@@ -1,4 +1,3 @@
-import { ScheduledMessageInfoBar } from '../src/components/schedules/scheduled-message-info-bar';
 // @vitest-environment jsdom
 import { LoroDoc } from 'loro-crdt';
 import { ScheduleRepository, type MachineMeta, type ScheduleRepositoryPort } from '@lody/shared';
@@ -473,7 +472,6 @@ describe('SessionChatInputArea submission feedback', () => {
     isVisible = true,
     overrides = {},
     retireOnCommit = false,
-    withScheduleInfoBar = false,
   }: {
     sessionId?: string;
     onSendMessage: SessionChatInputAreaProps['onSendMessage'];
@@ -481,7 +479,6 @@ describe('SessionChatInputArea submission feedback', () => {
     isVisible?: boolean;
     overrides?: Partial<SessionChatInputAreaProps>;
     retireOnCommit?: boolean;
-    withScheduleInfoBar?: boolean;
     composerRef?: RefObject<SessionChatInputAreaHandle | null>;
     claimNavigationFocus?: () => boolean;
   }) {
@@ -495,13 +492,6 @@ describe('SessionChatInputArea submission feedback', () => {
         createElement(
           Fragment,
           null,
-          withScheduleInfoBar && overrides.session
-            ? createElement(ScheduledMessageInfoBar, {
-                session: overrides.session,
-                machineMeta: scheduleMachine.value,
-                status: null,
-              })
-            : null,
           createElement(ScopeSwitchOnCommit, {
             retire: retireOnCommit,
             child: createElement(SessionChatInputArea, {
@@ -603,7 +593,6 @@ describe('SessionChatInputArea submission feedback', () => {
     const composerRef = createRef<SessionChatInputAreaHandle>();
     const ordinary: SessionInputBlock[][] = [];
     await renderComposer({
-      withScheduleInfoBar: true,
       sessionId,
       composerRef,
       onSendMessage: async (blocks) => {
@@ -629,6 +618,14 @@ describe('SessionChatInputArea submission feedback', () => {
     };
   }
 
+  const scheduledActionButton = () =>
+    [...container!.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+      button.textContent?.startsWith('Scheduled')
+    );
+  const openScheduleEdit = async () => {
+    await act(async () => scheduledActionButton()!.click());
+  };
+
   it('schedules complete content without sending now and clears only after durable acceptance', async () => {
     const h = await scheduledComposer(false);
     await act(async () => {
@@ -642,7 +639,7 @@ describe('SessionChatInputArea submission feedback', () => {
       });
     });
     await act(async () => {
-      container!.querySelector<HTMLButtonElement>('button[aria-label="Schedule send"]')!.click();
+      container!.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!.click();
     });
     const saved = await h.repository.read('scheduled-test');
     expect(
@@ -688,7 +685,7 @@ describe('SessionChatInputArea submission feedback', () => {
     });
     expect(container!.querySelector('img[alt="sample.png"]')).not.toBeNull();
     await act(async () => {
-      container!.querySelector<HTMLButtonElement>('button[aria-label="Schedule send"]')!.click();
+      container!.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!.click();
     });
     const saved = await h.repository.read('scheduled-test');
     expect(saved?.message?.inputBlocks).toContainEqual(
@@ -701,12 +698,12 @@ describe('SessionChatInputArea submission feedback', () => {
   it('keeps the original text and time after a schedule write fails', async () => {
     const h = await scheduledComposer(true);
     await act(async () => {
-      container!.querySelector<HTMLButtonElement>('button[aria-label="Schedule send"]')!.click();
+      container!.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!.click();
     });
     expect(h.ordinary).toEqual([]);
     expect(await h.repository.list()).toEqual([]);
     expect(container!.querySelector('textarea')?.value).toBe('focus regression draft');
-    expect(container!.querySelector('button[aria-label="Schedule send"]')).not.toBeNull();
+    expect(scheduledActionButton()).not.toBeNull();
   });
 
   const clickText = async (text: string) => {
@@ -717,24 +714,15 @@ describe('SessionChatInputArea submission feedback', () => {
       button.click();
     });
   };
-  const openScheduleEdit = async () => {
-    await act(async () =>
-      document.querySelector<HTMLButtonElement>('button[aria-label="Scheduled message"]')!.click()
-    );
-    await clickText('Edit');
-  };
 
-  it('edits the info-bar schedule and sends using the shared updated time', async () => {
+  it('edits the composer schedule and sends using the shared updated time', async () => {
     const options = new Intl.DateTimeFormat().resolvedOptions();
     vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({
       ...options,
       timeZone: 'Asia/Shanghai',
     });
     const h = await scheduledComposer(false);
-    expect(
-      container!.querySelector('[data-info-bar-surface] button[aria-label="Scheduled message"]')
-    ).not.toBeNull();
-    expect(container!.textContent).not.toContain('Scheduled message will be sent');
+    expect(scheduledActionButton()).not.toBeNull();
     await openScheduleEdit();
     const field = document.querySelector<HTMLInputElement>('input[type=datetime-local]')!;
     await act(async () => {
@@ -746,22 +734,22 @@ describe('SessionChatInputArea submission feedback', () => {
     });
     await clickText('Apply');
     await act(async () =>
-      container!.querySelector<HTMLButtonElement>('button[aria-label="Schedule send"]')!.click()
+      container!.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!.click()
     );
     expect((await h.repository.read('scheduled-test'))?.definition.trigger).toEqual({
       kind: 'once',
       at: '2099-01-02T01:30:00.000Z',
     });
-    expect(container!.querySelector('button[aria-label="Scheduled message"]')).toBeNull();
+    expect(scheduledActionButton()).toBeUndefined();
   });
 
-  it('cancels scheduling from the info bar while retaining the message draft', async () => {
+  it('cancels scheduling from the composer while retaining the message draft', async () => {
     await scheduledComposer(false);
     await openScheduleEdit();
     await clickText('Remove time');
     expect(container!.querySelector('textarea')?.value).toBe('focus regression draft');
     expect(container!.querySelector('button[aria-label="Send"]')).not.toBeNull();
-    expect(container!.querySelector('button[aria-label="Scheduled message"]')).toBeNull();
+    expect(scheduledActionButton()).toBeUndefined();
   });
 
   async function attachDrafts(composerRef: RefObject<SessionChatInputAreaHandle | null>) {

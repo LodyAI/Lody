@@ -1,4 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 
 const TOUCH = '@media (pointer: coarse), (max-width: 600px)';
@@ -47,6 +48,53 @@ export const queueSurface = stylex.create({
     gap: { default: 2, [TOUCH]: 0 },
   },
   pendingActions: { gap: { default: space[1], [TOUCH]: 0 } },
+  scheduledSection: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    paddingInline: space[2],
+    paddingTop: space[2],
+    paddingBottom: space[1],
+    borderTopWidth: 1,
+    borderTopStyle: 'solid',
+    borderTopColor: colors.separator,
+    fontSize: text.captionSize,
+    color: colors.secondaryLabel,
+  },
+  scheduledRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    width: '100%',
+    minHeight: { default: 32, [TOUCH]: 44 },
+    paddingInline: space[2],
+    paddingBlock: { default: space[1], [TOUCH]: 0 },
+    borderTopWidth: 1,
+    borderTopStyle: 'solid',
+    borderTopColor: colors.separator,
+    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
+    textAlign: 'start',
+    boxShadow: { default: 'none', ':focus-visible': `inset 0 0 0 2px ${colors.accent}` },
+    cursor: 'pointer',
+  },
+  scheduledIcon: { flexShrink: 0, color: colors.secondaryLabel },
+  scheduledTime: {
+    flexShrink: 0,
+    fontSize: text.captionSize,
+    color: colors.secondaryLabel,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  scheduledTitle: {
+    minWidth: 0,
+    flex: 1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: text.bodySize,
+  },
+  scheduledState: { flexShrink: 0, fontSize: text.captionSize, color: colors.secondaryLabel },
+  scheduledFailed: { color: colors.destructive },
+
   action: {
     minHeight: { default: null, [TOUCH]: 44 },
     minWidth: { default: null, [TOUCH]: 44 },

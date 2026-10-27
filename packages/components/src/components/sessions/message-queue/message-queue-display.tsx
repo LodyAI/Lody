@@ -24,7 +24,7 @@ import {
 } from '@dnd-kit/sortable';
 import { useTranslation } from 'react-i18next';
 import type { MessageQueueItem, SessionId } from '@lody/shared';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, Clock } from 'lucide-react';
 import { Collapsible } from '@lody/ui/collapsible';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
@@ -38,6 +38,7 @@ import {
   scrollEdgeOverflowEquals,
 } from '@/lib/scroll-edge-fade';
 import { MessageQueueRow } from './message-queue-row';
+import { ScheduledQueueRow, type ScheduledQueueItem } from './scheduled-queue-row';
 import { PendingQueueRow } from './pending-queue-row';
 import { useMessageQueueEditing } from './use-message-queue-editing';
 import { usePendingQueueActions, usePendingQueueRecords } from './use-pending-queue-records';
@@ -54,8 +55,10 @@ export type MessageQueueDisplayProps = {
   showSteerAction?: boolean;
   /** Native acknowledged steer: lets every queued row steer, not just the first. */
   nativeSteerAvailable?: boolean;
-  getItemScheduledAt?: (item: MessageQueueItem) => number | null;
   renderItemFooter?: (item: MessageQueueItem) => ReactNode;
+  /** Dedicated reservations, kept out of the executable mq list. */
+  scheduledItems?: readonly ScheduledQueueItem[];
+  onOpenScheduled?: (item: ScheduledQueueItem) => void;
   footerPosition?: 'below' | 'start' | 'end' | 'inline';
   roomy?: boolean | 'airy';
   title?: string;
@@ -97,6 +100,19 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
   failed: { color: colors.destructive },
+  scheduledSection: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    paddingInline: space[2],
+    paddingTop: space[2],
+    paddingBottom: space[1],
+    borderTopWidth: 1,
+    borderTopStyle: 'solid',
+    borderTopColor: colors.separator,
+    fontSize: text.captionSize,
+    color: colors.secondaryLabel,
+  },
 });
 
 export function MessageQueueDisplay({
@@ -111,7 +127,8 @@ export function MessageQueueDisplay({
   showSteerAction = false,
   nativeSteerAvailable = false,
   renderItemFooter,
-  getItemScheduledAt,
+  scheduledItems: dedicatedScheduledItems = [],
+  onOpenScheduled,
   footerPosition = 'below',
   roomy = false,
   title,
@@ -122,29 +139,19 @@ export function MessageQueueDisplay({
   const [expanded, setExpanded] = useState(true);
   const [overflow, setOverflow] = useState(NO_SCROLL_EDGE_OVERFLOW);
 
-  const { items, ordinaryItems, scheduledItems, scheduledIds } = useMemo(() => {
-    const ordinary: MessageQueueItem[] = [];
-    const scheduled: Array<{ item: MessageQueueItem; at: number }> = [];
-    for (const item of sourceItems) {
-      const at = getItemScheduledAt?.(item);
-      if (at == null) ordinary.push(item);
-      else scheduled.push({ item, at });
-    }
-    scheduled.sort((a, b) => a.at - b.at);
-    const timed = scheduled.map(({ item }) => item);
-    return {
-      items: [...ordinary, ...timed],
-      ordinaryItems: ordinary,
-      scheduledItems: timed,
-      scheduledIds: new Set(timed.map((item) => item.$cid)),
-    };
-  }, [sourceItems, getItemScheduledAt]);
-
+  const items = sourceItems;
+  const ordinaryItems = sourceItems;
+  const dedicatedScheduled = useMemo(
+    () => [...dedicatedScheduledItems].sort((a, b) => a.at - b.at),
+    [dedicatedScheduledItems]
+  );
   const editing = useMessageQueueEditing(items, { onEditStart, onEditCancel, onEditSave });
   const pending = usePendingQueueRecords(sessionId, items);
   const pendingActions = usePendingQueueActions();
-  const rowCount = items.length + pending.length;
+  const rowCount = items.length + pending.length + dedicatedScheduled.length;
   const failedCount = pending.filter((record) => Boolean(record.error)).length;
+  const onlyScheduled = items.length + pending.length === 0 && dedicatedScheduled.length > 0;
+  const scheduledFailedCount = dedicatedScheduled.filter((item) => item.state === 'failed').length;
   const preparingCount = pending.length - failedCount;
 
   const itemIds = useMemo(() => ordinaryItems.map((item) => item.$cid), [ordinaryItems]);
@@ -164,7 +171,14 @@ export function MessageQueueDisplay({
 
   useLayoutEffect(() => {
     updateOverflow();
-  }, [editing.editingCid, expanded, items, pending.length, updateOverflow]);
+  }, [
+    dedicatedScheduled.length,
+    editing.editingCid,
+    expanded,
+    items,
+    pending.length,
+    updateOverflow,
+  ]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -205,14 +219,12 @@ export function MessageQueueDisplay({
         footer={renderItemFooter?.(item)}
         footerPosition={footerPosition}
         roomy={roomy}
-        onMoveToTop={
-          !scheduledIds.has(item.$cid) ? () => onReorder(item.$cid, items[0]!.$cid) : undefined
-        }
+        onMoveToTop={index > 0 ? () => onReorder(item.$cid, items[0]!.$cid) : undefined}
         index={index}
         isFirst={index === 0}
-        showSteerAction={showSteerAction && !scheduledIds.has(item.$cid)}
+        showSteerAction={showSteerAction}
         nativeSteerAvailable={nativeSteerAvailable}
-        canReorder={canReorder && !scheduledIds.has(item.$cid)}
+        canReorder={canReorder}
         isEditing={isEditing}
         editValue={isEditing ? editing.editValue : ''}
         isPending={editing.pendingCid === item.$cid}
@@ -264,18 +276,33 @@ export function MessageQueueDisplay({
             <ChevronRight size={12} aria-hidden="true" />
           )}
           <span {...stylex.props(styles.title)}>
-            {title ?? t('sessions.messageQueue.upNext', 'Up next')}
-            {!title && (
+            {title ??
+              (onlyScheduled
+                ? t('sessions.messageQueue.scheduledTitle', 'Scheduled')
+                : t('sessions.messageQueue.upNext', 'Up next'))}
+            {!title && !onlyScheduled && (
               <span {...stylex.props(styles.count)}>
-                {t('sessions.messageQueue.queuedCount', {
-                  count: rowCount,
-                  defaultValue: '{{count}} queued',
-                })}
+                {[
+                  items.length + pending.length > 0
+                    ? t('sessions.messageQueue.queuedCount', {
+                        count: items.length + pending.length,
+                        defaultValue: '{{count}} queued',
+                      })
+                    : null,
+                  dedicatedScheduled.length > 0
+                    ? t('sessions.messageQueue.scheduledCount', {
+                        count: dedicatedScheduled.length,
+                        defaultValue: '{{count}} scheduled',
+                      })
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
               </span>
             )}
           </span>
         </Collapsible.Trigger>
-        {!expanded && pending.length > 0 ? (
+        {!expanded && (pending.length > 0 || scheduledFailedCount > 0) ? (
           <div role="status" {...stylex.props(styles.status)}>
             {failedCount > 0 ? (
               <span {...stylex.props(styles.failed)}>
@@ -284,6 +311,14 @@ export function MessageQueueDisplay({
             ) : null}
             {preparingCount > 0 ? (
               <span>{t('sessions.messageQueue.preparingCount', { count: preparingCount })}</span>
+            ) : null}
+            {scheduledFailedCount > 0 ? (
+              <span {...stylex.props(styles.failed)}>
+                {t('sessions.messageQueue.scheduledFailedCount', {
+                  count: scheduledFailedCount,
+                  defaultValue: '{{count}} scheduled not sent',
+                })}
+              </span>
             ) : null}
           </div>
         ) : null}
@@ -319,9 +354,15 @@ export function MessageQueueDisplay({
                   onCancel={() => void pendingActions.run(record, 'cancel')}
                 />
               ))}
-              {scheduledItems.map((item, index) =>
-                renderRow(item, ordinaryItems.length + pending.length + index)
-              )}
+              {!onlyScheduled && dedicatedScheduled.length > 0 ? (
+                <div {...stylex.props(styles.scheduledSection)}>
+                  <Clock size={12} aria-hidden="true" />
+                  {t('sessions.messageQueue.scheduledTitle', 'Scheduled')}
+                </div>
+              ) : null}
+              {dedicatedScheduled.map((item) => (
+                <ScheduledQueueRow key={item.scheduleId} item={item} onOpen={onOpenScheduled} />
+              ))}
             </DndContext>
           </div>
         </Collapsible.Panel>

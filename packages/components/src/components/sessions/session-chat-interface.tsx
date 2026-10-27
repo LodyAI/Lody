@@ -90,6 +90,7 @@ import {
 import { useSessionMcpSelection } from '@/hooks/use-session-mcp-selection';
 import {
   MessageQueueDisplay,
+  type ScheduledQueueItem,
   shouldRequestNativeQueueSteer,
   useHasPendingQueueRecords,
 } from './message-queue';
@@ -127,6 +128,7 @@ import {
   FREE_SESSION_TURN_WARNING_REMAINING,
   getAcpCapabilityCacheEntryAuthority,
   getAcpCapabilityCacheKey,
+  getDeviceTimeZone,
   getMachineFlockLocalProjects,
   getProjectRefBranch,
   getSessionPullRequestLegacyFields,
@@ -243,7 +245,7 @@ import { UserAvatar } from '@/components/user-avatar';
 import { RenameSessionDialog, type RenameSessionDialogTarget } from './rename-session-dialog';
 import { useResolvedTheme } from '../../theme-provider';
 import { PullRequestBadge } from './pull-request-badge';
-import { ScheduledMessageInfoBar } from '../schedules/scheduled-message-info-bar';
+import { SessionInfoBar } from './session-info-bar';
 import { SessionPreviewPreload } from './session-preview-preload';
 import { CurrentSessionRelationsChip, useHasSessionRelations } from './session-relations-chip';
 import { SessionProjectMembersChip } from './session-project-members-chip';
@@ -5483,6 +5485,50 @@ export const SessionChatInterface = memo(
     const router = useRouter();
     const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
     const scheduleRegistry = useSchedules();
+    const scheduledQueueItems = useMemo<ScheduledQueueItem[]>(() => {
+      const runtimeFor = (row: (typeof scheduleRegistry.rows)[number]) =>
+        scheduleRegistry.runtimes.find(
+          (candidate) =>
+            candidate.scheduleId === row.scheduleId &&
+            candidate.machineId === row.machineId &&
+            candidate.activationId === row.activationId &&
+            candidate.observedDefinitionFingerprint === row.definitionFingerprint
+        );
+      const timeZone = getDeviceTimeZone(sessionMachine?.timeZone);
+      return scheduleRegistry.rows
+        .filter(
+          (row) =>
+            row.scheduledMessage &&
+            row.enabled &&
+            row.ownerId === currentUser?.id &&
+            row.destination.kind === 'existing_session' &&
+            row.destination.sessionId === session.id &&
+            row.trigger.kind === 'once'
+        )
+        .map((row) => ({ row, scheduledRuntime: runtimeFor(row) }))
+        .filter(
+          ({ scheduledRuntime }) =>
+            !['sent', 'cancelled'].includes(scheduledRuntime?.messageState ?? '')
+        )
+        .map(({ row, scheduledRuntime }) => ({
+          scheduleId: row.scheduleId,
+          title: row.title,
+          at: Date.parse(row.trigger.kind === 'once' ? row.trigger.at : ''),
+          timeZone,
+          state:
+            scheduledRuntime?.messageState === 'failed'
+              ? ('failed' as const)
+              : ('pending' as const),
+        }))
+        .filter((item) => Number.isFinite(item.at))
+        .sort((a, b) => a.at - b.at);
+    }, [
+      currentUser?.id,
+      scheduleRegistry.rows,
+      scheduleRegistry.runtimes,
+      session.id,
+      sessionMachine?.timeZone,
+    ]);
 
     // Presentation-only "opened by" provenance (MCP `lody_session_create`).
     // Read from the already-loaded session meta cache, so it costs no extra
@@ -7114,9 +7160,7 @@ export const SessionChatInterface = memo(
                       and work context, glued to the composer shell. It
                       replaced the mobile status strip / goal banner /
                       in-composer scheduled panel. */}
-                    <ScheduledMessageInfoBar
-                      session={session}
-                      machineMeta={sessionMachine}
+                    <SessionInfoBar
                       status={statusStripState}
                       machine={
                         sessionMachine
@@ -7233,12 +7277,25 @@ export const SessionChatInterface = memo(
                       // bar is empty). Hidden with the composer: a pending
                       // permission bypasses the queue, as does share selection.
                       queue={
-                        (messageQueue.length > 0 || hasPendingQueueRecords) &&
+                        (messageQueue.length > 0 ||
+                          hasPendingQueueRecords ||
+                          scheduledQueueItems.length > 0) &&
                         !shouldReplaceComposerWithPermission &&
                         !shareSelection.active ? (
                           <MessageQueueDisplay
                             sessionId={session.id}
                             items={messageQueue}
+                            scheduledItems={scheduledQueueItems}
+                            onOpenScheduled={(item) => {
+                              if (!workspaceSlug) return;
+                              void router.navigate({
+                                to: '/$workspaceName/schedules/$scheduleId',
+                                params: {
+                                  workspaceName: workspaceSlug,
+                                  scheduleId: item.scheduleId,
+                                },
+                              });
+                            }}
                             onRemove={handleRemoveQueueItem}
                             onReorder={handleReorderQueueItem}
                             onEditStart={handleStartQueueItemEdit}

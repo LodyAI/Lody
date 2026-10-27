@@ -1,12 +1,10 @@
-import { QueuedScheduledMessagePreview } from './queued-scheduled-message-preview';
 import { SessionInfoBar } from '../components/sessions/session-info-bar';
-import {
-  ScheduledMessageInfoChip,
-  ScheduledMessageTimeDialog,
-} from '../components/schedules/scheduled-message-time';
+import { ScheduledMessageTimeDialog } from '../components/schedules/scheduled-message-time';
+import { formatUpcoming } from '../components/schedules/schedule-format';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useRef, useState } from 'react';
-import { Clock, ArrowUp, Bot, Github } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { ArrowUp, Bot, Github } from 'lucide-react';
 
 import {
   ChatComposer,
@@ -577,13 +575,8 @@ export const LandingWithPastedText: Story = {
   ),
 };
 
-function ScheduledSendPreview({
-  pickerInitiallyOpen = false,
-  infoInitiallyOpen = false,
-}: {
-  pickerInitiallyOpen?: boolean;
-  infoInitiallyOpen?: boolean;
-}) {
+function ScheduledSendPreview({ pickerInitiallyOpen = false }: { pickerInitiallyOpen?: boolean }) {
+  const { t, i18n } = useTranslation();
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState(
     'Review these files tomorrow morning and summarize the remaining issues.'
@@ -600,16 +593,6 @@ function ScheduledSendPreview({
             name: 'MacBook Pro',
             onlineStatus: 'online',
           }}
-          scheduledMessage={
-            at ? (
-              <ScheduledMessageInfoChip
-                at={at}
-                timeZone="Asia/Shanghai"
-                defaultOpen={infoInitiallyOpen}
-                onEdit={() => setPicker(true)}
-              />
-            ) : null
-          }
         />
         <ChatComposer
           variant="session"
@@ -619,9 +602,24 @@ function ScheduledSendPreview({
           onPromptChange={setText}
           onAttachmentAddClick={() => {}}
           onScheduleSend={() => setPicker(true)}
+          secondaryAction={
+            at
+              ? {
+                  label: t('scheduledMessage.composerAction', {
+                    time: formatUpcoming(
+                      Date.parse(at),
+                      'Asia/Shanghai',
+                      Date.parse('2026-10-27T08:00:00Z'),
+                      i18n.language
+                    ),
+                  }),
+                  onClick: () => setPicker(true),
+                }
+              : undefined
+          }
           primaryAction={
-            <Button icon aria-label="Schedule send">
-              <Clock size={16} />
+            <Button icon aria-label="Send">
+              <ArrowUp size={16} />
             </Button>
           }
           autoResize
@@ -658,17 +656,4 @@ export const ScheduledSendTimePicker: Story = {
 export const ScheduledSendDark: Story = {
   globals: { theme: 'dark' },
   render: () => <ScheduledSendPreview />,
-};
-
-export const ScheduledSendInfo: Story = {
-  render: () => <ScheduledSendPreview infoInitiallyOpen />,
-};
-
-export const QueuedScheduledMessage: Story = { render: () => <QueuedScheduledMessagePreview /> };
-
-export const QueuedTimeLeading: Story = {
-  render: () => <QueuedScheduledMessagePreview variant="start" />,
-};
-export const QueuedTimeAiry: Story = {
-  render: () => <QueuedScheduledMessagePreview variant="airy" />,
 };

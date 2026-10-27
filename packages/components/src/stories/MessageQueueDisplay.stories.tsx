@@ -108,6 +108,50 @@ export const MobileWidth: Story = {
   },
 };
 
+export const ScheduledSection: Story = {
+  args: {
+    ...commonArgs,
+    items: makeItems(2),
+    onOpenScheduled: () => {},
+    scheduledItems: [
+      {
+        scheduleId: 'scheduled-later',
+        title: 'Review these files tomorrow morning',
+        at: Date.parse('2026-10-28T01:00:00.000Z'),
+        timeZone: 'Asia/Shanghai',
+        state: 'pending',
+      },
+      {
+        scheduleId: 'scheduled-failed',
+        title: 'Send the weekly summary',
+        at: Date.parse('2026-10-27T09:00:00.000Z'),
+        timeZone: 'Asia/Shanghai',
+        state: 'failed',
+      },
+    ],
+  },
+};
+
+export const ScheduledOnlyMobile: Story = {
+  args: {
+    ...commonArgs,
+    items: [],
+    onOpenScheduled: () => {},
+    scheduledItems: [
+      {
+        scheduleId: 'scheduled-only',
+        title: 'Send the weekly summary',
+        at: Date.parse('2026-10-28T01:00:00.000Z'),
+        timeZone: 'Asia/Shanghai',
+        state: 'pending',
+      },
+    ],
+  },
+  parameters: {
+    containerWidth: 'w-[320px]',
+  },
+};
+
 export const EditingFirstItem: Story = {
   args: {
     ...commonArgs,

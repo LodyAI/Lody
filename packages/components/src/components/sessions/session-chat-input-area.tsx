@@ -1,9 +1,9 @@
 import { getSessionChatInputAreaShellClassName } from '@/components/chat/composer-surface';
 export { getSessionChatInputAreaShellClassName } from '@/components/chat/composer-surface';
-import { ScheduledMessagesSummary } from '../schedules/scheduled-messages-summary';
 import { useScheduledMessage } from '../schedules/use-scheduled-message';
 import { useLatestRef } from '@/hooks/use-latest-ref';
 import { ScheduledMessageTimeDialog } from '../schedules/scheduled-message-time';
+import { formatUpcoming } from '../schedules/schedule-format';
 import type { AgentConfigMeta } from '@lody/shared';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
@@ -29,7 +29,7 @@ import {
   useImperativeHandle,
 } from 'react';
 import { useAtomValue } from 'jotai';
-import { ArrowUp, Clock } from 'lucide-react';
+import { ArrowUp } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
@@ -2288,21 +2288,33 @@ export const SessionChatInputArea = memo(
         aria-label={
           isExternalHistoryRefreshing && externalHistorySyncLabel
             ? externalHistorySyncLabel
-            : scheduled.at
-              ? t('scheduledMessage.title')
-              : t('sessions.send')
+            : t('sessions.send')
         }
         className="shadow-xs transition-all bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]"
       >
         {submissionPending || isExternalHistoryRefreshing ? (
           <Spinner size={isMobile ? 'medium' : 'small'} />
-        ) : scheduled.at ? (
-          <Clock {...stylex.props(isMobile ? styles.sendIconMobile : styles.sendIconDesktop)} />
         ) : (
           <ArrowUp {...stylex.props(isMobile ? styles.sendIconMobile : styles.sendIconDesktop)} />
         )}
       </Button>
     );
+
+    const scheduledAction =
+      scheduled.at && scheduled.available && !isArchived && !submissionPending
+        ? {
+            label: t('scheduledMessage.composerAction', {
+              time: formatUpcoming(
+                Date.parse(scheduled.at),
+                scheduled.timeZone,
+                Date.now(),
+                i18n.language
+              ),
+            }),
+            onClick: scheduled.openPicker,
+            disabled: scheduled.saving,
+          }
+        : undefined;
 
     /* Mobile no longer inlines run-config pickers into the composer
        footer — that footer now holds a single `MobileSessionRunConfig`
@@ -2384,6 +2396,7 @@ export const SessionChatInputArea = memo(
             : undefined
         }
         scheduleDisabledReason={scheduled.disabledReason}
+        secondaryAction={scheduledAction}
         statusMessage={
           submissionPending && scheduled.progress !== null
             ? t('scheduledMessage.preparing', { progress: scheduled.progress })
@@ -2439,7 +2452,6 @@ export const SessionChatInputArea = memo(
         ) : null}
         <ConversationColumn>
           {hideTopSpacer ? null : <div aria-hidden="true" {...stylex.props(styles.topSpacer)} />}
-          <ScheduledMessagesSummary sessionId={session.id} timeZone={scheduled.timeZone} />
           {externalHistorySyncNode}
           {freeTurnLimitNoticeNode}
           {attachmentAddEnabled ? (

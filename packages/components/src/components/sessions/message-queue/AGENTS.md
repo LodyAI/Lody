@@ -5,7 +5,7 @@
 Read the parent [sessions AGENTS.md](../AGENTS.md) first. This scope renders the
 queued-turn list (`message-queue-display.tsx`, `message-queue-row.tsx`,
 `queued-image-preview.tsx`, `use-message-queue-editing.ts`) that
-`session-chat-input-area.tsx` mounts. Submission routing into the queue lives in
+`session-chat-interface.tsx` mounts through the composer info bar's queue slot. Submission routing into the queue lives in
 `../session-message-submit-route.ts` and is described in
 [.agents/docs/sessions-live-status.md](../../../../../../.agents/docs/sessions-live-status.md).
 
@@ -43,6 +43,8 @@ rows mounted while folded; focusing the disclosure must not commit or discard a
 row draft. Folded summaries retain pending/failed-send awareness. Intent:
 [queue presentation](../../../../../../specs/message-queue.md).
 
-When scheduled display rows are supplied, keep them after ordinary and local-pending
-rows, ordered by send time. Exclude them from drag sources/targets and move-to-top;
-time edits re-sort the view. This projection does not put reservations into `mq`.
+Production passes a separate `scheduledItems` view model; never fake a
+`MessageQueueItem` for a reservation. Keep dedicated rows after ordinary and
+local-pending rows, ordered by send time, in a `Scheduled` section without index,
+drag, steer or move-to-top. Rows are read-only and open the Schedule details.
+Never fake a scheduled row through a queue item or add a time field to durable `mq`.

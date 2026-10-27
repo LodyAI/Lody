@@ -14,11 +14,11 @@ blocks and the selected execution configuration. New-chat scheduling is excluded
 
 ## Decisions
 
-- The info bar owns one unstaged scheduled-message icon. Its popover shows the
-  send time and an Edit pill; the composer has no inline time bar. The editor uses
-  typed date/time with 30-minute, 1-hour and 5-hour presets; removing the time
-  preserves the message. Composer and info-bar controls share the same scoped
-  draft and save lock, so an accepted edit changes the actual send time.
+- The composer owns the pre-send draft: one secondary action beside Send reads
+  "发送定时消息 · <time>"; clicking it edits the time or removes the schedule, and
+  removing the time preserves the message. The info bar has no scheduled-message
+  item. The editor uses typed date/time with 30-minute, 1-hour and 5-hour presets.
+  Revised 2026-10-27 after UI review; the earlier info-bar icon decision is rejected.
 - The selected machine owns the clock. Presets and typed input use its IANA zone
   (device zone for legacy metadata). A sleeping/offline machine sends one catch-up;
   existing retry limits apply. A busy conversation waits without interruption.
@@ -41,8 +41,9 @@ blocks and the selected execution configuration. New-chat scheduling is excluded
   so retries reuse reservation/activity identities. Clear only the captured composer
   draft after acceptance. At the due time, the existing prepared-input handoff takes
   frozen blocks/configuration and stable Session/Turn IDs through retries/restarts.
-- The leaf pending summary opens Schedule details. Complete-message details retain
-  the once/current-chat target and edit the full payload; generic manual-run/resume
+- The queue's dedicated Scheduled section is read-only and opens Schedule details;
+  reservations never enter executable `mq`. Complete-message details retain the
+  once/current-chat target and edit the full payload; generic manual-run/resume
   controls are hidden. Ownership, machine capabilities and workspace content gates
   remain required. Cancellation disables the reservation; show waiting-for-machine
   until the engine reconciles dispatch. A committed dispatch wins and shows sent;
@@ -96,11 +97,11 @@ and dispatch; cloud-backed handoff continues to require current sync readiness.
 
 Expose separate synchronization and delivery dimensions:
 
-| Dimension | Proposed values / meaning |
-| --- | --- |
-| Local request | preparing, saved locally, awaiting owner, rejected/conflict |
-| Owner receipt | request ID, accepted revision/fingerprint, result, receipt sequence |
-| Delivery | scheduled, waiting (busy/offline/sync), dispatching, sent, cancelled, failed |
+| Dimension     | Proposed values / meaning                                                    |
+| ------------- | ---------------------------------------------------------------------------- |
+| Local request | preparing, saved locally, awaiting owner, rejected/conflict                  |
+| Owner receipt | request ID, accepted revision/fingerprint, result, receipt sequence          |
+| Delivery      | scheduled, waiting (busy/offline/sync), dispatching, sent, cancelled, failed |
 
 Delivery transitions are owned by the machine. Offline is an availability overlay,
 not a durable terminal state. A client clock passing the deadline can show time
@@ -126,6 +127,41 @@ This pass is source-grounded design research; it adds no runtime implementation 
 new end-to-end verification. Current runtime fields (`messageState`, `queueState`,
 `observedDefinitionFingerprint`) are useful projections, not the complete proposed
 receipt protocol.
+
+## Current flow audit (2026-10-27)
+
+Before this follow-up, the shipped path used the pre-queue surface: after Send,
+`ScheduledMessagesSummary` rendered one ghost line below the info bar and opened the
+generic Schedule detail page. The queue display already accepted scheduled-time rows,
+but production passed only `mq`; the Storybook preview classified reservations by
+faking `MessageQueueItem`, so it did not describe a shippable data path. The delivered
+turn also loses provenance: the synthetic "Scheduled task…" source is filtered by the
+conversation renderer, and the user turn looks typed.
+
+After the follow-up, the pre-send state is the composer's secondary action and the
+info bar has no scheduled item. Post-send reservations are read-only rows in the
+queue's dedicated Scheduled section, supplied by a separate view model. The control
+semantics are resolved: that secondary action is the state editor, and the primary
+Send commits the message as scheduled. Remaining open items are the time-editor form,
+a quiet delivered-turn provenance marker, and inline edit/cancel, which still depends
+on the receipt protocol below.
+
+## Sync robustness audit (2026-10-27)
+
+The current promise is replication convergence plus the owner's 15-second wake
+loop, not an acknowledgement. A daemon that was stopped at the due instant plans
+when it returns: `run_once` catches up and `plannedAt` is then, so there is no
+expiry measured from the scheduled time. A daemon that is running but not synced
+waits at the sync gate and plans after reconnect. A run that was already planned
+and then cannot dispatch expires after 24 hours or five attempts from `plannedAt`;
+a chat that stays busy retries every 30 seconds against the same 24-hour window.
+
+The two hard gaps are structural: the registry row is the only discovery and
+execution gate, with no owner-side repair scan from Schedule documents; and the
+client has no owner receipt or retry after its local flush. A missing registry row
+therefore makes a reservation invisible and unexecutable, while a locally saved
+row that never reaches the owner can stay Pending forever. The failure-mode matrix
+lives in the review artboard; no production behavior changed in this audit.
 
 ## Visual alternatives under review
 
