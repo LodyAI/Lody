@@ -109,3 +109,5 @@ and file responsibilities: [../README.md](../README.md).
   workspace metadata is complete. Contract: specs/session-worktree-lifecycle.md.
 
 - Project roots use registrations. Repair links; archive unlinks without following targets.
+- Child tabs share the main directory: never remove a correct member link because one
+  Provider takes additional directories; record `link` whenever it exists.
