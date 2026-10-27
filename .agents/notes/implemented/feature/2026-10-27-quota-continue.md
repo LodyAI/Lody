@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1973
 
 [中文](2026-10-27-quota-continue.zh.md)
 
