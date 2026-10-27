@@ -18,6 +18,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   terminalNotifications: 'terminalNotifications',
   memoryProviders: 'memoryProviders',
   mcpToolDiscovery: 'mcpToolDiscovery',
+  mcpLocalAuthentication: 'mcpLocalAuthentication',
   localProjectHistoryProvider: 'localProjectHistoryProvider',
   codexAuthProfiles: 'codexAuthProfiles',
   builtinPi: 'builtinPi',
@@ -57,6 +58,7 @@ export const PROJECT_FOLDER_SELECTION_PROTOCOL_VERSION = 1;
 export const OPERATION_INBOX_PROTOCOL_VERSION = 2;
 export const MEMORY_PROVIDERS_PROTOCOL_VERSION = 1;
 export const MCP_TOOL_DISCOVERY_PROTOCOL_VERSION = 1;
+export const MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_HISTORY_PROVIDER_PROTOCOL_VERSION = 1;
 
 export const ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION = 2;
@@ -151,6 +153,7 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.sessionCollaborationControl]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.memoryProviders]: MEMORY_PROVIDERS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.mcpToolDiscovery]: MCP_TOOL_DISCOVERY_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.mcpLocalAuthentication]: MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectHistoryProvider]:
     LOCAL_PROJECT_HISTORY_PROVIDER_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.subagentEvents]: SUBAGENT_EVENTS_PROTOCOL_VERSION,

@@ -288,14 +288,14 @@ preview 代理、`packages/loro-streams-rpc`、PR poller、Electron updater：�
 
 评估引导修订时使用以下合成任务，判断 agent 的范围选择和拟验证的可观察行为，不检查它是否复述关键词。
 
-| 任务 | 预期选择与证据 |
-| --- | --- |
-| 修复依赖仍使用 Promise 编排的模块中的超时 | 完成修复，解释推迟迁移的原因，不遍历重写整条依赖链。 |
-| 取消正在等待忽略 abort 的 Promise 的 Effect | 区分等待取消与原始工作，保留租约，用可控的迟到完成验证。 |
-| 取消共享生产者的一个读者 | 保留其他租约，验证生产者仍可用且最后拥有者等待清理。 |
-| 主体与释放同时失败 | 在 Promise 边界保留两类失败和恢复所有权，不依赖普通 squash。 |
+| 任务                                         | 预期选择与证据                                                                           |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| 修复依赖仍使用 Promise 编排的模块中的超时    | 完成修复，解释推迟迁移的原因，不遍历重写整条依赖链。                                     |
+| 取消正在等待忽略 abort 的 Promise 的 Effect  | 区分等待取消与原始工作，保留租约，用可控的迟到完成验证。                                 |
+| 取消共享生产者的一个读者                     | 保留其他租约，验证生产者仍可用且最后拥有者等待清理。                                     |
+| 主体与释放同时失败                           | 在 Promise 边界保留两类失败和恢复所有权，不依赖普通 squash。                             |
 | 提取纯 helper，并在既有 workflow 收集 Stream | helper 保持普通函数；允许返回 Effect 的 Stream 算子，不创建 runtime 或无必要的 Service。 |
-| Review 涉及既有生命周期缺陷附近的 diff | 比较 base/head，区分新增破坏与基线，遵守 P0/P1 报告规则，不启动重写。 |
+| Review 涉及既有生命周期缺陷附近的 diff       | 比较 base/head，区分新增破坏与基线，遵守 P0/P1 报告规则，不启动重写。                    |
 
 这些是评估输入与预期结果，不是已经完成的独立 agent 实验。后续评估应记录 prompt/指引 revision、产出 diff 或 findings、行为检查和偏差，仅使用合成 fixture。
 
@@ -338,6 +338,7 @@ preview 代理、`packages/loro-streams-rpc`、PR poller、Electron updater：�
 | 已释放回合的完成发布 | Promise 历史/backend 与通知适配器 | 原生确认策略；依赖仍未迁移 | Session execution 调用 `publishTurnCompletionLegacy` | 现有 Host drain；关闭取消确认等待 | [决定](../../implemented/bug-fix/2026-10-26-turn-completion-signals.zh.md)；不重试通知、不引入 outbox；完整 Turn 迁移仍待完成 |
 | dispatch、MessageHandler、daemon 集成     | Turn、投递、文档 flush                                | 待迁移             | Promise 编排                    | 已有 shell 根 runtime；其余所有权待完成 | 停会话→最终写入 flush→拆文档，报告外部释放失败                                                                                                                                                                   |
 | Renderer / Electron / supervisor 上层编排 | 各单元真实的平台与同步依赖                            | 待迁移    | 既有孤岛与进程调用方            | 上层资源/任务拥有者待完成               | 既有孤岛未评估；统一进程调用不代表上层 workflow 完成，交付前继续拆单元                                                                                                                                                           |
+| 本机 MCP 授权 / 凭证中继                  | MCP SDK 2.0.0、系统凭证库、Node 监听器                | 原生（本地变更） | Legacy SessionManager 与本机 RPC 门面 | 工作区服务 Scope；授权尝试与确切运行实例的子 Scope | [授权决定](../../implemented/architecture/2026-10-26-mcp-oauth-local-credentials.zh.md)；模拟流程/隔离测试；系统验收与 Slim 真实授权待完成                                                                       |
 
 ## 交付依赖图
 

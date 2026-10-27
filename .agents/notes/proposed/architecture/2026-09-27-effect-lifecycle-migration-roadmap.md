@@ -467,14 +467,14 @@ Update changed facts without recertifying unchanged rows on every PR.
 Use these synthetic tasks when evaluating a guidance revision. Judge the agent's
 scope decision and proposed observable checks, not whether it repeats keywords.
 
-| Task | Expected decision and evidence |
-| --- | --- |
-| Fix a timeout in a module whose dependencies still use Promise orchestration | Deliver the fix; explain why migration is deferred without traversing and rewriting the whole dependency chain. |
-| Cancel an Effect waiting on an abort-ignoring Promise | Distinguish wait cancellation from raw work; retain the lease and test a controlled late completion. |
-| Cancel one reader of a shared producer | Preserve other leases; verify the producer remains usable and last-owner cleanup is awaited. |
-| Body and release fail together | Preserve both failures and recovery ownership through the Promise boundary; do not rely on plain squash. |
-| Extract a pure helper and collect a Stream in an existing workflow | Keep the helper ordinary; allow Effect-returning Stream operators without creating a runtime or unnecessary Service. |
-| Review a diff near a pre-existing lifecycle defect | Compare base/head, distinguish introduced breakage from baseline, and follow P0/P1 reporting rules without starting a rewrite. |
+| Task                                                                         | Expected decision and evidence                                                                                                 |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Fix a timeout in a module whose dependencies still use Promise orchestration | Deliver the fix; explain why migration is deferred without traversing and rewriting the whole dependency chain.                |
+| Cancel an Effect waiting on an abort-ignoring Promise                        | Distinguish wait cancellation from raw work; retain the lease and test a controlled late completion.                           |
+| Cancel one reader of a shared producer                                       | Preserve other leases; verify the producer remains usable and last-owner cleanup is awaited.                                   |
+| Body and release fail together                                               | Preserve both failures and recovery ownership through the Promise boundary; do not rely on plain squash.                       |
+| Extract a pure helper and collect a Stream in an existing workflow           | Keep the helper ordinary; allow Effect-returning Stream operators without creating a runtime or unnecessary Service.           |
+| Review a diff near a pre-existing lifecycle defect                           | Compare base/head, distinguish introduced breakage from baseline, and follow P0/P1 reporting rules without starting a rewrite. |
 
 These are evaluation inputs and expected outcomes, not completed independent agent
 runs. A future evaluation should record the prompt/guidance revision, resulting
@@ -527,6 +527,7 @@ not an exhaustive inventory of the repository.
 | Released-turn completion publication | Promise history/backend and notification adapters | Native confirmation policy; dependency-blocked | `publishTurnCompletionLegacy` from Session execution | Existing Host drain; shutdown aborts confirmation | [Decision](../../implemented/bug-fix/2026-10-26-turn-completion-signals.md); no notification retry/outbox, full Turn migration remains pending |
 | dispatch, MessageHandler and daemon integration      | Turn, delivery and document flush                                    | Pending                     | Promise orchestration                | Shell root runtime exists; broader ownership pending | Stop sessions → flush final writes → tear down documents; report external release failures                                                                                                                                                           |
 | Renderer / Electron / supervisor upper orchestration | Actual per-unit platform and sync dependencies                       | Pending        | Existing islands and process callers | Upper resource/task owners pending                   | Existing islands unassessed; process caller unification is not upper workflow completion; refine into units before delivery                                                                                                                                                       |
+| Local MCP authentication / credential relay          | MCP SDK 2.0.0, OS vault, Node listeners                              | Native (local change) | Legacy SessionManager and local RPC facade | Workspace service Scope; attempt and exact-runtime child scopes | [Authorization decision](../../implemented/architecture/2026-10-26-mcp-oauth-local-credentials.md); synthetic flow/isolation tests; OS acceptance and live Slim consent pending                                                                      |
 
 ## Delivery dependency graph
 

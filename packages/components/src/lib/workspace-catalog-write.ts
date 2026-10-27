@@ -3,6 +3,7 @@ import {
   getWorkspaceFlockDocId,
   normalizeProjectMcpDefault,
   serializeAgentRoleRow,
+  assertPublicMcpServer,
   workspaceFlockKeys,
   type AgentRole,
   type AgentRoleId,
@@ -76,7 +77,10 @@ const deleteRow = async (
 export const putWorkspaceMcpServer = (
   deps: WorkspaceCatalogWriteDeps,
   entry: WorkspaceMcpServerMeta
-): Promise<void> => putRow(deps, workspaceFlockKeys.mcpServer(entry.id), entry);
+): Promise<void> => {
+  assertPublicMcpServer(entry);
+  return putRow(deps, workspaceFlockKeys.mcpServer(entry.id), entry);
+};
 
 export const deleteWorkspaceMcpServer = (
   deps: WorkspaceCatalogWriteDeps,
