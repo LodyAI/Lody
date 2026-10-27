@@ -113,6 +113,59 @@ describe('schedule list rows', () => {
   const buttonIn = (row: Element, label: string) =>
     row.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
 
+  it.each([false, true])(
+    'keeps saved rows visible with a retry action (retrying=%s)',
+    (retrying) => {
+      const retry = vi.fn();
+      act(() =>
+        root.render(
+          <ScheduleListView
+            rows={[timed]}
+            runtimes={[]}
+            ready
+            error="REGISTRY_UNAVAILABLE"
+            retrying={retrying}
+            onRetry={retry}
+            {...handlers}
+          />
+        )
+      );
+      expect(rowOf('Nightly review')).toBeTruthy();
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+        'Showing saved tasks'
+      );
+      const button = [...container.querySelectorAll('button')].find(
+        (b) => b.textContent === (retrying ? 'Retrying…' : 'Retry')
+      )!;
+      expect(button.disabled).toBe(retrying);
+      act(() => button.click());
+      expect(retry).toHaveBeenCalledTimes(retrying ? 0 : 1);
+    }
+  );
+
+  it('offers retry instead of claiming an unavailable registry is empty', () => {
+    const retry = vi.fn();
+    act(() =>
+      root.render(
+        <ScheduleListView
+          rows={[]}
+          runtimes={[]}
+          ready
+          error="REGISTRY_UNAVAILABLE"
+          onRetry={retry}
+          {...handlers}
+        />
+      )
+    );
+    expect(container.textContent).toContain('Schedules could not be loaded.');
+    expect(container.textContent).not.toContain('No schedules yet');
+    const button = [...container.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Retry'
+    )!;
+    act(() => button.click());
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
   it.each([
     ['America/Los_Angeles', '2:21 AM'],
     ['Asia/Singapore', '5:21 PM'],
