@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1964](https://github.com/LodyAI/Lody/pull/1964)
 
 [中文](2026-10-27-e2ee-renderer-evidence-recovery.zh.md)
 

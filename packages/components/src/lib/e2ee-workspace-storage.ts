@@ -12,8 +12,8 @@ export class E2eeLocalEvidenceCorruptError extends Error {
 /** Valid local evidence that disagrees with another record or the server. This can
  * indicate a rollback, fork or downgrade, so it is never resolved automatically. */
 export class E2eeLocalEvidenceConflictError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = 'E2eeLocalEvidenceConflictError';
   }
 }
@@ -597,11 +597,20 @@ export async function recoverE2eeWorkspaceIdentity(input: {
   isCurrent: () => boolean;
 }): Promise<void> {
   const { storage, accountId, workspaceId, runtime, isCurrent } = input;
-  if (!isCurrent() || (await runtime.account())?.userId !== accountId)
-    throw conflict('Workspace identity must be checked again');
-  const status = await runtime.status(workspaceId);
+  if (!isCurrent()) throw conflict('Workspace identity must be checked again');
+  let status: Awaited<ReturnType<typeof runtime.status>>;
+  try {
+    if ((await runtime.account())?.userId !== accountId)
+      throw conflict('Workspace identity must be checked again');
+    status = await runtime.status(workspaceId);
+    if ((await runtime.account())?.userId !== accountId)
+      throw conflict('Workspace identity must be checked again');
+  } catch (cause) {
+    // Without a verified host identity, neither a server response nor cache
+    // repair may supply the pin. Keep the native failure for diagnostics.
+    throw new E2eeLocalEvidenceConflictError('Workspace identity must be checked again', { cause });
+  }
   if (
-    (await runtime.account())?.userId !== accountId ||
     !isCurrent() ||
     status.workspaceId !== workspaceId ||
     !/^[0-9a-f]{64}$/.test(status.genesisHash)

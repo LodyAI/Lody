@@ -43,13 +43,15 @@ describe('WorkspaceAdmissionGate', () => {
   const render = () =>
     act(async () => {
       root.render(
-        <PlatformContext.Provider value={platform}>
-          <Provider store={store}>
-            <WorkspaceAdmissionGate workspaceName="alpha">
-              <div>workspace content</div>
-            </WorkspaceAdmissionGate>
-          </Provider>
-        </PlatformContext.Provider>
+        <React.StrictMode>
+          <PlatformContext.Provider value={platform}>
+            <Provider store={store}>
+              <WorkspaceAdmissionGate workspaceName="alpha">
+                <div>workspace content</div>
+              </WorkspaceAdmissionGate>
+            </Provider>
+          </PlatformContext.Provider>
+        </React.StrictMode>
       );
     });
   const fail = (failure: Omit<WorkspaceRuntimeInitFailure, 'workspaceSlug'>) =>
@@ -221,6 +223,30 @@ describe('WorkspaceAdmissionGate', () => {
         },
       })
     ).rejects.toThrow('checked again');
+    expect(localStorage.getItem(pin)).toBe('broken pin');
+  });
+
+  it('reports identity recheck when native verified identity is unavailable', async () => {
+    localStorage.setItem(pin, 'broken pin');
+    const cause = new Error('e2ee_missing-binding');
+    await expect(
+      recoverE2eeWorkspaceIdentity({
+        storage: localStorage,
+        accountId: 'account',
+        workspaceId: 'encrypted',
+        runtime: {
+          ...native(),
+          status: async () => {
+            throw cause;
+          },
+        },
+        isCurrent: () => true,
+      })
+    ).rejects.toMatchObject({
+      name: 'E2eeLocalEvidenceConflictError',
+      message: 'Workspace identity must be checked again',
+      cause,
+    });
     expect(localStorage.getItem(pin)).toBe('broken pin');
   });
 

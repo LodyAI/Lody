@@ -81,13 +81,12 @@ export function WorkspaceAdmissionGate({
   const currentScope = useRef<string | null>(recoveryScope);
   currentScope.current = recoveryScope;
   const [recheckScope, setRecheckScope] = useState<string | null>(null);
-  const recovering = useRef(false);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    currentScope.current = recoveryScope;
+    return () => {
       if (currentScope.current === recoveryScope) currentScope.current = null;
-    },
-    [recoveryScope]
-  );
+    };
+  }, [recoveryScope]);
   if (!platform.e2eeWorkspaces) return children;
   if (!mode || mode.workspaceSlug !== workspaceName || mode.accountId !== accountId) {
     if (failure?.workspaceSlug !== workspaceName) {
@@ -115,14 +114,12 @@ export function WorkspaceAdmissionGate({
             : t('workspace.route.openErrorDescription')
         }
         onRetry={() => {
-          if (recovering.current) return;
           const identityFailure =
             failure.errorType === E2eeLocalEvidenceCorruptError.name ||
             failure.errorType === E2eeLocalEvidenceConflictError.name;
           const workspaceId = failure.modeAdmission?.workspaceId;
           const native = platform.e2eeWorkspaces?.runtime;
           const isCurrent = () => currentScope.current === recoveryScope;
-          recovering.current = true;
           void (async () => {
             try {
               if (identityFailure && user?.id) {
@@ -141,8 +138,6 @@ export function WorkspaceAdmissionGate({
               if (isCurrent()) retryAdmission((value) => value + 1);
             } catch {
               if (isCurrent()) setRecheckScope(recoveryScope);
-            } finally {
-              recovering.current = false;
             }
           })();
         }}
