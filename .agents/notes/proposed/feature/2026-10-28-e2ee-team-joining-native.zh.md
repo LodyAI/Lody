@@ -40,4 +40,4 @@ Translation: current
 
 [独立移除 #1979](https://github.com/LodyAI/Lody/pull/1979) 负责 capability 集合以及快照、保留状态、摘要 v4。加入链不修改这些 core 字段或版本，直接使用 core 验证和导出接口。邀请和 KeyPackage 的 `version: 1` 是独立的传输封装，不是账本快照版本。临时组合 #1979 head `c9eeefb14b62` 后，154 项原生测试及一个真实 crypto/SQLite 用例通过；后者覆盖 capability 1 声明、tag10 移除、新成员完整历史安装、v4 导出，以及重开后 capability 保留。临时 core 覆盖与测试均不进入此分支。
 
-公开邀请契约统一位于 `packages/cloud-api/src/e2ee-members.ts`；独立 UI 配套在同一路径携带相同内容，合并时保留一份。原生能力统一使用 `E2eeWorkspaceRuntime`，保留 #1982 的 `signingPublicKey`、`membershipId`、`memberRole` 和 `setMemberRole`，以及本 PR 的临时 `readerOwner`。组合 IPC 改动时，新增的凭据认证邀请调用须沿用 #1982 统一的 `e2ee_member_removed` 分类与精确身份终态清理，不能另造错误名或仅按工作区 ID 删除。#1979 合入后 rebase 到 main，不另升格式版本，也不叠入任一移除分支。
+公开邀请契约统一位于 `packages/cloud-api/src/e2ee-members.ts`；独立 UI 配套在同一路径携带相同内容，合并时保留一份。原生能力统一使用 `E2eeWorkspaceRuntime`，保留 #1982 的 `signingPublicKey`、`membershipId`、`memberRole` 和 `setMemberRole`，以及本 PR 的临时 `readerOwner`。组合 IPC 改动时，新增的凭据认证邀请调用须沿用 #1982 统一的 `e2ee_member_removed` 分类与精确身份终态清理，不能另造错误名或仅按工作区 ID 删除。此分支已 rebase 到包含 #1979 的 main `6a53ad05`，不另升格式版本，也未叠入任一移除分支。
