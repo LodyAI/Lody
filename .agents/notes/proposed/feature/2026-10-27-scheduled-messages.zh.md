@@ -43,6 +43,18 @@ Storybook 预览通过伪造 `MessageQueueItem` 表达预约，因此不构成�
 编辑器，主 Send 负责按定时提交。仍待定的是时间编辑器的形态、送达轮次的弱化来源标记，以及行内
 编辑/取消；后者仍依赖下文的回执协议。
 
+## 终态回收
+
+执行端每次就绪评估都会运行回收扫描。完整的一次性消息进入终态
+（`sent`、`cancelled` 或 `failed`）后，如果 runtime row 的 `updatedAt`
+已超过 `SCHEDULED_MESSAGE_RETENTION_MS`（七天），执行端会清除
+`schedule-<id>` 文档，删除 Registry 的 schedule／runtime／manual 行，并留下
+tombstone。计时从终态投影开始，而不是创建时间。文档仍被占用（详情页打开中或
+同步未完成）时跳过，留到下一次评估重试。
+
+Pending／活动中的预约以及普通周期任务不在回收范围内。这是执行端本地清理：
+tombstone 会拒绝离线旧写入，但不声称已经压缩 Loro 历史或远端副本。
+
 ## 同步健壮性审计（2026-10-27）
 
 当前承诺是复制收敛加执行端 15 秒唤醒循环，不是确认回执。到点时 daemon 已停止的，重启后按当时

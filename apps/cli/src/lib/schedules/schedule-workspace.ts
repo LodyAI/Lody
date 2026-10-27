@@ -304,6 +304,15 @@ export async function createScheduleWorkspace(args: {
   const pass = async (): Promise<void> => {
     if (disposed) return;
     if (isReady() && !disabled) {
+      try {
+        await repository.pruneExpiredMessages({
+          now: getServerNow(),
+          ownerId: auth.userId,
+          machineId: auth.machineId,
+        });
+      } catch {
+        args.logger.warn('[schedules] retention sweep failed; will retry');
+      }
       const rows = await repository.list();
       for (const entry of registry.flock.scan({ prefix: ['manual'] })) {
         const request = entry.value as unknown as {

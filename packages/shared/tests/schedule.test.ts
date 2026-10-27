@@ -16,6 +16,7 @@ import {
 } from '../src/schedule-registry';
 import {
   normalizeLegacyScheduleAgent,
+  SCHEDULED_MESSAGE_RETENTION_MS,
   ScheduleAgentSchema,
   ScheduleDefinitionSchema,
 } from '../src/schedule-types';
@@ -334,6 +335,99 @@ describe('Chat-mode schedules carry no project', () => {
     };
     return port;
   };
+
+  it('purges terminal one-time messages after retention and retries a busy purge', async () => {
+    const docs = new Map<string, LoroDoc>();
+    const rows = new Map<string, unknown>();
+    const purged: string[] = [];
+    let purgeBusy = true;
+    const port: ScheduleRepositoryPort = {
+      openPersistedDoc: async (id) => {
+        if (!docs.has(id)) docs.set(id, new LoroDoc());
+        return { doc: docs.get(id)! };
+      },
+      openFlockDoc: async () => ({
+        flock: {
+          scan: () =>
+            [...rows].map(([key, value]) => ({ key: JSON.parse(key) as string[], value })),
+          get: (key) => rows.get(JSON.stringify(key)),
+          set: (key, value) => rows.set(JSON.stringify(key), value),
+          delete: (key) => rows.delete(JSON.stringify(key)),
+        },
+      }),
+      flush: async () => {},
+      purgeDoc: async (id) => {
+        if (purgeBusy) throw new Error('doc is busy');
+        purged.push(id);
+        docs.delete(id);
+      },
+    };
+    const repo = new ScheduleRepository(port, 'workspace' as never);
+    const draft = {
+      ...chatDraft(),
+      prompt: 'hello',
+      message: { inputBlocks: [{ type: 'text' as const, text: 'hello' }] },
+      trigger: { kind: 'once' as const, at: '2026-10-27T09:00:00Z' },
+      destination: { kind: 'existing_session' as const, sessionId: 'chat' },
+    };
+    await repo.save({
+      scheduleId: 'test',
+      draft,
+      actorId: 'owner',
+      now: 1,
+      activationId: 'activation',
+      activityId: 'created',
+      create: true,
+    });
+    const [row] = await repo.list();
+    const setRuntime = (messageState: string, updatedAt: number) => {
+      rows.set(JSON.stringify(['runtime', 'test', 'machine']), {
+        scheduleId: 'test',
+        machineId: 'machine',
+        activationId: 'activation',
+        observedDefinitionFingerprint: row!.definitionFingerprint,
+        messageState,
+        updatedAt,
+      });
+    };
+    setRuntime('pending', 1_000);
+    expect(
+      await repo.pruneExpiredMessages({
+        now: 1_000 + SCHEDULED_MESSAGE_RETENTION_MS,
+        ownerId: 'owner',
+        machineId: 'machine',
+      })
+    ).toEqual([]);
+    setRuntime('sent', 1_000);
+    expect(
+      await repo.pruneExpiredMessages({
+        now: 1_000 + SCHEDULED_MESSAGE_RETENTION_MS - 1,
+        ownerId: 'owner',
+        machineId: 'machine',
+      })
+    ).toEqual([]);
+    expect(
+      await repo.pruneExpiredMessages({
+        now: 1_000 + SCHEDULED_MESSAGE_RETENTION_MS,
+        ownerId: 'owner',
+        machineId: 'machine',
+      })
+    ).toEqual([]);
+    expect(await repo.list()).toHaveLength(1);
+    purgeBusy = false;
+    expect(
+      await repo.pruneExpiredMessages({
+        now: 1_000 + SCHEDULED_MESSAGE_RETENTION_MS,
+        ownerId: 'owner',
+        machineId: 'machine',
+      })
+    ).toEqual(['test']);
+    expect(purged).toEqual(['schedule-test']);
+    expect(await repo.list()).toEqual([]);
+    expect(rows.has(JSON.stringify(['tombstone', 'test']))).toBe(true);
+    expect(rows.has(JSON.stringify(['schedule', 'test']))).toBe(false);
+    expect(rows.has(JSON.stringify(['runtime', 'test', 'machine']))).toBe(false);
+  });
 
   it('persists complete messages across replicas, fingerprints their payload and replays one creation', async () => {
     const port = memoryPort();

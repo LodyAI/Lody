@@ -146,6 +146,20 @@ Send commits the message as scheduled. Remaining open items are the time-editor 
 a quiet delivered-turn provenance marker, and inline edit/cancel, which still depends
 on the receipt protocol below.
 
+## Terminal retention
+
+The owner worker runs a retention sweep on every ready evaluation. When a
+complete one-time message's runtime row is terminal (`sent`, `cancelled`, or
+`failed`) and its `updatedAt` is at least `SCHEDULED_MESSAGE_RETENTION_MS`
+(seven days) old, the owner purges the `schedule-<id>` document, removes the
+Registry schedule/runtime/manual rows, and leaves a tombstone. The timer starts
+at the terminal projection, not at creation. A busy document (open detail view or
+in-flight sync) is left for the next pass.
+
+Pending or active reservations and non-message Schedules are not swept. This is
+owner-local cleanup: the tombstone rejects stale offline writes, but it does not
+claim physical compaction of Loro history or remote replicas.
+
 ## Sync robustness audit (2026-10-27)
 
 The current promise is replication convergence plus the owner's 15-second wake
