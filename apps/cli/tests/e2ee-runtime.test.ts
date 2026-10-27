@@ -344,9 +344,14 @@ describe('machine E2EE local runtime', () => {
     expect(refreshed).toBe(false);
   });
 
-  it.each(['staged', 'activated'] as const)(
-    'pairs again after %s machine custody loss only in a new explicit session, retaining old evidence',
-    async (phase) => {
+  it.each([
+    ['staged', 'all'],
+    ['activated', 'all'],
+    ['staged', 'device'],
+    ['activated', 'device'],
+  ] as const)(
+    'pairs again after %s machine %s loss only in a new explicit session, retaining old evidence',
+    async (phase, loss) => {
       const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-repair-'));
       vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
       let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
@@ -485,10 +490,37 @@ describe('machine E2EE local runtime', () => {
           await pending.close();
         }
         const oldRuntime = await readdir(join(root, 'runtime'));
-        await rm(join(root, 'custody'), { recursive: true });
+        const originals = new Map<string, Buffer>();
+        if (loss === 'device') {
+          for (const name of await readdir(join(root, 'custody')))
+            if (name !== `${options.genesisHash}.machine.device`)
+              originals.set(name, await readFile(join(root, 'custody', name)));
+        }
+        const journal = new DatabaseSync(join(root, 'pairings.sqlite'));
+        const oldRow = journal
+          .prepare('SELECT * FROM pairings WHERE session=?')
+          .get(original.pairingSessionId);
+        journal.close();
+        await rm(
+          loss === 'all'
+            ? join(root, 'custody')
+            : join(root, 'custody', `${options.genesisHash}.machine.device`),
+          { recursive: true }
+        );
         await expect(prepare('01'.repeat(16))).rejects.toThrow();
         const replacement = await prepare('02'.repeat(16));
         expect(replacement.signingPublicKey).not.toBe(original.signingPublicKey);
+        expect(replacement.credentialHash).not.toBe(original.credentialHash);
+        const preserved = new DatabaseSync(join(root, 'pairings.sqlite'));
+        expect(
+          preserved.prepare('SELECT * FROM pairings WHERE session=?').get(original.pairingSessionId)
+        ).toEqual(oldRow);
+        preserved.close();
+        for (const [name, bytes] of originals)
+          expect(await readFile(join(root, 'custody', name))).toEqual(bytes);
+        await expect(openCliE2eeWorkspaceLegacy(options)).rejects.toThrow(
+          /e2ee_(pairing_required|binding_conflict)/
+        );
         await admit(replacement);
         await activateCliE2eeWorkspaceLegacy({
           ...options,
@@ -503,7 +535,9 @@ describe('machine E2EE local runtime', () => {
         await host.refresh();
         expect((await host.status()).hasCurrentKey).toBe(true);
         expect((await host.status()).devicePublicKey).toBe(replacement.signingPublicKey);
-        expect(await readdir(join(root, 'runtime'))).toEqual(expect.arrayContaining(oldRuntime));
+        const runtimes = await readdir(join(root, 'runtime'));
+        expect(runtimes).toEqual(expect.arrayContaining(oldRuntime));
+        expect(runtimes.length).toBeGreaterThan(oldRuntime.length);
         expect(report).toBe(true);
         const following = await prepare('03'.repeat(16));
         expect(following.signingPublicKey).toBe(replacement.signingPublicKey);
@@ -688,7 +722,7 @@ describe('machine E2EE local runtime', () => {
       const credentialPath = join(
         root,
         'custody',
-        'device-credential-' + context.genesisHash + '.sealed'
+        'device-credential-' + context.genesisHash + '-' + original.signingPublicKey + '.sealed'
       );
       const protectedCredential = await readFile(credentialPath);
       await fs.rename(devicePath, devicePath + '.retained');
@@ -1015,7 +1049,15 @@ describe('machine E2EE local runtime', () => {
             join(root, 'custody', context.genesisHash + '.machine.device')
           );
           const credential = await readFile(
-            join(root, 'custody', 'device-credential-' + context.genesisHash + '.sealed')
+            join(
+              root,
+              'custody',
+              'device-credential-' +
+                context.genesisHash +
+                '-' +
+                original.signingPublicKey +
+                '.sealed'
+            )
           );
           return { original, device, credential };
         } finally {
@@ -1041,7 +1083,15 @@ describe('machine E2EE local runtime', () => {
       ).toEqual(retained.device);
       expect(
         await readFile(
-          join(root, 'custody', 'device-credential-' + context.genesisHash + '.sealed')
+          join(
+            root,
+            'custody',
+            'device-credential-' +
+              context.genesisHash +
+              '-' +
+              retained.original.signingPublicKey +
+              '.sealed'
+          )
         )
       ).toEqual(retained.credential);
       await expect(
@@ -1294,7 +1344,7 @@ describe('machine E2EE local runtime', () => {
     }
   });
 
-  it('rejects partial custody loss before creating any replacement original', async () => {
+  it('rejects the same session with a surviving credential and missing device before creating any replacement original', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-partial-loss-'));
     vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
     try {
@@ -1316,13 +1366,20 @@ describe('machine E2EE local runtime', () => {
         frontendSigningPublicKey: fixture.sender,
         keyring: noKeyring,
       };
-      await prepareCliE2eeMachineLegacy({ ...input, pairingSessionId: '01'.repeat(16) });
-      const credentialPath = join(root, 'custody', `device-credential-${input.genesisHash}.sealed`);
+      const material = await prepareCliE2eeMachineLegacy({
+        ...input,
+        pairingSessionId: '01'.repeat(16),
+      });
+      const credentialPath = join(
+        root,
+        'custody',
+        `device-credential-${input.genesisHash}-${material.signingPublicKey}.sealed`
+      );
       const credential = await readFile(credentialPath);
       const devicePath = join(root, 'custody', `${input.genesisHash}.machine.device`);
       await rm(devicePath);
       await expect(
-        prepareCliE2eeMachineLegacy({ ...input, pairingSessionId: '02'.repeat(16) })
+        prepareCliE2eeMachineLegacy({ ...input, pairingSessionId: material.pairingSessionId })
       ).rejects.toThrow();
       await expect(readFile(devicePath)).rejects.toMatchObject({ code: 'ENOENT' });
       expect(await readFile(credentialPath)).toEqual(credential);
@@ -1466,7 +1523,7 @@ describe('machine E2EE local runtime', () => {
         createHash('sha256').update('account').digest('hex'),
         'workspace',
         'custody',
-        `device-credential-${hex(fixture.genesis.toBytes())}.sealed`
+        `device-credential-${hex(fixture.genesis.toBytes())}-${material.signingPublicKey}.sealed`
       );
       const originalCredential = await readFile(credentialPath);
       await fs.unlink(credentialPath);

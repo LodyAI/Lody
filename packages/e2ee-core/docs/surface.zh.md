@@ -98,3 +98,5 @@
 文件保护只能创建机器身份，个人身份必须使用系统安全存储。
 
 `NodeE2eeCustody.prepareDeviceCredential(genesis, signingPublicKey)` 一次性持久保存独立的 32 字节设备访问凭证，返回小写 hex 凭证及原字节的 SHA-256。`NodeE2eeCustody.deviceCredential` 只重开已有原件，缺失或损坏时不重新生成。凭证用独立用途域、genesis 与设备公钥绑定后由现有 KEK 保护，不改变设备文件和 epoch 密钥格式。它只用于服务端访问，不是内容密钥。
+
+凭证文件名为 `device-credential-${genesisHex}-${signingPublicKeyHex}.sealed`，与认证绑定一致。替换公钥拥有独立凭证，其他公钥的原件保持不变。存储遵循 current-only：不读取、重命名、转换或删除旧的仅含 genesis 的文件。使用旧文件名的开发身份需要明确重新配对或重建新身份，并保留旧 custody 目录作为证据。重开时缺失凭证不允许自动生成。

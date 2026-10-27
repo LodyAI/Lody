@@ -62,6 +62,91 @@ describe('machine E2EE custody', () => {
     }
   });
 
+  it('isolates replacement credentials by signing key and authenticates their binding', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'machine-credential-replacement-'));
+    const keyring: MachineKeyring = async () => {
+      throw new Error('synthetic unavailable');
+    };
+    const path = (key: string) =>
+      join(
+        directory,
+        `device-credential-${Buffer.from(genesis.toBytes()).toString('hex')}-${key}.sealed`
+      );
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const custody = yield* makeCliE2eeCustody({ directory, keyring });
+            const old = yield* custody.createDevice(genesis);
+            const original = yield* custody.prepareDeviceCredential(genesis, old.publicKey);
+            const oldPath = path(Buffer.from(old.publicKey.toBytes()).toString('hex'));
+            const originalBytes = readFileSync(oldPath);
+            unlinkSync(
+              join(directory, `${Buffer.from(genesis.toBytes()).toString('hex')}.machine.device`)
+            );
+            const replacement = yield* custody.createDevice(genesis);
+            const next = yield* custody.prepareDeviceCredential(genesis, replacement.publicKey);
+            expect(next.credentialHash).not.toBe(original.credentialHash);
+            expect(yield* custody.prepareDeviceCredential(genesis, replacement.publicKey)).toEqual(
+              next
+            );
+            expect(yield* custody.deviceCredential(genesis, old.publicKey)).toBe(
+              original.credential
+            );
+            expect(readFileSync(oldPath)).toEqual(originalBytes);
+            const nextPath = path(Buffer.from(replacement.publicKey.toBytes()).toString('hex'));
+            const nextBytes = readFileSync(nextPath);
+            // A valid blob in another key's filename still fails authenticated AAD.
+            renameSync(nextPath, nextPath + '.original');
+            renameSync(oldPath, nextPath);
+            expect(
+              Result.isFailure(
+                yield* Effect.result(custody.deviceCredential(genesis, replacement.publicKey))
+              )
+            ).toBe(true);
+            expect(readFileSync(nextPath)).toEqual(originalBytes);
+            expect(readFileSync(nextPath + '.original')).toEqual(nextBytes);
+          })
+        )
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves unkeyed developer credentials untouched and requires pairing again', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'machine-old-credential-'));
+    const keyring: MachineKeyring = async () => {
+      throw new Error('synthetic unavailable');
+    };
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const custody = yield* makeCliE2eeCustody({ directory, keyring });
+            const device = yield* custody.createDevice(genesis);
+            yield* custody.prepareDeviceCredential(genesis, device.publicKey);
+            const name = readdirSync(directory).find((file) =>
+              file.startsWith('device-credential-')
+            );
+            if (!name) throw new Error('credential was not retained');
+            const legacy = join(
+              directory,
+              `device-credential-${Buffer.from(genesis.toBytes()).toString('hex')}.sealed`
+            );
+            renameSync(join(directory, name), legacy);
+            const original = readFileSync(legacy);
+            const read = yield* Effect.result(custody.deviceCredential(genesis, device.publicKey));
+            expect(read).toMatchObject({ _tag: 'Failure', failure: { code: 'storage' } });
+            expect(readFileSync(legacy)).toEqual(original);
+          })
+        )
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('finishes ACL initialization for an interrupted empty directory, but never repairs originals', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'machine-acl-interrupted-'));
     let restricted = false;

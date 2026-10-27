@@ -85,8 +85,9 @@
   current identity atomically. A same-scope fresh session can take an unpublished
   creating generation atomically: old creating=-1, new creating=1, no original-byte
   edits. Account/machine/workspace/genesis/member must match; superseded sessions
-  cannot publish or retake. Reuse custody originals; surviving old credentials
-  forbid device replacement. Ledger-only owners cannot receive keys.
+  cannot publish or retake. Reuse custody originals; an unpublished credential
+  forbids replacing its missing device. Published old-key credentials remain evidence
+  and do not block a fresh session with a replacement key. Ledger-only owners cannot receive keys.
   Same-identity retries keep healthy owners; only identical intents share a flight.
   Local cancellation never guesses remote settlement.
 - Trusted OS-user socket only; partial upgrades fail closed. No remote authentication is implied. See the

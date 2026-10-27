@@ -625,10 +625,13 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
   }
   const credentialContext = (genesis: Bytes.GenesisHash, key: Bytes.SigningPublicKey) =>
     new Uint8Array(Buffer.concat([credentialPurpose, genesis.toBytes(), key.toBytes()]));
-  const credentialPath = (genesis: Bytes.GenesisHash) =>
-    join(directory, `device-credential-${Buffer.from(genesis.toBytes()).toString('hex')}.sealed`);
+  const credentialPath = (genesis: Bytes.GenesisHash, key: Bytes.SigningPublicKey) =>
+    join(
+      directory,
+      `device-credential-${Buffer.from(genesis.toBytes()).toString('hex')}-${Buffer.from(key.toBytes()).toString('hex')}.sealed`
+    );
   const readCredential = async (genesis: Bytes.GenesisHash, key: Bytes.SigningPublicKey) => {
-    const opened = unseal(await readOwned(credentialPath(genesis), 1024));
+    const opened = unseal(await readOwned(credentialPath(genesis, key), 1024));
     try {
       if (!equal(opened.aad, credentialContext(genesis, key)) || opened.body.length !== 32)
         throw fail('corrupt');
@@ -658,7 +661,7 @@ export const makeNodeE2eeCustody = Effect.fnUntraced(function* (input: {
           }
           const raw = random(new Uint8Array(32));
           try {
-            await publish(credentialPath(genesis), seal(raw, credentialContext(genesis, key)));
+            await publish(credentialPath(genesis, key), seal(raw, credentialContext(genesis, key)));
           } finally {
             raw.fill(0);
           }

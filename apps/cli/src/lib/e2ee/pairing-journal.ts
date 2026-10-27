@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { open } from 'node:fs/promises';
+import { open, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Data, Effect, Result, type Scope } from 'effect';
@@ -280,26 +280,45 @@ export const openMachinePairingJournal = Effect.fnUntraced(function* (directory:
         );
         if (Result.isFailure(found)) {
           const cause = found.failure.cause as NodeJS.ErrnoException | undefined;
-          if (cause?.code !== 'ENOENT' || original.sameSession) return yield* found.failure;
+          if (cause?.code !== 'ENOENT') return yield* found.failure;
+          // This session already published a particular key and credential.
+          // It cannot recover that identity by generating a replacement.
+          if (original.sameSession) return yield* failure('conflict');
           missing = true;
         }
       }
-      if (missing) {
-        // A surviving credential belongs to the missing identity. Never generate
-        // a replacement device that cannot reopen that credential's AAD.
-        const credential = yield* Effect.result(
-          io(async () => {
-            const file = await open(
-              join(directory, 'custody', `device-credential-${expected.genesisHash}.sealed`),
-              constants.O_RDONLY | constants.O_NOFOLLOW
-            );
-            await file.close();
+      if (missing && original.creating) {
+        // An unpublished generation may already have its own credential. Its
+        // missing device cannot be replaced by takeover. Published historical
+        // keys are evidence for other identities and do not block a fresh one.
+        const publishedKeys = yield* sql(
+          () =>
+            new Set(
+              (
+                db.prepare('SELECT material FROM pairings WHERE material IS NOT NULL').all() as {
+                  material: string;
+                }[]
+              ).map((row) => MaterialSchema.parse(JSON.parse(row.material)).signingPublicKey)
+            )
+        );
+        const files = yield* io(() =>
+          readdir(join(directory, 'custody')).catch((cause: NodeJS.ErrnoException) => {
+            if (cause.code === 'ENOENT') return [];
+            throw cause;
           })
         );
-        if (Result.isSuccess(credential)) return yield* failure('conflict');
-        if ((credential.failure.cause as NodeJS.ErrnoException | undefined)?.code !== 'ENOENT')
-          return yield* credential.failure;
+        const prefix = `device-credential-${expected.genesisHash}-`;
+        for (const file of files) {
+          if (
+            file.startsWith(prefix) &&
+            file.endsWith('.sealed') &&
+            !publishedKeys.has(file.slice(prefix.length, -'.sealed'.length))
+          )
+            return yield* failure('conflict');
+        }
       }
+      // A fresh session may replace a strictly missing device. Credentials are
+      // key-scoped: surviving evidence for a different key is never reopened.
       const reopen = Boolean(original.retained && !missing && !original.creating);
       if (!reopen) {
         // Persist generation ownership BEFORE custody can publish any replacement
