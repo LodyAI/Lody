@@ -84,6 +84,7 @@ describe('AttachmentAddMenu', () => {
         <Provider store={store}>
           <AttachmentAddMenu
             isMobile={isMobile}
+            scheduleDisabledReason="ordinary machine reason"
             onAddAttachment={() => {
               throw new Error('attachment must stay disabled');
             }}
@@ -116,5 +117,55 @@ describe('AttachmentAddMenu', () => {
     expect(document.body.textContent).toContain(
       'Encrypted workspaces do not yet support scheduled messages.'
     );
+    expect(document.body.textContent).not.toContain('ordinary machine reason');
+  });
+  it('explains a disabled schedule send on hover', async () => {
+    const reason = 'Update the target machine CLI to schedule messages.';
+    await act(async () => {
+      root.render(
+        <AttachmentAddMenu
+          isMobile={false}
+          onScheduleSend={() => {}}
+          scheduleDisabledReason={reason}
+        />
+      );
+    });
+
+    const trigger = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Add attachment"]'
+    );
+    expect(trigger).not.toBeNull();
+    await act(async () => {
+      trigger!.dispatchEvent(
+        new TestPointerEvent('mousedown', {
+          bubbles: true,
+          button: 0,
+          pointerType: 'mouse',
+        })
+      );
+      await vi.advanceTimersByTimeAsync(40);
+    });
+
+    const item = document.body.querySelector<HTMLElement>('[role="menuitem"]');
+    expect(item).not.toBeNull();
+    expect(item!.textContent).toContain('Schedule send');
+    expect(document.body.textContent).not.toContain(reason);
+
+    // The row itself is disabled and rejects pointer events; the wrapper is the
+    // hover target that carries the explanation.
+    const wrapper = item!.parentElement;
+    expect(wrapper).not.toBeNull();
+    await act(async () => {
+      for (const type of ['pointerover', 'pointerenter', 'mouseover', 'mouseenter']) {
+        wrapper!.dispatchEvent(
+          new TestPointerEvent(type, {
+            bubbles: type.endsWith('over'),
+            pointerType: 'mouse',
+          })
+        );
+      }
+    });
+
+    expect(document.body.textContent).toContain(reason);
   });
 });

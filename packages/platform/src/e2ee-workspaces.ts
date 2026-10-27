@@ -70,6 +70,8 @@ export interface E2eeRuntimeStatus {
   readonly rotationRequired: boolean;
   readonly deviceKind: 'personal' | 'machine' | 'recovery' | null;
   readonly hasCurrentKey: boolean;
+  /** Confirmed retained key usable for sends while current-key reception retries. */
+  readonly writeEpoch?: number | null;
   /** Local credential availability only; the credential remains in the host. */
   readonly hasDeviceCredential?: boolean;
   readonly continuityPending: boolean;
@@ -130,7 +132,8 @@ export interface E2eeWorkspaceRuntime {
     workspaceId: string,
     pairingSessionId: string
   ): Promise<{ admitted: true; ready: boolean }>;
-  refresh(workspaceId: string): Promise<E2eeRuntimeStatus>;
+  /** Ledger-only refresh separates discovery from retryable background key reception. */
+  refresh(workspaceId: string, options?: { installKeys?: boolean }): Promise<E2eeRuntimeStatus>;
   contentStreamsToken(
     workspaceId: string,
     rejectedToken?: string

@@ -154,8 +154,7 @@ async function settle<T>(operation: Promise<T>, timeout = 5_000): Promise<T> {
 }
 
 afterEach(async () => {
-  for (const transport of openTransports)
-    await settle(transport.close(), 10_000);
+  for (const transport of openTransports) await settle(transport.close(), 10_000);
   openTransports.clear();
   for (const tab of openTabs) await settle(tab.repo.destroy(), 10_000);
   openTabs.clear();
@@ -205,7 +204,6 @@ function transportFor(
   cursorStore?: RemoteCursorStore
 ) {
   const transport = createWorkspaceStreamsTransport({
-
     repo: tab.repo,
     workspaceId: tab.workspaceId,
     documentRemoteCursorStore:
@@ -1186,14 +1184,16 @@ describe('P10 public crypto and published SDK preparation', () => {
           },
         },
       });
-      const result = await settle(transportFor(reader, readerContent, {
-        load: (key) => cursor.load(key),
-        async save(value) {
-          const disk = await openTab(readerId);
-          expect((await disk.repo.openPersistedDoc('doc-a')).doc.toJSON()).toEqual(doc.toJSON());
-          await cursor.save(value);
-        },
-      }).syncDoc('doc-a', restored));
+      const result = await settle(
+        transportFor(reader, readerContent, {
+          load: (key) => cursor.load(key),
+          async save(value) {
+            const disk = await openTab(readerId);
+            expect((await disk.repo.openPersistedDoc('doc-a')).doc.toJSON()).toEqual(doc.toJSON());
+            await cursor.save(value);
+          },
+        }).syncDoc('doc-a', restored)
+      );
       expect(result.ok).toBe(fault === 'valid');
       if (fault === 'valid') {
         expect(decompressed).toHaveLength(1);

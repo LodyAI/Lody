@@ -111,14 +111,14 @@ describe('encrypted workspace control page reading', () => {
     genesisHash: vector.anchor,
     localPin,
   });
-  // Record 10 declares a capability this client cannot verify past.
+  // Record 12 declares a capability this client cannot verify past.
   const full = appendLedgerHistory(
     null,
-    page(10, '678d8a5fc4bb2ab0ef21032aa8d060056057958f15729fc53569158d07f5c0ce'),
+    page(12, 'f678de325f3a87488d3b6b40ad7da5aa8d8e7ef531e3f912a806ca1087887cc7'),
     expected(vector.anchor)
   );
   const history = (localPin: string | null) =>
-    appendLedgerHistory(null, page(9, full.records[8]!.hash), expected(localPin));
+    appendLedgerHistory(null, page(11, full.records[10]!.hash), expected(localPin));
 
   it('summarizes who did what and lists current members', () => {
     render({ history: history(vector.anchor) });

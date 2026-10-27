@@ -2,6 +2,7 @@ import { createContext, useContext, useState, type ReactNode, type RefCallback }
 import { createPortal } from 'react-dom';
 import * as stylex from '@stylexjs/stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
+import { cn } from '@/lib/utils';
 
 const SlotContext = createContext<RefCallback<HTMLDivElement> | null>(null);
 
@@ -44,6 +45,10 @@ export function AuthRecoveryEntryProvider({
 export function AuthRecoveryEntrySlot() {
   const register = useContext(SlotContext);
   return register ? (
-    <div ref={register} data-auth-recovery-entry {...stylex.props(styles.slot)} />
+    <div
+      ref={register}
+      data-auth-recovery-entry
+      className={cn(stylex.props(styles.slot).className, '[&:not(:empty)]:ml-1')}
+    />
   ) : null;
 }

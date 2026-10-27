@@ -55,6 +55,15 @@ function captureCommand(command: LedgerCommand) {
             command.encryptionPublicKey.toBytes()
           ),
           possessionSignature: yield* Bytes.signature(command.possessionSignature.toBytes()),
+          ...(command.machineId !== undefined ? { machineId: command.machineId } : {}),
+          ...(command.replaces !== undefined
+            ? {
+                replaces:
+                  command.replaces === null
+                    ? null
+                    : yield* Bytes.signingPublicKey(command.replaces.toBytes()),
+              }
+            : {}),
         });
       case 'SetRole':
         return Object.freeze({

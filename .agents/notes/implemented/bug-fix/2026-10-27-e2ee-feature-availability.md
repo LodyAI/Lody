@@ -23,6 +23,8 @@ sharing, exports or Code Collab indexes.
   guard error. Display checks the admitted workspace mode; operations check their own
   runtime/content even if callbacks or deep links bypass the UI.
 - Composer menus show disabled actions with visible explanations on desktop and touch.
+  Ordinary disabled schedule actions retain their hover tooltip; the encrypted-workspace
+  explanation stays visible even when a machine-level disabled reason also exists.
   Conversation menus explain exports, sharing, remote preview and RPC. Remote machine
   detail/provider controls and schedule deep links show a notice before mounting the
   unsupported editor. Remote goal, edit-and-resend and native steering affordances
@@ -42,7 +44,8 @@ sharing, exports or Code Collab indexes.
 
 ## Evidence and limits
 
-Deterministic tests exercise rendered disabled menus, English/Chinese presence copy,
+Deterministic tests exercise rendered disabled menus, English/Chinese upload refusals
+before network transfer, English/Chinese presence copy,
 schedule reasons/deep links, remote form suppression, Code Collab unavailability and
 local preview, real persistent draft hooks and prepared local files crossing real
 Loro history writes. With the implementation withdrawn to main, nine selected

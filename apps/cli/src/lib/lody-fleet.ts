@@ -1,3 +1,4 @@
+import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
 import { worktreeGitLegacy } from '@/session/worktree/git-execution-legacy';
 import type {
   LocalE2eePairingRequest,
@@ -1309,6 +1310,34 @@ export class LodyFleet {
     message: LocalSessionControlRequest,
     options: { onResponse?: (response: LocalSessionControlResponse) => void } = {}
   ): Promise<LocalSessionControlResponse[]> {
+    if (message.type === 'machine/dsh-providers') {
+      const providers = new Map<string, { id: string; name: string }>();
+      for (const runtime of this.runtimes.values()) {
+        const configs = await listMergedAgentConfigs(
+          runtime.lody.documentManager.repo,
+          runtime.workspace.id as WorkspaceId,
+          [this.machineId]
+        );
+        for (const config of configs) {
+          if (
+            config.machineId === this.machineId &&
+            config.cliType === 'builtin' &&
+            config.agentType === 'deepseek'
+          ) {
+            providers.set(config.id, { id: config.id, name: config.name });
+          }
+        }
+      }
+      const response = {
+        type: 'machine/dsh-providers_response' as const,
+        providers: [...providers.values()].sort(
+          (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)
+        ),
+      };
+      options.onResponse?.(response);
+      return [response];
+    }
+
     // Image and file uploads (from the in-session MCP server) may omit the
     // workspaceId; resolve it by finding the single active runtime that holds
     // the session doc. Both share the same resolution + ambiguity handling.

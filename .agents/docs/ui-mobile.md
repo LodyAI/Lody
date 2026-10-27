@@ -12,8 +12,10 @@ a z-index, or the session drawer's lifecycle.
 or desktop browser — keeps the desktop renderer at every width, and
 everything else (phones, tablets, unrecognized devices) follows the
 `MOBILE_LAYOUT_BREAKPOINT` viewport breakpoint — narrow is mobile, wide is
-the real desktop renderer (a phone rotated to landscape earns it). A narrow
-desktop window therefore never reaches this stack — it renders the desktop
+the real desktop renderer (a phone rotated to landscape earns it). A large
+tablet is therefore a desktop interaction surface: the full-height mobile
+new-chat sheet is phone/split-view only, and must not grow tablet-only variants.
+A narrow desktop window therefore never reaches this stack — it renders the desktop
 family in its compact presentation instead: the navigation sidebar and a
 Session's side panel stop consuming columns and become overlays
 (`useIsCompactDesktop()`, synced into `compactDesktopLayoutAtom` /
@@ -48,7 +50,7 @@ drag-start zone, which is why nothing else may mount one.
 
 The session is already a body-portal Vaul drawer at `z-50`. A second body-level
 `fixed z-50` surface — for example a Browser panel rendered with
-`createPortal(document.body)` — therefore lands *under* the conversation, invisible
+`createPortal(document.body)` — therefore lands _under_ the conversation, invisible
 until the session drawer closes and then flashing. Nesting the Browser drawer is
 what keeps it above.
 
@@ -113,7 +115,7 @@ rather than drawing both a status indicator and a chevron in the one node slot.
 
 ## Session sheets, viewers, and the frosted header
 
-The tab sheet is the only surface that can say a *background* tab is waiting on
+The tab sheet is the only surface that can say a _background_ tab is waiting on
 approval while another tab is on screen, which is why the status type — not just
 presence — travels through the derived atom and why `requestPermission` outranks
 the spinner. The header badge stays two-state because a dot can only differ by
