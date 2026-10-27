@@ -91,6 +91,9 @@ import type {
   WorktreeSetupScriptConfig,
 } from '@lody/shared';
 
+import type { E2eeMachinePairingRequests, E2eeMachinePairingStatus } from './e2ee-machine-pairing';
+export type { E2eeMachinePairingRequests, E2eeMachinePairingStatus } from './e2ee-machine-pairing';
+
 type Query<Args extends Record<string, unknown>, Result> = FunctionReference<
   'query',
   'public',
@@ -414,6 +417,22 @@ export type CloudApi = {
     status: Query<E2eeMailboxRequests['status'], E2eeMailboxReplies['status']>;
     report: Mutation<E2eeMailboxRequests['report'], E2eeMailboxReplies['report']>;
     repair: Mutation<E2eeMailboxRequests['repair'], E2eeMailboxReplies['repair']>;
+  };
+  e2eeMachinePairing: {
+    begin: Mutation<E2eeMachinePairingRequests['begin'], E2eeMachinePairingStatus>;
+    inspect: Query<E2eeMachinePairingRequests['inspect'], E2eeMachinePairingStatus>;
+    cancel: Mutation<E2eeMachinePairingRequests['cancel'], E2eeMachinePairingStatus>;
+    authorizeExisting: Mutation<E2eeMachinePairingRequests['inspect'], E2eeMachinePairingStatus>;
+    bootstrap: Query<
+      { workspaceId: string; credential: string; machineId: string },
+      | {
+          status: 'authorized';
+          userId: string;
+          workspaces: (WorkspaceSummary & { contentMode: 'e2ee'; genesisHash: string })[];
+        }
+      | { status: 'unauthorized'; reason: string }
+    >;
+    complete: Mutation<E2eeMachinePairingRequests['inspect'], E2eeMachinePairingStatus>;
   };
   e2eeWorkspaces: {
     accountIdentity: Action<Record<string, never>, { accountId: string; cryptoUserId: string }>;

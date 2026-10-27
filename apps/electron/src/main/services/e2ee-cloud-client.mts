@@ -1,3 +1,5 @@
+import { RemoteMachineStatusSchema } from '@lody/shared/e2ee-remote-pairing'
+import type { E2eeMachinePairingRequests } from '@lody/cloud-api'
 import { ConvexHttpClient } from 'convex/browser'
 import { api } from '@lody/cloud-api'
 import type {
@@ -352,6 +354,26 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
         })
       )
     },
+    machineBegin: (requestInput: E2eeMachinePairingRequests['begin']) =>
+      request(
+        (client) => client.mutation(api.e2eeMachinePairing.begin, requestInput),
+        RemoteMachineStatusSchema
+      ),
+    machineInspect: (requestInput: E2eeMachinePairingRequests['inspect']) =>
+      request(
+        (client) => client.query(api.e2eeMachinePairing.inspect, requestInput),
+        RemoteMachineStatusSchema
+      ),
+    machineAuthorizeExisting: (requestInput: E2eeMachinePairingRequests['inspect']) =>
+      request(
+        (client) => client.mutation(api.e2eeMachinePairing.authorizeExisting, requestInput),
+        RemoteMachineStatusSchema
+      ),
+    machineCancel: (requestInput: E2eeMachinePairingRequests['cancel']) =>
+      request(
+        (client) => client.mutation(api.e2eeMachinePairing.cancel, requestInput),
+        RemoteMachineStatusSchema
+      ),
     appendRecord: (requestInput: E2eeAppendRecordRequest) => {
       const original = { ...requestInput }
       return request((client) => client.action(api.e2eeWorkspaces.appendRecord, original), appended)

@@ -1,3 +1,4 @@
+import { makeDesktopRemotePairing } from './e2ee-remote-pairing.mjs'
 import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
 import { randomUUID } from 'node:crypto'
 import { makeDesktopPersonalPairing } from './e2ee-personal-pairing.mjs'
@@ -147,6 +148,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
       {
         scope: Scope.Closeable
         pairing: ReturnType<typeof makeDesktopLocalPairing>
+        remotePairing: ReturnType<typeof makeDesktopRemotePairing>
         personalPairing: ReturnType<typeof makeDesktopPersonalPairing>
         status: () => Effect.Effect<E2eeRuntimeStatus, unknown>
         ledgerView: () => Effect.Effect<E2eeRuntimeLedgerView, unknown>
@@ -528,6 +530,16 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             current: () => verified.current()
           })
         )
+        const remotePairing = yield* sql(() =>
+          makeDesktopRemotePairing({
+            db,
+            workspaceId,
+            genesis,
+            genesisRecord: creation.record,
+            signer: device,
+            current: () => verified.current()
+          })
+        )
         const personalPairing = yield* sql(() =>
           makeDesktopPersonalPairing({
             db,
@@ -897,6 +909,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         return {
           scope,
           pairing,
+          remotePairing,
           personalPairing,
           status,
           ledgerView,
@@ -984,6 +997,39 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
       )
     }
     return {
+      remoteMachineOffer: (
+        workspaceId: string,
+        args: { accountId: string; deploymentUrl: string; ingressUrl: string }
+      ) =>
+        run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.remotePairing.offer(args))),
+      stageRemoteMachine: (
+        workspaceId: string,
+        session: string,
+        material: LocalE2eePrepareResponse
+      ) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.remotePairing.stage(session, material)
+          )
+        ),
+      approveRemoteMachine: (workspaceId: string, session: string, summary: string) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.remotePairing.approve(session, summary)
+          )
+        ),
+      confirmRemoteMachine: (workspaceId: string, session: string) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.remotePairing.confirmed(session)
+          )
+        ),
+      retireRemoteMachine: (workspaceId: string, session: string, noAdmissionReserved: boolean) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.remotePairing.retire(session, noAdmissionReserved)
+          )
+        ),
       personalPairingOffer: (workspaceId: string) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.personalPairing.offer())),
       cancelPersonalPairing: (workspaceId: string, session: string) =>

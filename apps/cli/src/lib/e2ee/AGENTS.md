@@ -36,8 +36,9 @@
   See [integration proposal](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-realtime-journal.md).
 - `prepareCliE2eeMachineLegacy` binds the retained credential hash to the exact
   desktop-generated 16-byte pairing session using core's fixed v1 helper.
-  Pairing preparation and activation run only on the OS-user control socket;
-  Fleet checks its own account and discovered encrypted workspace/genesis first.
+  Local preparation/activation uses the OS-user control socket. Explicit remote pairing
+  uses the signed, expiring offer and scoped machine service port; Fleet checks its
+  account and encrypted workspace/genesis before activation.
   Activation refreshes the verified ledger and mailbox and acknowledges only an
   installed current key; temporary failure leaves the same pairing retryable.
 
@@ -81,8 +82,11 @@
   signing-key-scoped credentials. Ledger-only owners cannot receive keys. Same-identity
   retries keep healthy owners; only identical intents share flights. Cancellation never
   guesses remote settlement. See [recovery rationale](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-local-pairing-recovery.md).
-- OS-user socket only; partial upgrades fail closed. No remote authentication. See the
-  [pairing note](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-machine-pairing-journal.md).
+- Local pairing remains OS-user socket only; partial upgrades fail closed. Remote pairing
+  uses separate consent/session state and a device-bound service credential, never an
+  account API key. Persist routing metadata signed by the original device key; reject
+  tampering before releasing credentials. See the [pairing note](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-machine-pairing-journal.md)
+  and [remote flow](../../../../../.agents/notes/proposed/feature/2026-10-27-e2ee-remote-machine-pairing.md).
 
 ## Catalog and Fleet containment
 

@@ -296,6 +296,7 @@ export async function activateCliE2eeWorkspaceLegacy(
     await handle.close().catch(() => undefined);
     await unlink(temporary).catch(() => undefined);
   }
+  await pending.completeRemotePairing(options.pairingSessionId);
 }
 
 async function openWorkspace(
@@ -556,6 +557,12 @@ async function openWorkspace(
         throw new Error('e2ee_pairing_unconfirmed', { cause: pairingFailure });
     },
     confirmPairing,
+    completeRemotePairing: (pairingSessionId: string) =>
+      options.cloud.completeMachinePairing?.({
+        workspaceId: options.workspaceId,
+        credential: opened.credential,
+        pairingSessionId,
+      }) ?? Promise.resolve(),
     content,
     tokens,
     bucketId: () => bucket?.(),
@@ -572,3 +579,138 @@ async function openWorkspace(
   };
 }
 export type CliE2eeWorkspaceLegacy = Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>>;
+
+const RemoteBootstrapData = z
+  .object({
+    accountId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
+    workspaceId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
+    genesisHash: z.string().regex(/^[0-9a-f]{64}$/),
+    signingPublicKey: z.string().regex(/^[0-9a-f]{64}$/),
+    machineId: z.string().min(1).max(128),
+    deploymentUrl: z.string().url(),
+  })
+  .strict();
+const RemoteBootstrap = RemoteBootstrapData.extend({
+  signature: z.string().regex(/^[0-9a-f]{128}$/),
+}).strict();
+const remoteBootstrapBytes = (value: z.infer<typeof RemoteBootstrapData>) =>
+  new TextEncoder().encode(
+    JSON.stringify([
+      'lody-e2ee-machine-bootstrap-v1',
+      value.accountId,
+      value.workspaceId,
+      value.genesisHash,
+      value.signingPublicKey,
+      value.machineId,
+      value.deploymentUrl,
+    ])
+  );
+/** Device-authenticated routing metadata, written only after verified current-key installation. */
+export async function retainCliE2eeMachineBootstrapLegacy(
+  input: z.infer<typeof RemoteBootstrapData>,
+  keyring?: MachineKeyring
+) {
+  const unsigned = RemoteBootstrapData.parse(input);
+  const signature = await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const custody = yield* makeCliE2eeCustody({
+          directory: join(directoryFor(unsigned.accountId, unsigned.workspaceId), 'custody'),
+          keyring,
+        });
+        const { Bytes, signVerified } = yield* Effect.promise(
+          () => import('@lody/e2ee-core/protocol')
+        );
+        const device = yield* custody.openDevice(
+          Result.getOrThrow(Bytes.genesisHash(bytes(unsigned.genesisHash)))
+        );
+        if (hex(device.publicKey.toBytes()) !== unsigned.signingPublicKey)
+          return yield* Effect.fail(new Error('e2ee_binding_conflict'));
+        return hex((yield* signVerified(device, remoteBootstrapBytes(unsigned))).toBytes());
+      })
+    )
+  );
+  const value = { ...unsigned, signature };
+  const directory = directoryFor(value.accountId, value.workspaceId);
+  const temporary = join(directory, `remote-bootstrap-${randomBytes(16).toString('hex')}.pending`);
+  const file = await open(temporary, 'wx', 0o600);
+  try {
+    await file.writeFile(JSON.stringify(value));
+    await file.sync();
+    await file.close();
+    await rename(temporary, join(directory, 'remote-bootstrap.json'));
+  } finally {
+    await file.close();
+    await unlink(temporary).catch(() => undefined);
+  }
+}
+/** Reopen existing protected credentials only. This temporary custody owner closes before Fleet opens. */
+export async function loadCliE2eeMachineBootstrapLegacy(
+  reference: string,
+  machineId: string,
+  keyring?: MachineKeyring
+) {
+  const [accountId, workspaceId, extra] = reference.split('/');
+  if (!accountId || !workspaceId || extra !== undefined) throw new Error('e2ee_pairing_required');
+  const directory = directoryFor(accountId, workspaceId);
+  const file = await open(
+    join(directory, 'remote-bootstrap.json'),
+    constants.O_RDONLY | constants.O_NOFOLLOW
+  );
+  let bootstrap: z.infer<typeof RemoteBootstrap>;
+  try {
+    const stat = await file.stat();
+    if (!stat.isFile() || stat.size > 2048) throw new Error('e2ee_pairing_required');
+    bootstrap = RemoteBootstrap.parse(JSON.parse(await file.readFile('utf8')));
+  } finally {
+    await file.close();
+  }
+  if (
+    bootstrap.accountId !== accountId ||
+    bootstrap.workspaceId !== workspaceId ||
+    bootstrap.machineId !== machineId
+  )
+    throw new Error('e2ee_binding_conflict');
+  const marker = Activation.parse(
+    JSON.parse(await readFile(join(directory, 'activation.json'), 'utf8'))
+  );
+  if (
+    marker.genesisHash !== bootstrap.genesisHash ||
+    marker.signingPublicKey !== bootstrap.signingPublicKey
+  )
+    throw new Error('e2ee_pairing_required');
+  const original = await open(
+    join(directory, 'custody', `${bootstrap.genesisHash}.machine.device`),
+    constants.O_RDONLY | constants.O_NOFOLLOW
+  );
+  await original.close();
+  const credential = await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const custody = yield* makeCliE2eeCustody({
+          directory: join(directory, 'custody'),
+          keyring,
+        });
+        const { Bytes, verifySignature } = yield* Effect.promise(
+          () => import('@lody/e2ee-core/protocol')
+        );
+        const genesis = Result.getOrThrow(Bytes.genesisHash(bytes(bootstrap.genesisHash)));
+        const device = yield* custody.openDevice(genesis);
+        if (hex(device.publicKey.toBytes()) !== bootstrap.signingPublicKey)
+          return yield* Effect.fail(new Error('e2ee_binding_conflict'));
+        if (
+          Result.isFailure(
+            verifySignature(
+              device.publicKey.toBytes(),
+              remoteBootstrapBytes(bootstrap),
+              bytes(bootstrap.signature)
+            )
+          )
+        )
+          return yield* Effect.fail(new Error('e2ee_binding_conflict'));
+        return yield* custody.deviceCredential(genesis, device.publicKey);
+      })
+    )
+  );
+  return { bootstrap, credential };
+}

@@ -372,3 +372,138 @@ describe('shared Streams kernel after a failed response-body release', () => {
     await port.closeLegacy();
   });
 });
+
+it('runs the paired machine port with only one encrypted workspace and a revocable service credential', async () => {
+  const { createCloudE2eeMachinePort } = await import('../src/lib/cloud-cli-port');
+  type Client = NonNullable<Parameters<typeof createCloudE2eeMachinePort>[0]['client']>;
+  vi.stubEnv('LODY_PLATFORM', 'cloud');
+  vi.stubEnv('LODY_HTTP_TRANSPORT', 'default');
+  let deliver: ((value: unknown) => void) | undefined;
+  const account = 'synthetic-machine-owner',
+    workspaceId = 'synthetic-workspace',
+    credential = 'a1'.repeat(32);
+  const client: Client = {
+    onUpdate: ((_ref: unknown, _args: unknown, listener: (value: unknown) => void) => {
+      deliver = listener;
+      return () => {
+        deliver = undefined;
+      };
+    }) as Client['onUpdate'],
+    query: (async () => ({
+      status: 'authorized',
+      userId: account,
+      workspaces: [
+        {
+          id: workspaceId,
+          name: 'Synthetic',
+          slug: null,
+          role: 'member',
+          contentMode: 'e2ee',
+          genesisHash: 'ab'.repeat(32),
+        },
+      ],
+    })) as Client['query'],
+    close: async () => {
+      deliver = undefined;
+    },
+  };
+  const logger: Logger = {
+    debug: () => {},
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    trace: () => {},
+    success: () => {},
+    setLevel: () => {},
+    setDebug: () => {},
+    child: () => logger,
+    close: async () => {},
+  };
+  const packets: Record<string, unknown>[] = [];
+  vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+    const body = JSON.parse(String(init.body));
+    packets.push(body);
+    return Response.json({
+      status: 'success',
+      value: {
+        workspaceId,
+        genesisHash: 'ab'.repeat(32),
+        checkpoint: { headHash: 'cd'.repeat(32), length: 1 },
+        startIndex: 0,
+        recordsHex: ['00'],
+        position: 'position',
+        nextCursor: null,
+      },
+    });
+  });
+  const port = createCloudE2eeMachinePort({
+    accountId: account,
+    workspaceId,
+    genesisHash: 'ab'.repeat(32),
+    machineId: 'machine',
+    credential,
+    authBaseUrl: 'https://synthetic.convex.cloud',
+    logger,
+    client,
+  });
+  const states: unknown[] = [];
+  const stop = port.access.watchWorkspaceAccess(
+    (state) => states.push(state),
+    (error) => {
+      throw error;
+    }
+  );
+  try {
+    for (const name of [
+      'streamsTokens',
+      'notifications',
+      'usage',
+      'billing',
+      'githubTokens',
+      'bugReports',
+      'sessionSharing',
+      'prAssociation',
+      'attachmentUpload',
+      'remotePreview',
+    ] as const)
+      expect(port[name]).toBeNull();
+    const authorized = {
+      status: 'authorized',
+      userId: account,
+      workspaces: [
+        {
+          id: workspaceId,
+          name: 'Synthetic',
+          slug: null,
+          role: 'member',
+          contentMode: 'e2ee',
+          genesisHash: 'ab'.repeat(32),
+        },
+      ],
+    };
+    deliver?.(authorized);
+    expect(states).toEqual([authorized]);
+    expect(await port.e2ee!.getHistory({ workspaceId, credential })).toMatchObject({ workspaceId });
+    expect(packets).toEqual([
+      expect.objectContaining({
+        path: 'e2eeWorkspaces:history',
+        args: [expect.objectContaining({ workspaceId, credential })],
+      }),
+    ]);
+    expect(JSON.stringify(packets)).not.toContain('cliToken');
+    expect(() => port.e2ee!.getHistory({ workspaceId: 'other', credential })).toThrow(
+      'e2ee_binding_conflict'
+    );
+    deliver?.({ status: 'unauthorized', reason: 'Machine revoked; pair again' });
+    expect(states.at(-1)).toEqual({
+      status: 'unauthorized',
+      reason: 'Machine revoked; pair again',
+    });
+    stop();
+    expect(deliver).toBeUndefined();
+  } finally {
+    stop();
+    await port.dispose();
+    vi.unstubAllEnvs();
+  }
+});

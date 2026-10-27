@@ -121,6 +121,24 @@ export interface E2eeWorkspaceRuntime {
   account(options?: {
     token?: string;
   }): Promise<{ userId: string; source: 'network' | 'offline' } | null>;
+  beginRemoteMachinePairing?(
+    workspaceId: string
+  ): Promise<import('@lody/shared/e2ee-remote-pairing').RemoteMachineStatus & { command: string }>;
+  inspectRemoteMachinePairing?(
+    workspaceId: string,
+    pairingSessionId: string
+  ): Promise<
+    import('@lody/shared/e2ee-remote-pairing').RemoteMachineStatus & { summary: string | null }
+  >;
+  approveRemoteMachinePairing?(
+    workspaceId: string,
+    pairingSessionId: string,
+    summary: string
+  ): Promise<{ admitted: boolean; ready: boolean }>;
+  cancelRemoteMachinePairing?(
+    workspaceId: string,
+    pairingSessionId: string
+  ): Promise<import('@lody/shared/e2ee-remote-pairing').RemoteMachineStatus>;
   /** Prepare public same-user machine evidence; this never admits the device. */
   prepareLocalAgent?(
     workspaceId: string

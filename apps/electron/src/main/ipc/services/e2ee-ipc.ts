@@ -508,6 +508,154 @@ export class E2eeIpc extends IpcService {
     return this.status(workspaceId)
   }
   @IpcMethod()
+  async beginRemoteMachinePairing(workspaceId: string) {
+    const id = sender()
+    const state = await withDesktopE2eeAccount((owner) =>
+      Effect.gen(function* () {
+        if (!owner.readers.get(workspaceId)?.has(id))
+          return yield* Effect.fail(new Error('e2ee_not_open'))
+        const credential = yield* owner.bootstrap.deviceCredential(workspaceId)
+        const offer = yield* owner.host.remoteMachineOffer(workspaceId, {
+          accountId: owner.accountId,
+          deploymentUrl: new URL(import.meta.env.VITE_CONVEX_DEPLOY_URL ?? '').origin,
+          ingressUrl: new URL(import.meta.env.VITE_SERVER_URL ?? '').origin
+        })
+        return { credential, offer, accountId: owner.accountId }
+      })
+    )
+    const cloud = await desktopE2eeCloudClient()
+    if (cloud.accountId !== state.accountId) throw new Error('e2ee_account_mismatch')
+    const status = await Effect.runPromise(
+      cloud.client.machineBegin({ workspaceId, credential: state.credential, offer: state.offer })
+    )
+    return {
+      ...status,
+      command: `lody machine pair --offer ${Buffer.from(JSON.stringify(state.offer)).toString('base64url')}`
+    }
+  }
+  @IpcMethod()
+  async inspectRemoteMachinePairing(workspaceId: string, pairingSessionId: string) {
+    const id = sender()
+    pairingSession(pairingSessionId)
+    const access = await withDesktopE2eeAccount((owner) =>
+      Effect.gen(function* () {
+        if (!owner.readers.get(workspaceId)?.has(id))
+          return yield* Effect.fail(new Error('e2ee_not_open'))
+        return {
+          credential: yield* owner.bootstrap.deviceCredential(workspaceId),
+          accountId: owner.accountId
+        }
+      })
+    )
+    const cloud = await desktopE2eeCloudClient()
+    if (cloud.accountId !== access.accountId) throw new Error('e2ee_account_mismatch')
+    const status = await Effect.runPromise(
+      cloud.client.machineInspect({ workspaceId, pairingSessionId, credential: access.credential })
+    )
+    if (status.pairingSessionId !== pairingSessionId) throw new Error('e2ee_conflict')
+    const material = status.material
+    const summary =
+      material && ['claimed', 'admitting', 'admitted', 'ready'].includes(status.status)
+        ? await withDesktopE2eeAccount((owner) =>
+            owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
+              ? owner.host.stageRemoteMachine(workspaceId, pairingSessionId, material)
+              : Effect.fail(new Error('e2ee_account_mismatch'))
+          )
+        : null
+    return { ...status, summary }
+  }
+  @IpcMethod()
+  async approveRemoteMachinePairing(
+    workspaceId: string,
+    pairingSessionId: string,
+    summary: string
+  ) {
+    const id = sender()
+    pairingSession(pairingSessionId)
+    if (typeof summary !== 'string' || !/^[0-9a-f]{8}( [0-9a-f]{8}){7}$/.test(summary))
+      throw new Error('e2ee_invalid-input')
+    const current = await this.inspectRemoteMachinePairing(workspaceId, pairingSessionId)
+    if (
+      current.summary !== summary ||
+      !['claimed', 'admitting', 'admitted', 'ready'].includes(current.status)
+    )
+      throw new Error('e2ee_conflict')
+    const pending = await withDesktopE2eeAccount((owner) =>
+      Effect.gen(function* () {
+        if (!owner.readers.get(workspaceId)?.has(id))
+          return yield* Effect.fail(new Error('e2ee_not_open'))
+        return {
+          accountId: owner.accountId,
+          request: yield* owner.host.approveRemoteMachine(workspaceId, pairingSessionId, summary)
+        }
+      })
+    )
+    const cloud = await desktopE2eeCloudClient()
+    if (cloud.accountId !== pending.accountId) throw new Error('e2ee_account_mismatch')
+    if (pending.request) {
+      try {
+        await Effect.runPromise(cloud.client.appendRecord(pending.request))
+      } catch (error) {
+        this.pairingFailure = error
+      }
+    } else {
+      const credential = await withDesktopE2eeAccount((owner) =>
+        owner.accountId === pending.accountId && owner.readers.get(workspaceId)?.has(id)
+          ? owner.bootstrap.deviceCredential(workspaceId)
+          : Effect.fail(new Error('e2ee_account_mismatch'))
+      )
+      await Effect.runPromise(
+        cloud.client.machineAuthorizeExisting({ workspaceId, pairingSessionId, credential })
+      )
+    }
+    // Refresh reads back the original and drives resumable key distribution.
+    await this.refresh(workspaceId)
+    await withDesktopE2eeAccount((owner) =>
+      owner.accountId === pending.accountId && owner.readers.get(workspaceId)?.has(id)
+        ? owner.host.confirmRemoteMachine(workspaceId, pairingSessionId)
+        : Effect.fail(new Error('e2ee_account_mismatch'))
+    )
+    const status = await this.inspectRemoteMachinePairing(workspaceId, pairingSessionId)
+    return {
+      admitted: status.status === 'admitted' || status.status === 'ready',
+      ready: status.status === 'ready'
+    }
+  }
+  @IpcMethod()
+  async cancelRemoteMachinePairing(workspaceId: string, pairingSessionId: string) {
+    const id = sender()
+    pairingSession(pairingSessionId)
+    const access = await withDesktopE2eeAccount((owner) =>
+      Effect.gen(function* () {
+        if (!owner.readers.get(workspaceId)?.has(id))
+          return yield* Effect.fail(new Error('e2ee_not_open'))
+        return {
+          credential: yield* owner.bootstrap.deviceCredential(workspaceId),
+          accountId: owner.accountId
+        }
+      })
+    )
+    const cloud = await desktopE2eeCloudClient()
+    if (cloud.accountId !== access.accountId) throw new Error('e2ee_account_mismatch')
+    const result = await Effect.runPromise(
+      cloud.client.machineCancel({ workspaceId, pairingSessionId, credential: access.credential })
+    )
+    if (!['cancelled', 'expired', 'conflict', 'ready'].includes(result.status))
+      throw new Error('e2ee_conflict')
+    if (!result.noAdmissionReserved) await this.refresh(workspaceId)
+    await withDesktopE2eeAccount((owner) =>
+      owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
+        ? owner.host.retireRemoteMachine(
+            workspaceId,
+            pairingSessionId,
+            result.noAdmissionReserved === true
+          )
+        : Effect.fail(new Error('e2ee_account_mismatch'))
+    )
+    return result
+  }
+
+  @IpcMethod()
   async prepareLocalAgent(workspaceId: string) {
     this.pairingFailure = undefined
     const id = sender()

@@ -2269,6 +2269,43 @@ describe('machine E2EE local runtime', () => {
       );
       deliverEnvelope = true;
       await activateCliE2eeWorkspaceLegacy(hostOptions);
+      const { retainCliE2eeMachineBootstrapLegacy, loadCliE2eeMachineBootstrapLegacy } =
+        await import('../src/lib/e2ee/workspace-legacy');
+      const routing = {
+        accountId,
+        workspaceId: binding.workspaceId,
+        genesisHash: binding.genesisHash,
+        signingPublicKey: preparedPairing.signingPublicKey,
+        machineId: 'machine',
+        deploymentUrl: 'https://cloud.synthetic.test',
+      };
+      await retainCliE2eeMachineBootstrapLegacy(routing, noKeyring);
+      expect(
+        (
+          await loadCliE2eeMachineBootstrapLegacy(
+            `${accountId}/${binding.workspaceId}`,
+            'machine',
+            noKeyring
+          )
+        ).credential
+      ).toBe(fixture.credential);
+      const routingPath = join(machineDirectory, '..', 'remote-bootstrap.json');
+      const retainedRouting = await readFile(routingPath, 'utf8');
+      await fs.writeFile(
+        routingPath,
+        JSON.stringify({
+          ...JSON.parse(retainedRouting),
+          deploymentUrl: 'https://foreign.synthetic.test',
+        })
+      );
+      await expect(
+        loadCliE2eeMachineBootstrapLegacy(
+          `${accountId}/${binding.workspaceId}`,
+          'machine',
+          noKeyring
+        )
+      ).rejects.toThrow('e2ee_binding_conflict');
+      await fs.writeFile(routingPath, retainedRouting);
       const originalFs =
         await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
       for (const file of [
@@ -2495,6 +2532,161 @@ describe('machine E2EE local runtime', () => {
         })
       );
     } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('remote machine command', () => {
+  it('retains material-bound consent and exact signatures across restart without touching local pairing', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'remote-machine-command-'));
+    vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const { makeDesktopRemotePairing } = yield* Effect.promise(
+            () => import('../../electron/src/main/services/e2ee-remote-pairing.mts')
+          );
+          const { decodeRemoteMachineOffer } = yield* Effect.promise(
+            () => import('../src/lib/e2ee/remote-pairing')
+          );
+          const { remoteMachineSummary } = yield* Effect.promise(
+            () => import('@lody/shared/e2ee-remote-pairing')
+          );
+          const custody = yield* makeNodeE2eeCustody({
+            directory: join(directory, 'owner'),
+            wrapper,
+          });
+          const prepared = yield* custody.prepareDevice();
+          const membershipId = Result.getOrThrow(Bytes.membershipId(new Uint8Array(16).fill(11)));
+          const signed = yield* signGenesisRecord({
+            signer: prepared,
+            encryptionPublicKey: prepared.enc,
+            initialKey: Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(21))),
+            userId: Result.getOrThrow(Bytes.userId(new Uint8Array(32).fill(31))),
+            membershipId,
+          });
+          const signer = yield* custody.retainDevice(signed.genesis, prepared);
+          let view = Result.getOrThrow(
+            verifyLedger({
+              anchor: signed.genesis,
+              records: [signed.record],
+              checkpoint: { length: 1, head: hashRecordBytes(signed.record) },
+            })
+          );
+          const db = new DatabaseSync(join(directory, 'desktop.sqlite'));
+          yield* Effect.addFinalizer(() => Effect.sync(() => db.close()));
+          db.exec('CREATE TABLE records(position INTEGER PRIMARY KEY, record BLOB)');
+          db.prepare('INSERT INTO records VALUES(0,?)').run(signed.record);
+          const input = {
+            db,
+            workspaceId: 'workspace',
+            genesis: signed.genesis,
+            genesisRecord: signed.record,
+            signer,
+            current: () => Effect.succeed(view),
+          };
+          const local = makeDesktopLocalPairing(input);
+          const localSession = (yield* local.context()).pairingSessionId;
+          let remote = makeDesktopRemotePairing(input);
+          const args = {
+            accountId: 'remote-account',
+            deploymentUrl: 'https://cloud.synthetic.test',
+            ingressUrl: 'https://edge.synthetic.test',
+          };
+          const offer = yield* remote.offer(args);
+          const encoded = Buffer.from(JSON.stringify(offer)).toString('base64url');
+          expect(decodeRemoteMachineOffer(encoded)).toEqual(offer);
+          for (const patch of [
+            { workspaceId: 'other' },
+            { frontendSigningPublicKey: '01'.repeat(32) },
+            { ingressUrl: 'https://foreign.synthetic.test' },
+          ]) {
+            expect(() =>
+              decodeRemoteMachineOffer(
+                Buffer.from(JSON.stringify({ ...offer, ...patch })).toString('base64url')
+              )
+            ).toThrow();
+          }
+          const preparedMachine = yield* Effect.promise(() =>
+            prepareCliE2eeMachineLegacy({ ...offer, machineId: 'machine', keyring: noKeyring })
+          );
+          if ('superseded' in preparedMachine) throw new Error('unexpected supersession');
+          const material = {
+            ...preparedMachine,
+            machineId: 'machine',
+            ok: true as const,
+            type: 'prepare' as const,
+          };
+          const summary = yield* remote.stage(offer.pairingSessionId, material);
+          expect(summary).toBe(yield* Effect.promise(() => remoteMachineSummary(offer, material)));
+          expect(
+            (yield* Effect.result(remote.approve(offer.pairingSessionId, '00'.repeat(32))))._tag
+          ).toBe('Failure');
+          expect(db.prepare('SELECT record FROM remote_local_pairing').get()?.record).toBeNull();
+          const request = yield* remote.approve(offer.pairingSessionId, summary);
+          expect(request?.machinePairingSessionId).toBe(offer.pairingSessionId);
+          remote = makeDesktopRemotePairing(input);
+          expect(yield* remote.offer(args)).toEqual(offer);
+          expect(yield* remote.approve(offer.pairingSessionId, summary)).toEqual(request);
+          expect((yield* local.context()).pairingSessionId).toBe(localSession);
+          if (!request) throw new Error('expected first admission');
+          expect((yield* Effect.result(remote.retire(offer.pairingSessionId)))._tag).toBe(
+            'Failure'
+          );
+          // Cancellation serialized before writer reservation proves no dispatch.
+          yield* remote.retire(offer.pairingSessionId, true);
+          const resumedOffer = yield* remote.offer(args);
+          const resumed = yield* Effect.promise(() =>
+            prepareCliE2eeMachineLegacy({
+              ...resumedOffer,
+              machineId: 'machine',
+              keyring: noKeyring,
+            })
+          );
+          if ('superseded' in resumed) throw new Error('unexpected supersession');
+          const resumedSummary = yield* remote.stage(resumedOffer.pairingSessionId, {
+            ...resumed,
+            machineId: 'machine',
+            ok: true,
+            type: 'prepare',
+          });
+          const resumedRequest = yield* remote.approve(
+            resumedOffer.pairingSessionId,
+            resumedSummary
+          );
+          if (!resumedRequest) throw new Error('expected resumed admission');
+          const record = new Uint8Array(Buffer.from(resumedRequest.recordHex, 'hex'));
+          view = Result.getOrThrow(
+            extendLedger(view, [record], { length: 2, head: hashRecordBytes(record) })
+          );
+          db.prepare('INSERT INTO records VALUES(1,?)').run(record);
+          expect(yield* remote.confirmed(resumedOffer.pairingSessionId)).toMatchObject({
+            signingPublicKey: material.signingPublicKey,
+          });
+          yield* remote.retire(resumedOffer.pairingSessionId);
+          expect(db.prepare('SELECT record FROM remote_pairing_archive').get()?.record).toEqual(
+            record
+          );
+          const next = yield* remote.offer(args);
+          expect(next.pairingSessionId).not.toBe(offer.pairingSessionId);
+          const retried = yield* Effect.promise(() =>
+            prepareCliE2eeMachineLegacy({ ...next, machineId: 'machine', keyring: noKeyring })
+          );
+          if ('superseded' in retried) throw new Error('unexpected supersession');
+          expect(retried.signingPublicKey).toBe(material.signingPublicKey);
+          const nextSummary = yield* remote.stage(next.pairingSessionId, {
+            ...retried,
+            machineId: 'machine',
+            ok: true,
+            type: 'prepare',
+          });
+          expect(nextSummary).not.toBe(summary);
+          expect(yield* remote.approve(next.pairingSessionId, nextSummary)).toBeNull();
+        })
+      );
+    } finally {
+      vi.unstubAllEnvs();
       await rm(directory, { recursive: true, force: true });
     }
   });
