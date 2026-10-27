@@ -91,6 +91,10 @@ mac:
     NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
     NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
     NSCameraUsageDescription: Lody uses the camera only when you scan another member's ledger verification QR code.
+    # Agents and tools Lody runs inherit its Local Network decision. Without
+    # this key macOS never lists Lody under Privacy & Security > Local
+    # Network, so LAN requests from those processes are denied silently.
+    NSLocalNetworkUsageDescription: Lody and the agents it runs connect to services and devices on your local network.
     NSUserNotificationAlertStyle: banner
     SUFeedURL: https://github.com/LodyAI/Lody/releases/latest/download/appcast.xml
     SUPublicEDKey: SPARKLE_ED_PUBLIC_KEY_PLACEHOLDER
