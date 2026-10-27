@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { LocalSessionControlRequest } from '@lody/shared';
 import {
   IpcConnectError,
@@ -20,12 +20,17 @@ import {
   listAliveDocMetas,
   listAliveRoomIds,
   listAliveSessionMetas,
+  resolveWorkspaceOrThrow,
   selectWorkspaceSummary,
   syncWorkspaceMetaForRead,
   WORKSPACE_SYNC_UNAVAILABLE_MESSAGE,
   WorkspaceSyncUnavailableError,
 } from './command-runtime';
 import { makeWorkspaceCommandManagers } from './workspace-command-manager';
+import { Effect } from 'effect';
+import type { MachineId } from '@lody/shared';
+import * as workspaceApi from './workspace';
+import type { LocalWorkspaceCatalogSnapshot } from './local-workspace-catalog';
 
 const createControlRequest = (): LocalSessionControlRequest => ({
   type: 'session/create',
@@ -444,6 +449,92 @@ describe('command runtime helpers', () => {
 
     expect(selectWorkspaceSummary(workspaces, 'ws-1')).toEqual(workspaces[0]);
     expect(selectWorkspaceSummary(workspaces, 'beta')).toEqual(workspaces[1]);
+  });
+
+  it('resolves standalone workspaces online, or only from this login cache with --offline', async () => {
+    const auth = {
+      token: 'synthetic-token',
+      userId: 'user-1',
+      userName: 'User',
+      userEmail: 'user@example.test',
+      machineId: 'machine-1' as MachineId,
+      machineName: 'host',
+    };
+    const online = [
+      { id: 'ws-1', slug: 'alpha', name: 'Shared Team', role: 'owner' },
+      { id: 'ws-2', slug: 'beta', name: 'Shared Team', role: 'member' },
+    ];
+    vi.stubEnv('LODY_WORKSPACE_ID', '');
+    const list = vi.spyOn(workspaceApi, 'listWorkspacesForToken').mockResolvedValue(online);
+    onTestFinished(() => {
+      list.mockRestore();
+      vi.unstubAllEnvs();
+    });
+    await expect(resolveWorkspaceOrThrow(auth, 'beta')).resolves.toEqual(online[1]);
+    await expect(resolveWorkspaceOrThrow(auth, 'Shared Team')).rejects.toThrow('ambiguous');
+    await expect(resolveWorkspaceOrThrow(auth, 'missing')).rejects.toThrow(
+      'Workspace not found: missing'
+    );
+    expect(list).toHaveBeenCalledTimes(3);
+    list.mockRejectedValueOnce(new Error('Synthetic discovery outage'));
+    // A discovery failure is never reported as an empty workspace list.
+    await expect(resolveWorkspaceOrThrow(auth, 'beta')).rejects.toThrow(
+      'Synthetic discovery outage'
+    );
+    list.mockClear();
+
+    const cached = (snapshot: Partial<LocalWorkspaceCatalogSnapshot>) => ({
+      read: () =>
+        Effect.succeed({
+          version: 1 as const,
+          identity: { userId: 'user-1' },
+          machine: { machineId: 'machine-1' },
+          sessions: [],
+          workspaces: [
+            {
+              workspaceId: 'ws-1',
+              name: 'Alpha',
+              slug: 'alpha',
+              role: 'member',
+              contentMode: 'e2ee' as const,
+              genesisHash: 'ab'.repeat(32),
+              state: 'active' as const,
+              cachedAt: 1,
+            },
+            {
+              workspaceId: 'ws-2',
+              name: 'Removed',
+              slug: 'removed',
+              role: 'owner',
+              state: 'remote_missing' as const,
+              cachedAt: 1,
+            },
+          ],
+          ...snapshot,
+        }),
+    });
+    await expect(
+      resolveWorkspaceOrThrow(auth, undefined, { offline: true, catalog: cached({}) })
+    ).resolves.toEqual({
+      id: 'ws-1',
+      name: 'Alpha',
+      slug: 'alpha',
+      role: 'member',
+      contentMode: 'e2ee',
+      genesisHash: 'ab'.repeat(32),
+    });
+    // A workspace the cloud no longer lists is not usable offline.
+    await expect(
+      resolveWorkspaceOrThrow(auth, 'removed', { offline: true, catalog: cached({}) })
+    ).rejects.toThrow('Workspace not found: removed');
+    // Another login's cache grants nothing to this one.
+    await expect(
+      resolveWorkspaceOrThrow(auth, 'alpha', {
+        offline: true,
+        catalog: cached({ identity: { userId: 'user-2' } }),
+      })
+    ).rejects.toThrow('No workspaces are cached locally for the current CLI login');
+    expect(list).not.toHaveBeenCalled();
   });
 
   it('rejects ambiguous workspace names and shows stable selectors', () => {

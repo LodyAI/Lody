@@ -118,8 +118,10 @@ import {
   listAliveRoomIds,
   LocalDaemonAvailabilityError,
   normalizeCliValue,
+  listWorkspaceCandidates,
   printJson,
   resolveStructuredOutputMode as resolveOutputMode,
+  resolveWorkspaceOrThrow,
   selectWorkspaceSummary,
   syncDocForRead,
   syncCommandTime,
@@ -1257,24 +1259,15 @@ export function filterAuthorizedLocalProjectCandidates<T extends LocalProjectSel
   return localProjects.filter((project) => authorizedLocalProjectIds.has(project.id));
 }
 
-async function resolveWorkspaceOrThrow(
-  auth: AuthContext,
-  selector?: string
-): Promise<WorkspaceSummary> {
-  const workspaces = await listWorkspacesForToken(auth.token);
-  const effectiveSelector =
-    normalizeCliValue(selector) ?? normalizeCliValue(process.env.LODY_WORKSPACE_ID);
-  return selectWorkspaceSummary(workspaces, effectiveSelector);
-}
-
 async function resolveWorkspaceForSessionOrThrow(
   auth: AuthContext,
   sessionId: SessionId,
   options?: ResolveWorkspaceForSessionOptions
 ): Promise<WorkspaceSummary> {
-  const workspaces = await listWorkspacesForToken(auth.token);
+  const offline = typeof options === 'object' && options.offline === true;
+  const workspaces = await listWorkspaceCandidates(auth, { offline });
   const selector = typeof options === 'string' ? options : options?.workspace;
-  const shouldSync = typeof options === 'object' && options.offline !== true;
+  const shouldSync = !offline;
   const syncReason = typeof options === 'object' ? options.reason : undefined;
   const effectiveSelector =
     normalizeCliValue(selector) ?? normalizeCliValue(process.env.LODY_WORKSPACE_ID);
@@ -5116,7 +5109,9 @@ const sessionListCommand = new Command('list')
   .action(async (options: ListOptions) => {
     await runSessionCommand(options, async () => {
       const auth = getAuthContextOrThrow();
-      const workspace = await resolveWorkspaceOrThrow(auth, options.workspace);
+      const workspace = await resolveWorkspaceOrThrow(auth, options.workspace, {
+        offline: options.offline,
+      });
       if (options.openedBy && options.openedByCurrent === true) {
         throw new Error('Pass either --opened-by or --opened-by-current, not both.');
       }

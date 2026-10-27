@@ -60,6 +60,10 @@ import { getCliPlatformKind } from '@/lib/cli-platform';
 import type { CloudSessionSharingPort } from '@lody/platform';
 import { getDaemonWorkspace, getSessionCommandEnvironment } from './session-command-environment';
 import { makeWorkspaceCommandManagers } from './workspace-command-manager';
+import {
+  makeLocalWorkspaceCatalog,
+  type LocalWorkspaceCatalogService,
+} from './local-workspace-catalog';
 
 export function getCommandSessionSharingPort(): CloudSessionSharingPort | null {
   if (getCliPlatformKind() !== 'cloud') return null;
@@ -243,19 +247,76 @@ export function getAuthContextOrThrow(loggerName: string): AuthContext {
   };
 }
 
+const DAEMON_LOGIN_MISMATCH =
+  'The CLI login no longer matches the running Lody daemon; restart the daemon to use the new login.';
+
+export type ResolveWorkspaceOptions = {
+  /** Resolve from the local workspace catalog instead of online discovery. */
+  offline?: boolean;
+  catalog?: Pick<LocalWorkspaceCatalogService, 'read'>;
+};
+
+/**
+ * Workspace candidates for a standalone command: online discovery by default,
+ * or the active entries the daemon last cached for this login with `--offline`.
+ */
+export async function listWorkspaceCandidates(
+  auth: AuthContext,
+  options: ResolveWorkspaceOptions = {}
+): Promise<WorkspaceSummary[]> {
+  if (options.offline !== true) return await listWorkspacesForToken(auth.token);
+  const snapshot = await Effect.runPromise((options.catalog ?? makeLocalWorkspaceCatalog()).read());
+  const workspaces =
+    snapshot.identity?.userId === auth.userId
+      ? snapshot.workspaces.filter((workspace) => workspace.state === 'active')
+      : [];
+  if (workspaces.length === 0)
+    throw new Error(
+      'No workspaces are cached locally for the current CLI login; run without --offline.'
+    );
+  return workspaces.map(({ workspaceId, name, slug, role, contentMode, genesisHash }) => ({
+    id: workspaceId,
+    name,
+    slug,
+    role,
+    ...(contentMode ? { contentMode } : {}),
+    ...(genesisHash ? { genesisHash } : {}),
+  }));
+}
+
 export async function resolveWorkspaceOrThrow(
   auth: AuthContext,
-  selector?: string
+  selector?: string,
+  options: ResolveWorkspaceOptions = {}
 ): Promise<WorkspaceSummary> {
   const environment = getSessionCommandEnvironment();
   if (environment) {
     if (auth !== environment.auth) throw new Error('Session command identity mismatch');
     return selectWorkspaceSummary([environment.workspace], selector);
   }
-  const workspaces = await listWorkspacesForToken(auth.token);
   const effectiveSelector =
     normalizeCliValue(selector) ?? normalizeCliValue(process.env.LODY_WORKSPACE_ID);
-  return selectWorkspaceSummary(workspaces, effectiveSelector);
+  // A daemon command is bound to the daemon's workspace, whose access the daemon
+  // already tracks; enumerating every workspace of the login adds only a
+  // network dependency.
+  const daemon = getDaemonWorkspace();
+  const access = daemon?.readAccess?.();
+  if (daemon && access && access.status !== 'unknown') {
+    if (auth.userId !== daemon.userId || auth.machineId !== daemon.machineId)
+      throw new Error(DAEMON_LOGIN_MISMATCH);
+    if (access.status === 'unauthorized')
+      throw new Error('CLI token is invalid or expired. Run `lody login` again.');
+    if (access.status === 'revoked')
+      throw new Error(`Workspace access was revoked: ${daemon.workspaceId}`);
+    if (
+      access.workspace.id !== daemon.workspaceId ||
+      (effectiveSelector &&
+        findWorkspacesBySelector([access.workspace], effectiveSelector).length === 0)
+    )
+      throw new Error('Daemon command workspace mismatch');
+    return access.workspace;
+  }
+  return selectWorkspaceSummary(await listWorkspaceCandidates(auth, options), effectiveSelector);
 }
 
 export async function withMachineRpcClient<T>(
@@ -369,9 +430,7 @@ export async function withWorkspaceManager<T>(
     // and never writes into it under a different identity.
     if (workspace.id !== daemon.workspaceId) throw new Error('Daemon command workspace mismatch');
     if (auth.userId !== daemon.userId || auth.machineId !== daemon.machineId)
-      throw new Error(
-        'The CLI login no longer matches the running Lody daemon; restart the daemon to use the new login.'
-      );
+      throw new Error(DAEMON_LOGIN_MISMATCH);
     return fn(daemon.manager);
   }
   // One-shot commands write directly into the workspace repo and rely on
