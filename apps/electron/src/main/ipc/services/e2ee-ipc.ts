@@ -1,4 +1,4 @@
-import { E2eeMemberRemovedError } from '../../services/e2ee-cloud-client.mjs'
+import { E2eeMemberRemovedError } from '../../services/e2ee-cloud-errors.mjs'
 import { Effect } from 'effect'
 import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
 import type { E2eeWorkspaceRuntime } from '@lody/platform'

@@ -2508,6 +2508,7 @@ async function managementFailureFixture(t, commandType) {
           (yield* owner.host.managementState(workspaceId)).devices.find((entry) => entry.self).key,
           ownKey
         )
+        const submissionsBeforeRecovery = submitted.length
         const revoke = yield* Effect.result(
           owner.host.manage(workspaceId, independentCommand, remote)
         )
@@ -2556,6 +2557,11 @@ async function managementFailureFixture(t, commandType) {
           assert.deepEqual(rows[0].record, retained.rows[0].record)
           assert.deepEqual(rows[0].envelopes, retained.rows[0].envelopes)
         } else {
+          assert.deepEqual(
+            submitted.slice(submissionsBeforeRecovery),
+            [original],
+            'unknown CAS retries its original bytes while staging remains unavailable'
+          )
           assert.equal(attempts.length, 1, 'pending publication resumes without staging again')
           assert.equal(Result.isFailure(revoke), true)
           assert.equal(view.head.equals(point), true)
@@ -2573,6 +2579,13 @@ async function managementFailureFixture(t, commandType) {
           )
           assert.equal(Buffer.from(records.at(-2)).equals(original), true)
           assert.equal(view.inspectState().devices.has(targets[1]), false)
+          if (commandType === 'removeMember') {
+            const operation = Result.getOrThrow(decodeRecord(records.at(-1))).body.operation
+            assert.equal(operation.type, 'removeMember')
+            assert.equal(hex(operation.membershipId.toBytes()), '11'.repeat(16))
+            assert.equal(view.inspectState().members.has('11'.repeat(16)), false)
+            assert.equal(view.inspectState().epoch.rotationRequired, true)
+          }
         }
         assert.equal(view.inspectState().epoch.number, 1)
         assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, true)

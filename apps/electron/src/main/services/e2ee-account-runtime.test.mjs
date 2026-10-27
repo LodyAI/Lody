@@ -1,5 +1,5 @@
 import * as identityStorage from '@lody/shared/node/e2ee-identity'
-import { E2eeMemberRemovedError } from './e2ee-cloud-client.mts'
+import { E2eeMemberRemovedError } from './e2ee-cloud-errors.mts'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { readFile, mkdtemp, rm, readdir, writeFile } from 'node:fs/promises'
@@ -51,7 +51,7 @@ async function load(relative, dependencies, console = globalThis.console, env = 
       require: (id) =>
         Object.hasOwn(dependencies, id)
           ? dependencies[id]
-          : id === '../../services/e2ee-cloud-client.mjs'
+          : id === '../../services/e2ee-cloud-errors.mjs'
             ? { E2eeMemberRemovedError }
             : id === '../../services/e2ee-personal-pairing.mjs'
               ? { PersonalPairingOfferSchema }

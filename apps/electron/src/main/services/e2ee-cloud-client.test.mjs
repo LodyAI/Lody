@@ -1,4 +1,4 @@
-import { E2eeMemberRemovedError } from './e2ee-cloud-client.mts'
+import { E2eeMemberRemovedError } from './e2ee-cloud-errors.mts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createPrivateKey, createPublicKey, sign } from 'node:crypto'
