@@ -266,8 +266,13 @@ turn under the rewrite lease), the entry is dead:
   closes the entry a crashed run left open, at that failure point. A `processing` input is
   never closed this way: it still owes its crash-recovery run on the same entry. Dispatch
   checks do not sweep for dead turns; that would read history on every trigger.
-- The queue signal (`messageQueueCheckedAt`) is acknowledged only when the local queue is
-  empty, so a row that could not be promoted keeps the session watched.
+- Queue acknowledgement requires an empty local queue **and** observation of the control
+  frontier carried by that exact `messageQueueUpdatedAt` signal. Renderer queue mutations
+  capture `messageQueueUpdateVersion` before releasing their store. Metadata arriving first
+  therefore keeps the session watched until content arrives. Unversioned signals from older
+  renderers remain unacknowledged; their watch is released by a versioned queue update,
+  archive/deletion/reassignment or watcher shutdown. No polling or extra retry owner is added.
+  See the [causal acknowledgement decision](../../../../.agents/notes/implemented/bug-fix/2026-10-27-queue-signal-before-content.md).
 
 Observed cause: a restart's recovery dispatch was rejected by Inbox admission before its
 prompt, failing the user input while the entry stayed open. See the

@@ -1834,6 +1834,159 @@ describe('SessionDispatchWatcher', () => {
     h.watcher.stop();
   });
 
+  it.each([
+    { deliveryOrder: 'content-first', versioned: false },
+    { deliveryOrder: 'metadata-first', versioned: false },
+    { deliveryOrder: 'content-first', versioned: true },
+    { deliveryOrder: 'metadata-first', versioned: true },
+  ])(
+    'automatically dispatches a queued message after turn completion with $deliveryOrder delivery (versioned=$versioned)',
+    async ({ deliveryOrder, versioned }) => {
+      vi.useFakeTimers();
+      const sessionId = 'queue-arrival-order' as SessionId;
+      const roomId = `session-${sessionId}`;
+      // The previous turn has completed; only the queue watermark can keep this
+      // otherwise idle session watched. The two planes are delivered separately.
+      let meta: SessionMeta = {
+        id: sessionId,
+        machineId: 'machine-1',
+        userId: 'user-1',
+        createdAt: '2026-10-27T00:00:00.000Z',
+        cliType: 'builtin',
+        agentType: 'codex',
+        status: { type: 'idle' },
+        latestUserMsgId: 'previous-turn',
+        lastHandledUserMsgId: 'previous-turn',
+        messageQueueUpdatedAt: 10,
+        messageQueueCheckedAt: 10,
+      };
+      let onMetadata: (event: { kind: 'doc-metadata'; docId: string }) => void = () => {};
+      const repo = {
+        getMeta: () => ({ scan: async () => [{ key: ['e', roomId], value: true }] }),
+        getDocMeta: async () => ({ meta }),
+        upsertDocMeta: async (_roomId: string, patch: Partial<SessionMeta>) => {
+          meta = { ...meta, ...patch };
+          onMetadata({ kind: 'doc-metadata', docId: roomId });
+        },
+        watch: (listener: typeof onMetadata) => {
+          onMetadata = listener;
+          return {
+            unsubscribe: () => {
+              onMetadata = () => {};
+            },
+          };
+        },
+        flush: async () => {},
+      };
+      const doc = new SessionDocument(
+        repo as never,
+        sessionId,
+        async () => {},
+        createSilentLogger()
+      );
+      doc.roomId = roomId;
+      composeTestSessionDoc(doc, {
+        history: [
+          { ...createPendingUserTurn('previous-turn', 'previous input'), status: 'handled' },
+        ],
+      });
+      // The fixture composes storage without init(); bind the real backend for
+      // subscribeSessionChanges, as SessionDocument.init() does in production.
+      const backend = await createSessionBackend(doc);
+      vi.spyOn(doc, 'getSessionBackend').mockReturnValue(backend);
+      const errors: unknown[] = [];
+      const dispatched: string[] = [];
+      const watcher = createWatcher({
+        logger: {
+          ...createSilentLogger(),
+          error: (...args) => {
+            errors.push(args);
+          },
+        },
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        workspaceDocument: {
+          repo,
+          getOrCreateSessionDoc: async () => doc,
+          onMetaRoomSynced: () => () => {},
+        } as unknown as LoroDocumentManager,
+        executionService: {
+          getExecutionSnapshot: () => ({
+            hasActiveTurn: false,
+            hasBlockingPendingCreate: false,
+            hasReusableSession: false,
+          }),
+          startSession: async (request: { userTurnId: string }) => {
+            dispatched.push(request.userTurnId);
+            await (
+              await createSessionBackend(doc)
+            ).applyHistoryAction({
+              kind: 'user-status',
+              turnId: request.userTurnId,
+              status: 'handled',
+            });
+            await repo.upsertDocMeta(roomId, { lastHandledUserMsgId: request.userTurnId });
+          },
+          continueSession: async () => {},
+        } as unknown as SessionExecutionService,
+        canUseMachine: createAllowMachineAccess(),
+      });
+      // Observe existing work only: never enqueue a check to rescue the late row.
+      const work = watcher as unknown as {
+        metadataReconcileChain: Promise<void>;
+        metadataReconcileDrainScheduled: boolean;
+        sessionCheckChains: Map<SessionId, Promise<void>>;
+      };
+      const drain = async () => {
+        do {
+          await vi.runAllTimersAsync();
+          await Promise.all([work.metadataReconcileChain, ...work.sessionCheckChains.values()]);
+        } while (work.metadataReconcileDrainScheduled || work.sessionCheckChains.size > 0);
+      };
+      try {
+        await watcher.start();
+        await drain();
+        const sender = new SessionDocument(
+          repo as never,
+          sessionId,
+          async () => {},
+          createSilentLogger()
+        );
+        const senderLoro = composeTestSessionDoc(sender, { doc: doc.handle.doc.fork() });
+        let update: Uint8Array;
+        let frontiers: ReturnType<LoroDoc['frontiers']>;
+        try {
+          await sender.pushMessageQueue(createQueueItem('late-queued-turn'));
+          update = senderLoro.export({ mode: 'update', from: doc.handle.doc.version() });
+          frontiers = senderLoro.frontiers();
+        } finally {
+          sender.mirror.dispose();
+        }
+        if (deliveryOrder === 'content-first') doc.handle.doc.import(update);
+        await repo.upsertDocMeta(roomId, {
+          messageQueueUpdatedAt: 20,
+          ...(versioned ? { messageQueueUpdateVersion: { updatedAt: 20, frontiers } } : {}),
+        });
+        await drain();
+        if (deliveryOrder === 'metadata-first') {
+          expect(meta.messageQueueCheckedAt).toBe(10);
+          doc.handle.doc.import(update);
+          await drain();
+        }
+        expect(errors).toEqual([]);
+        expect({
+          dispatched,
+          queued: (await doc.getMessageQueue()).map((item) => item.userTurnId),
+        }).toEqual({ dispatched: ['late-queued-turn'], queued: [] });
+        if (versioned) expect(meta.messageQueueCheckedAt).toBe(20);
+      } finally {
+        watcher.stop();
+        doc.mirror.dispose();
+        vi.useRealTimers();
+      }
+    }
+  );
+
   it('keeps the queue signal open while a queued row could not be promoted', async () => {
     const id = 'queue-held' as SessionId;
     let meta = {
@@ -2472,62 +2625,66 @@ describe('SessionDispatchWatcher', () => {
     ).toBe('queued-2');
   });
 
-  it('uses queue update watermarks to wake and settle idle sessions', async () => {
-    const sessionId = 'session-mq-watermark' as SessionId;
-    const roomId = `session-${sessionId}`;
-    const upsertDocMeta = vi.fn(async () => {});
-    const workspaceDocument = {
-      repo: {
-        upsertDocMeta,
+  it('acknowledges an empty queue only after its matching control version arrives', async () => {
+    const sessionId = 'queue-version-ack' as SessionId;
+    let meta = {
+      id: sessionId,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      createdAt: '2026-10-27T00:00:00.000Z',
+      cliType: 'builtin',
+      agentType: 'codex',
+      status: { type: 'idle' },
+      messageQueueUpdatedAt: 20,
+      messageQueueCheckedAt: 10,
+    } as SessionMeta;
+    const repo = {
+      getDocMeta: async () => ({ meta }),
+      upsertDocMeta: async (_roomId: string, patch: Partial<SessionMeta>) => {
+        meta = { ...meta, ...patch };
       },
-    } as unknown as LoroDocumentManager;
+    };
+    const doc = new SessionDocument(repo as never, sessionId, async () => {}, createSilentLogger());
+    doc.roomId = `session-${sessionId}`;
+    const loro = composeTestSessionDoc(doc);
+    const sender = loro.fork();
+    // A remote enqueue followed by deletion leaves the final queue empty, but
+    // neither operation has arrived at the daemon yet.
+    sender.getMovableList('mq').push({ task: 'synthetic' });
+    sender.getMovableList('mq').delete(0, 1);
+    sender.commit();
     const watcher = createWatcher({
       logger: createSilentLogger(),
       machineId: 'machine-1',
       workspaceId: 'workspace-1' as WorkspaceId,
-      workspaceDocument,
-      executionService: {
-        getExecutionSnapshot: vi.fn(() => ({
-          hasActiveTurn: false,
-          hasBlockingPendingCreate: false,
-          hasReusableSession: false,
-        })),
-        continueSession: vi.fn(async () => {}),
-        startSession: vi.fn(async () => {}),
-        cancelSession: vi.fn(async () => ({ success: true })),
-      } as unknown as SessionExecutionService,
+      workspaceDocument: { repo } as unknown as LoroDocumentManager,
+      executionService: {} as SessionExecutionService,
       canUseMachine: createAllowMachineAccess(),
     });
-    const privateWatcher = watcher as unknown as {
+    const owner = watcher as unknown as {
+      markMessageQueueSignalChecked: (doc: SessionDocument, meta: SessionMeta) => Promise<void>;
       sessionNeedsActiveWatch: (meta: SessionMeta) => boolean;
-      markMessageQueueSignalChecked: (
-        sessionDoc: { roomId: string; getMessageQueue: () => Promise<MessageQueueItem[]> },
-        meta: SessionMeta
-      ) => Promise<void>;
     };
-    const meta = {
-      id: sessionId,
-      machineId: 'machine-1',
-      userId: 'user-1',
-      createdAt: new Date().toISOString(),
-      cliType: 'builtin',
-      agentType: 'codex',
-      status: { type: 'idle' },
-      lastHandledUserMsgId: 'turn-handled',
-      messageQueueUpdatedAt: 20,
-      messageQueueCheckedAt: 10,
-    } satisfies SessionMeta;
-
-    expect(privateWatcher.sessionNeedsActiveWatch(meta)).toBe(true);
-
-    await privateWatcher.markMessageQueueSignalChecked(
-      { roomId, getMessageQueue: async () => [] },
-      meta
-    );
-
-    expect(upsertDocMeta).toHaveBeenCalledWith(roomId, {
-      messageQueueCheckedAt: 20,
-    });
+    try {
+      await owner.markMessageQueueSignalChecked(doc, meta);
+      expect(meta.messageQueueCheckedAt).toBe(10); // legacy signal has no proof
+      meta.messageQueueUpdateVersion = { updatedAt: 20, frontiers: sender.frontiers() };
+      await owner.markMessageQueueSignalChecked(doc, meta);
+      expect(meta.messageQueueCheckedAt).toBe(10); // missing control update
+      expect(owner.sessionNeedsActiveWatch(meta)).toBe(true);
+      loro.import(sender.export({ mode: 'update', from: loro.version() }));
+      meta.messageQueueUpdatedAt = 30;
+      await owner.markMessageQueueSignalChecked(doc, meta);
+      expect(meta.messageQueueCheckedAt).toBe(10); // receipt belongs to an older signal
+      meta.messageQueueUpdateVersion = { updatedAt: 30, frontiers: sender.frontiers() };
+      await owner.markMessageQueueSignalChecked(doc, meta);
+      expect(await doc.getMessageQueue()).toEqual([]);
+      expect(meta.messageQueueCheckedAt).toBe(30);
+      expect(owner.sessionNeedsActiveWatch(meta)).toBe(false);
+    } finally {
+      watcher.stop();
+      doc.mirror.dispose();
+    }
   });
 
   it('waits for Stop control data, deduplicates it after reopen, and honors a new Stop on the same turn', async () => {

@@ -36,7 +36,7 @@
 - Stop data: control doc; meta: pointer. Never scan old docs for work or change active presence
   here (`../lib/loro/session-active-presence.ts`).
 - Bound reconciliation per README (no per-trigger scans/throttles); close
-  [dead turns](README.md#dead-turns); ack queue signals only when empty.
+  [dead turns](README.md#dead-turns); ack empty queues only with causal proof.
 
 ## Turn execution
 
