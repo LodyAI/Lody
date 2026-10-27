@@ -228,7 +228,9 @@ document key derived from the epoch key, and purpose-bound AAD.
   run encrypts anew, so a retry must resend the returned bytes.
 - Reading authenticates the historical author before decrypting. A revoked
   author's old content still opens and is attributed to its original member,
-  also after a snapshot, but this grants no current write right.
+  also after a ledger snapshot, but this grants no current write right. This applies
+  to both Streams snapshots and updates: historical ledger admission, signature,
+  readable epoch and AEAD remain mandatory; current author validity is not a read gate.
 
 ## Delivery (inside the distributor)
 

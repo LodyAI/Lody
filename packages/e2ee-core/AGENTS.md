@@ -65,6 +65,8 @@ whitepaper, Specs, decisions and this package's docs. Contract:
   rotationRequired only advises administrators and must not block new seals.
 - Documents: current write checks precede encryption and repeat after
   signing; historical signature evidence is neither permission nor AEAD validity.
+  Streams snapshot and update reads authenticate historically admitted authors;
+  revocation does not invalidate their signatures. Never-admitted keys fail closed.
   Host admission (header 3 batches, position-bound header 4 snapshots) checks the
   genuine current writer, submitting signer, resource/model/epoch and the complete
   original before forwarding. Snapshot publication keeps exact signer/offset/digest

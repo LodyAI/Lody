@@ -213,6 +213,7 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
               recordCreated: (request) => native.recordCreated(request),
               open: (workspaceId, observed) => native.open(workspaceId, observed),
               close: (workspaceId) => native.close(workspaceId),
+              readIdentity: (input) => native.readIdentity(input),
               status: (workspaceId) => native.status(workspaceId),
               ingestLedgerRecords: (workspaceId, page) =>
                 native.ingestLedgerRecords(workspaceId, page),

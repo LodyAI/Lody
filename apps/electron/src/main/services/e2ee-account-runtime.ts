@@ -10,7 +10,15 @@ import { getIpcServiceDeps } from '../ipc/ipc-service-deps'
 
 // Lazy application boundary. Plain workspaces never create a Scope or touch custody.
 const serial = Semaphore.makeUnsafe(1)
-const accountFailure = (code: string) => Object.assign(new Error(`e2ee_${code}`), { code })
+const accountFailure = (code: string) =>
+  Object.assign(
+    new Error(
+      code === 'restart-required'
+        ? 'e2ee_restart-required: Restart Lody to finish releasing encrypted resources.'
+        : `e2ee_${code}`
+    ),
+    { code }
+  )
 type Account = {
   accountId: string
   scope: Scope.Closeable
@@ -47,11 +55,11 @@ const closeCurrent = Effect.gen(function* () {
   const owner = current
   // Scope.close is idempotent even after a failed finalizer. Preserve that failure:
   // another close must not silently authorize a replacement owner.
-  if (owner.closeFailed) return yield* Effect.fail(new Error('e2ee_cleanup_failed'))
+  if (owner.closeFailed) return yield* Effect.fail(accountFailure('restart-required'))
   const closed = yield* Effect.exit(Scope.close(owner.scope, Exit.void))
   if (Exit.isFailure(closed)) {
     owner.closeFailed = true
-    return yield* Effect.fail(new Error('e2ee_cleanup_failed'))
+    return yield* Effect.fail(accountFailure('restart-required'))
   }
   current = undefined
   return undefined
@@ -120,7 +128,7 @@ export function withDesktopE2eeAccount<A>(
             yield* closeCurrent
             return yield* Effect.fail(accountFailure('account_unavailable'))
           }
-          if (current.closeFailed) return yield* Effect.fail(new Error('e2ee_cleanup_failed'))
+          if (current.closeFailed) return yield* Effect.fail(accountFailure('restart-required'))
           return yield* work(current)
         })
       )
@@ -149,7 +157,7 @@ export function closeDesktopE2eeAccount(options?: {
               catch: () => new Error('e2ee_signout_failed')
             })
           } else if (Exit.isFailure(closed)) {
-            return yield* Effect.fail(new Error('e2ee_cleanup_failed'))
+            return yield* Effect.fail(accountFailure('restart-required'))
           }
           return undefined
         })
@@ -270,8 +278,12 @@ function publicE2eeFailure(error: unknown): Error {
     'rotation_candidate_unavailable',
     'management_unauthorized',
     'management_operator_required',
-    'management_retry'
+    'management_retry',
+    'restart-required',
+    'local-history-recovery-required',
+    'trusted-pin-unavailable'
   ])
+  if (code === 'restart-required') return accountFailure(code)
   return new Error(
     typeof code === 'string' && allowed.has(code) ? `e2ee_${code}` : 'e2ee_host_operation_failed'
   )

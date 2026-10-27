@@ -1,3 +1,9 @@
+import { WorkspaceFeatureReasonText } from '@/components/workspace-feature-notice';
+import {
+  useWorkspaceFeature,
+  useWorkspaceFeatureReason,
+  useMachineRpcFeatureReason,
+} from '@/hooks/use-workspace-feature';
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
 import type { DocumentSelection } from '@/lib/document-selection';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
@@ -1319,7 +1325,7 @@ export function SessionHeaderMenu({
   onShareWithTeam,
   onShareAsImage,
   onOpenSearch,
-  onFork,
+  onFork: requestedFork,
   isForking = false,
   forkWorktreeAvailability = 'hidden',
   onForkMenuOpen,
@@ -1370,6 +1376,11 @@ export function SessionHeaderMenu({
   };
   t: SessionSharingTranslator;
 }) {
+  const rpcReason = useMachineRpcFeatureReason(session.machineId);
+  const onFork = rpcReason ? undefined : requestedFork;
+  const exportReason = useWorkspaceFeatureReason('export');
+  const sharingReason = useWorkspaceFeatureReason('sharing');
+  const previewReason = useWorkspaceFeatureReason('remote-preview');
   const isArchived = !!session.isArchived;
   const project = session.project as
     | { kind: 'github'; repoFullName?: string; branch?: string }
@@ -1706,7 +1717,7 @@ export function SessionHeaderMenu({
 
           {openInIdeMenu}
 
-          {onOpenPublicShare && (
+          {onOpenPublicShare && !sharingReason && (
             <Menu.Item icon={Share2} onClick={onOpenPublicShare}>
               {t('sharing.manager.title', 'Share')}
             </Menu.Item>
@@ -1723,7 +1734,7 @@ export function SessionHeaderMenu({
             </Menu.Item>
           )}
 
-          {onFork || onCopyConversationHistory ? (
+          {onFork || (onCopyConversationHistory && !exportReason) ? (
             <Menu.Submenu>
               <Menu.SubmenuTrigger
                 icon={isForking ? <Spinner size="small" label={null} /> : GitFork}
@@ -1774,7 +1785,7 @@ export function SessionHeaderMenu({
                       </SessionForkOptionTooltip>
                     );
                   })}
-                {onCopyConversationHistory && (
+                {onCopyConversationHistory && !exportReason && (
                   <Menu.Item
                     icon={Copy}
                     onClick={() => {
@@ -1845,7 +1856,7 @@ export function SessionHeaderMenu({
           {/* Copy URL stays in the Copy submenu even for private sessions (the
               link still works for the owner); sharing is a separate action that
               only appears while the conversation isn't team-visible. */}
-          {sharing && sharing.visibility !== 'team' ? (
+          {sharing && !sharingReason && sharing.visibility !== 'team' ? (
             <Menu.Item
               disabled={shareActionDisabled}
               onClick={() => {
@@ -1916,14 +1927,15 @@ export function SessionHeaderMenu({
                 onClick={() => {
                   void onCopyConversationHistory?.();
                 }}
-                disabled={!onCopyConversationHistory}
+                disabled={!!exportReason || !onCopyConversationHistory}
                 title={
-                  onCopyConversationHistory
+                  exportReason ??
+                  (onCopyConversationHistory
                     ? undefined
                     : t(
                         'sessions.copyConversationHistoryUnavailable',
                         'Conversation history is unavailable for this tab'
-                      )
+                      ))
                 }
                 icon={Copy}
               >
@@ -1941,14 +1953,35 @@ export function SessionHeaderMenu({
           </Menu.Submenu>
 
           <Menu.Item
-            disabled={!onShareAsImage}
+            disabled={!!exportReason || !onShareAsImage}
+            title={exportReason}
             onClick={() => {
               onShareAsImage?.();
             }}
             icon={Image}
           >
-            {t('sessions.shareAsImage', 'Share as image…')}
+            {exportReason ? (
+              <WorkspaceFeatureReasonText reason={exportReason} />
+            ) : (
+              t('sessions.shareAsImage', 'Share as image…')
+            )}
           </Menu.Item>
+
+          {rpcReason ? (
+            <Menu.Item disabled>
+              <WorkspaceFeatureReasonText reason={rpcReason} />
+            </Menu.Item>
+          ) : null}
+          {sharingReason ? (
+            <Menu.Item disabled icon={Share2}>
+              <WorkspaceFeatureReasonText reason={sharingReason} />
+            </Menu.Item>
+          ) : null}
+          {previewReason ? (
+            <Menu.Item disabled>
+              <WorkspaceFeatureReasonText reason={previewReason} />
+            </Menu.Item>
+          ) : null}
 
           {/* Archive / Restore + Delete */}
           {isArchived
@@ -2465,7 +2498,9 @@ export const SessionChatInterface = memo(
     const postHog = usePostHog();
     const localeObj = i18n.language?.startsWith('zh') ? zhCN : enUS;
     const workspaceId = useAtomValue(currentWorkspaceIdAtom);
-    const publicSharingAvailable = useAppCapability('teamSharing');
+    const rpcReason = useMachineRpcFeatureReason(session.machineId);
+    const sharingAllowed = useWorkspaceFeature('sharing');
+    const publicSharingAvailable = useAppCapability('teamSharing') && sharingAllowed;
     // One owner for the static-share editor, because both the header control
     // and the "…" menu open the same one.
     const publicShareWorkspaceId = publicSharingAvailable && workspaceId ? workspaceId : undefined;
@@ -2695,10 +2730,8 @@ export const SessionChatInterface = memo(
     const steerCapability = session.agentConfigId
       ? sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)]
       : undefined;
-    const nativeSteerAvailable = shouldRequestNativeQueueSteer(
-      capabilityAuthority,
-      steerCapability
-    );
+    const nativeSteerAvailable =
+      !rpcReason && shouldRequestNativeQueueSteer(capabilityAuthority, steerCapability);
     const { selectedModeId, selectedModelId, configOptionValues } =
       useResolvedAcpSessionConfigSelection(sessionConfigSelection, selectorOptions, {
         cliType: session.cliType,
@@ -3144,15 +3177,23 @@ export const SessionChatInterface = memo(
 
     // Session status strip above the composer: one priority-ordered slot for
     // "will my message run?" (self offline > machine removed > machine offline).
+    const presenceAvailable = useWorkspaceFeature('presence');
     const statusStripState = useMemo(
       () =>
         resolveSessionStatusStripState({
           browserOnline,
+          presenceAvailable,
           machineRemoved: isMachineRemoved,
           machineOnlineStatus: sessionMachineOnlineStatus,
           machineName: sessionMachine?.name ?? null,
         }),
-      [browserOnline, isMachineRemoved, sessionMachineOnlineStatus, sessionMachine?.name]
+      [
+        browserOnline,
+        presenceAvailable,
+        isMachineRemoved,
+        sessionMachineOnlineStatus,
+        sessionMachine?.name,
+      ]
     );
 
     // Keyboard cyclers (⇧Tab mode + rebindable model / thinking). The agent provider is
@@ -3354,7 +3395,10 @@ export const SessionChatInterface = memo(
     const goalCapability = session.agentConfigId
       ? sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)]
       : undefined;
-    const goalCommands = useMemo(() => getSessionGoalCommands(goalCapability), [goalCapability]);
+    const goalCommands = useMemo(
+      () => (rpcReason ? [] : getSessionGoalCommands(goalCapability)),
+      [rpcReason, goalCapability]
+    );
     const canPauseGoal = goalCommands.includes('pause');
 
     useEffect(() => {
@@ -3572,6 +3616,7 @@ export const SessionChatInterface = memo(
     ]);
     const editableLastUserMessageId = useMemo(() => {
       if (
+        rpcReason ||
         session.isArchived ||
         isGoalActive ||
         session.cliType !== 'builtin' ||
@@ -3614,6 +3659,7 @@ export const SessionChatInterface = memo(
       // The first user message uses session/new and therefore has no fork boundary.
       return userMessage.id;
     }, [
+      rpcReason,
       isGoalActive,
       session.agentConfigId,
       session.agentType,
