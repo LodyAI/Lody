@@ -1,7 +1,7 @@
 import type { SessionContextType } from '@/components/chat/context-switch';
 
 export type MobileNewChatTargetLabels = {
-  chat: string;
+  noProject: string;
   project: string;
   repository: string;
 };
@@ -10,7 +10,7 @@ export type MobileNewChatTargetLabels = {
  * Header title for the blank new-chat compose sheet.
  *
  * The sheet shows ONE target: the selected project / repository name, or the
- * plain Chat label when no project is involved. An empty or whitespace-only
+ * no-project label when no project is involved. An empty or whitespace-only
  * selection reads as the localized placeholder rather than an empty title, so
  * the header can never collapse to just the icon + chevron.
  */
@@ -27,5 +27,5 @@ export function resolveMobileNewChatTargetLabel({
 }): string {
   if (contextType === 'github') return repoFullName?.trim() || labels.repository;
   if (contextType === 'local') return projectName?.trim() || labels.project;
-  return labels.chat;
+  return labels.noProject;
 }

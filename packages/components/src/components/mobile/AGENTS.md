@@ -100,11 +100,12 @@ before touching gestures.
 - New-chat scopes agents via `allowedMachineIds` from the selected machine and
   leaves agent unlocked; in-session locks it after turns. No fast/plan toggles
   on new-chat.
-- New chat is a blank compose page: the header target opens the project sheet —
-  machine + one search over local folders and GitHub repos. Branch/worktree and
-  the machine chip live in the footer rail; no form rows; attachment/send stay
-  outside it.
-  [Why](../../../../../.agents/notes/implemented/feature/2026-10-27-mobile-new-chat-compose-sheet.md).
+- New chat: session shell/Sheet; machine/project/worktree+branch.
+  Home restores last-sent target; project entry/drafts win.
+  Group/folder icons, GitHub avatars; recency/name/id order.
+  Explain Role clearing on machine change. Hide after session presents;
+  suppress entrance across renders. Back animates.
+  [Details](README.md#sheets-and-session-surfaces).
 - `mobile-inline-picker.tsx` stays keyboard-operable (↑/↓/Enter/Esc, desktop
   search autofocus on `pointer: fine`) and virtualizes lists >40 options. Its
   search filters fuzzily through `lib/fuzzy-option-filter.ts`, shared with the

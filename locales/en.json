@@ -855,6 +855,8 @@
   "chat.mobileNewChat.projectLabel": "Project",
   "chat.mobileNewChat.repoLabel": "Repo",
   "chat.mobileNewChat.roleMachineLocked": "Machine is fixed by the selected Role",
+  "chat.mobileNewChat.noProject": "No project selected",
+  "chat.mobileNewChat.switchClearsRole": "Switching machines clears the selected Role",
   "chat.mobileNewChat.title": "New chat",
   "chat.mobileNewChat.workdirLocalLabel": "Local files",
   "chat.mobileNewChat.workdirModeLabel": "Mode",

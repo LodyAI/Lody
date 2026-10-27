@@ -1,13 +1,13 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { Provider, createStore } from 'jotai';
 import {
   ArrowUp,
-  Brain,
   ChevronsUpDown,
-  Folder,
+  Folders,
+  FolderOpen,
+  CircleSlash2,
   GitBranch,
-  Github,
-  MessageCircle,
   Monitor,
 } from 'lucide-react';
 
@@ -16,29 +16,55 @@ import {
   type ChatComposerFileItem,
   type ChatComposerImageItem,
 } from '@/components/chat/chat-composer';
-import type { AcpCommandSummary, LocalProjectId, MachineId } from '@lody/shared';
+import {
+  GitHubOwnerAvatarIcon,
+  type UnifiedProjectSelection,
+} from '@/components/chat/unified-project-selector';
+import { readChatLandingDefaults, recordChatLandingProjectUse } from '@/lib/chat-landing-defaults';
+import { MOBILE_NEW_CHAT_PROMPT_ID } from '@/components/chat/submission/use-composer-navigation-focus';
+import {
+  AGENT_ROLE_VERSION,
+  getAgentConfigRoomId,
+  type AgentConfigMeta,
+  type AcpCommandSummary,
+  type AgentConfigId,
+  type AgentRoleId,
+  type LocalProjectId,
+  type MachineId,
+} from '@lody/shared';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
 import type {
   FileWorkspaceProvider,
   FileWorkspaceProviderEntry,
 } from '@/lib/file-workspace-provider';
+import type { MobileNativeSelectOption } from '@/components/mobile/mobile-native-select';
+import { MobileSessionRunConfig } from '@/components/mobile/mobile-session-run-config';
+import { agentConfigMetaCacheAtom } from '@/atoms/doc-meta';
+import type { AgentSelection } from '@/components/shared/agent-selector';
+import type {
+  AcpConfigOptionSelector,
+  AcpConfigOptionValue,
+} from '@/components/shared/acp-selector-options';
 import {
-  MobileNativeSelect,
-  type MobileNativeSelectOption,
-} from '@/components/mobile/mobile-native-select';
-import { MobileFooterRail } from '@/components/mobile/mobile-footer-rail';
+  MobileInlinePicker,
+  MobileInlinePickerCoordinator,
+} from '@/components/mobile/mobile-inline-picker';
+import {
+  getMobileProjectOptions,
+  resolveMobileNewChatDefaultProject,
+} from '@/components/mobile/mobile-new-chat-project-options';
 import { MobileNewChatSheet } from '@/components/mobile/mobile-new-chat-sheet';
-import {
-  MobileNewChatProjectSheet,
-  type MobileProjectFolder,
-  type MobileProjectGroup,
-  type MobileProjectMachine,
-  type MobileProjectRepo,
+import type {
+  MobileProjectFolder,
+  MobileProjectGroup,
+  MobileProjectMachine,
+  MobileProjectRepo,
 } from '@/components/mobile/mobile-new-chat-project-sheet';
 import { WorktreeCheckboxPill } from '@/components/shared';
 import { Button } from '@lody/ui/button';
-import { cn } from '@/lib/utils';
+import { Spinner } from '@lody/ui/spinner';
 import { SettingsStoryProviders } from './settings-story-shell';
+import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 
 const meta = {
   title: 'Mobile/MobileNewChatSheet',
@@ -46,9 +72,11 @@ const meta = {
   parameters: { layout: 'fullscreen' },
   decorators: [
     (Story) => (
-      <SettingsStoryProviders>
-        <Story />
-      </SettingsStoryProviders>
+      <ForceMobileLayoutProvider force>
+        <SettingsStoryProviders>
+          <Story />
+        </SettingsStoryProviders>
+      </ForceMobileLayoutProvider>
     ),
   ],
   tags: ['autodocs'],
@@ -56,8 +84,6 @@ const meta = {
 
 export default meta;
 type Story = StoryObj<typeof meta>;
-
-type ContextType = 'local' | 'github' | 'chat';
 
 const projectMachines: MobileProjectMachine[] = [
   { id: 'spikes' as MachineId, name: 'spikes-PowerBook.local', online: true },
@@ -186,258 +212,587 @@ const demoCommands: AcpCommandSummary[] = [
   { name: 'compact', description: 'Compact the context' },
 ];
 
-function FooterChip({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex h-8 max-w-[70vw] min-w-0 shrink-0 items-center rounded-full border border-border/60 bg-muted/50 px-2 dark:bg-input/80">
-      {children}
-    </div>
-  );
-}
-
-function StoryHarness({
-  initialOpen = true,
-  initialContextType = 'chat' as ContextType,
-  initialModel = 'GPT 5.6-Luna',
-  withAttachments = false,
-  withMenus = false,
-}: {
-  initialOpen?: boolean;
-  initialContextType?: ContextType;
-  initialModel?: string;
-  withAttachments?: boolean;
-  withMenus?: boolean;
-}) {
-  const [open, setOpen] = useState(initialOpen);
-  const [contextType, setContextType] = useState<ContextType>(initialContextType);
-  const [machineId, setMachineId] = useState<MachineId>('spikes' as MachineId);
-  const [repo, setRepo] = useState('loro-dev/lody');
-  const [localProject, setLocalProject] = useState('blog');
-  const [branch, setBranch] = useState('main');
-  const [projectSheetOpen, setProjectSheetOpen] = useState(false);
-  const [workdirMode, setWorkdirMode] = useState<'local' | 'worktree'>('worktree');
-  const [prompt, setPrompt] = useState('');
-
-  const machineName =
-    projectMachines.find((machine) => machine.id === machineId)?.name ?? 'Machine';
-  const targetLabel =
-    contextType === 'local'
-      ? (projectFolders.find((folder) => folder.localProjectId === localProject)?.name ??
-        localProject)
-      : contextType === 'github'
-        ? repo
-        : 'Chat';
-  const targetIcon =
-    contextType === 'chat' ? (
-      <MessageCircle className="h-4 w-4 shrink-0 opacity-70" />
-    ) : contextType === 'github' ? (
-      <Github className="h-3.5 w-3.5 shrink-0 opacity-70" />
-    ) : (
-      <Folder className="h-3.5 w-3.5 shrink-0 opacity-70" />
-    );
-
-  return (
-    <div className="relative h-[956px] w-full bg-background text-foreground">
-      <div className="flex h-full items-end justify-center">
-        <Button type="button" onClick={() => setOpen(true)} className="mb-6">
-          Open
-        </Button>
-      </div>
-      <MobileNewChatSheet
-        open={open}
-        onOpenChange={setOpen}
-        labels={{ title: 'New chat', backAriaLabel: 'Back' }}
-        targetNode={
-          <button
-            type="button"
-            onClick={() => setProjectSheetOpen(true)}
-            aria-label="Select a project"
-            className={cn(
-              'flex h-11 min-w-0 max-w-full items-center gap-2 rounded-full px-3 text-xl font-semibold',
-              'text-foreground transition-colors hover:bg-muted/60 active:bg-muted'
-            )}
-          >
-            {targetIcon}
-            <span className="truncate">{targetLabel}</span>
-            <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-          </button>
-        }
-        composer={
-          <ChatComposer
-            variant="sheet"
-            className="min-h-0 flex-1"
-            promptValue={prompt}
-            onPromptChange={setPrompt}
-            promptRows={1}
-            promptAutoFocus
-            focusOnContainerClick
-            promptPlaceholder="Press '/' for commands, '@' for mentions, '$' for skills."
-            mentionSource={withMenus ? demoMentionSource : undefined}
-            availableCommands={withMenus ? demoCommands : undefined}
-            onAttachmentAddClick={() => {}}
-            imageItems={withAttachments ? sampleImageItems : []}
-            onImageRemove={() => {}}
-            fileItems={withAttachments ? sampleFileItems : []}
-            onFileRemove={() => {}}
-            footerSelector={
-              <MobileFooterRail>
-                <div className="flex h-8 min-w-0 max-w-[70vw] shrink-0 items-center overflow-hidden rounded-full bg-muted/55 pl-0.5 pr-2 dark:bg-input/80">
-                  <span className="flex min-w-0 items-baseline gap-1.5 px-2">
-                    <Brain className="h-3.5 w-3.5 shrink-0 self-center opacity-70" />
-                    <span className="truncate text-sm leading-none">{initialModel}</span>
-                    <span className="shrink-0 text-[11px] leading-none text-muted-foreground">
-                      Auto
-                    </span>
-                    <span className="shrink-0 text-[11px] leading-none tabular-nums text-muted-foreground">
-                      73%
-                    </span>
-                  </span>
-                </div>
-                <FooterChip>
-                  <button
-                    type="button"
-                    onClick={() => setProjectSheetOpen(true)}
-                    aria-label="Machine"
-                    className="flex h-8 min-w-0 items-center gap-1.5 px-1 text-sm text-foreground/85"
-                  >
-                    <Monitor className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
-                    <span className="min-w-0 flex-1 truncate">{machineName}</span>
-                    <ChevronsUpDown
-                      className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-                      aria-hidden="true"
-                    />
-                  </button>
-                </FooterChip>
-                {contextType === 'local' ? (
-                  <FooterChip>
-                    <WorktreeCheckboxPill
-                      checked={workdirMode === 'worktree'}
-                      onCheckedChange={(checked) => setWorkdirMode(checked ? 'worktree' : 'local')}
-                      className="h-7 bg-transparent px-1.5 hover:bg-hover/60"
-                    />
-                  </FooterChip>
-                ) : null}
-                {contextType === 'chat' ? null : (
-                  <FooterChip>
-                    <MobileNativeSelect
-                      value={branch}
-                      onChange={setBranch}
-                      options={branchOptions}
-                      ariaLabel="Branch"
-                      className="h-8 w-fit max-w-full"
-                      triggerContent={
-                        <>
-                          <GitBranch className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                          <span className="truncate">{branch}</span>
-                        </>
-                      }
-                    />
-                  </FooterChip>
-                )}
-              </MobileFooterRail>
-            }
-            primaryAction={
-              <Button
-                type="button"
-                icon
-                variant="ghost"
-                aria-label="Send"
-                disabled={!prompt.trim()}
-                className={cn(
-                  'h-9 w-9 rounded-full bg-foreground text-background hover:bg-foreground/90',
-                  !prompt.trim() && 'opacity-40'
-                )}
-              >
-                <ArrowUp className="h-5 w-5" />
-              </Button>
-            }
-          />
-        }
-      />
-      <MobileNewChatProjectSheet
-        open={projectSheetOpen}
-        onOpenChange={setProjectSheetOpen}
-        machines={projectMachines}
-        selectedMachineId={machineId}
-        onMachineChange={(nextMachineId) => {
-          setMachineId(nextMachineId);
-          if (
-            contextType === 'local' &&
-            !projectFolders.some(
-              (folder) =>
-                folder.machineId === nextMachineId && folder.localProjectId === localProject
-            )
-          ) {
-            setContextType('chat');
-          }
-        }}
-        localProjects={projectFolders}
-        repositories={projectRepos}
-        groups={projectGroups}
-        selection={
-          contextType === 'local'
-            ? {
-                kind: 'local',
-                machineId,
-                localProjectId: localProject as LocalProjectId,
-              }
-            : contextType === 'github'
-              ? { kind: 'github', repoFullName: repo }
-              : { kind: 'none' }
-        }
-        onSelect={(next) => {
-          if (next.kind === 'none') {
-            setContextType('chat');
-          } else if (next.kind === 'local') {
-            setMachineId(next.machineId);
-            setLocalProject(next.localProjectId);
-            setContextType('local');
-          } else if (next.kind === 'github') {
-            setRepo(next.repoFullName);
-            setContextType('github');
-          } else {
-            setContextType('chat');
-          }
-        }}
-        onAddLocalProject={() => setProjectSheetOpen(false)}
-        onConnectGitHub={() => setProjectSheetOpen(false)}
-      />
-    </div>
-  );
-}
-
 export const ChatContext: Story = {
   args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
-  render: () => <StoryHarness initialContextType="chat" />,
+  render: () => <InlinePageReview initialProject="none" />,
 };
 
 export const LocalContext: Story = {
   args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
-  render: () => <StoryHarness initialContextType="local" />,
+  render: () => <InlinePageReview initialProject="blog" />,
 };
 
 export const GitHubContext: Story = {
   args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
-  render: () => <StoryHarness initialContextType="github" />,
+  render: () => <InlinePageReview />,
 };
 
 export const LongModelName: Story = {
   args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
   render: () => (
-    <StoryHarness initialContextType="local" initialModel="MiniMax-M3 · 1M context window" />
+    <InlinePageReview initialProject="blog" initialModel="MiniMax-M3 · 1M context window" />
   ),
 };
 
 export const WithAttachments: Story = {
   args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
-  render: () => <StoryHarness initialContextType="local" withAttachments />,
+  render: () => <InlinePageReview initialProject="blog" withAttachments />,
 };
 
 export const Closed: Story = {
   args: { open: false, onOpenChange: () => {}, targetNode: null, composer: null },
-  render: () => <StoryHarness initialOpen={false} />,
+  render: () => (
+    <MobileNewChatSheet open={false} onOpenChange={() => {}} targetNode={null} composer={null} />
+  ),
 };
 
 export const WithMenus: Story = {
   args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
-  render: () => <StoryHarness initialContextType="local" withMenus />,
+  render: () => <InlinePageReview initialProject="blog" />,
+};
+
+/** Review of the requested page layout using the production composer and pickers.
+ * Selection state is synthetic; this story is not the production landing wiring. */
+const expandedConfigSelectors: AcpConfigOptionSelector[] = [
+  {
+    type: 'select',
+    configId: 'reasoning_effort',
+    category: 'thought_level',
+    label: 'Reasoning effort',
+    currentValue: 'medium',
+    options: ['low', 'medium', 'high', 'xhigh'].map((value) => ({ value, label: value })),
+  },
+  {
+    type: 'select',
+    configId: 'interaction_mode',
+    category: 'interaction',
+    label: 'Interaction mode',
+    currentValue: 'agent',
+    options: [
+      { value: 'agent', label: 'Agent' },
+      { value: 'plan', label: 'Plan' },
+      { value: 'ask', label: 'Ask' },
+    ],
+  },
+  {
+    type: 'select',
+    configId: 'agent_preset',
+    category: 'other',
+    label: 'Profile',
+    currentValue: 'default',
+    options: [
+      { value: 'default', label: 'Default' },
+      { value: 'review', label: 'Code review' },
+      { value: 'docs', label: 'Documentation' },
+    ],
+  },
+];
+const expandedAgentConfigs: AgentConfigMeta[] = [
+  {
+    id: 'agent-codex' as AgentConfigId,
+    machineId: 'spikes' as MachineId,
+    name: 'Codex Primary',
+    description: 'Synthetic Codex configuration',
+    cliType: 'builtin',
+    agentType: 'codex',
+    env: {},
+  },
+  {
+    id: 'agent-claude' as AgentConfigId,
+    machineId: 'spikes' as MachineId,
+    name: 'Claude Code',
+    description: 'Synthetic Claude configuration',
+    cliType: 'builtin',
+    agentType: 'claude',
+    env: {},
+  },
+];
+function ExpandedConfigStory() {
+  const store = useMemo(() => {
+    const value = createStore();
+    value.set(
+      agentConfigMetaCacheAtom,
+      Object.fromEntries(
+        expandedAgentConfigs.map((agent) => [getAgentConfigRoomId(agent.id), agent])
+      )
+    );
+    return value;
+  }, []);
+  return (
+    <Provider store={store}>
+      <InlinePageReview fullRunConfig />
+    </Provider>
+  );
+}
+
+export function InlinePageReview({
+  longNames = false,
+  initialLocalWorktree = false,
+  initialProject = 'loro-dev/loro',
+  initialText = '',
+  initialModel = 'Opus 4.8 1M',
+  onSend,
+  submissionPending = false,
+  withAttachments = false,
+  initialRole = false,
+  fullRunConfig = false,
+  manyBranches = false,
+}: {
+  longNames?: boolean;
+  initialLocalWorktree?: boolean;
+  initialProject?: string;
+  initialText?: string;
+  initialModel?: string;
+  onSend?: (
+    text: string,
+    model: string,
+    preserveFocus: boolean,
+    project: UnifiedProjectSelection
+  ) => void;
+  submissionPending?: boolean;
+  withAttachments?: boolean;
+  initialRole?: boolean;
+  fullRunConfig?: boolean;
+  manyBranches?: boolean;
+}) {
+  const [open, setOpen] = useState(true);
+  const [machineId, setMachineId] = useState<MachineId>('spikes' as MachineId);
+  const [project, setProject] = useState(initialLocalWorktree ? 'blog' : initialProject);
+  const [worktree, setWorktree] = useState(initialLocalWorktree);
+  const [branch, setBranch] = useState('main');
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const [roleId, setRoleId] = useState<AgentRoleId | null>(
+    initialRole ? ('reviewer' as AgentRoleId) : null
+  );
+  const [model, setModel] = useState(initialModel);
+  const [mode, setMode] = useState('auto');
+  const [agent, setAgent] = useState<AgentSelection>({
+    agentId: 'agent-codex' as AgentConfigId,
+    machineId: 'spikes' as MachineId,
+  });
+  const [configValues, setConfigValues] = useState<Record<string, AcpConfigOptionValue>>(
+    Object.fromEntries(
+      expandedConfigSelectors.map((selector) => [selector.configId, selector.currentValue])
+    )
+  );
+  const selectors = fullRunConfig ? expandedConfigSelectors : [];
+  const models = [
+    { value: initialModel, label: initialModel },
+    { value: 'GPT 5.6-Luna', label: 'GPT 5.6-Luna' },
+    ...(fullRunConfig
+      ? Array.from({ length: 14 }, (_, index) => ({
+          value: `example-model-${index + 1}`,
+          label: `Example model ${index + 1}`,
+        }))
+      : []),
+  ];
+  const branches = manyBranches
+    ? [
+        ...branchOptions,
+        ...Array.from({ length: 30 }, (_, index) => ({
+          value: `feature/mobile-layout-${index + 1}`,
+          label: `feature/mobile-layout-${index + 1}`,
+        })),
+      ]
+    : branchOptions;
+  const [prompt, setPrompt] = useState(initialText);
+  const [images, setImages] = useState(withAttachments ? sampleImageItems : []);
+  const [files, setFiles] = useState(withAttachments ? sampleFileItems : []);
+  const roleKey = 'reviewer' as AgentRoleId;
+  const role = {
+    v: AGENT_ROLE_VERSION as 1,
+    id: roleKey,
+    name: 'Code Reviewer',
+    emoji: '🔍',
+    ownerUserId: 'user-1',
+    visibility: 'private' as const,
+    machineId: 'spikes' as MachineId,
+    agentConfigId: 'agent-codex' as AgentConfigId,
+    runConfig: {},
+    revision: 1,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  const valueFace = (icon: ReactNode, value: string) => (
+    <span className="flex min-w-0 w-full items-center gap-2 text-start">
+      <span className="shrink-0 text-muted-foreground">{icon}</span>
+      <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-sm text-foreground">
+        {value}
+      </span>
+      <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+    </span>
+  );
+  const trigger = 'min-h-11 rounded-xl bg-foreground/[0.04] px-3 py-2';
+  const panel = 'shadow-none bg-muted/45 border-border/30';
+  const localProject = projectFolders.find((entry) => entry.localProjectId === project);
+  const isLocal = !!localProject;
+  const projectGroup = projectGroups.find((entry) => `group:${entry.projectId}` === project);
+  const isGroup = !!projectGroup;
+  const isGitLocal = isLocal && project !== 'docs';
+  const hasBranch = isGitLocal || (!isLocal && !isGroup && project !== 'none');
+  return (
+    <MobileNewChatSheet
+      open={open}
+      onOpenChange={setOpen}
+      labels={{ title: 'New chat' }}
+      targetNode="New chat"
+      coordinator={MobileInlinePickerCoordinator}
+      summary={
+        <div className="flex flex-col gap-2 py-3">
+          <MobileInlinePicker
+            id="preview-machine"
+            value={machineId}
+            onChange={(next) => {
+              setMachineId(next as MachineId);
+              if (next !== 'spikes') {
+                setRoleId(null);
+                if (isLocal) setProject('none');
+              }
+            }}
+            ariaLabel="Machine"
+            triggerClassName={trigger}
+            expansionPanelClassName={panel}
+            triggerContent={valueFace(
+              <Monitor className="size-4" />,
+              longNames
+                ? 'MacBook-Pro-for-long-running-development-and-review.local'
+                : (projectMachines.find((x) => x.id === machineId)?.name ?? 'Machine')
+            )}
+            options={projectMachines.map((x) => ({
+              value: x.id,
+              label: x.name,
+              disabled: !x.online,
+              description:
+                x.disabledReason ??
+                (roleId && x.id !== machineId
+                  ? 'Changing machine clears the selected Role'
+                  : undefined),
+            }))}
+          />
+          <MobileInlinePicker
+            id="preview-project"
+            value={project}
+            onChange={(next) => {
+              setProject(next);
+              setBranch('main');
+              setWorktree(false);
+            }}
+            ariaLabel="Project"
+            searchable
+            searchPlaceholder="Search projects"
+            triggerClassName={trigger}
+            expansionPanelClassName={panel}
+            triggerContent={valueFace(
+              isGroup ? (
+                <Folders className="size-4" />
+              ) : project === 'none' ? (
+                <CircleSlash2 className="size-4" />
+              ) : isLocal ? (
+                <FolderOpen className="size-4" />
+              ) : (
+                <GitHubOwnerAvatarIcon repoFullName={project} />
+              ),
+              longNames
+                ? 'organization/very-long-repository-name-for-mobile-layout-validation'
+                : project === 'none'
+                  ? 'No project selected'
+                  : (projectGroup?.name ?? project)
+            )}
+            preserveOptionOrder
+            options={[
+              {
+                value: 'none',
+                label: 'No project selected',
+                icon: <CircleSlash2 className="size-4" />,
+              },
+              ...getMobileProjectOptions({
+                folders: projectFolders,
+                repositories: projectRepos,
+                groups: projectGroups,
+                machineId,
+                query: '',
+              }).map((option) => ({
+                ...option,
+                value:
+                  option.selection.kind === 'local'
+                    ? option.selection.localProjectId
+                    : option.selection.kind === 'github'
+                      ? option.selection.repoFullName
+                      : option.value,
+                icon:
+                  option.selection.kind === 'group' ? (
+                    <Folders className="size-4" />
+                  ) : option.selection.kind === 'local' ? (
+                    <FolderOpen className="size-4" />
+                  ) : (
+                    <GitHubOwnerAvatarIcon repoFullName={option.selection.repoFullName} />
+                  ),
+              })),
+            ]}
+          />
+          {hasBranch ? (
+            <div className="flex min-w-0 items-start gap-2 px-1">
+              {isGitLocal ? (
+                <div className="pt-1">
+                  <WorktreeCheckboxPill checked={worktree} onCheckedChange={setWorktree} />
+                </div>
+              ) : null}
+              <div className="min-w-0 flex-1">
+                <MobileInlinePicker
+                  id="preview-branch"
+                  value={branch}
+                  onChange={setBranch}
+                  disabled={isGitLocal && !worktree}
+                  options={branches}
+                  ariaLabel="Branch"
+                  searchable
+                  triggerClassName="h-8 rounded-lg bg-transparent px-2 hover:bg-transparent"
+                  expansionPanelClassName={panel}
+                  triggerContent={
+                    <>
+                      <GitBranch className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 truncate">{branch}</span>
+                      <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
+                    </>
+                  }
+                />
+              </div>
+            </div>
+          ) : null}
+        </div>
+      }
+      composer={
+        <ChatComposer
+          variant="session"
+          promptRef={promptRef}
+          promptId={MOBILE_NEW_CHAT_PROMPT_ID}
+          promptValue={submissionPending ? '' : prompt}
+          promptDisabled={submissionPending}
+          preservePromptFocus
+          onPromptChange={setPrompt}
+          promptPlaceholder="Message, @files, /commands"
+          promptRows={2}
+          maxRows={11}
+          autoResize
+          onAttachmentAddClick={() => {}}
+          imageItems={images}
+          onImageRemove={(id) => setImages((items) => items.filter((item) => item.id !== id))}
+          fileItems={files}
+          onFileRemove={(id) => setFiles((items) => items.filter((item) => item.id !== id))}
+          mentionSource={demoMentionSource}
+          availableCommands={demoCommands}
+          footerSelector={
+            <MobileSessionRunConfig
+              disabled={submissionPending}
+              agentSelection={fullRunConfig ? agent : null}
+              allowedMachineIds={['spikes' as MachineId]}
+              onAgentConfigChange={setAgent}
+              configOptionSelectors={selectors}
+              configOptionValues={configValues}
+              onConfigOptionChange={(id, value) =>
+                setConfigValues((previous) => ({ ...previous, [id]: value }))
+              }
+              modelOptions={models}
+              selectedModelId={model}
+              onModelChange={setModel}
+              modeOptions={[
+                { value: 'auto', label: 'Auto' },
+                { value: 'full', label: 'Full access' },
+              ]}
+              selectedModeId={mode}
+              onModeChange={setMode}
+              fallbackAgent={{ cliType: 'builtin', agentType: 'codex' }}
+              agentRoles={{
+                items:
+                  machineId === 'spikes'
+                    ? [
+                        { role, availability: { kind: 'available' } },
+                        {
+                          role: {
+                            ...role,
+                            id: 'retired-role' as AgentRoleId,
+                            name: 'Retired Reviewer',
+                            emoji: '🗃️',
+                          },
+                          availability: {
+                            kind: 'unavailable',
+                            reason: 'agent_config_missing',
+                          },
+                        },
+                      ]
+                    : [],
+                selectedRoleId: roleId,
+                onSelect: setRoleId,
+              }}
+            />
+          }
+
+          primaryAction={
+            <Button
+              type="button"
+              icon
+              variant="ghost"
+              size="medium"
+              shape="pill"
+              aria-label="Send"
+              onClick={() => {
+                onSend?.(
+                  prompt,
+                  model,
+                  promptRef.current === document.activeElement,
+                  project === 'none'
+                    ? { kind: 'none' }
+                    : projectGroup
+                      ? { kind: 'group', projectId: projectGroup.projectId }
+                      : localProject
+                        ? {
+                            kind: 'local',
+                            machineId: localProject.machineId,
+                            localProjectId: localProject.localProjectId,
+                          }
+                        : { kind: 'github', repoFullName: project }
+                );
+              }}
+              onMouseDown={(event) => event.preventDefault()}
+              disabled={
+                submissionPending ||
+                !prompt.trim() ||
+                images.some((item) => item.status !== 'uploaded') ||
+                files.some((item) => item.status !== 'uploaded')
+              }
+              className="shadow-xs transition-all bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]"
+            >
+              {submissionPending ? <Spinner size="medium" /> : <ArrowUp className="h-5 w-5" />}
+            </Button>
+          }
+        />
+      }
+    />
+  );
+}
+
+export const InlinePageReviewStory: Story = {
+  name: 'Inline page review',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <InlinePageReview />,
+};
+
+export const InlinePageLongNames: Story = {
+  name: 'Inline page long names',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <InlinePageReview longNames />,
+};
+
+export const InlinePageLocalWorktree: Story = {
+  name: 'Inline page local Git worktree',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <InlinePageReview initialLocalWorktree />,
+};
+
+export const InlinePageNoProject: Story = {
+  name: 'Inline page no project',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <InlinePageReview initialProject="none" />,
+};
+export const InlinePageLocalDirect: Story = {
+  name: 'Inline page local Git direct',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <InlinePageReview initialProject="blog" />,
+};
+export const InlinePagePlainFolder: Story = {
+  name: 'Inline page plain folder',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <InlinePageReview initialProject="docs" />,
+};
+export const InlinePageAttachments: Story = {
+  name: 'Inline page attachments',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => (
+    <InlinePageReview
+      initialLocalWorktree
+      withAttachments
+      initialText="Please review the attached screenshot and notes."
+    />
+  ),
+};
+export const InlinePageLongDraft: Story = {
+  name: 'Inline page long draft',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => (
+    <InlinePageReview
+      initialProject="none"
+      initialText={
+        'Please review this change.\n\nCheck the mobile message composer on a short screen.\nKeep the draft and attachments when switching projects.\nVerify that the keyboard does not cover Send.\n\nPay attention to long machine and repository names.\nTry both light and dark themes.\nOpen every picker and return to the draft.\nCheck the worktree and branch controls.\n\nWrite down any remaining device-only limitations.'
+      }
+    />
+  ),
+};
+export const InlinePageSelectedRole: Story = {
+  name: 'Inline page selected Role',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <InlinePageReview initialProject="none" initialRole />,
+};
+
+export const InlinePageProjectGroup: Story = {
+  name: 'Inline page project group',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <InlinePageReview initialProject="group:loro-stack" />,
+};
+
+export const InlinePageExpandedConfig: Story = {
+  name: 'Inline page full run configuration',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <ExpandedConfigStory />,
+};
+export const InlinePageManyBranches: Story = {
+  name: 'Inline page many local branches',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <InlinePageReview initialLocalWorktree manyBranches />,
+};
+
+/** Synthetic home/acceptance; real page, selectors and persisted target resolver. */
+function RememberedProjectReview() {
+  const [open, setOpen] = useState(false);
+  const [target, setTarget] = useState('none');
+  return open ? (
+    <InlinePageReview
+      initialProject={target}
+      onSend={(_text, _model, _focus, project) => {
+        recordChatLandingProjectUse('storybook-last-project', project);
+        setOpen(false);
+      }}
+    />
+  ) : (
+    <Button
+      onClick={() => {
+        const selection = resolveMobileNewChatDefaultProject(
+          readChatLandingDefaults('storybook-last-project')?.lastUsedProject,
+          getMobileProjectOptions({
+            folders: projectFolders,
+            repositories: projectRepos,
+            groups: projectGroups,
+            machineId: 'spikes' as MachineId,
+            query: '',
+          })
+        );
+        setTarget(
+          selection.kind === 'github'
+            ? selection.repoFullName
+            : selection.kind === 'local'
+              ? selection.localProjectId
+              : selection.kind === 'group'
+                ? `group:${selection.projectId}`
+                : 'none'
+        );
+        setOpen(true);
+      }}
+    >
+      New conversation
+    </Button>
+  );
+}
+export const RememberedProject: Story = {
+  name: 'Restore last sent project',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <RememberedProjectReview />,
 };

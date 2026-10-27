@@ -98,3 +98,8 @@ PR 的 Contributors 也会列出 @natsustan。原分支以关闭未合并状态�
   搜索键盘、键盘高度扣减与输入区
   Vaul no-drag 的真机表现未验证。Storybook 中未从新 sheet 打开真实 run-config sheet；
   底部胶囊用视觉替身。390px 手机上需要横向滑动才能看到分支/工作树。
+
+## 后续调整
+
+[移动端新建对话页决定](2026-10-28-mobile-new-chat-page.zh.md) 取代本文的 sheet、
+底部横向控制栏和 Role 锁定机器方案，记录页内项目选择和首次发送的页面呈现确认。
