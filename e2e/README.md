@@ -29,6 +29,11 @@ Onboarding Page Objects wait for the final Configure Lody action, which remains
 available after the intro finishes. Local CLI readiness can arrive after the
 transient Skip intro button disappears, so that button is not a setup prerequisite.
 
+The onboarding smoke also cold-restarts the local profile without a cloud account with a valid
+cleanup receipt and IndexedDB content belonging to another encrypted identity. It
+checks the ordinary workspace cache, editable composer and unchanged foreign data;
+no cloud credentials or keys are installed.
+
 Each run uses fresh durable directories and a kernel-assigned loopback port.
 The test-only port override is accepted only when `LODY_E2E=1`, so Electron and
 its bundled CLI cannot attach to the normal local daemon. Teardown first asks
