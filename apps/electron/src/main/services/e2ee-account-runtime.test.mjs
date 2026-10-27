@@ -38,6 +38,7 @@ async function load(relative, dependencies, console = globalThis.console) {
     {
       exports,
       Error,
+      crypto: globalThis.crypto,
       setTimeout,
       clearTimeout,
       console,
@@ -108,11 +109,11 @@ void test('failed account cleanup cannot block sign-out or authorize replacement
   assert.equal(signedOut, true)
   assert.equal(warnings.length, 1)
   assert.ok(!JSON.stringify(warnings).includes('synthetic secret cause'))
-  await assert.rejects(api.closeDesktopE2eeAccount(), /e2ee_cleanup_failed/)
+  await assert.rejects(api.closeDesktopE2eeAccount(), /e2ee_restart-required/)
   api.resumeDesktopE2eeAccount()
   await assert.rejects(
     api.withDesktopE2eeAccount(() => Effect.succeed('replacement')),
-    /e2ee_host_operation_failed/
+    /e2ee_restart-required: Restart Lody/
   )
 })
 void test('cancelled quit reopens admission only after actual in-flight work and cleanup settle', async () => {
@@ -790,7 +791,13 @@ async function personalJoinFixture(t) {
       },
       '../../platform': { isLocalPlatform: () => false },
       '../../services/e2ee-bootstrap.mjs': {},
-      '../ipc-service-deps': { getIpcServiceDeps: () => ({}) },
+      '../ipc-service-deps': {
+        getIpcServiceDeps: () => ({
+          authService: {
+            getCachedSessionIdentity: () => ({ userId: owner.accountId, source: 'offline' })
+          }
+        })
+      },
       '../assert-sender': { assertProductWindowSender: () => {} },
       '../../services/e2ee-account-runtime': {
         withDesktopE2eeAccount: async (work) => {
@@ -816,7 +823,7 @@ async function personalJoinFixture(t) {
       },
       attach: async (id = workspaceId) => {
         await Effect.runPromise(owner.host.open(id))
-        owner.readers.set(id, new Set([sender.id]))
+        owner.readers.set(id, new Map([[sender.id, 1]]))
       },
       create: async (id = workspaceId) => {
         const prepared = await Effect.runPromise(
@@ -895,6 +902,71 @@ async function personalJoinFixture(t) {
   }
   return { open, rows, relay, db, workspaceId, append, admit }
 }
+
+void test('cold renderer marker recovery reads the real IPC boundary without granting status access', async (t) => {
+  const f = await personalJoinFixture(t)
+  const owner = await f.open('identity-recovery')
+  await owner.create()
+  const verified = await owner.ipc.status(f.workspaceId)
+  await Effect.runPromise(owner.host.closeWorkspace(f.workspaceId))
+  owner.readers.delete(f.workspaceId)
+  await assert.rejects(owner.ipc.status(f.workspaceId), /e2ee_not_open/)
+  const componentsRequire = createRequire(
+    new URL('../../../../../packages/components/package.json', import.meta.url)
+  )
+  const { JSDOM } = componentsRequire('jsdom')
+  const dom = new JSDOM('', { url: 'https://synthetic.test' })
+  t.after(() => dom.window.close())
+  const storage = dom.window.localStorage
+  const pin = `lody-e2ee-genesis-pin:${owner.accountId}:${f.workspaceId}`
+  const known = `lody-e2ee-known-mode:${owner.accountId}:${f.workspaceId}`
+  storage.setItem(pin, 'damaged pin')
+  storage.setItem(known, 'damaged marker')
+  const { recoverE2eeWorkspaceIdentity } = await load(
+    '../../../../../packages/components/src/lib/e2ee-workspace-storage.ts',
+    {}
+  )
+  await recoverE2eeWorkspaceIdentity({
+    storage,
+    accountId: owner.accountId,
+    workspaceId: f.workspaceId,
+    isCurrent: () => true,
+    runtime: {
+      account: () => owner.ipc.account(),
+      status: (id) => owner.ipc.status(id),
+      readIdentity: (input) => owner.ipc.readIdentity(input)
+    }
+  })
+  assert.equal(storage.getItem(pin), verified.genesisHash)
+  assert.equal(storage.getItem(known), verified.genesisHash)
+  const archives = Object.keys(storage)
+    .filter((key) => key.startsWith('lody-e2ee-evidence-archive:'))
+    .map((key) => JSON.parse(storage.getItem(key)))
+  assert.deepEqual(archives.map((value) => value.raw).sort(), ['damaged marker', 'damaged pin'])
+  assert.equal(owner.readers.has(f.workspaceId), false)
+  await assert.rejects(owner.ipc.status(f.workspaceId), /e2ee_not_open/)
+  // The temporary reader was fully released: ordinary admission can reopen it.
+  await owner.ipc.open(f.workspaceId)
+  assert.equal((await owner.ipc.status(f.workspaceId)).genesisHash, verified.genesisHash)
+  const readers = [...owner.readers.get(f.workspaceId)]
+  assert.deepEqual(
+    {
+      ...(await owner.ipc.readIdentity({ accountId: owner.accountId, workspaceId: f.workspaceId }))
+    },
+    {
+      workspaceId: f.workspaceId,
+      genesisHash: verified.genesisHash
+    }
+  )
+  assert.deepEqual([...owner.readers.get(f.workspaceId)], readers)
+  await assert.rejects(
+    owner.ipc.readIdentity({ accountId: 'other-account', workspaceId: f.workspaceId }),
+    /e2ee_account_mismatch/
+  )
+  assert.deepEqual([...owner.readers.get(f.workspaceId)], readers)
+  assert.equal((await owner.ipc.status(f.workspaceId)).genesisHash, verified.genesisHash)
+  await owner.ipc.close(f.workspaceId)
+})
 
 void test('personal IPC recovers a competing recipient after cancellation with lost receipt and process reopen, preserving custody and pins', async (t) => {
   const f = await personalJoinFixture(t)

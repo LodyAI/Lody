@@ -172,6 +172,145 @@ const historyDb = (directory, work) => {
     db.close()
   }
 }
+for (const damage of ['history', 'pin']) {
+  void test(`damaged authoritative ${damage} has a distinct recovery code and preserves originals`, async (t) => {
+    const directory = await fixture(t)
+    let prepared, records
+    await execute(
+      Effect.gen(function* () {
+        const owner = yield* ownerWithHost(directory)
+        prepared = yield* bind(owner)
+        records = yield* makeRecords(owner.custody, prepared, 3)
+        yield* owner.host.open(workspaceId)
+        yield* owner.host.ingestLedgerRecords(
+          workspaceId,
+          page(records, prepared.genesisHashHex, 0)
+        )
+      })
+    )
+    const pinPath = join(directory, 'workspaces', workspaceId, 'ledger-pin.sqlite')
+    const pin = new DatabaseSync(pinPath)
+    const trusted = pin.prepare('SELECT * FROM ledger_pin').all()
+    if (damage === 'pin') pin.exec('UPDATE ledger_pin SET count=0')
+    pin.close()
+    const damaged = records[2].slice()
+    damaged[damaged.length - 1] ^= 1
+    if (damage === 'history')
+      historyDb(directory, (db) =>
+        db.prepare('UPDATE records SET record=? WHERE position=2').run(damaged)
+      )
+    await execute(
+      Effect.gen(function* () {
+        const owner = yield* ownerWithHost(directory)
+        const failed = yield* Effect.result(owner.host.open(workspaceId))
+        assert.equal(
+          failed.failure.code,
+          damage === 'history' ? 'local-history-recovery-required' : 'trusted-pin-unavailable'
+        )
+        // The damaged workspace cannot prevent another independent workspace opening.
+        const next = yield* owner.bootstrap.prepareCreation({
+          ...intent,
+          requestId: 'second-recovery-request',
+          slug: 'second'
+        })
+        yield* owner.bootstrap.recordCreated({
+          workspaceId: 'second-workspace',
+          genesisHash: next.genesisHashHex,
+          requestId: 'second-recovery-request'
+        })
+        assert.equal((yield* owner.host.open('second-workspace')).hasCurrentKey, true)
+      })
+    )
+    const after = new DatabaseSync(pinPath)
+    if (damage === 'history')
+      assert.deepEqual(after.prepare('SELECT * FROM ledger_pin').all(), trusted)
+    else assert.equal(after.prepare('SELECT count FROM ledger_pin').get().count, 0)
+    after.close()
+    if (damage === 'history')
+      historyDb(directory, (db) =>
+        assert.deepEqual(
+          new Uint8Array(db.prepare('SELECT record FROM records WHERE position=2').get().record),
+          damaged
+        )
+      )
+  })
+}
+void test('a failed workspace finalizer reports restart, retains its fence and leaves a sibling available', async (t) => {
+  const directory = await fixture(t)
+  const scope = Effect.runSync(Scope.make())
+  const run = (work) => Effect.runPromise(work.pipe(Scope.provide(scope)))
+  const owner = await run(ownerWithHost(directory))
+  await run(bind(owner))
+  await run(owner.host.open(workspaceId))
+  const next = await run(
+    owner.bootstrap.prepareCreation({
+      ...intent,
+      requestId: 'sibling-finalizer-request',
+      slug: 'sibling'
+    })
+  )
+  await run(
+    owner.bootstrap.recordCreated({
+      workspaceId: 'sibling',
+      genesisHash: next.genesisHashHex,
+      requestId: 'sibling-finalizer-request'
+    })
+  )
+  await run(owner.host.open('sibling'))
+  const original = DatabaseSync.prototype.close
+  let retained
+  try {
+    DatabaseSync.prototype.close = function () {
+      retained = this
+      throw new Error('synthetic history close failure')
+    }
+    const failed = await run(Effect.exit(owner.host.closeWorkspace(workspaceId)))
+    DatabaseSync.prototype.close = original
+    assert.equal(Exit.isFailure(failed), true)
+    const blocked = await run(Effect.result(owner.host.open(workspaceId)))
+    assert.equal(blocked.failure.code, 'restart-required')
+    assert.equal((await run(owner.host.status('sibling'))).hasCurrentKey, true)
+    const retry = await run(Effect.exit(owner.host.closeWorkspace(workspaceId)))
+    assert.equal(Exit.isFailure(retry), true)
+  } finally {
+    DatabaseSync.prototype.close = original
+    if (retained) original.call(retained)
+    await run(Effect.exit(Scope.close(scope, Exit.void)))
+  }
+})
+
+for (const damage of ['history', 'pin']) {
+  void test(`a corrupt ${damage} SQLite image preserves bytes and reports a safe recovery code`, async (t) => {
+    const directory = await fixture(t)
+    await execute(
+      Effect.gen(function* () {
+        const owner = yield* ownerWithHost(directory)
+        yield* bind(owner)
+        yield* owner.host.open(workspaceId)
+      })
+    )
+    const path = join(
+      directory,
+      'workspaces',
+      workspaceId,
+      damage === 'history' ? 'history.sqlite' : 'ledger-pin.sqlite'
+    )
+    const original = Buffer.from('synthetic damaged SQLite image')
+    await writeFile(path, original)
+    await execute(
+      Effect.gen(function* () {
+        const owner = yield* ownerWithHost(directory)
+        const failed = yield* Effect.result(owner.host.open(workspaceId))
+        assert.equal(
+          failed.failure.code,
+          damage === 'history' ? 'local-history-recovery-required' : 'trusted-pin-unavailable'
+        )
+      })
+    )
+    assert.deepEqual(await readFile(path), original)
+  })
+}
+
 void test('binding is immutable, retained reopen asks only for a suffix, and corrupted cache recovers locally', async (t) => {
   const directory = await fixture(t)
   let saved
@@ -451,81 +590,88 @@ void test('overlapping pages compare verified bytes, append only their suffix an
   )
 })
 
-void test('content IPC binding encrypts allowed rooms and isolates a rejected room or corrupt frame', async (t) => {
-  const directory = await fixture(t)
-  await execute(
-    Effect.gen(function* () {
-      const owner = yield* ownerWithHost(directory)
-      yield* bind(owner)
-      yield* owner.host.open(workspaceId)
-      const context = {
-        protocol: 'loro-streams-crdt-payload-protection',
-        version: 2,
-        kind: 'update_batch'
-      }
-      const plaintext = new TextEncoder().encode('CANARY-content-boundary-synthetic')
-      const additionalData = new Uint8Array([17, 22, 3])
-      for (const room of [
-        { kind: 'meta' },
-        { kind: 'doc', docId: 'session' },
-        { kind: 'flock', flockDocId: `${workspaceId}:mf:local` },
-        { kind: 'flock', flockDocId: `${workspaceId}:wf:workspace` }
-      ]) {
-        const sealed = yield* owner.host.seal(workspaceId, {
-          epoch: 0,
-          room,
-          context,
-          plaintext,
-          additionalData
-        })
-        assert.equal(Buffer.from(sealed.sealed).includes(plaintext), false)
-        assert.deepEqual(
-          yield* owner.host.openContent(workspaceId, { room, context, ...sealed, additionalData }),
-          plaintext
-        )
-        const changed = new Uint8Array(sealed.sealed)
-        changed[changed.length - 1] ^= 1
+for (const kind of ['update_batch', 'snapshot'])
+  void test(`content IPC binding encrypts allowed rooms and isolates a rejected room or corrupt frame (${kind})`, async (t) => {
+    const directory = await fixture(t)
+    await execute(
+      Effect.gen(function* () {
+        const owner = yield* ownerWithHost(directory)
+        yield* bind(owner)
+        yield* owner.host.open(workspaceId)
+        const context = {
+          protocol: 'loro-streams-crdt-payload-protection',
+          version: 2,
+          kind,
+          ...(kind === 'snapshot' ? { continuationOffset: 'opaque:100' } : {})
+        }
+        const plaintext = new TextEncoder().encode('CANARY-content-boundary-synthetic')
+        const additionalData = new Uint8Array([17, 22, 3])
+        for (const room of [
+          { kind: 'meta' },
+          { kind: 'doc', docId: 'session' },
+          { kind: 'flock', flockDocId: `${workspaceId}:mf:local` },
+          { kind: 'flock', flockDocId: `${workspaceId}:wf:workspace` }
+        ]) {
+          const sealed = yield* owner.host.seal(workspaceId, {
+            epoch: 0,
+            room,
+            context,
+            plaintext,
+            additionalData
+          })
+          assert.equal(Buffer.from(sealed.sealed).includes(plaintext), false)
+          assert.deepEqual(
+            yield* owner.host.openContent(workspaceId, {
+              room,
+              context,
+              ...sealed,
+              additionalData
+            }),
+            plaintext
+          )
+          const changed = new Uint8Array(sealed.sealed)
+          changed[changed.length - 1] ^= 1
+          assert.equal(
+            Result.isFailure(
+              yield* Effect.result(
+                owner.host.openContent(workspaceId, {
+                  room,
+                  context,
+                  ...sealed,
+                  sealed: changed,
+                  additionalData
+                })
+              )
+            ),
+            true
+          )
+        }
         assert.equal(
           Result.isFailure(
             yield* Effect.result(
-              owner.host.openContent(workspaceId, {
-                room,
+              owner.host.seal(workspaceId, {
+                epoch: 0,
+                room: { kind: 'flock', flockDocId: 'code-index' },
                 context,
-                ...sealed,
-                sealed: changed,
+                plaintext,
                 additionalData
               })
             )
           ),
           true
         )
-      }
-      assert.equal(
-        Result.isFailure(
-          yield* Effect.result(
-            owner.host.seal(workspaceId, {
-              epoch: 0,
-              room: { kind: 'flock', flockDocId: 'code-index' },
-              context,
-              plaintext,
-              additionalData
-            })
-          )
-        ),
-        true
-      )
-      assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, true)
-      const valid = yield* owner.host.seal(workspaceId, {
-        epoch: 0,
-        room: { kind: 'meta' },
-        context,
-        plaintext,
-        additionalData
+        assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, true)
+        const valid = yield* owner.host.seal(workspaceId, {
+          epoch: 0,
+          room: { kind: 'meta' },
+          context,
+          plaintext,
+          additionalData
+        })
+        assert.ok(valid.sealed.length > plaintext.length)
       })
-      assert.ok(valid.sealed.length > plaintext.length)
-    })
-  )
-})
+    )
+  })
 
 void test('obsolete-cache deletion failure preserves the rebuilt feed and subsequent local opens', async (t) => {
   const directory = await fixture(t)

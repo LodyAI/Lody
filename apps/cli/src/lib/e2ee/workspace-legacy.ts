@@ -424,7 +424,8 @@ async function openWorkspace(
   let ledgerBlocked = false;
   let pairingConfirmed = false;
   let pairingFailure: unknown;
-  let retryLedgerOnSeal = false;
+  let ledgerRetryAttempts = 0;
+  let ledgerRetryTimer: ReturnType<typeof setTimeout> | undefined;
   let closed = false;
   let refresh: Promise<void> | undefined;
   let pending = false;
@@ -434,10 +435,41 @@ async function openWorkspace(
     string,
     Promise<Effect.Success<ReturnType<typeof opened.runtime.binding>>>
   >();
+  const snapshotRequests = new Map<string, number>();
+  const snapshotFlights = new Set<Promise<unknown>>();
+  const requestSnapshot = (stream: string) => {
+    if (closed) return;
+    const now = Date.now();
+    if (now - (snapshotRequests.get(stream) ?? -Infinity) < 30_000) return;
+    snapshotRequests.set(stream, now);
+    const flight = options.cloud.getContentToken({
+      workspaceId: options.workspaceId,
+      credential: opened.credential,
+      requestSnapshotFor: stream,
+    });
+    snapshotFlights.add(flight);
+    void flight.then(
+      () => snapshotFlights.delete(flight),
+      () => {
+        snapshotFlights.delete(flight);
+        console.warn('[e2ee] snapshot repair request failed; will retry');
+      }
+    );
+  };
   const content: WorkspaceStreamsContent = {
     mode: 'protected',
     namespace: encryptedWorkspaceNamespace(binding.genesisHash),
-    snapshotUpload: { canUpload: async () => false },
+    snapshotUpload: {
+      onSnapshotRecovery: (streamUrl, needsSnapshot) => {
+        if (needsSnapshot)
+          requestSnapshot(decodeURIComponent(new URL(streamUrl).pathname.split('/').at(-1)!));
+      },
+      // SDK schedules only after local writes, suppresses a competing writer,
+      // and checks the remote snapshot before exporting a new one.
+      canUpload: () => !closed && !ledgerBlocked,
+      debounceMs: 30_000,
+      minBytesSinceRemoteSnapshot: 1024 * 1024,
+    },
     resolve: encryptedWorkspaceResolver(options.workspaceId, (room) => {
       const descriptor = encryptedWorkspaceRoom(options.workspaceId, room);
       const protectedProvider = epochTransition.provider((writeEpoch) => {
@@ -465,7 +497,7 @@ async function openWorkspace(
           // A seal runs inside the SDK save queue. Request recovery without
           // awaiting it here: the queue must exit before any refresh can finish.
           if (ledgerBlocked) {
-            if (retryLedgerOnSeal) void refreshInBackground();
+            retryLedger();
             throw new Error('e2ee_invalid_ledger');
           }
           return protectedProvider.seal(input);
@@ -522,8 +554,31 @@ async function openWorkspace(
       )
     );
   };
-  const refreshInBackground = () => {
+  const clearLedgerRetry = () => {
+    if (ledgerRetryTimer !== undefined) clearTimeout(ledgerRetryTimer);
+    ledgerRetryTimer = undefined;
+  };
+  const retryLedger = (): void => {
+    if (closed || !ledgerBlocked || refresh || ledgerRetryAttempts >= 3) return;
+    clearLedgerRetry();
+    ledgerRetryAttempts++;
+    void refreshInBackground(false);
+  };
+  const scheduleLedgerRetry = () => {
+    if (closed || !ledgerBlocked || ledgerRetryTimer !== undefined || ledgerRetryAttempts >= 3)
+      return;
+    ledgerRetryTimer = setTimeout(() => {
+      ledgerRetryTimer = undefined;
+      retryLedger();
+    }, [250, 1_000, 4_000][ledgerRetryAttempts]);
+    ledgerRetryTimer.unref?.();
+  };
+  const refreshInBackground = (resetRetries = true) => {
     if (closed) return Promise.resolve();
+    if (resetRetries) {
+      clearLedgerRetry();
+      ledgerRetryAttempts = 0;
+    }
     pending = true;
     if (refresh) return refresh;
     if (pairing) pairingConfirmed = false;
@@ -545,24 +600,14 @@ async function openWorkspace(
           });
           if (closed) return;
           checkpoint ??= { ...page.checkpoint };
-          retryLedgerOnSeal = false;
-          status = await run(
-            opened.runtime.ingest(page).pipe(
-              Effect.tapError((error) =>
-                Effect.sync(() => {
-                  ledgerBlocked = true;
-                  retryLedgerOnSeal = 'code' in error && error.code === 'storage';
-                })
-              )
-            )
-          ).catch((error) => {
+          status = await run(opened.runtime.ingest(page)).catch((error) => {
             // Unexpected defects are fenced too, without classifying them as
             // transient storage or weakening the verification boundary.
             ledgerBlocked = true;
             throw error;
           });
           ledgerBlocked = false;
-          retryLedgerOnSeal = false;
+          ledgerRetryAttempts = 0;
           epochTransition.observe(status);
           cursor = page.nextCursor ?? undefined;
         } while (cursor && !isClosed());
@@ -598,10 +643,11 @@ async function openWorkspace(
       })
       .finally(() => {
         refresh = undefined;
+        scheduleLedgerRetry();
       });
     return refresh;
   };
-  // Startup is one of the three refresh triggers; no network request is awaited by open.
+  // Startup schedules the first refresh; local open never awaits network work.
   void refreshInBackground();
   return {
     assertPairingConfirmed: () => {
@@ -619,12 +665,14 @@ async function openWorkspace(
             ...status,
             epochPhase: epochTransition.phase(),
           })),
-    refresh: refreshInBackground,
+    refresh: () => refreshInBackground(),
     close: () => {
       closed = true;
+      clearLedgerRetry();
       return (closeReceipt ??= (async () => {
         await epochTransition.close();
         await refresh;
+        await Promise.allSettled([...snapshotFlights]);
         await Effect.runPromise(Scope.close(scope, Exit.void));
       })());
     },

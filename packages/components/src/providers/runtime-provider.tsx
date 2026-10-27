@@ -57,6 +57,8 @@ import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import type { WorkspaceAdmissionDescriptor } from '@lody/cloud-api';
 import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspace-mark';
 import {
+  E2eeLocalEvidenceCorruptError,
+  E2eeLocalEvidenceConflictError,
   hasEncryptedEvidenceForAnyAccount,
   hasPendingE2eeCreationForSlug,
   isWorkspaceModeStorageKey,
@@ -117,6 +119,7 @@ const resolveRuntimeEagerSyncSurface = (): EagerSyncSurface => {
 export function RuntimeProvider({ children }: { children: ReactNode }) {
   const platform = usePlatform();
   const { t } = useTranslation();
+  const [snapshotRecoveryWorkspace, setSnapshotRecoveryWorkspace] = useState<string | null>(null);
   const [keyUpdateWorkspace, setKeyUpdateWorkspace] = useState<string | null>(null);
   const retryKeyUpdateRef = useRef<() => void>(() => {});
   // Use workspaceSlug for runtime initialization (available immediately from URL)
@@ -345,6 +348,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   // (new encrypted evidence, unreadable evidence, retry) change effect keys.
   const savedModeRef = useRef(savedMode);
   savedModeRef.current = savedMode;
+  // Recovery lookup only; native independently verifies this cached/listed ID.
+  const recoveryWorkspaceIdRef = useRef(workspaceId ?? cachedId);
+  recoveryWorkspaceIdRef.current = workspaceId ?? cachedId;
   const knownEncryptedRef = useRef(knownEncrypted);
   knownEncryptedRef.current = knownEncrypted;
   const savedModeErrorType = savedMode.error ? describeErrorType(savedMode.error) : null;
@@ -449,7 +455,15 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const modeAdmissionFailure = (error: unknown) => ({
       workspaceSlug: workspaceSlug!,
       errorType: describeErrorType(error),
-      modeAdmission: { knownEncrypted: knownEncryptedRef.current },
+      modeAdmission: {
+        knownEncrypted: knownEncryptedRef.current ||
+          (error instanceof E2eeLocalEvidenceCorruptError &&
+            ['Invalid genesis pin', 'Invalid encrypted evidence'].includes(error.message)) ||
+          (error instanceof E2eeLocalEvidenceConflictError &&
+            error.message === 'Workspace mode conflicts with encrypted evidence'),
+        ...((effectiveWorkspaceId ?? recoveryWorkspaceIdRef.current)
+          ? { workspaceId: (effectiveWorkspaceId ?? recoveryWorkspaceIdRef.current)! } : {}),
+      },
     });
     // A restart of the same account/workspace (local-agent toggle, retry) keeps
     // the last verified mode so the workspace tree does not unmount and flash.
@@ -532,6 +546,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     }
 
     setKeyUpdateWorkspace(null);
+    setSnapshotRecoveryWorkspace(null);
     let disposed = false;
     // Set when background verification closes a provisionally opened runtime.
     let retired = false;
@@ -744,6 +759,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               epoch: status.writeEpoch ?? status.epoch,
               rotationRequired: status.rotationRequired,
               onKeyUpdateRequired: () => setKeyUpdateWorkspace(effectiveWorkspaceId),
+              onSnapshotRecoveryChange: (pending) => {
+                if (!disposed && !retired)
+                  setSnapshotRecoveryWorkspace(pending ? effectiveWorkspaceId : null);
+              },
               authToken: () => tokenRef.current,
             });
             encryptedAccess.updateStatus(status);
@@ -962,6 +981,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           </button>
         </div>
       )}
+      {snapshotRecoveryWorkspace !== null &&
+        (snapshotRecoveryWorkspace === runtime?.workspaceId ||
+          snapshotRecoveryWorkspace === workspaceId) && (
+          <div role="status">{t('e2ee.content.snapshotRecoveryPending')}</div>
+        )}
       {children}
       <SessionPendingSendsHost runtime={runtime} />
     </>

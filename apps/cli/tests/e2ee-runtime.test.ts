@@ -23,6 +23,7 @@ import { startProcessLegacy } from '@lody/shared/node/process';
 import { describe, expect, it, vi } from 'vitest';
 import {
   Bytes,
+  inspectContentFrame,
   verifyDeviceCredentialBinding,
   hashRecordBytes,
   extendLedger,
@@ -299,6 +300,151 @@ const page = (records: Uint8Array[], start = 0, end = records.length) => ({
 });
 
 describe('machine E2EE local runtime', () => {
+  it.each(['signature', 'conflict', 'defect'] as const)(
+    'bounds background ledger recovery after %s rejection, preserves the verified view and supports explicit retry',
+    async (failure) => {
+      const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-ledger-retry-'));
+      vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
+      try {
+        const accountId = 'ledger-retry-account';
+        const root = join(
+          getLodyDataDir(),
+          'e2ee',
+          createHash('sha256').update(accountId).digest('hex'),
+          'workspace'
+        );
+        const fixture = await execute(setup(directory, 2, join(root, 'custody')));
+        await retainCliE2eeWorkspaceBinding(accountId, {
+          workspaceId: 'workspace',
+          genesisHash: hex(fixture.genesis.toBytes()),
+          genesisRecordHex: hex(fixture.genesisRecord),
+        });
+        const signingPublicKey = await execute(
+          Effect.gen(function* () {
+            const custody = yield* makeCliE2eeCustody({
+              directory: join(root, 'custody'),
+              keyring: noKeyring,
+            });
+            return hex((yield* custody.openDevice(fixture.genesis)).publicKey.toBytes());
+          })
+        );
+        await fs.writeFile(
+          join(root, 'activation.json'),
+          JSON.stringify({ genesisHash: hex(fixture.genesis.toBytes()), signingPublicKey })
+        );
+        let history = page(fixture.records);
+        let reads = 0;
+        let revision = 0;
+        let retryFailed = () => {};
+        let reportSent = () => {};
+        const cloud = {
+          getHistory: async () => {
+            reads++;
+            return history;
+          },
+          mailboxCall: async (
+            method: keyof E2eeMailboxRequests,
+            input: E2eeMailboxRequests[keyof E2eeMailboxRequests]
+          ) => {
+            if (method === 'fetch')
+              return {
+                items: [{ sender: fixture.sender, frameHex: hex(fixture.frame) }],
+                next: null,
+              };
+            if (method === 'status')
+              return {
+                ...(input as E2eeMailboxRequests['status']).slot,
+                revision,
+                status: 'EnvelopeStored',
+              };
+            if (method === 'report') {
+              reportSent();
+              return null;
+            }
+            throw new Error('unexpected mailbox operation');
+          },
+        } as CloudE2eePort;
+        host = await openCliE2eeWorkspaceLegacy({
+          accountId,
+          workspaceId: 'workspace',
+          genesisHash: hex(fixture.genesis.toBytes()),
+          cloud,
+          keyring: noKeyring,
+          onUnavailable: () => {
+            queueMicrotask(() => retryFailed());
+          },
+        });
+        await host.refresh();
+        const verified = await host.status();
+        if (host.content.mode !== 'protected') throw new Error('expected protected workspace');
+        const protection = host.content.resolve({ kind: 'doc', docId: 'retry' });
+        if (protection.mode !== 'protected') throw new Error('expected protected room');
+        const input = {
+          context: {
+            protocol: 'loro-streams-crdt-payload-protection',
+            version: 2,
+            kind: 'update_batch',
+          } as const,
+          plaintext: new TextEncoder().encode('retained edit'),
+          additionalData: () => new Uint8Array([7]),
+        };
+        const damaged = fixture.record.slice();
+        damaged[damaged.length - 1] ^= 1;
+        const rejectedHistory = () => {
+          if (failure === 'signature') return page([...fixture.records, damaged], 2);
+          if (failure === 'conflict') return page([fixture.genesisRecord, damaged]);
+          return {
+            ...page(fixture.records),
+            get startIndex(): number {
+              throw new Error('synthetic unclassified ingest defect');
+            },
+          };
+        };
+        history = rejectedHistory();
+        await host.refresh();
+        const before = reads;
+        for (const [index, delay] of [250, 1_000, 4_000].entries()) {
+          const failed = Promise.withResolvers<void>();
+          retryFailed = failed.resolve;
+          await vi.advanceTimersByTimeAsync(delay);
+          expect(reads - before).toBe(index + 1);
+          await failed.promise;
+        }
+        expect(reads - before).toBe(3);
+        expect((await host.status()).headHash).toBe(verified.headHash);
+        expect((await host.status()).length).toBe(verified.length);
+        await expect(protection.config.provider.seal(input)).rejects.toThrow('e2ee_invalid_ledger');
+        history = page(fixture.records);
+        await vi.advanceTimersByTimeAsync(100_000);
+        expect(reads - before).toBe(3);
+        await host.refresh(); // Explicit retry resets the bounded episode.
+        await expect(protection.config.provider.seal(input)).resolves.toHaveProperty('sealed');
+        history = rejectedHistory();
+        await host.refresh();
+        history = page(fixture.records);
+        revision++;
+        const installed = Promise.withResolvers<void>();
+        reportSent = installed.resolve;
+        await vi.advanceTimersByTimeAsync(250);
+        await installed.promise;
+        await expect(protection.config.provider.seal(input)).resolves.toHaveProperty('sealed');
+        history = page([fixture.genesisRecord, damaged]);
+        await host.refresh();
+        await host.close();
+        const afterClose = reads;
+        await vi.advanceTimersByTimeAsync(100_000);
+        expect(reads).toBe(afterClose);
+      } finally {
+        await host?.close();
+        vi.useRealTimers();
+        vi.unstubAllEnvs();
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  );
+
   it.each([false, true, 'published', 'epoch'] as const)(
     'releases the real SDK save queue before storage recovery when rotation=%s',
     async (rotation) => {
@@ -505,6 +651,26 @@ describe('machine E2EE local runtime', () => {
         releaseHistory.resolve();
         const recovery = host.refresh(); // Queue-external receipt; never awaited by seal.
         await receiveEntered.promise;
+        const snapshotInput = {
+          ...input,
+          context: {
+            ...input.context,
+            kind: 'snapshot' as const,
+            continuationOffset: '00000000000000000100',
+          },
+        };
+        expect(await host.content.snapshotUpload.canUpload()).toBe(true);
+        const retainedSnapshot = await protection.config.provider.seal(snapshotInput);
+        expect(
+          Result.getOrThrow(inspectContentFrame(retainedSnapshot.sealed, 'doc-snapshot')).epoch
+        ).toBe(0);
+        expect(
+          await protection.config.provider.open({
+            ...retainedSnapshot,
+            context: snapshotInput.context,
+            additionalData: new Uint8Array([...retainedSnapshot.header, 9]),
+          })
+        ).toEqual(input.plaintext);
         expect((await stream.appendWriteOnly()).ok).toBe(true);
         expect(doc.getText('draft').toString()).toBe('retained local edit');
         const receivedDoc = new LoroDoc();
@@ -556,6 +722,13 @@ describe('machine E2EE local runtime', () => {
                 yield* Effect.promise(() => active.refresh());
                 expect((yield* Effect.promise(() => active.status())).epochPhase).toBe('ready');
                 expect(yield* token.getToken()).toBe('epoch-token-new');
+                const changedSnapshot = yield* Effect.promise(() =>
+                  protection.config.provider.seal(snapshotInput)
+                );
+                expect(
+                  Result.getOrThrow(inspectContentFrame(changedSnapshot.sealed, 'doc-snapshot'))
+                    .epoch
+                ).toBe(1);
                 const sealed = yield* Effect.promise(() => protection.config.provider.seal(input));
                 expect(
                   yield* Effect.promise(() =>
@@ -1782,6 +1955,106 @@ describe('machine E2EE local runtime', () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it.each(['history', 'pin'] as const)(
+    'classifies authoritative %s damage without replacing originals or trusted pins',
+    async (damage) => {
+      const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-history-recovery-'));
+      try {
+        const fixture = await execute(setup(directory));
+        const openRuntime = Effect.gen(function* () {
+          const custody = yield* makeCliE2eeCustody({
+            directory: join(directory, 'machine'),
+            keyring: noKeyring,
+          });
+          const device = yield* custody.openDevice(fixture.genesis);
+          return yield* makeCliE2eeRuntime({
+            directory: join(directory, 'runtime'),
+            workspaceId: 'workspace',
+            custody,
+            device,
+            genesisRecord: fixture.genesisRecord,
+          });
+        });
+        await execute(
+          Effect.flatMap(openRuntime, (runtime) => runtime.ingest(page(fixture.records)))
+        );
+        const pinPath = join(directory, 'runtime', 'ledger-pin.sqlite');
+        const pin = new DatabaseSync(pinPath);
+        const trusted = pin.prepare('SELECT * FROM ledger_pin').all();
+        if (damage === 'pin') pin.exec('UPDATE ledger_pin SET count=0');
+        pin.close();
+        const damaged = fixture.record.slice();
+        damaged[damaged.length - 1] ^= 1;
+        const history = new DatabaseSync(join(directory, 'runtime', 'history.sqlite'));
+        if (damage === 'history')
+          history.prepare('UPDATE records SET record=? WHERE position=1').run(damaged);
+        const result = await execute(Effect.result(openRuntime));
+        expect(Result.isFailure(result)).toBe(true);
+        if (Result.isSuccess(result)) throw new Error('expected local recovery failure');
+        expect(result.failure).toMatchObject({
+          code:
+            damage === 'history' ? 'local-history-recovery-required' : 'trusted-pin-unavailable',
+        });
+        const after = new DatabaseSync(pinPath);
+        if (damage === 'history') {
+          expect(after.prepare('SELECT * FROM ledger_pin').all()).toEqual(trusted);
+          expect(
+            new Uint8Array(
+              history.prepare('SELECT record FROM records WHERE position=1').get()!
+                .record as Uint8Array
+            )
+          ).toEqual(damaged);
+        } else expect(after.prepare('SELECT count FROM ledger_pin').get()!.count).toBe(0);
+        after.close();
+        history.close();
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each(['history', 'pin'] as const)(
+    'preserves a corrupt %s SQLite image and distinguishes it from temporary I/O',
+    async (damage) => {
+      const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-corrupt-image-'));
+      try {
+        const fixture = await execute(setup(directory));
+        const openRuntime = Effect.gen(function* () {
+          const custody = yield* makeCliE2eeCustody({
+            directory: join(directory, 'machine'),
+            keyring: noKeyring,
+          });
+          const device = yield* custody.openDevice(fixture.genesis);
+          return yield* makeCliE2eeRuntime({
+            directory: join(directory, 'runtime'),
+            workspaceId: 'workspace',
+            custody,
+            device,
+            genesisRecord: fixture.genesisRecord,
+          });
+        });
+        await execute(openRuntime);
+        const path = join(
+          directory,
+          'runtime',
+          damage === 'history' ? 'history.sqlite' : 'ledger-pin.sqlite'
+        );
+        const original = Buffer.from('synthetic damaged SQLite image');
+        await fs.writeFile(path, original);
+        const failed = await execute(Effect.result(openRuntime));
+        expect(Result.isFailure(failed)).toBe(true);
+        if (Result.isSuccess(failed)) throw new Error('expected local damage');
+        expect(failed.failure).toMatchObject({
+          code:
+            damage === 'history' ? 'local-history-recovery-required' : 'trusted-pin-unavailable',
+        });
+        expect(await readFile(path)).toEqual(original);
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  );
 
   it('reopens entirely offline with the same accepted position and credential', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-runtime-'));

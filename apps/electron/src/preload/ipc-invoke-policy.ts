@@ -36,6 +36,7 @@ export function isIpcInvokeChannel(channel: string): boolean {
       'open',
       'close',
       'status',
+      'readIdentity',
       'ingestLedgerRecords',
       'ledgerView'
     ]).has(match![2]!)
