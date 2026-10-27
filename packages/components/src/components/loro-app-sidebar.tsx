@@ -50,6 +50,266 @@ import {
   type SidebarMachineInfo,
 } from '@/components/sidebar-machine-card';
 import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
+import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../style/theme-colors.stylex';
+import {
+  themeSpace,
+  themeRadius,
+  themeFontWeight,
+  themeDuration,
+  themeEasing,
+} from '../style/theme-scale.stylex';
+/**
+ * The parts of the app sidebar that were Tailwind. The rows' own box, ink and
+ * fills come from sidebarSurface; these are the pieces around it.
+ */
+const appStyles = stylex.create({
+  rowBox: {
+    width: '100%',
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[2],
+    textAlign: 'left',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
+  },
+  rowNormalPadding: { paddingBlock: themeSpace[1] },
+  rowMetaPadding: { paddingBlock: themeSpace[1.5] },
+  rowInk: { color: themeColors.sidebarRowForeground },
+  rowHover: { backgroundColor: { default: 'transparent', ':hover': themeColors.sidebarHover } },
+  projectHover: {
+    color: {
+      default: themeColors.sidebarRowForeground,
+      ':hover': themeColors.sidebarHoverForeground,
+    },
+  },
+  rowSelected: {
+    backgroundColor: {
+      default: themeColors.sidebarSelection,
+      ':hover': themeColors.sidebarSelection,
+    },
+    color: themeColors.sidebarSelectionForeground,
+  },
+  projectSelected: { borderColor: 'hsl(var(--sidebar-ring) / 0.3)' },
+  projectRow: {
+    position: 'relative',
+    display: 'flex',
+    minWidth: 0,
+    flex: '1 1 0%',
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    fontWeight: themeFontWeight.normal,
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  navigable: { cursor: 'pointer' },
+  inert: { cursor: 'default' },
+  muted: { color: themeColors.mutedForeground },
+  flexRow: { display: 'flex', alignItems: 'center' },
+  rowLayout: { display: 'flex' },
+  rowTop: { alignItems: 'flex-start' },
+  rowCenter: { alignItems: 'center' },
+  gapMobile: { gap: themeSpace[1.5] },
+  gapDesktop: { gap: themeSpace[2] },
+  lineBox: { display: 'flex', flexShrink: 0, alignItems: 'center' },
+  contents: { display: 'contents' },
+  titleColumn: {
+    display: 'flex',
+    minWidth: 0,
+    flex: '1 1 0%',
+    flexDirection: 'column',
+    gap: themeSpace[1],
+  },
+  titleContent: {
+    minWidth: 0,
+    flex: '1 1 0%',
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: 'currentColor',
+  },
+  projectTitle: {
+    minWidth: 0,
+    flex: '1 1 0%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    textAlign: 'left',
+  },
+  mobileTime: {
+    marginLeft: 'auto',
+    display: 'flex',
+    flexShrink: 0,
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    fontVariantNumeric: 'tabular-nums',
+    color: themeColors.mutedForeground,
+  },
+  restMarks: { display: 'flex', alignItems: 'center', gap: themeSpace[1.5] },
+  folderGlyph: {
+    position: 'absolute',
+    left: 0,
+    top: '50%',
+    height: themeSpace[4],
+    width: themeSpace[4],
+    translate: '0 -50%',
+    transitionProperty: 'opacity,color',
+    transitionDuration: themeDuration[100],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  chevronGlyph: {
+    position: 'absolute',
+    left: 0,
+    top: '50%',
+    height: themeSpace[4],
+    width: themeSpace[4],
+    translate: '0 -50%',
+    color: 'currentColor',
+    transitionProperty: 'opacity,translate,scale,rotate',
+    transitionDuration: themeDuration[100],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  currentInk: { color: 'currentColor' },
+  folderIdle: { color: themeColors.sidebarForegroundMuted },
+  hidden: { opacity: 0 },
+  shown: { opacity: 1 },
+  collapsedChevron: { rotate: '-90deg' },
+  expandedChevron: { rotate: '0deg' },
+  removalStatus: {
+    display: 'inline-flex',
+    minWidth: 0,
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[1],
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.mutedForeground,
+  },
+  projectListSpacing: { marginBottom: { default: themeSpace[0.5], ':last-child': 0 } },
+  groupCollapsedSpacing: { marginBottom: themeSpace[1] },
+  groupOpenSpacing: { marginBottom: themeSpace[4] },
+  chatsOpenSpacing: { marginBottom: themeSpace[3] },
+  tooltipLines: { display: 'flex', flexDirection: 'column', gap: themeSpace[0.5] },
+  mono: {
+    fontFamily: 'var(--font-mono)',
+    fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
+  },
+  showMore: {
+    display: 'flex',
+    height: '30px',
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[2],
+    textAlign: 'left',
+    color: {
+      default: 'hsl(var(--sidebar-foreground-muted) / 0.8)',
+      ':hover': themeColors.sidebarHoverForeground,
+    },
+    backgroundColor: { default: null, ':hover': themeColors.sidebarHover },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  sortable: { width: '100%', marginBottom: { default: themeSpace[0.5], ':last-child': 0 } },
+  headerActions: { display: 'flex', alignItems: 'center', gap: themeSpace[1] },
+  sectionLabel: { display: 'inline-flex', minWidth: 0, alignItems: 'center', gap: themeSpace[1.5] },
+  focusScope: {
+    position: 'relative',
+    display: 'flow-root',
+    backgroundColor: themeColors.background,
+  },
+  shellFill: { width: '100%', height: '100%' },
+  desktopFill: { backgroundColor: themeColors.sidebar },
+  electronShell: { zIndex: 20 },
+  /**
+   * The focus state these controls had before the migration. The hover
+   * actions carried `focus-visible:ring-2 focus-visible:ring-ring/60` and the
+   * group's "show more" row carried
+   * `focus-visible:ring-2 focus-visible:ring-sidebar-ring/40`. Each of them
+   * declared a full box-shadow in the utilities layer, which erased the app's
+   * global inset focus ring, and the app forces Tailwind's own ring
+   * transparent — so the focused control painted NO focus indicator of its
+   * own. Keep that: no resting shadow, and no focus shadow.
+   */
+  noFocusRing: { boxShadow: { default: null, ':focus-visible': 'none' } },
+  glyph16: { width: themeSpace[4], height: themeSpace[4] },
+  /** A title the row owns: one clipped line, regular weight. */
+  titleText: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: 400,
+  },
+  glyph12: { width: themeSpace[3], height: themeSpace[3] },
+  waitingGlyph: { flexShrink: 0 },
+  glyph14: { width: themeSpace[3.5], height: themeSpace[3.5] },
+  glyphBox16: {
+    display: 'flex',
+    width: themeSpace[4],
+    height: themeSpace[4],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** A muted glyph that never changes colour. */
+  mutedGlyph12: {
+    width: themeSpace[3],
+    height: themeSpace[3],
+    flexShrink: 0,
+    color: 'hsl(var(--sidebar-foreground-muted) / 0.8)',
+  },
+  /** A row's leading slot. */
+  leadingSlot: {
+    position: 'relative',
+    marginRight: '-0.375rem',
+    display: 'flex',
+    height: themeSpace[5],
+    width: themeSpace[5],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** A row's trailing cluster. */
+  trailing: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: themeSpace[0.5] },
+  /** A row's own title. */
+  titleRow: { minWidth: 0, flexGrow: 1, flexShrink: 1, flexBasis: '0%', textAlign: 'left' },
+  /** A clipped label. */
+  clipped: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  /** A capped label: a long name gives up its tail. */
+  clippedCapped: {
+    maxWidth: '6rem',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  /** The archive action's own fill. */
+  archiveAction: {
+    backgroundColor: themeColors.sidebarHover,
+    color: themeColors.sidebarHoverForeground,
+  },
+  /** A drag handle's own box. */
+  dragHandle: {
+    cursor: { default: 'grab', ':active': 'grabbing' },
+    touchAction: 'none',
+  },
+  /** A row being dragged. */
+  dragging: { zIndex: 10, opacity: 0.6 },
+});
 import {
   SIDEBAR_ROW_TEXT_CLASS,
   SIDEBAR_CAPTION_TEXT_CLASS,
@@ -255,7 +515,8 @@ const sidebarMachineLabel = (name: string): string => name.trim().replace(/\.loc
  */
 // No `last:mb-0`: the last machine group is followed by GitHub Worktrees and
 // Chats, which need the same gap as between machines.
-const SIDEBAR_TOP_GROUP_SPACING = (collapsed: boolean) => (collapsed ? 'mb-1' : 'mb-4');
+const SIDEBAR_TOP_GROUP_SPACING = (collapsed: boolean) =>
+  stylex.props(collapsed ? appStyles.groupCollapsedSpacing : appStyles.groupOpenSpacing).className;
 
 export type LoroAppSidebarProps = {
   className?: string;
@@ -464,8 +725,8 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
         }
       : baseOpenedByTree;
   const lineBoxClassName = showMetaLine
-    ? cn('flex shrink-0 items-center', SIDEBAR_ROW_LINE_CLASS)
-    : 'contents';
+    ? clsx(stylex.props(appStyles.lineBox).className, SIDEBAR_ROW_LINE_CLASS)
+    : stylex.props(appStyles.contents).className;
   const showInlineArchive = !isMobile;
   const showWorktreeIcon = session.isWorktree === true;
   const isPinned = Boolean(session.isPinned);
@@ -509,8 +770,8 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
   const isUnsent = useSessionUnsentNewConversation(session.id);
   const titleContent = (
     <span
-      className={cn(
-        'truncate font-normal',
+      className={clsx(
+        stylex.props(appStyles.titleText).className,
         isUnsent && !showSelectedState && SIDEBAR_UNSENT_TITLE_CLASS
       )}
     >
@@ -549,15 +810,15 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
       draggable
       onDragStart={(event) => startSessionMentionDrag(event, { sessionId: session.id, title })}
       className={cn(
-        'group w-full rounded-md px-2 text-left',
-        showMetaLine ? 'py-1.5' : 'py-1',
-        'border border-transparent bg-transparent',
-        !showSelectedState &&
-          !isMobile &&
-          'hover:bg-sidebar-hover data-[menu-open]:bg-sidebar-hover',
-        showSelectedState &&
-          'bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection',
-        showSelectedState ? 'text-sidebar-selection-foreground' : 'text-sidebar-row-foreground'
+        'group',
+        stylex.props(
+          appStyles.rowBox,
+          showMetaLine ? appStyles.rowMetaPadding : appStyles.rowNormalPadding,
+          appStyles.rowInk,
+          !showSelectedState && !isMobile && appStyles.rowHover,
+          showSelectedState && appStyles.rowSelected
+        ).className,
+        !showSelectedState && !isMobile && 'data-[menu-open]:bg-sidebar-hover'
       )}
       onClick={(event) => {
         if (openSessionOnModifiedClick(event, session.id)) return;
@@ -570,10 +831,10 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
       }}
     >
       <div
-        className={cn(
-          'flex',
-          showMetaLine ? 'items-start' : 'items-center',
-          isMobile ? 'gap-1.5' : 'gap-2'
+        {...stylex.props(
+          appStyles.rowLayout,
+          showMetaLine ? appStyles.rowTop : appStyles.rowCenter,
+          isMobile ? appStyles.gapMobile : appStyles.gapDesktop
         )}
       >
         {/* On a two-line row the leading and end slots sit in a box one title line
@@ -585,12 +846,9 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
             openedByTree={openedByTree}
           />
         </div>
-        <div className={showMetaLine ? 'flex min-w-0 flex-1 flex-col gap-1' : 'contents'}>
+        <div {...stylex.props(showMetaLine ? appStyles.titleColumn : appStyles.contents)}>
           <div
-            className={cn(
-              SIDEBAR_ROW_TEXT_CLASS,
-              'min-w-0 flex-1 flex items-center gap-1 truncate text-current'
-            )}
+            className={cn(SIDEBAR_ROW_TEXT_CLASS, stylex.props(appStyles.titleContent).className)}
             // Double-click to rename is scoped to the title only, so it can't be
             // triggered by double-clicking the Archive confirm button.
             onDoubleClick={(event) => {
@@ -601,12 +859,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
             }}
           >
             <SessionRowAuthorAvatar author={author} />
-            {isPinned ? (
-              <Pin
-                aria-hidden="true"
-                className="h-3 w-3 shrink-0 text-sidebar-foreground-muted/80"
-              />
-            ) : null}
+            {isPinned ? <Pin aria-hidden="true" {...stylex.props(appStyles.mutedGlyph12)} /> : null}
             {titleContent}
           </div>
           {showMetaLine ? (
@@ -620,10 +873,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
             the time / branch live in the hover info card, so nothing sits here. */}
         {isMobile ? (
           <span
-            className={cn(
-              SIDEBAR_CAPTION_TEXT_CLASS,
-              'ml-auto flex shrink-0 select-none items-center gap-1 tabular-nums text-muted-foreground'
-            )}
+            className={cn(SIDEBAR_CAPTION_TEXT_CLASS, stylex.props(appStyles.mobileTime).className)}
           >
             {relativeTime}
           </span>
@@ -639,7 +889,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
             hasUnreadMessages={hasUnreadMessages}
             restIcon={
               showPr || showWorktreeIcon ? (
-                <span className="flex items-center gap-1.5">
+                <span {...stylex.props(appStyles.restMarks)}>
                   <SessionRowWorktreeIndicator isWorktree={showWorktreeIcon} />
                   {showPr ? (
                     <SessionPrIcon compact prStatus={prStatus} prCiState={prInfo.ciState} />
@@ -827,7 +1077,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
             key: 'archive',
             label: archiveActionLabel,
             ariaLabel: archiveTooltipLabel,
-            icon: <Archive className="h-4 w-4" />,
+            icon: <Archive className={stylex.props(appStyles.glyph16).className} />,
             hideLabel: true,
             className: 'bg-sidebar-hover text-sidebar-hover-foreground',
             onClick: () => onArchive(session.id),
@@ -1135,26 +1385,22 @@ export const LocalProjectItem = memo(function LocalProjectItem({
       // `asChild`, so their `data-state` values collide here.
       data-menu-open={projectMenuOpen ? '' : undefined}
       className={cn(
-        'group relative w-full rounded-md px-2 py-1 text-left',
-        'border border-transparent bg-transparent',
+        'group',
+        stylex.props(
+          appStyles.rowBox,
+          appStyles.rowNormalPadding,
+          appStyles.projectRow,
+          appStyles.rowInk,
+          !showSelectedState && !isMobile && appStyles.rowHover,
+          !showSelectedState && !isMobile && appStyles.projectHover,
+          showSelectedState && appStyles.rowSelected,
+          showSelectedState && appStyles.projectSelected,
+          projectCanNavigate ? appStyles.navigable : appStyles.inert
+        ).className,
+        SIDEBAR_ROW_TEXT_CLASS,
         !showSelectedState &&
           !isMobile &&
-          'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground',
-        showSelectedState &&
-          'border-sidebar-ring/30 bg-sidebar-selection hover:bg-sidebar-selection',
-        // A 14px row with a 16px icon under the 12px semibold group
-        // label: the two share a left edge and differ by type.
-        SIDEBAR_ROW_TEXT_CLASS,
-        'flex min-w-0 flex-1 select-none items-center gap-2 font-normal transition-colors',
-        projectCanNavigate ? 'cursor-pointer' : 'cursor-default',
-        removalState && 'text-muted-foreground',
-        showSelectedState
-          ? 'text-sidebar-selection-foreground'
-          : cn(
-              // Project folder names share the sidebar row color, below the
-              // conversation; hover does not change text color.
-              'text-sidebar-row-foreground'
-            )
+          'data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground'
       )}
       onClick={handleNavigate}
       onKeyDown={(event) => {
@@ -1165,7 +1411,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
     >
       <button
         type="button"
-        className="relative -mr-1.5 flex h-5 w-5 shrink-0 items-center justify-center"
+        {...stylex.props(appStyles.leadingSlot)}
         aria-label={toggleLabel}
         onClick={(event) => {
           event.preventDefault();
@@ -1179,26 +1425,30 @@ export const LocalProjectItem = memo(function LocalProjectItem({
         <ProjectFolderIcon
           strokeWidth={1.5}
           className={cn(
-            'absolute left-0 top-1/2 h-4 w-4 -translate-y-1/2 transition-[opacity,color] duration-100',
-            showSelectedState
-              ? 'text-current'
-              : 'text-sidebar-foreground-muted group-hover:text-current',
+            stylex.props(
+              appStyles.folderGlyph,
+              showSelectedState ? appStyles.currentInk : appStyles.folderIdle,
+              isMobile && appStyles.hidden
+            ).className,
+            !showSelectedState && 'group-hover:text-current',
             // Mobile: chevron is always visible so the folder icon must hide
             // permanently to avoid stacking. Desktop keeps the hover swap.
-            isMobile ? 'opacity-0' : 'group-hover:opacity-0'
+            !isMobile && 'group-hover:opacity-0'
           )}
         />
         <ChevronDown
           strokeWidth={1.5}
           className={cn(
-            'absolute left-0 top-1/2 h-4 w-4 -translate-y-1/2 text-current',
-            'transition-[opacity,translate,scale,rotate] duration-100',
-            isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
-            collapsed ? '-rotate-90' : 'rotate-0'
+            stylex.props(
+              appStyles.chevronGlyph,
+              isMobile ? appStyles.shown : appStyles.hidden,
+              collapsed ? appStyles.collapsedChevron : appStyles.expandedChevron
+            ).className,
+            !isMobile && 'group-hover:opacity-100'
           )}
         />
       </button>
-      <span className="min-w-0 flex-1 truncate text-left">{project.name}</span>
+      <span {...stylex.props(appStyles.projectTitle)}>{project.name}</span>
 
       {removalStateLabel ? (
         <Tooltip.Root>
@@ -1208,22 +1458,25 @@ export const LocalProjectItem = memo(function LocalProjectItem({
               <span
                 className={cn(
                   SIDEBAR_CAPTION_TEXT_CLASS,
-                  'inline-flex min-w-0 shrink-0 items-center gap-1 font-medium text-muted-foreground'
+                  stylex.props(appStyles.removalStatus).className
                 )}
               >
                 {removalState === 'waiting_for_device' ? (
-                  <Clock3 className="h-3 w-3 shrink-0" aria-hidden="true" />
+                  <Clock3
+                    {...stylex.props(appStyles.glyph12, appStyles.waitingGlyph)}
+                    aria-hidden="true"
+                  />
                 ) : (
-                  <Spinner className="h-3 w-3 shrink-0" aria-hidden="true" />
+                  <Spinner {...stylex.props(appStyles.glyph12)} aria-hidden="true" />
                 )}
-                <span className="max-w-24 truncate">{removalStateLabel}</span>
+                <span {...stylex.props(appStyles.clippedCapped)}>{removalStateLabel}</span>
               </span>
             }
           />
           <Tooltip.Content side="right">{removalStateLabel}</Tooltip.Content>
         </Tooltip.Root>
       ) : showProjectMenu || showNewChatButton || dragHandle ? (
-        <div className="flex shrink-0 items-center gap-0.5">
+        <div {...stylex.props(appStyles.trailing)}>
           {showProjectMenu ? (
             <button
               type="button"
@@ -1244,7 +1497,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                 );
               }}
             >
-              <MoreHorizontal className="h-3.5 w-3.5" />
+              <MoreHorizontal {...stylex.props(appStyles.glyph14)} />
             </button>
           ) : null}
           {showNewChatButton ? (
@@ -1258,7 +1511,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                 onNewChatInProject?.(machineId, project.id);
               }}
             >
-              <SquarePen className="h-3.5 w-3.5" />
+              <SquarePen {...stylex.props(appStyles.glyph14)} />
             </button>
           ) : null}
           {dragHandle}
@@ -1273,8 +1526,13 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   );
 
   return (
-    <div className="space-y-0.5">
-      <div className="group flex items-center">
+    <div>
+      <div
+        className={clsx(
+          'group',
+          stylex.props(appStyles.flexRow, appStyles.projectListSpacing).className
+        )}
+      >
         <ContextMenu.Root onOpenChange={setProjectMenuOpen}>
           <Tooltip.Root>
             <Tooltip.Trigger
@@ -1283,12 +1541,22 @@ export const LocalProjectItem = memo(function LocalProjectItem({
             />
             {formattedPath || trimmedMachineName || collapsedActivityDescription ? (
               <Tooltip.Content side="right" align="start" className="max-w-[420px] break-all">
-                <div className={cn(SIDEBAR_HELPER_TEXT_CLASS, 'flex flex-col gap-0.5')}>
+                <div
+                  className={clsx(
+                    SIDEBAR_HELPER_TEXT_CLASS,
+                    stylex.props(appStyles.tooltipLines).className
+                  )}
+                >
                   {trimmedMachineName ? (
-                    <span className="text-muted-foreground">{trimmedMachineName}</span>
+                    <span {...stylex.props(appStyles.muted)}>{trimmedMachineName}</span>
                   ) : null}
                   {formattedPath ? (
-                    <span className={cn(SIDEBAR_CAPTION_TEXT_CLASS, 'font-mono')}>
+                    <span
+                      className={clsx(
+                        SIDEBAR_CAPTION_TEXT_CLASS,
+                        stylex.props(appStyles.mono).className
+                      )}
+                    >
                       {formattedPath}
                     </span>
                   ) : null}
@@ -1433,15 +1701,12 @@ export const LocalProjectItem = memo(function LocalProjectItem({
               className={cn(
                 // Same 30px pitch as a conversation row (py-1 + 1px borders + 20px line).
                 SIDEBAR_CAPTION_TEXT_CLASS,
-                'flex h-[30px] select-none items-center gap-2 rounded-md px-2 text-left text-sidebar-foreground-muted/80',
-                'transition-colors',
-                'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
-                'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'
+                stylex.props(appStyles.showMore, appStyles.noFocusRing).className
               )}
               aria-label={toggleListLabel}
               onClick={() => onToggleFullList(groupKey)}
             >
-              <span className="flex h-4 w-4 items-center justify-center" aria-hidden="true" />
+              <span {...stylex.props(appStyles.glyphBox16)} aria-hidden="true" />
               <span>{toggleListLabel}</span>
             </button>
           ) : null}
@@ -1472,7 +1737,7 @@ const SortableLocalProjectItem = memo(
       <button
         type="button"
         ref={setActivatorNodeRef}
-        className={cn(hoverActionClassName, 'cursor-grab touch-none active:cursor-grabbing')}
+        className={clsx(hoverActionClassName, stylex.props(appStyles.dragHandle).className)}
         aria-label={t('sidebar.localProjects.reorder', 'Reorder project')}
         {...attributes}
         {...listeners}
@@ -1481,7 +1746,7 @@ const SortableLocalProjectItem = memo(
           event.stopPropagation();
         }}
       >
-        <GripVertical className="h-3.5 w-3.5" />
+        <GripVertical {...stylex.props(appStyles.glyph14)} />
       </button>
     ) : undefined;
 
@@ -1492,7 +1757,7 @@ const SortableLocalProjectItem = memo(
           transform: CSS.Transform.toString(constrainedTransform),
           transition,
         }}
-        className={cn('w-full', isDragging && 'z-10 opacity-60')}
+        className={stylex.props(appStyles.sortable, isDragging && appStyles.dragging).className}
         data-local-project-sortable-id={sortableId}
       >
         <LocalProjectItem {...props} dragHandle={dragHandle} />
@@ -2957,23 +3222,20 @@ export function LoroAppSidebar({
                   void handleImportLocalProject();
                 }}
               >
-                <FolderPlus className="h-4 w-4" strokeWidth={1.5} />
+                <FolderPlus {...stylex.props(appStyles.glyph16)} strokeWidth={1.5} />
               </Button>
             ) : undefined;
           const headerAction =
             dividerRight || headerFilter ? (
-              <div className="flex items-center gap-1">
+              <div {...stylex.props(appStyles.headerActions)}>
                 {dividerRight}
                 {headerFilter}
               </div>
             ) : undefined;
 
           return (
-            <div
-              key={section.sectionKey}
-              className={cn('space-y-0.5', SIDEBAR_TOP_GROUP_SPACING(sectionCollapsed))}
-            >
-              <div>
+            <div key={section.sectionKey} className={SIDEBAR_TOP_GROUP_SPACING(sectionCollapsed)}>
+              <div {...stylex.props(appStyles.projectListSpacing)}>
                 {/* No icon: a machine group reads like GitHub Worktrees and
                     Chats. "Offline" marks the exception, and hovering the
                     header tells what the group is (owner, status, OS). */}
@@ -2997,8 +3259,8 @@ export function LoroAppSidebar({
                     </SidebarMachineHoverCard>
                   )}
                   label={
-                    <span className="inline-flex min-w-0 items-center gap-1.5">
-                      <span className="min-w-0 truncate">{section.sectionLabel}</span>
+                    <span {...stylex.props(appStyles.sectionLabel)}>
+                      <span {...stylex.props(appStyles.clipped)}>{section.sectionLabel}</span>
                       {section.machineId && section.kind === 'remote' ? (
                         <SidebarMachineOfflinePill machineId={section.machineId} />
                       ) : null}
@@ -3414,7 +3676,10 @@ export function LoroAppSidebar({
   // section in Workspace mode.
   const sidebarChatsContent = showChats ? (
     <SessionList
-      className={chatsCollapsed ? 'mb-1' : 'mb-3'}
+      className={
+        stylex.props(chatsCollapsed ? appStyles.groupCollapsedSpacing : appStyles.chatsOpenSpacing)
+          .className
+      }
       sessions={workspaceChatSessions}
       repos={[]}
       isLoading={sessionsListLoading}
@@ -3748,7 +4013,8 @@ export function LoroAppSidebar({
     <FocusScope
       id={WORKSPACE_FOCUS_SCOPES.sidebar}
       className={cn(
-        'relative flow-root bg-background data-[scope-active]:ring-2 data-[scope-active]:ring-ring/30 data-[scope-active]:ring-inset',
+        stylex.props(appStyles.focusScope).className,
+        'data-[scope-active]:ring-2 data-[scope-active]:ring-ring/30 data-[scope-active]:ring-inset',
         className
       )}
     >
@@ -3765,8 +4031,11 @@ export function LoroAppSidebar({
       {!isMobile ? <WindowDragStrip /> : null}
       <LoroSidebar
         className={cn(
-          isMobile ? 'h-full w-full' : 'h-full w-full bg-sidebar',
-          isElectron && !isElectronFullscreen && 'z-20'
+          stylex.props(
+            appStyles.shellFill,
+            !isMobile && appStyles.desktopFill,
+            isElectron && !isElectronFullscreen && appStyles.electronShell
+          ).className
         )}
         workspaceName={resolvedWorkspaceName}
         userEmail={user?.email ?? ''}

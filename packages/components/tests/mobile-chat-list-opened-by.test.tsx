@@ -122,26 +122,31 @@ describe('mobile chat list opened-by tree', () => {
   it('indents an opened session by widening its leading slot, not the row', async () => {
     const list = await render(makeOpenerItems());
     const slot = (row: HTMLElement) =>
-      row.querySelector<HTMLElement>('[data-conversation-row-leading-slot]')?.className ?? '';
+      row
+        .querySelector<HTMLElement>('[data-conversation-row-leading-slot]')
+        ?.getAttribute('data-conversation-row-slot') ?? '';
     // The node must not move: only the slot after it widens (16px -> 32px), so
     // the opener, its opened Sessions, and unrelated rows share one node x
     // while the content indents.
-    expect(slot(list[0]!)).toContain('w-4');
-    expect(slot(list[4]!)).toContain('w-4');
-    expect(slot(list[1]!)).toContain('w-8');
-    expect(slot(list[1]!)).toContain('justify-start');
-    // Every row keeps the flat px-4; nothing shifts the row background.
-    for (const row of list) expect(row.className).toContain('px-4');
+    expect(slot(list[0]!)).toBe('flat');
+    expect(slot(list[4]!)).toBe('flat');
+    expect(slot(list[1]!)).toBe('nested');
+    // Every row keeps the flat indent; nothing shifts the row background.
+    for (const row of list) {
+      expect(row.getAttribute('data-conversation-row-indent')).toBe('flat');
+    }
   });
 
   it('keeps the flat DOM in a bucket with no nesting', async () => {
     // The regression that matters most: an ordinary list must not change shape
     // just because the feature exists.
     const list = await render([makeItem({ id: 'a' }), makeItem({ id: 'b' })]);
-    expect(list[0]?.className).toContain('px-4');
+    expect(list[0]?.getAttribute('data-conversation-row-indent')).toBe('flat');
     expect(
-      list[0]?.querySelector('[data-conversation-row-leading-slot]')?.className
-    ).toContain('w-4');
+      list[0]
+        ?.querySelector('[data-conversation-row-leading-slot]')
+        ?.getAttribute('data-conversation-row-slot')
+    ).toBe('flat');
     expect(toggleFor(list[0]!)).toBeNull();
   });
 
@@ -168,8 +173,10 @@ describe('mobile chat list opened-by tree', () => {
     expect(isNested(list[2]!)).toBe(true);
     // It still indents — losing the lines must not also lose the hierarchy.
     expect(
-      list[1]?.querySelector('[data-conversation-row-leading-slot]')?.className
-    ).toContain('w-8');
+      list[1]
+        ?.querySelector('[data-conversation-row-leading-slot]')
+        ?.getAttribute('data-conversation-row-slot')
+    ).toBe('nested');
   });
 
   it('gives an ACTIVE opener its status instead of the fold control', async () => {
@@ -227,13 +234,14 @@ describe('mobile chat list opened-by tree', () => {
   it('stops the connector trunk at the last opened session', async () => {
     const list = await render(makeOpenerItems());
     const trunkOf = (row: HTMLElement) =>
-      row.querySelector('[data-conversation-tree-connector] > span')?.className ?? '';
+      row
+        .querySelector('[data-conversation-tree-connector] > span')
+        ?.getAttribute('data-tree-trunk') ?? '';
     // Middle children carry the trunk into the next row; the last one ends it
     // at the elbow so it does not dangle past the group.
-    expect(trunkOf(list[1]!)).toContain('bottom-0');
-    expect(trunkOf(list[2]!)).toContain('bottom-0');
-    expect(trunkOf(list[3]!)).toContain('h-1/2');
-    expect(trunkOf(list[3]!)).not.toContain('bottom-0');
+    expect(trunkOf(list[1]!)).toBe('full');
+    expect(trunkOf(list[2]!)).toBe('full');
+    expect(trunkOf(list[3]!)).toBe('last');
   });
 
   it('keeps a session whose opener is missing from this list at top level', async () => {

@@ -1,3 +1,6 @@
+import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontSize, themeLineHeight, themeSpace } from '../../style/theme-scale.stylex';
 import { useEffect, useState } from 'react';
 import { FileText } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
@@ -67,13 +70,8 @@ export function ProjectFileBrowser({
   }, [provider, selectedPath, t]);
 
   return (
-    <div
-      className={cn(
-        'grid min-h-[440px] grid-cols-1 overflow-hidden md:grid-cols-[280px_minmax(0,1fr)]',
-        className
-      )}
-    >
-      <div className="min-h-0 border-b border-border/60 md:border-b-0 md:border-r">
+    <div className={cn(stylex.props(styles.root).className, className)}>
+      <div {...stylex.props(styles.tree)}>
         <FileTreeProviderView
           fileProvider={provider}
           fileProviderPending={pending}
@@ -91,8 +89,8 @@ function ProjectFileContent({ content }: { readonly content: FileContentState })
 
   if (content.status === 'idle') {
     return (
-      <div className="flex min-h-0 flex-col items-center justify-center gap-2 p-6 text-center text-sm text-muted-foreground">
-        <FileText className="h-5 w-5" />
+      <div {...stylex.props(styles.empty)}>
+        <FileText {...stylex.props(styles.fileIcon)} />
         {t('workspace.projects.selectFilePrompt', 'Select a file to preview it.')}
       </div>
     );
@@ -100,8 +98,8 @@ function ProjectFileContent({ content }: { readonly content: FileContentState })
 
   if (content.status === 'loading') {
     return (
-      <div className="flex min-h-0 items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
-        <Spinner className="h-4 w-4" />
+      <div {...stylex.props(styles.loading)}>
+        <Spinner {...stylex.props(styles.spinner)} />
         {t('workspace.projects.loadingFile', 'Loading file')}
       </div>
     );
@@ -109,8 +107,8 @@ function ProjectFileContent({ content }: { readonly content: FileContentState })
 
   if (content.status === 'error') {
     return (
-      <div className="flex min-h-0 flex-col items-center justify-center gap-2 p-6 text-center text-sm text-destructive">
-        <FileText className="h-5 w-5" />
+      <div {...stylex.props(styles.error)}>
+        <FileText {...stylex.props(styles.fileIcon)} />
         <span>{content.message}</span>
       </div>
     );
@@ -118,23 +116,103 @@ function ProjectFileContent({ content }: { readonly content: FileContentState })
 
   if (content.snapshot.kind !== 'text') {
     return (
-      <div className="flex min-h-0 flex-col items-center justify-center gap-2 p-6 text-center text-sm text-muted-foreground">
-        <FileText className="h-5 w-5" />
+      <div {...stylex.props(styles.empty)}>
+        <FileText {...stylex.props(styles.fileIcon)} />
         {t('workspace.projects.binaryPreviewUnavailable', 'Preview is unavailable for this file.')}
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-0 flex-col">
-      <div className="border-b border-border/60 px-3 py-2 font-mono text-xs text-muted-foreground">
-        {content.path}
-      </div>
-      <ScrollArea className="min-h-0 flex-1">
-        <pre className="min-h-full whitespace-pre-wrap break-words p-3 font-mono text-xs leading-5 text-foreground">
-          {content.snapshot.text}
-        </pre>
+    <div {...stylex.props(styles.content)}>
+      <div {...stylex.props(styles.path)}>{content.path}</div>
+      <ScrollArea {...stylex.props(styles.scroller)}>
+        <pre {...stylex.props(styles.text)}>{content.snapshot.text}</pre>
       </ScrollArea>
     </div>
   );
 }
+
+const styles = stylex.create({
+  root: {
+    display: 'grid',
+    minHeight: '440px',
+    gridTemplateColumns: {
+      default: 'minmax(0, 1fr)',
+      '@media (min-width: 768px)': '280px minmax(0, 1fr)',
+    },
+    overflow: 'hidden',
+  },
+  tree: {
+    minHeight: 0,
+    borderBottomWidth: { default: 1, '@media (min-width: 768px)': 0 },
+    borderBottomStyle: 'solid',
+    borderRightWidth: { default: 0, '@media (min-width: 768px)': 1 },
+    borderRightStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.6)',
+  },
+  empty: {
+    display: 'flex',
+    minHeight: 0,
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: themeSpace[2],
+    padding: themeSpace[6],
+    textAlign: 'center',
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.mutedForeground,
+  },
+  loading: {
+    display: 'flex',
+    minHeight: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: themeSpace[2],
+    padding: themeSpace[6],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.mutedForeground,
+  },
+  error: {
+    display: 'flex',
+    minHeight: 0,
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: themeSpace[2],
+    padding: themeSpace[6],
+    textAlign: 'center',
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.destructive,
+  },
+  fileIcon: { width: themeSpace[5], height: themeSpace[5] },
+  spinner: { width: themeSpace[4], height: themeSpace[4] },
+  content: { display: 'flex', minHeight: 0, flexDirection: 'column' },
+  path: {
+    borderBottomWidth: 1,
+    borderBottomStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.6)',
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2],
+    fontFamily: 'var(--font-mono)',
+    fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+  scroller: { minHeight: 0, flex: '1 1 0%' },
+  text: {
+    minHeight: '100%',
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'break-word',
+    padding: themeSpace[3],
+    fontFamily: 'var(--font-mono)',
+    fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
+    fontSize: themeFontSize.xs,
+    lineHeight: themeSpace[5],
+    color: themeColors.foreground,
+  },
+});

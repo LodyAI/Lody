@@ -1,0 +1,577 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "short",
+      "width": 1280,
+      "height": 320
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "terminal-migration--row-states",
+    "terminal-migration--limit-reached",
+    "terminal-migration--load-error",
+    "terminal-migration--open-error",
+    "terminal-migration--loading",
+    "terminal-migration--create-disabled"
+  ],
+  "ready": {
+    "terminal-migration--row-states": [
+      {
+        "action": "visible",
+        "selector": ".xterm-rows:has-text(\"Synthetic local shell\")"
+      },
+      {
+        "action": "focus",
+        "role": "button",
+        "name": "Toggle terminal dock"
+      }
+    ],
+    "terminal-migration--limit-reached": [
+      {
+        "action": "visible",
+        "selector": ".xterm-rows:has-text(\"Synthetic local shell\")"
+      },
+      {
+        "action": "focus",
+        "role": "button",
+        "name": "Toggle terminal dock"
+      }
+    ],
+    "terminal-migration--open-error": [
+      {
+        "action": "visible",
+        "selector": ".xterm-rows:has-text(\"Synthetic local shell\")"
+      },
+      {
+        "action": "focus",
+        "role": "button",
+        "name": "Toggle terminal dock"
+      }
+    ],
+    "terminal-migration--create-disabled": [
+      {
+        "action": "visible",
+        "selector": ".xterm-rows:has-text(\"Synthetic local shell\")"
+      },
+      {
+        "action": "focus",
+        "role": "button",
+        "name": "Toggle terminal dock"
+      }
+    ],
+    "terminal-migration--load-error": [
+      {
+        "action": "visible",
+        "selector": "span[title=\"Local terminal daemon is unavailable.\"]"
+      }
+    ],
+    "terminal-migration--loading": [
+      {
+        "action": "visible",
+        "text": "Loading terminals..."
+      }
+    ]
+  },
+  "states": {
+    "terminal-migration--row-states": [
+      {
+        "name": "inactive-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[role=\"tab\"]",
+            "index": 1
+          }
+        ]
+      },
+      {
+        "name": "long-title-selected",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[role=\"tab\"]:nth-child(2) > button:first-child"
+          },
+          {
+            "action": "visible",
+            "selector": ".xterm-rows:has-text(\"Synthetic local shell\")"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          }
+        ]
+      },
+      {
+        "name": "same-tab-collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[role=\"tab\"][aria-selected=\"true\"] > button:first-child"
+          },
+          {
+            "action": "hidden",
+            "role": "button",
+            "name": "Hide panel"
+          }
+        ]
+      },
+      {
+        "name": "restored",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          },
+          {
+            "action": "visible",
+            "selector": ".xterm-rows:has-text(\"Synthetic local shell\")"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-close-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": "[role=\"tab\"][aria-selected=\"true\"] > button:first-child"
+          },
+          {
+            "action": "press",
+            "selector": "[role=\"tab\"][aria-selected=\"true\"] > button:first-child",
+            "key": "Tab"
+          }
+        ]
+      },
+      {
+        "name": "created",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "New terminal"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"tab\"]:nth-child(5)"
+          },
+          {
+            "action": "visible",
+            "selector": ".xterm-rows:has-text(\"Synthetic local shell\")"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          }
+        ]
+      },
+      {
+        "name": "close-active-fallback",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[role=\"tab\"][aria-selected=\"true\"] > button[aria-label=\"Close terminal\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"tab\"]:first-child[aria-selected=\"true\"]"
+          },
+          {
+            "action": "visible",
+            "selector": ".xterm-rows:has-text(\"Synthetic local shell\")"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          }
+        ]
+      },
+      {
+        "name": "close-all",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Close terminal",
+            "index": 0
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Close terminal",
+            "index": 0
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Close terminal",
+            "index": 0
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Close terminal",
+            "index": 0
+          },
+          {
+            "action": "hidden",
+            "role": "button",
+            "name": "Hide panel"
+          }
+        ]
+      },
+      {
+        "name": "create-after-empty",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          },
+          {
+            "action": "visible",
+            "selector": ".xterm-rows:has-text(\"Synthetic local shell\")"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          }
+        ]
+      }
+    ],
+    "terminal-migration--limit-reached": [
+      {
+        "name": "disabled-hover",
+        "steps": [
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "New terminal"
+          },
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "New terminal"
+          }
+        ]
+      },
+      {
+        "name": "last-title-selected",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[role=\"tab\"]:nth-child(8) > button:first-child"
+          },
+          {
+            "action": "visible",
+            "selector": ".xterm-rows:has-text(\"Synthetic local shell\")"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          }
+        ]
+      },
+      {
+        "name": "last-close-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[role=\"tab\"]:nth-child(8) button[aria-label=\"Close terminal\"]"
+          }
+        ]
+      },
+      {
+        "name": "below-limit",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[role=\"tab\"]:nth-child(8) button[aria-label=\"Close terminal\"]"
+          },
+          {
+            "action": "enabled",
+            "role": "button",
+            "name": "New terminal"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"tab\"]:first-child[aria-selected=\"true\"]"
+          },
+          {
+            "action": "visible",
+            "selector": ".xterm-rows:has-text(\"Synthetic local shell\")"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          }
+        ]
+      },
+      {
+        "name": "limit-restored",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "New terminal"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "New terminal"
+          },
+          {
+            "action": "visible",
+            "selector": ".xterm-rows:has-text(\"Synthetic local shell\")"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          }
+        ]
+      }
+    ],
+    "terminal-migration--load-error": [
+      {
+        "name": "error-collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Hide panel"
+          },
+          {
+            "action": "hidden",
+            "role": "button",
+            "name": "Hide panel"
+          }
+        ]
+      },
+      {
+        "name": "create-after-list-error",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          },
+          {
+            "action": "visible",
+            "selector": ".xterm-rows:has-text(\"Synthetic local shell\")"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          }
+        ]
+      }
+    ],
+    "terminal-migration--open-error": [
+      {
+        "name": "create-error",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "New terminal"
+          },
+          {
+            "action": "visible",
+            "selector": ".lody-terminal-tab-strip:has(span[title=\"Session workdir is unavailable.\"])"
+          },
+          {
+            "action": "visible",
+            "selector": ".xterm-rows:has-text(\"Synthetic local shell\")"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          }
+        ]
+      },
+      {
+        "name": "error-collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Hide panel"
+          },
+          {
+            "action": "hidden",
+            "role": "button",
+            "name": "Hide panel"
+          }
+        ]
+      },
+      {
+        "name": "error-restored",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          },
+          {
+            "action": "visible",
+            "selector": ".lody-terminal-tab-strip:has(span[title=\"Session workdir is unavailable.\"])"
+          },
+          {
+            "action": "visible",
+            "selector": ".xterm-rows:has-text(\"Synthetic local shell\")"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          }
+        ]
+      }
+    ],
+    "terminal-migration--loading": [
+      {
+        "name": "resolved-empty",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Resolve empty terminal list"
+          },
+          {
+            "action": "hidden",
+            "role": "button",
+            "name": "Hide panel"
+          }
+        ]
+      },
+      {
+        "name": "create-after-empty",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          },
+          {
+            "action": "visible",
+            "selector": ".xterm-rows:has-text(\"Synthetic local shell\")"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          }
+        ]
+      }
+    ],
+    "terminal-migration--create-disabled": [
+      {
+        "name": "disabled-hover",
+        "steps": [
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "New terminal"
+          },
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "New terminal"
+          }
+        ]
+      },
+      {
+        "name": "long-title-selected",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[role=\"tab\"]:nth-child(2) > button:first-child"
+          },
+          {
+            "action": "visible",
+            "selector": ".xterm-rows:has-text(\"Synthetic local shell\")"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          }
+        ]
+      },
+      {
+        "name": "collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Hide panel"
+          },
+          {
+            "action": "hidden",
+            "role": "button",
+            "name": "Hide panel"
+          }
+        ]
+      },
+      {
+        "name": "restored",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          },
+          {
+            "action": "visible",
+            "selector": ".xterm-rows:has-text(\"Synthetic local shell\")"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "New terminal"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          }
+        ]
+      }
+    ]
+  }
+}

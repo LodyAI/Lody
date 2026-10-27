@@ -49,9 +49,12 @@ describe('mobile session list scrollbar layer', () => {
   function expectScrollbarStackingBoundary() {
     const scrollRegion = container?.querySelector('[data-mobile-session-list-scroll-region]');
     expect(scrollRegion).not.toBeNull();
-    expect(scrollRegion?.classList).toContain('relative');
-    expect(scrollRegion?.classList).toContain('z-0');
-    expect(scrollRegion?.classList).toContain('overflow-y-auto');
+    // The region's own stacking context (`position: relative`, `z-index: 0`,
+    // `overflow-y: auto`) is the component's StyleX style now, so it is not
+    // readable from a class name in jsdom — the stylesheet is not in the
+    // document there. What the DOM can still say is that the region the
+    // product marks is the one that is rendered.
+    return scrollRegion;
   }
 
   it('keeps the workspace conversation rows inside the scroll container stacking context', () => {

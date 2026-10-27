@@ -1,0 +1,140 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844,
+      "device": "iPhone 13"
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 720,
+      "device": "iPhone SE"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "ids": [
+    "sessions-sessioninfobar--owned-colours",
+    "sessions-sessioninfobar--owned-compact-colours",
+    "sessions-sessioninfobar--owned-root-palette",
+    "sessions-sessioninfobar--owned-subtree-palette",
+    "sessions-sessioninfobar--owned-nested-themes",
+    "sessions-sessioninfobar--context-only",
+    "sessions-sessioninfobar--machine-only",
+    "sessions-sessioninfobar--sync-only",
+    "sessions-sessioninfobar--empty-not-syncing-hidden"
+  ],
+  "ready": {
+    "sessions-sessioninfobar--owned-colours": [
+      {
+        "action": "visible",
+        "selector": "[data-info-bar-owned-result]"
+      }
+    ],
+    "sessions-sessioninfobar--owned-compact-colours": [
+      {
+        "action": "visible",
+        "selector": "[data-info-bar-owned-result]"
+      }
+    ],
+    "sessions-sessioninfobar--owned-root-palette": [
+      {
+        "action": "visible",
+        "selector": "[data-info-bar-owned-result]"
+      }
+    ],
+    "sessions-sessioninfobar--owned-subtree-palette": [
+      {
+        "action": "visible",
+        "selector": "[data-info-bar-owned-result]"
+      }
+    ],
+    "sessions-sessioninfobar--owned-nested-themes": [
+      {
+        "action": "visible",
+        "selector": "[data-info-bar-owned-result]"
+      }
+    ],
+    "sessions-sessioninfobar--context-only": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => window.__STORYBOOK_PREVIEW__?.currentRender?.phase === \"finished\""
+      }
+    ],
+    "sessions-sessioninfobar--machine-only": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => window.__STORYBOOK_PREVIEW__?.currentRender?.phase === \"finished\""
+      }
+    ],
+    "sessions-sessioninfobar--sync-only": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => window.__STORYBOOK_PREVIEW__?.currentRender?.phase === \"finished\""
+      }
+    ],
+    "sessions-sessioninfobar--empty-not-syncing-hidden": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => window.__STORYBOOK_PREVIEW__?.currentRender?.phase === \"finished\""
+      }
+    ]
+  },
+  "states": {
+    "sessions-sessioninfobar--owned-colours": [
+      {
+        "name": "privacy-pointer",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"Only synthetic owner can access this session\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"[data-info-bar-owned-result]\")?.textContent === \"Privacy action\""
+          }
+        ]
+      },
+      {
+        "name": "browser-pointer",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"Open preview\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"[data-info-bar-owned-result]\")?.textContent === \"Browser action\""
+          }
+        ]
+      },
+      {
+        "name": "simulator-keyboard",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "button[aria-label=\"iOS Simulator\"]"
+          },
+          {
+            "action": "press",
+            "selector": "button[aria-label=\"iOS Simulator\"]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"[data-info-bar-owned-result]\")?.textContent === \"Simulator action\""
+          }
+        ]
+      }
+    ]
+  },
+  "allowBlankIds": ["sessions-sessioninfobar--empty-not-syncing-hidden"]
+}

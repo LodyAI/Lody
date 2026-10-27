@@ -2,8 +2,64 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowDown, Check } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { withClassName } from '@/lib/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeDuration,
+  themeEasing,
+  themeFontWeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 import type { LodyConnectionUiState } from '@/atoms/control-connection';
+
+const styles = stylex.create({
+  root: { display: 'flex', minWidth: 0, alignItems: 'center', justifyContent: 'center' },
+  pill: {
+    pointerEvents: 'none',
+    display: 'flex',
+    maxWidth: '100%',
+    alignItems: 'center',
+    borderRadius: themeRadius.full,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.6)',
+    backgroundColor: 'hsl(var(--card) / 0.9)',
+    paddingInline: themeSpace[2.5],
+    paddingBlock: themeSpace[1],
+    backdropFilter: 'blur(8px)',
+    boxShadow: '0 1px 2px rgba(0,0,0,0.05), 0 10px 28px -14px rgba(0,0,0,0.28)',
+  },
+  content: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    fontSize: '0.8rem',
+    fontWeight: themeFontWeight.medium,
+  },
+  muted: { color: themeColors.mutedForeground },
+  success: { color: themeColors.statusSuccess },
+  danger: { color: themeColors.statusDanger },
+  glyph: { width: themeSpace[3.5], height: themeSpace[3.5] },
+  pullGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    transitionProperty: 'transform, translate, scale, rotate',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  offlineDot: {
+    display: 'inline-block',
+    width: themeSpace[1.5],
+    height: themeSpace[1.5],
+    borderRadius: themeRadius.full,
+    backgroundColor: themeColors.statusDanger,
+  },
+  label: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+});
 
 /**
  * Mobile-only home-header status indicator, rendered as a PILL.
@@ -81,7 +137,7 @@ type StatusContent = {
   key: string;
   icon: ReactNode;
   label: string;
-  textColor: string;
+  textStyle: stylex.StyleXStyles;
   /** Pull-hint content — not announced to assistive tech (it mirrors the
       visible drag gesture, which a screen-reader user isn't performing). */
   pull?: boolean;
@@ -107,14 +163,14 @@ function contentFor(
       key: 'pull',
       icon: (
         <ArrowDown
-          className="h-3.5 w-3.5 shrink-0 transition-transform duration-150"
+          {...stylex.props(styles.pullGlyph)}
           strokeWidth={2}
           style={{ transform: pull.pastThreshold ? 'rotate(180deg)' : 'rotate(0deg)' }}
           aria-hidden="true"
         />
       ),
       label: pull.label,
-      textColor: 'text-muted-foreground',
+      textStyle: styles.muted,
       pull: true,
     };
   }
@@ -127,15 +183,15 @@ function contentFor(
       key: 'refreshing',
       icon: <Spinner className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />,
       label: labels.refreshing ?? '刷新中…',
-      textColor: 'text-muted-foreground',
+      textStyle: styles.muted,
     };
   }
   if (showRecovery) {
     return {
       key: 'recovered',
-      icon: <Check className="h-3.5 w-3.5" strokeWidth={2.4} aria-hidden="true" />,
+      icon: <Check {...stylex.props(styles.glyph)} strokeWidth={2.4} aria-hidden="true" />,
       label: labels.recovered ?? '已连接',
-      textColor: 'text-status-success',
+      textStyle: styles.success,
     };
   }
   if (state === 'reconnecting') {
@@ -143,7 +199,7 @@ function contentFor(
       key: 'reconnecting',
       icon: <Spinner className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />,
       label: labels.reconnecting ?? '正在重连…',
-      textColor: 'text-muted-foreground',
+      textStyle: styles.muted,
     };
   }
   if (state === 'loading') {
@@ -151,20 +207,15 @@ function contentFor(
       key: 'loading',
       icon: <Spinner className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />,
       label: labels.loading ?? '连接中…',
-      textColor: 'text-muted-foreground',
+      textStyle: styles.muted,
     };
   }
   if (state === 'offline') {
     return {
       key: 'offline',
-      icon: (
-        <span
-          className="inline-block h-1.5 w-1.5 rounded-full bg-status-danger"
-          aria-hidden="true"
-        />
-      ),
+      icon: <span {...stylex.props(styles.offlineDot)} aria-hidden="true" />,
       label: labels.offline ?? '离线',
-      textColor: 'text-status-danger',
+      textStyle: styles.danger,
     };
   }
   return null;
@@ -223,11 +274,7 @@ export function MobileConnectionStatus({
   const content = contentFor(state, showRecovery, refreshing, pull, labels);
 
   return (
-    <div
-      className={cn('flex min-w-0 items-center justify-center', className)}
-      role="status"
-      aria-live="polite"
-    >
+    <div {...withClassName(stylex.props(styles.root), className)} role="status" aria-live="polite">
       {/* Outer AnimatePresence mounts/unmounts the pill itself so it
           springs in on appear and out on disappear. */}
       <AnimatePresence initial={false}>
@@ -238,13 +285,7 @@ export function MobileConnectionStatus({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -6, scale: 0.9 }}
             transition={PILL_TRANSITION}
-            className={cn(
-              /* `pointer-events-none`: the pill is purely informational, so
-                 it never swallows a tap aimed at the chrome around it. */
-              'pointer-events-none flex max-w-full items-center rounded-full',
-              'border border-border/60 bg-card/90 px-2.5 py-1 backdrop-blur',
-              'shadow-[0_1px_2px_rgba(0,0,0,0.05),0_10px_28px_-14px_rgba(0,0,0,0.28)]'
-            )}
+            {...stylex.props(styles.pill)}
           >
             {/* Inner cross-fade (`mode="wait"`) so content swaps — loader →
                 ✓, or status ⇄ pull hint — read as a smooth transition
@@ -256,14 +297,11 @@ export function MobileConnectionStatus({
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 2 }}
                 transition={CONTENT_TRANSITION}
-                className={cn(
-                  'flex min-w-0 items-center gap-1.5 text-[0.8rem] font-medium',
-                  content.textColor
-                )}
+                {...stylex.props(styles.content, content.textStyle)}
                 aria-hidden={content.pull ? 'true' : undefined}
               >
                 {content.icon}
-                <span className="truncate">{content.label}</span>
+                <span {...stylex.props(styles.label)}>{content.label}</span>
               </motion.div>
             </AnimatePresence>
           </motion.div>

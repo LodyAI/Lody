@@ -9,11 +9,15 @@ import {
 import { PopupContainerProvider } from '@lody/ui/popup-container';
 import { AnimatePresence, motion } from 'framer-motion';
 import { X } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { MobileInlinePickerRowSlot } from '@/components/mobile/mobile-inline-picker';
 import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
-import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
+import { sheetSurface } from './sheet-surface';
 
 export type MobileNewChatSheetLabels = {
   title?: string;
@@ -78,6 +82,94 @@ export type MobileNewChatSheetContentProps = {
   scrollAreaStyle?: CSSProperties;
 };
 
+const styles = stylex.create({
+  /** The sheet's column. */
+  root: {
+    display: 'flex',
+    minHeight: 0,
+    maxHeight: '100%',
+    flexDirection: 'column',
+    backgroundColor: themeColors.background,
+    color: themeColors.foreground,
+  },
+  /** The sheet's title. */
+  title: { userSelect: 'none' },
+  /** The close chip in the header's corner. */
+  closeChip: { WebkitAppRegion: 'no-drag' },
+  /** The sheet's description, under the header. */
+  description: {
+    paddingInline: themeSpace[4],
+    paddingBottom: themeSpace[1],
+    fontSize: '0.75rem',
+    lineHeight: 'calc(1 / 0.75)',
+    color: themeColors.mutedForeground,
+  },
+  /** The scrolling area. */
+  scroll: {
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflowY: 'auto',
+    paddingInline: themeSpace[4],
+    paddingBottom:
+      'calc(12px + max(0px, var(--safe-area-bottom, 0px) - var(--native-keyboard-height, 0px)))',
+  },
+  /** The labelled rows above the composer. */
+  rows: {
+    display: 'flex',
+    flexDirection: 'column',
+    paddingTop: themeSpace[1],
+    paddingBottom: themeSpace[3],
+  },
+  /** A row that animates in and out. */
+  animatedRow: { overflow: 'hidden' },
+  /** The space a row keeps above it. */
+  rowRhythm: { paddingTop: themeSpace[1.5] },
+  /** The space the first row keeps above it — the first one hugs the header. */
+  rowRhythmFirst: {
+    paddingTop: themeSpace[1.5],
+    ':first-child': { paddingTop: 0 },
+  },
+  /** The composer's own space. */
+  composer: { paddingTop: themeSpace[1] },
+  /** The cluster below the composer. */
+  belowComposer: {
+    paddingInline: themeSpace[1],
+    paddingTop: themeSpace[2],
+  },
+  /** A labelled row: the label, then the value column. */
+  row: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'stretch',
+    gap: themeSpace[3],
+    paddingInline: themeSpace[3],
+    paddingTop: themeSpace[1.5],
+    paddingBottom: themeSpace[1.5],
+    borderRadius: themeRadius.xl,
+    backgroundColor: themeColors.card,
+    boxShadow: '0 0 0 1px hsl(var(--border) / 0.6)',
+  },
+  /** The label column: a fixed width, so every value starts at the same x. */
+  rowLabel: {
+    width: '4rem',
+    flexShrink: 0,
+    alignSelf: 'center',
+    fontSize: '0.72rem',
+    fontWeight: themeFontWeight.semibold,
+    letterSpacing: '0.025em',
+    color: themeColors.mutedForeground,
+  },
+  /** The value column. */
+  rowValue: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+  },
+});
+
 /**
  * Bottom sheet that hosts the "new chat" composer flow on mobile home.
  *
@@ -117,23 +209,21 @@ export function MobileNewChatSheet({
          own slide-up. Vaul's open/close uses `translate-y`
          (orthogonal property), so the two animations don't fight. */}
       <DrawerContent
-        className={cn(
-          'mobile-new-chat-sheet',
-          'h-auto! max-h-[92dvh]! rounded-t-2xl border-border/60',
-          'bottom-[var(--native-keyboard-height,0px)]!'
-        )}
+        className="mobile-new-chat-sheet h-auto! max-h-[92dvh]! rounded-t-2xl border-border/60 bottom-[var(--native-keyboard-height,0px)]!"
         style={{
           transition: 'bottom 320ms cubic-bezier(0.32, 0.72, 0, 1)',
           willChange: 'bottom',
         }}
       >
-        <DrawerTitle className="sr-only">{title}</DrawerTitle>
-        <DrawerDescription className="sr-only">{description ?? title}</DrawerDescription>
+        <DrawerTitle {...stylex.props(sheetSurface.srOnly)}>{title}</DrawerTitle>
+        <DrawerDescription {...stylex.props(sheetSurface.srOnly)}>
+          {description ?? title}
+        </DrawerDescription>
         <PopupContainerProvider container={popupContainer}>
           <MobileNewChatSheetContent
             {...contentProps}
             onClose={() => onOpenChange(false)}
-            className={cn('max-h-full', contentProps.className)}
+            className={contentProps.className}
           />
         </PopupContainerProvider>
         {/* Stay inside Vaul's modal boundary, outside the scrolling content.
@@ -174,47 +264,36 @@ export function MobileNewChatSheetContent({
   useKeyboardAwareScrollIntoView(scrollRef);
 
   return (
-    <div className={cn('flex min-h-0 flex-col bg-background text-foreground', className)}>
-      <header className="relative flex items-center px-4 pb-2 pt-2">
-        <h2 className="mx-auto select-none text-[0.95rem] font-semibold tracking-tight">{title}</h2>
+    <div {...withClassName(stylex.props(styles.root), className)}>
+      <header {...stylex.props(sheetSurface.header)}>
+        <h2 {...stylex.props(sheetSurface.title, sheetSurface.titleCentered, styles.title)}>
+          {title}
+        </h2>
         {showCloseButton ? (
           <button
             type="button"
             aria-label={closeAriaLabel}
-            className={cn(
-              'absolute right-3 top-1.5 inline-flex h-9 w-9 items-center justify-center rounded-full',
-              'text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground',
-              '[-webkit-app-region:no-drag]'
+            {...stylex.props(
+              sheetSurface.iconButton,
+              sheetSurface.iconButtonRight,
+              styles.closeChip
             )}
             onClick={onClose}
           >
-            <X className="h-5 w-5" aria-hidden="true" strokeWidth={1.8} />
+            <X {...stylex.props(sheetSurface.glyph20)} aria-hidden="true" strokeWidth={1.8} />
           </button>
         ) : null}
       </header>
-      <p className={cn(description ? 'px-4 pb-1 text-xs text-muted-foreground' : 'sr-only')}>
-        {description ?? title}
-      </p>
+      {description ? (
+        <p {...stylex.props(styles.description)}>{description}</p>
+      ) : (
+        <p {...stylex.props(sheetSurface.srOnly)}>{title}</p>
+      )}
 
       <Coordinator>
         <div
           ref={scrollRef}
-          className={cn(
-            'min-h-0 flex-1 overflow-y-auto px-4',
-            /* Bottom padding is keyboard-aware: when the soft
-               keyboard is down, we need `safe-area-bottom + 12px`
-               so the last row clears the iOS home indicator. When
-               the keyboard is up, the home indicator is hidden
-               behind the keyboard so the safe-area portion is
-               wasted space — it pushes the picker's bottom-anchored
-               search input ~46px above the keyboard, leaving the
-               visible gap the user reported. `max(safe - keyboard,
-               0)` collapses that portion to 0 as soon as the
-               keyboard rises past the safe area, leaving only the
-               12px breathing buffer. */
-            'pb-[calc(12px+max(0px,var(--safe-area-bottom,0px)-var(--native-keyboard-height,0px)))]',
-            scrollAreaClassName
-          )}
+          {...withClassName(stylex.props(styles.scroll), scrollAreaClassName)}
           /* Cap the scroll container's height to the *visible*
              drawer area: viewport minus the soft keyboard and the
              header. Without this cap the container stretches to
@@ -239,7 +318,7 @@ export function MobileNewChatSheetContent({
              `AnimatePresence` + height-animated wrappers slide the
              rows in / out so the surrounding stack ripples smoothly
              rather than snapping. */}
-          <div className="flex flex-col pb-3 pt-1">
+          <div {...stylex.props(styles.rows)}>
             <AnimatedSheetRow alwaysOn>
               <Row label={machineLabel}>{machineNode}</Row>
             </AnimatedSheetRow>
@@ -265,12 +344,12 @@ export function MobileNewChatSheetContent({
             </AnimatePresence>
           </div>
 
-          <div className="pt-1">{composer}</div>
+          <div {...stylex.props(styles.composer)}>{composer}</div>
 
           {belowComposerNode ? (
             /* Vertical-rhythm wrapper only; the slot owns horizontal
                layout (e.g. agent left vs permission right). */
-            <div className="px-1 pt-2">{belowComposerNode}</div>
+            <div {...stylex.props(styles.belowComposer)}>{belowComposerNode}</div>
           ) : null}
         </div>
       </Coordinator>
@@ -297,7 +376,7 @@ function AnimatedSheetRow({
   alwaysOn?: boolean;
 }) {
   if (alwaysOn) {
-    return <div className="pt-1.5 first:pt-0">{children}</div>;
+    return <div {...stylex.props(styles.rowRhythmFirst)}>{children}</div>;
   }
   return (
     <motion.div
@@ -305,9 +384,9 @@ function AnimatedSheetRow({
       animate={{ height: 'auto', opacity: 1 }}
       exit={{ height: 0, opacity: 0 }}
       transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
-      className="overflow-hidden"
+      {...stylex.props(styles.animatedRow)}
     >
-      <div className="pt-1.5">{children}</div>
+      <div {...stylex.props(styles.rowRhythm)}>{children}</div>
     </motion.div>
   );
 }
@@ -324,7 +403,7 @@ function AnimatedSheetRow({
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <MobileInlinePickerRowSlot>
-      <div className="flex min-w-0 items-stretch gap-3 rounded-xl bg-card px-3 py-1.5 ring-1 ring-border/60">
+      <div {...stylex.props(styles.row)}>
         {/* Fixed-width label column so every row's value column starts
            at the same x regardless of the label's intrinsic width.
            Without this, "Machine" / "Type" / "Project" / "Branch" /
@@ -332,10 +411,8 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
            English (Chinese labels are uniform 2 chars so it accidentally
            lined up before). `w-16` (64px) fits the longest English
            label at 0.72rem without wrapping. */}
-        <span className="w-16 shrink-0 self-center text-[0.72rem] font-semibold tracking-wide text-muted-foreground">
-          {label}
-        </span>
-        <div className="min-w-0 flex-1">{children}</div>
+        <span {...stylex.props(styles.rowLabel)}>{label}</span>
+        <div {...stylex.props(styles.rowValue)}>{children}</div>
       </div>
     </MobileInlinePickerRowSlot>
   );

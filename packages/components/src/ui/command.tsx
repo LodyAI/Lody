@@ -1,10 +1,108 @@
 import * as React from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { Command as CommandPrimitive } from 'cmdk';
 import { Search } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { Dialog } from './dialog';
 import { ScrollArea } from '@lody/ui/scroll-area';
+import { themeColors } from '../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  command: {
+    display: 'flex',
+    height: '100%',
+    width: '100%',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    borderRadius: themeRadius.md,
+    backgroundColor: themeColors.popover,
+    color: themeColors.popoverForeground,
+  },
+  inputWrapper: {
+    display: 'flex',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomStyle: 'solid',
+    borderBottomColor: themeColors.border,
+    paddingInline: themeSpace[3],
+  },
+  searchIcon: {
+    marginRight: themeSpace[2],
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+    opacity: 0.5,
+  },
+  input: {
+    display: 'flex',
+    height: themeSpace[10],
+    width: '100%',
+    borderRadius: themeRadius.md,
+    backgroundColor: 'transparent',
+    paddingBlock: themeSpace[3],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: { default: themeColors.inputForeground, '::placeholder': themeColors.inputPlaceholder },
+    boxShadow: 'none',
+    cursor: { default: null, ':disabled': 'not-allowed' },
+    opacity: { default: null, ':disabled': 0.5 },
+  },
+  listContainer: { maxHeight: 300 },
+  listViewport: {
+    scrollbarGutter: 'auto',
+    maxHeight: 300,
+    overflowY: 'auto',
+    overflowX: 'hidden',
+    touchAction: 'pan-y',
+  },
+  list: { minWidth: '100%' },
+  empty: {
+    paddingBlock: themeSpace[6],
+    textAlign: 'center',
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+  },
+  group: { overflow: 'hidden', padding: themeSpace[1], color: themeColors.foreground },
+  separator: {
+    marginInline: `calc(${themeSpace[1]} * -1)`,
+    height: 1,
+    backgroundColor: themeColors.border,
+  },
+  item: {
+    position: 'relative',
+    display: 'flex',
+    cursor: 'default',
+    gap: themeSpace[2],
+    userSelect: 'none',
+    alignItems: 'center',
+    borderRadius: themeRadius.xs,
+    paddingInline: themeSpace[2],
+    paddingBlock: themeSpace[1.5],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    pointerEvents: { default: null, ':is([data-disabled="true"])': 'none' },
+    backgroundColor: {
+      default: null,
+      ':is([data-selected="true"])': 'hsl(var(--foreground) / 0.05)',
+    },
+    color: { default: null, ':is([data-selected="true"])': themeColors.foreground },
+    opacity: { default: null, ':is([data-disabled="true"])': 0.5 },
+  },
+  shortcut: {
+    marginLeft: 'auto',
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    letterSpacing: 'var(--tracking-widest)',
+    color: themeColors.mutedForeground,
+  },
+});
 
 const Command = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive>,
@@ -12,10 +110,7 @@ const Command = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <CommandPrimitive
     ref={ref}
-    className={cn(
-      'flex h-full w-full flex-col overflow-hidden rounded-md bg-popover text-popover-foreground',
-      className
-    )}
+    className={cn(stylex.props(styles.command).className, className)}
     {...props}
   />
 ));
@@ -62,12 +157,13 @@ const CommandInput = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive.Input>,
   React.ComponentPropsWithoutRef<typeof CommandPrimitive.Input>
 >(({ className, ...props }, ref) => (
-  <div className="flex items-center border-b px-3" cmdk-input-wrapper="">
-    <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
+  <div {...stylex.props(styles.inputWrapper)} cmdk-input-wrapper="">
+    <Search {...stylex.props(styles.searchIcon)} />
     <CommandPrimitive.Input
       ref={ref}
       className={cn(
-        'flex h-10 w-full rounded-md bg-transparent py-3 text-sm text-input-foreground outline-hidden ring-0 focus:outline-hidden focus:ring-0 focus-visible:outline-hidden focus-visible:ring-0 placeholder:text-input-placeholder disabled:cursor-not-allowed disabled:opacity-50',
+        stylex.props(styles.input).className,
+        'outline-hidden focus:outline-hidden focus-visible:outline-hidden',
         className
       )}
       {...props}
@@ -93,15 +189,20 @@ const CommandList = React.forwardRef<
     ref
   ) => (
     <ScrollArea
-      className={cn('max-h-[300px]', containerClassName)}
+      className={cn(stylex.props(styles.listContainer).className, containerClassName)}
       viewportRef={viewportRef}
       viewportClassName={cn(
-        'scroll-pro scrollbar-pro [scrollbar-gutter:auto] max-h-[300px] overflow-y-auto overflow-x-hidden touch-pan-y',
+        stylex.props(styles.listViewport).className,
+        'scroll-pro scrollbar-pro',
         viewportClassName
       )}
       viewportStyle={viewportStyle}
     >
-      <CommandPrimitive.List ref={ref} className={cn('min-w-full', className)} {...props} />
+      <CommandPrimitive.List
+        ref={ref}
+        className={cn(stylex.props(styles.list).className, className)}
+        {...props}
+      />
     </ScrollArea>
   )
 );
@@ -111,9 +212,7 @@ CommandList.displayName = CommandPrimitive.List.displayName;
 const CommandEmpty = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive.Empty>,
   React.ComponentPropsWithoutRef<typeof CommandPrimitive.Empty>
->((props, ref) => (
-  <CommandPrimitive.Empty ref={ref} className="py-6 text-center text-sm" {...props} />
-));
+>((props, ref) => <CommandPrimitive.Empty ref={ref} {...stylex.props(styles.empty)} {...props} />);
 
 CommandEmpty.displayName = CommandPrimitive.Empty.displayName;
 
@@ -124,7 +223,8 @@ const CommandGroup = React.forwardRef<
   <CommandPrimitive.Group
     ref={ref}
     className={cn(
-      'overflow-hidden p-1 text-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground',
+      stylex.props(styles.group).className,
+      '[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground',
       className
     )}
     {...props}
@@ -139,7 +239,7 @@ const CommandSeparator = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <CommandPrimitive.Separator
     ref={ref}
-    className={cn('-mx-1 h-px bg-border', className)}
+    className={cn(stylex.props(styles.separator).className, className)}
     {...props}
   />
 ));
@@ -152,7 +252,8 @@ const CommandItem = React.forwardRef<
   <CommandPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex cursor-default gap-2 select-none items-center rounded-xs px-2 py-1.5 text-sm outline-hidden data-[disabled=true]:pointer-events-none data-[selected=true]:bg-foreground/[0.05] data-[selected=true]:text-foreground data-[disabled=true]:opacity-50 dark:data-[selected=true]:bg-white/[0.10] dark:data-[selected=true]:text-foreground [&_svg]:pointer-events-none [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&_svg]:shrink-0",
+      stylex.props(styles.item).className,
+      "outline-hidden dark:data-[selected=true]:bg-white/[0.10] [&_svg]:pointer-events-none [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4 [&_svg]:shrink-0",
       className
     )}
     {...props}
@@ -162,12 +263,7 @@ const CommandItem = React.forwardRef<
 CommandItem.displayName = CommandPrimitive.Item.displayName;
 
 const CommandShortcut = ({ className, ...props }: React.HTMLAttributes<HTMLSpanElement>) => {
-  return (
-    <span
-      className={cn('ml-auto text-xs tracking-widest text-muted-foreground', className)}
-      {...props}
-    />
-  );
+  return <span className={cn(stylex.props(styles.shortcut).className, className)} {...props} />;
 };
 CommandShortcut.displayName = 'CommandShortcut';
 

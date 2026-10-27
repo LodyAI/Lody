@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
 import queueCurrent from '@/assets/onboarding/intro/queue-current.png';
 import quietWork from '@/assets/onboarding/intro/quiet-work.png';
 import continuousScroll from '@/assets/onboarding/intro/continuous-scroll.png';
 import readyToBegin from '@/assets/onboarding/intro/ready-to-begin.png';
-import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
 import { WINDOW_DRAG_EXEMPT_CLASS } from '@/ui/window-drag-region';
 import type { AudioLayers } from './use-onboarding-audio';
 import { playClick, playCut, playReveal, playSelect } from './ui-sounds';
+import { ceremonySurface } from './ceremony-surface';
 
 // The ceremony is ONE composition, not two half-screens: a block of words and
 // a small pile of polaroids standing shoulder to shoulder, centred together on
@@ -178,10 +180,11 @@ function PolaroidCard({
   front: boolean;
 }): React.JSX.Element {
   const spot = CARD_SPOTS[index % CARD_SPOTS.length]!;
+  const card = stylex.props(ceremonySurface.card);
   return (
     <figure
       aria-hidden={!front}
-      className="lody-intro-motion absolute left-1/2 top-1/2 m-0 rounded-[8px] border border-slate-900/[0.06] bg-white  p-[clamp(9px,0.9vw,14px)] pb-[clamp(15px,1.7vw,26px)]"
+      className={clsx(card.className, 'lody-intro-motion')}
       style={
         {
           '--tilt': `${spot.tilt}deg`,
@@ -198,19 +201,19 @@ function PolaroidCard({
       }
     >
       <span
-        className="absolute -top-2.5 left-1/2 h-6 w-[38%] rounded-[2px] bg-[#d9e8f2]/70 shadow-[0_1px_2px_rgba(15,23,42,.07)]"
+        {...stylex.props(ceremonySurface.tape)}
         style={{ transform: `translateX(calc(-50% + ${spot.tape}px)) rotate(-3.5deg)` }}
         aria-hidden
       />
       {/* Fixed photo window: every illustration gets the same frame, so the
           pile never changes size between beats. `contain` keeps the artwork
           uncropped — switch to `object-cover` if the art is full-bleed. */}
-      <span className="block h-full w-full overflow-hidden rounded-[3px] bg-[#fbfbfc]">
+      <span {...stylex.props(ceremonySurface.photo)}>
         <img
           src={beat.art}
           alt=""
           draggable={false}
-          className="h-full w-full select-none object-contain"
+          {...stylex.props(ceremonySurface.illustration)}
         />
       </span>
     </figure>
@@ -218,9 +221,10 @@ function PolaroidCard({
 }
 
 function PolaroidStack({ current }: { current: number }): React.JSX.Element {
+  const stack = stylex.props(ceremonySurface.stack);
   return (
     <div
-      className="relative shrink-0"
+      className={stack.className}
       style={{ width: 'var(--card-w)', height: 'var(--card-h)' }}
       aria-hidden
     >
@@ -252,11 +256,9 @@ function IntroCopy({
   return (
     <>
       <h1
-        className={cn(
-          'whitespace-pre-line text-balance text-slate-950',
-          chinese
-            ? 'max-w-[11em] text-[clamp(38px,4vw,46px)] font-normal leading-[1.18] tracking-[-0.015em]'
-            : 'max-w-[13ch] text-[clamp(40px,4.3vw,60px)] font-medium leading-[1.04] tracking-[-0.04em]'
+        {...stylex.props(
+          ceremonySurface.headline,
+          chinese ? ceremonySurface.headlineChinese : ceremonySurface.headlineLatin
         )}
         style={chinese ? { fontFamily: CJK_CEREMONY_FONT } : undefined}
       >
@@ -264,9 +266,9 @@ function IntroCopy({
       </h1>
       {description ? (
         <p
-          className={cn(
-            'mt-5 max-w-[33ch] text-slate-600',
-            chinese ? 'text-[19px] leading-[1.55] tracking-[0.01em]' : 'text-[16px] leading-relaxed'
+          {...stylex.props(
+            ceremonySurface.description,
+            chinese ? ceremonySurface.descriptionChinese : ceremonySurface.descriptionLatin
           )}
           style={chinese ? { fontFamily: CJK_CEREMONY_FONT } : undefined}
         >
@@ -347,10 +349,17 @@ export function IntroSequence({
     };
   };
   const outgoing = outgoingRef.current;
+  const stage = stylex.props(ceremonySurface.stage);
+  const row = stylex.props(ceremonySurface.row);
+  const copyColumn = stylex.props(ceremonySurface.copyColumn);
+  const copySlot = stylex.props(ceremonySurface.copySlot);
+  const copyLayer = stylex.props(ceremonySurface.copyLayer);
+  const controlAnchor = stylex.props(ceremonySurface.controlAnchor);
+  const skip = stylex.props(ceremonySurface.skip, ceremonySurface.skipHover);
 
   return (
     <div
-      className="lody-intro-stage absolute inset-0 flex items-center justify-center px-[clamp(20px,4vw,56px)] py-[clamp(20px,4vh,48px)]"
+      className={clsx(stage.className, 'lody-intro-stage')}
       style={{
         opacity: departing ? 0 : 1,
         transform: departing ? 'scale(0.985)' : 'scale(1)',
@@ -363,17 +372,21 @@ export function IntroSequence({
 
       {/* Words and pile, adjacent and centred as one block. Nothing is pinned
           to the window edges, so the composition can never spread apart. */}
-      <div className="lody-intro-row flex items-center justify-center gap-[var(--gutter)]">
-        <div className="flex shrink-0 flex-col items-start" style={{ width: 'var(--copy-w)' }}>
+      <div className={clsx(row.className, 'lody-intro-row')}>
+        <div className={copyColumn.className} style={{ width: 'var(--copy-w)' }}>
           {/* Fixed slot, vertically centred: the sentence's optical centre
               stays locked to the pile's centre however many lines it runs to,
               and the button slot below never moves. */}
-          <div className="relative w-full" style={{ height: 'var(--copy-slot)' }}>
+          <div className={copySlot.className} style={{ height: 'var(--copy-slot)' }}>
             {outgoing !== null && outgoing !== current ? (
               <div
                 key={`out-${outgoing}`}
                 aria-hidden
-                className="lody-intro-motion lody-intro-copy-leaving absolute inset-0 flex flex-col justify-center"
+                className={clsx(
+                  copyLayer.className,
+                  'lody-intro-motion',
+                  'lody-intro-copy-leaving'
+                )}
                 style={{ animation: 'lody-intro-copy-out 320ms ease both' }}
               >
                 <IntroCopy chinese={chinese} {...copyFor(outgoing)} />
@@ -382,7 +395,7 @@ export function IntroSequence({
             <div
               key={`in-${current}`}
               aria-live="polite"
-              className="lody-intro-motion absolute inset-0 flex flex-col justify-center"
+              className={clsx(copyLayer.className, 'lody-intro-motion')}
               style={{ animation: `lody-intro-copy-in 700ms ${INTRO_EASE} 130ms both` }}
             >
               <IntroCopy chinese={chinese} {...copyFor(current)} />
@@ -392,7 +405,7 @@ export function IntroSequence({
           {/* One control anchor, fixed height, on the headline's left rule:
               "skip" occupies it during the beats and the CTA takes it over at
               the end, so nothing jumps and nothing hides in a far corner. */}
-          <div className="mt-[clamp(18px,2.6vh,32px)] flex h-11 items-center">
+          <div className={controlAnchor.className}>
             {beat.final ? (
               <Button
                 size="large"
@@ -411,10 +424,8 @@ export function IntroSequence({
                   playClick();
                   setCurrent(LAST);
                 }}
-                className={cn(
-                  WINDOW_DRAG_EXEMPT_CLASS,
-                  'absolute right-8 top-14 z-10 border-b border-transparent px-1 py-1 font-mono text-[10.5px] tracking-[0.08em] text-slate-600 transition-colors hover:border-slate-500 hover:text-slate-950'
-                )}
+                {...skip}
+                className={clsx(skip.className, WINDOW_DRAG_EXEMPT_CLASS)}
               >
                 {t('onboarding.intro.skip', 'Skip intro')}
               </button>

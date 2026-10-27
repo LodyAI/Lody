@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import * as stylex from '@stylexjs/stylex';
 import {
   SCHEDULE_HOUR_STEPS,
   SCHEDULE_MINUTE_STEPS,
@@ -17,14 +18,71 @@ import { Select } from '@lody/ui/select';
 import { cn } from '@/lib/utils';
 import { describeRecurrence, weekdayNames } from './schedule-format';
 import { PropertyRow, ghostValueClass } from './schedule-property-row';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeDuration,
+  themeEasing,
+  themeFontWeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 
-/**
- * Time and date are typed, not picked: the browser's picker button is hidden,
- * so the field is only its editable segments (hours, minutes, …). Chromium is
- * the product runtime; its `calendar-picker-indicator` is also what opens the
- * popup on click, so hiding it removes the picker entirely.
- */
-const manualTimeInputClass = 'w-auto tabular-nums [&::-webkit-calendar-picker-indicator]:hidden';
+const styles = stylex.create({
+  days: { display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: themeSpace[1] },
+  dateGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
+    justifyItems: 'end',
+  },
+  day: {
+    width: themeSpace[7],
+    height: themeSpace[7],
+    borderRadius: themeRadius.md,
+    fontSize: '0.8em',
+    fontWeight: themeFontWeight.normal,
+    fontVariantNumeric: 'tabular-nums',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+    opacity: { default: null, ':disabled': 0.5 },
+  },
+  selectedDay: { backgroundColor: themeColors.primary, color: themeColors.primaryForeground },
+  unselectedDay: {
+    backgroundColor: {
+      default: 'hsl(var(--foreground) / 0.04)',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--foreground) / 0.08)' },
+    },
+    color: {
+      default: themeColors.mutedForeground,
+      '@media (hover: hover)': { ':hover': themeColors.foreground },
+    },
+  },
+  reveal: { overflow: 'hidden' },
+  unsupported: { display: 'flex', alignItems: 'center', gap: themeSpace[2] },
+  unsupportedSummary: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.9em',
+    color: themeColors.foreground,
+  },
+  replace: {
+    flexShrink: 0,
+    fontSize: '0.9em',
+    color: themeColors.primary,
+    textUnderlineOffset: '2px',
+    '@media (hover: hover)': { ':hover': { textDecorationLine: 'underline' } },
+    ':disabled': { opacity: 0.5 },
+  },
+  // In Chromium the indicator also opens the picker; hiding it leaves only
+  // the editable segments for both time and date-time fields.
+  manualTimeInput: {
+    width: 'auto',
+    fontVariantNumeric: 'tabular-nums',
+    '::-webkit-calendar-picker-indicator': { display: 'none' },
+  },
+});
 
 /** Small square toggles; one row of seven for weekdays, a 7-wide grid for dates. */
 function DayToggles({
@@ -42,12 +100,7 @@ function DayToggles({
 }) {
   const selected = new Set(values);
   return (
-    <div
-      className={cn(
-        'flex flex-wrap justify-end gap-1',
-        grid && 'grid grid-cols-7 justify-items-end'
-      )}
-    >
+    <div {...stylex.props(styles.days, grid && styles.dateGrid)}>
       {options.map((option) => {
         const on = selected.has(option.value);
         return (
@@ -65,10 +118,8 @@ function DayToggles({
               )
             }
             className={cn(
-              'size-7 rounded-md text-[0.8em] font-normal tabular-nums transition-colors disabled:opacity-50',
-              on
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-foreground/[0.04] text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground dark:bg-white/[0.05] dark:hover:bg-white/[0.10]'
+              stylex.props(styles.day, on ? styles.selectedDay : styles.unselectedDay).className,
+              !on && 'dark:bg-white/[0.05] dark:hover:bg-white/[0.10]'
             )}
           >
             {option.short}
@@ -96,7 +147,7 @@ function Reveal({ id, children }: { id: string; children: React.ReactNode }) {
       animate={{ height: 'auto', opacity: 1 }}
       exit={reduce ? undefined : { height: 0, opacity: 0 }}
       transition={{ duration: 0.18, ease: 'easeOut' }}
-      className="overflow-hidden"
+      {...stylex.props(styles.reveal)}
     >
       {children}
     </motion.div>
@@ -167,14 +218,14 @@ export function ScheduleRecurrenceEditor({
           'This rule was created with an older version and can no longer be edited here. Replace it to change it.'
         )}
       >
-        <div className="flex items-center gap-2">
-          <span className="truncate text-[0.9em] text-foreground">
+        <div {...stylex.props(styles.unsupported)}>
+          <span {...stylex.props(styles.unsupportedSummary)}>
             {describeRecurrence(value, t, i18n.language)}
           </span>
           <button
             type="button"
             disabled={disabled}
-            className="shrink-0 text-[0.9em] text-primary underline-offset-2 hover:underline disabled:opacity-50"
+            {...stylex.props(styles.replace)}
             onClick={() => onChange(changeScheduleRecurrenceKind(value, 'daily', now, timeZone))}
           >
             {t('schedules.repeat.replace', 'Replace')}
@@ -300,7 +351,7 @@ export function ScheduleRecurrenceEditor({
                 required
                 disabled={disabled}
                 aria-label={t('schedules.repeat.at', 'At')}
-                className={cn(ghostValueClass, manualTimeInputClass)}
+                className={cn(ghostValueClass, stylex.props(styles.manualTimeInput).className)}
                 value={timeValue}
                 onChange={(event) => {
                   const [hour, minute] = event.target.value.split(':');
@@ -320,7 +371,7 @@ export function ScheduleRecurrenceEditor({
                 required
                 disabled={disabled}
                 aria-label={t('schedules.repeat.runAt', 'Run at')}
-                className={cn(ghostValueClass, manualTimeInputClass)}
+                className={cn(ghostValueClass, stylex.props(styles.manualTimeInput).className)}
                 value={instantToZonedLocalInput(Date.parse(value.at), timeZone)}
                 onChange={(event) => {
                   const at = zonedLocalInputToInstant(event.target.value, timeZone);

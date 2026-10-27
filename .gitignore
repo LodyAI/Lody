@@ -124,6 +124,8 @@ logs/
 /e2e/artifacts/
 # Local acceptance captures and experiment bundles; do not commit generated evidence.
 /artifacts/
+# Visual-regression captures for the Tailwind -> StyleX migration.
+/packages/components/artifacts/
 
 # OS
 .DS_Store

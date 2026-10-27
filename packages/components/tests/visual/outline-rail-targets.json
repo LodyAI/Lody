@@ -1,0 +1,77 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 700
+    },
+    {
+      "name": "below",
+      "width": 927,
+      "height": 700
+    },
+    {
+      "name": "at",
+      "width": 928,
+      "height": 700
+    },
+    {
+      "name": "above",
+      "width": 929,
+      "height": 700
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 700
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "sessions-ownedoutlinerailmigration--basic",
+    "sessions-ownedoutlinerailmigration--overflow",
+    "sessions-ownedoutlinerailmigration--subtree-variables",
+    "sessions-ownedoutlinerailmigration--caller-flex-last",
+    "sessions-ownedoutlinerailmigration--caller-hidden-last",
+    "sessions-ownedoutlinerailmigration--portalled"
+  ],
+  "ready": {
+    "sessions-ownedoutlinerailmigration--basic": [
+      {
+        "action": "visible",
+        "selector": "[data-outline-fixture]"
+      }
+    ],
+    "sessions-ownedoutlinerailmigration--overflow": [
+      {
+        "action": "visible",
+        "selector": "[data-outline-fixture]"
+      }
+    ],
+    "sessions-ownedoutlinerailmigration--subtree-variables": [
+      {
+        "action": "visible",
+        "selector": "[data-outline-fixture]"
+      }
+    ],
+    "sessions-ownedoutlinerailmigration--caller-flex-last": [
+      {
+        "action": "visible",
+        "selector": "[data-outline-fixture]"
+      }
+    ],
+    "sessions-ownedoutlinerailmigration--caller-hidden-last": [
+      {
+        "action": "visible",
+        "selector": "[data-outline-fixture]"
+      }
+    ],
+    "sessions-ownedoutlinerailmigration--portalled": [
+      {
+        "action": "visible",
+        "selector": "[data-outline-fixture]"
+      }
+    ]
+  }
+}

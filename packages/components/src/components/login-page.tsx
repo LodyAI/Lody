@@ -8,6 +8,14 @@ import { Badge } from '@lody/ui/badge';
 import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { themeColors } from '../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../style/theme-scale.stylex';
 import { usePostHog } from '@posthog/react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import isEmail from 'validator/lib/isEmail';
@@ -424,10 +432,7 @@ function BrowserRedirect({
 function ProviderIcon({ className, children }: { className?: string; children: React.ReactNode }) {
   return (
     <span
-      className={cn(
-        'flex h-[18px] w-[18px] shrink-0 items-center justify-center [&_svg]:size-[18px]!',
-        className
-      )}
+      className={cn(stylex.props(styles.providerIcon).className, '[&_svg]:size-[18px]!', className)}
     >
       {children}
     </span>
@@ -552,7 +557,7 @@ function SocialLoginButtonContent({
 }) {
   return (
     <span
-      className="mx-auto grid grid-cols-[18px_minmax(0,1fr)] items-center gap-2 whitespace-nowrap"
+      {...stylex.props(styles.socialButtonContent)}
       style={width ? { width: `${width}px` } : undefined}
     >
       {icon}
@@ -1471,30 +1476,34 @@ export function LoginPage({
   );
 
   const renderVerificationSentPanel = () => (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-col items-center gap-3 pt-1 text-center">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-          <Mail className="size-6 text-foreground" strokeWidth={1.75} aria-hidden="true" />
+    <div {...stylex.props(styles.verificationPanel)}>
+      <div {...stylex.props(styles.verificationHead)}>
+        <div {...stylex.props(styles.verificationMark)}>
+          <Mail
+            {...stylex.props(styles.verificationMarkIcon)}
+            strokeWidth={1.75}
+            aria-hidden="true"
+          />
         </div>
-        <p className="text-sm leading-relaxed text-muted-foreground">
+        <p {...stylex.props(styles.verificationBody)}>
           <Trans
             i18nKey="login.verificationSentBody"
             values={{ email: email.trim() }}
             components={{
               br: <br />,
-              strong: <span className="font-medium text-foreground" />,
+              strong: <span {...stylex.props(styles.verificationStrong)} />,
             }}
           />
         </p>
       </div>
-      <div className="flex flex-col items-center gap-3 pt-1">
-        <p className="text-xs text-muted-foreground">
+      <div {...stylex.props(styles.verificationActions)}>
+        <p {...stylex.props(styles.verificationPrompt)}>
           {t('login.newEmailAccountPrompt', 'Creating a new email account?')}{' '}
           <button
             type="button"
             onClick={() => void handleResendVerification()}
             disabled={isButtonsDisabled}
-            className="font-medium text-foreground underline-offset-4 transition-colors hover:underline disabled:opacity-50"
+            {...stylex.props(styles.linkButton)}
           >
             {isResendingVerification
               ? t('login.resendingVerification', 'Sending...')
@@ -1505,16 +1514,16 @@ export function LoginPage({
           type="button"
           onClick={handleForgotPassword}
           disabled={isButtonsDisabled}
-          className="text-xs font-medium text-foreground underline-offset-4 transition-colors hover:underline disabled:opacity-50"
+          {...stylex.props(styles.linkButton, styles.linkButtonSmall)}
         >
           {t('login.setPasswordForExistingAccount', 'Set or reset password')}
         </button>
-        <span className="h-px w-8 bg-border/70" aria-hidden="true" />
+        <span {...stylex.props(styles.divider)} aria-hidden="true" />
         <button
           type="button"
           onClick={handleExitEmailView}
           disabled={isButtonsDisabled}
-          className="text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+          {...stylex.props(styles.quietLinkButton)}
         >
           {t('login.backToSignIn', 'Back to sign-in options')}
         </button>
@@ -1534,7 +1543,7 @@ export function LoginPage({
 
     return (
       <form
-        className="flex flex-col gap-4"
+        {...stylex.props(styles.emailForm)}
         onSubmit={(event) => {
           void handleEmailSubmit(event);
         }}
@@ -1587,8 +1596,8 @@ export function LoginPage({
           </div>
 
           <div {...stylex.props(styles.passwordField)}>
-            <div className="grid gap-1.5">
-              <div className="flex items-center justify-between">
+            <div {...stylex.props(styles.passwordGrid)}>
+              <div {...stylex.props(styles.passwordHead)}>
                 <UiField.Label htmlFor="email-auth-password" className="text-xs font-medium">
                   {t('login.passwordLabel', 'Password')}
                 </UiField.Label>
@@ -1616,12 +1625,12 @@ export function LoginPage({
               />
             </div>
             <LoginExpandingRow open={!isSignUp} reducedMotion={!!prefersReducedMotion}>
-              <div className="flex justify-end pt-1.5">
+              <div {...stylex.props(styles.forgotRow)}>
                 <button
                   type="button"
                   onClick={handleForgotPassword}
                   disabled={isButtonsDisabled || isSignUp}
-                  className="text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+                  {...stylex.props(styles.quietLinkButton)}
                 >
                   {t('login.forgotPassword', 'Forgot password?')}
                 </button>
@@ -1637,24 +1646,26 @@ export function LoginPage({
           >
             {isEmailSubmitting ? (
               <>
-                <Spinner className="mr-2 h-4 w-4" />
+                <Spinner
+                  className={cn(stylex.props(styles.pendingSpinnerSpacing).className, 'h-4 w-4')}
+                />
                 {submitLabel}
               </>
             ) : (
-              <span aria-hidden="true" className="flex items-center justify-center gap-2">
+              <span aria-hidden="true" {...stylex.props(styles.submitContent)}>
                 {submitLabel}
-                <ArrowRight className="size-4 opacity-80" strokeWidth={1.75} />
+                <ArrowRight {...stylex.props(styles.submitArrow)} strokeWidth={1.75} />
               </span>
             )}
           </Button>
 
           {emailAuthStatus === 'unverified' && !isElectronRendererLogin ? (
-            <div className="flex justify-center">
+            <div {...stylex.props(styles.resendRow)}>
               <button
                 type="button"
                 onClick={() => void handleResendVerification()}
                 disabled={isButtonsDisabled}
-                className="text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+                {...stylex.props(styles.quietLinkButton)}
               >
                 {isResendingVerification
                   ? t('login.resendingVerification', 'Sending...')
@@ -1665,7 +1676,7 @@ export function LoginPage({
         </div>
 
         {!isElectronRendererLogin ? (
-          <div className="text-center text-xs text-muted-foreground">
+          <div {...stylex.props(styles.emailFooter)}>
             {isSignUp ? (
               <>
                 {t('login.haveAccountPrompt', 'Already have an account?')}{' '}
@@ -1673,7 +1684,7 @@ export function LoginPage({
                   type="button"
                   onClick={handleToggleEmailAuthMode}
                   disabled={isButtonsDisabled}
-                  className="font-medium text-foreground underline-offset-4 transition-colors hover:underline disabled:opacity-50"
+                  {...stylex.props(styles.linkButton)}
                 >
                   {t('login.emailSignInTab', 'Sign in')}
                 </button>
@@ -1685,7 +1696,7 @@ export function LoginPage({
                   type="button"
                   onClick={handleToggleEmailAuthMode}
                   disabled={isButtonsDisabled}
-                  className="font-medium text-foreground underline-offset-4 transition-colors hover:underline disabled:opacity-50"
+                  {...stylex.props(styles.linkButton)}
                 >
                   {t('login.emailSignUpTab', 'Create account')}
                 </button>
@@ -1703,7 +1714,7 @@ export function LoginPage({
       : renderEmailFormPanel();
 
   const renderElectronRendererPanel = () => (
-    <div className="flex flex-col gap-3">
+    <div {...stylex.props(styles.electronPanel)}>
       <Button
         onClick={() => void handleElectronBrowserLogin()}
         className="h-10 w-full"
@@ -1719,7 +1730,7 @@ export function LoginPage({
           width={null}
         />
       </Button>
-      <p className="text-center text-xs leading-5 text-muted-foreground">
+      <p {...stylex.props(styles.electronHint)}>
         {electronLoginPhase === 'waiting'
           ? t('login.desktopWaiting')
           : t(
@@ -1750,16 +1761,13 @@ export function LoginPage({
   );
 
   const renderElectronBrowserHandoffPanel = () => (
-    <div className="flex flex-col gap-3">
+    <div {...stylex.props(styles.handoffPanel)}>
       {electronHandoffAccountLabel ? (
-        <div className="rounded-lg border border-border/60 bg-muted/40 px-3 py-2 text-center">
-          <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground/80">
+        <div {...stylex.props(styles.handoffCard)}>
+          <div {...stylex.props(styles.handoffCardLabel)}>
             {t('login.desktopHandoff.signedInAs', 'This browser is signed in as')}
           </div>
-          <div
-            className="truncate text-sm font-medium text-foreground"
-            title={electronHandoffAccountLabel}
-          >
+          <div {...stylex.props(styles.handoffAccount)} title={electronHandoffAccountLabel}>
             {electronHandoffAccountLabel}
           </div>
         </div>
@@ -1787,7 +1795,9 @@ export function LoginPage({
         >
           {isPreparingElectronHandoff ? (
             <>
-              <Spinner className="mr-2 h-4 w-4" />
+              <Spinner
+                className={cn(stylex.props(styles.pendingSpinnerSpacing).className, 'h-4 w-4')}
+              />
               {t('login.desktopHandoff.preparing', 'Preparing desktop sign-in...')}
             </>
           ) : (
@@ -1926,16 +1936,10 @@ export function LoginPage({
             </div>
 
             {effectiveError ? (
-              <p
-                id="login-form-error"
-                role="alert"
-                className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
-              >
+              <p id="login-form-error" role="alert" {...stylex.props(styles.errorCard)}>
                 {effectiveError}
                 {effectiveErrorDetail ? (
-                  <span className="mt-1 block select-text break-all text-[11px] opacity-80">
-                    {effectiveErrorDetail}
-                  </span>
+                  <span {...stylex.props(styles.errorDetail)}>{effectiveErrorDetail}</span>
                 ) : null}
               </p>
             ) : null}
@@ -1996,6 +2000,15 @@ const SAFE_TOP = 'max(12px, env(safe-area-inset-top))';
 const SAFE_BOTTOM = 'max(12px, env(safe-area-inset-bottom))';
 
 const styles = stylex.create({
+  providerIcon: {
+    display: 'flex',
+    height: '18px',
+    width: '18px',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pendingSpinnerSpacing: { marginRight: 'calc(var(--spacing) * 2)' },
   // The window holds two things: an inset visual surface and the sign-in
   // column. On a narrow window they stack, the visual on top.
   page: {
@@ -2162,5 +2175,199 @@ const styles = stylex.create({
     color: { default: colors.secondaryLabel, ':hover': colors.label },
     textDecoration: 'underline',
     textUnderlineOffset: '3px',
+  },
+
+  /**
+   * The parts of the sign-in column that were Tailwind. They read the theme's
+   * own variables, so a migrated element keeps exactly the ink it had.
+   */
+  socialButtonContent: {
+    marginInline: 'auto',
+    display: 'grid',
+    gridTemplateColumns: '18px minmax(0, 1fr)',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    whiteSpace: 'nowrap',
+  },
+  verificationPanel: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[5],
+  },
+  verificationHead: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: themeSpace[3],
+    paddingTop: themeSpace[1],
+    textAlign: 'center',
+  },
+  verificationMark: {
+    display: 'flex',
+    height: themeSpace[12],
+    width: themeSpace[12],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.full,
+    backgroundColor: themeColors.muted,
+  },
+  verificationMarkIcon: {
+    width: themeSpace[6],
+    height: themeSpace[6],
+    color: themeColors.foreground,
+  },
+  verificationBody: {
+    fontSize: themeFontSize.sm,
+    lineHeight: 1.625,
+    color: themeColors.mutedForeground,
+  },
+  verificationStrong: {
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+  },
+  verificationActions: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: themeSpace[3],
+    paddingTop: themeSpace[1],
+  },
+  verificationPrompt: {
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+  /** A link in a sentence: the ink of the sentence, underlined under the pointer. */
+  linkButton: {
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+    textUnderlineOffset: '4px',
+    textDecorationLine: { default: 'none', ':hover': 'underline' },
+    transitionProperty:
+      'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    opacity: { default: 1, ':disabled': 0.5 },
+  },
+  linkButtonSmall: {
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+  },
+  /** A quiet link: the secondary ink, the primary ink under the pointer. */
+  quietLinkButton: {
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: { default: themeColors.mutedForeground, ':hover': themeColors.foreground },
+    transitionProperty:
+      'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    opacity: { default: 1, ':disabled': 0.5 },
+  },
+  divider: {
+    height: '1px',
+    width: themeSpace[8],
+    backgroundColor: 'hsl(var(--border) / 0.7)',
+  },
+  emailForm: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[4],
+  },
+  passwordGrid: {
+    display: 'grid',
+    gap: themeSpace[1.5],
+  },
+  passwordHead: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  forgotRow: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    paddingTop: themeSpace[1.5],
+  },
+  submitContent: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: themeSpace[2],
+  },
+  submitArrow: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    opacity: 0.8,
+  },
+  resendRow: {
+    display: 'flex',
+    justifyContent: 'center',
+  },
+  emailFooter: {
+    textAlign: 'center',
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+  electronPanel: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[3],
+  },
+  electronHint: {
+    textAlign: 'center',
+    fontSize: themeFontSize.xs,
+    lineHeight: themeSpace[5],
+    color: themeColors.mutedForeground,
+  },
+  handoffPanel: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[3],
+  },
+  handoffCard: {
+    borderRadius: themeRadius.lg,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.6)',
+    backgroundColor: 'hsl(var(--muted) / 0.4)',
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2],
+    textAlign: 'center',
+  },
+  handoffCardLabel: {
+    fontSize: '11px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.12em',
+    color: 'hsl(var(--muted-foreground) / 0.8)',
+  },
+  handoffAccount: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+  },
+  errorCard: {
+    borderRadius: themeRadius.md,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--destructive) / 0.3)',
+    backgroundColor: 'hsl(var(--destructive) / 0.05)',
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.destructive,
+  },
+  errorDetail: {
+    display: 'block',
+    marginTop: themeSpace[1],
+    userSelect: 'text',
+    wordBreak: 'break-all',
+    fontSize: '11px',
+    opacity: 0.8,
   },
 });

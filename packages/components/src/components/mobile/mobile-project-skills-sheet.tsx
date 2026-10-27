@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { DEFAULT_PROJECT_SKILL_DIR, type ProjectSkill, type ProjectSkillScope } from '@lody/shared';
+import * as stylex from '@stylexjs/stylex';
 import {
   useProjectSkills,
   type ProjectSkillResolvedGroup,
@@ -34,7 +35,11 @@ import {
   SkillSymlinkBadge,
   SkillVersionBadge,
 } from '@/components/settings/skill-badges';
-import { cn } from '@/lib/utils';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
+import { withClassName } from '@/lib/stylex';
+import { sheetSurface } from './sheet-surface';
+import { mobileSurface } from './surface';
 
 type SelectedSkill = { skill: ProjectSkill; scope: ProjectSkillScope };
 
@@ -43,6 +48,317 @@ export type MobileProjectSkillsSheetProps = {
   onOpenChange: (open: boolean) => void;
   source: ProjectSkillsSource | null;
 };
+
+/** Tailwind's `transition-colors`: colour properties only, 150ms, standard ease. */
+const TRANSITION_COLORS = {
+  transitionProperty: 'color, background-color, border-color, text-decoration-color, fill, stroke',
+  transitionDuration: '150ms',
+  transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+} as const;
+
+const styles = stylex.create({
+  /** The title, clipped so a long name cannot push the chips away. */
+  title: { maxWidth: '68%' },
+  /** The pane the skill detail slides over. */
+  pane: {
+    position: 'relative',
+    display: 'flex',
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    flexDirection: 'column',
+    overflow: 'hidden',
+  },
+  /** The list of skills. */
+  list: {
+    display: 'flex',
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    flexDirection: 'column',
+    overflowY: 'auto',
+    paddingBottom: 'calc(16px + max(0px, var(--safe-area-bottom, 0px)))',
+  },
+  /** The detail slide-over. */
+  detail: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 10,
+    display: 'flex',
+    flexDirection: 'column',
+    backgroundColor: themeColors.background,
+  },
+  /** The detail's scrolling body. */
+  detailBody: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflowY: 'auto',
+    paddingInline: themeSpace[4],
+    paddingTop: themeSpace[1],
+    paddingBottom: 'calc(16px + max(0px, var(--safe-area-bottom, 0px)))',
+  },
+
+  /** The mark in the empty state. */
+  emptyIcon: {
+    width: '1.75rem',
+    height: '1.75rem',
+  },
+  emptyIconDanger: { color: 'hsl(var(--destructive) / 0.7)' },
+  emptyIconMuted: { color: 'hsl(var(--muted-foreground) / 0.7)' },
+  /** The loading state. */
+  loading: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[5],
+    paddingTop: themeSpace[12],
+    paddingBottom: themeSpace[12],
+    fontSize: '0.875rem',
+    lineHeight: 'calc(1.25 / 0.875)',
+    color: themeColors.mutedForeground,
+  },
+  /** The empty / error state. */
+  empty: {
+    display: 'flex',
+    marginInline: themeSpace[3],
+    marginTop: themeSpace[3],
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[4],
+    paddingTop: themeSpace[12],
+    paddingBottom: themeSpace[12],
+    textAlign: 'center',
+    borderRadius: themeRadius['2xl'],
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.4)',
+    backgroundColor: themeColors.card,
+  },
+  emptyTitle: {
+    fontSize: '0.875rem',
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+  },
+  emptyBody: {
+    maxWidth: '20rem',
+    fontSize: '0.75rem',
+    lineHeight: 'calc(1 / 0.75)',
+    color: themeColors.mutedForeground,
+  },
+  /** The retry action of the error state. */
+  retry: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    marginTop: themeSpace[1],
+    paddingInline: themeSpace[3],
+    paddingTop: themeSpace[1.5],
+    paddingBottom: themeSpace[1.5],
+    borderRadius: themeRadius.full,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.6)',
+    fontSize: '0.75rem',
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+    backgroundColor: { default: null, ':active': 'hsl(var(--muted) / 0.5)' },
+    ...TRANSITION_COLORS,
+  },
+
+  /** The list's own bottom padding. */
+  listBody: { paddingBottom: themeSpace[3] },
+  /** The mark that says the list is stale. */
+  staleGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    color: themeColors.statusWarning,
+  },
+  /** A label clipped to its column. */
+  truncate: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  /** The header of the skill list. */
+  listHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[5],
+    paddingTop: themeSpace[1],
+    paddingBottom: themeSpace[1],
+  },
+  /** The summary line. */
+  summary: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    fontSize: '0.78rem',
+    color: themeColors.mutedForeground,
+  },
+  /** The refresh action in the header. */
+  refresh: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: themeSpace[8],
+    height: themeSpace[8],
+    borderRadius: themeRadius.full,
+    color: themeColors.mutedForeground,
+    backgroundColor: { default: null, ':active': 'hsl(var(--muted) / 0.5)' },
+    opacity: { default: 1, ':disabled': 0.5 },
+    ...TRANSITION_COLORS,
+  },
+
+  /** A group of skills. */
+  group: {
+    marginTop: themeSpace[4],
+    ':first-child': { marginTop: themeSpace[2] },
+  },
+  /** The group's heading. */
+  groupHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[5],
+    paddingBottom: themeSpace[1.5],
+  },
+  /** The group's directory. */
+  groupHead: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+  },
+  groupGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+  },
+  groupDir: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+    fontSize: '0.72rem',
+    color: themeColors.mutedForeground,
+  },
+  /** The group's card. */
+  groupCard: {
+    marginInline: themeSpace[3],
+    overflow: 'hidden',
+    borderRadius: themeRadius['2xl'],
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.4)',
+    backgroundColor: themeColors.card,
+  },
+  /** The group's error line. */
+  groupError: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[4],
+    paddingTop: themeSpace[3],
+    paddingBottom: themeSpace[3],
+    fontSize: '0.78rem',
+    color: themeColors.destructive,
+  },
+  groupErrorGlyph: {
+    marginTop: '1px',
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+  },
+  groupErrorText: {
+    minWidth: 0,
+    wordBreak: 'break-word',
+  },
+  /** The note about skipped symlinks. */
+  groupSkipped: {
+    paddingInline: themeSpace[4],
+    paddingTop: themeSpace[2],
+    paddingBottom: themeSpace[2],
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'hsl(var(--border) / 0.4)',
+    fontSize: '0.72rem',
+    color: themeColors.mutedForeground,
+  },
+
+  /** A skill's name and its badges. */
+  skillLabel: {
+    display: 'flex',
+    minWidth: 0,
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: themeSpace[2],
+    rowGap: themeSpace[1],
+  },
+  skillName: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.95rem',
+    fontWeight: themeFontWeight.medium,
+    lineHeight: 1.25,
+    color: themeColors.foreground,
+  },
+  /** A skill's helper lines. */
+  skillHelper: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[0.5],
+  },
+  skillDescription: {
+    fontSize: '0.78rem',
+    lineHeight: 1.375,
+    color: themeColors.mutedForeground,
+  },
+  skillMeta: {
+    display: 'flex',
+    minWidth: 0,
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: themeSpace[2.5],
+    rowGap: themeSpace[0.5],
+    fontSize: '0.72rem',
+    color: 'hsl(var(--muted-foreground) / 0.8)',
+  },
+  skillAuthor: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: themeSpace[1],
+  },
+  skillAuthorGlyph: {
+    width: themeSpace[3],
+    height: themeSpace[3],
+  },
+  skillPath: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+  },
+});
 
 /**
  * Second-level bottom sheet that lists a project's skills (mobile).
@@ -81,46 +397,44 @@ export function MobileProjectSkillsSheet({
 
   return (
     <Drawer open={open} onOpenChange={handleOpenChange}>
-      <DrawerContent className={cn('h-auto! max-h-[88dvh]! rounded-t-2xl border-border/60')}>
-        <div className="flex max-h-full min-h-0 flex-col">
-          <header className="relative flex shrink-0 items-center px-4 pb-2 pt-2">
+      <DrawerContent className="h-auto! max-h-[88dvh]! rounded-t-2xl border-border/60">
+        <div {...stylex.props(sheetSurface.columnAuto)}>
+          <header {...stylex.props(sheetSurface.header, sheetSurface.headerShrink)}>
             {detail ? (
               <button
                 type="button"
                 onClick={() => setDetail(null)}
                 aria-label={t('common.back', 'Back')}
-                className="absolute left-2 top-1.5 inline-flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                {...stylex.props(sheetSurface.iconButton, sheetSurface.iconButtonLeftTight)}
               >
-                <ChevronLeft className="h-5 w-5" aria-hidden="true" strokeWidth={1.8} />
+                <ChevronLeft
+                  {...stylex.props(sheetSurface.glyph20)}
+                  aria-hidden="true"
+                  strokeWidth={1.8}
+                />
               </button>
             ) : null}
-            <DrawerTitle className="mx-auto max-w-[68%] truncate text-[0.95rem] font-semibold tracking-tight">
+            <DrawerTitle
+              {...stylex.props(sheetSurface.title, sheetSurface.titleCentered, styles.title)}
+            >
               {detail ? detail.skill.name : title}
             </DrawerTitle>
             <DrawerClose asChild>
               <button
                 type="button"
                 aria-label={t('common.close', 'Close')}
-                className={cn(
-                  'absolute right-3 top-1.5 inline-flex h-9 w-9 items-center justify-center rounded-full',
-                  'text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground'
-                )}
+                {...stylex.props(sheetSurface.iconButton, sheetSurface.iconButtonRight)}
               >
-                <X className="h-5 w-5" aria-hidden="true" strokeWidth={1.8} />
+                <X {...stylex.props(sheetSurface.glyph20)} aria-hidden="true" strokeWidth={1.8} />
               </button>
             </DrawerClose>
           </header>
-          <DrawerDescription className="sr-only">
+          <DrawerDescription {...stylex.props(sheetSurface.srOnly)}>
             {detail ? detail.skill.name : title}
           </DrawerDescription>
 
-          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-            <div
-              className={cn(
-                'flex min-h-0 flex-1 flex-col overflow-y-auto',
-                'pb-[calc(16px+max(0px,var(--safe-area-bottom,0px)))]'
-              )}
-            >
+          <div {...stylex.props(styles.pane)}>
+            <div {...stylex.props(styles.list)}>
               <MobileProjectSkillsBody
                 status={status}
                 groups={groups}
@@ -139,9 +453,9 @@ export function MobileProjectSkillsSheet({
                   animate={{ x: 0 }}
                   exit={{ x: '100%' }}
                   transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1] }}
-                  className="absolute inset-0 z-10 flex flex-col bg-background"
+                  {...stylex.props(styles.detail)}
                 >
-                  <div className="scrollbar-pro flex-1 overflow-y-auto px-4 pb-[calc(16px+max(0px,var(--safe-area-bottom,0px)))] pt-1">
+                  <div {...withClassName(stylex.props(styles.detailBody), 'scrollbar-pro')}>
                     <SkillDetailContent skill={detail.skill} scope={detail.scope} />
                   </div>
                 </motion.div>
@@ -168,17 +482,19 @@ export function MobileProjectSkillsRow({ source }: { source: ProjectSkillsSource
       <MobileSettingsSection title={t('workspace.projects.skills.sectionTitle', 'Skills')}>
         <MobileSettingsRow
           label={
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                <Boxes className="h-[1.05rem] w-[1.05rem]" />
+            <div {...stylex.props(mobileSurface.identity)}>
+              <div {...stylex.props(mobileSurface.identityTile)}>
+                <Boxes {...stylex.props(mobileSurface.identityGlyph)} />
               </div>
-              <span className="truncate text-[0.95rem] font-medium leading-tight">
+              <span
+                {...stylex.props(mobileSurface.identityLabel, mobileSurface.identityLabelTight)}
+              >
                 {t('workspace.projects.skills.rowLabel', 'Project skills')}
               </span>
             </div>
           }
           onClick={() => setOpen(true)}
-          trailing={<ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" />}
+          trailing={<ChevronRight {...stylex.props(mobileSurface.chevron)} />}
         />
       </MobileSettingsSection>
       <MobileProjectSkillsSheet open={open} onOpenChange={setOpen} source={source} />
@@ -216,7 +532,7 @@ export function MobileProjectSkillsBody({
 
   if (isInitialLoading) {
     return (
-      <div className="flex items-center justify-center gap-2 px-5 py-12 text-sm text-muted-foreground">
+      <div {...stylex.props(styles.loading)}>
         <Spinner className="h-4 w-4" />
         {t('workspace.projects.skills.loading', 'Loading skills')}
       </div>
@@ -227,7 +543,12 @@ export function MobileProjectSkillsBody({
     if (status === 'error') {
       return (
         <MobileSkillsEmpty
-          icon={<AlertCircle className="h-7 w-7 text-destructive/70" strokeWidth={1.6} />}
+          icon={
+            <AlertCircle
+              {...stylex.props(styles.emptyIcon, styles.emptyIconDanger)}
+              strokeWidth={1.6}
+            />
+          }
           title={t('workspace.projects.skills.errorTitle', "Couldn't load skills")}
           body={error}
           onRetry={onRefresh}
@@ -237,7 +558,12 @@ export function MobileProjectSkillsBody({
     }
     return (
       <MobileSkillsEmpty
-        icon={<PackageOpen className="h-7 w-7 text-muted-foreground/70" strokeWidth={1.6} />}
+        icon={
+          <PackageOpen
+            {...stylex.props(styles.emptyIcon, styles.emptyIconMuted)}
+            strokeWidth={1.6}
+          />
+        }
         title={t('workspace.projects.skills.empty', 'No skills found')}
         body={t('workspace.projects.skills.emptyHint', {
           defaultValue:
@@ -249,9 +575,9 @@ export function MobileProjectSkillsBody({
   }
 
   return (
-    <div className="pb-3">
-      <div className="flex items-center justify-between gap-2 px-5 pb-1 pt-1">
-        <div className="flex min-w-0 items-center gap-1.5 text-[0.78rem] text-muted-foreground">
+    <div {...stylex.props(styles.listBody)}>
+      <div {...stylex.props(styles.listHeader)}>
+        <div {...stylex.props(styles.summary)}>
           {isRefreshing ? (
             <>
               <Spinner className="h-3.5 w-3.5 shrink-0" />
@@ -259,8 +585,8 @@ export function MobileProjectSkillsBody({
             </>
           ) : status === 'error' && stale ? (
             <>
-              <AlertCircle className="h-3.5 w-3.5 shrink-0 text-status-warning" />
-              <span className="min-w-0 truncate">
+              <AlertCircle {...stylex.props(styles.staleGlyph)} />
+              <span {...stylex.props(styles.truncate)}>
                 {t(
                   'workspace.projects.skills.staleNotice',
                   "Couldn't refresh — showing the last cached result."
@@ -268,7 +594,7 @@ export function MobileProjectSkillsBody({
               </span>
             </>
           ) : (
-            <span className="min-w-0 truncate">
+            <span {...stylex.props(styles.truncate)}>
               {t('workspace.projects.skills.summary', {
                 defaultValue: '{{count}} skills',
                 count: totalSkills,
@@ -290,10 +616,7 @@ export function MobileProjectSkillsBody({
           onClick={onRefresh}
           disabled={isRefreshing}
           aria-label={t('workspace.projects.skills.refresh', 'Refresh')}
-          className={cn(
-            'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full',
-            'text-muted-foreground transition-colors active:bg-muted/50 disabled:opacity-50'
-          )}
+          {...stylex.props(styles.refresh)}
         >
           <Spinner icon={RefreshCw} spinning={isRefreshing} className="h-4 w-4" />
         </button>
@@ -319,22 +642,20 @@ function MobileSkillGroup({
 }) {
   const { t } = useTranslation();
   return (
-    <section className="mt-4 first:mt-2">
-      <header className="flex items-center justify-between gap-2 px-5 pb-1.5">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <Boxes className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <code className="min-w-0 truncate font-mono text-[0.72rem] text-muted-foreground">
-            {group.dir}
-          </code>
+    <section {...stylex.props(styles.group)}>
+      <header {...stylex.props(styles.groupHeader)}>
+        <div {...stylex.props(styles.groupHead)}>
+          <Boxes {...stylex.props(styles.groupGlyph)} />
+          <code {...stylex.props(styles.groupDir)}>{group.dir}</code>
           <SkillScopeBadge scope={group.scope} size="sm" className="shrink-0" />
         </div>
       </header>
 
-      <div className="mx-3 overflow-hidden rounded-2xl border border-border/40 bg-card">
+      <div {...stylex.props(styles.groupCard)}>
         {group.error ? (
-          <div className="flex items-start gap-2 px-4 py-3 text-[0.78rem] text-destructive">
-            <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
-            <span className="min-w-0 break-words">{group.error}</span>
+          <div {...stylex.props(styles.groupError)}>
+            <AlertCircle {...stylex.props(styles.groupErrorGlyph)} />
+            <span {...stylex.props(styles.groupErrorText)}>{group.error}</span>
           </div>
         ) : null}
         <MobileSettingsRowGroup>
@@ -348,7 +669,7 @@ function MobileSkillGroup({
           ))}
         </MobileSettingsRowGroup>
         {group.skippedExternalSymlinks ? (
-          <div className="border-t border-border/40 px-4 py-2 text-[0.72rem] text-muted-foreground">
+          <div {...stylex.props(styles.groupSkipped)}>
             {t('workspace.projects.skills.skippedSymlinks', {
               defaultValue: '{{count}} external symlinks skipped',
               count: group.skippedExternalSymlinks,
@@ -362,10 +683,8 @@ function MobileSkillGroup({
 
 function SkillLabel({ skill }: { skill: ProjectSkill }) {
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-      <span className="truncate text-[0.95rem] font-medium leading-tight text-foreground">
-        {skill.name}
-      </span>
+    <div {...stylex.props(styles.skillLabel)}>
+      <span {...stylex.props(styles.skillName)}>{skill.name}</span>
       {skill.version ? <SkillVersionBadge version={skill.version} size="sm" /> : null}
       {skill.isSymlink ? <SkillSymlinkBadge symlinkTarget={skill.symlinkTarget} size="sm" /> : null}
     </div>
@@ -374,20 +693,20 @@ function SkillLabel({ skill }: { skill: ProjectSkill }) {
 
 function SkillHelper({ skill }: { skill: ProjectSkill }) {
   return (
-    <div className="flex flex-col gap-0.5">
+    <div {...stylex.props(styles.skillHelper)}>
       {skill.description ? (
-        <span className="line-clamp-2 text-[0.78rem] leading-snug text-muted-foreground">
+        <span {...withClassName(stylex.props(styles.skillDescription), 'line-clamp-2')}>
           {skill.description}
         </span>
       ) : null}
-      <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[0.72rem] text-muted-foreground/80">
+      <span {...stylex.props(styles.skillMeta)}>
         {skill.author ? (
-          <span className="inline-flex items-center gap-1">
-            <User className="h-3 w-3" />
+          <span {...stylex.props(styles.skillAuthor)}>
+            <User {...stylex.props(styles.skillAuthorGlyph)} />
             {skill.author}
           </span>
         ) : null}
-        <span className="min-w-0 truncate font-mono">{skill.relativePath}</span>
+        <span {...stylex.props(styles.skillPath)}>{skill.relativePath}</span>
       </span>
     </div>
   );
@@ -407,17 +726,13 @@ function MobileSkillsEmpty({
   retryLabel?: string;
 }) {
   return (
-    <div className="mx-3 mt-3 flex flex-col items-center justify-center gap-2 rounded-2xl border border-border/40 bg-card px-4 py-12 text-center">
+    <div {...stylex.props(styles.empty)}>
       {icon}
-      <p className="text-sm font-medium text-foreground">{title}</p>
-      {body ? <p className="max-w-xs text-xs text-muted-foreground">{body}</p> : null}
+      <p {...stylex.props(styles.emptyTitle)}>{title}</p>
+      {body ? <p {...stylex.props(styles.emptyBody)}>{body}</p> : null}
       {onRetry ? (
-        <button
-          type="button"
-          onClick={onRetry}
-          className="mt-1 inline-flex items-center gap-1.5 rounded-full border border-border/60 px-3 py-1.5 text-xs font-medium text-foreground transition-colors active:bg-muted/50"
-        >
-          <RefreshCw className="h-3.5 w-3.5" />
+        <button type="button" onClick={onRetry} {...stylex.props(styles.retry)}>
+          <RefreshCw {...stylex.props(sheetSurface.glyph14)} />
           {retryLabel}
         </button>
       ) : null}

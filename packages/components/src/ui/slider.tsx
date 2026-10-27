@@ -1,6 +1,66 @@
 import * as React from 'react';
 
 import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../style/theme-colors.stylex';
+import { themeRadius, themeShadow, themeSpace } from '../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  input: {
+    height: themeSpace[5],
+    width: '100%',
+    appearance: 'none',
+    backgroundColor: 'transparent',
+    cursor: { default: 'pointer', ':disabled': 'not-allowed' },
+    opacity: { default: null, ':disabled': 0.6 },
+    '::-webkit-slider-runnable-track': {
+      height: themeSpace[1],
+      borderRadius: themeRadius.full,
+      backgroundImage:
+        'linear-gradient(to right, hsl(var(--primary)) var(--lody-slider-fill), hsl(var(--muted)) var(--lody-slider-fill))',
+    },
+    '::-moz-range-track': {
+      height: themeSpace[1],
+      borderRadius: themeRadius.full,
+      backgroundImage:
+        'linear-gradient(to right, hsl(var(--primary)) var(--lody-slider-fill), hsl(var(--muted)) var(--lody-slider-fill))',
+    },
+    '::-webkit-slider-thumb': {
+      marginTop: `calc(${themeSpace[1.5]} * -1)`,
+      width: themeSpace[4],
+      height: themeSpace[4],
+      appearance: 'none',
+      borderRadius: themeRadius.full,
+      borderWidth: 1,
+      borderStyle: 'solid',
+      borderColor: themeColors.border,
+      backgroundColor: themeColors.background,
+      boxShadow: themeShadow.sm,
+    },
+    '::-moz-range-thumb': {
+      width: themeSpace[4],
+      height: themeSpace[4],
+      appearance: 'none',
+      borderRadius: themeRadius.full,
+      borderWidth: 1,
+      borderStyle: 'solid',
+      borderColor: themeColors.border,
+      backgroundColor: themeColors.background,
+      boxShadow: themeShadow.sm,
+    },
+    '@media (hover: hover)': {
+      ':hover': {
+        '::-webkit-slider-thumb': { borderColor: 'hsl(var(--primary) / 0.6)' },
+        '::-moz-range-thumb': { borderColor: 'hsl(var(--primary) / 0.6)' },
+      },
+    },
+    ':focus-visible': {
+      boxShadow: 'none',
+      '::-webkit-slider-thumb': { boxShadow: '0 0 0 3px hsl(var(--primary) / 0.3)' },
+      '::-moz-range-thumb': { boxShadow: '0 0 0 3px hsl(var(--primary) / 0.3)' },
+    },
+  },
+});
 
 /**
  * A single-value slider on the native range input rather than a library: the
@@ -13,16 +73,15 @@ import { cn } from '@/lib/utils';
  *
  * - The "Pro focus style" paints `box-shadow: inset 0 0 0 1px` on ANY focused
  *   input through a zero-specificity `:where(…)` selector, which on a range
- *   input draws a rectangle around the whole control. `focus-visible:shadow-none`
- *   turns it off so the focus ring can live on the thumb, where it belongs.
+ *   input draws a rectangle around the whole control. Neutralizing the input's
+ *   focus shadow keeps the focus ring on the thumb.
  * - The global `*:focus-visible` reset forces `--tw-ring-shadow` to none with
  *   `!important`, and custom properties inherit into pseudo-elements, so Tailwind
  *   `ring-*` utilities are dead on the thumb too. The thumb's focus ring is an
  *   explicit `box-shadow` instead.
  *
- * Every pseudo-element class is written out in full. Tailwind scans source text
- * for literal candidates, so a class assembled from a template literal is never
- * generated, and a variant prefix binds only to the class immediately after it.
+ * WebKit and Mozilla track/thumb selectors stay separate. The inline fill
+ * variable follows the controlled value; caller styles merge before that variable.
  */
 export interface SliderProps extends Omit<
   React.ComponentPropsWithoutRef<'input'>,
@@ -55,37 +114,7 @@ export const Slider = React.forwardRef<HTMLInputElement, SliderProps>(function S
       disabled={disabled}
       onChange={(event) => onValueChange(Number(event.target.value))}
       style={{ ...style, '--lody-slider-fill': `${fill}%` } as React.CSSProperties}
-      className={cn(
-        'h-5 w-full cursor-pointer appearance-none bg-transparent',
-        'focus-visible:shadow-none disabled:cursor-not-allowed disabled:opacity-60',
-        '[&::-webkit-slider-runnable-track]:h-1',
-        '[&::-webkit-slider-runnable-track]:rounded-full',
-        '[&::-webkit-slider-runnable-track]:[background:linear-gradient(to_right,hsl(var(--primary))_var(--lody-slider-fill),hsl(var(--muted))_var(--lody-slider-fill))]',
-        '[&::-moz-range-track]:h-1',
-        '[&::-moz-range-track]:rounded-full',
-        '[&::-moz-range-track]:[background:linear-gradient(to_right,hsl(var(--primary))_var(--lody-slider-fill),hsl(var(--muted))_var(--lody-slider-fill))]',
-        // -mt centres a 16px thumb on a 4px webkit track; Firefox centres its own.
-        '[&::-webkit-slider-thumb]:-mt-1.5',
-        '[&::-webkit-slider-thumb]:size-4',
-        '[&::-webkit-slider-thumb]:appearance-none',
-        '[&::-webkit-slider-thumb]:rounded-full',
-        '[&::-webkit-slider-thumb]:border',
-        '[&::-webkit-slider-thumb]:border-border',
-        '[&::-webkit-slider-thumb]:bg-background',
-        '[&::-webkit-slider-thumb]:shadow-sm',
-        '[&::-moz-range-thumb]:size-4',
-        '[&::-moz-range-thumb]:appearance-none',
-        '[&::-moz-range-thumb]:rounded-full',
-        '[&::-moz-range-thumb]:border',
-        '[&::-moz-range-thumb]:border-border',
-        '[&::-moz-range-thumb]:bg-background',
-        '[&::-moz-range-thumb]:shadow-sm',
-        'hover:[&::-webkit-slider-thumb]:border-primary/60',
-        'hover:[&::-moz-range-thumb]:border-primary/60',
-        'focus-visible:[&::-webkit-slider-thumb]:[box-shadow:0_0_0_3px_hsl(var(--primary)/0.3)]',
-        'focus-visible:[&::-moz-range-thumb]:[box-shadow:0_0_0_3px_hsl(var(--primary)/0.3)]',
-        className
-      )}
+      className={cn(stylex.props(styles.input).className, className)}
       {...props}
     />
   );

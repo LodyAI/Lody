@@ -1,10 +1,32 @@
 import { memo, useCallback, useMemo } from 'react';
 import { Pin, X } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
 import type { SessionHistoryParsed } from '@lody/shared';
 import { useTranslation } from 'react-i18next';
 import { ConversationColumn } from '@/components/shared/conversation-column';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeSpace } from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  banner: {
+    position: 'relative',
+    zIndex: 10,
+    width: '100%',
+    borderBottomWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.5)',
+    backgroundColor: 'hsl(var(--muted) / 0.2)',
+  },
+  column: { display: 'flex', alignItems: 'center', gap: themeSpace[2] },
+  pinIcon: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+  },
+  closeIcon: { width: themeSpace[3.5], height: themeSpace[3.5] },
+});
 
 interface SessionPinProps {
   pinnedHistoryId: string | null;
@@ -58,9 +80,9 @@ export const SessionPin = memo(function SessionPin({
   }
 
   return (
-    <div className={cn('relative z-10 w-full', 'border-b border-border/50', 'bg-muted/20')}>
-      <ConversationColumn className="flex items-center gap-2">
-        <Pin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+    <div {...stylex.props(styles.banner)}>
+      <ConversationColumn {...stylex.props(styles.column)}>
+        <Pin {...stylex.props(styles.pinIcon)} />
         <Button
           type="button"
           variant="ghost"
@@ -79,7 +101,7 @@ export const SessionPin = memo(function SessionPin({
           onClick={onUnpin}
           aria-label={t('sessions.pin.unpin', 'Unpin message')}
         >
-          <X className="h-3.5 w-3.5" />
+          <X {...stylex.props(styles.closeIcon)} />
         </Button>
       </ConversationColumn>
     </div>

@@ -18,7 +18,8 @@ import {
 } from '@/hooks/use-local-project-file-paths';
 import { buildFileTreeFromPaths, markFileTreeModified } from '@/lib/file-tree';
 import { getBasename } from '@/lib';
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
+import * as stylex from '@stylexjs/stylex';
 import {
   flattenVisibleFileTreeRows,
   pruneExpandedFileTreeIds,
@@ -51,6 +52,8 @@ import {
   DefaultFileIcon,
   DefaultFolderIcon,
 } from '@/components/icons/file-icons';
+import { themeColors } from '../../../style/theme-colors.stylex';
+import { themeDuration, themeSpace } from '../../../style/theme-scale.stylex';
 
 interface FileTreeViewProps {
   session: SessionMeta;
@@ -84,6 +87,80 @@ const VIRTUAL_FILE_TREE_OVERSCAN = 12;
 const TREE_INDENT_PX = 8;
 const EMPTY_FILE_TREE: FileTreeItem[] = [];
 
+const styles = stylex.create({
+  skeletonSurface: { height: '100%', overflow: 'hidden' },
+  tree: { minWidth: 0 },
+  treeVirtual: { position: 'relative', minWidth: 0 },
+  row: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    paddingRight: themeSpace[2],
+    textAlign: 'left',
+    fontSize: '0.9em',
+    // The old Tailwind `focus-visible:ring-*` painted nothing — the app forces
+    // Tailwind's own ring transparent — but it still declared a `box-shadow`,
+    // and a utility-layer shadow beats the base layer's inset focus ring. So
+    // the row showed NO focus indicator at all. Keep it that way.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+  },
+  /**
+   * The row's fill and ink. A selected row keeps the selection fill, and a
+   * focus-visible row shows the hover fill even when it is selected — the
+   * `:hover:not(:focus-visible)` split keeps the two states apart.
+   */
+  rowInk: {
+    backgroundColor: {
+      default: null,
+      ':hover': themeColors.hover,
+      ':focus-visible': themeColors.hover,
+    },
+    color: { default: null, ':hover': themeColors.hoverForeground },
+  },
+  rowSelected: {
+    backgroundColor: {
+      default: themeColors.selection,
+      ':hover:not(:focus-visible)': themeColors.selection,
+      ':focus-visible': themeColors.hover,
+    },
+    color: { default: themeColors.selectionForeground, ':hover': themeColors.selectionForeground },
+  },
+  rowDisabled: { cursor: 'not-allowed', opacity: 0.5 },
+  /** The virtualized row is placed by the virtualizer, not by the flow. */
+  rowVirtual: { position: 'absolute', left: 0, top: 0 },
+  chevron: {
+    marginRight: themeSpace[0.5],
+    height: themeSpace[4],
+    width: themeSpace[4],
+    flexShrink: 0,
+    color: 'hsl(var(--muted-foreground) / 0.7)',
+    transitionProperty: 'transform, translate, scale, rotate',
+    transitionDuration: themeDuration[200],
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  chevronOpen: { rotate: '90deg' },
+  rowIcon: {
+    marginRight: themeSpace[1],
+    height: themeSpace[4],
+    width: themeSpace[4],
+    flexShrink: 0,
+  },
+  rowName: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  scrollArea: { height: '100%' },
+  treePadding: { padding: themeSpace[1] },
+  retryIcon: { height: themeSpace[3.5], width: themeSpace[3.5] },
+  truncatedNote: {
+    paddingTop: themeSpace[2],
+    fontSize: '0.8em',
+    color: themeColors.mutedForeground,
+  },
+});
+
 // All loading phases map to the same skeleton surface for the user; the distinct
 // branch names are kept only so the debug console can tell them apart.
 type FileTreeRenderBranch =
@@ -101,7 +178,7 @@ type FileTreeRenderBranch =
 // of introducing its own scrollbar while real content is still loading.
 function FileTreeSkeletonSurface() {
   return (
-    <div className="h-full overflow-hidden">
+    <div {...stylex.props(styles.skeletonSurface)}>
       <FileTreeSkeleton />
     </div>
   );
@@ -310,7 +387,7 @@ function VirtualFileTree({
 
   if (!shouldVirtualizeRows) {
     return (
-      <div role="tree" className="min-w-0">
+      <div role="tree" {...stylex.props(styles.tree)}>
         {rows.map((row) => (
           <VirtualFileTreeRow
             key={row.item.id}
@@ -331,7 +408,7 @@ function VirtualFileTree({
   return (
     <div
       role="tree"
-      className="relative min-w-0"
+      {...stylex.props(styles.treeVirtual)}
       style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
     >
       {virtualItems.map((virtualItem) => {
@@ -402,6 +479,15 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
   // uninitialized); only a file has none. `hasChildren` cannot stand in for
   // this — an empty directory has none either.
   const isFile = item.children === undefined;
+  const rowProps = stylex.props(
+    styles.row,
+    styles.rowInk,
+    selected && styles.rowSelected,
+    disabled && styles.rowDisabled,
+    // `w-full` resolves against the positioned ancestor once absolute, so
+    // the hover/selection background still spans the full row.
+    virtualStart !== undefined && styles.rowVirtual
+  );
   const rowButton = (
     <button
       type="button"
@@ -410,21 +496,15 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
       aria-level={row.level + 1}
       aria-selected={selected}
       disabled={disabled}
-      className={cn(
-        'group flex w-full items-center pr-2 text-left text-[0.9em] outline-none hover:bg-hover hover:text-hover-foreground focus-visible:bg-hover focus-visible:ring-1 focus-visible:ring-ring',
-        // `w-full` resolves against the positioned ancestor once absolute, so
-        // the hover/selection background still spans the full row.
-        virtualStart !== undefined && 'absolute left-0 top-0',
-        selected &&
-          'bg-selection text-selection-foreground hover:bg-selection hover:text-selection-foreground',
-        disabled && 'cursor-not-allowed opacity-50',
-        item.className
-      )}
+      {...rowProps}
       style={{
         height: `${virtualSize ?? VIRTUAL_FILE_TREE_ROW_HEIGHT_PX}px`,
         paddingLeft,
         ...(virtualStart === undefined ? {} : { transform: `translateY(${virtualStart}px)` }),
       }}
+      // The group's own marker, and the modified-file ink, stay Tailwind: the
+      // marker is not a style, and the ink is a rule of the base sheet.
+      className={clsx(rowProps.className, 'group', item.className)}
       onClick={activate}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
@@ -446,15 +526,10 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
       }}
     >
       {row.hasChildren ? (
-        <ChevronRight
-          className={cn(
-            'mr-0.5 h-4 w-4 shrink-0 text-muted-foreground/70 transition-transform duration-200',
-            row.isOpen && 'rotate-90'
-          )}
-        />
+        <ChevronRight {...stylex.props(styles.chevron, row.isOpen && styles.chevronOpen)} />
       ) : null}
-      <Icon className="mr-1 h-4 w-4 shrink-0" />
-      <span className="min-w-0 truncate" title={item.id}>
+      <Icon className={stylex.props(styles.rowIcon).className} />
+      <span {...stylex.props(styles.rowName)} title={item.id}>
         {item.name}
       </span>
     </button>
@@ -582,8 +657,8 @@ function ControlledFileTreeView({
   }
 
   return (
-    <ScrollArea className="h-full" viewportRef={scrollViewportRef}>
-      <div className="p-1">
+    <ScrollArea {...stylex.props(styles.scrollArea)} viewportRef={scrollViewportRef}>
+      <div {...stylex.props(styles.treePadding)}>
         <VirtualFileTree
           data={fileTreeData}
           viewportRef={scrollViewportRef}
@@ -869,7 +944,7 @@ const AutoFileTreeView = ({
         }
         action={
           <Button variant="secondary" size="small" onClick={handleRetryLocalFiles}>
-            <RefreshCw className="h-3.5 w-3.5" />
+            <RefreshCw {...stylex.props(styles.retryIcon)} />
             {t('sessions.codeSession.files.retry', 'Try again')}
           </Button>
         }
@@ -904,8 +979,8 @@ const AutoFileTreeView = ({
   }
 
   return (
-    <ScrollArea className="h-full" viewportRef={scrollViewportRef}>
-      <div className="p-1">
+    <ScrollArea {...stylex.props(styles.scrollArea)} viewportRef={scrollViewportRef}>
+      <div {...stylex.props(styles.treePadding)}>
         <VirtualFileTree
           data={fileTreeData}
           viewportRef={scrollViewportRef}
@@ -914,7 +989,7 @@ const AutoFileTreeView = ({
         />
 
         {shouldUseLocalFileList && localListTruncated ? (
-          <div className="pt-2 text-[0.8em] text-muted-foreground">{localTruncatedLabel}</div>
+          <div {...stylex.props(styles.truncatedNote)}>{localTruncatedLabel}</div>
         ) : null}
       </div>
     </ScrollArea>

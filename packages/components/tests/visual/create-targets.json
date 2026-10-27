@@ -1,0 +1,32 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "pages-createworkspacepage--empty",
+    "pages-createworkspacepage--ready",
+    "pages-createworkspacepage--with-back-button",
+    "pages-createworkspacepage--checking-slug",
+    "pages-createworkspacepage--slug-error",
+    "pages-createworkspacepage--create-error",
+    "pages-createworkspacepage--creating",
+    "pages-createworkspacepage--plus-required",
+    "pages-createworkspacepage--plus-required-pricing-loading"
+  ],
+  "titles": []
+}

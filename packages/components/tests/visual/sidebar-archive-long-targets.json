@@ -1,0 +1,107 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "components-sidebar-migration--row-anatomy",
+    "components-sidebar-migration--large-interface-type"
+  ],
+  "allowBlankIds": [],
+  "states": {
+    "components-sidebar-migration--row-anatomy": [
+      {
+        "name": "long-title-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-fixture-row=\"child-last\"]"
+          }
+        ]
+      },
+      {
+        "name": "long-title-confirm",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Archive Review a very long session title that should stay clipped"
+          },
+          {
+            "action": "visible",
+            "role": "button",
+            "name": "Confirm Archive Review a very long session title that should stay clipped"
+          }
+        ]
+      },
+      {
+        "name": "long-title-committed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Confirm Archive Review a very long session title that should stay clipped"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-fixture-row=\"child-last\"]"
+          }
+        ]
+      }
+    ],
+    "components-sidebar-migration--large-interface-type": [
+      {
+        "name": "long-title-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-fixture-row=\"child-last\"]"
+          }
+        ]
+      },
+      {
+        "name": "long-title-confirm",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Archive Review a very long session title that should stay clipped"
+          },
+          {
+            "action": "visible",
+            "role": "button",
+            "name": "Confirm Archive Review a very long session title that should stay clipped"
+          }
+        ]
+      },
+      {
+        "name": "long-title-committed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Confirm Archive Review a very long session title that should stay clipped"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-fixture-row=\"child-last\"]"
+          }
+        ]
+      }
+    ]
+  }
+}

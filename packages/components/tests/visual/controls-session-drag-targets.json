@@ -1,0 +1,79 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 900
+    },
+    {
+      "name": "phone-compact",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "blockedHosts": [
+    "avatars.githubusercontent.com"
+  ],
+  "titles": [
+    "Components/SessionList"
+  ],
+  "states": {
+    "components-sessionlist--default": [
+      {
+        "name": "drag-ready",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-repo-full-name=\"loro-dev/lody\"]"
+          }
+        ]
+      },
+      {
+        "name": "dragging",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-repo-full-name=\"loro-dev/lody\"] button[aria-label=\"Reorder repo\"]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-repo-full-name=\"loro-dev/lody\"] button[aria-label=\"Reorder repo\"]",
+            "key": " "
+          }
+        ]
+      },
+      {
+        "name": "drag-moved",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-repo-full-name=\"loro-dev/lody\"] button[aria-label=\"Reorder repo\"]",
+            "key": "ArrowUp"
+          }
+        ]
+      },
+      {
+        "name": "drag-committed",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-repo-full-name=\"loro-dev/lody\"] button[aria-label=\"Reorder repo\"]",
+            "key": " "
+          }
+        ]
+      }
+    ]
+  },
+  "ids": [
+    "components-sessionlist--default"
+  ]
+}

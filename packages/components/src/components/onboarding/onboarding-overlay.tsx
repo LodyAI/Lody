@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { usePlatformCapability } from '@lody/platform/react';
 import type { AgentConfigMeta, ManagedBuiltinAgentType, ProviderSetupTask } from '@lody/shared';
@@ -31,6 +32,18 @@ import {
   type DesktopOnboardingTraceProperties,
 } from './onboarding-analytics';
 import { WindowDragStrip } from '@/ui/window-drag-region';
+
+const styles = stylex.create({
+  overlay: {
+    position: 'fixed',
+    inset: 'calc(var(--spacing) * 0)',
+    zIndex: 40,
+    overflow: 'hidden',
+    backgroundColor: '#f7f5f2',
+    color: 'var(--color-slate-950)',
+  },
+  screen: { position: 'absolute', inset: 'calc(var(--spacing) * 0)', zIndex: 10 },
+});
 
 export type DesktopOnboardingCompletion = {
   sessionId?: string;
@@ -388,12 +401,12 @@ export function OnboardingOverlay({
 
   return (
     <OnboardingStepsProvider steps={visibleSteps}>
-      <div className="fixed inset-0 z-40 overflow-hidden bg-[#f7f5f2] text-slate-950">
+      <div {...stylex.props(styles.overlay)}>
         <WindowDragStrip className="z-30" />
         {phase === 'ceremony' ? (
-          <div className="absolute inset-0 z-10">{screens[phase]}</div>
+          <div {...stylex.props(styles.screen)}>{screens[phase]}</div>
         ) : (
-          <div className="absolute inset-0 z-10">
+          <div {...stylex.props(styles.screen)}>
             <OnboardingShellHost>{screens[phase]}</OnboardingShellHost>
           </div>
         )}

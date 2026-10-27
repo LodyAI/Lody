@@ -1,11 +1,36 @@
 import type { ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 
-import { cn } from '@/lib/utils';
+// The theme tokens are imported by path, not by the `@/` alias: the StyleX
+// compiler links a theme file on its own and does not follow bundler aliases.
+import { themeSpace } from '../../style/theme-scale.stylex';
 import {
   MobileInlinePicker,
   type MobileInlinePickerOption,
 } from '@/components/mobile/mobile-inline-picker';
+
+const styles = stylex.create({
+  /** The trigger's box: it hugs its label and never takes the whole row. */
+  trigger: { display: 'inline-block', maxWidth: '60vw' },
+  /** The icon slot beside the label. */
+  iconSlot: { flexShrink: 0 },
+  /** The label: it truncates and keeps the row on one line. */
+  label: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    textAlign: 'right',
+  },
+  /** The chevron that says the trigger opens a list. */
+  chevron: {
+    height: themeSpace[3.5],
+    width: themeSpace[3.5],
+    flexShrink: 0,
+    opacity: 0.6,
+  },
+});
 
 export function MobileSettingsPickerTrigger<T extends string>({
   id,
@@ -29,7 +54,7 @@ export function MobileSettingsPickerTrigger<T extends string>({
   searchPlaceholder?: string;
 }) {
   return (
-    <div className={cn('inline-block max-w-[60vw]')}>
+    <div {...stylex.props(styles.trigger)}>
       <MobileInlinePicker<T>
         id={id}
         value={value}
@@ -41,13 +66,9 @@ export function MobileSettingsPickerTrigger<T extends string>({
         triggerClassName="w-auto"
         triggerContent={
           <>
-            {triggerIcon ? <span className="shrink-0">{triggerIcon}</span> : null}
-            <span className="min-w-0 truncate text-right">{triggerLabel}</span>
-            <ChevronDown
-              className="h-3.5 w-3.5 shrink-0 opacity-60"
-              strokeWidth={2}
-              aria-hidden="true"
-            />
+            {triggerIcon ? <span {...stylex.props(styles.iconSlot)}>{triggerIcon}</span> : null}
+            <span {...stylex.props(styles.label)}>{triggerLabel}</span>
+            <ChevronDown {...stylex.props(styles.chevron)} strokeWidth={2} aria-hidden="true" />
           </>
         }
       />

@@ -1,8 +1,87 @@
 import * as React from 'react';
 import { GripVerticalIcon } from 'lucide-react';
 import * as ResizablePrimitive from 'react-resizable-panels';
+import * as stylex from '@stylexjs/stylex';
 
-import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
+import { themeColors } from '../style/theme-colors.stylex';
+import { themeRadius, themeSpace } from '../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  group: {
+    display: 'flex',
+    height: '100%',
+    width: '100%',
+    flexDirection: { default: null, ':is([data-panel-group-direction="vertical"])': 'column' },
+  },
+  handle: {
+    backgroundColor: themeColors.border,
+    position: 'relative',
+    display: 'flex',
+    width: { default: '1px', ':is([data-panel-group-direction="vertical"])': '100%' },
+    height: { default: null, ':is([data-panel-group-direction="vertical"])': '1px' },
+    alignItems: 'center',
+    justifyContent: 'center',
+    '--tw-ring-color': { default: null, ':focus-visible': themeColors.ring },
+    '--tw-ring-offset-width': { default: null, ':focus-visible': '1px' },
+    '--tw-ring-offset-shadow': {
+      default: null,
+      ':focus-visible':
+        'var(--tw-ring-inset,) 0 0 0 var(--tw-ring-offset-width) var(--tw-ring-offset-color)',
+    },
+    '--tw-ring-shadow': {
+      default: null,
+      ':focus-visible':
+        'var(--tw-ring-inset,) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentcolor)',
+    },
+    boxShadow: {
+      default: null,
+      ':focus-visible':
+        'var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)',
+    },
+    outlineStyle: { default: null, ':focus-visible': 'none' },
+    outline: {
+      default: null,
+      ':focus-visible': {
+        default: null,
+        '@media (forced-colors: active)': '2px solid transparent',
+      },
+    },
+    outlineOffset: {
+      default: null,
+      ':focus-visible': { default: null, '@media (forced-colors: active)': '2px' },
+    },
+    '::after': {
+      content: '""',
+      position: 'absolute',
+      top: 0,
+      bottom: 0,
+      left: { default: '50%', ':is([data-panel-group-direction="vertical"])': 0 },
+      width: { default: themeSpace[1], ':is([data-panel-group-direction="vertical"])': '100%' },
+      height: { default: null, ':is([data-panel-group-direction="vertical"])': themeSpace[1] },
+      translate: { default: '-50% 0', ':is([data-panel-group-direction="vertical"])': '0 -50%' },
+    },
+  },
+  grip: {
+    backgroundColor: themeColors.border,
+    zIndex: 10,
+    display: 'flex',
+    height: themeSpace[4],
+    width: themeSpace[3],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.xs,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    rotate: {
+      default: null,
+      [stylex.when.ancestor(
+        ':is([data-slot="resizable-handle"][data-panel-group-direction="vertical"])'
+      )]: '90deg',
+    },
+  },
+  glyph: { height: themeSpace[2.5], width: themeSpace[2.5] },
+});
 
 function ResizablePanelGroup({
   className,
@@ -11,7 +90,7 @@ function ResizablePanelGroup({
   return (
     <ResizablePrimitive.PanelGroup
       data-slot="resizable-panel-group"
-      className={cn('flex h-full w-full data-[panel-group-direction=vertical]:flex-col', className)}
+      {...withClassName(stylex.props(styles.group), className)}
       {...props}
     />
   );
@@ -34,15 +113,12 @@ function ResizableHandle({
   return (
     <ResizablePrimitive.PanelResizeHandle
       data-slot="resizable-handle"
-      className={cn(
-        'bg-border focus-visible:ring-ring relative flex w-px items-center justify-center after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 focus-visible:ring-1 focus-visible:ring-offset-1 focus-visible:outline-hidden data-[panel-group-direction=vertical]:h-px data-[panel-group-direction=vertical]:w-full data-[panel-group-direction=vertical]:after:left-0 data-[panel-group-direction=vertical]:after:h-1 data-[panel-group-direction=vertical]:after:w-full data-[panel-group-direction=vertical]:after:translate-x-0 data-[panel-group-direction=vertical]:after:-translate-y-1/2 [&[data-panel-group-direction=vertical]>div]:rotate-90',
-        className
-      )}
+      {...withClassName(stylex.props(stylex.defaultMarker(), styles.handle), className)}
       {...props}
     >
       {withHandle && (
-        <div className="bg-border z-10 flex h-4 w-3 items-center justify-center rounded-xs border">
-          <GripVerticalIcon className="size-2.5" />
+        <div {...stylex.props(styles.grip)}>
+          <GripVerticalIcon {...stylex.props(styles.glyph)} />
         </div>
       )}
     </ResizablePrimitive.PanelResizeHandle>

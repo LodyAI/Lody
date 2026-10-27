@@ -1,9 +1,50 @@
 import type { ComponentType, SVGProps } from 'react';
 import { Trash2, WifiOff } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 import { FamiconsCloudOfflineOutline } from '@/components/icons/famicons-cloud-offline-outline';
 import type { MachineOnlineStatus } from '@/atoms/presence';
+
+const styles = stylex.create({
+  root: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[2.5],
+    paddingBlock: themeSpace[1.5],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+  },
+  /** A state that blocks sending says so in the warning tone. */
+  rootWarning: {
+    borderColor: 'hsl(var(--status-warning) / 0.25)',
+    backgroundColor: 'hsl(var(--status-warning) / 0.1)',
+    color: themeColors.statusWarning,
+  },
+  /** An ordinary state stays in the muted ink. */
+  rootMuted: {
+    borderColor: 'hsl(var(--border) / 0.6)',
+    backgroundColor: 'hsl(var(--muted-foreground) / 0.1)',
+    color: themeColors.mutedForeground,
+  },
+  icon: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+  },
+  label: { minWidth: 0, flexGrow: 1, flexShrink: 1, flexBasis: '0%' },
+});
 
 /**
  * One priority-ordered status slot surfaced next to the composer. It answers
@@ -107,19 +148,12 @@ export function SessionStatusStrip({
   if (!presentation) return null;
   const { Icon, text, warning } = presentation;
 
+  const rootProps = stylex.props(styles.root, warning ? styles.rootWarning : styles.rootMuted);
+
   return (
-    <div
-      role="status"
-      className={cn(
-        'flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs',
-        warning
-          ? 'border-status-warning/25 bg-status-warning/10 text-status-warning'
-          : 'border-border/60 bg-muted-foreground/10 text-muted-foreground',
-        className
-      )}
-    >
-      <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      <span className="min-w-0 flex-1">{text}</span>
+    <div {...rootProps} role="status" className={clsx(rootProps.className, className)}>
+      <Icon {...stylex.props(styles.icon)} aria-hidden="true" />
+      <span {...stylex.props(styles.label)}>{text}</span>
     </div>
   );
 }

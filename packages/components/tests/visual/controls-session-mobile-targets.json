@@ -1,0 +1,67 @@
+{
+  "viewports": [
+    {
+      "name": "iphone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "android",
+      "device": "Pixel 5",
+      "width": 393,
+      "height": 851
+    }
+  ],
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "blockedHosts": [
+    "avatars.githubusercontent.com"
+  ],
+  "titles": [
+    "Components/SessionList"
+  ],
+  "states": {
+    "components-sessionlist--default": [
+      {
+        "name": "repo-collapsed",
+        "steps": [
+          {
+            "action": "tap",
+            "selector": "[data-sidebar-group-key=\"loro-dev/loro\"]"
+          }
+        ]
+      },
+      {
+        "name": "repo-expanded",
+        "steps": [
+          {
+            "action": "tap",
+            "selector": "[data-sidebar-group-key=\"loro-dev/loro\"]"
+          }
+        ]
+      }
+    ]
+  },
+  "allowBlankIds": [
+    "components-sessionlist--loading"
+  ],
+  "ready": {
+    "components-sessionlist--loading": [
+      {
+        "action": "visible",
+        "selector": "[data-sidebar-loading-skeleton] [aria-hidden=\"true\"]",
+        "index": 0
+      }
+    ]
+  },
+  "ids": [
+    "components-sessionlist--default",
+    "components-sessionlist--repo-collapsed",
+    "components-sessionlist--opened-sessions-active-opener",
+    "components-sessionlist--long-titles",
+    "components-sessionlist--loading"
+  ]
+}

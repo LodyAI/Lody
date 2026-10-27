@@ -1,11 +1,44 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
 import { deferredPostHog } from '@/lib/deferred-posthog';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
+// The theme tokens are imported by path, not by the `@/` alias: the StyleX
+// compiler links a theme file on its own and does not follow bundler aliases.
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 import { MobileSettingsSection } from './mobile-settings-row';
 import { CompactSection } from '../settings/compact-layout';
+
+const styles = stylex.create({
+  /** The icon choices, laid out in a wrapping row. */
+  choices: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: themeSpace[3],
+    padding: themeSpace[4],
+  },
+  /** The icon's preview. */
+  preview: { borderRadius: themeRadius['2xl'] },
+  /** The choice's name, with its check beside it. */
+  choiceLabel: { display: 'flex', alignItems: 'center', gap: themeSpace[1] },
+  /** The check that marks the current icon. */
+  check: { height: themeSpace[3.5], width: themeSpace[3.5] },
+  /** The error line under the choices. */
+  error: { paddingInline: themeSpace[4], paddingBottom: themeSpace[3] },
+  errorText: {
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.destructive,
+  },
+});
 
 export type AppIconState = { supported: boolean; name: string };
 export type AppIconBridge = {
@@ -82,7 +115,7 @@ export function MobileAppIconSettings({
   const Section = layout === 'desktop' ? CompactSection : MobileSettingsSection;
   return (
     <Section title={t('settings.appIcon.title')}>
-      <div className="flex flex-wrap gap-3 p-4" aria-busy={pending || (!state && !error)}>
+      <div {...stylex.props(styles.choices)} aria-busy={pending || (!state && !error)}>
         {bridge.icons.map((icon, index) => {
           const selected = state?.name === icon.name;
           const label =
@@ -98,18 +131,24 @@ export function MobileAppIconSettings({
               disabled={!state || pending}
               onClick={() => void selectIcon(icon.name)}
             >
-              <img src={icon.previewUrl} alt="" width={64} height={64} className="rounded-2xl" />
-              <span className="flex items-center gap-1">
+              <img
+                {...stylex.props(styles.preview)}
+                src={icon.previewUrl}
+                alt=""
+                width={64}
+                height={64}
+              />
+              <span {...stylex.props(styles.choiceLabel)}>
                 {label}
-                {selected ? <Check className="size-3.5" aria-hidden="true" /> : null}
+                {selected ? <Check {...stylex.props(styles.check)} aria-hidden="true" /> : null}
               </span>
             </Button>
           );
         })}
       </div>
       {error ? (
-        <div className="px-4 pb-3">
-          <p role="alert" className="text-sm text-destructive">
+        <div {...stylex.props(styles.error)}>
+          <p role="alert" {...stylex.props(styles.errorText)}>
             {t('settings.appIcon.error')}
           </p>
           {!state ? (

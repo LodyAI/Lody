@@ -1,0 +1,28 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "sessions-sessioninfobar--mergeable",
+    "sessions-sessioninfobar--dirty-worktree-outranks-merge",
+    "onboarding-blueprint--project",
+    "onboarding-blueprint--first-task",
+    "ai-assistanteditedfiles--many-files",
+    "components-baseheader--default"
+  ]
+}

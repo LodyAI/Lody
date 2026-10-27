@@ -1,3 +1,4 @@
+import { withClassName } from '@/lib/stylex';
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -328,12 +329,11 @@ export function SketchLayer({
                   />
                   {drawing && region.rect.w > 120 && region.rect.h > 30 ? (
                     <path
-                      className="lody-blueprint-construct"
                       d={constructionLines(region.rect)}
                       pathLength={1}
                       vectorEffect="non-scaling-stroke"
                       strokeWidth={1}
-                      {...stylex.props(styles.construct)}
+                      {...withClassName(stylex.props(styles.construct), 'lody-blueprint-construct')}
                     />
                   ) : null}
                   {pencil(region, sweep).map((line, index) => (
@@ -370,11 +370,10 @@ export function SketchLayer({
                 clipPath={`url(#${id}-clip-${region.id})`}
               >
                 <circle
-                  className="lody-blueprint-ring"
                   cx={region.origin.x}
                   cy={region.origin.y}
                   vectorEffect="non-scaling-stroke"
-                  {...stylex.props(styles.ring)}
+                  {...withClassName(stylex.props(styles.ring), 'lody-blueprint-ring')}
                   style={
                     {
                       '--ring-r': `${farthestCorner(region.origin, region.rect) * 0.92}px`,

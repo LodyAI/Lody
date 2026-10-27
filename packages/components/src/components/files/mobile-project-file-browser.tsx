@@ -1,4 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontWeight, themeSpace } from '../../style/theme-scale.stylex';
 import {
   forwardRef,
   Fragment,
@@ -57,9 +59,14 @@ const MOBILE_DRILL_EXIT_MS = 280;
 /* The bottom tab bar floats fixed over the viewport, so the scrollable
    level body needs padding to clear it (height + safe-area). Same trick
    `mobile-project-screen.tsx` uses on its list scroller. */
-const MOBILE_TABBAR_CLEARANCE =
-  'pb-[calc(var(--mobile-tabbar-height)+var(--k-safe-area-bottom,0px)+1rem)]';
-const MOBILE_SAFE_AREA_CLEARANCE = 'pb-[calc(var(--k-safe-area-bottom,0px)+1rem)]';
+const clearanceStyles = stylex.create({
+  tabbar: {
+    paddingBottom: 'calc(var(--mobile-tabbar-height) + var(--k-safe-area-bottom, 0px) + 1rem)',
+  },
+  safeArea: { paddingBottom: 'calc(var(--k-safe-area-bottom, 0px) + 1rem)' },
+});
+const MOBILE_TABBAR_CLEARANCE = stylex.props(clearanceStyles.tabbar).className ?? '';
+const MOBILE_SAFE_AREA_CLEARANCE = stylex.props(clearanceStyles.safeArea).className ?? '';
 
 const ROOT_PATH = '';
 const videoStyles = stylex.create({ frame: { height: '100%', minHeight: 0 } });
@@ -298,12 +305,7 @@ export const MobileProjectFileBrowser = forwardRef<
   }, [onScrollActivity, topPath]);
 
   return (
-    <div
-      className={cn(
-        'absolute inset-0 flex min-h-0 flex-col overflow-hidden bg-background',
-        className
-      )}
-    >
+    <div className={cn(stylex.props(styles.root).className, className)}>
       {/* The breadcrumb sits at the top of the body (not in the screen
           header) and is shared across every level — the levels slide
           beneath it. Hidden at the root: the project header already
@@ -315,7 +317,7 @@ export const MobileProjectFileBrowser = forwardRef<
           onNavigateSegment={(index) => popTo(index + 2)}
         />
       ) : null}
-      <div ref={framesRef} className="relative min-h-0 flex-1">
+      <div ref={framesRef} {...stylex.props(styles.frames)}>
         {stack.map((frame, index) => {
           const isTop = index === stack.length - 1;
           return (
@@ -324,9 +326,8 @@ export const MobileProjectFileBrowser = forwardRef<
               ref={isTop ? topFrameRef : undefined}
               aria-hidden={!isTop}
               className={cn(
-                'absolute inset-0 flex flex-col bg-background',
-                index > 0 && 'mobile-drill-in',
-                !isTop && 'pointer-events-none'
+                stylex.props(styles.frame, !isTop && styles.inactiveFrame).className,
+                index > 0 && 'mobile-drill-in'
               )}
             >
               <FrameContent
@@ -379,7 +380,7 @@ function FilesBreadcrumb({
     setOverflowing(el.scrollWidth > el.clientWidth + 1);
   }, [segments]);
   return (
-    <div className="relative z-30 flex shrink-0 items-center border-b border-border/50 px-3 py-2 text-[0.78rem] leading-none text-muted-foreground">
+    <div {...stylex.props(styles.breadcrumb)}>
       {/* Root crumb lives OUTSIDE the scroll area so it stays visible and
           tappable even on deep paths — the segment row auto-scrolls to its
           end, which would otherwise push the leftmost root off-screen. */}
@@ -387,36 +388,26 @@ function FilesBreadcrumb({
         type="button"
         onClick={onNavigateRoot}
         aria-label="Root"
-        className="mr-0.5 flex shrink-0 items-center rounded p-1 active:bg-muted/50"
+        {...stylex.props(styles.rootCrumb)}
       >
-        <Home className="h-3.5 w-3.5" aria-hidden="true" />
+        <Home {...stylex.props(styles.smallIcon)} aria-hidden="true" />
       </button>
       <div
         ref={scrollRef}
-        className={cn(
-          'flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap',
-          '[scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
-          /* Fade the left edge (auto-scrolled to the end, so hidden
-             ancestors sit on the left) to hint the row scrolls — only
-             when it overflows. `-webkit-` for iOS WKWebView. */
-          overflowing && [
-            '[mask-image:linear-gradient(to_right,transparent,#000_14px)]',
-            '[-webkit-mask-image:linear-gradient(to_right,transparent,#000_14px)]',
-          ]
-        )}
+        {...stylex.props(styles.crumbScroller, overflowing && styles.overflowingCrumbs)}
       >
         {segments.map((segment, index) => {
           const isLast = index === segments.length - 1;
           return (
-            <span key={`${index}:${segment}`} className="flex shrink-0 items-center gap-1">
-              <ChevronRight className="h-3.5 w-3.5 shrink-0 opacity-40" aria-hidden="true" />
+            <span key={`${index}:${segment}`} {...stylex.props(styles.crumbSegment)}>
+              <ChevronRight {...stylex.props(styles.crumbChevron)} aria-hidden="true" />
               <button
                 type="button"
                 disabled={isLast}
                 onClick={() => onNavigateSegment(index)}
                 className={cn(
-                  'shrink-0 rounded px-0.5',
-                  isLast ? 'font-medium text-foreground' : 'active:bg-muted/50'
+                  stylex.props(styles.crumbButton, isLast && styles.currentCrumb).className,
+                  !isLast && stylex.props(styles.ancestorCrumb).className
                 )}
               >
                 {segment}
@@ -576,12 +567,12 @@ function MobileDirectoryList({
 
   return (
     <div
-      className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain', bottomClearanceClassName)}
+      className={cn(stylex.props(styles.directoryScroller).className, bottomClearanceClassName)}
       onScroll={(event) => onScrollActivity?.(event.currentTarget.scrollTop)}
     >
       {resolved.children.map((item, index) => (
         <Fragment key={item.path}>
-          {index > 0 ? <div className="ml-[3.75rem] h-px bg-border/40" aria-hidden /> : null}
+          {index > 0 ? <div {...stylex.props(styles.separator)} aria-hidden /> : null}
           <FileRow item={item} onOpenDir={onOpenDir} onOpenFile={onOpenFile} />
         </Fragment>
       ))}
@@ -603,24 +594,21 @@ function FileRow({
     <button
       type="button"
       onClick={() => (isDirectory ? onOpenDir(item.path) : onOpenFile(item.path))}
-      className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors active:bg-muted/50"
+      {...stylex.props(styles.fileRow)}
     >
       {isDirectory ? (
-        <FolderIcon folderPath={item.path} className="h-7 w-7 shrink-0" />
+        <FolderIcon folderPath={item.path} {...stylex.props(styles.fileIcon)} />
       ) : (
-        <FileIcon filePath={item.path} className="h-7 w-7 shrink-0" />
+        <FileIcon filePath={item.path} {...stylex.props(styles.fileIcon)} />
       )}
       <span
         className={cn(
-          'min-w-0 flex-1 truncate text-[1.0625rem] text-foreground',
-          item.modified && 'text-amber-500'
+          stylex.props(styles.fileName, item.modified && styles.modifiedName).className
         )}
       >
         {basename(item.path)}
       </span>
-      {isDirectory ? (
-        <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/40" aria-hidden />
-      ) : null}
+      {isDirectory ? <ChevronRight {...stylex.props(styles.directoryChevron)} aria-hidden /> : null}
     </button>
   );
 }
@@ -787,7 +775,7 @@ function MobileImagePreview({
   readonly bottomClearanceClassName: string;
 }) {
   return (
-    <div className={cn('min-h-0 flex-1 overflow-hidden', bottomClearanceClassName)}>
+    <div className={cn(stylex.props(styles.preview).className, bottomClearanceClassName)}>
       <SessionFileImagePreview path={path} bytes={bytes} svgText={svgText} />
     </div>
   );
@@ -853,11 +841,11 @@ function MobileTextPreview({
   if (isSessionMarkdownPath(path)) {
     return (
       <div
-        className={cn('min-h-0 flex-1 overflow-auto overscroll-contain', bottomClearanceClassName)}
+        className={cn(stylex.props(styles.markdownScroller).className, bottomClearanceClassName)}
         data-native-selection-allow
         onScroll={(event) => onScrollActivity?.(event.currentTarget.scrollTop)}
       >
-        <div className="mx-auto w-full max-w-3xl px-3 py-3 sm:px-4 sm:py-4">
+        <div {...stylex.props(styles.markdown)}>
           <MarkdownRenderer text={text} size={conversationFontSize} />
         </div>
       </div>
@@ -866,27 +854,20 @@ function MobileTextPreview({
 
   if (isSessionFileShikiLanguage(language)) {
     return (
-      <div
-        className={cn(
-          'min-h-0 flex-1 overflow-hidden overscroll-contain',
-          bottomClearanceClassName
-        )}
-      >
+      <div className={cn(stylex.props(styles.codePreview).className, bottomClearanceClassName)}>
         <SessionShikiTextViewer
           key={path}
           path={path}
           text={text}
           language={language}
-          className="h-full min-h-0"
+          className={stylex.props(videoStyles.frame).className}
         />
       </div>
     );
   }
 
   return (
-    <div
-      className={cn('min-h-0 flex-1 overflow-hidden overscroll-contain', bottomClearanceClassName)}
-    >
+    <div className={cn(stylex.props(styles.codePreview).className, bottomClearanceClassName)}>
       <SessionMonacoTextViewer
         key={path}
         text={text}
@@ -894,7 +875,7 @@ function MobileTextPreview({
         resolvedTheme={resolvedTheme}
         vscodeTheme={activeVSCodeTheme ?? null}
         readOnly
-        className="h-full min-h-0"
+        className={stylex.props(videoStyles.frame).className}
         onScrollChange={({ scrollTop }) => onScrollActivity?.(scrollTop)}
       />
     </div>
@@ -923,15 +904,12 @@ function StatusPanel({
   return (
     <div
       className={cn(
-        'flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-8 text-center',
-        tone === 'destructive' ? 'text-destructive' : 'text-muted-foreground'
+        stylex.props(styles.status, tone === 'destructive' && styles.errorStatus).className
       )}
     >
-      <Spinner icon={Icon} spinning={spin} className="h-6 w-6" aria-hidden />
-      <span className="text-[0.95rem]">{title}</span>
-      {description ? (
-        <span className="text-[0.8125rem] text-muted-foreground">{description}</span>
-      ) : null}
+      <Spinner icon={Icon} spinning={spin} {...stylex.props(styles.statusIcon)} aria-hidden />
+      <span {...stylex.props(styles.statusTitle)}>{title}</span>
+      {description ? <span {...stylex.props(styles.statusDescription)}>{description}</span> : null}
     </div>
   );
 }
@@ -940,4 +918,138 @@ const htmlStyles = stylex.create({
   root: { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' },
   toolbar: { display: 'flex', flexShrink: 0 },
   source: { flex: 1, minHeight: 0 },
+});
+
+const styles = stylex.create({
+  root: {
+    position: 'absolute',
+    inset: 0,
+    display: 'flex',
+    minHeight: 0,
+    flexDirection: 'column',
+    overflow: 'hidden',
+    backgroundColor: themeColors.background,
+  },
+  frames: { position: 'relative', minHeight: 0, flex: '1 1 0%' },
+  frame: {
+    position: 'absolute',
+    inset: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    backgroundColor: themeColors.background,
+  },
+  inactiveFrame: { pointerEvents: 'none' },
+  breadcrumb: {
+    position: 'relative',
+    zIndex: 30,
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.5)',
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2],
+    fontSize: '0.78rem',
+    lineHeight: 1,
+    color: themeColors.mutedForeground,
+  },
+  rootCrumb: {
+    marginRight: themeSpace[0.5],
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    borderRadius: '0.25rem',
+    padding: themeSpace[1],
+    backgroundColor: { default: null, ':active': 'hsl(var(--muted) / 0.5)' },
+  },
+  smallIcon: { width: themeSpace[3.5], height: themeSpace[3.5] },
+  crumbScroller: {
+    display: 'flex',
+    minWidth: 0,
+    flex: '1 1 0%',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    overflowX: 'auto',
+    whiteSpace: 'nowrap',
+    scrollbarWidth: 'none',
+    '::-webkit-scrollbar': { display: 'none' },
+  },
+  overflowingCrumbs: {
+    maskImage: 'linear-gradient(to right, transparent, #000 14px)',
+    WebkitMaskImage: 'linear-gradient(to right, transparent, #000 14px)',
+  },
+  crumbSegment: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: themeSpace[1] },
+  crumbChevron: { width: themeSpace[3.5], height: themeSpace[3.5], flexShrink: 0, opacity: 0.4 },
+  crumbButton: { flexShrink: 0, borderRadius: '0.25rem', paddingInline: themeSpace[0.5] },
+  currentCrumb: { fontWeight: themeFontWeight.medium, color: themeColors.foreground },
+  ancestorCrumb: { backgroundColor: { default: null, ':active': 'hsl(var(--muted) / 0.5)' } },
+  directoryScroller: {
+    minHeight: 0,
+    flex: '1 1 0%',
+    overflowY: 'auto',
+    overscrollBehavior: 'contain',
+  },
+  separator: { marginLeft: '3.75rem', height: '1px', backgroundColor: 'hsl(var(--border) / 0.4)' },
+  fileRow: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    gap: themeSpace[3],
+    paddingInline: themeSpace[4],
+    paddingBlock: themeSpace[3.5],
+    textAlign: 'left',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    backgroundColor: { default: null, ':active': 'hsl(var(--muted) / 0.5)' },
+  },
+  fileIcon: { width: themeSpace[7], height: themeSpace[7], flexShrink: 0 },
+  fileName: {
+    minWidth: 0,
+    flex: '1 1 0%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '1.0625rem',
+    color: themeColors.foreground,
+  },
+  modifiedName: { color: 'var(--color-amber-500)' },
+  directoryChevron: {
+    width: themeSpace[5],
+    height: themeSpace[5],
+    flexShrink: 0,
+    color: 'hsl(var(--muted-foreground) / 0.4)',
+  },
+  preview: { minHeight: 0, flex: '1 1 0%', overflow: 'hidden' },
+  markdownScroller: {
+    minHeight: 0,
+    flex: '1 1 0%',
+    overflow: 'auto',
+    overscrollBehavior: 'contain',
+  },
+  markdown: {
+    marginInline: 'auto',
+    width: '100%',
+    maxWidth: '48rem',
+    padding: { default: themeSpace[3], '@media (min-width: 640px)': themeSpace[4] },
+  },
+  codePreview: { minHeight: 0, flex: '1 1 0%', overflow: 'hidden', overscrollBehavior: 'contain' },
+  status: {
+    display: 'flex',
+    minHeight: 0,
+    flex: '1 1 0%',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: themeSpace[2],
+    padding: themeSpace[8],
+    textAlign: 'center',
+    color: themeColors.mutedForeground,
+  },
+  errorStatus: { color: themeColors.destructive },
+  statusIcon: { width: themeSpace[6], height: themeSpace[6] },
+  statusTitle: { fontSize: '0.95rem' },
+  statusDescription: { fontSize: '0.8125rem', color: themeColors.mutedForeground },
 });

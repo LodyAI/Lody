@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CheckCircle2, AlertCircle, Download, ExternalLink } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 import type { ElectronUpdaterPhase } from '@lody/shared';
 import { useAtom } from 'jotai';
@@ -23,6 +24,45 @@ import {
   MobileSettingsRowGroup,
   MobileSettingsSection,
 } from '@/components/mobile/mobile-settings-row';
+// The theme tokens are imported by path, not by the `@/` alias: the StyleX
+// compiler links a theme file on its own and does not follow bundler aliases.
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontSize, themeLineHeight, themeSpace } from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  /** The updater's answer: a mark and one line of copy. */
+  status: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+  statusError: { color: themeColors.destructive },
+  /** The same copy, with no mark beside it. */
+  statusQuiet: {
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+  statusIcon: { height: themeSpace[3.5], width: themeSpace[3.5] },
+  statusIconSuccess: {
+    height: themeSpace[3.5],
+    width: themeSpace[3.5],
+    color: themeColors.statusSuccess,
+  },
+  /** A build fact, set in the mono face so it reads as a fixed value. */
+  value: {
+    fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+    fontSize: '0.85rem',
+    color: themeColors.mutedForeground,
+  },
+  /** The icon inside a button, with the button's own gap before it. */
+  buttonIcon: { marginRight: themeSpace[1], height: themeSpace[3.5], width: themeSpace[3.5] },
+  /** A row's trailing mark. */
+  trailing: { height: themeSpace[4], width: themeSpace[4] },
+});
 
 function readNativeAppVersion(): string | null {
   const version = readNativeAppInfo().version;
@@ -59,8 +99,8 @@ function UpdateStatusText({
 }) {
   if (phase === 'up_to_date') {
     return (
-      <span className="flex items-center gap-1 text-xs text-muted-foreground">
-        <CheckCircle2 className="h-3.5 w-3.5 text-status-success" />
+      <span {...stylex.props(styles.status)}>
+        <CheckCircle2 {...stylex.props(styles.statusIconSuccess)} />
         {t('settings.about.upToDate')}
       </span>
     );
@@ -68,8 +108,8 @@ function UpdateStatusText({
 
   if (phase === 'error') {
     return (
-      <span className="flex items-center gap-1 text-xs text-destructive">
-        <AlertCircle className="h-3.5 w-3.5" />
+      <span {...stylex.props(styles.status, styles.statusError)}>
+        <AlertCircle {...stylex.props(styles.statusIcon)} />
         {t('settings.about.updateError')}
       </span>
     );
@@ -78,7 +118,7 @@ function UpdateStatusText({
   if (phase === 'downloading') {
     const p = percent != null ? Math.round(percent) : 0;
     return (
-      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+      <span {...stylex.props(styles.status)}>
         <Spinner className="h-3.5 w-3.5" />
         {t('settings.about.downloading', { percent: String(p) })}
       </span>
@@ -86,9 +126,7 @@ function UpdateStatusText({
   }
 
   if (phase === 'disabled') {
-    return (
-      <span className="text-xs text-muted-foreground">{t('settings.about.updaterDisabled')}</span>
-    );
+    return <span {...stylex.props(styles.statusQuiet)}>{t('settings.about.updaterDisabled')}</span>;
   }
 
   return null;
@@ -170,13 +208,11 @@ export function MobileAboutSettings() {
         <MobileSettingsRowGroup>
           {aboutVersion ? (
             <MobileSettingsRow label={t('settings.about.version')}>
-              <span className="font-mono text-[0.85rem] text-muted-foreground">{aboutVersion}</span>
+              <span {...stylex.props(styles.value)}>{aboutVersion}</span>
             </MobileSettingsRow>
           ) : null}
           <MobileSettingsRow label={t('settings.about.buildDate')}>
-            <span className="font-mono text-[0.85rem] text-muted-foreground">
-              {formatBuildDate(BUILD_DATE)}
-            </span>
+            <span {...stylex.props(styles.value)}>{formatBuildDate(BUILD_DATE)}</span>
           </MobileSettingsRow>
           {/* The reveal target is the commit row, not the version row: the
              version row only renders when a version is known (absent on narrow
@@ -186,7 +222,7 @@ export function MobileAboutSettings() {
             label={t('settings.about.commitHash')}
             onClick={() => setRevealTaps((count) => count + 1)}
           >
-            <span className="font-mono text-[0.85rem] text-muted-foreground">{GIT_COMMIT}</span>
+            <span {...stylex.props(styles.value)}>{GIT_COMMIT}</span>
           </MobileSettingsRow>
         </MobileSettingsRowGroup>
       </MobileSettingsSection>
@@ -199,12 +235,12 @@ export function MobileAboutSettings() {
           <MobileSettingsRow
             label={t('settings.about.downloadApps', 'Download apps')}
             onClick={handleOpenDownloadPage}
-            trailing={<ExternalLink className="h-4 w-4" />}
+            trailing={<ExternalLink {...stylex.props(styles.trailing)} />}
           />
           <MobileSettingsRow
             label={t('settings.about.website', 'Website')}
             onClick={handleOpenWebsite}
-            trailing={<ExternalLink className="h-4 w-4" />}
+            trailing={<ExternalLink {...stylex.props(styles.trailing)} />}
           />
           {/* Dialog is self-contained (renders its own DialogTrigger button); we
              keep the trigger button in the row's right slot rather than making
@@ -240,7 +276,7 @@ export function MobileAboutSettings() {
                 {isInstalling ? (
                   <Spinner className="mr-1 h-3.5 w-3.5" />
                 ) : (
-                  <Download className="mr-1 h-3.5 w-3.5" />
+                  <Download {...stylex.props(styles.buttonIcon)} />
                 )}
                 {t('settings.about.updateAndRestart')}
               </Button>

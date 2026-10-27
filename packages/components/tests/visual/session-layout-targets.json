@@ -1,0 +1,157 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 800
+    },
+    {
+      "name": "compact",
+      "width": 767,
+      "height": 800
+    },
+    {
+      "name": "boundary",
+      "width": 768,
+      "height": 800
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "sessions-ownedsessionlayoutmigration--open",
+    "sessions-ownedsessionlayoutmigration--closed",
+    "sessions-ownedsessionlayoutmigration--subtree-variables",
+    "sessions-ownedsessionlayoutmigration--caller-overrides",
+    "sessions-ownedsessionlayoutmigration--unanchored"
+  ],
+  "ready": {
+    "sessions-ownedsessionlayoutmigration--open": [
+      {
+        "action": "visible",
+        "selector": "[data-session-layout-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-workspace-card]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-layout-pane=\"conversation\"]"
+      }
+    ],
+    "sessions-ownedsessionlayoutmigration--closed": [
+      {
+        "action": "visible",
+        "selector": "[data-session-layout-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-workspace-card]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-layout-pane=\"conversation\"]"
+      }
+    ],
+    "sessions-ownedsessionlayoutmigration--subtree-variables": [
+      {
+        "action": "visible",
+        "selector": "[data-session-layout-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-workspace-card]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-layout-pane=\"conversation\"]"
+      }
+    ],
+    "sessions-ownedsessionlayoutmigration--caller-overrides": [
+      {
+        "action": "visible",
+        "selector": "[data-session-layout-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-workspace-card]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-layout-pane=\"conversation\"]"
+      }
+    ],
+    "sessions-ownedsessionlayoutmigration--unanchored": [
+      {
+        "action": "visible",
+        "selector": "[data-session-layout-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-workspace-card]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-layout-pane=\"conversation\"]"
+      }
+    ]
+  },
+  "states": {
+    "sessions-ownedsessionlayoutmigration--open": [
+      {
+        "name": "toggled",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button:has-text(\"Toggle panel\")"
+          }
+        ]
+      }
+    ],
+    "sessions-ownedsessionlayoutmigration--closed": [
+      {
+        "name": "toggled",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button:has-text(\"Toggle panel\")"
+          }
+        ]
+      }
+    ],
+    "sessions-ownedsessionlayoutmigration--subtree-variables": [
+      {
+        "name": "toggled",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button:has-text(\"Toggle panel\")"
+          }
+        ]
+      }
+    ],
+    "sessions-ownedsessionlayoutmigration--caller-overrides": [
+      {
+        "name": "toggled",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button:has-text(\"Toggle panel\")"
+          }
+        ]
+      }
+    ],
+    "sessions-ownedsessionlayoutmigration--unanchored": [
+      {
+        "name": "toggled",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button:has-text(\"Toggle panel\")"
+          }
+        ]
+      }
+    ]
+  }
+}

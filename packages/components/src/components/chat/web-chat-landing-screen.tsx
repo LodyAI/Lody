@@ -3,7 +3,6 @@ import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import type { DropZone } from '@/hooks/use-drop-zone';
-import { cn } from '@/lib/utils';
 import { isElectronRenderer, isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { getSessionChatInputAreaShellClassName } from '@/components/sessions/session-chat-input-area';
 import { ConversationColumn } from '@/components/shared/conversation-column';
@@ -16,6 +15,8 @@ import { FocusScope } from '@/ui/focus-scope';
 import { WINDOW_DRAG_EXEMPT_CLASS, WindowDragStrip } from '@/ui/window-drag-region';
 
 import { WORKSPACE_FOCUS_SCOPES } from '@/atoms';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeSpace } from '../../style/theme-scale.stylex';
 import { LandingStageContext, type LandingStage } from './landing-stage';
 
 /*
@@ -53,6 +54,42 @@ const stage = stylex.create({
     letterSpacing: '-0.025em',
     color: colors.label,
   },
+  /* The page the landing sits on. */
+  screen: {
+    position: 'relative',
+    display: 'flex',
+    height: '100%',
+    width: '100%',
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    backgroundColor: themeColors.background,
+    color: themeColors.foreground,
+  },
+  /* The chrome that opens the sidebar, in the window's top-left corner. */
+  sidebarToggle: { position: 'absolute', top: themeSpace[3], zIndex: 20 },
+  /* The shell card's 4px rim plus 5px top inset centers the h-7 toggle at
+     23px, matching the macOS traffic lights. A 92px left inset leaves 20px
+     after the light cluster, which ends at x=76. */
+  sidebarToggleMac: { top: '5px', left: '92px' },
+  sidebarTogglePlain: { left: themeSpace[3] },
+  /* The Electron screen is not selectable; its text fields say so again. */
+  selectNone: { userSelect: 'none' },
+  /* The scope the greeting and the composer share. */
+  scope: {
+    position: 'relative',
+    display: 'flex',
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    flexDirection: 'column',
+  },
+  /* The composer's column is a container, so the composer can size itself to it. */
+  composerColumn: { containerType: 'inline-size' },
+  hint: { paddingBottom: themeSpace[2] },
 });
 
 export type WebChatLandingScreenProps = {
@@ -96,30 +133,35 @@ export function WebChatLandingScreen({
     [stageElement, groupElement]
   );
 
+  // The text fields stay selectable inside the unselectable Electron screen:
+  // StyleX has no descendant selector, so those three rules stay Tailwind and
+  // ride the element beside the compiled style.
+  const screenStyle = stylex.props(stage.screen, isElectron && stage.selectNone);
+  const screenClassName = [
+    screenStyle.className,
+    isElectron
+      ? '[&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text'
+      : undefined,
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const sidebarToggleProps = stylex.props(
+    stage.sidebarToggle,
+    isMacOSElectronRenderer() && !isElectronFullscreen
+      ? stage.sidebarToggleMac
+      : stage.sidebarTogglePlain
+  );
+
   return (
-    <div
-      className={cn(
-        'relative flex h-full w-full flex-1 flex-col overflow-hidden',
-        'bg-background text-foreground',
-        isElectron &&
-          'select-none [&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text'
-      )}
-      {...dropHandlers}
-    >
+    <div className={screenClassName} style={screenStyle.style} {...dropHandlers}>
       <WindowDragStrip />
       <ConversationDropOverlay active={dropActive} kind={dropKind} />
       {leftSidebarExpandSlot != null ? (
         <div
-          className={cn(
-            'absolute top-3 z-20',
-            WINDOW_DRAG_EXEMPT_CLASS,
-            // macOS Electron: `top-[5px]` plus the shell card's 4px rim centers the
-            // h-7 button at 23px, on the traffic-light centerline
-            // (`trafficLightPosition.y` 16 + 7px radius in apps/electron/src/main/window.ts).
-            // `left-[92px]` plus the card's 4px rim leaves a 20px buffer after the
-            // light cluster (which ends at x=76).
-            isMacOSElectronRenderer() && !isElectronFullscreen ? 'top-[5px] left-[92px]' : 'left-3'
-          )}
+          {...sidebarToggleProps}
+          className={[sidebarToggleProps.className, WINDOW_DRAG_EXEMPT_CLASS]
+            .filter(Boolean)
+            .join(' ')}
         >
           {leftSidebarExpandSlot}
         </div>
@@ -129,7 +171,7 @@ export function WebChatLandingScreen({
       <FocusScope
         id={WORKSPACE_FOCUS_SCOPES.chatLanding}
         ref={navRootRef}
-        className="relative flex min-h-0 flex-1 flex-col"
+        {...stylex.props(stage.scope)}
         onFocus={(event) => {
           if (event.target === event.currentTarget) {
             focusFirstChatLandingOption(event.currentTarget);
@@ -158,9 +200,13 @@ export function WebChatLandingScreen({
             lift and can never drift from the session composer. Hints sit above the
             composer so its bottom edge stays pinned to the shell when a hint toggles. */}
         <div className={getSessionChatInputAreaShellClassName()}>
-          <ConversationColumn className="@container">
-            {noMachineHint != null ? <div className="pb-2">{noMachineHint}</div> : null}
-            {agentConfigHint != null ? <div className="pb-2">{agentConfigHint}</div> : null}
+          <ConversationColumn className={stylex.props(stage.composerColumn).className}>
+            {noMachineHint != null ? (
+              <div {...stylex.props(stage.hint)}>{noMachineHint}</div>
+            ) : null}
+            {agentConfigHint != null ? (
+              <div {...stylex.props(stage.hint)}>{agentConfigHint}</div>
+            ) : null}
             {composer}
           </ConversationColumn>
         </div>

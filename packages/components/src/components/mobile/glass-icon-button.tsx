@@ -1,6 +1,12 @@
 import { forwardRef, useEffect, useRef, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
 
-import { cn } from '@/lib/utils';
+import {
+  themeDuration,
+  themeEasing,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 
 /**
  * Circular "glass" icon button for the mobile floating session header.
@@ -21,6 +27,59 @@ import { cn } from '@/lib/utils';
  */
 
 type GlassMode = 'light' | 'dark';
+
+const styles = stylex.create({
+  button: {
+    position: 'relative',
+    display: 'inline-flex',
+    height: themeSpace[11],
+    width: themeSpace[11],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.full,
+    /* Light: one solid near-black for every glyph (matches reference).
+       Dark: soft foreground on the translucent glass — the `dark:`
+       variant stays a Tailwind class, because StyleX cannot select a
+       `.dark` ancestor. */
+    color: '#1c1c1e',
+    transitionProperty: 'transform, translate, scale, rotate',
+    transitionDuration: themeDuration[200],
+    transitionTimingFunction: themeEasing.out,
+    transform: {
+      default: 'none',
+      ':hover': 'scale(1.05)',
+      ':active': 'scale(1.25)',
+    },
+  },
+  disc: {
+    position: 'absolute',
+    pointerEvents: 'none',
+    left: '50%',
+    top: '50%',
+    transform: 'translate(-50%, -50%)',
+    borderRadius: themeRadius.full,
+  },
+  canvas: {
+    transitionProperty: 'opacity',
+    transitionDuration: themeDuration[200],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  pressed: {
+    opacity: 0,
+    transitionProperty: 'opacity',
+    transitionDuration: themeDuration[200],
+    transitionTimingFunction: themeEasing['in-out'],
+    backgroundColor: '#f3f3f5',
+  },
+  content: {
+    position: 'relative',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: 'currentColor',
+  },
+});
 
 function resolveMode(): GlassMode {
   if (typeof document === 'undefined') return 'light';
@@ -207,6 +266,18 @@ export const GlassIconButton = forwardRef<
     return () => observer.disconnect();
   }, [discSize]);
 
+  /* `group` / `group-active:*` and the `dark:` variants stay Tailwind: they
+     select a PARENT's state or a `.dark` ancestor, which StyleX cannot
+     express. Everything else on the button is StyleX. */
+  const buttonClassName = [
+    stylex.props(styles.button).className,
+    'group',
+    'dark:text-foreground/90',
+    className,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   return (
     <button
       ref={(node) => {
@@ -217,25 +288,12 @@ export const GlassIconButton = forwardRef<
       type="button"
       aria-label={label}
       onClick={onClick}
-      className={cn(
-        /* Press: scale up slightly; glass fades to a solid disc. */
-        'group relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full',
-        /* Light: one solid near-black for every glyph (matches reference).
-           Dark: soft foreground on the translucent glass. Active overrides
-           (e.g. text-primary) still win via caller className. */
-        'text-[#1c1c1e] dark:text-foreground/90',
-        'transition-transform duration-200 ease-out',
-        'hover:scale-105 active:scale-125',
-        className
-      )}
+      className={buttonClassName}
     >
       <canvas
         ref={canvasRef}
         aria-hidden="true"
-        className={cn(
-          'pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full',
-          'transition-opacity duration-200 group-active:opacity-0'
-        )}
+        className={`${stylex.props(styles.disc, styles.canvas).className} group-active:opacity-0`}
         style={{
           width: discSize,
           height: discSize,
@@ -244,16 +302,10 @@ export const GlassIconButton = forwardRef<
       {/* Pressed solid disc — slightly deeper cool gray than rest fill. */}
       <span
         aria-hidden="true"
-        className={cn(
-          'pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full',
-          'opacity-0 transition-opacity duration-200 group-active:opacity-100',
-          'bg-[#f3f3f5] dark:bg-foreground/15'
-        )}
+        className={`${stylex.props(styles.disc, styles.pressed).className} group-active:opacity-100 dark:bg-foreground/15`}
         style={{ width: discSize, height: discSize }}
       />
-      <span className="relative inline-flex items-center justify-center text-current [&_svg]:text-current">
-        {children}
-      </span>
+      <span {...stylex.props(styles.content)}>{children}</span>
     </button>
   );
 });

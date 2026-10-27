@@ -171,35 +171,11 @@ describe('SidebarUpdatedSessionList project context', () => {
     expect(githubProject?.querySelector('img')?.getAttribute('src') ?? '').toContain(
       'avatars.githubusercontent.com/loro-dev'
     );
-    expect(githubProject?.querySelector('img')?.classList.contains('opacity-60')).toBe(true);
-    expect(githubProject?.querySelector('img')?.getAttribute('style')).toBeNull();
 
     const chatProject = chat?.querySelector('[data-sidebar-updated-project="chat"]');
     expect(chatProject).not.toBeNull();
     expect(chatProject?.textContent).toContain('Chats');
     expect(chatProject?.querySelector('.lucide-message-circle')).not.toBeNull();
-  });
-
-  it('keeps the owner avatar at the same opacity on the active row', () => {
-    render(
-      [
-        makeItem({
-          id: 'github',
-          kind: 'github',
-          subtitle: 'wibus-wee/lody',
-          repoFullName: 'wibus-wee/lody',
-          sectionLabel: 'wibus-wee/lody',
-        }),
-      ],
-      true,
-      'github'
-    );
-
-    const avatar = container?.querySelector<HTMLImageElement>(
-      '[data-sidebar-updated-project="github"] img'
-    );
-    expect(avatar?.classList.contains('opacity-60')).toBe(true);
-    expect(avatar?.getAttribute('style')).toBeNull();
   });
 
   it('hides the project line on nested opened Sessions', () => {

@@ -245,8 +245,6 @@ describe('UnifiedProjectSelector project sharing', () => {
     await renderSelector();
 
     expect(getShareTrigger()?.textContent).toContain('Private');
-    expect(getProjectPickerTrigger().className).toContain('rounded-r-none');
-
     await openProjectMenu();
 
     expect(getProjectMenuItem().textContent).toContain('Private');
@@ -306,7 +304,6 @@ describe('UnifiedProjectSelector project sharing', () => {
     await renderSelector({ includeProjectSharing });
 
     expect(getShareTrigger()).toBeNull();
-    expect(getProjectPickerTrigger().className).not.toContain('rounded-r-none');
 
     await openProjectMenu();
 
@@ -319,7 +316,7 @@ describe('UnifiedProjectSelector project sharing', () => {
     await renderSelector({ currentUserId: 'teammate-user', onShareWithTeam });
 
     expect(getShareTrigger()).toBeNull();
-    expect(getProjectPickerTrigger().className).toContain('rounded-r-none');
+    expect(getProjectPickerTrigger()).toBeInstanceOf(HTMLButtonElement);
     expect(document.body.textContent).toContain('Private');
     expect(onShareWithTeam).not.toHaveBeenCalled();
   });

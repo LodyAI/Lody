@@ -1,10 +1,80 @@
+import { withClassName } from '@/lib/stylex';
 import { ChevronDown, GitMerge } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
+import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import type { GitHubMergeMethod } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
 import { Menu } from '@/ui/menu';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeDuration,
+  themeEasing,
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  root: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'stretch',
+    overflow: 'hidden',
+    borderRadius: themeRadius.md,
+  },
+  /** The compact control paints its own tinted well behind both halves. */
+  rootCompact: {
+    height: themeSpace[5],
+    backgroundColor: 'hsl(var(--status-success) / 0.08)',
+  },
+  compactMain: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: themeSpace[1],
+    paddingInline: themeSpace[1.5],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.statusSuccess,
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+    ':focus-visible': { backgroundColor: 'hsl(var(--status-success) / 0.12)' },
+    ':disabled': { opacity: 0.5 },
+  },
+  compactTrigger: {
+    position: 'relative',
+    display: 'flex',
+    width: themeSpace[5],
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: themeColors.statusSuccess,
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+    '::before': {
+      content: '""',
+      position: 'absolute',
+      left: 0,
+      height: themeSpace[3],
+      width: '1px',
+      backgroundColor: 'hsl(var(--status-success) / 0.25)',
+    },
+    ':focus-visible': { backgroundColor: 'hsl(var(--status-success) / 0.12)' },
+    ':disabled': { opacity: 0.5 },
+  },
+  icon: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+  },
+});
 
 const MERGE_METHODS: Array<{
   value: GitHubMergeMethod;
@@ -75,25 +145,28 @@ export function PrMergeButton({
 
   const mainContent = (
     <>
-      {isMerging ? <Spinner className="h-3.5 w-3.5" /> : <GitMerge className="h-3.5 w-3.5" />}
+      {isMerging ? (
+        <Spinner className="h-3.5 w-3.5" />
+      ) : (
+        <GitMerge {...stylex.props(styles.icon)} />
+      )}
       {isMerging ? t('sessions.prTab.merging', 'Merging…') : <PrMergeMethodLabel method={method} />}
     </>
   );
 
+  const rootProps = stylex.props(styles.root, compact && styles.rootCompact);
+
   return (
-    <div
-      className={cn(
-        'flex shrink-0 items-stretch overflow-hidden rounded-md',
-        compact && 'h-5 bg-status-success/[0.08]'
-      )}
-      data-pr-merge-control=""
-    >
+    <div {...rootProps} data-pr-merge-control="">
       {compact ? (
         <button
           type="button"
           disabled={isDisabled}
           onClick={() => void onMerge?.(method)}
-          className="flex min-w-0 items-center gap-1 px-1.5 text-xs font-medium text-status-success outline-none transition-colors enabled:hover:bg-status-success/[0.10] focus-visible:bg-status-success/[0.12] disabled:opacity-50"
+          {...withClassName(
+            stylex.props(styles.compactMain),
+            'enabled:hover:bg-status-success/[0.10]'
+          )}
         >
           {mainContent}
         </button>
@@ -121,9 +194,12 @@ export function PrMergeButton({
                 type="button"
                 disabled={isMerging || !onSelectMethod}
                 aria-label={t('sessions.prTab.chooseMergeMethod', 'Choose merge method')}
-                className="relative flex w-5 items-center justify-center text-status-success outline-none transition-colors before:absolute before:left-0 before:h-3 before:w-px before:bg-status-success/25 enabled:hover:bg-status-success/[0.10] focus-visible:bg-status-success/[0.12] disabled:opacity-50"
+                {...withClassName(
+                  stylex.props(styles.compactTrigger),
+                  'enabled:hover:bg-status-success/[0.10]'
+                )}
               >
-                <ChevronDown className="h-3.5 w-3.5" />
+                <ChevronDown {...stylex.props(styles.icon)} />
               </button>
             ) : (
               <Button
@@ -137,7 +213,7 @@ export function PrMergeButton({
                   readyGreen && cn(greenClasses, 'border-l-white/25')
                 )}
               >
-                <ChevronDown className="h-3.5 w-3.5" />
+                <ChevronDown {...stylex.props(styles.icon)} />
               </Button>
             )
           }

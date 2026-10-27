@@ -9,6 +9,27 @@ import { authTokenAtom } from '@/atoms/runtime';
 import { getSessionImageBlobUrl } from '@/lib/session-image-cache';
 import { cn } from '@/lib/utils';
 import { ZoomableImageViewer } from '@/components/shared/zoomable-image-viewer';
+import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../../../style/theme-colors.stylex';
+
+const styles = stylex.create({
+  trigger: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    borderRadius: '0.25rem',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.4)',
+    backgroundColor: 'hsl(var(--background) / 0.6)',
+    cursor: { default: 'zoom-in', ':disabled': 'default' },
+  },
+  thumbnail: { width: '100%', height: '100%', objectFit: 'cover' },
+  failure: { color: themeColors.mutedForeground },
+  loading: { width: '100%', height: '100%', backgroundColor: 'hsl(var(--muted) / 0.7)' },
+});
 
 export type QueuedImageBlock = Extract<SessionInputBlock, { type: 'image' }>;
 
@@ -103,39 +124,42 @@ export function QueuedImagePreview({
   return (
     <>
       <Tooltip.Root>
-        <Tooltip.Trigger delay={300} render={<button
-            type="button"
-            disabled={loadFailed}
-            onClick={(event) => {
-              // The row is draggable and editable; opening the preview is all
-              // this click should do.
-              event.stopPropagation();
-              setPreviewOpen(true);
-            }}
-            onPointerDown={(event) => event.stopPropagation()}
-            className={cn(
-              'flex shrink-0 items-center justify-center overflow-hidden rounded',
-              'border border-border/40 bg-background/60',
-              'cursor-zoom-in disabled:cursor-default',
-              'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/40',
-              className
-            )}
-            style={{ width: size, height: size }}
-            aria-label={t('sessions.messageQueue.previewImage', 'Preview {{name}}', {
-              name: label,
-            })}
-          >
-            {thumbnailUrl ? (
-              <img src={thumbnailUrl} alt={label} className="h-full w-full object-cover" />
-            ) : loadFailed ? (
-              <ImageIcon
-                className="text-muted-foreground"
-                style={{ width: size * 0.5, height: size * 0.5 }}
-              />
-            ) : (
-              <div className="h-full w-full animate-pulse bg-muted/70" />
-            )}
-          </button>}/>
+        <Tooltip.Trigger
+          delay={300}
+          render={
+            <button
+              type="button"
+              disabled={loadFailed}
+              onClick={(event) => {
+                // The row is draggable and editable; opening the preview is all
+                // this click should do.
+                event.stopPropagation();
+                setPreviewOpen(true);
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+              className={cn(
+                stylex.props(styles.trigger).className,
+                'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/40',
+                className
+              )}
+              style={{ width: size, height: size }}
+              aria-label={t('sessions.messageQueue.previewImage', 'Preview {{name}}', {
+                name: label,
+              })}
+            >
+              {thumbnailUrl ? (
+                <img src={thumbnailUrl} alt={label} {...stylex.props(styles.thumbnail)} />
+              ) : loadFailed ? (
+                <ImageIcon
+                  {...stylex.props(styles.failure)}
+                  style={{ width: size * 0.5, height: size * 0.5 }}
+                />
+              ) : (
+                <div className={cn(stylex.props(styles.loading).className, 'animate-pulse')} />
+              )}
+            </button>
+          }
+        />
         <Tooltip.Content side="top">{label}</Tooltip.Content>
       </Tooltip.Root>
       <ZoomableImageViewer

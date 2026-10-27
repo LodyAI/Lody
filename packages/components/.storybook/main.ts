@@ -5,8 +5,7 @@ import { searchForWorkspaceRoot } from 'vite';
 import stylex from '@stylexjs/unplugin';
 import tailwindcss from '@tailwindcss/vite';
 import wasm from 'vite-plugin-wasm';
-import { stylexOptions } from '../../ui/stylex-options';
-import topLevelAwait from '../vite-top-level-await-fixed.cjs';
+import { componentsStylexOptions as stylexOptions } from '../stylex-options';
 import { emojibaseAssetsPlugin } from '../vite-emojibase-assets';
 import { loroCrdtWasmUrlWorkaround } from '../vite-wasm-workarounds.ts';
 import { preservePdfWorkerExports } from '../vite-pdf-worker';
@@ -58,24 +57,51 @@ const config: StorybookConfig = {
       const name = 'name' in plugin ? String(plugin.name) : '';
       if (name === 'dts' || name === 'vite:dts') return false;
       if (name.includes('tanstack')) return false;
+      // Modern browser targets evaluate WASM through native top-level await.
+      if (name.startsWith('vite-plugin-top-level-await')) return false;
       return true;
     });
     viteConfig.plugins.push(tailwindcss());
     viteConfig.plugins.push(stylex.vite(stylexOptions));
+    viteConfig.plugins.push({
+      name: 'storybook-diffs-web-component-registration',
+      enforce: 'post',
+      transform(code, id) {
+        if (!id.includes('/@pierre/diffs/') || !id.endsWith('/components/web-components.js'))
+          return undefined;
+        // 1.0.10 names only its unpublished src path in package.sideEffects.
+        // Keep the shipped module's real custom-element registration in builds.
+        return { code, map: null, moduleSideEffects: 'no-treeshake' };
+      },
+    });
     // Serves `/emojibase/<locale>/{data,messages}.json` in dev so the picker's
     // bundled-dataset URL contract holds here too, not only in app builds.
     viteConfig.plugins.push(emojibaseAssetsPlugin());
+    viteConfig.plugins.push({
+      name: 'storybook-native-module-initialization',
+      enforce: 'post',
+      config(storybookViteConfig, { command }) {
+        if (command !== 'build') return;
+        // Keep browser-native evaluation of cyclic async module graphs.
+        // Storybook 10.6 forces wrappers that can await one another; combining
+        // modules into shared chunks can also introduce new async cycles.
+        const bundlerOptions = storybookViteConfig.build?.rolldownOptions;
+        if (!bundlerOptions) return;
+        bundlerOptions.preserveEntrySignatures = 'exports-only';
+        const output = bundlerOptions.output;
+        for (const options of Array.isArray(output) ? output : output ? [output] : []) {
+          options.strictExecutionOrder = false;
+          options.preserveModules = true;
+        }
+      },
+    });
 
     viteConfig.worker = {
       ...(viteConfig.worker ?? {}),
       format: 'es',
-      plugins: () => [
-        preservePdfWorkerExports(),
-        loroCrdtWasmUrlWorkaround(),
-        wasm(),
-        topLevelAwait(),
-      ],
+      plugins: () => [preservePdfWorkerExports(), loroCrdtWasmUrlWorkaround(), wasm()],
     };
+    viteConfig.build = { ...viteConfig.build, target: 'esnext' };
 
     if (process.env.STORYBOOK_DEBUG_PLUGINS === '1') {
       // eslint-disable-next-line no-console

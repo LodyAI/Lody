@@ -1,0 +1,314 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "below-sm",
+      "width": 639,
+      "height": 900
+    },
+    {
+      "name": "at-sm",
+      "width": 640,
+      "height": 900
+    },
+    {
+      "name": "above-sm",
+      "width": 641,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "components-renamesessiondialog--default",
+    "components-renamesessiondialog--wrapping-title",
+    "components-renamesessiondialog--empty-title",
+    "components-renamesessiondialog--overflow-title",
+    "components-renamesessiondialog--interactive",
+    "components-renamesessiondialog--pending-save",
+    "components-renamesessiondialog--failure-retry"
+  ],
+  "ready": {
+    "components-renamesessiondialog--default": [
+      {
+        "action": "visible",
+        "role": "dialog",
+        "name": "Rename Chat"
+      },
+      {
+        "action": "visible",
+        "selector": "textarea"
+      }
+    ],
+    "components-renamesessiondialog--wrapping-title": [
+      {
+        "action": "visible",
+        "role": "dialog",
+        "name": "Rename Chat"
+      },
+      {
+        "action": "visible",
+        "selector": "textarea"
+      }
+    ],
+    "components-renamesessiondialog--empty-title": [
+      {
+        "action": "visible",
+        "role": "dialog",
+        "name": "Rename Chat"
+      },
+      {
+        "action": "visible",
+        "selector": "textarea"
+      },
+      {
+        "action": "disabled",
+        "role": "button",
+        "name": "Save"
+      }
+    ],
+    "components-renamesessiondialog--overflow-title": [
+      {
+        "action": "visible",
+        "role": "dialog",
+        "name": "Rename Chat"
+      },
+      {
+        "action": "visible",
+        "selector": "textarea"
+      }
+    ],
+    "components-renamesessiondialog--interactive": [
+      {
+        "action": "visible",
+        "role": "dialog",
+        "name": "Rename Chat"
+      },
+      {
+        "action": "visible",
+        "selector": "textarea"
+      }
+    ],
+    "components-renamesessiondialog--pending-save": [
+      {
+        "action": "visible",
+        "role": "dialog",
+        "name": "Rename Chat"
+      },
+      {
+        "action": "visible",
+        "selector": "textarea"
+      }
+    ],
+    "components-renamesessiondialog--failure-retry": [
+      {
+        "action": "visible",
+        "role": "dialog",
+        "name": "Rename Chat"
+      },
+      {
+        "action": "visible",
+        "selector": "textarea"
+      }
+    ]
+  },
+  "states": {
+    "components-renamesessiondialog--default": [
+      {
+        "name": "cancel-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Cancel"
+          }
+        ]
+      },
+      {
+        "name": "save-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Save"
+          }
+        ]
+      }
+    ],
+    "components-renamesessiondialog--interactive": [
+      {
+        "name": "edited",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "textarea",
+            "value": "Synthetic renamed 中文"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-saved",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "textarea",
+            "key": "Enter"
+          },
+          {
+            "action": "hidden",
+            "role": "dialog",
+            "name": "Rename Chat"
+          },
+          {
+            "action": "visible",
+            "text": "Saved: Synthetic renamed 中文"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open rename dialog"
+          },
+          {
+            "action": "visible",
+            "selector": "textarea"
+          }
+        ]
+      },
+      {
+        "name": "escape-closed",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "textarea",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "dialog",
+            "name": "Rename Chat"
+          }
+        ]
+      }
+    ],
+    "components-renamesessiondialog--pending-save": [
+      {
+        "name": "saving",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "textarea",
+            "value": "Awaiting synthetic save 中文"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Save"
+          },
+          {
+            "action": "disabled",
+            "selector": "textarea"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Save"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Cancel"
+          }
+        ]
+      },
+      {
+        "name": "escape-while-saving",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-lody-dialog-content][role=dialog]",
+            "key": "Escape"
+          },
+          {
+            "action": "visible",
+            "role": "dialog",
+            "name": "Rename Chat"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Save"
+          }
+        ]
+      }
+    ],
+    "components-renamesessiondialog--failure-retry": [
+      {
+        "name": "save-failed",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "textarea",
+            "value": "Retry synthetic title 中文"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Save"
+          },
+          {
+            "action": "visible",
+            "text": "Synthetic rename failed"
+          },
+          {
+            "action": "enabled",
+            "role": "button",
+            "name": "Save"
+          }
+        ]
+      },
+      {
+        "name": "retry-saved",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Save"
+          },
+          {
+            "action": "hidden",
+            "role": "dialog",
+            "name": "Rename Chat"
+          },
+          {
+            "action": "visible",
+            "text": "Saved: Retry synthetic title 中文"
+          }
+        ]
+      }
+    ]
+  },
+  "allowBlankIds": [
+    "components-renamesessiondialog--default",
+    "components-renamesessiondialog--wrapping-title",
+    "components-renamesessiondialog--empty-title",
+    "components-renamesessiondialog--overflow-title"
+  ]
+}

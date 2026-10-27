@@ -1,9 +1,53 @@
 import { useEffect, useState } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import { VList } from 'virtua';
 import type { PagedFileSource } from '@/lib/paged-file-source';
 import { Pagination } from '@lody/ui/pagination';
 import { Button } from '@lody/ui/button';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontSize, themeLineHeight, themeSpace } from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  root: {
+    display: 'flex',
+    height: '100%',
+    minHeight: 0,
+    flexDirection: 'column',
+  },
+  toolbar: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    padding: themeSpace[2],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+  notice: {
+    padding: themeSpace[3],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+  },
+  list: {
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    fontFamily: 'var(--font-mono)',
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+  },
+  line: {
+    minHeight: themeSpace[5],
+    whiteSpace: 'pre',
+    paddingInline: themeSpace[3],
+    lineHeight: '1.25rem',
+  },
+});
 
 /** One bounded page, virtual rows, no editor/LSP/HTML execution or accumulated cache. */
 export function PagedFileViewer({
@@ -40,8 +84,8 @@ export function PagedFileViewer({
   }, [source, current, active]);
   const result = loaded?.source === source && loaded.page === current ? loaded : undefined;
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex flex-wrap items-center gap-2 border-b p-2 text-xs text-muted-foreground">
+    <div {...stylex.props(styles.root)}>
+      <div {...stylex.props(styles.toolbar)}>
         <span>{t('sessions.fileViewer.paged', 'Large file · read-only')}</span>
         <Pagination
           layout="compact"
@@ -69,24 +113,24 @@ export function PagedFileViewer({
         ) : null}
       </div>
       {result?.error ? (
-        <div role="alert" className="p-3 text-sm">
+        <div role="alert" {...stylex.props(styles.notice)}>
           {t(
             'sessions.fileViewer.pageUnavailable',
             'File changed or is unavailable. Reopen the preview.'
           )}
         </div>
       ) : result?.text === undefined ? (
-        <div role="status" className="p-3 text-sm">
+        <div role="status" {...stylex.props(styles.notice)}>
           {t('sessions.fileViewer.loading', 'Loading file…')}
         </div>
       ) : (
         <VList
           key={`${current}:${source.sizeBytes}`}
-          className="min-h-0 flex-1 font-mono text-xs"
+          {...stylex.props(styles.list)}
           style={{ overflowX: 'auto' }}
         >
           {result.text.split('\n').map((line, index) => (
-            <div key={index} className="min-h-5 whitespace-pre px-3 leading-5">
+            <div key={index} {...stylex.props(styles.line)}>
               {line || ' '}
             </div>
           ))}

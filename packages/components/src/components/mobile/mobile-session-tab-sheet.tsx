@@ -17,11 +17,20 @@ import { Spinner } from '@lody/ui/spinner';
 import { Badge } from '@lody/ui/badge';
 import { useTranslation } from 'react-i18next';
 import { getServerNow } from '@lody/shared';
+import * as stylex from '@stylexjs/stylex';
 
 import { ChatsIcon } from '@/components/icons/chats-icon';
 import { GlassIconButton } from '@/components/mobile/glass-icon-button';
-import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
+import { sheetSurface } from './sheet-surface';
 
 /**
  * Bottom sheet that replaces the mobile `SessionTabBar`. Opened by the header
@@ -128,6 +137,212 @@ const VIEWER_ICON: Record<ViewerTabEntry['kind'], typeof FileIcon> = {
   files: FolderOpen,
 };
 
+/** Tailwind's `transition-colors`: colour properties only, 150ms, standard ease. */
+const TRANSITION_COLORS = {
+  transitionProperty: 'color, background-color, border-color, text-decoration-color, fill, stroke',
+  transitionDuration: '150ms',
+  transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+} as const;
+
+const styles = stylex.create({
+  /** A row's leading slot: one node, always the same width. */
+  leadingSlot: {
+    display: 'flex',
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** The wrapper a conversation row and its close chip share. */
+  conversationLine: { display: 'flex', alignItems: 'center' },
+  /** The column that holds the row button. */
+  conversationBody: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+  },
+  /** The chip that closes a conversation tab. */
+  closeChip: {
+    flexShrink: 0,
+    padding: themeSpace[3],
+    color: themeColors.mutedForeground,
+  },
+
+  /** A row that opens something else. */
+  actionable: {
+    backgroundColor: {
+      default: null,
+      '@media (hover: hover)': {
+        ':hover': 'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 5%, transparent)',
+      },
+    },
+    ...TRANSITION_COLORS,
+  },
+  /** The row that starts a new conversation. */
+  newChat: {
+    fontWeight: themeFontWeight.medium,
+    color: {
+      default: themeColors.mutedForeground,
+      '@media (hover: hover)': { ':hover': themeColors.foreground },
+    },
+    ...TRANSITION_COLORS,
+  },
+  /** The row that opens the closed-conversations list. */
+  disclosure: {
+    color: themeColors.mutedForeground,
+    ...TRANSITION_COLORS,
+  },
+  /** A row that is the current one. */
+  active: {
+    backgroundColor: 'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 10%, transparent)',
+  },
+  /** A row's title and its badge. */
+  titleLine: {
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+  },
+  /** The title itself. */
+  title: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  /** The title of the current row. */
+  titleActive: {
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+  },
+  /** The title of a row that is not current. */
+  titleIdle: { color: 'color-mix(in oklab, hsl(var(--foreground) / 1) 90%, transparent)' },
+  /** A title in the sheet's quiet ink. */
+  titleQuiet: { color: themeColors.mutedForeground },
+
+  /** The trailing "Xm ago". */
+  elapsed: {
+    flexShrink: 0,
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    fontVariantNumeric: 'tabular-nums',
+    color: themeColors.mutedForeground,
+  },
+  /** The trailing "Xm ago" of a closed conversation. */
+  elapsedClosed: {
+    color: 'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 70%, transparent)',
+  },
+
+  /** The glyph beside a closed conversation's title. */
+  restoreGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    color: 'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 70%, transparent)',
+  },
+  /** The chevron of the closed-conversations disclosure. */
+  disclosureChevron: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    rotate: '0deg',
+    transitionProperty: 'transform',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  disclosureChevronClosed: { rotate: '-90deg' },
+  /** The disclosure's label. */
+  disclosureLabel: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+
+  /** The dot that says a conversation has unread messages. */
+  unreadDot: {
+    width: themeSpace[2],
+    height: themeSpace[2],
+    borderRadius: '9999px',
+    backgroundColor: themeColors.primary,
+  },
+  /** The hand that says a conversation needs permission. */
+  waitingGlyph: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    color: themeColors.statusWarning,
+  },
+  /** The spinner that says a conversation is working. */
+  workingGlyph: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    color: themeColors.tabActiveAccent,
+  },
+  /** The glyph of a viewer row. */
+  viewerGlyph: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+  },
+
+  /** The group heading above a card. */
+  groupLabel: {
+    paddingInline: themeSpace[3.5],
+    paddingBottom: themeSpace[1.5],
+    fontSize: '0.68rem',
+    fontWeight: themeFontWeight.medium,
+    letterSpacing: '0.025em',
+    color: 'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 70%, transparent)',
+  },
+
+  groupLabelSpaced: { marginTop: themeSpace[4] },
+
+  /** The header trigger's glyph. */
+  triggerGlyph: {
+    width: themeSpace[5],
+    height: themeSpace[5],
+    color: 'currentColor',
+  },
+  /** The badge that says background tabs are waiting. */
+  triggerDot: {
+    position: 'absolute',
+    top: 'calc(var(--spacing) * -0.5)',
+    right: 'calc(var(--spacing) * -0.5)',
+    width: themeSpace[2],
+    height: themeSpace[2],
+    borderRadius: '9999px',
+    backgroundColor: themeColors.primary,
+    boxShadow: '0 0 0 2px hsl(var(--background))',
+  },
+  /** The frame that holds the breathing dot. */
+  triggerFrame: {
+    position: 'absolute',
+    top: '-0.25rem',
+    right: '-0.25rem',
+    display: 'flex',
+    width: themeSpace[3],
+    height: themeSpace[3],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: '9999px',
+    backgroundColor: themeColors.background,
+  },
+  /** The breathing dot itself. */
+  triggerPulse: {
+    width: themeSpace[2],
+    height: themeSpace[2],
+    borderRadius: '9999px',
+  },
+});
+
 export function MobileSessionTabSheet({
   open,
   onOpenChange,
@@ -154,14 +369,14 @@ export function MobileSessionTabSheet({
   return (
     <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
       <DrawerContent className="h-auto! max-h-[85dvh]! rounded-t-2xl border-border/60">
-        <DrawerTitle className="sr-only">{title}</DrawerTitle>
-        <DrawerDescription className="sr-only">{title}</DrawerDescription>
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(16px+var(--safe-area-bottom,0px))] pt-3">
+        <DrawerTitle {...stylex.props(sheetSurface.srOnly)}>{title}</DrawerTitle>
+        <DrawerDescription {...stylex.props(sheetSurface.srOnly)}>{title}</DrawerDescription>
+        <div {...stylex.props(sheetSurface.body)}>
           <GroupLabel>{t('sessions.tabs.conversationsGroup', 'Conversations')}</GroupLabel>
           <GroupCard>
             {conversations.map((c) => (
-              <div key={c.id} className="flex items-center">
-                <div className="min-w-0 flex-1">
+              <div key={c.id} {...stylex.props(styles.conversationLine, sheetSurface.cardChild)}>
+                <div {...stylex.props(styles.conversationBody)}>
                   <ConversationRow
                     active={c.active}
                     running={c.running}
@@ -181,11 +396,11 @@ export function MobileSessionTabSheet({
                 {onCloseConversation && (
                   <button
                     type="button"
-                    className="shrink-0 p-3 text-muted-foreground"
+                    {...stylex.props(styles.closeChip)}
                     aria-label={t('sessions.tabs.closeTab', 'Close tab')}
                     onClick={() => onCloseConversation(c.id)}
                   >
-                    <X className="h-4 w-4" />
+                    <X {...stylex.props(sheetSurface.glyph16)} />
                   </button>
                 )}
               </div>
@@ -194,13 +409,14 @@ export function MobileSessionTabSheet({
               <button
                 type="button"
                 onClick={() => select(onNewConversation)}
-                className={cn(
-                  rowClassName,
-                  'font-medium text-muted-foreground transition-colors hover:text-foreground'
-                )}
+                {...stylex.props(sheetSurface.cardRow, sheetSurface.cardRowText, styles.newChat)}
               >
-                <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-                  <Plus className="h-4 w-4" strokeWidth={1.8} aria-hidden="true" />
+                <span {...stylex.props(styles.leadingSlot)}>
+                  <Plus
+                    {...stylex.props(sheetSurface.glyph16)}
+                    strokeWidth={1.8}
+                    aria-hidden="true"
+                  />
                 </span>
                 <span>{t('sessions.tabs.newChat', 'New Chat')}</span>
               </button>
@@ -211,19 +427,23 @@ export function MobileSessionTabSheet({
                   type="button"
                   onClick={() => setArchivedOpen((v) => !v)}
                   aria-expanded={archivedOpen}
-                  className={cn(rowClassName, 'text-muted-foreground transition-colors')}
+                  {...stylex.props(
+                    sheetSurface.cardRow,
+                    sheetSurface.cardRowText,
+                    styles.disclosure
+                  )}
                 >
-                  <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+                  <span {...stylex.props(styles.leadingSlot)}>
                     <ChevronDown
-                      className={cn(
-                        'h-4 w-4 transition-transform',
-                        archivedOpen ? '' : '-rotate-90'
+                      {...stylex.props(
+                        styles.disclosureChevron,
+                        !archivedOpen && styles.disclosureChevronClosed
                       )}
                       strokeWidth={1.8}
                       aria-hidden="true"
                     />
                   </span>
-                  <span className="min-w-0 flex-1 truncate">
+                  <span {...stylex.props(styles.disclosureLabel)}>
                     {t('sessions.tabs.closedCount', 'Closed ({{count}})', {
                       count: archivedConversations.length,
                     })}
@@ -240,41 +460,42 @@ export function MobileSessionTabSheet({
                             ? t('archive.restore', 'Restore session')
                             : t('sessions.tabs.reopenTab', 'Reopen conversation')
                         }
-                        className={cn(
-                          rowClassName,
-                          'transition-colors hover:bg-muted-foreground/5'
+                        {...stylex.props(
+                          sheetSurface.cardRow,
+                          sheetSurface.cardRowText,
+                          styles.actionable
                         )}
                       >
-                        <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+                        <span {...stylex.props(styles.leadingSlot)}>
                           {a.waitingPermission ? (
                             <Hand
-                              className="h-4 w-4 text-status-warning"
+                              {...stylex.props(styles.waitingGlyph)}
                               aria-label={t('sessions.waitingPermission', 'Waiting for permission')}
                             />
                           ) : a.running ? (
-                            <Spinner className="h-4 w-4" />
+                            <Spinner {...stylex.props(sheetSurface.glyph16)} />
                           ) : a.unread ? (
                             <span
-                              className="h-2 w-2 rounded-full bg-primary"
+                              {...stylex.props(styles.unreadDot)}
                               aria-label={t('sessions.unreadMessages', 'Unread messages')}
                             />
                           ) : null}
                         </span>
-                        <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                        <span {...stylex.props(styles.title, styles.titleQuiet)}>
                           {a.title || t('sessions.untitled', 'Untitled')}
                         </span>
-                        <span className="shrink-0 text-xs tabular-nums text-muted-foreground/70">
+                        <span {...stylex.props(styles.elapsed, styles.elapsedClosed)}>
                           {formatRelativeTime(a.lastActivityAt, t)}
                         </span>
                         {a.restoresArchive ? (
                           <ArchiveRestore
-                            className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70"
+                            {...stylex.props(styles.restoreGlyph)}
                             strokeWidth={1.8}
                             aria-hidden="true"
                           />
                         ) : (
                           <Undo2
-                            className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70"
+                            {...stylex.props(styles.restoreGlyph)}
                             strokeWidth={1.8}
                             aria-hidden="true"
                           />
@@ -288,7 +509,7 @@ export function MobileSessionTabSheet({
 
           {viewers.length > 0 ? (
             <>
-              <GroupLabel className="mt-4">{t('sessions.tabs.viewersGroup', 'Viewers')}</GroupLabel>
+              <GroupLabel spaced>{t('sessions.tabs.viewersGroup', 'Viewers')}</GroupLabel>
               <GroupCard>
                 {viewers.map((v) => {
                   const Icon = VIEWER_ICON[v.kind];
@@ -299,7 +520,7 @@ export function MobileSessionTabSheet({
                       onSelect={() => select(() => onSelectViewer(v.id))}
                       leading={
                         <Icon
-                          className="h-4 w-4 shrink-0 text-muted-foreground"
+                          {...stylex.props(styles.viewerGlyph)}
                           strokeWidth={1.8}
                           aria-hidden="true"
                         />
@@ -317,17 +538,9 @@ export function MobileSessionTabSheet({
   );
 }
 
-/** Shared row shell: fixed leading slot keeps titles aligned across rows. */
-const rowClassName =
-  'flex w-full select-none items-center gap-3 px-3.5 py-2.5 text-left text-sm first:rounded-t-xl last:rounded-b-xl';
-
 /** Card wrapper matching the menu sheet's info block (hairline row dividers). */
 function GroupCard({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex flex-col divide-y divide-border/40 rounded-xl bg-card ring-1 ring-border/60">
-      {children}
-    </div>
-  );
+  return <div {...stylex.props(sheetSurface.card)}>{children}</div>;
 }
 
 /** `[status] title elapsed` row for a conversation tab (no close affordance). */
@@ -360,53 +573,37 @@ function ConversationRow({
       type="button"
       onClick={onSelect}
       aria-current={active}
-      className={cn(
-        rowClassName,
-        'transition-colors',
-        // NB: bg-muted ≈ the sheet background in the dark theme, so the active
-        // tint uses muted-foreground alpha to stay visible on the card.
-        active ? 'bg-muted-foreground/10' : 'hover:bg-muted-foreground/5'
+      {...stylex.props(
+        sheetSurface.cardRow,
+        sheetSurface.cardRowText,
+        active ? styles.active : styles.actionable
       )}
     >
-      <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+      <span {...stylex.props(styles.leadingSlot)}>
         {/* Precedence matches the mobile project screen and the desktop sidebar:
             "this tab needs you" beats "this tab is busy" beats "unread". */}
         {waitingPermission ? (
-          <Hand className="h-4 w-4 text-status-warning" aria-label={waitingPermissionLabel} />
+          <Hand {...stylex.props(styles.waitingGlyph)} aria-label={waitingPermissionLabel} />
         ) : running ? (
-          <Spinner className="h-4 w-4 text-tab-active-accent" aria-hidden="true" />
+          <Spinner {...stylex.props(styles.workingGlyph)} aria-hidden="true" />
         ) : unread ? (
-          <span className="h-2 w-2 rounded-full bg-primary" aria-label={unreadLabel} />
+          <span {...stylex.props(styles.unreadDot)} aria-label={unreadLabel} />
         ) : null}
       </span>
-      <span className="flex min-w-0 flex-1 items-center gap-1.5">
-        <span
-          className={cn(
-            'min-w-0 truncate',
-            active ? 'font-medium text-foreground' : 'text-foreground/90'
-          )}
-        >
+      <span {...stylex.props(styles.titleLine)}>
+        <span {...stylex.props(styles.title, active ? styles.titleActive : styles.titleIdle)}>
           {label}
         </span>
         {mainChip ? <Badge>{mainChip}</Badge> : null}
       </span>
-      {elapsed ? (
-        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{elapsed}</span>
-      ) : null}
+      {elapsed ? <span {...stylex.props(styles.elapsed)}>{elapsed}</span> : null}
     </button>
   );
 }
 
-function GroupLabel({ children, className }: { children: ReactNode; className?: string }) {
+function GroupLabel({ children, spaced = false }: { children: ReactNode; spaced?: boolean }) {
   return (
-    <div
-      className={cn(
-        'px-3.5 pb-1.5 text-[0.68rem] font-medium tracking-wide text-muted-foreground/70',
-        className
-      )}
-    >
-      {children}
-    </div>
+    <div {...stylex.props(styles.groupLabel, spaced && styles.groupLabelSpaced)}>{children}</div>
   );
 }
 
@@ -427,19 +624,14 @@ function ViewerRow({
       type="button"
       onClick={onSelect}
       aria-current={active}
-      className={cn(
-        rowClassName,
-        'transition-colors',
-        active ? 'bg-muted-foreground/10' : 'hover:bg-muted-foreground/5'
+      {...stylex.props(
+        sheetSurface.cardRow,
+        sheetSurface.cardRowText,
+        active ? styles.active : styles.actionable
       )}
     >
       {leading}
-      <span
-        className={cn(
-          'min-w-0 flex-1 truncate',
-          active ? 'font-medium text-foreground' : 'text-foreground/90'
-        )}
-      >
+      <span {...stylex.props(styles.title, active ? styles.titleActive : styles.titleIdle)}>
         {label}
       </span>
     </button>
@@ -483,14 +675,14 @@ export function MobileSessionTabButton({
       onClick={onOpen}
       className={className}
     >
-      <ChatsIcon className="h-5 w-5 text-current" aria-hidden="true" />
+      <ChatsIcon {...stylex.props(styles.triggerGlyph)} aria-hidden="true" />
       {badge === 'unread' ? (
-        <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-primary ring-2 ring-background" />
+        <span {...stylex.props(styles.triggerDot)} />
       ) : badge === 'working' ? (
         // Fixed dark frame (bg-background disc); only the inner gradient dot pulses.
-        <span className="absolute -right-1 -top-1 flex h-3 w-3 items-center justify-center rounded-full bg-background">
+        <span {...stylex.props(styles.triggerFrame)}>
           <span
-            className="h-2 w-2 rounded-full animate-badge-pulse"
+            {...withClassName(stylex.props(styles.triggerPulse), 'animate-badge-pulse')}
             style={{
               backgroundImage:
                 'linear-gradient(135deg, color-mix(in oklch, hsl(var(--primary)) 55%, white), hsl(var(--primary)))',

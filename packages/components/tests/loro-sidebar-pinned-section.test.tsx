@@ -427,8 +427,18 @@ describe('LoroSidebar pinned section', () => {
     expect(container?.querySelector('[data-sidebar-updated-project]')).toBeNull();
   });
 
-  it('collapses pinned conversations and keeps the folded chevron visible', () => {
-    const onTogglePinnedSection = vi.fn();
+  it('expands and collapses pinned conversations through the section control', () => {
+    let collapsed = true;
+    const onTogglePinnedSection = () => {
+      collapsed = !collapsed;
+      root?.render(
+        <LoroSidebar
+          {...baseProps}
+          pinnedSectionCollapsed={collapsed}
+          onTogglePinnedSection={onTogglePinnedSection}
+        />
+      );
+    };
     renderSidebar({
       pinnedSectionCollapsed: true,
       onTogglePinnedSection,
@@ -437,11 +447,14 @@ describe('LoroSidebar pinned section', () => {
     expect(container?.querySelector('[data-sidebar-updated-id="pinned-session"]')).toBeNull();
     const header = container?.querySelector('[role="button"][aria-expanded="false"]');
     expect(header?.getAttribute('aria-label')).toBe('Pinned');
-    const chevron = header?.querySelector('.lucide-chevron-down');
-    expect(chevron?.classList.contains('opacity-100')).toBe(true);
-    expect(chevron?.classList.contains('-rotate-90')).toBe(true);
+    expect(header?.querySelector('.lucide-chevron-down')).not.toBeNull();
 
-    header?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    expect(onTogglePinnedSection).toHaveBeenCalledOnce();
+    flushSync(() => header?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(header?.getAttribute('aria-expanded')).toBe('true');
+    expect(container?.querySelector('[data-sidebar-updated-id="pinned-session"]')).not.toBeNull();
+
+    flushSync(() => header?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(header?.getAttribute('aria-expanded')).toBe('false');
+    expect(container?.querySelector('[data-sidebar-updated-id="pinned-session"]')).toBeNull();
   });
 });

@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { ArrowLeft, Copy, Ellipsis, FileText } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 
 import { FileIcon } from '@/components/icons/file-icons';
 import {
@@ -14,8 +15,83 @@ import { getBasename } from '@/lib';
 import { isNativeIOSAppShell } from '@/lib/native-platform';
 import { Button } from '@lody/ui/button';
 import { Drawer, DrawerContent, DrawerTitle } from '@/ui/drawer';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
+import { sheetSurface } from './sheet-surface';
 
 const MOBILE_FILE_DRAWER_HEADER_INSET = 'calc(3.5rem + var(--safe-area-top))';
+
+const styles = stylex.create({
+  /** The drawer's column. */
+  column: {
+    display: 'flex',
+    height: '100%',
+    minHeight: 0,
+    flexDirection: 'column',
+  },
+  /** The drawer's header. */
+  header: {
+    display: 'flex',
+    height: MOBILE_FILE_DRAWER_HEADER_INSET,
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[3],
+    paddingTop: 'var(--safe-area-top)',
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: themeColors.border,
+  },
+  /** The header's identity column. */
+  identity: {
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    alignItems: 'center',
+    gap: themeSpace[2],
+  },
+  /** The file's mark. */
+  fileIcon: {
+    width: themeSpace[5],
+    height: themeSpace[5],
+    flexShrink: 0,
+  },
+  /** The file's name. */
+  fileName: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.semibold,
+  },
+  /** The drawer's body. */
+  body: {
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+  },
+  /** The header's glyphs. */
+  headerGlyph: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+  },
+  /** The glyphs the menu sheet's rows carry. */
+  menuGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+  },
+});
 
 export type MobileFileViewerDrawerProps = {
   readonly open: boolean;
@@ -41,7 +117,7 @@ export function MobileFileViewerDrawer({
   const menuInfoRows: MobileSessionMenuInfoRow[] = [
     {
       id: 'file-path',
-      icon: <FileText className="h-3.5 w-3.5" />,
+      icon: <FileText {...stylex.props(styles.menuGlyph)} />,
       label: t('sessions.fileViewer.path', 'File path'),
       value: filePath,
       wrapValue: true,
@@ -53,7 +129,7 @@ export function MobileFileViewerDrawer({
       ? [
           {
             id: 'copy-file-content',
-            icon: <Copy className="h-3.5 w-3.5" />,
+            icon: <Copy {...stylex.props(styles.menuGlyph)} />,
             label: t('sessions.fileViewer.copyMarkdown', 'Copy full Markdown'),
             onClick: onCopyMarkdown,
           },
@@ -61,7 +137,7 @@ export function MobileFileViewerDrawer({
       : []),
     {
       id: 'copy-file-path',
-      icon: <Copy className="h-3.5 w-3.5" />,
+      icon: <Copy {...stylex.props(styles.menuGlyph)} />,
       label: t('sessions.fileViewer.copyPath', 'Copy file path'),
       onClick: onCopyPath,
     },
@@ -80,16 +156,18 @@ export function MobileFileViewerDrawer({
           onOpenChange(nextOpen);
         }}
       >
+        {/* The drawer's own geometry wins over the shared drawer's, so its
+            full-bleed rules stay Tailwind classes with `!important`. */}
         <DrawerContent
           forceMount
           className="inset-0 w-full! max-w-none! rounded-none border-0 border-l-0!"
           style={isNativeIOS ? { bottom: 'var(--native-keyboard-height, 0px)' } : undefined}
           data-sidebar-swipe-open-disabled
         >
-          <DrawerTitle className="sr-only">{fileName}</DrawerTitle>
+          <DrawerTitle {...stylex.props(sheetSurface.srOnly)}>{fileName}</DrawerTitle>
           <VaulDrawerBody topInset={MOBILE_FILE_DRAWER_HEADER_INSET}>
-            <div className="flex h-full min-h-0 flex-col">
-              <header className="flex h-[calc(3.5rem+var(--safe-area-top))] shrink-0 items-center gap-2 border-b border-border px-3 pt-[var(--safe-area-top)]">
+            <div {...stylex.props(styles.column)}>
+              <header {...stylex.props(styles.header)}>
                 <Button
                   type="button"
                   variant="ghost"
@@ -98,11 +176,14 @@ export function MobileFileViewerDrawer({
                   onClick={() => onOpenChange(false)}
                   aria-label={t('common.back', 'Back')}
                 >
-                  <ArrowLeft className="h-4 w-4" />
+                  <ArrowLeft {...stylex.props(styles.headerGlyph)} />
                 </Button>
-                <div className="flex min-w-0 flex-1 items-center gap-2">
-                  <FileIcon filePath={filePath} className="h-5 w-5 shrink-0" />
-                  <span className="min-w-0 truncate text-sm font-semibold">{fileName}</span>
+                <div {...stylex.props(styles.identity)}>
+                  <FileIcon
+                    filePath={filePath}
+                    className={stylex.props(styles.fileIcon).className}
+                  />
+                  <span {...stylex.props(styles.fileName)}>{fileName}</span>
                 </div>
                 <Button
                   type="button"
@@ -112,10 +193,10 @@ export function MobileFileViewerDrawer({
                   onClick={() => setMenuOpen(true)}
                   aria-label={t('sessions.fileViewer.moreActions', 'File actions')}
                 >
-                  <Ellipsis className="h-4 w-4" />
+                  <Ellipsis {...stylex.props(styles.headerGlyph)} />
                 </Button>
               </header>
-              <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
+              <div {...stylex.props(styles.body)}>{children}</div>
             </div>
           </VaulDrawerBody>
         </DrawerContent>

@@ -5,10 +5,18 @@ import { Spinner } from '@lody/ui/spinner';
 import type { MachineId } from '@lody/shared';
 import { Switch } from '@lody/ui/switch';
 import { Tooltip } from '@lody/ui/tooltip';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
 import { AgentIcon } from '@/components/icons/agent-icon';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 import {
   getHistoryProviderLabel,
   ProjectHistoryImportPanel,
@@ -18,17 +26,276 @@ import {
   type ProjectSettingsViewProps,
   WorktreeSetupEditor,
 } from '@/components/settings/project-settings';
+import { mobileSurface } from './surface';
+
+/** Tailwind's `transition-colors`: colour properties only, 150ms, standard ease. */
+const TRANSITION_COLORS = {
+  transitionProperty: 'color, background-color, border-color, text-decoration-color, fill, stroke',
+  transitionDuration: '150ms',
+  transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+} as const;
+
+const styles = stylex.create({
+  multiRepoIdentity: {
+    display: 'flex',
+    minWidth: 'calc(var(--spacing) * 0)',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 3)',
+  },
+  multiRepoTile: {
+    display: 'flex',
+    width: 'calc(var(--spacing) * 9)',
+    height: 'calc(var(--spacing) * 9)',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 'var(--radius-xl)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--primary)) 10%, transparent)',
+    color: 'hsl(var(--primary))',
+  },
+  multiRepoGlyph: { width: '1.05rem', height: '1.05rem' },
+  multiRepoText: { minWidth: 'calc(var(--spacing) * 0)' },
+  multiRepoLabel: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.95rem',
+    fontWeight: 'var(--font-weight-medium)',
+    lineHeight: 'var(--leading-tight)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  multiRepoLabelBlock: { display: 'block' },
+  multiRepoCount: {
+    display: 'block',
+    marginTop: 'calc(var(--spacing) * 0.5)',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.78rem',
+    lineHeight: 'var(--leading-tight)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  multiRepoChevron: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+  },
+  /** The machine's name, with its online mark in front. */
+  machineHeading: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+  },
+  /** The machine's online mark. */
+  machineDot: {
+    width: '0.375rem',
+    height: '0.375rem',
+    flexShrink: 0,
+    borderRadius: themeRadius.full,
+  },
+  machineDotOnline: {
+    backgroundColor: themeColors.statusSuccess,
+    boxShadow: '0 0 0 2px hsl(var(--status-success) / 0.2)',
+  },
+  machineDotOffline: {
+    backgroundColor: 'hsl(var(--muted-foreground) / 0.4)',
+    boxShadow: '0 0 0 2px hsl(var(--muted))',
+  },
+  machineName: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+
+  /** The loading state. */
+  loading: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[4],
+    paddingTop: themeSpace[6],
+    paddingBottom: themeSpace[6],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.mutedForeground,
+  },
+  /** The empty state. */
+  empty: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[4],
+    paddingTop: themeSpace[10],
+    paddingBottom: themeSpace[10],
+    textAlign: 'center',
+  },
+  /** The mark of the empty state. */
+  emptyGlyph: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: themeSpace[9],
+    height: themeSpace[9],
+    borderRadius: themeRadius.full,
+    backgroundColor: 'hsl(var(--muted) / 0.6)',
+  },
+  emptyIcon: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    color: themeColors.mutedForeground,
+  },
+  emptyText: {
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.mutedForeground,
+  },
+
+  /** A row's label, in the settings ink. */
+  rowLabel: { color: themeColors.foreground },
+  /** The value column of a row. */
+  valueColumn: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+  },
+  /** The second line of a row's value. */
+  valueMeta: {
+    marginTop: '0.125rem',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+    fontSize: '0.72rem',
+    lineHeight: 1.25,
+    color: themeColors.mutedForeground,
+  },
+  /** The share control beside a row. */
+  shareControl: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+  },
+  /** The chevron at the end of a row. */
+  chevron: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+  },
+  /** The rule between two rows of a card. */
+  rowDivider: {
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: themeColors.border,
+  },
+  /** The editors under a project row. */
+  rowEditors: {
+    marginInline: themeSpace[4],
+    marginBottom: themeSpace[3],
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[5],
+  },
+
+  /** The history panel of a project row. */
+  historyPanel: {
+    marginInline: themeSpace[4],
+    marginBottom: themeSpace[3],
+    overflow: 'hidden',
+    borderRadius: themeRadius.xl,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: themeColors.tabBorder,
+  },
+  /** The tab strip of the history panel. */
+  historyTabs: {
+    display: 'flex',
+    overflowX: 'auto',
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: themeColors.tabBorder,
+    backgroundColor: themeColors.tabBar,
+  },
+  /** One tab of the strip. */
+  historyTab: {
+    position: 'relative',
+    display: 'flex',
+    height: themeSpace[9],
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    paddingInline: themeSpace[3],
+    borderRightWidth: '1px',
+    borderRightStyle: 'solid',
+    borderRightColor: themeColors.tabBorder,
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    cursor: 'pointer',
+    ...TRANSITION_COLORS,
+  },
+  /** The selected tab. */
+  historyTabActive: {
+    backgroundColor: themeColors.tabActive,
+    color: themeColors.tabActiveForeground,
+    '::after': {
+      content: "''",
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      height: '0.125rem',
+      backgroundColor: themeColors.tabActiveAccent,
+    },
+  },
+  /** A tab that is not selected. */
+  historyTabIdle: {
+    backgroundColor: themeColors.tabInactive,
+    color: themeColors.tabInactiveForeground,
+    ':hover': {
+      backgroundColor: themeColors.tabHover,
+      color: themeColors.tabHoverForeground,
+    },
+  },
+  /** The mark of a tab. */
+  historyTabIcon: {
+    width: themeSpace[3],
+    height: themeSpace[3],
+    opacity: 0.6,
+  },
+  /** A tab's label. */
+  historyTabLabel: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  /** The single-provider header of the history panel. */
+  historyHead: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    paddingInline: themeSpace[3],
+    paddingTop: themeSpace[2],
+    paddingBottom: themeSpace[2],
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: themeColors.tabBorder,
+    backgroundColor: themeColors.tabBar,
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+});
 
 function MobileMachineHeading({ name, online }: { name: string; online: boolean }) {
   const { t } = useTranslation();
   return (
-    <span className="inline-flex items-center gap-1.5">
+    <span {...stylex.props(styles.machineHeading)}>
       <span
-        className={cn(
-          'h-1.5 w-1.5 shrink-0 rounded-full',
-          online
-            ? 'bg-status-success ring-2 ring-status-success/20'
-            : 'bg-muted-foreground/40 ring-2 ring-muted'
+        {...stylex.props(
+          styles.machineDot,
+          online ? styles.machineDotOnline : styles.machineDotOffline
         )}
         title={
           online
@@ -36,7 +303,7 @@ function MobileMachineHeading({ name, online }: { name: string; online: boolean 
             : t('workspace.machines.offline', 'Offline')
         }
       />
-      <span className="min-w-0 truncate">{name}</span>
+      <span {...stylex.props(styles.machineName)}>{name}</span>
     </span>
   );
 }
@@ -124,15 +391,15 @@ export function MobileProjectSettings({
       key={`multi:${project.id}`}
       hasDivider={hasDivider}
       label={
-        <span className="flex min-w-0 items-center gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <Folders className="h-[1.05rem] w-[1.05rem]" />
+        <span {...stylex.props(styles.multiRepoIdentity)}>
+          <span {...stylex.props(styles.multiRepoTile)}>
+            <Folders {...stylex.props(styles.multiRepoGlyph)} />
           </span>
-          <span className="min-w-0">
-            <span className="block truncate text-[0.95rem] font-medium leading-tight text-foreground">
+          <span {...stylex.props(styles.multiRepoText)}>
+            <span {...stylex.props(styles.multiRepoLabel, styles.multiRepoLabelBlock)}>
               {project.name}
             </span>
-            <span className="mt-0.5 block truncate text-[0.78rem] leading-tight text-muted-foreground">
+            <span {...stylex.props(styles.multiRepoCount)}>
               {t('workspace.projects.repositoryCount', '{{count}} repositories or folders', {
                 count: project.memberCount,
               })}
@@ -141,7 +408,7 @@ export function MobileProjectSettings({
         </span>
       }
       onClick={onOpenMultiRepoProject ? () => onOpenMultiRepoProject(project.id) : undefined}
-      trailing={<ChevronRight className="h-4 w-4" />}
+      trailing={<ChevronRight {...stylex.props(styles.multiRepoChevron)} />}
     />
   );
   const fallbackTitle = t('workspace.projects.title', 'Projects');
@@ -154,7 +421,7 @@ export function MobileProjectSettings({
   ) {
     return (
       <MobileSettingsSection title={fallbackTitle}>
-        <div className="flex items-center justify-center gap-2 px-4 py-6 text-sm text-muted-foreground">
+        <div {...stylex.props(styles.loading)}>
           <Spinner className="h-4 w-4" />
           {t('workspace.projects.loading', 'Loading projects')}
         </div>
@@ -165,11 +432,11 @@ export function MobileProjectSettings({
   if (totalProjects + totalGithubProjects === 0 && machineGroups.length === 0) {
     return (
       <MobileSettingsSection title={fallbackTitle}>
-        <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted/60">
-            <FolderOpen className="h-4 w-4 text-muted-foreground" />
+        <div {...stylex.props(styles.empty)}>
+          <div {...stylex.props(styles.emptyGlyph)}>
+            <FolderOpen {...stylex.props(styles.emptyIcon)} />
           </div>
-          <p className="text-sm text-muted-foreground">
+          <p {...stylex.props(styles.emptyText)}>
             {t('workspace.projects.empty', 'No projects yet')}
           </p>
         </div>
@@ -211,17 +478,23 @@ export function MobileProjectSettings({
             <MobileSettingsRow
               hasDivider={group.rows.length > 0}
               label={
-                <span className="flex min-w-0 items-center gap-3">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                    <FolderPlus className="h-[1.05rem] w-[1.05rem]" />
+                <span {...stylex.props(mobileSurface.identity)}>
+                  <span {...stylex.props(mobileSurface.identityTile)}>
+                    <FolderPlus {...stylex.props(mobileSurface.identityGlyph)} />
                   </span>
-                  <span className="truncate text-[0.95rem] font-medium leading-tight text-foreground">
+                  <span
+                    {...stylex.props(
+                      mobileSurface.identityLabel,
+                      mobileSurface.identityLabelTight,
+                      styles.rowLabel
+                    )}
+                  >
                     {addFolderLabel}
                   </span>
                 </span>
               }
               onClick={() => onAddLocalProject(group.machineId)}
-              trailing={<ChevronRight className="h-4 w-4" />}
+              trailing={<ChevronRight {...stylex.props(styles.chevron)} />}
             />
           ) : null}
           {boundTo(group.machineId).map((project) => multiRepoRow(project, true))}
@@ -234,17 +507,17 @@ export function MobileProjectSettings({
             <MobileSettingsRow
               hasDivider={anyMachineProjects.length > 0}
               label={
-                <span className="flex min-w-0 items-center gap-3">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                    <Folders className="h-[1.05rem] w-[1.05rem]" />
+                <span {...stylex.props(styles.multiRepoIdentity)}>
+                  <span {...stylex.props(styles.multiRepoTile)}>
+                    <Folders {...stylex.props(styles.multiRepoGlyph)} />
                   </span>
-                  <span className="truncate text-[0.95rem] font-medium leading-tight text-foreground">
+                  <span {...stylex.props(styles.multiRepoLabel)}>
                     {t('workspace.projects.createMultiRepo', 'Several repositories or folders')}
                   </span>
                 </span>
               }
               onClick={() => onCreateMultiRepoProject()}
-              trailing={<ChevronRight className="h-4 w-4" />}
+              trailing={<ChevronRight {...stylex.props(styles.multiRepoChevron)} />}
             />
           ) : null}
         </MobileSettingsSection>
@@ -252,25 +525,29 @@ export function MobileProjectSettings({
       {visibleGithubSections.map((section) => (
         <MobileSettingsSection key={section.owner} title={`GitHub · ${section.owner}`}>
           {section.rows.map((row, rowIndex) => (
-            <div key={row.key} className={cn(rowIndex > 0 && 'border-t border-border')}>
+            <div key={row.key} {...stylex.props(rowIndex > 0 && styles.rowDivider)}>
               <MobileSettingsRow
                 label={
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                      <Github className="h-[1.05rem] w-[1.05rem]" />
+                  <div {...stylex.props(mobileSurface.identity)}>
+                    <div {...stylex.props(mobileSurface.identityTile)}>
+                      <Github {...stylex.props(mobileSurface.identityGlyph)} />
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[0.95rem] font-medium leading-tight text-foreground">
+                    <div {...stylex.props(styles.valueColumn)}>
+                      <p
+                        {...stylex.props(
+                          mobileSurface.identityLabel,
+                          mobileSurface.identityLabelTight,
+                          styles.rowLabel
+                        )}
+                      >
                         {row.name}
                       </p>
-                      <p className="mt-0.5 truncate font-mono text-[0.72rem] leading-tight text-muted-foreground">
-                        {row.repoFullName}
-                      </p>
+                      <p {...stylex.props(styles.valueMeta)}>{row.repoFullName}</p>
                     </div>
                   </div>
                 }
               />
-              <div className="mx-4 mb-3 flex flex-col gap-5">
+              <div {...stylex.props(styles.rowEditors)}>
                 <WorktreeSetupEditor
                   phase="setup"
                   config={row.worktreeSetup}
@@ -322,18 +599,21 @@ function MobileProjectRow({
     null;
 
   const label = (
-    <div className="flex min-w-0 items-center gap-3">
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-        <Folder className="h-[1.05rem] w-[1.05rem]" />
+    <div {...stylex.props(mobileSurface.identity)}>
+      <div {...stylex.props(mobileSurface.identityTile)}>
+        <Folder {...stylex.props(mobileSurface.identityGlyph)} />
       </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-[0.95rem] font-medium leading-tight text-foreground">
+      <div {...stylex.props(styles.valueColumn)}>
+        <p
+          {...stylex.props(
+            mobileSurface.identityLabel,
+            mobileSurface.identityLabelTight,
+            styles.rowLabel
+          )}
+        >
           {row.project.name}
         </p>
-        <p
-          className="mt-0.5 truncate font-mono text-[0.72rem] leading-tight text-muted-foreground"
-          title={row.project.rootPath}
-        >
+        <p {...stylex.props(styles.valueMeta)} title={row.project.rootPath}>
           {row.project.rootPath}
         </p>
       </div>
@@ -341,7 +621,7 @@ function MobileProjectRow({
   );
 
   const shareControl = (
-    <div className="flex items-center gap-2">
+    <div {...stylex.props(styles.shareControl)}>
       {row.isUpdating ? <Spinner className="h-3.5 w-3.5 text-muted-foreground" /> : null}
       <Switch
         checked={row.sharedWithTeam}
@@ -365,9 +645,9 @@ function MobileProjectRow({
   );
 
   return (
-    <div className={cn(hasDivider && 'border-t border-border')}>
+    <div {...stylex.props(hasDivider && styles.rowDivider)}>
       <MobileSettingsRow label={label}>{shareControl}</MobileSettingsRow>
-      <div className="mx-4 mb-3 flex flex-col gap-5">
+      <div {...stylex.props(styles.rowEditors)}>
         <WorktreeSetupEditor
           phase="setup"
           config={row.worktreeSetup}
@@ -388,12 +668,12 @@ function MobileProjectRow({
         />
       </div>
       {activeHistoryState ? (
-        <div className="mx-4 mb-3 overflow-hidden rounded-xl border border-tab-border">
+        <div {...stylex.props(styles.historyPanel)}>
           {visibleHistoryImports.length > 1 ? (
             <div
               role="tablist"
               aria-label={t('workspace.projects.historyTablistLabel', 'History providers')}
-              className="flex overflow-x-auto border-b border-tab-border bg-tab-bar"
+              {...stylex.props(styles.historyTabs)}
             >
               {visibleHistoryImports.map((state) => {
                 const active = state.providerKey === activeHistoryState.providerKey;
@@ -404,32 +684,30 @@ function MobileProjectRow({
                     type="button"
                     role="tab"
                     aria-selected={active}
-                    className={cn(
-                      'relative flex h-9 shrink-0 cursor-pointer items-center gap-1.5 border-r border-tab-border px-3 text-xs transition-colors',
-                      active
-                        ? "bg-tab-active text-tab-active-foreground after:absolute after:inset-x-0 after:top-0 after:h-0.5 after:bg-tab-active-accent after:content-['']"
-                        : 'bg-tab-inactive text-tab-inactive-foreground hover:bg-tab-hover hover:text-tab-hover-foreground'
+                    {...stylex.props(
+                      styles.historyTab,
+                      active ? styles.historyTabActive : styles.historyTabIdle
                     )}
                     onClick={() => setActiveProviderKey(state.providerKey)}
                   >
                     <AgentIcon
                       cliType={state.provider.cliType}
                       agentType={state.provider.agentType}
-                      className="h-3 w-3 opacity-60"
+                      {...stylex.props(styles.historyTabIcon)}
                     />
-                    <span className="truncate">{providerLabel}</span>
+                    <span {...stylex.props(styles.historyTabLabel)}>{providerLabel}</span>
                   </button>
                 );
               })}
             </div>
           ) : (
-            <div className="flex items-center gap-1.5 border-b border-tab-border bg-tab-bar px-3 py-2 text-xs text-muted-foreground">
+            <div {...stylex.props(styles.historyHead)}>
               <AgentIcon
                 cliType={activeHistoryState.provider.cliType}
                 agentType={activeHistoryState.provider.agentType}
-                className="h-3 w-3 opacity-60"
+                {...stylex.props(styles.historyTabIcon)}
               />
-              <span className="truncate">
+              <span {...stylex.props(styles.historyTabLabel)}>
                 {getHistoryProviderLabel(activeHistoryState.provider)}
               </span>
             </div>

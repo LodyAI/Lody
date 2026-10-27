@@ -46,6 +46,7 @@ import { writeTextToClipboard } from '@/lib/clipboard';
 import { getDownloadPageUrl } from '@/lib/lody-urls';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
 import { usePullToRefresh } from '@/hooks/use-pull-to-refresh';
 import { GlassIconButton } from '@/components/mobile/glass-icon-button';
 import { type MobileConversationItem } from './mobile-project-screen';
@@ -64,6 +65,1131 @@ import { MobileInitialLetterAvatar } from './mobile-initial-letter-avatar';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
 import { WorkspaceAvatar } from '@/components/workspace-avatar';
 import { MobileWorkspaceTabBar, type MobileBottomTabBarTabSpec } from './mobile-workspace-tabbar';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeEasing,
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
+
+/* Tailwind's `transition-colors` / `transition` / `transition-transform`. */
+const TRANSITION_COLORS = {
+  transitionProperty: 'color, background-color, border-color, text-decoration-color, fill, stroke',
+  transitionDuration: '150ms',
+  transitionTimingFunction: themeEasing['in-out'],
+} as const;
+const TRANSITION_ALL = {
+  transitionProperty: 'all',
+  transitionDuration: '150ms',
+  transitionTimingFunction: themeEasing['in-out'],
+} as const;
+const TRANSITION_TRANSFORM = {
+  transitionProperty: 'transform, translate, scale, rotate',
+  transitionDuration: '150ms',
+  transitionTimingFunction: themeEasing['in-out'],
+} as const;
+/* `motion-safe:` — the scale only happens when motion is welcome. */
+const MOTION_SAFE = '@media (prefers-reduced-motion: no-preference)';
+
+const styles = stylex.create({
+  /* The Material-icon wrapper: a sized box the icon fills. */
+  reactIconGlyph: { width: '100%', height: '100%' },
+  workspacePill: { width: themeSpace[9], height: themeSpace[9], justifyContent: 'center', gap: 0 },
+  statusBounds: { minWidth: 0, maxWidth: 'min(100%, 12rem)' },
+  reactIcon: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  /* ── Icons ─────────────────────────────────────────────────────────── */
+  icon3: { width: themeSpace[3], height: themeSpace[3] },
+  icon3Shrink: { width: themeSpace[3], height: themeSpace[3], flexShrink: 0 },
+  icon35: { width: themeSpace[3.5], height: themeSpace[3.5] },
+  icon35ShrinkMuted: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+  },
+  icon4: { width: themeSpace[4], height: themeSpace[4] },
+  icon4Current: { width: themeSpace[4], height: themeSpace[4], color: 'currentColor' },
+  icon4Shrink: { width: themeSpace[4], height: themeSpace[4], flexShrink: 0 },
+  icon4ShrinkMuted: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+  },
+  icon5: { width: themeSpace[5], height: themeSpace[5] },
+  icon5Shrink: { width: themeSpace[5], height: themeSpace[5], flexShrink: 0 },
+  icon5ShrinkMuted: {
+    width: themeSpace[5],
+    height: themeSpace[5],
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+  },
+  icon6: { width: themeSpace[6], height: themeSpace[6] },
+  icon8Shrink: { width: themeSpace[8], height: themeSpace[8], flexShrink: 0 },
+  icon18: { width: '18px', height: '18px' },
+
+  /* ── Floating pill (workspace / settings chip) ────────────────────── */
+  pill: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[2],
+    borderRadius: themeRadius.full,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.5)',
+    backgroundColor: themeColors.muted,
+    color: themeColors.foreground,
+    ...TRANSITION_COLORS,
+  },
+  pillActive: {
+    backgroundColor: { default: themeColors.muted, ':active': 'hsl(var(--muted) / 0.8)' },
+    transform: { default: 'none', ':active': 'scale(0.97)' },
+  },
+
+  /* ── Add-project sheet ────────────────────────────────────────────── */
+  sheetStack: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[2.5],
+    paddingInline: themeSpace[4],
+    paddingTop: themeSpace[3],
+  },
+  sheetOption: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[3.5],
+    borderRadius: themeRadius['2xl'],
+    backgroundColor: {
+      default: 'hsl(var(--muted) / 0.4)',
+      ':active': 'hsl(var(--muted) / 0.7)',
+    },
+    paddingInline: themeSpace[4],
+    paddingBlock: themeSpace[3.5],
+    textAlign: 'left',
+    ...TRANSITION_COLORS,
+  },
+  sheetOptionIcon: {
+    display: 'flex',
+    height: themeSpace[11],
+    width: themeSpace[11],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.full,
+    backgroundColor: 'hsl(var(--primary) / 0.1)',
+    color: themeColors.primary,
+  },
+  sheetOptionBody: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+  },
+  sheetOptionTitle: {
+    display: 'block',
+    fontSize: '0.95rem',
+    fontWeight: themeFontWeight.semibold,
+    lineHeight: 1.25,
+  },
+  sheetOptionHint: {
+    marginTop: themeSpace[0.5],
+    display: 'block',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.8rem',
+    color: themeColors.mutedForeground,
+  },
+
+  /* ── Private-resource help sheet ───────────────────────────────────── */
+  helpStack: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    paddingInline: themeSpace[5],
+    paddingBottom: themeSpace[2],
+    paddingTop: themeSpace[4],
+    textAlign: 'center',
+  },
+  helpIcon: {
+    marginBottom: themeSpace[3],
+    display: 'inline-flex',
+    height: themeSpace[10],
+    width: themeSpace[10],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.full,
+    backgroundColor: themeColors.muted,
+    color: themeColors.mutedForeground,
+  },
+  helpClose: {
+    marginTop: themeSpace[5],
+    minHeight: themeSpace[11],
+    width: '100%',
+    maxWidth: '24rem',
+    borderRadius: themeRadius.xl,
+    backgroundColor: themeColors.primary,
+    paddingInline: themeSpace[4],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.semibold,
+    color: themeColors.primaryForeground,
+    opacity: { default: 1, ':active': 0.8 },
+  },
+
+  /* ── Row trailing meta ─────────────────────────────────────────────── */
+  trailingMeta: {
+    marginLeft: themeSpace[2],
+    display: 'inline-flex',
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    gap: themeSpace[1],
+    alignSelf: 'center',
+  },
+  trailingAge: {
+    fontSize: '0.7rem',
+    fontVariantNumeric: 'tabular-nums',
+    color: themeColors.mutedForeground,
+  },
+  trailingBadge: {
+    display: 'inline-flex',
+    height: '1.125rem',
+    minWidth: '1.125rem',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.full,
+    backgroundColor: themeColors.primary,
+    paddingInline: themeSpace[1.5],
+    fontSize: '0.68rem',
+    fontWeight: themeFontWeight.semibold,
+    lineHeight: 1,
+    fontVariantNumeric: 'tabular-nums',
+    color: themeColors.primaryForeground,
+  },
+
+  /* ── Header search ─────────────────────────────────────────────────── */
+  searchField: {
+    display: 'flex',
+    height: themeSpace[9],
+    width: '100%',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    borderRadius: themeRadius.full,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.5)',
+    backgroundColor: {
+      default: themeColors.muted,
+      ':focus-within': 'hsl(var(--muted) / 0.8)',
+    },
+    paddingInline: themeSpace[3],
+    color: themeColors.foreground,
+    ...TRANSITION_COLORS,
+  },
+  searchInput: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    borderWidth: 0,
+    borderStyle: 'none',
+    backgroundColor: 'transparent',
+    fontSize: '0.82rem',
+    // The field's focus ring was a Tailwind `focus:ring-0`, which painted
+    // nothing and erased the app's global focus ring. The field keeps no
+    // focus indicator, exactly as before.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+    '::placeholder': { color: themeColors.mutedForeground },
+  },
+  searchClear: {
+    marginRight: 'calc(var(--spacing) * -1)',
+    display: 'inline-flex',
+    height: themeSpace[6],
+    width: themeSpace[6],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.full,
+    color: {
+      default: themeColors.mutedForeground,
+      ':hover': themeColors.foreground,
+    },
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': 'hsl(var(--background) / 0.6)',
+    },
+  },
+
+  /* ── Chat-list filter toggle ───────────────────────────────────────── */
+  filterToggle: {
+    position: 'relative',
+    display: 'inline-flex',
+    height: themeSpace[8],
+    width: themeSpace[8],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.full,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.5)',
+    backgroundColor: {
+      default: themeColors.muted,
+      ':hover': 'hsl(var(--muted) / 0.8)',
+    },
+    color: {
+      default: themeColors.mutedForeground,
+      ':hover': themeColors.foreground,
+    },
+    // The toggle's focus ring was a Tailwind `focus-visible:ring-1`, which
+    // painted nothing and erased the app's global focus ring. It keeps no
+    // focus indicator, exactly as before.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+    transform: { default: 'none', ':active': 'scale(0.97)' },
+    ...TRANSITION_COLORS,
+  },
+  filterToggleOpen: {
+    borderColor: 'hsl(var(--primary) / 0.4)',
+    /* The open state replaces the resting fill, but the hover fill still
+       applies on top of it — the same order the Tailwind classes had. */
+    backgroundColor: {
+      default: 'hsl(var(--primary) / 0.15)',
+      ':hover': 'hsl(var(--muted) / 0.8)',
+    },
+    color: {
+      default: themeColors.primary,
+      ':hover': themeColors.foreground,
+    },
+  },
+  filterToggleDot: {
+    position: 'absolute',
+    right: themeSpace[1],
+    top: themeSpace[1],
+    height: themeSpace[1.5],
+    width: themeSpace[1.5],
+    borderRadius: themeRadius.full,
+    backgroundColor: themeColors.primary,
+  },
+
+  /* ── Section headings ──────────────────────────────────────────────── */
+  allItemsHeading: {
+    paddingInline: themeSpace[5],
+    paddingBottom: themeSpace[1],
+    paddingTop: themeSpace[3],
+    fontSize: '0.72rem',
+    fontWeight: themeFontWeight.semibold,
+    textTransform: 'uppercase',
+    letterSpacing: '0.025em',
+    color: themeColors.mutedForeground,
+  },
+  machineGroupHeading: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    paddingInline: themeSpace[5],
+    paddingBottom: themeSpace[1],
+    paddingTop: themeSpace[3],
+  },
+  machineGroupName: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.78rem',
+    fontWeight: themeFontWeight.semibold,
+    letterSpacing: '-0.025em',
+    color: themeColors.foreground,
+  },
+  machinePrivateButton: {
+    display: 'inline-flex',
+    minHeight: themeSpace[7],
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[1],
+    borderRadius: themeRadius.full,
+    paddingInline: themeSpace[1.5],
+    fontSize: '0.68rem',
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.mutedForeground,
+    backgroundColor: { default: 'transparent', ':active': themeColors.muted },
+  },
+  statusDot: {
+    display: 'inline-block',
+    height: themeSpace[2],
+    width: themeSpace[2],
+    flexShrink: 0,
+    borderRadius: themeRadius.full,
+  },
+  statusDotOnline: { backgroundColor: themeColors.statusSuccess },
+  statusDotOffline: { backgroundColor: 'hsl(var(--muted-foreground) / 0.4)' },
+
+  /* ── Owner avatar / list shell ─────────────────────────────────────── */
+  ownerAvatarImage: {
+    height: themeSpace[10],
+    width: themeSpace[10],
+    flexShrink: 0,
+    borderRadius: themeRadius.xl,
+    objectFit: 'cover',
+  },
+  ownerAvatarTile: {
+    display: 'inline-flex',
+    height: themeSpace[10],
+    width: themeSpace[10],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.xl,
+    backgroundColor: themeColors.muted,
+    color: 'hsl(var(--foreground) / 0.8)',
+  },
+  listShell: {
+    marginInline: themeSpace[3],
+    overflow: 'hidden',
+    borderRadius: themeRadius['2xl'],
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.4)',
+    backgroundColor: themeColors.card,
+  },
+
+  /* ── Flat list row ─────────────────────────────────────────────────── */
+  listRow: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    gap: themeSpace[3],
+    borderBottomWidth: { default: '1px', ':last-child': 0 },
+    borderBottomStyle: 'solid',
+    borderBottomColor: 'hsl(var(--border) / 0.4)',
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2.5],
+    textAlign: 'left',
+    color: { default: themeColors.foreground, ':disabled': themeColors.mutedForeground },
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': 'hsl(var(--muted) / 0.3)',
+      ':active': 'hsl(var(--muted) / 0.4)',
+      ':focus-visible': 'hsl(var(--muted) / 0.4)',
+      ':disabled:hover': 'transparent',
+      ':disabled:active': 'transparent',
+    },
+    ...TRANSITION_COLORS,
+  },
+  listRowBody: {
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    flexDirection: 'column',
+  },
+  listRowTitleLine: {
+    display: 'flex',
+    minWidth: 0,
+    gap: themeSpace[1.5],
+    alignItems: 'baseline',
+  },
+  listRowTitleLineCentered: { alignItems: 'center' },
+  listRowTitle: {
+    fontSize: '1.02rem',
+    fontWeight: themeFontWeight.semibold,
+    lineHeight: 1.25,
+  },
+  listRowTitleWrap: {
+    minWidth: 0,
+    overflowWrap: 'break-word',
+  },
+  listRowTitleTruncate: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  listRowSuffix: {
+    fontSize: '0.78rem',
+    fontWeight: themeFontWeight.normal,
+    lineHeight: 1.25,
+    color: themeColors.mutedForeground,
+  },
+  listRowSuffixWrap: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+  },
+  listRowSuffixTruncate: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+
+  /* ── Recents strip ─────────────────────────────────────────────────── */
+  recentsWrap: {
+    paddingBottom: themeSpace[2],
+    paddingTop: themeSpace[3],
+  },
+  recentsHeading: {
+    paddingInline: themeSpace[5],
+    paddingBottom: themeSpace[1],
+    fontSize: '0.72rem',
+    fontWeight: themeFontWeight.semibold,
+    textTransform: 'uppercase',
+    letterSpacing: '0.025em',
+    color: themeColors.mutedForeground,
+  },
+  recentsScroller: {
+    display: 'flex',
+    alignItems: 'stretch',
+    gap: themeSpace[2],
+    overflowX: 'auto',
+    paddingInline: themeSpace[5],
+  },
+  recentCard: {
+    display: 'inline-flex',
+    width: '10rem',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[2],
+    borderRadius: themeRadius['2xl'],
+    backgroundColor: themeColors.card,
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2],
+    textAlign: 'left',
+    color: themeColors.foreground,
+    boxShadow: '0 1px 2px rgba(0,0,0,0.04), 0 8px 24px -16px rgba(0,0,0,0.12)',
+    transform: { default: 'none', ':active': 'scale(0.97)' },
+    ...TRANSITION_TRANSFORM,
+  },
+  recentCardBody: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+  },
+  recentCardMeta: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.7rem',
+    lineHeight: 1.25,
+    color: themeColors.mutedForeground,
+  },
+  recentCardName: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.85rem',
+    fontWeight: themeFontWeight.semibold,
+    lineHeight: 1.25,
+  },
+  recentAvatar: {
+    height: themeSpace[8],
+    width: themeSpace[8],
+    flexShrink: 0,
+    borderRadius: themeRadius.full,
+    objectFit: 'cover',
+  },
+
+  /* ── Projects sub-tab selector ─────────────────────────────────────── */
+  subTabBar: {
+    marginInline: themeSpace[3],
+    marginBottom: themeSpace[2],
+    marginTop: themeSpace[1],
+    display: 'flex',
+  },
+  subTabTrack: {
+    position: 'relative',
+    display: 'inline-flex',
+    borderRadius: themeRadius.full,
+    backgroundColor: 'hsl(var(--muted) / 0.5)',
+    padding: themeSpace[0.5],
+  },
+  subTabThumb: {
+    position: 'absolute',
+    bottom: themeSpace[0.5],
+    left: 0,
+    top: themeSpace[0.5],
+    borderRadius: themeRadius.full,
+    backgroundColor: themeColors.card,
+  },
+  subTabButton: {
+    position: 'relative',
+    zIndex: 10,
+    borderRadius: themeRadius.full,
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[1],
+    fontSize: '0.78rem',
+    fontWeight: themeFontWeight.medium,
+    color: {
+      default: themeColors.mutedForeground,
+      ':active': themeColors.foreground,
+    },
+    ...TRANSITION_COLORS,
+  },
+  subTabButtonActive: { color: themeColors.foreground },
+  subTabLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+  },
+
+  /* ── Home screen chrome ────────────────────────────────────────────── */
+  appRoot: {
+    position: 'relative',
+    height: '100%',
+    minHeight: 0,
+    width: '100%',
+    color: themeColors.foreground,
+  },
+  shell: {
+    position: 'relative',
+    display: 'flex',
+    height: '100%',
+    width: '100%',
+    flexDirection: 'column',
+    backgroundColor: themeColors.background,
+  },
+  header: {
+    position: 'relative',
+    zIndex: 30,
+    paddingTop: 'calc(var(--k-safe-area-top, 0px) + var(--spacing) * 2)',
+    paddingBottom: themeSpace[2],
+    paddingInlineStart: 'calc(var(--k-safe-area-left, 0px) + var(--spacing) * 3)',
+    paddingInlineEnd: 'calc(var(--k-safe-area-right, 0px) + var(--spacing) * 3)',
+  },
+  headerRow: {
+    position: 'relative',
+    display: 'flex',
+    height: themeSpace[9],
+    width: '100%',
+    alignItems: 'center',
+    gap: themeSpace[2],
+  },
+  headerLeading: {
+    position: 'relative',
+    zIndex: 10,
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+  },
+  workspaceIdentity: {
+    display: 'flex',
+    height: themeSpace[9],
+    width: themeSpace[9],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.full,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.5)',
+    backgroundColor: themeColors.muted,
+    color: themeColors.foreground,
+  },
+  searchSlot: {
+    position: 'relative',
+    zIndex: 10,
+    height: themeSpace[9],
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    transitionProperty: 'opacity, transform',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0, 0, 0.2, 1)',
+  },
+  searchSlotOpaque: {
+    opacity: 1,
+    transform: 'translateY(0)',
+    pointerEvents: 'auto',
+  },
+  searchSlotHidden: {
+    opacity: 0,
+    transform: 'translateY(0.375rem)',
+    pointerEvents: 'none',
+  },
+  headerTrailing: {
+    position: 'relative',
+    zIndex: 10,
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: themeSpace[2],
+  },
+  statusOverlay: {
+    pointerEvents: 'none',
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  contentColumn: {
+    position: 'relative',
+    display: 'flex',
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    flexDirection: 'column',
+    overflow: 'hidden',
+  },
+  contentBody: {
+    display: 'flex',
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    flexDirection: 'column',
+  },
+  contentBodyHidden: { display: 'none' },
+  overflowHidden: { overflow: 'hidden' },
+  listRegion: {
+    position: 'relative',
+    zIndex: 0,
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflowY: 'auto',
+    paddingTop: themeSpace[1],
+    paddingBottom: 'calc(var(--mobile-tabbar-height) + var(--k-safe-area-bottom, 0px) + 1rem)',
+    scrollbarGutter: 'auto',
+  },
+  schedulesColumn: {
+    display: 'flex',
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    flexDirection: 'column',
+    overflow: 'hidden',
+  },
+
+  /* ── Inbox tab ─────────────────────────────────────────────────────── */
+  inboxSection: {
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  inboxList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[4],
+    paddingBlock: themeSpace[3],
+  },
+  inboxLoading: {
+    paddingInline: themeSpace[2],
+    paddingBlock: themeSpace[8],
+    textAlign: 'center',
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.mutedForeground,
+  },
+  inboxCard: {
+    position: 'relative',
+    display: 'flex',
+    gap: themeSpace[3],
+    borderRadius: themeRadius['2xl'],
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.6)',
+    backgroundColor: themeColors.background,
+    paddingInline: themeSpace[3.5],
+    paddingBlock: themeSpace[3],
+    boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+  },
+  inboxCardButton: {
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    alignItems: 'flex-start',
+    gap: themeSpace[3],
+    textAlign: 'left',
+    opacity: { default: 1, ':active': 0.7 },
+  },
+  inboxCardIcon: {
+    position: 'relative',
+    marginTop: themeSpace[0.5],
+    display: 'flex',
+    height: themeSpace[9],
+    width: themeSpace[9],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.full,
+    backgroundColor: themeColors.muted,
+    color: themeColors.foreground,
+  },
+  inboxUnreadDot: {
+    position: 'absolute',
+    right: 'calc(var(--spacing) * -0.5)',
+    top: 'calc(var(--spacing) * -0.5)',
+    height: themeSpace[2.5],
+    width: themeSpace[2.5],
+    borderRadius: themeRadius.full,
+    borderWidth: '2px',
+    borderStyle: 'solid',
+    borderColor: themeColors.background,
+    backgroundColor: themeColors.primary,
+  },
+  inboxCardBody: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+  },
+  inboxCardTitle: {
+    display: 'block',
+    fontSize: '0.9rem',
+    fontWeight: themeFontWeight.semibold,
+    lineHeight: 1.375,
+    color: themeColors.foreground,
+  },
+  inboxCardDescription: {
+    marginTop: themeSpace[0.5],
+    display: 'block',
+    fontSize: '0.78rem',
+    lineHeight: 1.625,
+    color: themeColors.mutedForeground,
+  },
+  inboxCardAction: {
+    marginTop: themeSpace[2],
+    display: 'block',
+    fontSize: '0.78rem',
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.primary,
+  },
+  inboxDismiss: {
+    display: 'flex',
+    height: themeSpace[7],
+    width: themeSpace[7],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.full,
+    color: themeColors.mutedForeground,
+    backgroundColor: { default: 'transparent', ':active': themeColors.muted },
+  },
+
+  /* ── Local project rows ────────────────────────────────────────────── */
+  removalState: {
+    display: 'inline-flex',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: themeSpace[1],
+    fontSize: '0.7rem',
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.mutedForeground,
+  },
+  removalStateText: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  projectPath: {
+    marginTop: themeSpace[0.5],
+    display: 'block',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.72rem',
+    color: themeColors.mutedForeground,
+  },
+
+  /* ── Chat tab ──────────────────────────────────────────────────────── */
+  chatSection: {
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  chatTrailingRow: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingInline: themeSpace[4],
+    paddingBottom: themeSpace[1.5],
+    paddingTop: themeSpace[2],
+  },
+
+  /* ── Onboarding guide ──────────────────────────────────────────────── */
+  onboardingRoot: {
+    paddingInline: themeSpace[4],
+    paddingBottom: themeSpace[6],
+    paddingTop: themeSpace[8],
+  },
+  onboardingColumn: {
+    marginInline: 'auto',
+    display: 'flex',
+    maxWidth: '24rem',
+    flexDirection: 'column',
+    gap: themeSpace[4],
+  },
+  onboardingHead: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: themeSpace[3],
+    textAlign: 'center',
+  },
+  onboardingGlyph: {
+    display: 'flex',
+    height: themeSpace[12],
+    width: themeSpace[12],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius['2xl'],
+    backgroundColor: themeColors.muted,
+    color: themeColors.mutedForeground,
+  },
+  onboardingHeadStack: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[1],
+  },
+  onboardingTitle: {
+    /* `space-y-1` on the stack: every child but the last carries the gap. */
+    marginBlockStart: { default: themeSpace[1], ':last-child': 0 },
+    marginBlockEnd: { default: themeSpace[1], ':last-child': 0 },
+    fontSize: '0.95rem',
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+  },
+  onboardingBody: {
+    marginBlockStart: { default: themeSpace[1], ':last-child': 0 },
+    marginBlockEnd: { default: themeSpace[1], ':last-child': 0 },
+    fontSize: '0.8rem',
+    lineHeight: 1.625,
+    color: themeColors.mutedForeground,
+  },
+  onboardingCard: {
+    borderRadius: themeRadius['2xl'],
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.4)',
+    backgroundColor: themeColors.card,
+    padding: themeSpace[4],
+  },
+  onboardingCardHead: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+  },
+  onboardingCardTitle: {
+    fontSize: '0.85rem',
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+  },
+  onboardingCardActions: {
+    marginTop: themeSpace[3],
+    display: 'flex',
+    alignItems: 'stretch',
+    gap: themeSpace[2],
+  },
+  onboardingCardHint: {
+    marginTop: themeSpace[2.5],
+    fontSize: '0.75rem',
+    lineHeight: 1.625,
+    color: themeColors.mutedForeground,
+  },
+  onboardingShareButton: {
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: themeSpace[2],
+    borderRadius: themeRadius.xl,
+    backgroundColor: themeColors.primary,
+    paddingInline: themeSpace[4],
+    paddingBlock: themeSpace[2.5],
+    fontSize: '0.85rem',
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.primaryForeground,
+    ...TRANSITION_TRANSFORM,
+  },
+  onboardingShareButtonMotion: {
+    [MOTION_SAFE]: { ':active': { transform: 'scale(0.98)' } },
+  },
+  onboardingCopyButton: {
+    position: 'relative',
+    display: 'inline-flex',
+    width: themeSpace[10],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.xl,
+    backgroundColor: {
+      default: 'hsl(var(--muted) / 0.7)',
+      ':active': themeColors.muted,
+    },
+    color: themeColors.mutedForeground,
+    ...TRANSITION_ALL,
+  },
+  onboardingCopyButtonMotion: {
+    [MOTION_SAFE]: { ':active': { transform: 'scale(0.9)' } },
+  },
+  onboardingSteps: {
+    paddingInline: themeSpace[1],
+    paddingTop: themeSpace[1],
+  },
+  onboardingStepsHeading: {
+    fontSize: '0.72rem',
+    fontWeight: themeFontWeight.medium,
+    textTransform: 'uppercase',
+    letterSpacing: '0.025em',
+    color: themeColors.mutedForeground,
+  },
+  onboardingStepList: {
+    marginTop: themeSpace[2.5],
+  },
+  onboardingStep: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: themeSpace[2.5],
+    /* `space-y-2` on the list: every child but the last carries the gap. */
+    marginBlockStart: { default: themeSpace[2], ':last-child': 0 },
+    marginBlockEnd: { default: themeSpace[2], ':last-child': 0 },
+  },
+  onboardingStepNumber: {
+    marginTop: '1px',
+    display: 'flex',
+    height: '18px',
+    width: '18px',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.full,
+    backgroundColor: themeColors.muted,
+    fontSize: '0.68rem',
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.mutedForeground,
+  },
+  onboardingStepText: {
+    fontSize: '0.78rem',
+    lineHeight: 1.625,
+    color: themeColors.mutedForeground,
+  },
+  onboardingInlineIcon: {
+    display: 'inline-flex',
+  },
+  onboardingArtifactPill: {
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    borderRadius: themeRadius.xl,
+    backgroundColor: {
+      default: 'hsl(var(--muted) / 0.7)',
+      ':active': themeColors.muted,
+    },
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2.5],
+    textAlign: 'left',
+    ...TRANSITION_ALL,
+  },
+  onboardingArtifactPillMotion: {
+    [MOTION_SAFE]: { ':active': { transform: 'scale(0.98)' } },
+  },
+  onboardingArtifactCode: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    fontFamily: 'var(--font-mono)',
+    fontSize: '0.78rem',
+    color: themeColors.foreground,
+  },
+  onboardingArtifactTrailing: {
+    position: 'relative',
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    color: themeColors.mutedForeground,
+  },
+  onboardingShareIconButton: {
+    display: 'inline-flex',
+    width: themeSpace[10],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.xl,
+    backgroundColor: {
+      default: 'hsl(var(--muted) / 0.7)',
+      ':active': themeColors.muted,
+    },
+    color: themeColors.mutedForeground,
+    ...TRANSITION_ALL,
+  },
+  onboardingShareIconButtonMotion: {
+    [MOTION_SAFE]: { ':active': { transform: 'scale(0.9)' } },
+  },
+
+  /* ── Empty states ──────────────────────────────────────────────────── */
+  tabEmptyState: {
+    marginInline: themeSpace[3],
+    marginTop: themeSpace[3],
+    borderRadius: themeRadius['2xl'],
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.4)',
+    backgroundColor: themeColors.card,
+    paddingInline: themeSpace[4],
+    paddingBlock: themeSpace[6],
+    textAlign: 'center',
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.mutedForeground,
+  },
+  tabEmptyAction: {
+    marginTop: themeSpace[3],
+    display: 'flex',
+    justifyContent: 'center',
+  },
+  tabEmptyButton: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    borderRadius: themeRadius.full,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.6)',
+    backgroundColor: {
+      default: themeColors.background,
+      ':hover': 'hsl(var(--muted) / 0.4)',
+      ':active': 'hsl(var(--muted) / 0.6)',
+    },
+    paddingInline: themeSpace[3.5],
+    paddingBlock: themeSpace[1.5],
+    fontSize: '0.8rem',
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+    ...TRANSITION_COLORS,
+  },
+});
 
 function MobileReactIcon({
   icon: Icon,
@@ -78,13 +1204,10 @@ function MobileReactIcon({
      `text-[0.72rem]` for the label, so 1em collapsed Material icons to ~12px. */
   return (
     <span
-      className={cn(
-        'inline-flex shrink-0 items-center justify-center [&_svg]:h-full [&_svg]:w-full',
-        className
-      )}
+      className={cn(stylex.props(styles.reactIcon).className, className)}
       aria-hidden={ariaHidden}
     >
-      <Icon />
+      <Icon {...stylex.props(styles.reactIconGlyph)} />
     </span>
   );
 }
@@ -557,12 +1680,13 @@ const FloatingPill = forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HT
         {...rest}
         ref={ref}
         type={type}
-        className={cn(
-          'inline-flex shrink-0 items-center gap-2 rounded-full border border-border/50 bg-muted text-foreground',
-          'dark:border-white/12 dark:bg-white/10',
-          'transition-colors active:bg-muted/80 active:scale-[0.97] dark:active:bg-white/14',
-          className
-        )}
+        className={[
+          stylex.props(styles.pill, styles.pillActive, styles.workspacePill).className,
+          'dark:border-white/12 dark:bg-white/10 dark:active:bg-white/14',
+          className,
+        ]
+          .filter(Boolean)
+          .join(' ')}
       />
     );
   }
@@ -595,7 +1719,13 @@ function AddProjectActionSheet({
   if (onAddLocalProject) {
     options.push({
       key: 'local',
-      icon: <FolderPlus className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />,
+      icon: (
+        <FolderPlus
+          className={stylex.props(styles.icon5).className}
+          strokeWidth={1.8}
+          aria-hidden="true"
+        />
+      ),
       title: labels.addLocalProject ?? '添加文件夹',
       hint: labels.addLocalProjectHint ?? '浏览机器目录，选择一个文件夹',
       onSelect: onAddLocalProject,
@@ -604,7 +1734,13 @@ function AddProjectActionSheet({
   if (onAddGitHubRepository) {
     options.push({
       key: 'github',
-      icon: <Github className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />,
+      icon: (
+        <Github
+          className={stylex.props(styles.icon5).className}
+          strokeWidth={1.8}
+          aria-hidden="true"
+        />
+      ),
       title: labels.addGitHubRepository ?? '添加 GitHub 仓库',
       hint: labels.addGitHubRepositoryHint ?? '连接 GitHub 集成',
       onSelect: onAddGitHubRepository,
@@ -618,7 +1754,7 @@ function AddProjectActionSheet({
       <DrawerContent className="pb-[max(1.25rem,var(--safe-area-bottom,0px))]">
         <DrawerTitle className="sr-only">{title}</DrawerTitle>
         <DrawerDescription className="sr-only">{title}</DrawerDescription>
-        <div className="flex flex-col gap-2.5 px-4 pt-3">
+        <div {...stylex.props(styles.sheetStack)}>
           {options.map((opt) => (
             <button
               key={opt.key}
@@ -627,18 +1763,12 @@ function AddProjectActionSheet({
                 onOpenChange(false);
                 opt.onSelect();
               }}
-              className="flex items-center gap-3.5 rounded-2xl bg-muted/40 px-4 py-3.5 text-left transition-colors active:bg-muted/70"
+              {...stylex.props(styles.sheetOption)}
             >
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-                {opt.icon}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-[0.95rem] font-semibold leading-tight">
-                  {opt.title}
-                </span>
-                <span className="mt-0.5 block truncate text-[0.8rem] text-muted-foreground">
-                  {opt.hint}
-                </span>
+              <span {...stylex.props(styles.sheetOptionIcon)}>{opt.icon}</span>
+              <span {...stylex.props(styles.sheetOptionBody)}>
+                <span {...stylex.props(styles.sheetOptionTitle)}>{opt.title}</span>
+                <span {...stylex.props(styles.sheetOptionHint)}>{opt.hint}</span>
               </span>
             </button>
           ))}
@@ -661,9 +1791,9 @@ function PrivateResourceHelpSheet({
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerContent className="pb-[max(1.25rem,var(--safe-area-bottom,0px))]">
-        <div className="flex flex-col items-center px-5 pb-2 pt-4 text-center">
-          <span className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
-            <LockKeyhole className="h-5 w-5" aria-hidden="true" />
+        <div {...stylex.props(styles.helpStack)}>
+          <span {...stylex.props(styles.helpIcon)}>
+            <LockKeyhole className={stylex.props(styles.icon5).className} aria-hidden="true" />
           </span>
           <DrawerTitle className="text-base font-semibold text-foreground">{title}</DrawerTitle>
           <DrawerDescription className="mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
@@ -672,7 +1802,7 @@ function PrivateResourceHelpSheet({
           </DrawerDescription>
           <button
             type="button"
-            className="mt-5 min-h-11 w-full max-w-sm rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground active:opacity-80"
+            {...stylex.props(styles.helpClose)}
             onClick={() => onOpenChange(false)}
           >
             {labels.privateHelpClose ?? 'Got it'}
@@ -719,14 +1849,10 @@ function RowTrailingMeta({
   const unread = unreadCount ?? 0;
   if (!ageLabel && unread === 0) return null;
   return (
-    <span className="ml-2 inline-flex flex-col items-end gap-1 self-center">
-      {ageLabel ? (
-        <span className="text-[0.7rem] tabular-nums text-muted-foreground">{ageLabel}</span>
-      ) : null}
+    <span {...stylex.props(styles.trailingMeta)}>
+      {ageLabel ? <span {...stylex.props(styles.trailingAge)}>{ageLabel}</span> : null}
       {unread > 0 ? (
-        <span className="inline-flex h-[1.125rem] min-w-[1.125rem] items-center justify-center rounded-full bg-primary px-1.5 text-[0.68rem] font-semibold leading-none tabular-nums text-primary-foreground">
-          {unread > 99 ? '99+' : unread}
-        </span>
+        <span {...stylex.props(styles.trailingBadge)}>{unread > 99 ? '99+' : unread}</span>
       ) : null}
     </span>
   );
@@ -757,15 +1883,17 @@ function HeaderSearchInput({
 }) {
   return (
     <label
-      className={cn(
-        'mobile-home-header-search flex h-9 w-full min-w-0 items-center gap-1.5 rounded-full border border-border/50 bg-muted px-3 text-foreground',
-        'dark:border-white/12 dark:bg-white/10',
-        'transition-colors focus-within:bg-muted/80 dark:focus-within:bg-white/14',
-        className
-      )}
+      className={[
+        'mobile-home-header-search',
+        stylex.props(styles.searchField).className,
+        'dark:border-white/12 dark:bg-white/10 dark:focus-within:bg-white/14',
+        className,
+      ]
+        .filter(Boolean)
+        .join(' ')}
     >
       <Search
-        className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+        className={stylex.props(styles.icon35ShrinkMuted).className}
         strokeWidth={1.8}
         aria-hidden="true"
       />
@@ -778,16 +1906,20 @@ function HeaderSearchInput({
         enterKeyHint="search"
         /* Drop the browser's default focus border on type=search; the
            muted pill is the visual container. */
-        className="min-w-0 flex-1 border-none bg-transparent text-[0.82rem] outline-none focus:outline-none focus:ring-0 placeholder:text-muted-foreground"
+        {...stylex.props(styles.searchInput)}
       />
       {value ? (
         <button
           type="button"
           onClick={() => onChange('')}
           aria-label={clearAriaLabel}
-          className="-mr-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-background/60 hover:text-foreground"
+          {...stylex.props(styles.searchClear)}
         >
-          <X className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />
+          <X
+            className={stylex.props(styles.icon35).className}
+            strokeWidth={1.8}
+            aria-hidden="true"
+          />
         </button>
       ) : null}
     </label>
@@ -814,22 +1946,20 @@ function ChatListFilterToggle({
       onClick={onToggle}
       aria-label={ariaLabel}
       aria-pressed={open}
-      className={cn(
-        'relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border',
-        'border-border/50 bg-muted text-muted-foreground',
-        'dark:border-white/12 dark:bg-white/10',
-        'transition-colors active:scale-[0.97]',
-        'hover:bg-muted/80 hover:text-foreground dark:hover:bg-white/14',
-        'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/30',
-        open && 'border-primary/40 bg-primary/15 text-primary'
-      )}
+      className={[
+        stylex.props(styles.filterToggle, open && styles.filterToggleOpen).className,
+        'dark:border-white/12 dark:bg-white/10 dark:hover:bg-white/14',
+      ]
+        .filter(Boolean)
+        .join(' ')}
     >
-      <SlidersHorizontal className="h-4 w-4 text-current" strokeWidth={1.8} aria-hidden="true" />
+      <SlidersHorizontal
+        className={stylex.props(styles.icon4Current).className}
+        strokeWidth={1.8}
+        aria-hidden="true"
+      />
       {hasActiveFilters && !open ? (
-        <span
-          aria-hidden="true"
-          className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-primary"
-        />
+        <span aria-hidden="true" {...stylex.props(styles.filterToggleDot)} />
       ) : null}
     </button>
   );
@@ -839,20 +1969,13 @@ function ChatListFilterToggle({
    the "最近常用" heading on the recents strip, but standalone (no
    horizontal scroll, no trailing chips). */
 function AllItemsHeading({ children }: { children: ReactNode }) {
-  return (
-    <div className="px-5 pb-1 pt-3 text-[0.72rem] font-semibold uppercase tracking-wide text-muted-foreground">
-      {children}
-    </div>
-  );
+  return <div {...stylex.props(styles.allItemsHeading)}>{children}</div>;
 }
 
 function MachineStatusDot({ online }: { online: boolean }) {
   return (
     <span
-      className={cn(
-        'inline-block h-2 w-2 shrink-0 rounded-full',
-        online ? 'bg-status-success' : 'bg-muted-foreground/40'
-      )}
+      {...stylex.props(styles.statusDot, online ? styles.statusDotOnline : styles.statusDotOffline)}
       aria-hidden="true"
     />
   );
@@ -870,25 +1993,24 @@ function GhOwnerAvatar({ url, handle }: { url?: string | null; handle: string })
         src={url}
         alt=""
         loading="lazy"
-        className="h-10 w-10 shrink-0 rounded-xl object-cover"
+        className={stylex.props(styles.ownerAvatarImage).className}
       />
     );
   }
   return (
-    <span
-      className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted text-foreground/80"
-      aria-label={handle}
-    >
-      <Github className="h-5 w-5" strokeWidth={1.6} aria-hidden="true" />
+    <span {...stylex.props(styles.ownerAvatarTile)} aria-label={handle}>
+      <Github
+        className={stylex.props(styles.icon5).className}
+        strokeWidth={1.6}
+        aria-hidden="true"
+      />
     </span>
   );
 }
 
 /* Rounded card surface that wraps the flat row list on each tab. */
 function MobileHomeListShell({ children }: { children: ReactNode }) {
-  return (
-    <ul className="mx-3 overflow-hidden rounded-2xl border border-border/40 bg-card">{children}</ul>
-  );
+  return <ul {...stylex.props(styles.listShell)}>{children}</ul>;
 }
 
 /* Single row in the flat home list. Slots:
@@ -933,37 +2055,26 @@ function MobileHomeListRow({
         onClick={onClick}
         disabled={disabled}
         aria-label={ariaLabel}
-        className={cn(
-          'flex w-full items-center gap-3 border-b border-border/40 px-3 py-2.5 text-left text-foreground',
-          'last:border-b-0',
-          'transition-colors active:bg-muted/40 hover:bg-muted/30',
-          'focus-visible:outline-none focus-visible:bg-muted/40',
-          'disabled:cursor-default disabled:text-muted-foreground disabled:hover:bg-transparent disabled:active:bg-transparent'
-        )}
+        {...stylex.props(styles.listRow)}
       >
         {leading}
-        <span className="flex min-w-0 flex-1 flex-col">
+        <span {...stylex.props(styles.listRowBody)}>
           <span
-            className={cn('flex min-w-0 gap-1.5', wrapTitle ? 'items-center' : 'items-baseline')}
+            {...stylex.props(styles.listRowTitleLine, wrapTitle && styles.listRowTitleLineCentered)}
           >
             <span
-              className={cn(
-                'text-[1.02rem] font-semibold leading-tight',
-                wrapTitle ? 'min-w-0 break-words' : 'truncate'
+              {...stylex.props(
+                styles.listRowTitle,
+                wrapTitle ? styles.listRowTitleWrap : styles.listRowTitleTruncate
               )}
             >
               {title}
             </span>
             {titleSuffix ? (
               <span
-                className={cn(
-                  'text-[0.78rem] font-normal leading-tight text-muted-foreground',
-                  /* wrapTitle: the suffix (e.g. machine) takes the
-                     remaining width to the row's right edge and truncates
-                     only there — the node itself owns its truncation, so
-                     no `truncate` here. Otherwise it's a plain inline
-                     suffix that shrinks. */
-                  wrapTitle ? 'min-w-0 flex-1' : 'min-w-0 truncate'
+                {...stylex.props(
+                  styles.listRowSuffix,
+                  wrapTitle ? styles.listRowSuffixWrap : styles.listRowSuffixTruncate
                 )}
               >
                 {titleSuffix}
@@ -996,21 +2107,15 @@ function RecentItemsRow<TItem extends { id: string }>({
 }) {
   if (items.length === 0) return null;
   return (
-    <div className="mobile-home-recents pb-2 pt-3">
-      <div className="px-5 pb-1 text-[0.72rem] font-semibold uppercase tracking-wide text-muted-foreground">
-        {heading}
-      </div>
-      <div className="hide-scrollbar flex items-stretch gap-2 overflow-x-auto px-5">
+    <div {...withClassName(stylex.props(styles.recentsWrap), 'mobile-home-recents')}>
+      <div {...stylex.props(styles.recentsHeading)}>{heading}</div>
+      <div {...withClassName(stylex.props(styles.recentsScroller), 'hide-scrollbar')}>
         {items.map((item) => (
           <button
             key={item.id}
             type="button"
             onClick={() => onSelect(item)}
-            className={cn(
-              'inline-flex w-[10rem] shrink-0 items-center gap-2 rounded-2xl bg-card px-3 py-2 text-left text-foreground',
-              'shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_-16px_rgba(0,0,0,0.12)]',
-              'transition-transform active:scale-[0.97]'
-            )}
+            {...stylex.props(styles.recentCard)}
           >
             {renderItem(item)}
           </button>
@@ -1037,28 +2142,32 @@ function workspaceTabSpecs(
       ? [
           {
             key: 'inbox' as const,
-            ios: <BellRing className="h-6 w-6" strokeWidth={1.75} />,
-            material: <BellRing className="h-6 w-6" strokeWidth={1.75} />,
+            ios: <BellRing className={stylex.props(styles.icon6).className} strokeWidth={1.75} />,
+            material: (
+              <BellRing className={stylex.props(styles.icon6).className} strokeWidth={1.75} />
+            ),
             label: labels.inboxTab ?? 'Inbox',
           },
         ]
       : []),
     {
       key: 'chat',
-      ios: <MessageCircle className="h-6 w-6" strokeWidth={1.75} />,
-      material: <MobileReactIcon icon={MdChat} className="h-6 w-6" />,
+      ios: <MessageCircle className={stylex.props(styles.icon6).className} strokeWidth={1.75} />,
+      material: <MobileReactIcon icon={MdChat} className={stylex.props(styles.icon6).className} />,
       label: labels.chatTab ?? 'Chat',
     },
     {
       key: 'schedules',
-      ios: <Clock3 className="h-6 w-6" />,
-      material: <Clock3 className="h-6 w-6" />,
+      ios: <Clock3 className={stylex.props(styles.icon6).className} />,
+      material: <Clock3 className={stylex.props(styles.icon6).className} />,
       label: labels.schedulesTab ?? 'Schedules',
     },
     {
       key: 'projects',
-      ios: <Folders className="h-6 w-6" strokeWidth={1.75} />,
-      material: <MobileReactIcon icon={MdFolderCopy} className="h-6 w-6" />,
+      ios: <Folders className={stylex.props(styles.icon6).className} strokeWidth={1.75} />,
+      material: (
+        <MobileReactIcon icon={MdFolderCopy} className={stylex.props(styles.icon6).className} />
+      ),
       label: labels.projectsTab ?? '项目',
     },
   ];
@@ -1159,9 +2268,13 @@ function ProjectsSubTabSelector({
       key: 'local',
       label: localLabel,
       icon: iosTheme ? (
-        <Monitor className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />
+        <Monitor
+          className={stylex.props(styles.icon35).className}
+          strokeWidth={1.8}
+          aria-hidden="true"
+        />
       ) : (
-        <MobileReactIcon icon={MdComputer} className="h-3.5 w-3.5" />
+        <MobileReactIcon icon={MdComputer} className={stylex.props(styles.icon35).className} />
       ),
       ref: localRef,
     },
@@ -1169,9 +2282,13 @@ function ProjectsSubTabSelector({
       key: 'github',
       label: githubLabel,
       icon: iosTheme ? (
-        <Github className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />
+        <Github
+          className={stylex.props(styles.icon35).className}
+          strokeWidth={1.8}
+          aria-hidden="true"
+        />
       ) : (
-        <MobileReactIcon icon={FaGithub} className="h-3.5 w-3.5" />
+        <MobileReactIcon icon={FaGithub} className={stylex.props(styles.icon35).className} />
       ),
       ref: githubRef,
     },
@@ -1210,17 +2327,17 @@ function ProjectsSubTabSelector({
   }, [active, localLabel, githubLabel, iosTheme]);
 
   return (
-    <div className="mx-3 mb-2 mt-1 flex">
+    <div {...stylex.props(styles.subTabBar)}>
       <div
         ref={listRef}
         role="tablist"
         aria-label={localLabel + ' / ' + githubLabel}
-        className="relative inline-flex rounded-full bg-muted/50 p-0.5"
+        {...stylex.props(styles.subTabTrack)}
       >
         {thumb ? (
           <motion.span
             aria-hidden="true"
-            className="absolute bottom-0.5 left-0 top-0.5 rounded-full bg-card"
+            {...stylex.props(styles.subTabThumb)}
             initial={false}
             animate={{ x: thumb.x, width: thumb.width }}
             transition={{ type: 'spring', stiffness: 380, damping: 34, mass: 0.65 }}
@@ -1238,12 +2355,9 @@ function ProjectsSubTabSelector({
               role="tab"
               aria-selected={isActive}
               onClick={() => onSelect(seg.key)}
-              className={cn(
-                'relative z-10 rounded-full px-3 py-1 text-[0.78rem] font-medium transition-colors',
-                isActive ? 'text-foreground' : 'text-muted-foreground active:text-foreground'
-              )}
+              {...stylex.props(styles.subTabButton, isActive && styles.subTabButtonActive)}
             >
-              <span className="flex items-center gap-1.5">
+              <span {...stylex.props(styles.subTabLabel)}>
                 {seg.icon}
                 {seg.label}
               </span>
@@ -1459,31 +2573,28 @@ export function MobileHomeScreen({
        ancestor opts in via this class — `<App safeAreas>` used to do
        it for us; now we do it directly. The class is just a CSS hook
        (from konsta/styles/safe-areas.css), no Konsta runtime needed. */
-    <div className="mobile-home-app safe-areas relative h-full min-h-0 w-full text-foreground">
+    <div {...withClassName(stylex.props(styles.appRoot), 'mobile-home-app safe-areas')}>
       {/* Column flex so the header + Chat-tab pill bar sit ABOVE the
          scroll region — keeps the vertical scrollbar contained to
          the list area instead of running through the chrome at the
          top. Mirrors the structure on MobileProjectScreen. */}
-      <div className="mobile-home-shell relative flex h-full w-full flex-col bg-background">
+      <div {...withClassName(stylex.props(styles.shell), 'mobile-home-shell')}>
         {/* Sticky header: safe-area padding outside the chrome row so the
            status/pull pill can center on the same h-9 band as the
            workspace / search / trailing controls — not the full header
            including `pt-safe` (that was pulling the pill into the notch). */}
-        <header
-          className={cn('mobile-home-glass relative z-30', 'pt-safe-2 pb-2 ps-safe-3 pe-safe-3')}
-        >
+        <header {...withClassName(stylex.props(styles.header), 'mobile-home-glass')}>
           {/* Single chrome row: workspace | search (middle blank) |
              archive/settings. Search fills the gap at rest; on pull it
              does a fast top→bottom fade, then the status/pull pill
              mounts (never overlapping). Leading/trailing keep
              `relative z-10` so taps stay hittable under the pill overlay. */}
-          <div className="relative flex h-9 w-full items-center gap-2">
+          <div {...stylex.props(styles.headerRow)}>
             {/* Icon-only workspace identity. With a menu callback it is the
                switcher trigger; without one it remains a static nameplate. */}
-            <div className="relative z-10 flex shrink-0 items-center justify-start">
+            <div {...stylex.props(styles.headerLeading)}>
               {onWorkspaceMenuOpen ? (
                 <FloatingPill
-                  className="h-9 w-9 items-center justify-center !gap-0"
                   aria-label={`${labels.switchWorkspace ?? 'Switch workspace'}: ${workspace.name}`}
                   aria-haspopup="dialog"
                   onClick={onWorkspaceMenuOpen}
@@ -1492,7 +2603,10 @@ export function MobileHomeScreen({
                 </FloatingPill>
               ) : (
                 <div
-                  className="flex h-9 w-9 items-center justify-center rounded-full border border-border/50 bg-muted text-foreground dark:border-white/12 dark:bg-white/10"
+                  {...withClassName(
+                    stylex.props(styles.workspaceIdentity),
+                    'dark:border-white/12 dark:bg-white/10'
+                  )}
                   data-workspace-identity
                 >
                   <HomeWorkspaceAvatar workspace={workspace} />
@@ -1503,15 +2617,9 @@ export function MobileHomeScreen({
             {/* Search stays mounted so CSS can run the exit transition.
                Slot always occupies flex-1 so trailing discs don't jump. */}
             <div
-              className={cn(
-                'relative z-10 h-9 min-w-0 flex-1',
-                /* Top→bottom handoff: fade + slight downward drift.
-                   Duration matches HEADER_SEARCH_EXIT_MS (tailwind
-                   duration-150 ≈ 150ms; keep the timeout in sync). */
-                'transition-[opacity,transform] duration-150 ease-out',
-                searchOpaque
-                  ? 'opacity-100 translate-y-0'
-                  : 'pointer-events-none translate-y-1.5 opacity-0'
+              {...stylex.props(
+                styles.searchSlot,
+                searchOpaque ? styles.searchSlotOpaque : styles.searchSlotHidden
               )}
               aria-hidden={!searchOpaque}
             >
@@ -1526,14 +2634,18 @@ export function MobileHomeScreen({
 
             {/* Trailing header actions — same canvas liquid-glass discs as
                the in-session mobile header (`GlassIconButton`). */}
-            <div className="relative z-10 flex shrink-0 items-center justify-end gap-2">
+            <div {...stylex.props(styles.headerTrailing)}>
               {selectedTab === 'chat' && onShowArchivedToggle ? (
                 <GlassIconButton
                   label={labels.archiveToggleLabel ?? '归档'}
                   onClick={onShowArchivedToggle}
                   className={cn(showArchived && 'text-primary')}
                 >
-                  <Archive className="h-5 w-5 text-current" aria-hidden="true" strokeWidth={1.75} />
+                  <Archive
+                    className={stylex.props(styles.icon5).className}
+                    aria-hidden="true"
+                    strokeWidth={1.75}
+                  />
                 </GlassIconButton>
               ) : null}
 
@@ -1542,7 +2654,11 @@ export function MobileHomeScreen({
                   label={labels.addProjectMenu ?? '添加项目'}
                   onClick={() => setAddMenuOpen(true)}
                 >
-                  <Plus className="h-5 w-5 text-current" aria-hidden="true" strokeWidth={1.75} />
+                  <Plus
+                    className={stylex.props(styles.icon5).className}
+                    aria-hidden="true"
+                    strokeWidth={1.75}
+                  />
                 </GlassIconButton>
               ) : null}
 
@@ -1551,14 +2667,18 @@ export function MobileHomeScreen({
                   label={labels.newSchedule ?? '新建定时任务'}
                   onClick={() => createScheduleRef.current?.()}
                 >
-                  <Plus className="h-5 w-5 text-current" aria-hidden="true" strokeWidth={1.75} />
+                  <Plus
+                    className={stylex.props(styles.icon5).className}
+                    aria-hidden="true"
+                    strokeWidth={1.75}
+                  />
                 </GlassIconButton>
               ) : null}
 
               {onSettingsOpen ? (
                 <GlassIconButton label={labels.settingsTab ?? '设置'} onClick={onSettingsOpen}>
                   <Settings
-                    className="h-5 w-5 text-current"
+                    className={stylex.props(styles.icon5).className}
                     aria-hidden="true"
                     strokeWidth={1.75}
                   />
@@ -1571,9 +2691,9 @@ export function MobileHomeScreen({
                two never share the band. pointer-events-none so it never
                steals taps from workspace / trailing discs. */}
             {statusRevealed ? (
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              <div {...stylex.props(styles.statusOverlay)}>
                 <MobileConnectionStatus
-                  className="min-w-0 max-w-[min(100%,12rem)]"
+                  className={stylex.props(styles.statusBounds).className}
                   state={connectionUiState}
                   refreshing={isPullingRefresh}
                   pull={
@@ -1611,9 +2731,9 @@ export function MobileHomeScreen({
            `translate3d` so they move as a single compositor layer.
            The header stays put: search does a fast top→bottom exit,
            then the centered status pill mounts. */}
-        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div {...stylex.props(styles.contentColumn)}>
           <div
-            className={cn('flex min-h-0 flex-1 flex-col', scheduleTabActive && 'hidden')}
+            {...stylex.props(styles.contentBody, scheduleTabActive && styles.contentBodyHidden)}
             style={
               pullDistance > 0
                 ? {
@@ -1637,7 +2757,7 @@ export function MobileHomeScreen({
                   animate={{ height: 'auto', opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
                   transition={{ duration: 0.2, ease: 'easeInOut' }}
-                  className="overflow-hidden"
+                  {...stylex.props(styles.overflowHidden)}
                 >
                   <MobileFilterPillBar pills={chatFilterPills} />
                 </motion.div>
@@ -1647,13 +2767,9 @@ export function MobileHomeScreen({
             <div
               ref={listScrollRef}
               data-mobile-session-list-scroll-region=""
-              className={cn(
-                /* `z-0` makes the scroller a stacking context. WebKit can
-                   otherwise promote the positioned / animated conversation
-                   rows beside its overflow-controls layer, letting row
-                   backgrounds paint over the vertical scrollbar. */
-                'mobile-home-list-region scrollbar-pro relative z-0 min-h-0 flex-1 overflow-y-auto pt-1 [scrollbar-gutter:auto]',
-                'pb-[calc(var(--mobile-tabbar-height)+var(--k-safe-area-bottom,0px)+1rem)]'
+              {...withClassName(
+                stylex.props(styles.listRegion),
+                'mobile-home-list-region scrollbar-pro'
               )}
             >
               {selectedTab === 'inbox' ? (
@@ -1730,7 +2846,7 @@ export function MobileHomeScreen({
              Its own title/search row stays hidden so this search field
              is the one that filters the list. */}
           {scheduleTabActive ? (
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div {...stylex.props(styles.schedulesColumn)}>
               <SchedulesWorkspace
                 hideHeader
                 query={searchQuery}
@@ -1791,23 +2907,21 @@ function InboxTabView({
 
   if (!loading && items.length === 0) {
     return (
-      <section aria-label={label} className="flex flex-col">
+      <section aria-label={label} {...stylex.props(styles.inboxSection)}>
         <TabEmptyState label={placeholder ?? 'No new notifications'} />
       </section>
     );
   }
   if (!loading && query && visibleItems.length === 0) {
     return (
-      <section aria-label={label} className="flex flex-col">
+      <section aria-label={label} {...stylex.props(styles.inboxSection)}>
         <TabEmptyState label={emptySearchLabel} />
       </section>
     );
   }
   return (
-    <section aria-label={label} className="flex flex-col gap-2 px-4 py-3">
-      {loading ? (
-        <div className="px-2 py-8 text-center text-sm text-muted-foreground">{loadingLabel}</div>
-      ) : null}
+    <section aria-label={label} {...stylex.props(styles.inboxList)}>
+      {loading ? <div {...stylex.props(styles.inboxLoading)}>{loadingLabel}</div> : null}
       {visibleItems.map((item) => {
         const Icon =
           item.kind === 'sharing_review'
@@ -1816,42 +2930,35 @@ function InboxTabView({
               ? BellRing
               : CircleCheckBig;
         return (
-          <article
-            key={item.id}
-            className="relative flex gap-3 rounded-2xl border border-border/60 bg-background px-3.5 py-3 shadow-xs"
-          >
+          <article key={item.id} {...stylex.props(styles.inboxCard)}>
             <button
               type="button"
-              className="flex min-w-0 flex-1 items-start gap-3 text-left active:opacity-70"
+              {...stylex.props(styles.inboxCardButton)}
               onClick={() => onSelect?.(item.id)}
             >
-              <span className="relative mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-foreground">
-                <Icon className="h-[18px] w-[18px]" strokeWidth={1.8} aria-hidden="true" />
-                {item.unread ? (
-                  <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-background bg-primary" />
-                ) : null}
+              <span {...stylex.props(styles.inboxCardIcon)}>
+                <Icon
+                  className={stylex.props(styles.icon18).className}
+                  strokeWidth={1.8}
+                  aria-hidden="true"
+                />
+                {item.unread ? <span {...stylex.props(styles.inboxUnreadDot)} /> : null}
               </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-[0.9rem] font-semibold leading-snug text-foreground">
-                  {item.title}
-                </span>
-                <span className="mt-0.5 block text-[0.78rem] leading-relaxed text-muted-foreground">
-                  {item.description}
-                </span>
+              <span {...stylex.props(styles.inboxCardBody)}>
+                <span {...stylex.props(styles.inboxCardTitle)}>{item.title}</span>
+                <span {...stylex.props(styles.inboxCardDescription)}>{item.description}</span>
                 {item.actionLabel ? (
-                  <span className="mt-2 block text-[0.78rem] font-medium text-primary">
-                    {item.actionLabel}
-                  </span>
+                  <span {...stylex.props(styles.inboxCardAction)}>{item.actionLabel}</span>
                 ) : null}
               </span>
             </button>
             <button
               type="button"
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground active:bg-muted"
+              {...stylex.props(styles.inboxDismiss)}
               onClick={() => onDismiss?.(item.id)}
               aria-label={dismissAriaLabel}
             >
-              <X className="h-4 w-4" aria-hidden="true" />
+              <X className={stylex.props(styles.icon4).className} aria-hidden="true" />
             </button>
           </article>
         );
@@ -1915,13 +3022,9 @@ function ProjectsTabView({
           item.kind === 'local' ? (
             <>
               <MobileInitialLetterAvatar name={item.name} hashSeed={item.id} size="lg" />
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[0.7rem] leading-tight text-muted-foreground">
-                  {item.machineName ?? item.path}
-                </div>
-                <div className="truncate text-[0.85rem] font-semibold leading-tight">
-                  {item.name}
-                </div>
+              <div {...stylex.props(styles.recentCardBody)}>
+                <div {...stylex.props(styles.recentCardMeta)}>{item.machineName ?? item.path}</div>
+                <div {...stylex.props(styles.recentCardName)}>{item.name}</div>
               </div>
             </>
           ) : (
@@ -1930,19 +3033,19 @@ function ProjectsTabView({
                 <CachedAvatarImg
                   src={item.avatarUrl}
                   alt=""
-                  className="h-8 w-8 shrink-0 rounded-full object-cover"
+                  className={stylex.props(styles.recentAvatar).className}
                   loading="lazy"
                 />
               ) : (
-                <Github className="h-8 w-8 shrink-0" strokeWidth={1.6} aria-hidden="true" />
+                <Github
+                  className={stylex.props(styles.icon8Shrink).className}
+                  strokeWidth={1.6}
+                  aria-hidden="true"
+                />
               )}
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[0.7rem] leading-tight text-muted-foreground">
-                  {item.ownerHandle}
-                </div>
-                <div className="truncate text-[0.85rem] font-semibold leading-tight">
-                  {item.name}
-                </div>
+              <div {...stylex.props(styles.recentCardBody)}>
+                <div {...stylex.props(styles.recentCardMeta)}>{item.ownerHandle}</div>
+                <div {...stylex.props(styles.recentCardName)}>{item.name}</div>
               </div>
             </>
           )
@@ -1951,7 +3054,7 @@ function ProjectsTabView({
     ) : null;
 
   return (
-    <section aria-label={labels.projectsTab ?? '项目'} className="flex flex-col">
+    <section aria-label={labels.projectsTab ?? '项目'} {...stylex.props(styles.chatSection)}>
       {recentStrip}
       <ProjectsSubTabSelector
         active={selectedSubTab}
@@ -2003,21 +3106,19 @@ function MachineGroupHeading({
   onPrivateHelp: () => void;
 }) {
   return (
-    <div className="flex items-center gap-1.5 px-5 pb-1 pt-3">
+    <div {...stylex.props(styles.machineGroupHeading)}>
       <MachineStatusDot online={machine?.isOnline ?? false} />
-      <span className="min-w-0 truncate text-[0.78rem] font-semibold tracking-tight text-foreground">
-        {machine?.name ?? fallbackName}
-      </span>
+      <span {...stylex.props(styles.machineGroupName)}>{machine?.name ?? fallbackName}</span>
       {machine?.isPrivate || hasPrivateProject ? (
         <button
           type="button"
           onClick={onPrivateHelp}
           aria-label={privateHelpAriaLabel}
-          className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-full px-1.5 text-[0.68rem] font-medium text-muted-foreground active:bg-muted"
+          {...stylex.props(styles.machinePrivateButton)}
         >
-          <LockKeyhole className="h-3 w-3" aria-hidden="true" />
+          <LockKeyhole className={stylex.props(styles.icon3).className} aria-hidden="true" />
           {machine?.isPrivate ? privateLabel : null}
-          <CircleHelp className="h-3 w-3" aria-hidden="true" />
+          <CircleHelp className={stylex.props(styles.icon3).className} aria-hidden="true" />
         </button>
       ) : null}
     </div>
@@ -2112,13 +3213,19 @@ function LocalProjectsList({
                   wrapTitle
                   titleSuffix={
                     project.removalState ? (
-                      <span className="inline-flex min-w-0 items-center gap-1 text-[0.7rem] font-medium text-muted-foreground">
+                      <span {...stylex.props(styles.removalState)}>
                         {project.removalState === 'waiting_for_device' ? (
-                          <Clock3 className="h-3 w-3 shrink-0" aria-hidden="true" />
+                          <Clock3
+                            className={stylex.props(styles.icon3Shrink).className}
+                            aria-hidden="true"
+                          />
                         ) : (
-                          <Spinner className="h-3 w-3 shrink-0" aria-hidden="true" />
+                          <Spinner
+                            className={stylex.props(styles.icon3Shrink).className}
+                            aria-hidden="true"
+                          />
                         )}
-                        <span className="truncate">
+                        <span {...stylex.props(styles.removalStateText)}>
                           {project.removalState === 'waiting_for_device'
                             ? (labels.projectRemovalWaiting ?? 'Waiting for device…')
                             : (labels.projectRemoving ?? 'Removing…')}
@@ -2126,16 +3233,14 @@ function LocalProjectsList({
                       </span>
                     ) : project.isPrivate ? (
                       <LockKeyhole
-                        className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                        className={stylex.props(styles.icon35ShrinkMuted).className}
                         aria-hidden="true"
                       />
                     ) : undefined
                   }
                   secondaryLine={
                     project.path ? (
-                      <span className="mt-0.5 block truncate text-[0.72rem] text-muted-foreground">
-                        {project.path}
-                      </span>
+                      <span {...stylex.props(styles.projectPath)}>{project.path}</span>
                     ) : undefined
                   }
                   trailing={
@@ -2280,9 +3385,7 @@ function ChatsFlatView({
      bar / clear filters without a group heading to host it. */
   const emptyTrailing =
     firstGroupTrailing != null ? (
-      <div className="flex w-full items-center justify-end px-4 pb-1.5 pt-2">
-        {firstGroupTrailing}
-      </div>
+      <div {...stylex.props(styles.chatTrailingRow)}>{firstGroupTrailing}</div>
     ) : null;
 
   if (chats.length === 0) {
@@ -2290,7 +3393,7 @@ function ChatsFlatView({
        active filters means the filters hid everything (vs. a workspace
        with no conversations at all). */
     return (
-      <section aria-label={labels.chatTab ?? 'Chat'} className="flex flex-col">
+      <section aria-label={labels.chatTab ?? 'Chat'} {...stylex.props(styles.chatSection)}>
         {emptyTrailing}
         <TabEmptyState
           label={
@@ -2305,7 +3408,7 @@ function ChatsFlatView({
   }
   if (query && visible.length === 0) {
     return (
-      <section aria-label={labels.chatTab ?? 'Chat'} className="flex flex-col">
+      <section aria-label={labels.chatTab ?? 'Chat'} {...stylex.props(styles.chatSection)}>
         {emptyTrailing}
         <TabEmptyState label={labels.emptySearch ?? '没有匹配的结果'} action={clearFiltersAction} />
       </section>
@@ -2317,7 +3420,7 @@ function ChatsFlatView({
        local-project, github-repo) into one newest-first list. The
        list body is rendered by `MobileChatList` (shared with the
        in-project detail page) so design tweaks land in one place. */
-    <section aria-label={labels.chatTab ?? 'Chat'} className="flex flex-col">
+    <section aria-label={labels.chatTab ?? 'Chat'} {...stylex.props(styles.chatSection)}>
       <MobileChatList
         chats={visible}
         groupBy={groupBy}
@@ -2418,20 +3521,20 @@ export function MobileHomeOnboarding({
   ];
 
   return (
-    <div className="px-4 pb-6 pt-8">
-      <div className="mx-auto flex max-w-sm flex-col gap-4">
-        <div className="flex flex-col items-center gap-3 text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
-            <MonitorSmartphone className="h-6 w-6" strokeWidth={1.6} aria-hidden="true" />
+    <div {...stylex.props(styles.onboardingRoot)}>
+      <div {...stylex.props(styles.onboardingColumn)}>
+        <div {...stylex.props(styles.onboardingHead)}>
+          <div {...stylex.props(styles.onboardingGlyph)}>
+            <MonitorSmartphone
+              className={stylex.props(styles.icon6).className}
+              strokeWidth={1.6}
+              aria-hidden="true"
+            />
           </div>
-          <div className="space-y-1">
-            <p className="text-[0.95rem] font-medium text-foreground">
-              {labels.title ?? '先连接一台机器'}
-            </p>
+          <div {...stylex.props(styles.onboardingHeadStack)}>
+            <p {...stylex.props(styles.onboardingTitle)}>{labels.title ?? '先连接一台机器'}</p>
             {labels.description ? (
-              <p className="text-[0.8rem] leading-relaxed text-muted-foreground">
-                {labels.description}
-              </p>
+              <p {...stylex.props(styles.onboardingBody)}>{labels.description}</p>
             ) : null}
           </div>
         </div>
@@ -2439,18 +3542,18 @@ export function MobileHomeOnboarding({
         {/* Path 1 — one command on any machine. The command is the most
             transferable artifact a phone can hand to a terminal: type it,
             paste it into an SSH client, or share it to the computer. */}
-        <section className="rounded-2xl border border-border/40 bg-card p-4">
-          <div className="flex items-center gap-2">
+        <section {...stylex.props(styles.onboardingCard)}>
+          <div {...stylex.props(styles.onboardingCardHead)}>
             <Terminal
-              className="h-4 w-4 shrink-0 text-muted-foreground"
+              className={stylex.props(styles.icon4ShrinkMuted).className}
               strokeWidth={1.8}
               aria-hidden="true"
             />
-            <p className="text-[0.85rem] font-medium text-foreground">
+            <p {...stylex.props(styles.onboardingCardTitle)}>
               {labels.commandHeading ?? '一行命令，接入任意机器'}
             </p>
           </div>
-          <div className="mt-3 flex items-stretch gap-2">
+          <div {...stylex.props(styles.onboardingCardActions)}>
             <OnboardingArtifactPill
               display={command}
               ariaLabel={`${copyLabel}: ${command}`}
@@ -2464,7 +3567,7 @@ export function MobileHomeOnboarding({
               />
             ) : null}
           </div>
-          <p className="mt-2.5 text-[0.75rem] leading-relaxed text-muted-foreground">
+          <p {...stylex.props(styles.onboardingCardHint)}>
             {labels.commandHint ??
               '在服务器、虚拟机或你的电脑上运行（需 Node.js 22.23.4+（22.x）、24.22.1+（24.x）或 26.12.1+（26.x））。命令会发起登录；没有浏览器的机器会打印链接，用这台手机打开即可完成授权。'}
           </p>
@@ -2476,30 +3579,30 @@ export function MobileHomeOnboarding({
             AirDrop lands it there; no need to display the link itself. Only
             when `navigator.share` is missing does the type/copy pill appear
             as the fallback path. The phone never opens the page itself. */}
-        <section className="rounded-2xl border border-border/40 bg-card p-4">
-          <div className="flex items-center gap-2">
+        <section {...stylex.props(styles.onboardingCard)}>
+          <div {...stylex.props(styles.onboardingCardHead)}>
             <MonitorDown
-              className="h-4 w-4 shrink-0 text-muted-foreground"
+              className={stylex.props(styles.icon4ShrinkMuted).className}
               strokeWidth={1.8}
               aria-hidden="true"
             />
-            <p className="text-[0.85rem] font-medium text-foreground">
+            <p {...stylex.props(styles.onboardingCardTitle)}>
               {labels.desktopHeading ?? '或者在电脑上装桌面端'}
             </p>
           </div>
           {canShare ? (
-            <div className="mt-3 flex items-stretch gap-2">
+            <div {...stylex.props(styles.onboardingCardActions)}>
               <button
                 type="button"
                 onClick={shareDownload}
                 aria-label={labels.shareDownloadLabel ?? '发送到电脑'}
-                className={cn(
-                  'flex min-w-0 flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5',
-                  'text-[0.85rem] font-medium text-primary-foreground',
-                  'transition-transform motion-safe:active:scale-[0.98]'
-                )}
+                {...stylex.props(styles.onboardingShareButton, styles.onboardingShareButtonMotion)}
               >
-                <Share2 className="h-4 w-4 shrink-0" strokeWidth={1.8} aria-hidden="true" />
+                <Share2
+                  className={stylex.props(styles.icon4Shrink).className}
+                  strokeWidth={1.8}
+                  aria-hidden="true"
+                />
                 {labels.shareDownloadLabel ?? '发送到电脑'}
               </button>
               {/* Trailing copy accelerator — same coupled layout as the
@@ -2511,20 +3614,17 @@ export function MobileHomeOnboarding({
                 aria-label={`${labels.copyDownloadLabel ?? '复制下载链接'}: ${linkUrl}`}
                 title={labels.copyDownloadLabel ?? '复制下载链接'}
                 data-copied={copied === 'link' ? 'true' : 'false'}
-                className={cn(
-                  'relative inline-flex w-10 shrink-0 items-center justify-center rounded-xl bg-muted/70',
-                  'text-muted-foreground transition active:bg-muted motion-safe:active:scale-90'
-                )}
+                {...stylex.props(styles.onboardingCopyButton, styles.onboardingCopyButtonMotion)}
               >
                 <OnboardingCopiedIcon
                   isCopied={copied === 'link'}
-                  className="h-4 w-4"
+                  className={stylex.props(styles.icon4).className ?? ''}
                   strokeWidth={1.8}
                 />
               </button>
             </div>
           ) : (
-            <div className="mt-3 flex items-stretch gap-2">
+            <div {...stylex.props(styles.onboardingCardActions)}>
               <OnboardingArtifactPill
                 display={linkDisplay}
                 ariaLabel={`${labels.copyDownloadLabel ?? '复制下载链接'}: ${linkUrl}`}
@@ -2533,24 +3633,22 @@ export function MobileHomeOnboarding({
               />
             </div>
           )}
-          <p className="mt-2.5 text-[0.75rem] leading-relaxed text-muted-foreground">
+          <p {...stylex.props(styles.onboardingCardHint)}>
             {labels.desktopHint ?? '安装桌面端并登录，它会自动启动 Agent 运行环境。'}
           </p>
         </section>
 
         {/* What happens after the machine connects — so the user knows the
             flow continues on this phone. */}
-        <section className="px-1 pt-1">
-          <p className="text-[0.72rem] font-medium uppercase tracking-wide text-muted-foreground">
+        <section {...stylex.props(styles.onboardingSteps)}>
+          <p {...stylex.props(styles.onboardingStepsHeading)}>
             {labels.nextStepsHeading ?? '机器上线之后'}
           </p>
-          <ol className="mt-2.5 space-y-2">
+          <ol {...stylex.props(styles.onboardingStepList)}>
             {nextSteps.map((step, index) => (
-              <li key={index} className="flex items-start gap-2.5">
-                <span className="mt-px flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full bg-muted text-[0.68rem] font-medium text-muted-foreground">
-                  {index + 1}
-                </span>
-                <span className="text-[0.78rem] leading-relaxed text-muted-foreground">{step}</span>
+              <li key={index} {...stylex.props(styles.onboardingStep)}>
+                <span {...stylex.props(styles.onboardingStepNumber)}>{index + 1}</span>
+                <span {...stylex.props(styles.onboardingStepText)}>{step}</span>
               </li>
             ))}
           </ol>
@@ -2586,13 +3684,13 @@ function OnboardingCopiedIcon({
     <Copy className={className} strokeWidth={strokeWidth} aria-hidden="true" />
   );
   if (reduceMotion) {
-    return <span className="inline-flex">{icon}</span>;
+    return <span {...stylex.props(styles.onboardingInlineIcon)}>{icon}</span>;
   }
   return (
     <AnimatePresence mode="popLayout" initial={false}>
       <motion.span
         key={isCopied ? 'copied' : 'idle'}
-        className="inline-flex"
+        {...stylex.props(styles.onboardingInlineIcon)}
         initial={{ opacity: 0, scale: 0.7, filter: 'blur(2px)' }}
         animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
         exit={{ opacity: 0, scale: 0.7, filter: 'blur(2px)' }}
@@ -2621,14 +3719,15 @@ function OnboardingArtifactPill({
       onClick={onCopy}
       aria-label={ariaLabel}
       data-copied={isCopied ? 'true' : 'false'}
-      className={cn(
-        'flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-muted/70 px-3 py-2.5 text-left',
-        'transition active:bg-muted motion-safe:active:scale-[0.98]'
-      )}
+      {...stylex.props(styles.onboardingArtifactPill, styles.onboardingArtifactPillMotion)}
     >
-      <code className="min-w-0 flex-1 font-mono text-[0.78rem] text-foreground">{display}</code>
-      <span className="relative inline-flex shrink-0 items-center text-muted-foreground">
-        <OnboardingCopiedIcon isCopied={isCopied} className="h-3.5 w-3.5" strokeWidth={2} />
+      <code {...stylex.props(styles.onboardingArtifactCode)}>{display}</code>
+      <span {...stylex.props(styles.onboardingArtifactTrailing)}>
+        <OnboardingCopiedIcon
+          isCopied={isCopied}
+          className={stylex.props(styles.icon35).className ?? ''}
+          strokeWidth={2}
+        />
       </span>
     </button>
   );
@@ -2645,21 +3744,22 @@ function OnboardingShareButton({ label, onShare }: { label: string; onShare: () 
       onClick={onShare}
       aria-label={label}
       title={label}
-      className={cn(
-        'inline-flex w-10 shrink-0 items-center justify-center rounded-xl bg-muted/70',
-        'text-muted-foreground transition active:bg-muted motion-safe:active:scale-90'
-      )}
+      {...stylex.props(styles.onboardingShareIconButton, styles.onboardingShareIconButtonMotion)}
     >
-      <Share2 className="h-4 w-4" strokeWidth={1.8} aria-hidden="true" />
+      <Share2
+        className={stylex.props(styles.icon4).className}
+        strokeWidth={1.8}
+        aria-hidden="true"
+      />
     </button>
   );
 }
 
 function TabEmptyState({ label, action }: { label: ReactNode; action?: ReactNode }) {
   return (
-    <div className="mx-3 mt-3 rounded-2xl border border-border/40 bg-card px-4 py-6 text-center text-sm text-muted-foreground">
+    <div {...stylex.props(styles.tabEmptyState)}>
       <div>{label}</div>
-      {action ? <div className="mt-3 flex justify-center">{action}</div> : null}
+      {action ? <div {...stylex.props(styles.tabEmptyAction)}>{action}</div> : null}
     </div>
   );
 }
@@ -2668,16 +3768,8 @@ function TabEmptyState({ label, action }: { label: ReactNode; action?: ReactNode
    secondary styling so it reads as a recovery action, not a primary CTA. */
 function TabEmptyStateButton({ children, onClick }: { children: ReactNode; onClick?: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-background px-3.5 py-1.5',
-        'text-[0.8rem] font-medium text-foreground transition-colors',
-        'active:bg-muted/60 hover:bg-muted/40'
-      )}
-    >
-      <X className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
+    <button type="button" onClick={onClick} {...stylex.props(styles.tabEmptyButton)}>
+      <X className={stylex.props(styles.icon35).className} strokeWidth={2} aria-hidden="true" />
       {children}
     </button>
   );

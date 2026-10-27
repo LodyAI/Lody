@@ -1,0 +1,22 @@
+{
+  "viewports": [
+    {
+      "name": "desktop-motion",
+      "width": 1280,
+      "height": 900,
+      "svgTime": 0
+    },
+    {
+      "name": "desktop-motion-midcycle",
+      "width": 1280,
+      "height": 900,
+      "svgTime": 0.6
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": ["components-sidebar-send-status--states"],
+  "allowBlankIds": [],
+  "states": {},
+  "reducedMotion": "no-preference",
+  "blockedHosts": ["avatars.githubusercontent.com"]
+}

@@ -51,6 +51,247 @@ import { getGitHubOwnerAvatarUrl } from '@/lib/github-avatar';
 import { useStableNow } from '@/hooks/use-stable-now';
 import { formatCompactRelativeTime, type RelativeTimeValue } from '@/lib/format-relative-time';
 import { sidebarSurface } from './sidebar-surface';
+import { clsx } from 'clsx';
+import { themeColors } from '../style/theme-colors.stylex';
+import { themeDuration, themeEasing, themeRadius, themeSpace } from '../style/theme-scale.stylex';
+
+/**
+ * The parts of a sidebar row that were Tailwind. The row's own box, ink and
+ * fills come from sidebarSurface; these are the pieces around it.
+ */
+const sendSpin = stylex.keyframes({ to: { transform: 'rotate(360deg)' } });
+
+const rowParts = stylex.create({
+  hoverAction: {
+    display: 'inline-flex',
+    width: themeSpace[5],
+    height: themeSpace[5],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.sm,
+    color: { default: 'hsl(var(--muted-foreground) / 0.7)', ':hover': themeColors.foreground },
+    backgroundColor: { default: null, ':hover': 'hsl(var(--muted) / 0.3)' },
+    transitionProperty: 'opacity,background-color,color',
+    transitionDuration: themeDuration[100],
+    transitionTimingFunction: themeEasing['in-out'],
+    opacity: 0,
+    pointerEvents: 'none',
+  },
+  hoverActionFocus: { boxShadow: { default: null, ':focus-visible': 'none' } },
+  verdictSuccess: { color: themeColors.statusSuccess },
+  verdictFailure: { color: themeColors.destructive },
+  verdictWarning: { color: themeColors.statusWarning },
+  primary: { color: themeColors.primary },
+  smallPr: { height: themeSpace[3], width: themeSpace[3] },
+  fullPr: { height: themeSpace[3.5], width: themeSpace[3.5] },
+  mergedPr: { translate: '1px' },
+  shrink: { flexShrink: 0 },
+  sendSpinning: {
+    animationName: { default: sendSpin, '@media (prefers-reduced-motion: reduce)': 'none' },
+    animationDuration: '1.2s',
+    animationTimingFunction: 'linear',
+    animationIterationCount: 'infinite',
+  },
+  sendShimmer: { display: { default: null, '@media (prefers-reduced-motion: reduce)': 'none' } },
+  menuChevron: {
+    transitionProperty: 'transform, translate, scale, rotate',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  expanded: { rotate: '0deg' },
+  collapsed: { rotate: '-90deg' },
+  rowList: { display: 'flex', flexDirection: 'column', gap: '1px' },
+  archive: {
+    right: 0,
+    top: 0,
+    opacity: 0,
+    pointerEvents: 'none',
+  },
+  endSlot: {
+    position: 'relative',
+    display: 'flex',
+    height: themeSpace[5],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    pointerEvents: 'none',
+  },
+  endReserve: { minWidth: themeSpace[5] },
+  emptySlot: { width: 0 },
+  rest: { display: 'flex' },
+  restFade: {
+    transitionProperty: 'opacity',
+    transitionDuration: themeDuration[100],
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  groupActivity: {
+    position: 'relative',
+    display: 'flex',
+    height: themeSpace[5],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  groupActivityWidth: { width: themeSpace[5] },
+  sectionButton: {
+    position: 'relative',
+    display: 'flex',
+    height: '26px',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[2],
+    textAlign: 'left',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    boxShadow: { default: null, ':focus-visible': 'none' },
+  },
+  clickable: { cursor: 'pointer' },
+  inert: { cursor: 'default' },
+  sectionChevron: {
+    height: themeSpace[3.5],
+    width: themeSpace[3.5],
+    flexShrink: 0,
+    color: 'currentColor',
+    opacity: 0,
+    transitionProperty: 'opacity, translate, scale, rotate',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing.out,
+  },
+  visibleChevron: { opacity: 1 },
+  spacer: { flexGrow: 1, flexShrink: 1, flexBasis: '0%' },
+  skeletonHeaderRow: { display: 'flex', height: themeSpace[7], alignItems: 'center' },
+  /** The verdict mark of a pull request: a fixed 16px box. */
+  prIcon: { width: themeSpace[4], height: themeSpace[4], flexShrink: 0 },
+  /** The send ring's own box. */
+  sendRing: {
+    display: 'flex',
+    height: themeSpace[3],
+    width: themeSpace[3],
+    color: themeColors.primary,
+  },
+  /** The ring's canvas. */
+  sendCanvas: { width: '100%', height: '100%' },
+  /** The filled arc of the send ring. */
+  sendArc: {
+    transitionProperty: 'stroke-dashoffset',
+    transitionDuration: themeDuration[300],
+    transitionTimingFunction: themeEasing.out,
+  },
+  /** Under reduced motion the arc does not sweep. */
+  sendArcStill: {
+    transitionProperty: {
+      default: 'stroke-dashoffset',
+      '@media (prefers-reduced-motion: reduce)': 'none',
+    },
+  },
+  /** A row's status mark: a fixed box the glyph sits in. */
+  statusMark: {
+    display: 'flex',
+    height: themeSpace[3.5],
+    width: themeSpace[3.5],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  destructiveGlyph: { width: themeSpace[3], height: themeSpace[3], color: themeColors.destructive },
+  primaryGlyph: { width: themeSpace[3], height: themeSpace[3], color: themeColors.primary },
+  smallGlyph: { width: themeSpace[3], height: themeSpace[3], flexShrink: 0 },
+  /** A row's trailing meta: a quiet line that never wraps. */
+  trailingMeta: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    color: 'hsl(var(--sidebar-foreground-muted) / 0.45)',
+  },
+  /** A clipped label. */
+  clipped: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  /** The owner's avatar in a row's meta line. */
+  ownerAvatar: { borderRadius: themeRadius.sm, objectFit: 'cover' },
+  /** The branch segment of a row's meta line. */
+  branchRow: { display: 'flex', minWidth: 0, alignItems: 'center', gap: themeSpace[1] },
+  /** A number that never changes width. */
+  tabular: { flexShrink: 0, userSelect: 'none', fontVariantNumeric: 'tabular-nums' },
+  /** The tree row's own box. */
+  treeRow: {
+    display: 'flex',
+    height: '26px',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    borderRadius: themeRadius.md,
+  },
+  /** The tree row's trailing slot. */
+  treeAction: { marginRight: themeSpace[2], flexShrink: 0 },
+  listStack: { display: 'flex', flexDirection: 'column' },
+  listSpacing: { marginBottom: { default: themeSpace[2.5], ':last-child': 0 } },
+  /** The tree trunk's own pixel: it owns the list's 1px gap. */
+  treeTrunk: {
+    position: 'relative',
+    minWidth: 0,
+    paddingBottom: '1px',
+    marginBottom: '-1px',
+  },
+  /** A row's meta line. */
+  metaLine: { display: 'flex', minWidth: 0, alignItems: 'center', gap: themeSpace[1.5] },
+  /** The skeleton: the section's own shape, empty. */
+  skeletonSection: { display: 'flex', flexDirection: 'column', gap: themeSpace[0.5] },
+  skeletonHeader: {
+    position: 'relative',
+    display: 'flex',
+    height: themeSpace[7],
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[2],
+  },
+  skeletonIconBox: {
+    display: 'flex',
+    height: themeSpace[5],
+    width: themeSpace[5],
+    flexShrink: 0,
+    alignItems: 'center',
+  },
+  skeletonIcon: { width: themeSpace[3.5], height: themeSpace[3.5], borderRadius: themeRadius.sm },
+  skeletonTitle: { height: themeSpace[3], width: '6rem' },
+  skeletonRows: { display: 'flex', flexDirection: 'column', gap: '1px' },
+  skeletonRow: {
+    display: 'flex',
+    height: themeSpace[7],
+    minWidth: 0,
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[2],
+  },
+  skeletonAvatar: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    borderRadius: themeRadius.full,
+  },
+  skeletonLine: { height: themeSpace[3], minWidth: 0 },
+  skeletonTail: { marginLeft: 'auto', height: themeSpace[3], width: themeSpace[8], flexShrink: 0 },
+});
 
 /**
  * Shared building blocks for the single-line sidebar session rows. All three
@@ -102,19 +343,20 @@ function MaskedPrCiIcon({
 }) {
   const maskId = `pr-ci-${verdict}-${useId().replaceAll(':', '')}`;
   const isRunning = verdict === 'pending';
-  const verdictToneClassName =
+  const verdictToneClassName = stylex.props(
     verdict === 'success'
-      ? 'text-status-success'
+      ? rowParts.verdictSuccess
       : verdict === 'failure'
-        ? 'text-destructive'
-        : 'text-status-warning';
+        ? rowParts.verdictFailure
+        : rowParts.verdictWarning
+  ).className;
 
   return (
     <svg
       viewBox="0 0 16 16"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
-      className={cn('h-4 w-4 shrink-0', className)}
+      className={clsx(stylex.props(rowParts.prIcon).className, className)}
       data-pr-ci-verdict={verdict}
       aria-hidden="true"
     >
@@ -172,13 +414,15 @@ export function SessionSendProgressRing({ progress }: { progress?: number }) {
   };
   return (
     <span
-      className={cn(
-        'flex h-3 w-3 text-primary',
-        !known && 'animate-spin [animation-duration:1.2s] motion-reduce:animate-none'
-      )}
+      {...stylex.props(rowParts.sendRing, !known && rowParts.sendSpinning)}
       data-session-send-ring={known ? 'determinate' : 'indeterminate'}
     >
-      <svg viewBox="0 0 12 12" className="h-full w-full" fill="none" aria-hidden="true">
+      <svg
+        viewBox="0 0 12 12"
+        {...stylex.props(rowParts.sendCanvas)}
+        fill="none"
+        aria-hidden="true"
+      >
         <circle
           cx="6"
           cy="6"
@@ -190,7 +434,7 @@ export function SessionSendProgressRing({ progress }: { progress?: number }) {
         <circle
           {...arc}
           stroke="currentColor"
-          className="transition-[stroke-dashoffset] duration-300 ease-out motion-reduce:transition-none"
+          {...stylex.props(rowParts.sendArc, rowParts.sendArcStill)}
         />
         {known ? (
           <>
@@ -208,7 +452,7 @@ export function SessionSendProgressRing({ progress }: { progress?: number }) {
               strokeDasharray={`${SEND_RING_SHIMMER_LENGTH} ${SEND_RING_CIRCUMFERENCE}`}
               transform="rotate(-90 6 6)"
               mask={`url(#${maskId})`}
-              className="motion-reduce:hidden"
+              {...stylex.props(rowParts.sendShimmer)}
               data-session-send-shimmer=""
             >
               <animate
@@ -263,10 +507,10 @@ export function SessionRowStatusIndicator({
   let label: string | undefined;
 
   if (sendState === 'failed') {
-    icon = <CircleAlert className="h-3 w-3 text-destructive" strokeWidth={2.25} />;
+    icon = <CircleAlert {...stylex.props(rowParts.destructiveGlyph)} strokeWidth={2.25} />;
     label = sendLabel;
   } else if (isWaitingPermission === true) {
-    icon = <Hand className="h-3 w-3 text-primary" />;
+    icon = <Hand {...stylex.props(rowParts.primaryGlyph)} />;
   } else if (isWorking !== true && sendState === 'sending') {
     icon = <SessionSendProgressRing progress={sendProgress} />;
     label = sendLabel;
@@ -277,7 +521,7 @@ export function SessionRowStatusIndicator({
       <WorkingStatusMark
         working={isWorking === true}
         unread={hasUnreadMessages === true}
-        className="text-primary"
+        {...stylex.props(rowParts.primary)}
       />
     );
   }
@@ -290,7 +534,7 @@ export function SessionRowStatusIndicator({
       data-session-send-state={sendState ?? undefined}
       role={label ? 'img' : undefined}
       aria-label={label}
-      className="flex h-3.5 w-3.5 shrink-0 items-center justify-center"
+      {...stylex.props(rowParts.statusMark)}
     >
       {icon}
     </div>
@@ -414,7 +658,7 @@ export function SessionPrIcon({
         className={cn(
           compact && SIDEBAR_PR_ICON_COMPACT_CLASS,
           compact && 'h-3.5 w-3.5',
-          prStatus === 'merged' && 'translate-x-px',
+          prStatus === 'merged' && stylex.props(rowParts.mergedPr).className,
           className
         )}
       />
@@ -423,8 +667,8 @@ export function SessionPrIcon({
   return (
     <BaseIcon
       className={cn(
-        compact ? ['h-3 w-3', SIDEBAR_PR_ICON_COMPACT_CLASS] : 'h-3.5 w-3.5',
-        'shrink-0',
+        stylex.props(compact ? rowParts.smallPr : rowParts.fullPr, rowParts.shrink).className,
+        compact && SIDEBAR_PR_ICON_COMPACT_CLASS,
         meta.iconColorClassName,
         className
       )}
@@ -472,7 +716,7 @@ export function SessionRowAuthorAvatar({
   author?: { name?: string | null; image?: string | null } | null;
 }) {
   if (!author) return null;
-  return <UserAvatar user={author} size="small" className="shrink-0" />;
+  return <UserAvatar user={author} size="small" {...stylex.props(rowParts.shrink)} />;
 }
 
 /**
@@ -498,8 +742,8 @@ export function SessionRowWorktreeIndicator({ isWorktree }: { isWorktree?: boole
     <Tooltip.Root>
       <Tooltip.Trigger
         render={
-          <span className="inline-flex shrink-0 items-center text-sidebar-foreground-muted/45">
-            <WorktreeIcon className="h-3 w-3" aria-label={label} />
+          <span {...stylex.props(rowParts.trailingMeta)}>
+            <WorktreeIcon {...stylex.props(rowParts.smallGlyph)} aria-label={label} />
           </span>
         }
       />
@@ -538,7 +782,10 @@ export function SessionRowOpenedByMenuItems({
         <ContextMenu.Item
           icon={
             <ChevronDown
-              className={cn('transition-transform', opener.expanded ? 'rotate-0' : '-rotate-90')}
+              {...stylex.props(
+                rowParts.menuChevron,
+                opener.expanded ? rowParts.expanded : rowParts.collapsed
+              )}
             />
           }
           onClick={opener.onToggle}
@@ -559,7 +806,7 @@ export function SessionRowOpenedByMenuItems({
  * box (focus rings are `ring-inset`), because the property also applies paint
  * containment. The rule lives in `tailwind/index.css` (`sidebar-row-list`).
  */
-export const SIDEBAR_ROW_LIST_CLASS = 'flex flex-col gap-px sidebar-row-list';
+export const SIDEBAR_ROW_LIST_CLASS = `${stylex.props(rowParts.rowList).className} sidebar-row-list`;
 
 /**
  * A project-like row's hover controls (⋯, new chat, drag handle): hidden until
@@ -567,12 +814,9 @@ export const SIDEBAR_ROW_LIST_CLASS = 'flex flex-col gap-px sidebar-row-list';
  * Project groups so the two rows behave alike.
  */
 export const SIDEBAR_HOVER_ACTION_CLASS = cn(
-  'inline-flex h-5 w-5 items-center justify-center rounded-sm',
-  'text-muted-foreground/70 transition-[opacity,background-color,color] duration-100',
-  'opacity-0 pointer-events-none',
+  stylex.props(rowParts.hoverAction, rowParts.hoverActionFocus).className,
   'group-hover:opacity-100 group-hover:pointer-events-auto',
-  'group-data-[menu-open]:opacity-100 group-data-[menu-open]:pointer-events-auto',
-  'hover:text-foreground hover:bg-muted/30 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/60'
+  'group-data-[menu-open]:opacity-100 group-data-[menu-open]:pointer-events-auto'
 );
 
 /**
@@ -604,7 +848,7 @@ export function SessionOpenedByTreeRow({
       // at every row. The wrapper owns that pixel as its own padding and gives it
       // back with a negative margin, so the pitch is unchanged and the trunk's last
       // pixel lands inside the box that clips it.
-      className="relative min-w-0 pb-px -mb-px"
+      {...stylex.props(rowParts.treeTrunk)}
       data-session-tree-depth={depth}
       data-session-tree-indent={depth === 1 ? 'child' : undefined}
     >
@@ -641,8 +885,10 @@ export function SidebarRowArchiveButton({
           <SidebarConfirmArchiveButton
             label={label}
             confirmLabel={confirmLabel}
+            // Override the shared button's confirming-state relative positioning.
             className={cn(
-              'absolute right-0 top-0 z-20 opacity-0 pointer-events-none',
+              'absolute z-20',
+              stylex.props(rowParts.archive).className,
               revealClassName
             )}
             onConfirm={onConfirm}
@@ -720,14 +966,14 @@ export function SidebarRowEndSlot({
     // the row's navigation; the Archive button re-enables pointer events on hover.
     <div
       data-session-row-end-slot=""
-      className={cn(
-        'relative flex h-5 shrink-0 items-center justify-center pointer-events-none',
-        reserve ? 'min-w-5' : 'w-0'
-      )}
+      {...stylex.props(rowParts.endSlot, reserve ? rowParts.endReserve : rowParts.emptySlot)}
     >
       {hasRest ? (
         <span
-          className={cn('flex', archive && cn('transition-opacity duration-100', fadeClassName))}
+          className={cn(
+            stylex.props(rowParts.rest, Boolean(archive) && rowParts.restFade).className,
+            archive && fadeClassName
+          )}
         >
           {restContent}
         </span>
@@ -886,9 +1132,9 @@ export function SidebarGroupActivityMark({
       data-sidebar-group-activity=""
       role={hasStatus && description ? 'img' : undefined}
       aria-label={hasStatus && description ? description : undefined}
-      className={cn(
-        'relative flex h-5 shrink-0 items-center justify-center',
-        hasStatus ? 'w-5' : 'w-0'
+      {...stylex.props(
+        rowParts.groupActivity,
+        hasStatus ? rowParts.groupActivityWidth : rowParts.emptySlot
       )}
     >
       {hasStatus ? (
@@ -941,7 +1187,7 @@ export function GitHubOwnerIcon({
       src={getGitHubOwnerAvatarUrl(ownerHandle)}
       alt=""
       aria-hidden="true"
-      className={cn('rounded-sm object-cover', className)}
+      className={clsx(stylex.props(rowParts.ownerAvatar).className, className)}
       style={style}
       crossOrigin={crossOrigin}
       onLoad={onImageLoad}
@@ -1001,9 +1247,9 @@ export function SidebarBranchSegment({ branchName }: { branchName?: string | nul
   const branch = typeof branchName === 'string' ? branchName.trim() : '';
   if (!branch) return null;
   return (
-    <span className="flex min-w-0 items-center gap-1">
-      <GitBranch className="h-3 w-3 shrink-0" strokeWidth={1.75} aria-hidden="true" />
-      <span className="min-w-0 truncate">{branch}</span>
+    <span {...stylex.props(rowParts.branchRow)}>
+      <GitBranch {...stylex.props(rowParts.smallGlyph)} strokeWidth={1.75} aria-hidden="true" />
+      <span {...stylex.props(rowParts.clipped)}>{branch}</span>
     </span>
   );
 }
@@ -1028,32 +1274,17 @@ export function SidebarSessionMetaLine({
   return (
     <div
       data-sidebar-session-meta=""
-      className={cn(
-        'flex min-w-0 items-center gap-1.5',
+      className={clsx(
+        stylex.props(rowParts.metaLine).className,
         SIDEBAR_CAPTION_TEXT_CLASS,
         stylex.props(sidebarSurface.meta).className
       )}
     >
       <SidebarBranchSegment branchName={branchName} />
-      <span className="shrink-0 select-none tabular-nums">{relativeTime}</span>
+      <span {...stylex.props(rowParts.tabular)}>{relativeTime}</span>
     </div>
   );
 }
-
-const SECTION_HEADER_BUTTON_CLASS = cn(
-  'relative flex h-[26px] min-w-0 flex-1 select-none items-center gap-1.5 rounded-md px-2 text-left',
-  'border border-transparent bg-transparent',
-  SIDEBAR_GROUP_LABEL_CLASS,
-  'transition-colors',
-  // The outer row paints the focus ring; suppress the global :focus-visible
-  // box-shadow here so the ring wraps the whole row (label + action).
-  'focus-visible:shadow-none'
-);
-
-const SECTION_HEADER_CHEVRON_CLASS = cn(
-  'h-3.5 w-3.5 shrink-0 text-current opacity-0',
-  'transition-[opacity,translate,scale,rotate] duration-150 ease-out'
-);
 
 /**
  * The ONE section header shared by every sidebar organize mode, so section labels
@@ -1117,37 +1348,47 @@ export function SidebarSectionHeader({
           : undefined
       }
       className={cn(
-        SECTION_HEADER_BUTTON_CLASS,
-        canToggle
-          ? cn('cursor-pointer', !isMobile && 'hover:text-sidebar-foreground')
-          : 'cursor-default'
+        stylex.props(rowParts.sectionButton, canToggle ? rowParts.clickable : rowParts.inert)
+          .className,
+        SIDEBAR_GROUP_LABEL_CLASS,
+        canToggle && !isMobile && 'hover:text-sidebar-foreground'
       )}
     >
       {icon}
-      <span className="min-w-0 truncate">{label}</span>
+      <span {...stylex.props(rowParts.clipped)}>{label}</span>
       {canToggle ? (
         <ChevronDown
           className={cn(
-            SECTION_HEADER_CHEVRON_CLASS,
+            stylex.props(
+              rowParts.sectionChevron,
+              (collapsed || isMobile) && rowParts.visibleChevron,
+              collapsed ? rowParts.collapsed : rowParts.expanded
+            ).className,
             // This shared header is reserved for top-level sections (Chats,
             // machine names, GitHub Worktrees), whose folded affordance stays visible.
-            collapsed || isMobile ? 'opacity-100' : 'group-hover:opacity-100',
-            // Collapsed points right (the platform-wide convention).
-            collapsed ? '-rotate-90' : 'rotate-0'
+            !collapsed && !isMobile && 'group-hover:opacity-100'
           )}
           aria-hidden="true"
         />
       ) : null}
-      <span className="flex-1" aria-hidden="true" />
+      <span {...stylex.props(rowParts.spacer)} aria-hidden="true" />
       {collapsed && activity ? (
         <SidebarGroupActivityMark activity={activity} describe={describeActivity} />
       ) : null}
     </div>
   );
   return (
-    <div className="group flex h-[26px] items-center gap-1 rounded-md has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.5)]">
+    <div
+      className={clsx(
+        'group',
+        stylex.props(rowParts.treeRow).className,
+        // Retain the descendant-focus hook until this row and its control
+        // share a StyleX marker contract.
+        'has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.5)]'
+      )}
+    >
       {wrapToggle ? wrapToggle(toggle) : toggle}
-      {action ? <div className="mr-2 shrink-0">{action}</div> : null}
+      {action ? <div {...stylex.props(rowParts.treeAction)}>{action}</div> : null}
     </div>
   );
 }
@@ -1168,31 +1409,34 @@ const SIDEBAR_SKELETON_ROW_WIDTHS = [
 export function SidebarListSkeleton({
   className,
   showHeaderIcon = true,
-  sectionClassName = 'mb-2.5 last:mb-0',
+  sectionClassName = stylex.props(rowParts.listSpacing).className,
 }: {
   className?: string;
   showHeaderIcon?: boolean;
   sectionClassName?: string;
 }) {
   return (
-    <div className={cn('flex flex-col', className)} data-sidebar-loading-skeleton="">
-      <div className={cn('flex flex-col gap-0.5', sectionClassName)}>
-        <div className="group flex h-7 items-center">
-          <div className="relative flex h-7 min-w-0 flex-1 items-center gap-1 rounded-md px-2">
+    <div
+      className={clsx(stylex.props(rowParts.listStack).className, className)}
+      data-sidebar-loading-skeleton=""
+    >
+      <div className={cn(stylex.props(rowParts.skeletonSection).className, sectionClassName)}>
+        <div className={clsx('group', stylex.props(rowParts.skeletonHeaderRow).className)}>
+          <div {...stylex.props(rowParts.skeletonHeader)}>
             {showHeaderIcon ? (
-              <span className="flex h-5 w-5 shrink-0 items-center">
-                <Skeleton className="h-3.5 w-3.5 rounded-sm" />
+              <span {...stylex.props(rowParts.skeletonIconBox)}>
+                <Skeleton {...stylex.props(rowParts.skeletonIcon)} />
               </span>
             ) : null}
-            <Skeleton className="h-3 w-24" />
+            <Skeleton {...stylex.props(rowParts.skeletonTitle)} />
           </div>
         </div>
-        <div className="flex flex-col gap-px">
+        <div {...stylex.props(rowParts.skeletonRows)}>
           {SIDEBAR_SKELETON_ROW_WIDTHS.map((width, index) => (
-            <div key={index} className="flex h-7 min-w-0 items-center gap-1.5 rounded-md px-2">
-              <Skeleton className="h-3.5 w-3.5 shrink-0 rounded-full" />
-              <Skeleton className={cn('h-3 min-w-0', width)} />
-              <Skeleton className="ml-auto h-3 w-8 shrink-0" />
+            <div key={index} {...stylex.props(rowParts.skeletonRow)}>
+              <Skeleton {...stylex.props(rowParts.skeletonAvatar)} />
+              <Skeleton className={cn(stylex.props(rowParts.skeletonLine).className, width)} />
+              <Skeleton {...stylex.props(rowParts.skeletonTail)} />
             </div>
           ))}
         </div>

@@ -2,13 +2,134 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowUpRight, MessageSquareReply } from 'lucide-react';
 import type { SessionId } from '@lody/shared';
+import * as stylex from '@stylexjs/stylex';
 
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
-import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
 import { Dialog } from '@/ui/dialog';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 import { useOperationTargetTitle } from './created-session-operation-card';
 import { MarkdownRenderer } from './markdown-renderer';
+
+const styles = stylex.create({
+  errorLine: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: themeFontSize.xs,
+    lineHeight: themeSpace[5],
+    color: themeColors.destructive,
+  },
+  replyButton: {
+    display: 'block',
+    width: '100%',
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    borderRadius: themeRadius.sm,
+    textAlign: 'left',
+    fontSize: themeFontSize.xs,
+    lineHeight: themeSpace[5],
+    transitionProperty: 'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    color: {
+      default: themeColors.mutedForeground,
+      ':hover': themeColors.foreground,
+    },
+    // The Tailwind ring painted nothing — the app resets every focus ring —
+    // and its `box-shadow` erased the app's own focus indicator as well. The
+    // button stays as blind as it was.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+  },
+  card: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: themeSpace[3],
+    borderRadius: themeRadius.lg,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.7)',
+    backgroundColor: 'hsl(var(--muted) / 0.25)',
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2],
+  },
+  glyph: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+  },
+  glyphFailed: { color: themeColors.destructive },
+  glyphIdle: { color: themeColors.mutedForeground },
+  smallGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+  },
+  body: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+  },
+  heading: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'baseline',
+    gap: themeSpace[1.5],
+  },
+  label: {
+    flexShrink: 0,
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+  },
+  labelFailed: { color: themeColors.destructive },
+  labelIdle: { color: themeColors.mutedForeground },
+  separator: {
+    flexShrink: 0,
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: 'hsl(var(--muted-foreground) / 0.6)',
+  },
+  title: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+  },
+  dialogHeader: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: themeSpace[3],
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: 'hsl(var(--border) / 0.6)',
+    paddingBlock: themeSpace[3],
+    paddingLeft: themeSpace[5],
+    paddingRight: themeSpace[12],
+  },
+  dialogBody: {
+    minHeight: 0,
+    overflowY: 'auto',
+    paddingInline: themeSpace[5],
+    paddingBlock: themeSpace[4],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+  },
+});
 
 /** One paragraph of Markdown as plain reading text (no heading, list or code marks). */
 const toPlainText = (markdown: string): string =>
@@ -63,7 +184,7 @@ export function OperationReplyCard(props: OperationReplyCardProps) {
   const viewSessionLabel = t('sessions.openedBy.viewSession', 'View session');
 
   const secondLine = failed ? (
-    <p className="truncate text-xs leading-5 text-destructive" title={props.error}>
+    <p {...stylex.props(styles.errorLine)} title={props.error}>
       {props.error}
     </p>
   ) : reply ? (
@@ -71,38 +192,27 @@ export function OperationReplyCard(props: OperationReplyCardProps) {
       type="button"
       onClick={() => setOpen(true)}
       title={t('sessions.operationReply.expand', 'View full reply')}
-      className={cn(
-        'block w-full min-w-0 truncate rounded-sm text-left text-xs leading-5 text-muted-foreground',
-        'transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/40'
-      )}
+      {...stylex.props(styles.replyButton)}
     >
       {opening || reply}
     </button>
   ) : null;
 
   return (
-    <div
-      data-operation-reply-card={props.status}
-      className="flex min-w-0 items-center gap-3 rounded-lg border border-border/70 bg-muted/25 px-3 py-2"
-    >
+    <div data-operation-reply-card={props.status} {...stylex.props(styles.card)}>
       <MessageSquareReply
-        className={cn('h-4 w-4 shrink-0', failed ? 'text-destructive' : 'text-muted-foreground')}
+        {...stylex.props(styles.glyph, failed ? styles.glyphFailed : styles.glyphIdle)}
         aria-hidden="true"
       />
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-baseline gap-1.5">
-          <span
-            className={cn(
-              'shrink-0 text-xs',
-              failed ? 'text-destructive' : 'text-muted-foreground'
-            )}
-          >
+      <div {...stylex.props(styles.body)}>
+        <div {...stylex.props(styles.heading)}>
+          <span {...stylex.props(styles.label, failed ? styles.labelFailed : styles.labelIdle)}>
             {label}
           </span>
-          <span aria-hidden="true" className="shrink-0 text-xs text-muted-foreground/60">
+          <span aria-hidden="true" {...stylex.props(styles.separator)}>
             ·
           </span>
-          <span className="min-w-0 truncate text-sm font-medium text-foreground" title={title}>
+          <span {...stylex.props(styles.title)} title={title}>
             {title}
           </span>
         </div>
@@ -117,14 +227,14 @@ export function OperationReplyCard(props: OperationReplyCardProps) {
         onClick={navigate}
       >
         {viewSessionLabel}
-        <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
+        <ArrowUpRight {...stylex.props(styles.smallGlyph)} aria-hidden="true" />
       </Button>
 
       {reply ? (
         <Dialog.Root open={open} onOpenChange={setOpen}>
           <Dialog.Content width="42rem" className="flex max-h-[80vh] flex-col gap-0 p-0 sm:p-0">
-            <div className="flex min-w-0 items-center gap-3 border-b border-border/60 py-3 pl-5 pr-12">
-              <div className="min-w-0 flex-1">
+            <div {...stylex.props(styles.dialogHeader)}>
+              <div {...stylex.props(styles.body)}>
                 <Dialog.Description className="text-xs">
                   {t('sessions.operationReply.received', 'Reply received')}
                 </Dialog.Description>
@@ -144,11 +254,11 @@ export function OperationReplyCard(props: OperationReplyCardProps) {
                   }}
                 >
                   {viewSessionLabel}
-                  <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
+                  <ArrowUpRight {...stylex.props(styles.smallGlyph)} aria-hidden="true" />
                 </Button>
               ) : null}
             </div>
-            <div className="min-h-0 overflow-y-auto px-5 py-4 text-sm">
+            <div {...stylex.props(styles.dialogBody)}>
               <MarkdownRenderer text={reply} />
             </div>
           </Dialog.Content>

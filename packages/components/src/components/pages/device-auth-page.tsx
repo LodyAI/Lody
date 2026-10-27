@@ -1,3 +1,4 @@
+import { pageSurface as surface } from './surface';
 import type { FormEvent } from 'react';
 import { useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
@@ -196,7 +197,7 @@ export function DeviceAuthPage({
           <Button type="submit" size="large" disabled={!canSubmit || isVerifying}>
             {isVerifying ? (
               <>
-                <Spinner className="mr-2 h-4 w-4" />
+                <Spinner className={`h-4 w-4 ${stylex.props(surface.spinnerMargin).className}`} />
                 {t('device.verifying')}
               </>
             ) : (

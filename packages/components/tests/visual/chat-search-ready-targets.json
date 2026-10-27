@@ -1,0 +1,41 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 900
+    },
+    {
+      "name": "phone-compact",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "blockedHosts": ["avatars.githubusercontent.com"],
+  "ids": ["chat-unifiedprojectselector--search-beyond-recent"],
+  "states": {},
+  "ready": {
+    "chat-unifiedprojectselector--search-beyond-recent": [
+      {
+        "action": "fill",
+        "role": "textbox",
+        "name": "Search projects",
+        "value": "30"
+      },
+      {
+        "action": "visible",
+        "selector": "[role=\"menuitemradio\"]:has-text(\"archived-project-30\")"
+      },
+      {
+        "action": "hidden",
+        "selector": "[role=\"menuitemradio\"]:has-text(\"loro-swift\")"
+      }
+    ]
+  }
+}

@@ -12,6 +12,13 @@ import type * as React from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
+import { themeColors } from '../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../style/theme-scale.stylex';
 
 /**
  * shadcn's `frimousse` emoji picker, kept as the registry ships it apart from
@@ -26,9 +33,128 @@ import { cn } from '@/lib/utils';
  * category header — takes the popup rung's color directly.
  */
 const styles = stylex.create({
-  // frimousse sticks category headers to the viewport's top while their rows
-  // scroll underneath, so the header needs the surface's own opaque color.
-  categoryHeader: { backgroundColor: colors.raisedBackground },
+  root: {
+    isolation: 'isolate',
+    display: 'flex',
+    height: '100%',
+    width: 'fit-content',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    borderRadius: themeRadius.md,
+  },
+  searchWrapper: {
+    display: 'flex',
+    height: themeSpace[9],
+    alignItems: 'center',
+    gap: themeSpace[2],
+    borderBottomStyle: 'var(--tw-border-style, solid)',
+    borderBottomWidth: 1,
+    paddingInline: themeSpace[3],
+  },
+  searchIcon: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+    opacity: 0.5,
+  },
+  search: {
+    outlineStyle: { default: 'none', '@media (forced-colors: active)': 'solid' },
+    outlineWidth: { default: null, '@media (forced-colors: active)': 2 },
+    outlineColor: { default: null, '@media (forced-colors: active)': 'transparent' },
+    outlineOffset: { default: null, '@media (forced-colors: active)': 2 },
+    display: 'flex',
+    height: themeSpace[10],
+    width: '100%',
+    borderRadius: themeRadius.md,
+    backgroundColor: 'transparent',
+    paddingBlock: themeSpace[3],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    boxShadow: { default: null, ':focus-visible': 'none' },
+    cursor: { default: null, ':disabled': 'not-allowed' },
+    opacity: { default: null, ':disabled': 0.5 },
+    '::placeholder': { color: themeColors.mutedForeground },
+  },
+  row: { scrollMarginBlock: themeSpace[1], paddingInline: themeSpace[1] },
+  emoji: {
+    display: 'flex',
+    width: themeSpace[7],
+    height: themeSpace[7],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.sm,
+    fontSize: themeFontSize.base,
+    lineHeight: themeLineHeight.base,
+  },
+  categoryHeader: {
+    // Sticky rows cover the scrolling emoji with the containing popup's surface.
+    backgroundColor: colors.raisedBackground,
+    color: themeColors.mutedForeground,
+    paddingInline: themeSpace[3],
+    paddingBottom: themeSpace[2],
+    paddingTop: themeSpace[3.5],
+    fontSize: themeFontSize.xs,
+    lineHeight: 1,
+  },
+  viewport: {
+    outlineStyle: { default: 'none', '@media (forced-colors: active)': 'solid' },
+    outlineWidth: { default: null, '@media (forced-colors: active)': 2 },
+    outlineColor: { default: null, '@media (forced-colors: active)': 'transparent' },
+    outlineOffset: { default: null, '@media (forced-colors: active)': 2 },
+    position: 'relative',
+    flex: '1 1 0%',
+  },
+  feedback: {
+    position: 'absolute',
+    inset: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: themeColors.mutedForeground,
+  },
+  empty: { fontSize: themeFontSize.sm, lineHeight: themeLineHeight.sm },
+  list: { userSelect: 'none', paddingBottom: themeSpace[1] },
+  footer: {
+    maxWidth: 'var(--frimousse-viewport-width)',
+    display: 'flex',
+    width: '100%',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: themeSpace[1],
+    borderTopStyle: 'var(--tw-border-style, solid)',
+    borderTopWidth: 1,
+    padding: themeSpace[2],
+  },
+  activeEmoji: {
+    display: 'flex',
+    width: themeSpace[7],
+    height: themeSpace[7],
+    flex: 'none',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: themeFontSize.lg,
+    lineHeight: themeLineHeight.lg,
+  },
+  activeLabel: {
+    color: themeColors.secondaryForeground,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+  },
+  placeholder: {
+    color: themeColors.mutedForeground,
+    marginLeft: themeSpace[1.5],
+    display: 'flex',
+    height: themeSpace[7],
+    alignItems: 'center',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+  },
 });
 
 function EmojiPicker({
@@ -37,7 +163,7 @@ function EmojiPicker({
 }: React.ComponentProps<typeof EmojiPickerPrimitive.Root>) {
   return (
     <EmojiPickerPrimitive.Root
-      className={cn('isolate flex h-full w-fit flex-col overflow-hidden rounded-md', className)}
+      className={cn(stylex.props(styles.root).className, className)}
       data-slot="emoji-picker"
       {...props}
     />
@@ -50,20 +176,13 @@ function EmojiPickerSearch({
 }: React.ComponentProps<typeof EmojiPickerPrimitive.Search>) {
   return (
     <div
-      className={cn('flex h-9 items-center gap-2 border-b px-3', className)}
+      className={cn(stylex.props(styles.searchWrapper).className, className)}
       data-slot="emoji-picker-search-wrapper"
     >
-      <SearchIcon className="size-4 shrink-0 opacity-50" />
-      {/* `focus-visible:shadow-none` opts out of the app's global inset focus
-          ring (tailwind/index.css, "Pro focus style": an inset 1px `--primary`
-          box-shadow on any focused input). That `:where(…)` selector carries no
-          specificity, so every other input in the app overrides it with its own
-          `focus-visible:` utility and never shows it — this bare registry input
-          had none, so it was the one field in the app that did, drawing an
-          accent box inside the row's own divider the moment it was typed in.
-          The caret is the focus affordance here, as it is everywhere else. */}
+      <SearchIcon {...stylex.props(styles.searchIcon)} />
+      {/* The caret supplies focus feedback; neutralize the app's global inset input shadow. */}
       <EmojiPickerPrimitive.Search
-        className="outline-hidden placeholder:text-muted-foreground flex h-10 w-full rounded-md bg-transparent py-3 text-sm focus-visible:shadow-none disabled:cursor-not-allowed disabled:opacity-50"
+        className={stylex.props(styles.search).className}
         data-slot="emoji-picker-search"
         {...props}
       />
@@ -73,7 +192,7 @@ function EmojiPickerSearch({
 
 function EmojiPickerRow({ children, ...props }: EmojiPickerListRowProps) {
   return (
-    <div {...props} className="scroll-my-1 px-1" data-slot="emoji-picker-row">
+    <div {...props} className={stylex.props(styles.row).className} data-slot="emoji-picker-row">
       {children}
     </div>
   );
@@ -84,10 +203,9 @@ function EmojiPickerEmoji({ emoji, className, ...props }: EmojiPickerListEmojiPr
     <button
       {...props}
       className={cn(
-        // The registry's `bg-accent` is dead here: `--accent` is never
-        // declared, so the fill silently resolved to nothing. Use the overlay
-        // list hover fill the rest of the app's floating surfaces use.
-        'data-[active]:bg-foreground/[0.05] dark:data-[active]:bg-white/[0.10] flex size-7 items-center justify-center rounded-sm text-base',
+        stylex.props(styles.emoji).className,
+        // Preserve the app's nested light/dark scope predicate and overlay fills.
+        'data-[active]:bg-foreground/[0.05] dark:data-[active]:bg-white/[0.10]',
         className
       )}
       data-slot="emoji-picker-emoji"
@@ -106,7 +224,7 @@ function EmojiPickerCategoryHeader({
   return (
     <div
       {...props}
-      className={cn(sx.className, 'text-muted-foreground px-3 pb-2 pt-3.5 text-xs leading-none')}
+      className={sx.className}
       style={{ ...sx.style, ...style }}
       data-slot="emoji-picker-category-header"
     >
@@ -122,24 +240,24 @@ function EmojiPickerContent({
   const { t } = useTranslation();
   return (
     <EmojiPickerPrimitive.Viewport
-      className={cn('outline-hidden relative flex-1', className)}
+      className={cn(stylex.props(styles.viewport).className, className)}
       data-slot="emoji-picker-viewport"
       {...props}
     >
       <EmojiPickerPrimitive.Loading
-        className="absolute inset-0 flex items-center justify-center text-muted-foreground"
+        className={stylex.props(styles.feedback).className}
         data-slot="emoji-picker-loading"
       >
         <Spinner className="size-4" />
       </EmojiPickerPrimitive.Loading>
       <EmojiPickerPrimitive.Empty
-        className="absolute inset-0 flex items-center justify-center text-muted-foreground text-sm"
+        className={stylex.props(styles.feedback, styles.empty).className}
         data-slot="emoji-picker-empty"
       >
         {t('emojiPicker.empty', 'No emoji found.')}
       </EmojiPickerPrimitive.Empty>
       <EmojiPickerPrimitive.List
-        className="select-none pb-1"
+        className={stylex.props(styles.list).className}
         components={{
           Row: EmojiPickerRow,
           Emoji: EmojiPickerEmoji,
@@ -155,10 +273,7 @@ function EmojiPickerFooter({ className, ...props }: React.ComponentProps<'div'>)
   const { t } = useTranslation();
   return (
     <div
-      className={cn(
-        'max-w-(--frimousse-viewport-width) flex w-full min-w-0 items-center gap-1 border-t p-2',
-        className
-      )}
+      className={cn(stylex.props(styles.footer).className, className)}
       data-slot="emoji-picker-footer"
       {...props}
     >
@@ -166,13 +281,11 @@ function EmojiPickerFooter({ className, ...props }: React.ComponentProps<'div'>)
         {({ emoji }) =>
           emoji ? (
             <>
-              <div className="flex size-7 flex-none items-center justify-center text-lg">
-                {emoji.emoji}
-              </div>
-              <span className="text-secondary-foreground truncate text-xs">{emoji.label}</span>
+              <div {...stylex.props(styles.activeEmoji)}>{emoji.emoji}</div>
+              <span {...stylex.props(styles.activeLabel)}>{emoji.label}</span>
             </>
           ) : (
-            <span className="text-muted-foreground ml-1.5 flex h-7 items-center truncate text-xs">
+            <span {...stylex.props(styles.placeholder)}>
               {t('emojiPicker.placeholder', 'Select an emoji…')}
             </span>
           )

@@ -1,0 +1,102 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "ui-scrollareamigration--vertical",
+    "ui-scrollareamigration--horizontal",
+    "ui-scrollareamigration--both",
+    "ui-scrollareamigration--viewport-content",
+    "ui-scrollareamigration--no-overflow"
+  ],
+  "states": {
+    "ui-scrollareamigration--vertical": [
+      {
+        "name": "scrolled",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Scroll middle"
+          },
+          {
+            "action": "visible",
+            "text": "Scrolled"
+          }
+        ]
+      },
+      {
+        "name": "thumb-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-orientation] > [data-hovering], [data-orientation] > div",
+            "index": 0
+          }
+        ]
+      }
+    ],
+    "ui-scrollareamigration--horizontal": [
+      {
+        "name": "scrolled",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Scroll middle"
+          },
+          {
+            "action": "visible",
+            "text": "Scrolled"
+          }
+        ]
+      },
+      {
+        "name": "thumb-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-orientation] > [data-hovering], [data-orientation] > div",
+            "index": 0
+          }
+        ]
+      }
+    ],
+    "ui-scrollareamigration--both": [
+      {
+        "name": "scrolled",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Scroll middle"
+          },
+          {
+            "action": "visible",
+            "text": "Scrolled"
+          }
+        ]
+      },
+      {
+        "name": "thumb-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-orientation] > [data-hovering], [data-orientation] > div",
+            "index": 0
+          }
+        ]
+      }
+    ]
+  }
+}

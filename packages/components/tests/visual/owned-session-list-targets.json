@@ -1,0 +1,327 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "compact-desktop",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "blockedHosts": ["avatars.githubusercontent.com"],
+  "ids": [
+    "components-owned-session-list-migration--project-groups",
+    "components-owned-session-list-migration--selected-project-group",
+    "components-owned-session-list-migration--subtree-variables",
+    "components-owned-session-list-migration--root-variable-overrides",
+    "components-owned-session-list-migration--caller-overrides",
+    "components-owned-session-list-migration--narrow",
+    "components-owned-session-list-migration--empty-and-loading",
+    "components-sessionlist--default",
+    "components-sessionlist--opened-sessions",
+    "components-sessionlist--opened-sessions-collapsed",
+    "components-sessionlist--long-titles",
+    "components-sessionlist--loading"
+  ],
+  "states": {
+    "components-owned-session-list-migration--project-groups": [
+      {
+        "name": "header-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-group-key=\"projectGroup:alpha\"]"
+          }
+        ]
+      },
+      {
+        "name": "header-menu-pointer-out",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-group-key=\"projectGroup:alpha\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Edit project…"
+          },
+          {
+            "action": "movePointer",
+            "x": 380,
+            "y": 820
+          }
+        ]
+      },
+      {
+        "name": "settings-clicked",
+        "steps": [
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Edit project…"
+          },
+          {
+            "action": "visible",
+            "text": "Settings alpha"
+          }
+        ]
+      },
+      {
+        "name": "collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-group-key=\"projectGroup:alpha\"] > button[aria-label=\"Toggle\"]"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-session-id=\"opener\"]"
+          }
+        ]
+      },
+      {
+        "name": "expanded",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-group-key=\"projectGroup:alpha\"] > button[aria-label=\"Toggle\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-session-id=\"opener\"]"
+          }
+        ]
+      },
+      {
+        "name": "new-project",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-group-key=\"projectGroup:alpha\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-group-key=\"projectGroup:alpha\"] button:has(svg.lucide-square-pen)"
+          },
+          {
+            "action": "visible",
+            "text": "New project alpha"
+          }
+        ]
+      },
+      {
+        "name": "rename-dialog",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-session-id=\"opener\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-session-id=\"opener\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=dialog] textarea"
+          }
+        ]
+      },
+      {
+        "name": "rename-empty",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "[role=dialog] textarea",
+            "value": ""
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Save"
+          }
+        ]
+      },
+      {
+        "name": "rename-saved",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "[role=dialog] textarea",
+            "value": "  Renamed owned session  "
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Save"
+          },
+          {
+            "action": "hidden",
+            "selector": "[role=dialog]"
+          },
+          {
+            "action": "visible",
+            "text": "Renamed opener: Renamed owned session"
+          }
+        ]
+      },
+      {
+        "name": "show-all",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-show-more=\"projectGroup:alpha\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-session-id=\"project-5\"]"
+          }
+        ]
+      },
+      {
+        "name": "show-less",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-show-more=\"projectGroup:alpha\"]"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-session-id=\"project-5\"]"
+          }
+        ]
+      },
+      {
+        "name": "empty-menu",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-group-key=\"projectGroup:empty\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-group-key=\"projectGroup:empty\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "disabled",
+            "role": "menuitem",
+            "name": "Archive chats"
+          }
+        ]
+      }
+    ],
+    "components-owned-session-list-migration--selected-project-group": [
+      {
+        "name": "selected-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-group-key=\"projectGroup:alpha\"]"
+          }
+        ]
+      }
+    ],
+    "components-owned-session-list-migration--caller-overrides": [
+      {
+        "name": "caller-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-group-key=\"projectGroup:alpha\"]"
+          }
+        ]
+      }
+    ],
+    "components-owned-session-list-migration--narrow": [
+      {
+        "name": "narrow-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-group-key=\"projectGroup:alpha\"]"
+          }
+        ]
+      }
+    ],
+    "components-owned-session-list-migration--subtree-variables": [
+      {
+        "name": "variable-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-group-key=\"projectGroup:alpha\"]"
+          }
+        ]
+      },
+      {
+        "name": "variable-menu",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-group-key=\"projectGroup:alpha\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Edit project…"
+          },
+          {
+            "action": "movePointer",
+            "x": 380,
+            "y": 820
+          }
+        ]
+      }
+    ],
+    "components-owned-session-list-migration--root-variable-overrides": [
+      {
+        "name": "variable-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-group-key=\"projectGroup:alpha\"]"
+          }
+        ]
+      },
+      {
+        "name": "variable-menu",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-group-key=\"projectGroup:alpha\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Edit project…"
+          },
+          {
+            "action": "movePointer",
+            "x": 380,
+            "y": 820
+          }
+        ]
+      }
+    ]
+  },
+  "allowBlankIds": ["components-sessionlist--loading"],
+  "ready": {
+    "components-sessionlist--loading": [
+      {
+        "action": "visible",
+        "selector": "[data-sidebar-loading-skeleton] [aria-hidden=\"true\"]",
+        "index": 0
+      }
+    ]
+  }
+}

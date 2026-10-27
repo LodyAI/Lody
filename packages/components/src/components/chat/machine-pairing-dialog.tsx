@@ -9,6 +9,7 @@ import {
   Terminal,
   TerminalSquare,
 } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
@@ -18,8 +19,143 @@ import { writeTextToClipboard } from '@/lib/clipboard';
 import { Button } from '@lody/ui/button';
 import { Dialog } from '@/ui/dialog';
 import { Tooltip } from '@lody/ui/tooltip';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 
 const LODY_DESKTOP_DOWNLOAD_URL = 'https://lody.ai/download';
+
+const styles = stylex.create({
+  /* Glyphs */
+  icon20: { width: themeSpace[5], height: themeSpace[5] },
+  icon16: { width: themeSpace[4], height: themeSpace[4] },
+  icon14: { width: themeSpace[3.5], height: themeSpace[3.5] },
+  icon32: { width: themeSpace[8], height: themeSpace[8] },
+  iconMuted: { color: themeColors.mutedForeground },
+  iconSuccess: { color: themeColors.statusSuccess },
+  iconShrink: { flexShrink: 0 },
+
+  /* The body of the dialog */
+  waiting: {
+    display: 'flex',
+    minHeight: 'calc(var(--spacing) * 40)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: themeColors.mutedForeground,
+  },
+  centered: {
+    display: 'flex',
+    minHeight: 'calc(var(--spacing) * 40)',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: themeSpace[3],
+    textAlign: 'center',
+  },
+  centeredTall: {
+    display: 'flex',
+    minHeight: 'calc(var(--spacing) * 44)',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: themeSpace[3],
+    textAlign: 'center',
+  },
+  stack: { display: 'flex', flexDirection: 'column', gap: themeSpace[3] },
+  errorText: {
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.destructive,
+  },
+  mutedText: {
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.mutedForeground,
+  },
+  title: {
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.medium,
+  },
+  caption: {
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+
+  /* One option card */
+  option: {
+    borderRadius: themeRadius.lg,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: themeColors.border,
+    padding: themeSpace[4],
+  },
+  optionRow: { display: 'flex', alignItems: 'center', gap: themeSpace[3] },
+  optionGlyph: {
+    display: 'flex',
+    height: themeSpace[9],
+    width: themeSpace[9],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.md,
+    backgroundColor: themeColors.muted,
+  },
+  optionText: { minWidth: 0 },
+
+  /* The "or" rule between the two options */
+  divider: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[3],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+  dividerRule: {
+    height: '1px',
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    backgroundColor: themeColors.border,
+  },
+
+  /* The command */
+  command: {
+    position: 'relative',
+    marginTop: themeSpace[3],
+    borderRadius: themeRadius.md,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: themeColors.border,
+    backgroundColor: 'hsl(var(--muted) / 0.4)',
+    padding: themeSpace[3],
+    paddingRight: themeSpace[11],
+  },
+  commandText: {
+    display: 'block',
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'break-word',
+    fontSize: themeFontSize.xs,
+    lineHeight: themeSpace[5],
+    color: themeColors.foreground,
+  },
+  expiry: {
+    marginTop: themeSpace[3],
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+});
 
 export type MachinePairingDialogProps = {
   open: boolean;
@@ -111,7 +247,10 @@ export function MachinePairingDialog({
           <>
             <Dialog.Header>
               <Dialog.Title className="flex items-center gap-2">
-                <CheckCircle2 className="h-5 w-5 text-status-success" aria-hidden="true" />
+                <CheckCircle2
+                  {...stylex.props(styles.icon20, styles.iconSuccess)}
+                  aria-hidden="true"
+                />
                 {t('machinePairing.connectedTitle', 'Machine connected')}
               </Dialog.Title>
               <Dialog.Description>
@@ -149,12 +288,12 @@ export function MachinePairingDialog({
             </Dialog.Header>
 
             {creating ? (
-              <div className="flex min-h-40 items-center justify-center text-muted-foreground">
+              <div {...stylex.props(styles.waiting)}>
                 <Spinner className="h-5 w-5" aria-hidden="true" />
               </div>
             ) : createError ? (
-              <div className="flex min-h-40 flex-col items-center justify-center gap-3 text-center">
-                <p className="text-sm text-destructive">
+              <div {...stylex.props(styles.centered)}>
+                <p {...stylex.props(styles.errorText)}>
                   {t('machinePairing.createFailed', 'Could not create a connection request.')}
                 </p>
                 <Button variant="secondary" onClick={onRetry}>
@@ -162,17 +301,20 @@ export function MachinePairingDialog({
                 </Button>
               </div>
             ) : status === 'pending' ? (
-              <div className="space-y-3">
-                <div className="rounded-lg border border-border p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted">
-                      <Laptop className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+              <div {...stylex.props(styles.stack)}>
+                <div {...stylex.props(styles.option)}>
+                  <div {...stylex.props(styles.optionRow)}>
+                    <div {...stylex.props(styles.optionGlyph)}>
+                      <Laptop
+                        {...stylex.props(styles.icon16, styles.iconMuted)}
+                        aria-hidden="true"
+                      />
                     </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium">
+                    <div {...stylex.props(styles.optionText)}>
+                      <p {...stylex.props(styles.title)}>
                         {t('machinePairing.desktopOptionTitle', 'Lody Desktop')}
                       </p>
-                      <p className="text-xs text-muted-foreground">
+                      <p {...stylex.props(styles.caption)}>
                         {t(
                           'machinePairing.desktopOptionDescription',
                           'Install the desktop app to connect this machine.'
@@ -181,25 +323,28 @@ export function MachinePairingDialog({
                     </div>
                   </div>
                   <Button className="mt-3 w-full" onClick={downloadDesktop}>
-                    <Download className="h-4 w-4" aria-hidden="true" />
+                    <Download {...stylex.props(styles.icon16)} aria-hidden="true" />
                     {t('machinePairing.downloadDesktop', 'Download Lody Desktop')}
                   </Button>
                 </div>
-                <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                  <div className="h-px flex-1 bg-border" />
+                <div {...stylex.props(styles.divider)}>
+                  <div {...stylex.props(styles.dividerRule)} />
                   {t('common.or', 'or')}
-                  <div className="h-px flex-1 bg-border" />
+                  <div {...stylex.props(styles.dividerRule)} />
                 </div>
-                <div className="rounded-lg border border-border p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted">
-                      <Terminal className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                <div {...stylex.props(styles.option)}>
+                  <div {...stylex.props(styles.optionRow)}>
+                    <div {...stylex.props(styles.optionGlyph)}>
+                      <Terminal
+                        {...stylex.props(styles.icon16, styles.iconMuted)}
+                        aria-hidden="true"
+                      />
                     </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium">
+                    <div {...stylex.props(styles.optionText)}>
+                      <p {...stylex.props(styles.title)}>
                         {t('machinePairing.cliOptionTitle', 'Command line')}
                       </p>
-                      <p className="text-xs text-muted-foreground">
+                      <p {...stylex.props(styles.caption)}>
                         {t(
                           'machinePairing.cliOptionDescription',
                           'Run this command on the machine you want to connect.'
@@ -207,28 +352,33 @@ export function MachinePairingDialog({
                       </p>
                     </div>
                   </div>
-                  <div className="relative mt-3 rounded-md border border-border bg-muted/40 p-3 pr-11">
-                    <code className="block whitespace-pre-wrap break-words font-mono text-xs leading-5 text-foreground">
-                      {command}
-                    </code>
+                  <div {...stylex.props(styles.command)}>
+                    {/* `font-mono` is the app's own global class, and its rule
+                        already names `code`, so the element keeps the mono face
+                        without the class. */}
+                    <code {...stylex.props(styles.commandText)}>{command}</code>
                     <Tooltip.Root>
-                      <Tooltip.Trigger render={<Button
-                          type="button"
-                          variant="ghost"
-                          icon
-                          className="absolute right-1.5 top-1.5"
-                          onClick={() => void copyCommand()}
-                          aria-label={t('machinePairing.copyCommand', 'Copy command')}
-                        >
-                          <Copy className="h-4 w-4" aria-hidden="true" />
-                        </Button>}/>
+                      <Tooltip.Trigger
+                        render={
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            icon
+                            className="absolute right-1.5 top-1.5"
+                            onClick={() => void copyCommand()}
+                            aria-label={t('machinePairing.copyCommand', 'Copy command')}
+                          >
+                            <Copy {...stylex.props(styles.icon16)} aria-hidden="true" />
+                          </Button>
+                        }
+                      />
                       <Tooltip.Content>
                         {t('machinePairing.copyCommand', 'Copy command')}
                       </Tooltip.Content>
                     </Tooltip.Root>
                   </div>
-                  <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <Clock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <p {...stylex.props(styles.expiry)}>
+                    <Clock {...stylex.props(styles.icon14, styles.iconShrink)} aria-hidden="true" />
                     {t(
                       'machinePairing.expiresIn',
                       'This command expires in {{time}} and can only be used to connect one machine.',
@@ -238,21 +388,24 @@ export function MachinePairingDialog({
                 </div>
               </div>
             ) : status === 'claimed' ? (
-              <div className="flex min-h-44 flex-col items-center justify-center gap-3 text-center">
-                <TerminalSquare className="h-8 w-8 text-muted-foreground" aria-hidden="true" />
+              <div {...stylex.props(styles.centeredTall)}>
+                <TerminalSquare
+                  {...stylex.props(styles.icon32, styles.iconMuted)}
+                  aria-hidden="true"
+                />
                 <div>
-                  <p className="text-sm font-medium">
+                  <p {...stylex.props(styles.title)}>
                     {t('machinePairing.claimed', 'Machine is signing in')}
                   </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
+                  <p {...stylex.props(styles.caption)}>
                     {t('machinePairing.preparingAgents', 'Preparing agent configuration…')}
                   </p>
                 </div>
                 <Spinner className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
               </div>
             ) : (
-              <div className="flex min-h-40 flex-col items-center justify-center gap-3 text-center">
-                <p className="text-sm text-muted-foreground">
+              <div {...stylex.props(styles.centered)}>
+                <p {...stylex.props(styles.mutedText)}>
                   {status === 'cancelled'
                     ? t('machinePairing.cancelled', 'This connection request was cancelled.')
                     : t('machinePairing.expired', 'This connection request has expired.')}

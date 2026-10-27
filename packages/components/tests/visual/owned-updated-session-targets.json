@@ -1,0 +1,816 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "components-ownedupdatedsessionmigration--tree-and-projects",
+    "components-ownedupdatedsessionmigration--anchor-rows",
+    "components-ownedupdatedsessionmigration--read-only",
+    "components-ownedupdatedsessionmigration--scoped-variables",
+    "components-ownedupdatedsessionmigration--caller-overrides",
+    "components-ownedupdatedsessionmigration--collapsed-tree",
+    "components-ownedupdatedsessionmigration--mobile-rows",
+    "components-ownedupdatedsessionmigration--overflow",
+    "components-sidebar-migration--updated-empty",
+    "components-sidebar-migration--updated-loading"
+  ],
+  "ready": {
+    "components-ownedupdatedsessionmigration--tree-and-projects": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-updated-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-owned-updated-result]"
+      }
+    ],
+    "components-ownedupdatedsessionmigration--anchor-rows": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-updated-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-owned-updated-result]"
+      }
+    ],
+    "components-ownedupdatedsessionmigration--read-only": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-updated-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-owned-updated-result]"
+      }
+    ],
+    "components-ownedupdatedsessionmigration--scoped-variables": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-updated-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-owned-updated-result]"
+      }
+    ],
+    "components-ownedupdatedsessionmigration--caller-overrides": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-updated-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-owned-updated-result]"
+      }
+    ],
+    "components-ownedupdatedsessionmigration--collapsed-tree": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-updated-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-owned-updated-result]"
+      }
+    ],
+    "components-ownedupdatedsessionmigration--mobile-rows": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-updated-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-owned-updated-result]"
+      }
+    ],
+    "components-ownedupdatedsessionmigration--overflow": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-updated-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-owned-updated-result]"
+      }
+    ],
+    "components-sidebar-migration--updated-loading": [
+      {
+        "action": "visible",
+        "selector": "[data-sidebar-loading-skeleton]"
+      }
+    ]
+  },
+  "states": {
+    "components-ownedupdatedsessionmigration--tree-and-projects": [
+      {
+        "name": "outer-hover",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 8,
+            "y": 8
+          }
+        ]
+      },
+      {
+        "name": "opener-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"opener\"]"
+          }
+        ]
+      },
+      {
+        "name": "child-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"child-a\"]"
+          }
+        ]
+      },
+      {
+        "name": "menu-open",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"opener\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-updated-id=\"opener\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Rename"
+          }
+        ]
+      },
+      {
+        "name": "menu-escape",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "menuitem",
+            "name": "Rename"
+          }
+        ]
+      },
+      {
+        "name": "rename-dialog",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"opener\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-updated-id=\"opener\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "visible",
+            "role": "dialog",
+            "name": "Rename Chat"
+          }
+        ]
+      },
+      {
+        "name": "rename-cancel",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Cancel"
+          },
+          {
+            "action": "hidden",
+            "role": "dialog",
+            "name": "Rename Chat"
+          }
+        ]
+      },
+      {
+        "name": "archive-confirm",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"opener\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-updated-id=\"opener\"] button[aria-label=\"Archive session\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-updated-id=\"opener\"] button[aria-label=\"Confirm Archive session\"]"
+          }
+        ]
+      },
+      {
+        "name": "archive-escape",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-sidebar-updated-id=\"opener\"] button[aria-label=\"Confirm Archive session\"]",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-updated-id=\"opener\"] button[aria-label=\"Confirm Archive session\"]"
+          }
+        ]
+      },
+      {
+        "name": "tree-collapsed",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"opener\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-updated-id=\"opener\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Hide opened sessions"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-updated-id=\"child-a\"]"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-updated-id=\"child-b\"]"
+          }
+        ]
+      },
+      {
+        "name": "tree-expanded",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"opener\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-updated-id=\"opener\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Show 2 opened sessions"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-updated-id=\"child-a\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-updated-id=\"child-b\"]"
+          }
+        ]
+      },
+      {
+        "name": "bucket-collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle updated chats"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-updated-id=\"opener\"]"
+          }
+        ]
+      },
+      {
+        "name": "bucket-expanded",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle updated chats"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-updated-id=\"opener\"]"
+          }
+        ]
+      }
+    ],
+    "components-ownedupdatedsessionmigration--anchor-rows": [
+      {
+        "name": "keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 8,
+            "y": 8
+          },
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Tab"
+          },
+          {
+            "action": "focus",
+            "selector": "[data-sidebar-updated-id=\"opener\"] a"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-updated-id=\"opener\"] a:focus-visible"
+          }
+        ]
+      },
+      {
+        "name": "outer-hover",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 8,
+            "y": 8
+          }
+        ]
+      },
+      {
+        "name": "opener-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"opener\"]"
+          }
+        ]
+      },
+      {
+        "name": "child-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"child-a\"]"
+          }
+        ]
+      },
+      {
+        "name": "menu-open",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"opener\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-updated-id=\"opener\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Rename"
+          }
+        ]
+      },
+      {
+        "name": "menu-escape",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "menuitem",
+            "name": "Rename"
+          }
+        ]
+      },
+      {
+        "name": "rename-dialog",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"opener\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-updated-id=\"opener\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "visible",
+            "role": "dialog",
+            "name": "Rename Chat"
+          }
+        ]
+      },
+      {
+        "name": "rename-cancel",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Cancel"
+          },
+          {
+            "action": "hidden",
+            "role": "dialog",
+            "name": "Rename Chat"
+          }
+        ]
+      }
+    ],
+    "components-ownedupdatedsessionmigration--read-only": [
+      {
+        "name": "outer-hover",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 8,
+            "y": 8
+          }
+        ]
+      },
+      {
+        "name": "row-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"waiting\"]"
+          }
+        ]
+      },
+      {
+        "name": "opener-menu",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"opener\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-updated-id=\"opener\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Hide opened sessions"
+          }
+        ]
+      },
+      {
+        "name": "opener-folded",
+        "steps": [
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Hide opened sessions"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-updated-id=\"child-a\"]"
+          }
+        ]
+      }
+    ],
+    "components-ownedupdatedsessionmigration--scoped-variables": [
+      {
+        "name": "outer-hover",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 8,
+            "y": 8
+          }
+        ]
+      },
+      {
+        "name": "opener-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"opener\"]"
+          }
+        ]
+      },
+      {
+        "name": "child-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"child-a\"]"
+          }
+        ]
+      },
+      {
+        "name": "menu-open",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"opener\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-updated-id=\"opener\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Rename"
+          }
+        ]
+      },
+      {
+        "name": "menu-escape",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "menuitem",
+            "name": "Rename"
+          }
+        ]
+      },
+      {
+        "name": "rename-dialog",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"opener\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-updated-id=\"opener\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "visible",
+            "role": "dialog",
+            "name": "Rename Chat"
+          }
+        ]
+      },
+      {
+        "name": "rename-cancel",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Cancel"
+          },
+          {
+            "action": "hidden",
+            "role": "dialog",
+            "name": "Rename Chat"
+          }
+        ]
+      },
+      {
+        "name": "archive-confirm",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"opener\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-updated-id=\"opener\"] button[aria-label=\"Archive session\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-updated-id=\"opener\"] button[aria-label=\"Confirm Archive session\"]"
+          }
+        ]
+      },
+      {
+        "name": "archive-escape",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-sidebar-updated-id=\"opener\"] button[aria-label=\"Confirm Archive session\"]",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-updated-id=\"opener\"] button[aria-label=\"Confirm Archive session\"]"
+          }
+        ]
+      }
+    ],
+    "components-ownedupdatedsessionmigration--caller-overrides": [
+      {
+        "name": "outer-hover",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 8,
+            "y": 8
+          }
+        ]
+      },
+      {
+        "name": "opener-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"opener\"]"
+          }
+        ]
+      },
+      {
+        "name": "child-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"child-a\"]"
+          }
+        ]
+      },
+      {
+        "name": "menu-open",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"opener\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-updated-id=\"opener\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Rename"
+          }
+        ]
+      },
+      {
+        "name": "menu-escape",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "menuitem",
+            "name": "Rename"
+          }
+        ]
+      }
+    ],
+    "components-ownedupdatedsessionmigration--collapsed-tree": [
+      {
+        "name": "initially-folded",
+        "steps": [
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-updated-id=\"child-a\"]"
+          }
+        ]
+      },
+      {
+        "name": "opened",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"opener\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-updated-id=\"opener\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Show 2 opened sessions"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-updated-id=\"child-a\"]"
+          }
+        ]
+      }
+    ],
+    "components-ownedupdatedsessionmigration--overflow": [
+      {
+        "name": "show-all-focus",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Tab"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Show all (26)"
+          }
+        ]
+      },
+      {
+        "name": "show-all",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Show all (26)"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-updated-id=\"overflow-22\"]"
+          }
+        ]
+      },
+      {
+        "name": "show-less",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Show less"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-updated-id=\"overflow-22\"]"
+          }
+        ]
+      }
+    ]
+  },
+  "allowBlankIds": ["components-sidebar-migration--updated-loading"]
+}

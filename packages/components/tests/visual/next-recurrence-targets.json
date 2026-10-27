@@ -1,0 +1,348 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "at-sm",
+      "width": 640,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "schedules-recurrencemigration--weekly",
+    "schedules-recurrencemigration--monthly",
+    "schedules-recurrencemigration--large-monthly",
+    "schedules-recurrencemigration--disabled-weekly",
+    "schedules-recurrencemigration--disabled-monthly",
+    "schedules-recurrencemigration--once",
+    "schedules-recurrencemigration--unsupported",
+    "schedules-recurrencemigration--disabled-unsupported"
+  ],
+  "states": {
+    "schedules-recurrencemigration--weekly": [
+      {
+        "name": "unselected-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "button[aria-label=\"Tuesday\"]"
+          }
+        ]
+      },
+      {
+        "name": "selected-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "button[aria-label=\"Monday\"]"
+          }
+        ]
+      },
+      {
+        "name": "day-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": "button[aria-label=\"Tuesday\"]"
+          }
+        ]
+      },
+      {
+        "name": "day-keyboard-toggle",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "button[aria-label=\"Tuesday\"]",
+            "key": "Space"
+          },
+          {
+            "action": "visible",
+            "selector": "button[aria-label=\"Tuesday\"][aria-pressed=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "day-pointer-toggle",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"Monday\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "button[aria-label=\"Monday\"][aria-pressed=\"false\"]"
+          }
+        ]
+      },
+      {
+        "name": "time-edit",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "input[type=\"time\"]",
+            "value": "13:45"
+          }
+        ]
+      },
+      {
+        "name": "kind-menu",
+        "steps": [
+          {
+            "action": "click",
+            "role": "combobox",
+            "name": "Repeat"
+          },
+          {
+            "action": "visible",
+            "role": "listbox"
+          }
+        ]
+      }
+    ],
+    "schedules-recurrencemigration--monthly": [
+      {
+        "name": "unselected-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "button[aria-label=\"Day 2\"]"
+          }
+        ]
+      },
+      {
+        "name": "selected-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "button[aria-label=\"Day 15\"]"
+          }
+        ]
+      },
+      {
+        "name": "day-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": "button[aria-label=\"Day 2\"]"
+          }
+        ]
+      },
+      {
+        "name": "day-keyboard-toggle",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "button[aria-label=\"Day 2\"]",
+            "key": "Space"
+          },
+          {
+            "action": "visible",
+            "selector": "button[aria-label=\"Day 2\"][aria-pressed=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "day-pointer-toggle",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"Day 31\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "button[aria-label=\"Day 31\"][aria-pressed=\"false\"]"
+          }
+        ]
+      }
+    ],
+    "schedules-recurrencemigration--large-monthly": [
+      {
+        "name": "unselected-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "button[aria-label=\"Day 2\"]"
+          }
+        ]
+      },
+      {
+        "name": "selected-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "button[aria-label=\"Day 15\"]"
+          }
+        ]
+      },
+      {
+        "name": "day-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": "button[aria-label=\"Day 2\"]"
+          }
+        ]
+      },
+      {
+        "name": "day-keyboard-toggle",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "button[aria-label=\"Day 2\"]",
+            "key": "Space"
+          },
+          {
+            "action": "visible",
+            "selector": "button[aria-label=\"Day 2\"][aria-pressed=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "day-pointer-toggle",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"Day 31\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "button[aria-label=\"Day 31\"][aria-pressed=\"false\"]"
+          }
+        ]
+      }
+    ],
+    "schedules-recurrencemigration--disabled-weekly": [
+      {
+        "name": "disabled-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "button[aria-label=\"Tuesday\"]"
+          }
+        ]
+      }
+    ],
+    "schedules-recurrencemigration--disabled-monthly": [
+      {
+        "name": "disabled-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "button[aria-label=\"Day 2\"]"
+          }
+        ]
+      }
+    ],
+    "schedules-recurrencemigration--once": [
+      {
+        "name": "date-edit",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "input[type=\"datetime-local\"]",
+            "value": "2026-10-23T10:45"
+          }
+        ]
+      }
+    ],
+    "schedules-recurrencemigration--unsupported": [
+      {
+        "name": "replace-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Replace"
+          }
+        ]
+      },
+      {
+        "name": "replace-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Replace"
+          }
+        ]
+      },
+      {
+        "name": "replaced",
+        "steps": [
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Replace",
+            "key": "Space"
+          },
+          {
+            "action": "visible",
+            "selector": "input[type=\"time\"]"
+          }
+        ]
+      }
+    ],
+    "schedules-recurrencemigration--disabled-unsupported": [
+      {
+        "name": "disabled-replace-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Replace"
+          }
+        ]
+      }
+    ]
+  },
+  "ready": {
+    "schedules-recurrencemigration--disabled-weekly": [
+      {
+        "action": "disabled",
+        "selector": "button[aria-label=\"Tuesday\"]"
+      }
+    ],
+    "schedules-recurrencemigration--disabled-monthly": [
+      {
+        "action": "disabled",
+        "selector": "button[aria-label=\"Day 2\"]"
+      }
+    ],
+    "schedules-recurrencemigration--disabled-unsupported": [
+      {
+        "action": "disabled",
+        "role": "button",
+        "name": "Replace"
+      }
+    ]
+  }
+}

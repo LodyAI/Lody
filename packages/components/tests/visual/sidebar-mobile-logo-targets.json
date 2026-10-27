@@ -1,0 +1,21 @@
+{
+  "viewports": [
+    {
+      "name": "android",
+      "device": "Pixel 5",
+      "width": 393,
+      "height": 851
+    }
+  ],
+  "themes": ["dark"],
+  "ids": ["components-sidebarfooter--local-identity"],
+  "ready": {
+    "components-sidebarfooter--local-identity": [
+      {
+        "action": "visible",
+        "selector": "[data-shape=\"tile\"] img"
+      }
+    ]
+  },
+  "blockedHosts": ["avatars.githubusercontent.com"]
+}

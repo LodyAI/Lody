@@ -225,7 +225,6 @@ describe('SessionList opened-by rendering', () => {
       ?.closest('[data-session-tree-depth]');
     const childSlot = childRow?.querySelector('[data-session-row-leading-slot]');
     expect(childRow?.getAttribute('data-session-tree-indent')).toBe('child');
-    expect(childSlot?.className).toContain('w-[26px]');
     expect(childSlot?.querySelectorAll('[data-session-tree-connector]')).toHaveLength(2);
     expect(childSlot?.querySelector('[data-session-tree-connector="trunk"]')).not.toBeNull();
     expect(childSlot?.querySelector('[data-session-tree-connector="elbow"]')).not.toBeNull();

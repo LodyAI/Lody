@@ -14,6 +14,8 @@ import { ArrowLeft, Check } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Button } from '@lody/ui/button';
+import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
 import { TourStill, type TourStillDebugOptions } from './tour/tour-still';
 import { DEFAULT_TOUR_IDENTITY, type TourIdentity } from './tour/tour-fixtures';
 import type { TourAppTracks, TourConfigurationState } from './tour/tour-app';
@@ -21,6 +23,7 @@ import type { CameraShot } from './tour/camera';
 import { applyOnboardingDebugShot, onboardingDebugAtom } from './onboarding-debug';
 import { playBack, playClick, playHover, playSelect } from './ceremony/ui-sounds';
 import type { OnboardingStepKey } from './onboarding-steps';
+import { onboardingShellSurface } from './onboarding-shell.surface';
 
 // The configuration screens and the product are two layers on one stage.
 // `TourStill` is the camera layer; the active form is foreground direction.
@@ -86,7 +89,7 @@ interface StageComposition {
   /** Position of the configuration content in the stage. */
   form: FormPose;
   /** Opacity only: the camera viewport itself always fills the whole stage. */
-  camera: string;
+  cameraOpacity: number;
   /** Horizontal readability gradient; a vertical mask softens its top/bottom. */
   veil: 'left' | 'right' | 'centre';
 }
@@ -122,7 +125,7 @@ const STEP_COMPOSITION: Partial<Record<OnboardingStepKey, StageComposition>> = {
       width: 'min(430px, 38%)',
       edge: 'left',
     },
-    camera: 'opacity-65',
+    cameraOpacity: 0.65,
     veil: 'left',
   },
   workspace: {
@@ -133,7 +136,7 @@ const STEP_COMPOSITION: Partial<Record<OnboardingStepKey, StageComposition>> = {
       width: 'min(455px, 39%)',
       edge: 'right',
     },
-    camera: 'opacity-65',
+    cameraOpacity: 0.65,
     veil: 'right',
   },
   providers: {
@@ -144,7 +147,7 @@ const STEP_COMPOSITION: Partial<Record<OnboardingStepKey, StageComposition>> = {
       width: 'min(470px, 40%)',
       edge: 'left',
     },
-    camera: 'opacity-60',
+    cameraOpacity: 0.6,
     veil: 'left',
   },
   projects: {
@@ -155,7 +158,7 @@ const STEP_COMPOSITION: Partial<Record<OnboardingStepKey, StageComposition>> = {
       width: 'min(455px, 39%)',
       edge: 'left',
     },
-    camera: 'opacity-55',
+    cameraOpacity: 0.55,
     veil: 'left',
   },
   firstTask: {
@@ -166,7 +169,7 @@ const STEP_COMPOSITION: Partial<Record<OnboardingStepKey, StageComposition>> = {
       width: 'min(465px, 40%)',
       edge: 'left',
     },
-    camera: 'opacity-60',
+    cameraOpacity: 0.6,
     veil: 'left',
   },
   summary: {
@@ -177,7 +180,7 @@ const STEP_COMPOSITION: Partial<Record<OnboardingStepKey, StageComposition>> = {
       width: 'min(460px, 42%)',
       edge: 'left',
     },
-    camera: 'opacity-48',
+    cameraOpacity: 0.48,
     veil: 'left',
   },
   language: {
@@ -188,7 +191,7 @@ const STEP_COMPOSITION: Partial<Record<OnboardingStepKey, StageComposition>> = {
       width: 'min(450px, 40%)',
       edge: 'right',
     },
-    camera: 'opacity-50',
+    cameraOpacity: 0.5,
     veil: 'right',
   },
   theme: {
@@ -199,7 +202,7 @@ const STEP_COMPOSITION: Partial<Record<OnboardingStepKey, StageComposition>> = {
       width: 'min(450px, 40%)',
       edge: 'right',
     },
-    camera: 'opacity-50',
+    cameraOpacity: 0.5,
     veil: 'right',
   },
   appearance: {
@@ -210,7 +213,7 @@ const STEP_COMPOSITION: Partial<Record<OnboardingStepKey, StageComposition>> = {
       width: 'min(450px, 40%)',
       edge: 'right',
     },
-    camera: 'opacity-50',
+    cameraOpacity: 0.5,
     veil: 'right',
   },
   invite: {
@@ -221,18 +224,10 @@ const STEP_COMPOSITION: Partial<Record<OnboardingStepKey, StageComposition>> = {
       width: 'min(560px, 86%)',
       edge: 'right',
     },
-    camera: 'opacity-20',
+    cameraOpacity: 0.2,
     veil: 'centre',
   },
 };
-
-const COMPACT_FORM =
-  'max-[1080px]:left-[calc(50%_-_min(310px,43%))]! max-[1080px]:top-[9%]! max-[1080px]:bottom-[7%]! max-[1080px]:w-[min(620px,86%)]!';
-// Below the two-column breakpoint the centred form overlaps the product and
-// the close-up frames an empty patch of the window, so the preview steps out
-// entirely. Opacity (not unmount) is what flips, keeping the camera mounted
-// and letting the existing 700ms fade carry the transition both ways.
-const COMPACT_CAMERA = 'max-[1080px]:opacity-0';
 
 const STEP_CONFIGURATION_STATE: Partial<Record<OnboardingStepKey, TourConfigurationState>> = {
   login: {
@@ -461,18 +456,24 @@ function OnboardingShellSurface({
   // this distance fixed so a wider form never travels farther than a narrow one.
   const formOffsetX = composition.form.edge === 'left' ? -72 : 72;
 
+  const stage = stylex.props(onboardingShellSurface.stage);
+  const camera = stylex.props(onboardingShellSurface.camera);
+  const form = stylex.props(onboardingShellSurface.form, onboardingShellSurface.formCompact);
+  const veil = stylex.props(onboardingShellSurface.veil);
+  const scroller = stylex.props(onboardingShellSurface.scroller);
+  const column = stylex.props(onboardingShellSurface.column);
+  const actions = stylex.props(onboardingShellSurface.actions);
+
   return (
-    <div
-      className="absolute inset-0 isolate overflow-hidden bg-transparent text-slate-950"
-      data-onboarding-stage={stepKey}
-    >
+    <div data-onboarding-stage={stepKey} {...stage} className={stage.className}>
       <motion.div
         aria-hidden
-        className="absolute inset-0"
         initial={{ opacity: 0 }}
         animate={{ opacity: 0.82 }}
         transition={{ duration: 0.72, ease: [0.22, 1, 0.36, 1] }}
         style={{
+          position: 'absolute',
+          inset: 0,
           backgroundImage:
             'linear-gradient(rgba(33,68,79,0.055) 1px, transparent 1px), linear-gradient(90deg, rgba(33,68,79,0.055) 1px, transparent 1px), radial-gradient(circle at 52% 42%, rgba(255,255,255,0.92), rgba(239,244,245,0.72) 58%, rgba(220,229,231,0.78))',
           backgroundSize: '44px 44px, 44px 44px, 100% 100%',
@@ -482,13 +483,17 @@ function OnboardingShellSurface({
       {showsSession ? (
         <>
           <motion.div
-            className="pointer-events-none absolute inset-0 z-0"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.12, duration: 0.68, ease: [0.22, 1, 0.36, 1] }}
+            style={{ position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none' }}
           >
             <div
-              className={`absolute inset-0 h-full w-full overflow-clip transition-opacity duration-700 ease-out ${composition.camera} ${COMPACT_CAMERA}`}
+              {...camera}
+              className={camera.className}
+              style={
+                { '--onboarding-camera-opacity': composition.cameraOpacity } as React.CSSProperties
+              }
               data-onboarding-camera={stepKey}
             >
               <TourStill
@@ -514,7 +519,8 @@ function OnboardingShellSurface({
           </motion.div>
           <motion.div
             aria-hidden
-            className="pointer-events-none absolute inset-0 z-[1]"
+            {...veil}
+            className={veil.className}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.56, ease: [0.22, 1, 0.36, 1] }}
@@ -529,10 +535,10 @@ function OnboardingShellSurface({
       ) : null}
 
       <motion.div
-        className="pointer-events-none absolute inset-0 z-10"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.3, duration: 0.58, ease: [0.22, 1, 0.36, 1] }}
+        style={{ position: 'absolute', inset: 0, zIndex: 10, pointerEvents: 'none' }}
       >
         <AnimatePresence mode="wait" initial={false}>
           <motion.section
@@ -544,7 +550,8 @@ function OnboardingShellSurface({
               x: { type: 'spring', stiffness: 260, damping: 28, mass: 0.8 },
               opacity: { duration: 0.2, ease: 'easeOut' },
             }}
-            className={`pointer-events-auto absolute z-10 flex min-h-0 flex-col will-change-transform ${COMPACT_FORM}`}
+            {...form}
+            className={form.className}
             style={{
               left: composition.form.left,
               top: composition.form.top,
@@ -553,26 +560,20 @@ function OnboardingShellSurface({
             }}
             data-onboarding-form={stepKey}
           >
-            <div className="scrollbar-pro -mx-1 flex min-h-0 flex-1 flex-col overflow-y-auto px-1">
-              <div className="my-auto flex flex-col gap-5 py-2">
+            <div {...scroller} className={clsx(scroller.className, 'scrollbar-pro')}>
+              <div {...column} className={column.className}>
                 {eyebrow == null ? null : (
-                  <div className="text-[11.5px] font-medium tracking-wide text-slate-500">
-                    {eyebrow}
-                  </div>
+                  <div {...stylex.props(onboardingShellSurface.eyebrow)}>{eyebrow}</div>
                 )}
-                <h1 className="text-[31px] font-semibold leading-tight tracking-tight text-slate-950">
-                  {title}
-                </h1>
+                <h1 {...stylex.props(onboardingShellSurface.title)}>{title}</h1>
                 {description == null ? null : (
-                  <div className="max-w-[40ch] text-[14.5px] leading-relaxed text-slate-600">
-                    {description}
-                  </div>
+                  <div {...stylex.props(onboardingShellSurface.description)}>{description}</div>
                 )}
-                <div className="min-h-0">{children}</div>
+                <div {...stylex.props(onboardingShellSurface.content)}>{children}</div>
               </div>
             </div>
             {secondaryAction || primaryAction ? (
-              <div className="flex shrink-0 justify-end gap-2.5 pt-6">
+              <div {...actions} className={actions.className}>
                 {secondaryAction}
                 {primaryAction}
               </div>
@@ -605,7 +606,7 @@ export function OnboardingBackButton({ onClick, disabled, label }: OnboardingBac
       }}
       disabled={disabled}
     >
-      <ArrowLeft className="h-4 w-4" />
+      <ArrowLeft {...stylex.props(onboardingShellSurface.glyph)} />
       {label ?? t('common.back', 'Back')}
     </Button>
   );
@@ -645,9 +646,9 @@ export function OnboardingNextButton({
       disabled={disabled}
     >
       {loading === true ? (
-        <Spinner className="h-4 w-4" />
+        <Spinner {...stylex.props(onboardingShellSurface.glyph)} />
       ) : isFinish ? (
-        <Check className="h-4 w-4" />
+        <Check {...stylex.props(onboardingShellSurface.glyph)} />
       ) : null}
       {text}
     </Button>

@@ -1,7 +1,12 @@
 import { useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check, ChevronDown, Filter } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+
 import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
 import { MobileFilterDrawer } from './mobile-filter-drawer';
 
 /**
@@ -96,38 +101,186 @@ export type MobileFilterPillBarProps = {
 
 const PANEL_TRANSITION = { duration: 0.18, ease: [0.32, 0.72, 0, 1] as const };
 
+/** Tailwind's `transition-colors`: colour properties only, 150ms, standard ease. */
+const TRANSITION_COLORS = {
+  transitionProperty: 'color, background-color, border-color, text-decoration-color, fill, stroke',
+  transitionDuration: '150ms',
+  transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+} as const;
+
+const styles = stylex.create({
+  root: { position: 'relative' },
+  toolbar: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[2],
+    overflowX: 'auto',
+    paddingInline: themeSpace[3],
+    paddingTop: themeSpace[2],
+    paddingBottom: themeSpace[1.5],
+  },
+  accordion: { overflow: 'hidden' },
+
+  /** A chip in the bar. */
+  pill: {
+    position: 'relative',
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderRadius: themeRadius.full,
+    fontSize: '0.78rem',
+    fontWeight: themeFontWeight.medium,
+    lineHeight: 1,
+    letterSpacing: '-0.025em',
+    scale: { default: null, ':active': '0.97' },
+    ...TRANSITION_COLORS,
+  },
+  /** The chip that opens the drawer: a wider gap and its own left inset. */
+  pillAggregate: {
+    gap: themeSpace[2],
+    paddingTop: themeSpace[1.5],
+    paddingBottom: themeSpace[1.5],
+    paddingLeft: themeSpace[3],
+    paddingRight: themeSpace[2.5],
+  },
+  /** The chip that opens the inline panel. */
+  pillSingle: {
+    gap: themeSpace[1],
+    paddingTop: themeSpace[1.5],
+    paddingBottom: themeSpace[1.5],
+    paddingInline: themeSpace[3],
+  },
+  /** A chip at rest. */
+  pillIdle: {
+    borderColor: 'hsl(var(--border) / 0.5)',
+    backgroundColor: { default: themeColors.muted, ':hover': 'hsl(var(--muted) / 0.8)' },
+    color: themeColors.foreground,
+  },
+  /** A chip that is open, or carries a filter. */
+  pillActive: {
+    borderColor: 'hsl(var(--primary) / 0.4)',
+    backgroundColor: 'hsl(var(--primary) / 0.15)',
+    color: themeColors.primary,
+  },
+  /** The chip's label never wraps. */
+  pillLabel: { whiteSpace: 'nowrap' },
+  /** The rule that splits the aggregate chip's label from its glyph. */
+  pillDivider: {
+    width: '1px',
+    height: themeSpace[3.5],
+  },
+  pillDividerIdle: { backgroundColor: 'hsl(var(--border) / 0.7)' },
+  pillDividerActive: { backgroundColor: 'hsl(var(--primary) / 0.3)' },
+  /** The aggregate chip's glyph. */
+  pillGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+  },
+  /** The single chip's chevron. */
+  chevron: {
+    width: themeSpace[3],
+    height: themeSpace[3],
+    flexShrink: 0,
+    rotate: '0deg',
+    transitionProperty: 'transform',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  chevronOpen: { rotate: '180deg' },
+
+  /** The dot that says a filter is applied. */
+  filterDot: {
+    position: 'absolute',
+    top: 'calc(var(--spacing) * -0.5)',
+    right: 'calc(var(--spacing) * -0.5)',
+    display: 'inline-block',
+    width: themeSpace[2],
+    height: themeSpace[2],
+    borderRadius: themeRadius.full,
+    backgroundColor: themeColors.primary,
+    boxShadow: '0 0 0 2px hsl(var(--background))',
+  },
+
+  /** The inline panel the chip opens. */
+  panel: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: themeSpace[1.5],
+    paddingInline: themeSpace[3],
+    paddingTop: themeSpace[1],
+    paddingBottom: themeSpace[2.5],
+  },
+  /** One option of the inline panel. */
+  option: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderRadius: themeRadius.full,
+    paddingTop: themeSpace[1],
+    paddingBottom: themeSpace[1],
+    paddingInline: themeSpace[2.5],
+    fontSize: '0.78rem',
+    fontWeight: themeFontWeight.medium,
+    lineHeight: 1,
+    letterSpacing: '-0.025em',
+    scale: { default: null, ':active': '0.97' },
+    ...TRANSITION_COLORS,
+  },
+  /** An option of a multi-select panel, which carries a check. */
+  optionMulti: { gap: themeSpace[1.5] },
+  /** A chosen option. */
+  optionSelected: {
+    borderColor: themeColors.primary,
+    backgroundColor: themeColors.primary,
+    color: themeColors.primaryForeground,
+  },
+  /** An option that is not chosen. */
+  optionIdle: {
+    borderColor: 'hsl(var(--border) / 0.6)',
+    backgroundColor: { default: themeColors.card, ':hover': 'hsl(var(--muted) / 0.4)' },
+    color: themeColors.foreground,
+  },
+  /** The check in a chosen option. */
+  optionCheck: {
+    width: themeSpace[3],
+    height: themeSpace[3],
+    flexShrink: 0,
+  },
+});
+
 export function MobileFilterPillBar({ pills, className }: MobileFilterPillBarProps) {
   const [openPillId, setOpenPillId] = useState<string | null>(null);
-  const activePill = openPillId
-    ? (pills.find((pill) => pill.id === openPillId) ?? null)
-    : null;
+  const activePill = openPillId ? (pills.find((pill) => pill.id === openPillId) ?? null) : null;
 
   /* Inline accordion only renders for single / multi pills. Aggregate
      pills open their own drawer (rendered below). Splitting the
      branches here keeps the AnimatePresence height animation
      focused on the in-flow accordion case where it actually
      applies. */
-  const inlineActivePill =
-    activePill && activePill.kind !== 'aggregate' ? activePill : null;
+  const inlineActivePill = activePill && activePill.kind !== 'aggregate' ? activePill : null;
   const aggregatePills = pills.filter(
     (pill): pill is AggregateFilterPill => pill.kind === 'aggregate'
   );
 
   return (
-    <div className={cn('mobile-filter-pill-bar relative', className)}>
+    <div {...withClassName(stylex.props(styles.root), cn('mobile-filter-pill-bar', className))}>
       <div
         role="toolbar"
         aria-label="filters"
-        className="hide-scrollbar flex shrink-0 items-center gap-2 overflow-x-auto px-3 pt-2 pb-1.5"
+        {...withClassName(stylex.props(styles.toolbar), 'hide-scrollbar')}
       >
         {pills.map((pill) => (
           <FilterPillButton
             key={pill.id}
             pill={pill}
             isOpen={openPillId === pill.id}
-            onToggle={() =>
-              setOpenPillId((current) => (current === pill.id ? null : pill.id))
-            }
+            onToggle={() => setOpenPillId((current) => (current === pill.id ? null : pill.id))}
           />
         ))}
       </div>
@@ -139,7 +292,7 @@ export function MobileFilterPillBar({ pills, className }: MobileFilterPillBarPro
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={PANEL_TRANSITION}
-            className="overflow-hidden"
+            {...stylex.props(styles.accordion)}
           >
             <PillOptionsPanel
               pill={inlineActivePill}
@@ -186,35 +339,34 @@ function FilterPillButton({
     const hasActiveFilter = pill.pills.some(
       (inner) => !setsEqual(inner.selectedIds, inner.defaultIds)
     );
+    const engaged = isOpen || hasActiveFilter;
     return (
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={isOpen}
         aria-haspopup="dialog"
-        className={cn(
-          'relative inline-flex shrink-0 items-center gap-2 rounded-full border py-1.5 pl-3 pr-2.5 text-[0.78rem] font-medium leading-none tracking-tight',
-          'transition-colors active:scale-[0.97]',
-          isOpen || hasActiveFilter
-            ? 'border-primary/40 bg-primary/15 text-primary'
-            : 'border-border/50 bg-muted text-foreground hover:bg-muted/80 dark:border-white/12 dark:bg-white/10 dark:hover:bg-white/14'
+        /* The dark-mode fills are hard-coded colours, so they stay
+           Tailwind classes on this element. */
+        {...withClassName(
+          stylex.props(
+            styles.pill,
+            styles.pillAggregate,
+            engaged ? styles.pillActive : styles.pillIdle
+          ),
+          engaged ? undefined : 'dark:border-white/12 dark:bg-white/10 dark:hover:bg-white/14'
         )}
       >
-        <span className="whitespace-nowrap">{pill.label}</span>
+        <span {...stylex.props(styles.pillLabel)}>{pill.label}</span>
         <span
           aria-hidden="true"
-          className={cn(
-            'h-3.5 w-px',
-            isOpen || hasActiveFilter ? 'bg-primary/30' : 'bg-border/70'
+          {...stylex.props(
+            styles.pillDivider,
+            engaged ? styles.pillDividerActive : styles.pillDividerIdle
           )}
         />
-        <Filter className="h-3.5 w-3.5 shrink-0" strokeWidth={2} aria-hidden="true" />
-        {hasActiveFilter ? (
-          <span
-            aria-hidden="true"
-            className="absolute -right-0.5 -top-0.5 inline-block h-2 w-2 rounded-full bg-primary ring-2 ring-background"
-          />
-        ) : null}
+        <Filter {...stylex.props(styles.pillGlyph)} strokeWidth={2} aria-hidden="true" />
+        {hasActiveFilter ? <span aria-hidden="true" {...stylex.props(styles.filterDot)} /> : null}
       </button>
     );
   }
@@ -235,29 +387,20 @@ function FilterPillButton({
       onClick={onToggle}
       aria-expanded={isOpen}
       aria-haspopup="listbox"
-      className={cn(
-        'relative inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-1.5 text-[0.78rem] font-medium leading-none tracking-tight',
-        'transition-colors active:scale-[0.97]',
-        isOpen
-          ? 'border-primary/40 bg-primary/15 text-primary'
-          : 'border-border/50 bg-muted text-foreground hover:bg-muted/80 dark:border-white/12 dark:bg-white/10 dark:hover:bg-white/14'
+      /* The dark-mode fills are hard-coded colours, so they stay
+         Tailwind classes on this element. */
+      {...withClassName(
+        stylex.props(styles.pill, styles.pillSingle, isOpen ? styles.pillActive : styles.pillIdle),
+        isOpen ? undefined : 'dark:border-white/12 dark:bg-white/10 dark:hover:bg-white/14'
       )}
     >
-      <span className="whitespace-nowrap">{label}</span>
+      <span {...stylex.props(styles.pillLabel)}>{label}</span>
       <ChevronDown
-        className={cn(
-          'h-3 w-3 shrink-0 transition-transform',
-          isOpen ? 'rotate-180' : 'rotate-0'
-        )}
+        {...stylex.props(styles.chevron, isOpen && styles.chevronOpen)}
         strokeWidth={2}
         aria-hidden="true"
       />
-      {hasFilterDot ? (
-        <span
-          aria-hidden="true"
-          className="absolute -right-0.5 -top-0.5 inline-block h-2 w-2 rounded-full bg-primary ring-2 ring-background"
-        />
-      ) : null}
+      {hasFilterDot ? <span aria-hidden="true" {...stylex.props(styles.filterDot)} /> : null}
     </button>
   );
 }
@@ -271,7 +414,7 @@ function PillOptionsPanel({
 }) {
   if (pill.kind === 'single') {
     return (
-      <div className="flex flex-wrap gap-1.5 px-3 pb-2.5 pt-1">
+      <div {...stylex.props(styles.panel)}>
         {pill.options.map((option) => {
           const selected = option.id === pill.selectedId;
           return (
@@ -282,13 +425,7 @@ function PillOptionsPanel({
                 if (!selected) pill.onSelect(option.id);
                 onAfterSelect();
               }}
-              className={cn(
-                'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[0.78rem] font-medium leading-none tracking-tight',
-                'transition-colors active:scale-[0.97]',
-                selected
-                  ? 'border-primary bg-primary text-primary-foreground'
-                  : 'border-border/60 bg-card text-foreground hover:bg-muted/40'
-              )}
+              {...stylex.props(styles.option, selected ? styles.optionSelected : styles.optionIdle)}
             >
               {option.label}
             </button>
@@ -299,7 +436,7 @@ function PillOptionsPanel({
   }
 
   return (
-    <div className="flex flex-wrap gap-1.5 px-3 pb-2.5 pt-1">
+    <div {...stylex.props(styles.panel)}>
       {pill.options.map((option) => {
         const selected = pill.selectedIds.has(option.id);
         return (
@@ -312,19 +449,17 @@ function PillOptionsPanel({
               else next.add(option.id);
               pill.onChange(next);
             }}
-            className={cn(
-              'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[0.78rem] font-medium leading-none tracking-tight',
-              'transition-colors active:scale-[0.97]',
-              selected
-                ? 'border-primary bg-primary text-primary-foreground'
-                : 'border-border/60 bg-card text-foreground hover:bg-muted/40'
+            {...stylex.props(
+              styles.option,
+              styles.optionMulti,
+              selected ? styles.optionSelected : styles.optionIdle
             )}
           >
             {selected ? (
-              <Check className="h-3 w-3 shrink-0" strokeWidth={2.4} aria-hidden="true" />
+              <Check {...stylex.props(styles.optionCheck)} strokeWidth={2.4} aria-hidden="true" />
             ) : null}
             {option.icon}
-            <span className="whitespace-nowrap">{option.label}</span>
+            <span {...stylex.props(styles.pillLabel)}>{option.label}</span>
           </button>
         );
       })}

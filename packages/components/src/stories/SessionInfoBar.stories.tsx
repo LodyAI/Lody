@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { useState } from 'react';
+import { useLayoutEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { fn, userEvent, within } from 'storybook/test';
 import { useTranslation } from 'react-i18next';
 import {
@@ -721,3 +721,109 @@ function PeekPlayground() {
 export const RecencyFocus: Story = {
   render: () => <PeekPlayground />,
 };
+
+const ownedPalette = {
+  '--input': '210 45% 70%',
+  '--input-border': '283 65% 42%',
+  '--composer': '165 25% 92%',
+  '--color-amber-300': 'oklch(75% 0.15 72)',
+  '--color-emerald-600': 'oklch(48% 0.12 162)',
+  '--color-emerald-400': 'oklch(78% 0.13 170)',
+} as CSSProperties;
+
+function OwnedColourScope({ root, children }: { root: boolean; children: ReactNode }) {
+  useLayoutEffect(() => {
+    if (!root) return undefined;
+    const element = document.documentElement;
+    const previous = Object.keys(ownedPalette).map((name) => [
+      name,
+      element.style.getPropertyValue(name),
+    ]);
+    for (const [name, value] of Object.entries(ownedPalette))
+      element.style.setProperty(name, value);
+    return () => {
+      for (const [name, value] of previous) {
+        if (value) element.style.setProperty(name, value);
+        else element.style.removeProperty(name);
+      }
+    };
+  }, [root]);
+  return children;
+}
+
+function OwnedInfoBarFixture({
+  compact = false,
+  scope,
+  nested = false,
+}: {
+  compact?: boolean;
+  scope?: 'root' | 'subtree';
+  nested?: boolean;
+}) {
+  const [action, setAction] = useState('Ready');
+  const [pointer, setPointer] = useState('none');
+  const renderBar = () => (
+    <SessionInfoBar
+      status={null}
+      machine={compact ? LOCAL_MACHINE : undefined}
+      compactMachineInfo={compact}
+      privateAccessStatus={{
+        label: 'Private · Only synthetic owner 中文长标签',
+        description: 'Only synthetic owner can access this session',
+        onAction: () => setAction('Privacy action'),
+      }}
+      onOpenBrowser={() => setAction('Browser action')}
+      onOpenIosSimulator={() => setAction('Simulator action')}
+    />
+  );
+  const themed = (outer: string, inner?: string) => (
+    <section className={outer} data-info-bar-owned-theme={`${outer}/${inner ?? 'none'}`}>
+      <p style={{ margin: '8px 0', fontSize: 12 }}>
+        {outer}
+        {inner ? ` → ${inner}` : ''}
+      </p>
+      {inner ? <div className={inner}>{renderBar()}</div> : renderBar()}
+    </section>
+  );
+  return (
+    <OwnedColourScope root={scope === 'root'}>
+      <main
+        data-info-bar-owned-fixture
+        data-info-bar-owned-scope={scope ?? 'default'}
+        onPointerDownCapture={(event) =>
+          setPointer(`${event.pointerType}:${String(event.isTrusted)}`)
+        }
+        onKeyDownCapture={(event) => setPointer(`keyboard:${event.key}:${String(event.isTrusted)}`)}
+        style={{
+          width: 'min(760px, calc(100vw - 32px))',
+          paddingBlock: 16,
+          ...(scope === 'subtree' ? ownedPalette : {}),
+        }}
+      >
+        <output
+          data-info-bar-owned-result
+          data-pointer={pointer}
+          style={{ display: 'block', marginBottom: 16 }}
+        >
+          {action}
+        </output>
+        {nested ? (
+          <>
+            {themed('dark-scope')}
+            {themed('light-scope')}
+            {themed('dark-scope', 'light-scope')}
+            {themed('light-scope', 'dark-scope')}
+          </>
+        ) : (
+          renderBar()
+        )}
+      </main>
+    </OwnedColourScope>
+  );
+}
+
+export const OwnedColours: Story = { render: () => <OwnedInfoBarFixture /> };
+export const OwnedCompactColours: Story = { render: () => <OwnedInfoBarFixture compact /> };
+export const OwnedRootPalette: Story = { render: () => <OwnedInfoBarFixture scope="root" /> };
+export const OwnedSubtreePalette: Story = { render: () => <OwnedInfoBarFixture scope="subtree" /> };
+export const OwnedNestedThemes: Story = { render: () => <OwnedInfoBarFixture nested /> };

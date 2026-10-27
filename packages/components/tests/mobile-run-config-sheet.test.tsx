@@ -212,10 +212,10 @@ describe('MobileRunConfigSheet', () => {
     );
     expect(options.every(Boolean)).toBe(true);
     for (const option of options) {
-      expect(option?.querySelector('span.h-4.w-4')).not.toBeNull();
+      expect(option?.querySelector('[data-picker-option-icon]')).not.toBeNull();
     }
     // The trigger shows one value, not a column, so it stays flush.
-    expect(view.querySelector('button[aria-label="Role"] span.h-4.w-4')).toBeNull();
+    expect(view.querySelector('button[aria-label="Role"] [data-picker-option-icon]')).toBeNull();
   });
 
   it('selects and clears a Role without changing the permission', async () => {

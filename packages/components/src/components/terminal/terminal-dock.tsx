@@ -19,6 +19,15 @@ import {
   terminalDockOpenAtom,
 } from './terminal-controller';
 import type { TerminalChannel, TerminalSnapshot } from './terminal-channel';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeDuration,
+  themeEasing,
+  themeFontSize,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 
 // A bottom dock that stays fully hidden until it is opened (from the session
 // header's dock toggle, or the ⌃` / ⌘J command). There is no always-present
@@ -38,20 +47,23 @@ type RememberedTerminalSessionState = {
   activeTerminalId: string | null;
 };
 
-// The terminal tab strip's own canvas is already `bg-sidebar`, unlike
-// `SessionTabBar`/`TAB_PILL_*`, whose pill sits on the app's plain
-// `--background` canvas. Flat fill only, no border/shadow.
-const TERMINAL_TAB_ACTIVE_CLASS =
-  'bg-background text-tab-active-foreground dark:bg-muted-foreground/[0.16]';
-const TERMINAL_TAB_INACTIVE_CLASS =
-  'text-tab-inactive-foreground hover:bg-muted-foreground/[0.08] hover:text-tab-hover-foreground';
-
-const HEADER_HEIGHT = 32;
-const DOCK_CHROME_HEIGHT = HEADER_HEIGHT + 1;
-
 const styles = stylex.create({
-  frame: {
+  root: { flex: 'none', overflow: 'hidden' },
+  heightTransition: {
+    transitionProperty: 'height',
+    transitionDuration: themeDuration[200],
+    transitionTimingFunction: themeEasing.out,
+  },
+  panel: {
     position: 'relative',
+    display: 'flex',
+    minWidth: 0,
+    flexDirection: 'column',
+    overflow: 'hidden',
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'hsl(var(--sidebar-border) / 0.8)',
+    backgroundColor: themeColors.sidebar,
   },
   resizeHandle: {
     position: 'absolute',
@@ -62,7 +74,125 @@ const styles = stylex.create({
     cursor: 'ns-resize',
     touchAction: 'none',
   },
+  header: {
+    display: 'flex',
+    height: themeSpace[8],
+    flex: 'none',
+    alignItems: 'center',
+    gap: themeSpace[3],
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: 'hsl(var(--sidebar-border) / 0.6)',
+    paddingInline: themeSpace[2],
+    fontSize: '11px',
+    color: themeColors.mutedForeground,
+  },
+  tabStrip: {
+    display: 'flex',
+    height: '100%',
+    minWidth: 0,
+    flex: '1 1 0%',
+    alignItems: 'center',
+    gap: themeSpace[3],
+    overflowX: 'auto',
+  },
+  tab: {
+    display: 'flex',
+    height: themeSpace[6],
+    maxWidth: 'calc(var(--spacing) * 44)',
+    minWidth: 0,
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[1],
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[2],
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  // The tab's canvas is already the sidebar; the selected fill stays flat.
+  tabActive: {
+    backgroundColor: themeColors.background,
+    color: themeColors.tabActiveForeground,
+  },
+  tabInactive: {
+    backgroundColor: {
+      default: null,
+      '@media (hover: hover)': { ':hover': 'hsl(var(--muted-foreground) / 0.08)' },
+    },
+    color: {
+      default: themeColors.tabInactiveForeground,
+      '@media (hover: hover)': { ':hover': themeColors.tabHoverForeground },
+    },
+  },
+  tabButton: { display: 'flex', minWidth: 0, alignItems: 'center', gap: themeSpace[1] },
+  terminalGlyph: {
+    width: themeSpace[3],
+    height: themeSpace[3],
+    flexShrink: 0,
+    opacity: 0.7,
+  },
+  title: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  close: {
+    flexShrink: 0,
+    borderRadius: themeRadius.sm,
+    padding: themeSpace[0.5],
+    transitionProperty: 'opacity',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  closeActive: { opacity: { default: 0.7, '@media (hover: hover)': { ':hover': 1 } } },
+  closeInactive: {
+    opacity: {
+      default: 0,
+      '@media (hover: hover)': {
+        [stylex.when.ancestor(':is([data-terminal-tab]):hover')]: 1,
+      },
+    },
+  },
+  closeGlyph: { width: themeSpace[2.5], height: themeSpace[2.5] },
+  action: {
+    display: 'flex',
+    height: '100%',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingInline: themeSpace[0.5],
+  },
+  actionHover: {
+    color: { default: null, '@media (hover: hover)': { ':hover': themeColors.foreground } },
+  },
+  createAction: {
+    cursor: { default: null, ':disabled': 'not-allowed' },
+    opacity: { default: null, ':disabled': 0.4 },
+    color: {
+      default: null,
+      '@media (hover: hover)': {
+        ':hover': themeColors.foreground,
+        ':disabled:hover': themeColors.mutedForeground,
+      },
+    },
+  },
+  plusGlyph: { width: themeSpace[3], height: themeSpace[3] },
+  error: { color: themeColors.destructive },
+  collapseGlyph: { width: themeSpace[3.5], height: themeSpace[3.5], opacity: 0.7 },
+  body: { minHeight: 0, flex: '1 1 0%', overflow: 'hidden' },
+  empty: {
+    display: 'flex',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingInline: themeSpace[4],
+    textAlign: 'center',
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
 });
+
+const HEADER_HEIGHT = 32;
+const DOCK_CHROME_HEIGHT = HEADER_HEIGHT + 1;
 
 const MIN_BODY_HEIGHT = 140;
 const MAX_BODY_HEIGHT = 680;
@@ -484,21 +614,14 @@ export function TerminalDock({
   return (
     <div
       className={cn(
-        'flex-none overflow-hidden',
-        !isResizing && 'transition-[height] duration-200 ease-out',
+        stylex.props(styles.root, !isResizing && styles.heightTransition).className,
         className
       )}
       style={{ height: isOpen ? bodyHeight + DOCK_CHROME_HEIGHT : 0 }}
       aria-hidden={!isOpen}
     >
       {isOpen ? (
-        <div
-          className={cn(
-            'flex min-w-0 flex-col overflow-hidden border-t border-sidebar-border/80 bg-sidebar',
-            stylex.props(styles.frame).className
-          )}
-          style={{ height: bodyHeight + DOCK_CHROME_HEIGHT }}
-        >
+        <div {...stylex.props(styles.panel)} style={{ height: bodyHeight + DOCK_CHROME_HEIGHT }}>
           {/* Drag-to-resize zone at the very top edge (no visible handle bar). */}
           <div
             onPointerDown={onResizeDown}
@@ -509,8 +632,8 @@ export function TerminalDock({
 
           {/* Top tab strip: terminal tabs (+ new) fill the width left of the
               collapse chevron. */}
-          <div className="flex h-8 flex-none items-center gap-3 border-b border-sidebar-border/60 px-2 text-[11px] text-muted-foreground">
-            <div className="lody-terminal-tab-strip flex h-full min-w-0 flex-1 items-center gap-3 overflow-x-auto">
+          <div {...stylex.props(styles.header)}>
+            <div className={cn('lody-terminal-tab-strip', stylex.props(styles.tabStrip).className)}>
               {sessionId
                 ? terminals.map((term) => {
                     const isActive = term.terminalId === activeId && view === 'terminal';
@@ -519,31 +642,34 @@ export function TerminalDock({
                         key={term.terminalId}
                         role="tab"
                         aria-selected={isActive}
+                        data-terminal-tab=""
                         className={cn(
-                          'group flex h-6 max-w-44 min-w-0 shrink-0 items-center gap-1 rounded-md px-2 transition-colors',
-                          isActive ? TERMINAL_TAB_ACTIVE_CLASS : TERMINAL_TAB_INACTIVE_CLASS
+                          stylex.props(
+                            stylex.defaultMarker(),
+                            styles.tab,
+                            isActive ? styles.tabActive : styles.tabInactive
+                          ).className,
+                          isActive && 'dark:bg-muted-foreground/[0.16]'
                         )}
                       >
                         <button
                           type="button"
                           onClick={() => selectTerminal(term.terminalId)}
-                          className="flex min-w-0 items-center gap-1"
+                          {...stylex.props(styles.tabButton)}
                         >
-                          <TerminalSquare className="h-3 w-3 shrink-0 opacity-70" />
-                          <span className="min-w-0 truncate">{term.title || 'shell'}</span>
+                          <TerminalSquare {...stylex.props(styles.terminalGlyph)} />
+                          <span {...stylex.props(styles.title)}>{term.title || 'shell'}</span>
                         </button>
                         <button
                           type="button"
                           aria-label="Close terminal"
                           onClick={() => handleCloseTerminal(term.terminalId)}
-                          className={cn(
-                            'shrink-0 rounded-sm p-0.5 transition-opacity',
-                            isActive
-                              ? 'opacity-70 hover:opacity-100'
-                              : 'opacity-0 group-hover:opacity-100'
+                          {...stylex.props(
+                            styles.close,
+                            isActive ? styles.closeActive : styles.closeInactive
                           )}
                         >
-                          <X className="h-2.5 w-2.5" />
+                          <X {...stylex.props(styles.closeGlyph)} />
                         </button>
                       </div>
                     );
@@ -562,13 +688,13 @@ export function TerminalDock({
                   onClick={() => {
                     void handleNewTerminal();
                   }}
-                  className="flex h-full shrink-0 items-center justify-center px-0.5 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground"
+                  {...stylex.props(styles.action, styles.createAction)}
                 >
-                  <Plus className="h-3 w-3" />
+                  <Plus {...stylex.props(styles.plusGlyph)} />
                 </button>
               ) : null}
               {sessionId && terminalError ? (
-                <span className="min-w-0 truncate text-destructive" title={terminalError}>
+                <span {...stylex.props(styles.title, styles.error)} title={terminalError}>
                   {terminalError}
                 </span>
               ) : null}
@@ -579,14 +705,14 @@ export function TerminalDock({
               type="button"
               aria-label="Hide panel"
               onClick={toggleDock}
-              className="flex h-full shrink-0 items-center justify-center px-0.5 hover:text-foreground"
+              {...stylex.props(styles.action, styles.actionHover)}
             >
-              <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+              <ChevronDown {...stylex.props(styles.collapseGlyph)} />
             </button>
           </div>
 
           {/* Body: the active terminal. */}
-          <div className="min-h-0 flex-1 overflow-hidden">
+          <div {...stylex.props(styles.body)}>
             {activeId ? (
               <LocalTerminalPanel
                 key={activeId}
@@ -600,12 +726,7 @@ export function TerminalDock({
                 onTitleChange={updateActiveTitle}
               />
             ) : (
-              <div
-                className={cn(
-                  'flex h-full items-center justify-center px-4 text-center text-xs',
-                  terminalError ? 'text-destructive' : 'text-muted-foreground'
-                )}
-              >
+              <div {...stylex.props(styles.empty, Boolean(terminalError) && styles.error)}>
                 {terminalError ??
                   (isLoadingTerminals ? 'Loading terminals...' : 'No terminal open')}
               </div>

@@ -1,0 +1,33 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "components-lodysidebar--all-sessions-working",
+    "components-lodysidebar--default",
+    "components-lodysidebar--electron-always-visible-collapse-toggle",
+    "components-lodysidebar--electron-mac-os-collapse-toggle",
+    "components-lodysidebar--external-history-providers",
+    "components-lodysidebar--updated-mode-opened-sessions",
+    "components-lodysidebar--updated-mode-show-project-overview",
+    "components-sessionlist--long-titles"
+  ],
+  "allowBlankIds": [],
+  "states": {},
+  "blockedHosts": ["avatars.githubusercontent.com"]
+}

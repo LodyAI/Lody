@@ -1,5 +1,20 @@
 import { Spinner } from '@lody/ui/spinner';
+import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontSize, themeLineHeight, themeSpace } from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  root: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[1],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+});
 
 /**
  * - `syncing`: generic document catch-up (headers).
@@ -17,11 +32,7 @@ export function SessionSyncingIndicator({
   const { t } = useTranslation();
 
   return (
-    <span
-      className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
-      role="status"
-      data-sync-indicator={variant}
-    >
+    <span {...stylex.props(styles.root)} role="status" data-sync-indicator={variant}>
       <Spinner className="h-3 w-3" aria-hidden="true" />
       <span className={labelClassName}>
         {variant === 'updating'

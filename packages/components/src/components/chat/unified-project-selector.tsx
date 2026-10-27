@@ -28,17 +28,224 @@ import {
 import type { MachineVisibilityAccess } from '@/lib/visible-machine-index';
 import type { VisibleLocalProjectIndex } from '@/lib/visible-local-project-index';
 import { cn } from '@/lib/utils';
-import { withClassName } from '@/lib/stylex';
 import { contextPill } from './context-pill-class';
 import { Menu, MenuSearchInput } from '@/ui/menu';
 import { Tooltip } from '@lody/ui/tooltip';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  /* The owner mark beside a project name. */
+  ownerGlyph: { width: themeSpace[4], height: themeSpace[4], flexShrink: 0, opacity: 0.7 },
+  ownerAvatar: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+    borderRadius: themeRadius.sm,
+    objectFit: 'cover',
+  },
+  folderGlyph: { width: themeSpace[4], height: themeSpace[4], opacity: 0.7 },
+  lockGlyph: { width: themeSpace[3], height: themeSpace[3] },
+
+  /* The access badge: "Private", and the action that shares the project. */
+  accessStatus: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    color: 'hsl(var(--foreground) / 0.75)',
+  },
+  accessStatusTrigger: {
+    height: themeSpace[6],
+    borderTopRightRadius: themeRadius.md,
+    borderBottomRightRadius: themeRadius.md,
+    paddingInline: themeSpace[2],
+    fontSize: '0.8em',
+    fontWeight: themeFontWeight.medium,
+    transitionProperty:
+      'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  accessStatusOption: { fontSize: '0.8em', fontWeight: themeFontWeight.medium },
+  accessStatusAction: {
+    cursor: 'pointer',
+    color: { default: 'hsl(var(--foreground) / 0.75)', ':hover': themeColors.foreground },
+  },
+  /**
+   * The focus state: the badge comes forward so its own ring is not clipped.
+   * The focus ring itself is a Tailwind `focus-visible:ring-*`, which paints
+   * nothing (the app zeroes Tailwind's ring shadow on focus), so it is not
+   * restated here.
+   */
+  accessStatusFocus: {
+    position: { default: 'static', ':focus-visible': 'relative' },
+    zIndex: { default: 'auto', ':focus-visible': 20 },
+  },
+  accessTitle: { fontWeight: themeFontWeight.medium },
+  accessDescription: {
+    marginTop: themeSpace[0.5],
+    fontSize: '0.8em',
+    color: themeColors.mutedForeground,
+  },
+
+  /* The selector's own row. */
+  row: { position: 'relative', display: 'flex', minWidth: 0, alignItems: 'center' },
+  rowFull: { width: '100%' },
+  clear: {
+    position: 'absolute',
+    left: themeSpace[2],
+    zIndex: 10,
+    display: 'flex',
+    height: themeSpace[4],
+    width: themeSpace[4],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.full,
+    color: { default: themeColors.mutedForeground, ':hover': themeColors.foreground },
+    backgroundColor: { default: 'transparent', ':hover': themeColors.hover },
+    opacity: {
+      default: 0,
+      '@media (hover: hover)': {
+        [stylex.when.ancestor(':is([data-unified-project-row]):hover')]: 1,
+      },
+      [stylex.when.ancestor(':is([data-unified-project-row]):focus-within')]: 1,
+    },
+    transitionProperty: 'opacity',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  clearGlyph: { width: themeSpace[3], height: themeSpace[3] },
+
+  /* The trigger's own face. */
+  triggerPropertyRow: {
+    display: 'flex',
+    height: themeSpace[8],
+    width: '100%',
+    minWidth: 0,
+    maxWidth: 'none',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[2],
+    fontSize: '1em',
+    fontWeight: themeFontWeight.normal,
+    color: themeColors.foreground,
+    transitionProperty:
+      'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  /** The first property-row face: the pointer's fill, and the same while open. */
+  triggerPropertyRowHover: {
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': themeColors.hover,
+      ':is([data-state="open"])': themeColors.hover,
+    },
+  },
+  /**
+   * The second property-row face: a faint ink wash instead of the pointer's
+   * fill. Its dark step is a hard-coded white, so it stays a Tailwind class.
+   */
+  triggerPropertyRowInk: {
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': 'hsl(var(--foreground) / 0.05)',
+      ':is([data-state="open"])': 'hsl(var(--foreground) / 0.05)',
+    },
+  },
+  triggerChip: {
+    display: 'flex',
+    height: themeSpace[6],
+    minWidth: 0,
+    maxWidth: '18rem',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[2],
+    fontSize: '0.9em',
+    fontWeight: themeFontWeight.normal,
+    color: { default: 'hsl(var(--foreground) / 0.8)', ':hover': themeColors.foreground },
+    transitionProperty:
+      'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  /** The chip shares the badge's half, so it loses its right corners. */
+  triggerChipShared: { borderTopRightRadius: 0, borderBottomRightRadius: 0 },
+  triggerEmpty: { color: themeColors.mutedForeground },
+  triggerGlyph: {
+    display: 'flex',
+    height: themeSpace[4],
+    width: themeSpace[4],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  triggerGlyphFade: {
+    opacity: {
+      default: 1,
+      '@media (hover: hover)': {
+        [stylex.when.ancestor(':is([data-unified-project-row]):hover')]: 0,
+      },
+      [stylex.when.ancestor(':is([data-unified-project-row]):focus-within')]: 0,
+    },
+    transitionProperty: 'opacity',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  triggerLabel: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    textAlign: 'left',
+  },
+  triggerChevron: { width: themeSpace[3.5], height: themeSpace[3.5], flexShrink: 0 },
+
+  /* The list the trigger opens. */
+  list: { maxHeight: 'min(50vh, 13rem)', overflowY: 'auto' },
+  optionLabel: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  optionLabelSelected: { fontWeight: themeFontWeight.medium },
+  optionIcon: { flexShrink: 0 },
+  optionIconWithDescription: { marginTop: '0.5px' },
+  optionBody: {
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    flexDirection: 'column',
+  },
+  optionDescription: {
+    overflow: 'hidden',
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 2,
+    fontSize: '0.8em',
+    lineHeight: '1.375',
+    color: themeColors.mutedForeground,
+  },
+  empty: {
+    paddingInline: themeSpace[2.5],
+    paddingBlock: themeSpace[5],
+    textAlign: 'center',
+    fontSize: '0.9em',
+    color: themeColors.mutedForeground,
+  },
+});
 
 function GitHubOwnerAvatarIcon({ repoFullName }: { repoFullName: string }) {
   const ownerHandle = (repoFullName.split('/')[0] ?? '').trim();
   const [failed, setFailed] = useState(false);
 
   if (!ownerHandle || failed) {
-    return <Github className="h-4 w-4 shrink-0 opacity-70" />;
+    return <Github {...stylex.props(styles.ownerGlyph)} />;
   }
 
   return (
@@ -46,7 +253,7 @@ function GitHubOwnerAvatarIcon({ repoFullName }: { repoFullName: string }) {
       src={getGitHubOwnerAvatarUrl(ownerHandle)}
       alt=""
       aria-hidden="true"
-      className="h-4 w-4 shrink-0 rounded-sm object-cover"
+      className={stylex.props(styles.ownerAvatar).className}
       onError={() => setFailed(true)}
     />
   );
@@ -290,21 +497,24 @@ function ProjectAccessStatus({
   const title = t('sessions.sharing.privateToYou', 'Private to you');
   const description = getSessionSharingDescription(t, state);
   const isAction = variant === 'trigger' && Boolean(onShare);
-  const sharedClassName = cn(
-    'inline-flex shrink-0 select-none items-center gap-1 text-muted-foreground',
-    variant === 'trigger' && ['h-6 rounded-r-md px-2 text-[0.8em] font-medium transition-colors'],
-    variant === 'option' && 'text-[0.8em] font-medium',
-    'text-foreground/75',
-    isAction && 'cursor-pointer hover:text-foreground',
-    variant === 'trigger' &&
-      'outline-hidden focus-visible:relative focus-visible:z-20 focus-visible:ring-2 focus-visible:ring-ring/50'
-  );
+  // The badge's own face. The focus ring is a Tailwind `focus-visible:ring-*`,
+  // which paints nothing, so it is not restated; the focus state that raises
+  // the badge is.
+  const accessTrigger = variant === 'trigger' && styles.accessStatusTrigger;
+  const accessOption = variant === 'option' && styles.accessStatusOption;
+  const accessFocus = variant === 'trigger' && styles.accessStatusFocus;
+  const accessAction = isAction && styles.accessStatusAction;
   const content = isAction ? (
     <button
       type="button"
-      {...withClassName(
-        stylex.props(contextPill.surface, contextPill.interactive),
-        sharedClassName
+      {...stylex.props(
+        contextPill.surface,
+        contextPill.interactive,
+        styles.accessStatus,
+        accessTrigger,
+        accessOption,
+        accessAction,
+        accessFocus
       )}
       aria-label={`${title}: ${description}. ${t(
         'workspace.projects.shareProjectAction',
@@ -312,18 +522,22 @@ function ProjectAccessStatus({
       )}`}
       onClick={onShare}
     >
-      <LockKeyhole className="h-3 w-3" aria-hidden="true" />
+      <LockKeyhole {...stylex.props(styles.lockGlyph)} aria-hidden="true" />
       <span>{label}</span>
     </button>
   ) : (
     <span
       tabIndex={variant === 'trigger' ? 0 : undefined}
-      {...withClassName(
-        stylex.props(variant === 'trigger' && contextPill.surface),
-        sharedClassName
+      {...stylex.props(
+        variant === 'trigger' && contextPill.surface,
+        styles.accessStatus,
+        accessTrigger,
+        accessOption,
+        accessAction,
+        accessFocus
       )}
     >
-      <LockKeyhole className="h-3 w-3" aria-hidden="true" />
+      <LockKeyhole {...stylex.props(styles.lockGlyph)} aria-hidden="true" />
       <span>{label}</span>
     </span>
   );
@@ -335,8 +549,8 @@ function ProjectAccessStatus({
         side={variant === 'trigger' ? 'top' : 'right'}
         className="max-w-72 px-2.5 py-2"
       >
-        <div className="font-medium">{title}</div>
-        <div className="mt-0.5 text-[0.8em] text-muted-foreground">{description}</div>
+        <div {...stylex.props(styles.accessTitle)}>{title}</div>
+        <div {...stylex.props(styles.accessDescription)}>{description}</div>
       </Tooltip.Content>
     </Tooltip.Root>
   );
@@ -450,7 +664,7 @@ export function UnifiedProjectSelectorView({
         value: `local:${project.machineId}:${project.localProjectId}`,
         label: project.name,
         description: project.rootPath,
-        icon: <FolderOpen className="h-4 w-4 shrink-0 opacity-70" />,
+        icon: <FolderOpen {...stylex.props(styles.ownerGlyph)} />,
         selection: {
           kind: 'local',
           machineId: project.machineId,
@@ -491,7 +705,7 @@ export function UnifiedProjectSelectorView({
     ) : value.kind === 'group' ? (
       <Folders className="h-4 w-4 opacity-70" />
     ) : (
-      <FolderOpen className="h-4 w-4 opacity-70" />
+      <FolderOpen {...stylex.props(styles.folderGlyph)} />
     ));
   const triggerLabel =
     selectedOption?.label ??
@@ -516,9 +730,15 @@ export function UnifiedProjectSelectorView({
 
   const isPropertyRow = triggerVariant === 'property-row';
 
+  // Preserve the inherited SVG override for caller/owner glyphs, including
+  // avatar fallbacks; these marks are also rendered in the menu's options.
+  const triggerTailwind = isPropertyRow
+    ? '[&_svg]:text-current [&_svg]:opacity-70'
+    : '[&_svg]:text-current [&_svg]:opacity-100';
   return (
     <div
-      className={cn('group/project relative flex min-w-0 items-center', isPropertyRow && 'w-full')}
+      data-unified-project-row=""
+      {...stylex.props(stylex.defaultMarker(), styles.row, isPropertyRow && styles.rowFull)}
     >
       {value.kind !== 'none' && !isPropertyRow ? (
         <button
@@ -528,13 +748,9 @@ export function UnifiedProjectSelectorView({
             setOpen(false);
           }}
           aria-label={clearLabel}
-          className={cn(
-            'absolute left-2 z-10 flex h-4 w-4 items-center justify-center rounded-full',
-            'text-muted-foreground opacity-0 transition-opacity hover:bg-hover hover:text-foreground',
-            'group-hover/project:opacity-100 group-focus-within/project:opacity-100'
-          )}
+          {...stylex.props(styles.clear)}
         >
-          <X className="h-3 w-3" />
+          <X {...stylex.props(styles.clearGlyph)} />
         </button>
       ) : null}
       <Menu.Root
@@ -548,87 +764,78 @@ export function UnifiedProjectSelectorView({
           render={
             <button
               type="button"
-              {...withClassName(
+              className={[
                 stylex.props(
                   !isPropertyRow && contextPill.surface,
                   !isPropertyRow && contextPill.interactive,
-                  !isPropertyRow && open && contextPill.open
-                ),
-                cn(
-                  isPropertyRow
-                    ? [
-                        'flex h-8 w-full min-w-0 max-w-none items-center gap-2 rounded-md px-2',
-                        'text-[1em] font-normal transition-colors',
-                        'bg-transparent text-foreground hover:bg-hover',
-                        'data-[state=open]:bg-hover',
-                        '[&_svg]:text-current [&_svg]:opacity-70',
-                        value.kind === 'none' && 'text-muted-foreground',
-                      ]
-                    : [
-                        'flex h-6 min-w-0 max-w-[18rem] items-center gap-1.5 rounded-md px-2',
-                        'text-[0.9em] font-normal text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
-                        'hover:text-foreground',
-                        selectedPrivateSharing && 'rounded-r-none',
-                      ],
-                  className
-                )
-              )}
+                  !isPropertyRow && open && contextPill.open,
+                  isPropertyRow && styles.triggerPropertyRow,
+                  isPropertyRow && styles.triggerPropertyRowHover,
+                  !isPropertyRow && styles.triggerChip,
+                  !isPropertyRow && selectedPrivateSharing && styles.triggerChipShared,
+                  value.kind === 'none' && styles.triggerEmpty
+                ).className,
+                triggerTailwind,
+                className,
+              ]
+                .filter(Boolean)
+                .join(' ')}
             >
               <span
-                className={cn(
-                  'flex h-4 w-4 shrink-0 items-center justify-center',
-                  !isPropertyRow &&
-                    value.kind !== 'none' &&
-                    'transition-opacity group-hover/project:opacity-0 group-focus-within/project:opacity-0'
+                {...stylex.props(
+                  styles.triggerGlyph,
+                  !isPropertyRow && value.kind !== 'none' && styles.triggerGlyphFade
                 )}
               >
                 {triggerIcon}
               </span>
-              <span className="min-w-0 flex-1 truncate text-left">{triggerLabel}</span>
+              <span {...stylex.props(styles.triggerLabel)}>{triggerLabel}</span>
             </button>
           }
         >
           <button
             type="button"
-            {...withClassName(
+            className={[
               stylex.props(
                 !isPropertyRow && contextPill.surface,
                 !isPropertyRow && contextPill.interactive,
-                !isPropertyRow && open && contextPill.open
-              ),
-              cn(
-                isPropertyRow
-                  ? [
-                      'flex h-8 w-full min-w-0 max-w-none items-center gap-2 rounded-md px-2',
-                      'text-[1em] font-normal transition-colors',
-                      'bg-transparent text-foreground hover:bg-foreground/[0.05] dark:hover:bg-white/[0.08]',
-                      'data-[state=open]:bg-foreground/[0.05] dark:data-[state=open]:bg-white/[0.08]',
-                      '[&_svg]:text-current [&_svg]:opacity-70',
-                      value.kind === 'none' && 'text-muted-foreground',
-                    ]
-                  : [
-                      'flex h-6 min-w-0 max-w-[18rem] items-center gap-1.5 rounded-md px-2',
-                      'text-[0.9em] font-normal text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
-                      'hover:text-foreground',
-                      selectedPrivateSharing && 'rounded-r-none',
-                    ],
-                className
-              )
-            )}
+                !isPropertyRow && open && contextPill.open,
+                isPropertyRow && styles.triggerPropertyRow,
+                isPropertyRow && styles.triggerPropertyRowInk,
+                !isPropertyRow && styles.triggerChip,
+                !isPropertyRow && selectedPrivateSharing && styles.triggerChipShared,
+                value.kind === 'none' && styles.triggerEmpty
+              ).className,
+              triggerTailwind,
+              // The ink wash's dark step is a hard-coded white, so it stays a
+              // Tailwind class.
+              isPropertyRow
+                ? 'dark:hover:bg-white/[0.08] dark:data-[state=open]:bg-white/[0.08]'
+                : undefined,
+              className,
+            ]
+              .filter(Boolean)
+              .join(' ')}
           >
             <span
-              className={cn(
-                'flex h-4 w-4 shrink-0 items-center justify-center',
-                !isPropertyRow &&
-                  value.kind !== 'none' &&
-                  'transition-opacity group-hover/project:opacity-0 group-focus-within/project:opacity-0'
+              {...stylex.props(
+                styles.triggerGlyph,
+                !isPropertyRow && value.kind !== 'none' && styles.triggerGlyphFade
               )}
             >
               {triggerIcon}
             </span>
-            <span className="min-w-0 flex-1 truncate text-left">{triggerLabel}</span>
+            <span {...stylex.props(styles.triggerLabel)}>{triggerLabel}</span>
             {isPropertyRow ? (
-              <ChevronDown className="size-3.5 shrink-0 !opacity-50" aria-hidden="true" />
+              <ChevronDown
+                // `!opacity-50` is an important utility; StyleX cannot state
+                // `!important`, and the parent's own glyph rule would win over
+                // a plain opacity.
+                className={[stylex.props(styles.triggerChevron).className, '!opacity-50']
+                  .filter(Boolean)
+                  .join(' ')}
+                aria-hidden="true"
+              />
             ) : null}
           </button>
         </Menu.Trigger>
@@ -649,7 +856,11 @@ export function UnifiedProjectSelectorView({
             placeholder={t('chat.projectPicker.searchPlaceholder', 'Search projects')}
             className="mb-1 h-8 rounded-md border border-border/50 bg-input-field py-0"
           />
-          <div className="scrollbar-pro max-h-[min(50vh,13rem)] overflow-y-auto">
+          <div
+            className={['scrollbar-pro', stylex.props(styles.list).className]
+              .filter(Boolean)
+              .join(' ')}
+          >
             {filteredOptions.length > 0 ? (
               <Menu.RadioGroup
                 value={selectedValue ?? ''}
@@ -667,7 +878,10 @@ export function UnifiedProjectSelectorView({
                     option.selection.kind === 'group' ? option.description : undefined;
                   const labelNode = (
                     <span
-                      className={cn('truncate', option.value === selectedValue && 'font-medium')}
+                      {...stylex.props(
+                        styles.optionLabel,
+                        option.value === selectedValue && styles.optionLabelSelected
+                      )}
                     >
                       {option.label}
                     </span>
@@ -684,10 +898,15 @@ export function UnifiedProjectSelectorView({
                         inlineDescription ? 'items-start' : 'items-center'
                       )}
                     >
-                      <span className={cn('shrink-0', inlineDescription && 'mt-0.5')}>
+                      <span
+                        {...stylex.props(
+                          styles.optionIcon,
+                          Boolean(inlineDescription) && styles.optionIconWithDescription
+                        )}
+                      >
                         {option.icon}
                       </span>
-                      <span className="flex min-w-0 flex-1 flex-col">
+                      <span {...stylex.props(styles.optionBody)}>
                         {localPath ? (
                           <Tooltip.Root>
                             <Tooltip.Trigger render={labelNode} />
@@ -699,7 +918,7 @@ export function UnifiedProjectSelectorView({
                           labelNode
                         )}
                         {inlineDescription ? (
-                          <span className="line-clamp-2 text-[0.8em] leading-snug text-muted-foreground">
+                          <span {...stylex.props(styles.optionDescription)}>
                             {inlineDescription}
                           </span>
                         ) : null}
@@ -712,7 +931,7 @@ export function UnifiedProjectSelectorView({
                 })}
               </Menu.RadioGroup>
             ) : (
-              <div className="px-2.5 py-5 text-center text-[0.9em] text-muted-foreground">
+              <div {...stylex.props(styles.empty)}>
                 {t('chat.projectPicker.emptyText', 'No projects found')}
               </div>
             )}

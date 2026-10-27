@@ -1,9 +1,26 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
+import * as stylex from '@stylexjs/stylex';
 
 import type { FabricRecipe } from './fabric-recipe';
 import { FabricSimulator, type FabricLight } from './fabric-simulator';
+
+const styles = stylex.create({
+  /**
+   * The cloth sits behind the panel it decorates: it covers the whole box and
+   * never takes the pointer.
+   */
+  layer: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    pointerEvents: 'none',
+    zIndex: -10,
+  },
+});
 
 /**
  * Theme-derived fabric decor for the sidebar: a low-amplitude woven backdrop
@@ -45,13 +62,7 @@ function useSidebarBackgroundHsl(): Hsl | null {
     const update = () =>
       setHsl((prev) => {
         const next = readSidebarHsl();
-        if (
-          prev &&
-          next &&
-          prev[0] === next[0] &&
-          prev[1] === next[1] &&
-          prev[2] === next[2]
-        ) {
+        if (prev && next && prev[0] === next[0] && prev[1] === next[1] && prev[2] === next[2]) {
           return prev;
         }
         return next;
@@ -167,8 +178,9 @@ export function SidebarFabricBackdrop({ className }: { className?: string }) {
   const recipe = useMemo(() => (hsl ? backdropRecipe(hsl) : null), [hsl]);
   const light = useMemo(() => (hsl ? backdropLight(hsl[2]) : null), [hsl]);
   if (!recipe || !light) return null;
+  const layerProps = stylex.props(styles.layer);
   return (
-    <div aria-hidden className={cn('pointer-events-none absolute inset-0 -z-10', className)}>
+    <div aria-hidden {...layerProps} className={clsx(layerProps.className, className)}>
       <FabricSimulator recipe={recipe} light={light} className="pointer-events-none" />
     </div>
   );
@@ -185,8 +197,9 @@ export function SidebarFabricBand({ className }: { className?: string }) {
   const recipe = useMemo(() => (hsl ? bandRecipe(hsl) : null), [hsl]);
   const light = useMemo(() => (hsl ? bandLight(hsl[2]) : null), [hsl]);
   if (!recipe || !light) return null;
+  const layerProps = stylex.props(styles.layer);
   return (
-    <div aria-hidden className={cn('pointer-events-none absolute inset-0 -z-10', className)}>
+    <div aria-hidden {...layerProps} className={clsx(layerProps.className, className)}>
       <FabricSimulator
         recipe={recipe}
         light={light}

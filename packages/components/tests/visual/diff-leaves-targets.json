@@ -1,0 +1,531 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "blockedHosts": ["avatars.githubusercontent.com", "github.com"],
+  "ids": [
+    "ui-diffleavesmigration--header-actions",
+    "ui-diffleavesmigration--copy-only",
+    "ui-diffleavesmigration--empty-path",
+    "ui-diffleavesmigration--header-overrides",
+    "ui-diffleavesmigration--add-buttons",
+    "ui-diffleavesmigration--annotation-stack",
+    "ui-diffleavesmigration--annotation-threads",
+    "ui-diffleavesmigration--annotation-empty",
+    "ui-diffleavesmigration--annotation-anonymous",
+    "ui-diffleavesmigration--annotation-pending",
+    "ui-diffleavesmigration--slotted-unified",
+    "ui-diffleavesmigration--slotted-split"
+  ],
+  "ready": {
+    "ui-diffleavesmigration--annotation-stack": [
+      {
+        "action": "visible",
+        "selector": "[data-diff-comment-line=\"2\"]"
+      }
+    ],
+    "ui-diffleavesmigration--annotation-threads": [
+      {
+        "action": "visible",
+        "selector": "[data-diff-comment-line=\"2\"]"
+      }
+    ],
+    "ui-diffleavesmigration--annotation-empty": [
+      {
+        "action": "visible",
+        "selector": "[data-diff-comment-line=\"2\"]"
+      }
+    ],
+    "ui-diffleavesmigration--annotation-anonymous": [
+      {
+        "action": "visible",
+        "selector": "[data-diff-comment-line=\"2\"]"
+      }
+    ],
+    "ui-diffleavesmigration--annotation-pending": [
+      {
+        "action": "visible",
+        "selector": "[data-diff-comment-line=\"2\"]"
+      }
+    ],
+    "ui-diffleavesmigration--slotted-unified": [
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-line-index=\"2,1\"]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-diff-comment-line=\"2\"]"
+      }
+    ],
+    "ui-diffleavesmigration--slotted-split": [
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-line-index=\"2,1\"]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-diff-comment-line=\"2\"]"
+      }
+    ]
+  },
+  "states": {
+    "ui-diffleavesmigration--header-actions": [
+      {
+        "name": "copy-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "button[aria-label=\"Copy file path\"]"
+          }
+        ]
+      },
+      {
+        "name": "copy-keyboard-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "button[aria-label=\"Copy file path\"]"
+          },
+          {
+            "action": "press",
+            "selector": "button[aria-label=\"Copy file path\"]",
+            "key": "ArrowLeft"
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          }
+        ]
+      },
+      {
+        "name": "opened-file",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"Open file\"]"
+          },
+          {
+            "action": "visible",
+            "text": "Opened:",
+            "exact": false
+          },
+          {
+            "action": "visible",
+            "selector": "[data-header-content]"
+          }
+        ]
+      }
+    ],
+    "ui-diffleavesmigration--copy-only": [
+      {
+        "name": "copy-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "button[aria-label=\"Copy file path\"]"
+          }
+        ]
+      },
+      {
+        "name": "copy-keyboard-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "button[aria-label=\"Copy file path\"]"
+          },
+          {
+            "action": "press",
+            "selector": "button[aria-label=\"Copy file path\"]",
+            "key": "ArrowLeft"
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          }
+        ]
+      }
+    ],
+    "ui-diffleavesmigration--header-overrides": [
+      {
+        "name": "copy-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "button[aria-label=\"Copy file path\"]"
+          }
+        ]
+      },
+      {
+        "name": "copy-keyboard-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "button[aria-label=\"Copy file path\"]"
+          },
+          {
+            "action": "press",
+            "selector": "button[aria-label=\"Copy file path\"]",
+            "key": "ArrowLeft"
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          }
+        ]
+      },
+      {
+        "name": "opened-file",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"Open file\"]"
+          },
+          {
+            "action": "visible",
+            "text": "Opened:",
+            "exact": false
+          },
+          {
+            "action": "visible",
+            "selector": "[data-header-content]"
+          }
+        ]
+      }
+    ],
+    "ui-diffleavesmigration--empty-path": [
+      {
+        "name": "empty-copy-noop",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"Copy file path\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-header-content]"
+          }
+        ]
+      }
+    ],
+    "ui-diffleavesmigration--add-buttons": [
+      {
+        "name": "add-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-add-default] button"
+          }
+        ]
+      },
+      {
+        "name": "add-keyboard-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-add-default] button"
+          },
+          {
+            "action": "press",
+            "selector": "[data-add-default] button",
+            "key": "ArrowLeft"
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          }
+        ]
+      },
+      {
+        "name": "add-activated",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-add-default] button"
+          },
+          {
+            "action": "visible",
+            "text": "Default add activated \u00b7 parent clicks=0"
+          }
+        ]
+      },
+      {
+        "name": "override-activated",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-add-override] button"
+          },
+          {
+            "action": "visible",
+            "text": "Override add activated \u00b7 parent clicks=0"
+          }
+        ]
+      }
+    ],
+    "ui-diffleavesmigration--annotation-stack": [
+      {
+        "name": "draft-text",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "textarea",
+            "value": "Preserve \u4e2d\u6587 draft wrapping and layout."
+          },
+          {
+            "action": "enabled",
+            "role": "button",
+            "name": "Comment"
+          }
+        ]
+      },
+      {
+        "name": "draft-submit",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Comment"
+          },
+          {
+            "action": "hidden",
+            "selector": "textarea"
+          },
+          {
+            "action": "visible",
+            "text": "Draft closed"
+          }
+        ]
+      },
+      {
+        "name": "outdated-expanded",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-diff-comment-thread-id=\"201\"] button[aria-expanded]"
+          }
+        ]
+      }
+    ],
+    "ui-diffleavesmigration--annotation-threads": [
+      {
+        "name": "reply-open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Write a reply..."
+          }
+        ]
+      },
+      {
+        "name": "reply-text",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "textarea",
+            "value": "A real reply verifies the expanded thread."
+          }
+        ]
+      },
+      {
+        "name": "reply-cancelled",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "textarea",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "selector": "textarea"
+          }
+        ]
+      }
+    ],
+    "ui-diffleavesmigration--annotation-anonymous": [
+      {
+        "name": "anonymous-draft",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "textarea",
+            "value": "Anonymous has no linked GitHub submission."
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Comment"
+          }
+        ]
+      }
+    ],
+    "ui-diffleavesmigration--annotation-pending": [
+      {
+        "name": "submission-pending",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "textarea",
+            "value": "Pending submission keeps the annotation layout."
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Comment"
+          },
+          {
+            "action": "disabled",
+            "selector": "textarea"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Cancel"
+          }
+        ]
+      },
+      {
+        "name": "submission-completed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Complete request"
+          },
+          {
+            "action": "hidden",
+            "selector": "textarea"
+          },
+          {
+            "action": "visible",
+            "text": "Draft closed"
+          }
+        ]
+      }
+    ],
+    "ui-diffleavesmigration--slotted-unified": [
+      {
+        "name": "line-hover-add",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "diffs-container [data-line-index=\"2,1\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "button[aria-label=\"Add comment\"]"
+          }
+        ]
+      },
+      {
+        "name": "slotted-draft",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"Add comment\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-diff-comment-line=\"2\"] textarea"
+          }
+        ]
+      },
+      {
+        "name": "slotted-typed",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "[data-diff-comment-line=\"2\"] textarea",
+            "value": "Real slotted draft \u4e2d\u6587 keeps native sans, margin and spacing."
+          }
+        ]
+      },
+      {
+        "name": "slotted-cancelled",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-diff-comment-line=\"2\"] textarea",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-diff-comment-line=\"2\"] textarea"
+          }
+        ]
+      }
+    ],
+    "ui-diffleavesmigration--slotted-split": [
+      {
+        "name": "line-hover-add",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "diffs-container [data-line-index=\"2,1\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "button[aria-label=\"Add comment\"]"
+          }
+        ]
+      },
+      {
+        "name": "slotted-draft",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"Add comment\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-diff-comment-line=\"2\"] textarea"
+          }
+        ]
+      },
+      {
+        "name": "slotted-typed",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "[data-diff-comment-line=\"2\"] textarea",
+            "value": "Real slotted draft \u4e2d\u6587 keeps native sans, margin and spacing."
+          }
+        ]
+      },
+      {
+        "name": "slotted-cancelled",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-diff-comment-line=\"2\"] textarea",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-diff-comment-line=\"2\"] textarea"
+          }
+        ]
+      }
+    ]
+  }
+}

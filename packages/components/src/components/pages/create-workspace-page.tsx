@@ -1,3 +1,14 @@
+import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeShadow,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
+import { pageSurface as surface } from './surface';
 import type { ReferralPolicy } from '@lody/cloud-api';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, ArrowRight, Building2, CreditCard } from 'lucide-react';
@@ -73,8 +84,8 @@ export function CreateWorkspacePage({
   const { t } = useTranslation();
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <div className="w-full max-w-md">
+    <div {...stylex.props(surface.page)}>
+      <div {...stylex.props(surface.card)}>
         {onBackToWorkspace ? (
           <Button
             type="button"
@@ -82,24 +93,24 @@ export function CreateWorkspacePage({
             size="small"
             onClick={onBackToWorkspace}
             disabled={creating}
-            className="mb-3 -ml-2"
+            {...stylex.props(styles.back)}
           >
-            <ArrowLeft className="h-4 w-4" />
+            <ArrowLeft {...stylex.props(surface.smallIcon)} />
             {t('organization.backToPreviousWorkspace', 'Back to previous workspace')}
           </Button>
         ) : null}
 
         <Card.Root>
-          <Card.Header className="text-center">
-            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-              <Building2 className="h-6 w-6 text-primary" />
+          <Card.Header {...stylex.props(surface.center)}>
+            <div {...stylex.props(styles.hero)}>
+              <Building2 {...stylex.props(surface.heroIcon)} />
             </div>
             <Card.Title className="text-2xl">
               {paidRequired
                 ? t('organization.createPlusWorkspaceTitle', 'Create a Plus workspace')
                 : t('organization.welcomeTitle', 'Welcome to Lody Agent')}
             </Card.Title>
-            <Card.Description className="mt-2 whitespace-pre-line">
+            <Card.Description {...stylex.props(styles.description)}>
               {paidRequired
                 ? t(
                     'organization.createPlusWorkspaceDescription',
@@ -131,8 +142,8 @@ export function CreateWorkspacePage({
                   disabled={creating || fieldsDisabled}
                   className={error ? 'border-destructive' : ''}
                 />
-                {error ? <p className="text-sm text-destructive">{error}</p> : null}
-                <p className="text-xs text-muted-foreground">
+                {error ? <p {...stylex.props(surface.error)}>{error}</p> : null}
+                <p {...stylex.props(surface.hint)}>
                   {t(
                     'organization.workspaceNameHint',
                     'You can change this name later in settings'
@@ -141,15 +152,15 @@ export function CreateWorkspacePage({
               </div>
 
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
+                <div {...stylex.props(styles.between)}>
                   <UiField.Label htmlFor="workspace-slug">
                     {t('organization.workspaceSlug')}
                   </UiField.Label>
-                  <div className="flex items-center gap-2">
+                  <div {...stylex.props(styles.row)}>
                     {canResetSlug ? (
                       <button
                         type="button"
-                        className="text-xs text-muted-foreground hover:text-foreground"
+                        {...stylex.props(styles.reset)}
                         onClick={onResetWorkspaceSlug}
                         disabled={creating || fieldsDisabled}
                       >
@@ -157,7 +168,7 @@ export function CreateWorkspacePage({
                       </button>
                     ) : null}
                     {workspaceSlug && !slugErrorType ? (
-                      <span className="text-xs text-muted-foreground">
+                      <span {...stylex.props(surface.hint)}>
                         {slugChecking
                           ? t('organization.workspaceSlugChecking')
                           : slugAvailable
@@ -178,7 +189,7 @@ export function CreateWorkspacePage({
                   className={slugErrorType ? 'border-destructive' : ''}
                 />
                 {slugErrorType ? (
-                  <p className="text-xs text-destructive">
+                  <p {...stylex.props(surface.smallError)}>
                     {t(`organization.workspaceSlugError.${slugErrorType}`)}
                   </p>
                 ) : null}
@@ -187,29 +198,30 @@ export function CreateWorkspacePage({
               {creationOptions}
 
               {paidRequired ? (
-                <div className="space-y-2 border-t border-border/60 pt-4">
-                  <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                    <CreditCard className="h-4 w-4" />
+                <div className={`space-y-2 ${stylex.props(styles.billing).className}`}>
+                  <div {...stylex.props(styles.billingHeading)}>
+                    <CreditCard {...stylex.props(surface.smallIcon)} />
                     {t('organization.plusBillingInterval', 'Billing interval')}
                   </div>
-                  <div className="grid grid-cols-2 rounded-lg border border-border bg-muted/40 p-0.5">
+                  <div {...stylex.props(styles.intervals)}>
                     {(['year', 'month'] as const).map((value) => (
                       <button
                         key={value}
                         type="button"
                         onClick={() => onBillingIntervalChange?.(value)}
                         disabled={creating}
-                        className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                        {...stylex.props(
+                          styles.interval,
                           billingInterval === value
-                            ? 'bg-background text-foreground shadow-xs'
-                            : 'text-muted-foreground hover:text-foreground'
-                        }`}
+                            ? styles.intervalSelected
+                            : styles.intervalUnselected
+                        )}
                       >
                         {value === 'year'
                           ? t('billing.yearly', 'Yearly')
                           : t('billing.monthly', 'Monthly')}
                         {pricing ? (
-                          <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                          <span {...stylex.props(styles.intervalPrice)}>
                             {t('organization.plusPricePerSeatMonth', {
                               price: formatUsd(
                                 value === 'year'
@@ -243,7 +255,7 @@ export function CreateWorkspacePage({
                       policy={referralOffer.policy}
                     />
                   ) : null}
-                  <p className="text-xs text-muted-foreground">
+                  <p {...stylex.props(surface.hint)}>
                     {t(
                       'organization.plusBillingHelp',
                       'Plus is billed per accepted workspace member. Stripe shows the final total before payment.'
@@ -263,28 +275,30 @@ export function CreateWorkspacePage({
                   (!retryPendingCreation &&
                     (slugChecking || Boolean(slugErrorType) || !slugAvailable))
                 }
-                className="w-full"
+                {...stylex.props(surface.fullWidth)}
               >
                 {creating ? (
-                  <span className="flex items-center">
-                    <Spinner className="mr-2 h-4 w-4" />
+                  <span {...stylex.props(surface.row)}>
+                    <Spinner
+                      className={`h-4 w-4 ${stylex.props(surface.spinnerMargin).className}`}
+                    />
                     {paidRequired
                       ? t('billing.startingCheckout', 'Starting checkout...')
                       : t('common.creating')}
                   </span>
                 ) : (
-                  <span className="flex items-center">
+                  <span {...stylex.props(surface.row)}>
                     {retryPendingCreation
                       ? t('e2ee.create.resume')
                       : paidRequired
                         ? t('organization.continueToCheckout', 'Continue to checkout')
                         : t('organization.createWorkspace', 'Create Workspace')}
-                    <ArrowRight className="ml-2 h-4 w-4" />
+                    <ArrowRight {...stylex.props(surface.smallIcon, styles.trailingIcon)} />
                   </span>
                 )}
               </Button>
 
-              {paidRequired ? <SubscribeConsentNotice className="text-center" /> : null}
+              {paidRequired ? <SubscribeConsentNotice {...stylex.props(surface.center)} /> : null}
             </div>
           </Card.Content>
         </Card.Root>
@@ -292,3 +306,80 @@ export function CreateWorkspacePage({
     </div>
   );
 }
+
+const styles = stylex.create({
+  back: { marginBottom: themeSpace[3], marginLeft: 'calc(var(--spacing) * -2)' },
+  hero: {
+    marginInline: 'auto',
+    marginBottom: themeSpace[4],
+    display: 'flex',
+    height: themeSpace[12],
+    width: themeSpace[12],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.full,
+    backgroundColor: 'hsl(var(--primary) / 0.1)',
+  },
+  description: { marginTop: themeSpace[2], whiteSpace: 'pre-line' },
+  between: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  row: { display: 'flex', alignItems: 'center', gap: themeSpace[2] },
+  reset: {
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: { default: themeColors.mutedForeground, ':hover': themeColors.foreground },
+  },
+  billing: {
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'hsl(var(--border) / 0.6)',
+    paddingTop: themeSpace[4],
+  },
+  billingHeading: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+  },
+  intervals: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    borderRadius: themeRadius.lg,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: themeColors.border,
+    backgroundColor: 'hsl(var(--muted) / 0.4)',
+    padding: themeSpace[0.5],
+  },
+  interval: {
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.medium,
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  intervalSelected: {
+    backgroundColor: themeColors.background,
+    color: themeColors.foreground,
+    boxShadow: themeShadow.xs,
+  },
+  intervalUnselected: {
+    color: { default: themeColors.mutedForeground, ':hover': themeColors.foreground },
+  },
+  intervalPrice: {
+    marginTop: themeSpace[0.5],
+    display: 'block',
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    fontWeight: themeFontWeight.normal,
+    color: themeColors.mutedForeground,
+  },
+  trailingIcon: { marginLeft: themeSpace[2] },
+});

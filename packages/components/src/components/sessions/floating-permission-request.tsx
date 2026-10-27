@@ -13,6 +13,7 @@ import { Button, ButtonGroup } from '@lody/ui/button';
 import { Spinner } from '@lody/ui/spinner';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { themeEasing, themeSpace } from '../../style/theme-scale.stylex';
 import {
   createAskUserQuestionPermissionOutcome,
   isAskUserQuestionPermissionMeta,
@@ -26,7 +27,6 @@ import {
 } from '@lody/shared';
 import { Menu } from '@/ui/menu';
 import { ScrollArea } from '@lody/ui/scroll-area';
-import { cn } from '@/lib/utils';
 import { withClassName } from '@/lib/stylex';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { usePermissionResponse } from '@/hooks/use-permission-response';
@@ -120,6 +120,24 @@ const REGION = `color-mix(in oklab, transparent, ${colors.label} 4%)`;
 const MONO = 'var(--font-mono, ui-monospace, monospace)';
 
 const styles = stylex.create({
+  /** The question sheet rides above the keyboard when it opens. */
+  askQuestionScroll: {
+    marginInline: themeSpace[3],
+    marginBottom: 'calc(0.5rem + var(--native-keyboard-height, 0px))',
+    maxHeight: 'calc(100dvh - var(--native-keyboard-height, 0px) - 4rem)',
+    transitionProperty: 'margin-bottom',
+    transitionDuration: '250ms',
+    transitionTimingFunction: themeEasing.out,
+  },
+  askQuestionViewport: {
+    overscrollBehavior: 'contain',
+    paddingBottom: 'max(0px, var(--safe-area-bottom, 0px) - var(--native-keyboard-height, 0px))',
+  },
+  /** The permission prompt keeps the sheet's own inset. */
+  permissionBody: {
+    marginInline: themeSpace[3],
+    marginBottom: themeSpace[2],
+  },
   /**
    * It stands in the composer's place, so it is the composer's rung and scale:
    * a card of small controls, not a dialog. The question, what it is about,
@@ -742,15 +760,8 @@ export function FloatingPermissionRequest({
     <>
       <ScrollArea
         hidden={!current.isAskUserQuestion}
-        className={cn(
-          'mx-3 mb-[calc(0.5rem+var(--native-keyboard-height,0px))]',
-          'max-h-[calc(100dvh-var(--native-keyboard-height,0px)-4rem)]',
-          'transition-[margin-bottom] duration-[250ms] ease-out'
-        )}
-        viewportClassName={cn(
-          'overscroll-contain',
-          'pb-[max(0px,var(--safe-area-bottom,0px)-var(--native-keyboard-height,0px))]'
-        )}
+        className={stylex.props(styles.askQuestionScroll).className}
+        viewportClassName={stylex.props(styles.askQuestionViewport).className}
         viewportRef={askQuestionScrollRef}
       >
         <ConversationColumn>
@@ -786,7 +797,7 @@ export function FloatingPermissionRequest({
         </ConversationColumn>
       </ScrollArea>
       {!current.isAskUserQuestion ? (
-        <div className="mx-3 mb-2">
+        <div {...stylex.props(styles.permissionBody)}>
           <ConversationColumn>
             <PermissionPrompt
               key={`${sessionId}:${requestId}`}

@@ -1,0 +1,67 @@
+{
+  "viewports": [
+    { "name": "desktop", "width": 1280, "height": 900 },
+    { "name": "tablet", "width": 768, "height": 900 },
+    { "name": "phone-compact", "width": 390, "height": 844 }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "blockedHosts": ["avatars.githubusercontent.com"],
+  "ids": [
+    "ai-gui-viewmigration--activity-tones",
+    "ai-gui-viewmigration--turn-metadata",
+    "ai-gui-viewmigration--sparse-turn-metadata"
+  ],
+  "states": {
+    "ai-gui-viewmigration--turn-metadata": [
+      {
+        "name": "metadata-keyboard-focus",
+        "steps": [
+          { "action": "focus", "role": "button", "name": "Turn configuration" },
+          { "action": "visible", "selector": "[data-turn-timing]" },
+          { "action": "visible", "text": "$0.0182" }
+        ]
+      },
+      {
+        "name": "metadata-close",
+        "steps": [
+          { "action": "press", "role": "button", "name": "Turn configuration", "key": "Escape" },
+          { "action": "hidden", "selector": "[data-turn-timing]" }
+        ]
+      },
+      {
+        "name": "metadata-keyboard-reopen",
+        "steps": [
+          { "action": "press", "role": "button", "name": "Turn configuration", "key": "Enter" },
+          { "action": "visible", "selector": "[data-turn-timing]" },
+          { "action": "visible", "text": "1.5M" }
+        ]
+      }
+    ],
+    "ai-gui-viewmigration--sparse-turn-metadata": [
+      {
+        "name": "metadata-keyboard-focus",
+        "steps": [
+          { "action": "focus", "role": "button", "name": "Turn configuration" },
+          { "action": "visible", "selector": "[data-turn-timing]" },
+          { "action": "visible", "text": "Tokens", "exact": true }
+        ]
+      },
+      {
+        "name": "metadata-close",
+        "steps": [
+          { "action": "press", "role": "button", "name": "Turn configuration", "key": "Escape" },
+          { "action": "hidden", "selector": "[data-turn-timing]" }
+        ]
+      },
+      {
+        "name": "metadata-keyboard-reopen",
+        "steps": [
+          { "action": "press", "role": "button", "name": "Turn configuration", "key": "Enter" },
+          { "action": "visible", "selector": "[data-turn-timing]" },
+          { "action": "visible", "text": "Tokens", "exact": true }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,184 @@
+{
+  "viewports": [
+    {
+      "name": "iphone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "android",
+      "device": "Pixel 5",
+      "width": 393,
+      "height": 851
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "sessions-queuedimagemigration--thumbnail-sizes",
+    "sessions-queuedimagemigration--long-filename",
+    "sessions-queuedimagemigration--missing-filename",
+    "sessions-queuedimagemigration--load-control",
+    "sessions-queuedimagemigration--missing-auth",
+    "sessions-queuedimagemigration--in-queue"
+  ],
+  "ready": {
+    "sessions-queuedimagemigration--thumbnail-sizes": [
+      {
+        "action": "visible",
+        "selector": "[data-fixture-ready=\"true\"]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-queue-image-fixture] img",
+        "index": 0
+      }
+    ],
+    "sessions-queuedimagemigration--long-filename": [
+      {
+        "action": "visible",
+        "selector": "[data-fixture-ready=\"true\"]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-queue-image-fixture] img",
+        "index": 0
+      }
+    ],
+    "sessions-queuedimagemigration--missing-filename": [
+      {
+        "action": "visible",
+        "selector": "[data-fixture-ready=\"true\"]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-queue-image-fixture] img",
+        "index": 0
+      }
+    ],
+    "sessions-queuedimagemigration--load-control": [
+      {
+        "action": "visible",
+        "selector": "[data-fixture-ready=\"true\"]"
+      }
+    ],
+    "sessions-queuedimagemigration--missing-auth": [
+      {
+        "action": "visible",
+        "selector": "[data-fixture-ready=\"true\"]"
+      },
+      {
+        "action": "disabled",
+        "selector": "[data-queue-image-fixture] button[aria-label^=\"Preview \"]",
+        "index": 0
+      }
+    ],
+    "sessions-queuedimagemigration--in-queue": [
+      {
+        "action": "visible",
+        "selector": "[data-fixture-ready=\"true\"]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-queue-image-fixture] img",
+        "index": 0
+      }
+    ]
+  },
+  "states": {
+    "sessions-queuedimagemigration--thumbnail-sizes": [
+      {
+        "name": "thumbnail-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": "[data-queue-image-fixture] button[aria-label^=\"Preview \"]",
+            "index": 0
+          }
+        ]
+      },
+      {
+        "name": "preview-open",
+        "steps": [
+          {
+            "action": "tap",
+            "selector": "[data-queue-image-fixture] button[aria-label^=\"Preview \"]",
+            "index": 0
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"dialog\"] img.lody-photo-slider-image"
+          }
+        ]
+      },
+      {
+        "name": "preview-closed",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "button",
+            "name": "Close image preview"
+          },
+          {
+            "action": "hidden",
+            "selector": "[role=\"dialog\"]"
+          }
+        ]
+      }
+    ],
+    "sessions-queuedimagemigration--long-filename": [],
+    "sessions-queuedimagemigration--missing-filename": [],
+    "sessions-queuedimagemigration--load-control": [
+      {
+        "name": "thumbnail-loaded",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "button",
+            "name": "Load synthetic image"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-queue-image-fixture] img",
+            "index": 0
+          }
+        ]
+      }
+    ],
+    "sessions-queuedimagemigration--in-queue": [
+      {
+        "name": "preview-open",
+        "steps": [
+          {
+            "action": "tap",
+            "selector": "[data-queue-image-fixture] button[aria-label^=\"Preview \"]",
+            "index": 0
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"dialog\"] img.lody-photo-slider-image"
+          }
+        ]
+      },
+      {
+        "name": "preview-closed",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "button",
+            "name": "Close image preview"
+          },
+          {
+            "action": "hidden",
+            "selector": "[role=\"dialog\"]"
+          }
+        ]
+      }
+    ]
+  }
+}

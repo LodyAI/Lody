@@ -1,9 +1,10 @@
 import { useCallback, useLayoutEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
 import { Spinner } from '@lody/ui/spinner';
 
 import { Button } from '@lody/ui/button';
-import { cn } from '@/lib/utils';
 import type { ConversationFontSize } from '@/atoms/settings';
 import { conversationTextFontSizeStyle } from './conversation-font-size-classes';
 import { CombinedMentionTextarea } from '@/components/mentions/combined-mention-textarea';
@@ -22,6 +23,53 @@ import {
   useSessionMentionSource,
   type UseSessionMentionSourceArgs,
 } from '@/hooks/use-session-mention-source';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeDuration,
+  themeEasing,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  card: {
+    display: 'flex',
+    width: '32rem',
+    maxWidth: '100%',
+    flexDirection: 'column',
+    borderRadius: themeRadius['2xl'],
+    borderWidth: '0.5px',
+    borderStyle: 'solid',
+    borderColor: {
+      default: 'hsl(var(--foreground) / 0.1)',
+      ':focus-within': 'hsl(var(--foreground) / 0.25)',
+    },
+    backgroundColor: themeColors.background,
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2.5],
+    boxShadow: '0 1px 2px hsl(0 0% 0%/0.04), 0 8px 24px -16px hsl(0 0% 0%/0.12)',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  input: {
+    lineHeight: '1.625',
+    // The card carries the focus edge; the textarea itself must not draw a
+    // second outline/ring inside it (MentionInput is a bare primitive, not the
+    // styled Textarea). The Tailwind ring painted nothing and erased the
+    // app's own focus ring with it, so the textarea stays as blind as it was.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+  },
+  inputSaving: { color: themeColors.mutedForeground },
+  actions: {
+    marginTop: themeSpace[2],
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: themeSpace[1],
+  },
+});
 
 /** Grows with the text instead of reserving a fixed empty block. */
 const MAX_TEXTAREA_HEIGHT_PX = 320;
@@ -117,12 +165,13 @@ function UserMessageEditorContent({
 
   return (
     <div
-      className={cn(
-        'flex w-[32rem] max-w-full flex-col',
-        'rounded-2xl border-[0.5px] border-foreground/[0.10] bg-background px-3 py-2.5',
-        'shadow-[0_1px_2px_hsl(0_0%_0%/0.04),0_8px_24px_-16px_hsl(0_0%_0%/0.12)]',
-        'transition-colors duration-150 focus-within:border-foreground/25',
-        'dark:border-input-border/70 dark:bg-input/90 dark:focus-within:border-input-border'
+      className={clsx(
+        // The dark half of the card has no StyleX equivalent, so it stays a
+        // Tailwind class on this element.
+        'dark:border-input-border/70',
+        'dark:bg-input/90',
+        'dark:focus-within:border-input-border',
+        stylex.props(styles.card).className
       )}
       aria-busy={isSaving || undefined}
     >
@@ -163,17 +212,17 @@ function UserMessageEditorContent({
             handleSave();
           }
         }}
-        className={cn(
+        className={clsx(
           // The card carries the focus edge; the textarea itself must not draw
           // a second outline/ring inside it (MentionInput is a bare primitive,
           // not the styled Textarea).
-          'input-scrollbar leading-relaxed focus-visible:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0',
-          isSaving && 'text-muted-foreground'
+          'input-scrollbar',
+          stylex.props(styles.input, isSaving && styles.inputSaving).className
         )}
         style={conversationTextFontSizeStyle(conversationFontSize)}
         aria-label={t('sessions.editMessage', 'Edit message')}
       />
-      <div className="mt-2 flex items-center justify-end gap-1">
+      <div {...stylex.props(styles.actions)}>
         <Button
           type="button"
           variant="ghost"

@@ -1,0 +1,36 @@
+{
+  "viewports": [
+    {
+      "name": "iphone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "android",
+      "device": "Pixel 5",
+      "width": 393,
+      "height": 851
+    }
+  ],
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "blockedHosts": [
+    "avatars.githubusercontent.com"
+  ],
+  "ids": [
+    "mobile-mobilehomescreen--ios",
+    "mobile-mobilehomescreen--workspace-logo",
+    "mobile-mobilehomescreen--workspace-logo-without-switcher",
+    "mobile-mobilehomescreen--material",
+    "mobile-mobilehomescreen--stuck-connection-hint",
+    "mobile-mobilehomescreen--reconnecting",
+    "mobile-mobilehomescreen--offline",
+    "mobile-mobilehomescreen--crowded-header-status",
+    "mobile-mobilehomescreen--long-workspace-name",
+    "mobile-mobilehomescreen--first-run-onboarding"
+  ],
+  "states": {}
+}

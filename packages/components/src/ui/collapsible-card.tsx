@@ -9,6 +9,89 @@ import * as Collapsible from '@radix-ui/react-collapsible';
 import { Button } from '@lody/ui/button';
 import { CopyButton } from './copy-button';
 import { clamp } from '@/lib/clamp';
+import * as stylex from '@stylexjs/stylex';
+import { withClassName } from '@/lib/stylex';
+import { themeColors } from '../style/theme-colors.stylex';
+import {
+  themeDuration,
+  themeFontSize,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  card: {
+    position: 'relative',
+    display: 'flex',
+    minHeight: themeSpace[14],
+    flexDirection: 'column',
+    borderRadius: themeRadius.xl,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: themeColors.border,
+    backgroundColor: themeColors.card,
+  },
+  clipped: { overflow: 'hidden' },
+  header: {
+    height: themeSpace[14],
+    zIndex: 20,
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    justifyContent: 'space-between',
+  },
+  sticky: { position: 'sticky', top: 0 },
+  absolute: { position: 'absolute', insetInline: themeSpace[4] },
+  relative: { position: 'relative' },
+  glyph: {
+    height: themeSpace[4],
+    width: themeSpace[4],
+    transitionProperty: 'transform, translate, scale, rotate',
+    transitionDuration: themeDuration[200],
+    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+  },
+  titleRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    minWidth: 0,
+    overflow: 'hidden',
+  },
+  title: {
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.mutedForeground,
+    textWrap: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    minWidth: 0,
+  },
+  content: { position: 'relative', height: { default: null, ':is([data-state="closed"])': 0 } },
+  horizontalScroll: {
+    overflowX: 'auto',
+    overflow: { default: null, ':is([data-state="closed"])': 'hidden' },
+  },
+  body: {
+    maxHeight: '70svh',
+    paddingTop: themeSpace[14],
+    paddingBottom: themeSpace[4],
+    overflow: 'auto',
+  },
+  externalBody: { paddingBottom: themeSpace[4] },
+  fade: {
+    insetInline: 0,
+    top: 0,
+    height: 'calc(var(--spacing) * 17)',
+    zIndex: 10,
+    borderTopLeftRadius: themeRadius.xl,
+    borderTopRightRadius: themeRadius.xl,
+  },
+});
 
 type CollapsibleCardProps = Collapsible.CollapsibleProps & {
   /** When true, removes overflow-hidden to allow sticky children to work with outer scroll containers */
@@ -24,15 +107,11 @@ const CollapsibleCard = ({
   return (
     <Collapsible.Root
       {...props}
+      // Keep the combined ring/shadow contract: cn lets caller shadows replace
+      // shadow-none without an unlayered StyleX custom property masking them.
       className={cn(
-        // Default surface is bg-card; callers (e.g. DiffViewer) may override to
-        // bg-background. Keep a single 1px border — no default shadow/ring, which
-        // anti-aliases to a second gray at rounded corners on light canvases.
-        'relative flex min-h-14 flex-col rounded-xl border border-border bg-card shadow-none ring-0',
-        // When allowStickyChildren is true, we avoid setting any overflow on the card root
-        // so that sticky children can stick relative to an outer scroll container.
-        // Horizontal scrolling should be handled by inner content wrappers instead.
-        !allowStickyChildren && 'overflow-hidden',
+        stylex.props(styles.card, !allowStickyChildren && styles.clipped).className,
+        'shadow-none ring-0',
         className
       )}
     >
@@ -59,17 +138,14 @@ const CollapsibleCardHeader: React.FC<CollapsibleCardHeaderProps> = ({
     <Collapsible.Trigger asChild>
       <div
         {...props}
-        className={cn(
-          headerPosition === 'sticky' && 'sticky top-0 h-14 z-20',
-          headerPosition === 'absolute' && 'absolute h-14 inset-x-4 z-20',
-          headerPosition === 'relative' && 'relative h-14 z-20',
-          'flex items-center gap-2 justify-between',
-          className
-        )}
+        className={cn(stylex.props(styles.header, styles[headerPosition]).className, className)}
       >
         <Button variant="ghost" aria-label="Toggle section" size="mini" icon>
           <ChevronDown
-            className="h-4 w-4 transition-transform duration-200 [[data-state=closed]_&]:-rotate-90"
+            className={cn(
+              stylex.props(styles.glyph).className,
+              '[[data-state=closed]_&]:-rotate-90'
+            )}
             aria-hidden="true"
           />
         </Button>
@@ -83,11 +159,8 @@ const CollapsibleCardTitle: React.FC<
   React.HTMLAttributes<HTMLSpanElement> & { title?: string }
 > = ({ className, title, children, ...p }) => {
   return (
-    <div className="flex items-center gap-2 group flex-1 min-w-0 overflow-hidden flex-end">
-      <p
-        {...p}
-        className={cn('text-sm text-muted-foreground text-nowrap truncate min-w-0', className)}
-      >
+    <div {...withClassName(stylex.props(styles.titleRow), 'group')}>
+      <p {...p} className={cn(stylex.props(styles.title).className, className)}>
         {children}
       </p>
       {title && (
@@ -132,22 +205,20 @@ const CollapsibleCardContent: React.FC<CollapsibleCardContentProps> = ({
   return (
     <Collapsible.Content
       className={cn(
-        'relative',
+        stylex.props(styles.content, noInternalScroll ? styles.horizontalScroll : styles.clipped)
+          .className,
         // When noInternalScroll is true, we need overflow-x-auto on Collapsible.Content
         // to allow horizontal scrolling. overflow-hidden would clip the scrollbar.
         // When collapsed (data-[state=closed]), we still need h-0 + overflow-hidden to hide content.
-        noInternalScroll
-          ? 'overflow-x-auto data-[state=closed]:overflow-hidden'
-          : 'overflow-hidden',
         'data-[state=open]:animate-collapsible-down',
-        'data-[state=closed]:animate-collapsible-up data-[state=closed]:h-0'
+        'data-[state=closed]:animate-collapsible-up'
       )}
     >
       <div
         {...props}
         ref={contentRef}
         className={cn(
-          noInternalScroll ? 'pb-4' : 'max-h-[70svh] pt-14 pb-4 overflow-auto',
+          stylex.props(noInternalScroll ? styles.externalBody : styles.body).className,
           className
         )}
         onScroll={noInternalScroll ? undefined : onScroll}
@@ -156,7 +227,7 @@ const CollapsibleCardContent: React.FC<CollapsibleCardContentProps> = ({
         <Fade
           ref={topFadeRef}
           background="var(--color-background)"
-          className="inset-x-0 top-0 h-17 z-10 rounded-t-xl"
+          {...stylex.props(styles.fade)}
           side="top"
           blur="4px"
           stop="60%"

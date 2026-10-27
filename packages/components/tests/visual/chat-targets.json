@@ -1,0 +1,248 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 900
+    },
+    {
+      "name": "phone-compact",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "blockedHosts": ["avatars.githubusercontent.com"],
+  "ids": [
+    "chat-chatcomposer--landing-dark",
+    "chat-chatcomposer--landing-mention-stress",
+    "chat-chatcomposer--dialog-light",
+    "chat-chatcomposer--dialog-mention-stress",
+    "chat-chatcomposer--session-dark",
+    "chat-chatcomposer--session-mention-stress",
+    "chat-chatcomposer--session-mention-wide-dark",
+    "chat-chatcomposer--session-long-prompt",
+    "chat-chatcomposer--session-with-attachments",
+    "chat-chatcomposer--attachment-upload-states",
+    "chat-chatcomposer--attachment-upload-states-dark",
+    "chat-chatcomposer--landing-with-pasted-text",
+    "chat-chatlandingview--desktop-dark",
+    "chat-chatlandingview--desktop-light",
+    "chat-chatlandingview--submission-pending-dark",
+    "chat-chatlandingview--no-machine-download-client-hint",
+    "chat-chatlandingview--no-agent-config-hint",
+    "chat-chatlandingview--long-model-names",
+    "chat-unifiedprojectselector--selected-private",
+    "chat-unifiedprojectselector--selected-team-without-status",
+    "chat-unifiedprojectselector--property-row",
+    "chat-unifiedprojectselector--no-project",
+    "chat-unifiedprojectselector--menu-open",
+    "chat-unifiedprojectselector--menu-open-dark",
+    "chat-unifiedprojectselector--search-beyond-recent",
+    "chat-unifiedprojectselector--share-confirmation",
+    "chat-migration--context-tabs",
+    "chat-migration--context-disabled-tooltip",
+    "chat-migration--context-disabled-action",
+    "chat-migration--connection-states",
+    "chat-migration--connection-large-type",
+    "chat-migration--connection-controls"
+  ],
+  "states": {
+    "chat-migration--context-tabs": [
+      {
+        "name": "github-selected",
+        "steps": [
+          {
+            "action": "click",
+            "role": "tab",
+            "name": "GitHub"
+          }
+        ]
+      },
+      {
+        "name": "chat-keyboard-selected",
+        "steps": [
+          {
+            "action": "press",
+            "role": "tab",
+            "name": "GitHub",
+            "key": "ArrowRight"
+          }
+        ]
+      },
+      {
+        "name": "local-keyboard-selected",
+        "steps": [
+          {
+            "action": "press",
+            "role": "tab",
+            "name": "Chat",
+            "key": "Home"
+          }
+        ]
+      }
+    ],
+    "chat-migration--context-disabled-action": [
+      {
+        "name": "local-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Local Add folder"
+          }
+        ]
+      },
+      {
+        "name": "local-action",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Local Add folder"
+          },
+          {
+            "action": "visible",
+            "selector": "output[aria-label=\"Last action\"]:has-text(\"Add folder\")"
+          }
+        ]
+      },
+      {
+        "name": "github-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "GitHub Connect GitHub"
+          }
+        ]
+      },
+      {
+        "name": "github-action",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "GitHub Connect GitHub"
+          }
+        ]
+      }
+    ],
+    "chat-migration--context-disabled-tooltip": [
+      {
+        "name": "tooltip-open",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Local"
+          },
+          {
+            "action": "visible",
+            "text": "Desktop only"
+          }
+        ]
+      },
+      {
+        "name": "tooltip-close",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Outside control"
+          },
+          {
+            "action": "hidden",
+            "text": "Desktop only"
+          }
+        ]
+      }
+    ],
+    "chat-migration--connection-controls": [
+      {
+        "name": "refreshing",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle refresh"
+          },
+          {
+            "action": "visible",
+            "text": "Refreshing"
+          }
+        ]
+      },
+      {
+        "name": "pull-priority",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle pull"
+          },
+          {
+            "action": "visible",
+            "text": "Release to refresh"
+          }
+        ]
+      },
+      {
+        "name": "refresh-restored",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle pull"
+          },
+          {
+            "action": "visible",
+            "text": "Refreshing"
+          }
+        ]
+      },
+      {
+        "name": "reconnecting",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle refresh"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Reconnect"
+          },
+          {
+            "action": "visible",
+            "text": "Reconnecting"
+          }
+        ]
+      }
+    ]
+  },
+  "ready": {
+    "chat-unifiedprojectselector--search-beyond-recent": [
+      {
+        "action": "fill",
+        "role": "textbox",
+        "name": "Search projects",
+        "value": "30"
+      },
+      {
+        "action": "visible",
+        "selector": "[role=\"menuitemradio\"]:has-text(\"archived-project-30\")"
+      },
+      {
+        "action": "hidden",
+        "selector": "[role=\"menuitemradio\"]:has-text(\"loro-swift\")"
+      }
+    ]
+  }
+}

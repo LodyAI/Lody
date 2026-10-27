@@ -8,14 +8,22 @@ import { AlertCircle, Check, Download, RefreshCw, X } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { Badge } from '@lody/ui/badge';
 import type { LocalProjectHistoryCatalogItem, LocalProjectHistoryProvider } from '@lody/shared';
+import * as stylex from '@stylexjs/stylex';
 
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { Button } from '@lody/ui/button';
 import { AlertDialog } from '@/ui/dialog';
-import { cn } from '@/lib/utils';
 import { toIntlLocale } from '@/lib/intl-locale';
 import { getVisibleLocalProjectHistoryFailures } from '@/lib/local-project-history-catalog';
 import { AgentIcon } from '@/components/icons/agent-icon';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 import {
   formatHistorySyncSummary,
   formatHistoryUpdatedAt,
@@ -24,6 +32,7 @@ import {
   type ProjectHistoryImportState,
   type ProjectSettingsRow,
 } from '@/components/settings/project-settings';
+import { sheetSurface } from './sheet-surface';
 
 export type MobileAcpHistorySheetProps = {
   open: boolean;
@@ -48,6 +57,312 @@ export type MobileAcpHistorySheetProps = {
 };
 
 const EMPTY_CATALOG_SESSIONS: LocalProjectHistoryCatalogItem[] = [];
+
+/** Tailwind's `transition-colors`: colour properties only, 150ms, standard ease. */
+const TRANSITION_COLORS = {
+  transitionProperty: 'color, background-color, border-color, text-decoration-color, fill, stroke',
+  transitionDuration: '150ms',
+  transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+} as const;
+
+const styles = stylex.create({
+  /** The title, with the provider's mark in front of it. */
+  titleRow: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+  },
+  /** The provider's mark. */
+  providerGlyph: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: themeSpace[7],
+    height: themeSpace[7],
+    borderRadius: themeRadius.lg,
+    backgroundColor: 'hsl(var(--primary) / 0.1)',
+    color: themeColors.primary,
+  },
+  providerIcon: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+  },
+
+  /** The status block, under the header. */
+  statusSection: {
+    flexShrink: 0,
+    paddingInline: themeSpace[4],
+    paddingTop: themeSpace[1],
+    paddingBottom: themeSpace[3],
+  },
+  statusRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: themeSpace[3],
+    paddingTop: themeSpace[1],
+    paddingBottom: themeSpace[1],
+  },
+  statusText: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+  },
+  statusLabel: {
+    fontSize: '0.8rem',
+    color: themeColors.mutedForeground,
+  },
+  statusSummary: {
+    marginTop: '0.125rem',
+    fontSize: '0.72rem',
+    lineHeight: 1.625,
+    color: 'hsl(var(--muted-foreground) / 0.8)',
+  },
+  failureList: {
+    marginTop: themeSpace[1],
+    color: themeColors.destructive,
+  },
+  /** One failed conversation. The list's `space-y` lands here. */
+  failureItem: {
+    wordBreak: 'break-word',
+    marginTop: '0px',
+    marginBottom: { default: '0px', ':not(:last-child)': '0.125rem' },
+  },
+  /** The "N more failures" line, spaced like the ones above it. */
+  failureTail: {
+    marginTop: '0px',
+    marginBottom: { default: '0px', ':not(:last-child)': '0.125rem' },
+  },
+
+  /** The sync action, beside the status it refreshes. */
+  syncButton: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    paddingInline: themeSpace[3],
+    paddingTop: themeSpace[1.5],
+    paddingBottom: themeSpace[1.5],
+    borderRadius: themeRadius.full,
+    fontSize: '0.8rem',
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.primary,
+    backgroundColor: { default: null, ':hover': 'hsl(var(--primary) / 0.1)' },
+    scale: { default: null, ':active': '0.97' },
+    cursor: { default: null, ':disabled': 'default' },
+    opacity: { default: 1, ':disabled': 0.5 },
+    ...TRANSITION_COLORS,
+  },
+  syncGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+  },
+
+  /** The error banner, under the status. */
+  errorBanner: {
+    display: 'flex',
+    marginTop: themeSpace[2],
+    alignItems: 'flex-start',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[3],
+    paddingTop: themeSpace[2],
+    paddingBottom: themeSpace[2],
+    borderRadius: themeRadius.xl,
+    backgroundColor: 'hsl(var(--destructive) / 0.08)',
+    fontSize: '0.72rem',
+    color: themeColors.destructive,
+  },
+  errorGlyph: {
+    marginTop: '1px',
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+  },
+  errorText: {
+    minWidth: 0,
+    wordBreak: 'break-word',
+  },
+
+  /** The list of conversations. */
+  listSection: {
+    display: 'flex',
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    flexDirection: 'column',
+    paddingInline: themeSpace[4],
+    paddingBottom: themeSpace[3],
+  },
+  listCard: {
+    overflow: 'hidden',
+    borderRadius: themeRadius['2xl'],
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.4)',
+    backgroundColor: themeColors.card,
+  },
+  /** The row that selects every conversation. */
+  selectAllRow: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    gap: themeSpace[3],
+    paddingInline: themeSpace[4],
+    paddingTop: themeSpace[3],
+    paddingBottom: themeSpace[3],
+    textAlign: 'left',
+    backgroundColor: { default: null, ':active': 'hsl(var(--muted) / 0.4)' },
+    cursor: { default: null, ':disabled': 'default' },
+    opacity: { default: 1, ':disabled': 0.6 },
+    ...TRANSITION_COLORS,
+  },
+  /** The checkbox in front of a row. */
+  checkbox: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: themeSpace[5],
+    height: themeSpace[5],
+    borderRadius: themeRadius.md,
+    borderWidth: '2px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.8)',
+    ...TRANSITION_COLORS,
+  },
+  /** The checkbox of a picked row. */
+  checkboxChecked: {
+    borderColor: themeColors.primary,
+    backgroundColor: themeColors.primary,
+    color: themeColors.primaryForeground,
+  },
+  checkGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+  },
+  /** The select-all row's label. */
+  selectAllLabel: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.85rem',
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+  },
+  /** The list's empty state. */
+  emptyState: {
+    paddingInline: themeSpace[4],
+    paddingTop: themeSpace[10],
+    paddingBottom: themeSpace[10],
+    textAlign: 'center',
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.mutedForeground,
+  },
+  /** The list of conversations. */
+  list: {
+    maxHeight: '100%',
+    overflowY: 'auto',
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'hsl(var(--border) / 0.4)',
+  },
+  /**
+   * One conversation. The list's `divide-y` and `space-y` both land here:
+   * a hairline under every conversation but the last, and a hair of space
+   * between them.
+   */
+  listItem: {
+    borderBottomWidth: { default: '0px', ':not(:last-child)': '1px' },
+    borderBottomStyle: { default: 'none', ':not(:last-child)': 'solid' },
+    borderBottomColor: 'hsl(var(--border) / 0.4)',
+    marginTop: '0px',
+    marginBottom: { default: '0px', ':not(:last-child)': '0.125rem' },
+  },
+  /** One conversation's row. */
+  row: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    gap: themeSpace[3],
+    paddingInline: themeSpace[4],
+    paddingTop: themeSpace[3],
+    paddingBottom: themeSpace[3],
+    textAlign: 'left',
+    ...TRANSITION_COLORS,
+  },
+  /** A row that cannot be toggled. */
+  rowLocked: {
+    cursor: 'default',
+    opacity: 0.7,
+  },
+  /** A row that can be toggled. */
+  rowToggleable: {
+    backgroundColor: { default: null, ':active': 'hsl(var(--muted) / 0.4)' },
+  },
+  /** The row's text column. */
+  rowText: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+  },
+  /** The conversation's title. */
+  rowTitle: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.9rem',
+    fontWeight: themeFontWeight.medium,
+    lineHeight: 1.25,
+    color: themeColors.foreground,
+  },
+  /** The conversation's last activity. */
+  rowUpdated: {
+    marginTop: '0.125rem',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.72rem',
+    color: themeColors.mutedForeground,
+  },
+  /** The row that resolves a conflict. */
+  conflictAction: {
+    paddingInlineStart: themeSpace[12],
+    paddingInlineEnd: themeSpace[4],
+    paddingBottom: themeSpace[3],
+  },
+
+  /** The glyph of the re-import action. */
+  conflictGlyph: {
+    marginRight: themeSpace[1.5],
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+  },
+  /** The glyph of the import action. */
+  importGlyph: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+  },
+  /** The footer's import action. */
+  footer: {
+    flexShrink: 0,
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'hsl(var(--border) / 0.4)',
+    paddingInline: themeSpace[4],
+    paddingTop: themeSpace[3],
+    paddingBottom:
+      'calc(12px + max(0px, var(--safe-area-bottom, 0px) - var(--native-keyboard-height, 0px)))',
+  },
+});
 
 /**
  * Mobile-native bottom sheet for the per-provider ACP history sync /
@@ -149,21 +464,18 @@ export function MobileAcpHistorySheet({
   return (
     <>
       <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
-        <DrawerContent
-          className={cn(
-            'mobile-acp-history-sheet',
-            'h-[88dvh]! max-h-[88dvh]! rounded-t-2xl border-border/60'
-          )}
-        >
-          <div className="flex h-full min-h-0 flex-col">
+        <DrawerContent className="mobile-acp-history-sheet h-[88dvh]! max-h-[88dvh]! rounded-t-2xl border-border/60">
+          <div {...stylex.props(sheetSurface.column)}>
             {/* Header: provider chip centered, close on right */}
-            <header className="relative flex shrink-0 items-center px-4 pb-2 pt-2">
-              <DrawerTitle className="mx-auto inline-flex items-center gap-2 text-[0.95rem] font-semibold tracking-tight">
-                <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <header {...stylex.props(sheetSurface.header, sheetSurface.headerShrink)}>
+              <DrawerTitle
+                {...stylex.props(sheetSurface.title, sheetSurface.titleCentered, styles.titleRow)}
+              >
+                <span {...stylex.props(styles.providerGlyph)}>
                   <AgentIcon
                     cliType={state.provider.cliType}
                     agentType={state.provider.agentType}
-                    className="h-4 w-4"
+                    {...stylex.props(styles.providerIcon)}
                   />
                 </span>
                 {providerLabel}
@@ -172,16 +484,13 @@ export function MobileAcpHistorySheet({
                 <button
                   type="button"
                   aria-label={t('common.close', 'Close')}
-                  className={cn(
-                    'absolute right-3 top-1.5 inline-flex h-9 w-9 items-center justify-center rounded-full',
-                    'text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground'
-                  )}
+                  {...stylex.props(sheetSurface.iconButton, sheetSurface.iconButtonRight)}
                 >
-                  <X className="h-5 w-5" aria-hidden="true" strokeWidth={1.8} />
+                  <X {...stylex.props(sheetSurface.glyph20)} aria-hidden="true" strokeWidth={1.8} />
                 </button>
               </DrawerClose>
             </header>
-            <DrawerDescription className="sr-only">
+            <DrawerDescription {...stylex.props(sheetSurface.srOnly)}>
               {t('workspace.projects.historySyncSection', '对话同步')}
             </DrawerDescription>
 
@@ -197,22 +506,22 @@ export function MobileAcpHistorySheet({
              `syncSummary` slips under the status as a second line so
              the two narrations of "last sync" hang together; the
              error banner sits as its own full-width strip below. */}
-            <section className="shrink-0 px-4 pb-3 pt-1">
-              <div className="flex items-center justify-between gap-3 py-1">
-                <div className="min-w-0 flex-1">
-                  <p className="text-[0.8rem] text-muted-foreground">{statusLabel}</p>
+            <section {...stylex.props(styles.statusSection)}>
+              <div {...stylex.props(styles.statusRow)}>
+                <div {...stylex.props(styles.statusText)}>
+                  <p {...stylex.props(styles.statusLabel)}>{statusLabel}</p>
                   {state.syncSummary ? (
-                    <div className="mt-0.5 text-[0.72rem] leading-relaxed text-muted-foreground/80">
+                    <div {...stylex.props(styles.statusSummary)}>
                       <p>{formatHistorySyncSummary(state.syncSummary, t)}</p>
                       {syncFailures && syncFailures.failures.length > 0 ? (
-                        <ul className="mt-1 space-y-0.5 text-destructive">
+                        <ul {...stylex.props(styles.failureList)}>
                           {syncFailures.failures.map((failure) => (
-                            <li key={failure.acpSessionId} className="break-words">
+                            <li key={failure.acpSessionId} {...stylex.props(styles.failureItem)}>
                               {failure.acpSessionId}: {failure.message}
                             </li>
                           ))}
                           {syncFailures.remaining > 0 ? (
-                            <li>
+                            <li {...stylex.props(styles.failureTail)}>
                               {t('workspace.projects.historySyncMoreFailures', {
                                 defaultValue: '{{count}} more failures',
                                 count: syncFailures.remaining,
@@ -231,17 +540,12 @@ export function MobileAcpHistorySheet({
                     onClick={() => {
                       void onSyncHistory(row, state.provider);
                     }}
-                    className={cn(
-                      'inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5',
-                      'text-[0.8rem] font-medium text-primary',
-                      'transition-colors hover:bg-primary/10 active:scale-[0.97]',
-                      'disabled:cursor-default disabled:opacity-50'
-                    )}
+                    {...stylex.props(styles.syncButton)}
                   >
                     {state.isSyncing ? (
-                      <Spinner className="h-3.5 w-3.5" aria-hidden="true" />
+                      <Spinner {...stylex.props(styles.syncGlyph)} aria-hidden="true" />
                     ) : (
-                      <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                      <RefreshCw {...stylex.props(styles.syncGlyph)} aria-hidden="true" />
                     )}
                     {t('workspace.projects.syncHistory', 'Sync')}
                   </button>
@@ -249,14 +553,9 @@ export function MobileAcpHistorySheet({
               </div>
 
               {state.errorMessage ? (
-                <div
-                  className={cn(
-                    'mt-2 flex items-start gap-2 rounded-xl bg-destructive/8 px-3 py-2',
-                    'text-[0.72rem] text-destructive'
-                  )}
-                >
-                  <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  <span className="min-w-0 break-words">{state.errorMessage}</span>
+                <div {...stylex.props(styles.errorBanner)}>
+                  <AlertCircle {...stylex.props(styles.errorGlyph)} aria-hidden="true" />
+                  <span {...stylex.props(styles.errorText)}>{state.errorMessage}</span>
                 </div>
               ) : null}
             </section>
@@ -265,8 +564,8 @@ export function MobileAcpHistorySheet({
              so they read as a checklist (left → right: pick, then
              title). Imported / conflict rows still show a status
              pill on the right since they aren't user-toggleable. */}
-            <section className="flex min-h-0 flex-1 flex-col px-4 pb-3">
-              <div className="overflow-hidden rounded-2xl border border-border/40 bg-card">
+            <section {...stylex.props(styles.listSection)}>
+              <div {...stylex.props(styles.listCard)}>
                 {catalogSessions.length > 0 ? (
                   <button
                     type="button"
@@ -274,25 +573,23 @@ export function MobileAcpHistorySheet({
                       if (selectableSessions.length > 0 && canManageCatalog) toggleSelectAll();
                     }}
                     disabled={selectableSessions.length === 0 || !canManageCatalog}
-                    className={cn(
-                      'flex w-full items-center gap-3 px-4 py-3 text-left',
-                      'transition-colors active:bg-muted/40',
-                      'disabled:cursor-default disabled:opacity-60'
-                    )}
+                    {...stylex.props(styles.selectAllRow)}
                   >
                     <span
-                      className={cn(
-                        'flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 transition-colors',
-                        allSelectableSelected
-                          ? 'border-primary bg-primary text-primary-foreground'
-                          : 'border-border/80'
+                      {...stylex.props(
+                        styles.checkbox,
+                        allSelectableSelected && styles.checkboxChecked
                       )}
                     >
                       {allSelectableSelected ? (
-                        <Check className="h-3.5 w-3.5" strokeWidth={3} aria-hidden="true" />
+                        <Check
+                          {...stylex.props(styles.checkGlyph)}
+                          strokeWidth={3}
+                          aria-hidden="true"
+                        />
                       ) : null}
                     </span>
-                    <span className="min-w-0 flex-1 truncate text-[0.85rem] font-medium text-foreground">
+                    <span {...stylex.props(styles.selectAllLabel)}>
                       {t('workspace.projects.selectAllHistory', {
                         defaultValue: 'Select all available ({{count}})',
                         count: selectableSessions.length,
@@ -302,14 +599,14 @@ export function MobileAcpHistorySheet({
                 ) : null}
 
                 {catalogSessions.length === 0 ? (
-                  <div className="px-4 py-10 text-center text-sm text-muted-foreground">
+                  <div {...stylex.props(styles.emptyState)}>
                     {t('workspace.projects.historyEmpty', {
                       defaultValue: 'No {{provider}} conversations found',
                       provider: providerLabel,
                     })}
                   </div>
                 ) : (
-                  <ul className="max-h-full divide-y divide-border/40 overflow-y-auto border-t border-border/40">
+                  <ul {...stylex.props(styles.list)}>
                     {catalogSessions.map((session) => {
                       const imported = session.status === 'imported';
                       const conflict = session.status === 'sync_conflict';
@@ -334,39 +631,32 @@ export function MobileAcpHistorySheet({
                         ? updatedAtDate.toLocaleString(intlLocale)
                         : session.acpSessionId;
                       return (
-                        <li key={session.acpSessionId}>
+                        <li key={session.acpSessionId} {...stylex.props(styles.listItem)}>
                           <button
                             type="button"
                             disabled={selectionDisabled}
                             onClick={() => {
                               if (!selectionDisabled) toggleSession(session.acpSessionId);
                             }}
-                            className={cn(
-                              'flex w-full items-center gap-3 px-4 py-3 text-left',
-                              'transition-colors',
-                              selectionDisabled ? 'cursor-default opacity-70' : 'active:bg-muted/40'
+                            {...stylex.props(
+                              styles.row,
+                              selectionDisabled ? styles.rowLocked : styles.rowToggleable
                             )}
                           >
                             <span
-                              className={cn(
-                                'flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 transition-colors',
-                                selected
-                                  ? 'border-primary bg-primary text-primary-foreground'
-                                  : 'border-border/80'
-                              )}
+                              {...stylex.props(styles.checkbox, selected && styles.checkboxChecked)}
                             >
                               {selected ? (
-                                <Check className="h-3.5 w-3.5" strokeWidth={3} aria-hidden="true" />
+                                <Check
+                                  {...stylex.props(styles.checkGlyph)}
+                                  strokeWidth={3}
+                                  aria-hidden="true"
+                                />
                               ) : null}
                             </span>
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-[0.9rem] font-medium leading-tight text-foreground">
-                                {session.title}
-                              </p>
-                              <p
-                                className="mt-0.5 truncate text-[0.72rem] text-muted-foreground"
-                                title={updatedAtTitle}
-                              >
+                            <div {...stylex.props(styles.rowText)}>
+                              <p {...stylex.props(styles.rowTitle)}>{session.title}</p>
+                              <p {...stylex.props(styles.rowUpdated)} title={updatedAtTitle}>
                                 {updatedAtLabel}
                               </p>
                             </div>
@@ -379,7 +669,7 @@ export function MobileAcpHistorySheet({
                             ) : null}
                           </button>
                           {conflict ? (
-                            <div className="px-4 pb-3 pl-12">
+                            <div {...stylex.props(styles.conflictAction)}>
                               <Button
                                 type="button"
                                 variant="secondary"
@@ -394,7 +684,10 @@ export function MobileAcpHistorySheet({
                                 {resolving ? (
                                   <Spinner className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
                                 ) : (
-                                  <RefreshCw className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                                  <RefreshCw
+                                    {...stylex.props(styles.conflictGlyph)}
+                                    aria-hidden="true"
+                                  />
                                 )}
                                 {t('workspace.projects.resolveHistoryConflict', 'Re-import')}
                               </Button>
@@ -412,12 +705,7 @@ export function MobileAcpHistorySheet({
              bottom. Only mounts when the user has selected something
              so the resting state of the sheet stays minimal. */}
             {selectedCount > 0 ? (
-              <div
-                className={cn(
-                  'shrink-0 border-t border-border/40 px-4 pt-3',
-                  'pb-[calc(12px+max(0px,var(--safe-area-bottom,0px)-var(--native-keyboard-height,0px)))]'
-                )}
-              >
+              <div {...stylex.props(styles.footer)}>
                 <Button
                   type="button"
                   size="large"
@@ -430,7 +718,7 @@ export function MobileAcpHistorySheet({
                   {state.isImporting ? (
                     <Spinner className="h-4 w-4" aria-hidden="true" />
                   ) : (
-                    <Download className="h-4 w-4" aria-hidden="true" />
+                    <Download {...stylex.props(styles.importGlyph)} aria-hidden="true" />
                   )}
                   {t('workspace.projects.importSelectedHistoryCount', {
                     defaultValue: 'Import {{count}} selected',

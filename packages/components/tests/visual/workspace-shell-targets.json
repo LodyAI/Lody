@@ -1,0 +1,184 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "compact-boundary",
+      "width": 767,
+      "height": 900
+    },
+    {
+      "name": "desktop-boundary",
+      "width": 768,
+      "height": 900
+    },
+    {
+      "name": "iphone",
+      "width": 390,
+      "height": 844,
+      "device": "iPhone 13"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "components-ownedworkspaceshellmigration--default",
+    "components-ownedworkspaceshellmigration--empty",
+    "components-ownedworkspaceshellmigration--static-identity",
+    "components-ownedworkspaceshellmigration--root-variable-scope",
+    "components-ownedworkspaceshellmigration--subtree-variable-scope"
+  ],
+  "ready": {
+    "components-ownedworkspaceshellmigration--default": [
+      {
+        "action": "visible",
+        "selector": "[data-sidebar-footer]"
+      }
+    ],
+    "components-ownedworkspaceshellmigration--empty": [
+      {
+        "action": "visible",
+        "selector": "[data-sidebar-footer]"
+      }
+    ],
+    "components-ownedworkspaceshellmigration--static-identity": [
+      {
+        "action": "visible",
+        "selector": "[data-sidebar-footer]"
+      }
+    ],
+    "components-ownedworkspaceshellmigration--root-variable-scope": [
+      {
+        "action": "visible",
+        "selector": "[data-sidebar-footer]"
+      }
+    ],
+    "components-ownedworkspaceshellmigration--subtree-variable-scope": [
+      {
+        "action": "visible",
+        "selector": "[data-sidebar-footer]"
+      }
+    ]
+  },
+  "states": {
+    "components-ownedworkspaceshellmigration--default": [
+      {
+        "name": "workspace-menu",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-workspace-switcher-trigger]"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"menu\"]"
+          }
+        ]
+      },
+      {
+        "name": "help-menu",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Escape"
+          },
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"Help\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"menu\"]"
+          }
+        ]
+      },
+      {
+        "name": "archive-hover",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Escape"
+          },
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"Archive\"]"
+          },
+          {
+            "action": "hover",
+            "selector": "button[aria-label=\"Leave Archive\"]"
+          }
+        ]
+      },
+      {
+        "name": "archive-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 600,
+            "y": 30
+          },
+          {
+            "action": "focus",
+            "selector": "button[aria-label=\"Help\"]"
+          },
+          {
+            "action": "press",
+            "selector": "button[aria-label=\"Help\"]",
+            "key": "Tab"
+          }
+        ]
+      }
+    ],
+    "components-ownedworkspaceshellmigration--empty": [
+      {
+        "name": "show-all",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-empty-state] button"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"[data-workspace-shell-result]\")?.getAttribute(\"data-scope\") === \"team\""
+          }
+        ]
+      }
+    ],
+    "components-ownedworkspaceshellmigration--root-variable-scope": [
+      {
+        "name": "workspace-menu",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-workspace-switcher-trigger]"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"menu\"]"
+          }
+        ]
+      }
+    ],
+    "components-ownedworkspaceshellmigration--subtree-variable-scope": [
+      {
+        "name": "workspace-menu",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-workspace-switcher-trigger]"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"menu\"]"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -17,9 +17,10 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
 import { Spinner } from '@/ui/spinner';
 import type { LocalProjectBrowseDirectoryEntry } from '@lody/shared';
-import { cn } from '@/lib/utils';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
@@ -36,8 +37,7 @@ import {
   type RemoteDirectoryPickerArgs,
   type RemoteDirectoryPickerController,
 } from './use-remote-directory-picker';
-
-const MOBILE_SHEET_TITLE_TEXT_CLASS = 'text-[0.95rem] font-semibold leading-6 text-foreground';
+import { localProjectsSurface as surface } from './surface';
 
 /**
  * Mobile-optimized add-local-project flow (machine → browse → confirm). Large
@@ -55,31 +55,29 @@ export function MobileAddLocalProjectFlow(args: RemoteDirectoryPickerArgs) {
       : (c.selectedMachine?.name ?? t('localProjects.add.title', 'Add a folder'));
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div {...stylex.props(surface.column)}>
       {/* Top bar */}
-      <div className="flex items-center gap-1 px-2 pb-1.5 pt-1">
+      <div {...stylex.props(surface.titleRow)}>
         {c.phase === 'machine' ? (
-          <div className="h-11 w-11 shrink-0" aria-hidden />
+          <div {...stylex.props(surface.iconButtonSpacer)} aria-hidden />
         ) : (
           <button
             type="button"
             onClick={c.back}
             aria-label={t('common.back', 'Back')}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-foreground active:bg-muted/60"
+            {...stylex.props(surface.iconButton, surface.iconButtonForeground)}
           >
-            <ArrowLeft className="h-5 w-5" />
+            <ArrowLeft {...stylex.props(surface.iconGlyph)} />
           </button>
         )}
-        <p className={cn('min-w-0 flex-1 truncate text-center', MOBILE_SHEET_TITLE_TEXT_CLASS)}>
-          {title}
-        </p>
+        <p {...stylex.props(surface.title)}>{title}</p>
         <button
           type="button"
           onClick={c.close}
           aria-label={t('common.cancel', 'Cancel')}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted-foreground active:bg-muted/60"
+          {...stylex.props(surface.iconButton, surface.iconButtonMuted)}
         >
-          <X className="h-5 w-5" />
+          <X {...stylex.props(surface.iconGlyph)} />
         </button>
       </div>
 
@@ -116,16 +114,19 @@ function MobileMachineList({ controller: c }: { controller: RemoteDirectoryPicke
     );
   }
   return (
-    <div className="scrollbar-pro min-h-0 flex-1 overflow-y-auto pb-[var(--safe-area-bottom,0px)]">
-      <p className="px-4 py-2 text-[0.8125rem] text-muted-foreground">
+    <div
+      {...stylex.props(surface.scroller, surface.scrollerSafeArea)}
+      className={clsx(
+        stylex.props(surface.scroller, surface.scrollerSafeArea).className,
+        'scrollbar-pro'
+      )}
+    >
+      <p {...stylex.props(surface.hint)}>
         {t('localProjects.add.pickMachineHint', 'Pick where the folder lives.')}
       </p>
       {c.blockedMachine ? (
-        <div
-          role="alert"
-          className="mx-4 mb-2 flex gap-2 rounded-lg bg-muted/60 px-3 py-2.5 text-[0.8125rem] leading-snug text-muted-foreground"
-        >
-          <Lock className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+        <div role="alert" {...stylex.props(surface.notice)}>
+          <Lock {...stylex.props(surface.noticeGlyph)} aria-hidden />
           <span>
             {c.blockedMachine.ownerName
               ? t(
@@ -142,28 +143,21 @@ function MobileMachineList({ controller: c }: { controller: RemoteDirectoryPicke
       ) : null}
       {c.machines.map((machine, index) => (
         <Fragment key={machine.id}>
-          {index > 0 ? <div className="ml-[3.25rem] h-px bg-border/40" aria-hidden /> : null}
+          {index > 0 ? <div {...stylex.props(surface.separator)} aria-hidden /> : null}
           <button
             type="button"
             disabled={machine.canAddProjects && !machine.online}
             aria-disabled={machine.canAddProjects && !machine.online}
             onClick={() => c.selectMachine(machine.id)}
-            className={cn(
-              'flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors',
-              machine.canAddProjects && !machine.online
-                ? 'cursor-not-allowed opacity-50'
-                : 'active:bg-muted/50'
+            {...stylex.props(
+              surface.row,
+              machine.canAddProjects && !machine.online ? surface.rowDisabled : surface.rowActive
             )}
           >
-            <MonitorSmartphone
-              className="h-6 w-6 shrink-0 text-muted-foreground"
-              strokeWidth={1.6}
-            />
-            <span className="min-w-0 flex-1">
-              <span className={cn('block truncate', MOBILE_SHEET_TITLE_TEXT_CLASS)}>
-                {machine.name}
-              </span>
-              <span className="block truncate text-[0.8125rem] text-muted-foreground">
+            <MonitorSmartphone {...stylex.props(surface.rowGlyph)} strokeWidth={1.6} />
+            <span {...stylex.props(surface.rowText)}>
+              <span {...stylex.props(surface.rowTitle)}>{machine.name}</span>
+              <span {...stylex.props(surface.rowName)}>
                 {machine.canAddProjects
                   ? t('localProjects.add.yourMachine', 'Your machine')
                   : machine.ownerName
@@ -176,11 +170,11 @@ function MobileMachineList({ controller: c }: { controller: RemoteDirectoryPicke
                       )}
               </span>
             </span>
-            <span className="flex shrink-0 flex-col items-end gap-1">
+            <span {...stylex.props(surface.rowTrailing)}>
               <span
-                className={cn(
-                  'text-[0.8125rem]',
-                  machine.online ? 'text-emerald-500' : 'text-muted-foreground'
+                {...stylex.props(
+                  surface.rowTrailingText,
+                  machine.online ? surface.rowTrailingOnline : undefined
                 )}
               >
                 {machine.online
@@ -188,21 +182,18 @@ function MobileMachineList({ controller: c }: { controller: RemoteDirectoryPicke
                   : t('localProjects.add.offline', 'Offline')}
               </span>
               {!machine.canAddProjects ? (
-                <span className="text-xs text-muted-foreground">
+                <span {...stylex.props(surface.rowTrailingNote)}>
                   {t('localProjects.add.ownerOnly', 'Owner only')}
                 </span>
               ) : null}
             </span>
             {machine.canAddProjects ? (
               <ChevronRight
-                className={cn(
-                  'h-5 w-5 shrink-0 text-muted-foreground/40',
-                  !machine.online && 'invisible'
-                )}
+                {...stylex.props(surface.rowChevron, !machine.online && surface.rowChevronHidden)}
                 aria-hidden
               />
             ) : (
-              <Lock className="h-5 w-5 shrink-0 text-muted-foreground/50" aria-hidden />
+              <Lock {...stylex.props(surface.rowLock)} aria-hidden />
             )}
           </button>
         </Fragment>
@@ -224,7 +215,7 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
   return (
     <>
       {/* Path bar */}
-      <div className="flex min-h-[3.25rem] items-center gap-1 border-y border-border/40 bg-muted/20 px-2 py-1.5">
+      <div {...stylex.props(surface.pathBar)}>
         {c.editingPath ? (
           <>
             <Input
@@ -242,43 +233,42 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
               type="button"
               onClick={c.submitPath}
               aria-label={t('localProjects.add.go', 'Go')}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-primary active:bg-muted/60"
+              {...stylex.props(surface.pathGoButton)}
             >
-              <Check className="h-5 w-5" />
+              <Check {...stylex.props(surface.pathGoGlyph)} />
             </button>
           </>
         ) : (
           <>
-            <div className="flex min-h-10 min-w-0 flex-1 items-center gap-0.5 overflow-hidden whitespace-nowrap text-[0.9rem] text-muted-foreground">
+            <div {...stylex.props(surface.pathCrumbs)}>
               {crumbs.length === 0 ? (
                 <Skeleton width={128} height={16} className="mx-1.5 shrink-0" />
               ) : (
                 <>
                   {breadcrumbTrail.hiddenPrefix ? (
-                    <span className="shrink-0 px-1.5 py-1 text-muted-foreground/60">…</span>
+                    <span {...stylex.props(surface.pathCrumbEllipsis)}>…</span>
                   ) : null}
                   {breadcrumbTrail.visibleCrumbs.map((crumb, index) => {
                     const originalIndex = breadcrumbTrail.startIndex + index;
                     const isRoot = originalIndex === 0;
                     return (
-                      <span key={crumb.path} className="flex min-w-0 items-center">
+                      <span key={crumb.path} {...stylex.props(surface.pathCrumbGroup)}>
                         {index > 0 || breadcrumbTrail.hiddenPrefix ? (
-                          <span className="shrink-0 px-0.5 text-muted-foreground/40">/</span>
+                          <span {...stylex.props(surface.pathCrumbSeparator)}>/</span>
                         ) : null}
                         <button
                           type="button"
                           onClick={() => c.navigate(crumb.path)}
                           aria-label={isRoot ? t('localProjects.add.root', 'Root') : undefined}
-                          className={cn(
-                            'flex min-w-0 max-w-32 items-center rounded px-1.5 py-1 transition-colors active:bg-muted/60',
-                            originalIndex === crumbs.length - 1 &&
-                              'max-w-40 font-medium text-foreground'
+                          {...stylex.props(
+                            surface.pathCrumb,
+                            originalIndex === crumbs.length - 1 && surface.pathCrumbCurrent
                           )}
                         >
                           {isRoot ? (
-                            <Home className="h-4 w-4 shrink-0" />
+                            <Home {...stylex.props(surface.pathCrumbGlyph)} />
                           ) : (
-                            <span className="truncate">{crumb.label}</span>
+                            <span {...stylex.props(surface.truncate)}>{crumb.label}</span>
                           )}
                         </button>
                       </span>
@@ -288,8 +278,8 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
               )}
             </div>
             {c.status === 'loading' ? (
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center">
-                <Spinner className="h-4 w-4 text-muted-foreground" aria-hidden />
+              <div {...stylex.props(surface.pathSpinnerBox)}>
+                <Spinner {...stylex.props(surface.pathSpinner)} aria-hidden />
               </div>
             ) : (
               <>
@@ -299,9 +289,9 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
                   onClick={c.startEditPath}
                   disabled={!c.current}
                   aria-label={t('localProjects.add.editPath', 'Edit path')}
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground active:bg-muted/60 disabled:opacity-40"
+                  {...stylex.props(surface.pathEditButton)}
                 >
-                  <Pencil className="h-4 w-4" />
+                  <Pencil {...stylex.props(surface.pathEditGlyph)} />
                 </button>
               </>
             )}
@@ -311,15 +301,15 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
 
       {/* Drives (Windows) */}
       {c.roots?.drives && c.roots.drives.length > 1 ? (
-        <div className="flex flex-wrap gap-1.5 border-b border-border/40 px-3 py-2">
+        <div {...stylex.props(surface.drives)}>
           {c.roots.drives.map((drive) => (
             <button
               key={drive}
               type="button"
               onClick={() => c.navigate(drive)}
-              className="flex items-center gap-1.5 rounded-full bg-muted/50 px-3 py-1.5 text-[0.8125rem] active:bg-muted/70"
+              {...stylex.props(surface.drive)}
             >
-              <HardDrive className="h-3.5 w-3.5" />
+              <HardDrive {...stylex.props(surface.driveGlyph)} />
               {drive}
             </button>
           ))}
@@ -327,7 +317,13 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
       ) : null}
 
       {/* List */}
-      <div className="scrollbar-pro min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <div
+        {...stylex.props(surface.scroller, surface.scrollerOverscroll)}
+        className={clsx(
+          stylex.props(surface.scroller, surface.scrollerOverscroll).className,
+          'scrollbar-pro'
+        )}
+      >
         {initialLoading ? (
           <MobileDirectorySkeleton />
         ) : c.status === 'error' && errorView ? (
@@ -337,32 +333,34 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
             description={errorView.description}
             action={
               <Button type="button" variant="secondary" size="large" onClick={c.retry}>
-                <RefreshCw className="h-4 w-4" />
+                <RefreshCw {...stylex.props(surface.glyphSm)} />
                 {t('common.retry', 'Retry')}
               </Button>
             }
           />
         ) : c.current ? (
-          <div className={cn('transition-opacity', navigating && 'pointer-events-none opacity-50')}>
+          <div {...stylex.props(surface.listing, navigating && surface.listingNavigating)}>
             {c.current.parentPath ? (
               <button
                 type="button"
                 onClick={() => c.current?.parentPath && c.navigate(c.current.parentPath)}
-                className="flex w-full items-center gap-3 px-4 py-3.5 text-left text-muted-foreground transition-colors active:bg-muted/50"
+                {...stylex.props(surface.parentRow)}
               >
-                <ArrowUp className="h-6 w-6 shrink-0" />
-                <span className="text-[1.0625rem]">{t('localProjects.add.parent', '..')}</span>
+                <ArrowUp {...stylex.props(surface.parentGlyph)} />
+                <span {...stylex.props(surface.parentLabel)}>
+                  {t('localProjects.add.parent', '..')}
+                </span>
               </button>
             ) : null}
             {c.current.entries.length === 0 ? (
-              <p className="px-4 py-12 text-center text-[0.95rem] text-muted-foreground">
+              <p {...stylex.props(surface.emptyListing)}>
                 {t('localProjects.add.emptyFolder', 'This folder has no subfolders.')}
               </p>
             ) : (
               c.current.entries.map((entry, index) => (
                 <Fragment key={entry.absolutePath}>
                   {index > 0 || c.current?.parentPath ? (
-                    <div className="ml-[3.25rem] h-px bg-border/40" aria-hidden />
+                    <div {...stylex.props(surface.separator)} aria-hidden />
                   ) : null}
                   <MobileEntryRow entry={entry} onClick={() => c.entryClick(entry)} />
                 </Fragment>
@@ -373,10 +371,10 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
                 type="button"
                 onClick={() => void c.loadMore()}
                 disabled={c.loadingMore}
-                className="flex w-full items-center justify-center gap-2 px-4 py-3.5 text-[0.95rem] text-muted-foreground active:bg-muted/50"
+                {...stylex.props(surface.loadMoreRow)}
               >
                 {c.loadingMore ? (
-                  <Spinner className="h-4 w-4" />
+                  <Spinner {...stylex.props(surface.glyphSm)} />
                 ) : (
                   t('localProjects.add.loadMore', 'Load more')
                 )}
@@ -389,11 +387,9 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
       </div>
 
       {/* Footer — the creation form appears only after invoking the path-bar action. */}
-      <div className="border-t border-border/60 px-4 pb-[max(0.75rem,var(--safe-area-bottom,0px))] pt-3">
+      <div {...stylex.props(surface.footer)}>
         <RemoteDirectoryNewFolderControl controller={c} />
-        {c.addError ? (
-          <p className="mb-2 text-left text-[0.8rem] text-destructive">{c.addError}</p>
-        ) : null}
+        {c.addError ? <p {...stylex.props(surface.footerError)}>{c.addError}</p> : null}
         <Button
           type="button"
           size="large"
@@ -401,7 +397,7 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
           disabled={!c.canAddCurrentFolder}
           onClick={() => void c.addCurrentFolder()}
         >
-          {c.adding ? <Spinner className="h-5 w-5" /> : null}
+          {c.adding ? <Spinner {...stylex.props(surface.glyphMd)} /> : null}
           {t('localProjects.add.useThisFolder', 'Add')}
         </Button>
       </div>
@@ -426,16 +422,14 @@ function MobileEntryRow({
       type="button"
       onClick={onClick}
       disabled={unreadable}
-      className={cn(
-        'flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors',
-        unreadable ? 'cursor-not-allowed opacity-50' : 'active:bg-muted/50'
-      )}
+      {...stylex.props(surface.row, unreadable ? surface.rowDisabled : surface.rowActive)}
     >
-      <Icon className="h-6 w-6 shrink-0 text-muted-foreground" strokeWidth={1.6} />
+      <Icon {...stylex.props(surface.rowGlyph)} strokeWidth={1.6} />
       <span
-        className={cn(
-          'min-w-0 flex-1 truncate text-[1.0625rem] text-foreground',
-          entry.hidden && 'text-muted-foreground'
+        {...stylex.props(
+          surface.rowText,
+          surface.rowNameLarge,
+          entry.hidden && surface.rowNameHidden
         )}
       >
         {entry.name}
@@ -445,9 +439,9 @@ function MobileEntryRow({
           {t('localProjects.add.added', 'Added')}
         </Badge>
       ) : unreadable ? (
-        <Lock className="h-5 w-5 shrink-0 text-muted-foreground/40" aria-hidden />
+        <Lock {...stylex.props(surface.rowChevron)} aria-hidden />
       ) : (
-        <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/40" aria-hidden />
+        <ChevronRight {...stylex.props(surface.rowChevron)} aria-hidden />
       )}
     </button>
   );
@@ -455,9 +449,9 @@ function MobileEntryRow({
 
 function MobileDirectorySkeleton() {
   return (
-    <div className="py-1">
+    <div {...stylex.props(surface.skeletonBody)}>
       {Array.from({ length: 8 }).map((_, index) => (
-        <div key={index} className="flex items-center gap-3 px-4 py-3.5">
+        <div key={index} {...stylex.props(surface.skeletonRow)}>
           <Skeleton width={28} height={28} className="shrink-0" />
           <Skeleton height={16} className="flex-1" style={{ maxWidth: `${64 - index * 5}%` }} />
         </div>
@@ -486,19 +480,17 @@ function MobileStatusPanel({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-10 text-center">
+    <div {...stylex.props(surface.statusPanel)}>
       <Spinner
         icon={Icon}
         spinning={spinning}
-        className="h-9 w-9 text-muted-foreground"
+        {...stylex.props(surface.statusGlyph)}
         aria-hidden
         strokeWidth={1.6}
       />
-      <span className="text-[1.0625rem] font-medium text-foreground">{title}</span>
-      {description ? (
-        <span className="max-w-xs text-[0.9rem] text-muted-foreground">{description}</span>
-      ) : null}
-      {action ? <div className="mt-1">{action}</div> : null}
+      <span {...stylex.props(surface.statusTitle)}>{title}</span>
+      {description ? <span {...stylex.props(surface.statusDescription)}>{description}</span> : null}
+      {action ? <div {...stylex.props(surface.statusAction)}>{action}</div> : null}
     </div>
   );
 }

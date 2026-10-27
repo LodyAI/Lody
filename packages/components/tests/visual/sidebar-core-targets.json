@@ -1,0 +1,95 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "components-lodysidebar--default",
+    "components-lodysidebar--workspace-syncing",
+    "components-lodysidebar--filtered-workspace-empty",
+    "components-lodysidebar--workspace-empty",
+    "components-lodysidebar--electron-always-visible-collapse-toggle",
+    "components-lodysidebar--electron-mac-os-collapse-toggle",
+    "components-lodysidebar--updated-mode",
+    "components-lodysidebar--updated-mode-show-project-overview",
+    "components-lodysidebar--updated-mode-opened-sessions",
+    "components-lodysidebar--updated-mode-team",
+    "components-lodysidebar--external-history-providers",
+    "components-lodysidebar--with-projects",
+    "components-lodysidebar--all-sessions-working",
+    "components-lodysidebar--machine-group-scrolling-header",
+    "components-sessionlist--long-titles",
+    "components-sessionlist--row-context-menu",
+    "components-sessionlist--loading",
+    "components-sessionlist--team-scope-authors",
+    "components-sessionlist--all-diff-and-pr-states",
+    "components-sessionlist--opened-sessions",
+    "components-sessionlist--opened-sessions-active-opener",
+    "components-sessionlist--opened-sessions-collapsed",
+    "components-sidebar-send-status--states",
+    "components-sidebar-folded-group-status--folded",
+    "components-sidebar-folded-group-status--side-by-side",
+    "components-sidebarfooter--default",
+    "components-sidebarfooter--long-name",
+    "components-sidebarfooter--syncing",
+    "components-sidebarfooter--local-identity",
+    "projects-localprojectremovalux--project-removing",
+    "projects-localprojectremovalux--project-waiting-for-device",
+    "projects-localprojectremovalux--desktop-remove-confirmation",
+    "projects-localprojectremovalux--cleanup-result-visible",
+    "components-sidebar-migration--updated-loading",
+    "components-sidebar-migration--updated-empty",
+    "components-sidebar-migration--updated-overflow"
+  ],
+  "allowBlankIds": [
+    "components-sessionlist--loading",
+    "components-sidebar-migration--updated-loading"
+  ],
+  "states": {
+    "components-sidebar-migration--updated-loading": [
+      {
+        "name": "skeleton-visible",
+        "steps": [
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-loading-skeleton]"
+          }
+        ]
+      }
+    ]
+  },
+  "ready": {
+    "components-sidebarfooter--default": [
+      {
+        "action": "visible",
+        "selector": "[data-shape=\"tile\"] img"
+      }
+    ],
+    "components-sidebarfooter--long-name": [
+      {
+        "action": "visible",
+        "selector": "[data-shape=\"tile\"] img"
+      }
+    ],
+    "components-sidebarfooter--local-identity": [
+      {
+        "action": "visible",
+        "selector": "[data-shape=\"tile\"] img"
+      }
+    ]
+  }
+}

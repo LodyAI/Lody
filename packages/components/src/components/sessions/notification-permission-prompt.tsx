@@ -1,3 +1,13 @@
+import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeDuration,
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Bell, X } from 'lucide-react';
 import { Button } from '@lody/ui/button';
@@ -135,30 +145,30 @@ export function NotificationPermissionPrompt({
   }
 
   return (
-    <ConversationColumn className="mb-2">
+    <ConversationColumn {...stylex.props(styles.column)}>
       {/* The same surface as the composer it sits above, not a status tint: this
           asks a question, it does not report a condition, and `--status-info`
           painted the whole card amber next to otherwise neutral chrome. Colour
           is left to the one primary action. */}
       <div
         className={cn(
-          'flex items-start gap-3 rounded-xl border-[0.5px] px-4 py-3 text-sm animate-in fade-in slide-in-from-bottom-2 duration-300',
-          'border-foreground/[0.10] bg-[hsl(var(--composer))] dark:border-input-border/70 dark:bg-input/90',
+          stylex.props(styles.prompt).className,
+          'dark:border-input-border/70 dark:bg-input/90',
           COMPOSER_ELEVATION_CLASS,
           className
         )}
       >
-        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-foreground/[0.06]">
-          <Bell className="h-3.5 w-3.5 text-muted-foreground" />
+        <div {...stylex.props(styles.iconWell)}>
+          <Bell {...stylex.props(styles.icon, styles.muted)} />
         </div>
-        <div className="flex-1 min-w-0">
-          <p className="font-medium text-foreground">
+        <div {...stylex.props(styles.body)}>
+          <p {...stylex.props(styles.title)}>
             {t('notifications.prompt.title', 'Enable notifications?')}
           </p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
+          <p {...stylex.props(styles.description)}>
             {t('notifications.prompt.description', 'Get notified when your AI tasks complete.')}
           </p>
-          <div className="mt-2 flex items-center gap-2">
+          <div {...stylex.props(styles.actions)}>
             <Button size="small" onClick={handleEnable}>
               {t('notifications.prompt.enable', 'Enable')}
             </Button>
@@ -177,12 +187,67 @@ export function NotificationPermissionPrompt({
           size="mini"
           icon
           onClick={handleClose}
-          className="shrink-0 text-muted-foreground/70 hover:text-foreground"
+          className={cn(
+            stylex.props(styles.close).className,
+            'text-muted-foreground/70 hover:text-foreground'
+          )}
           aria-label={t('common.close', 'Close')}
         >
-          <X className="h-3.5 w-3.5" />
+          <X {...stylex.props(styles.icon)} />
         </Button>
       </div>
     </ConversationColumn>
   );
 }
+
+const enter = stylex.keyframes({
+  from: {
+    opacity: 0,
+    transform: 'translate3d(0, calc(var(--spacing) * 2), 0) scale3d(1, 1, 1) rotate(0)',
+    filter: 'blur(0)',
+  },
+});
+
+const styles = stylex.create({
+  column: { marginBottom: themeSpace[2] },
+  prompt: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: themeSpace[3],
+    borderRadius: themeRadius.xl,
+    borderWidth: '0.5px',
+    borderStyle: 'solid',
+    paddingInline: themeSpace[4],
+    paddingBlock: themeSpace[3],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    borderColor: 'hsl(var(--foreground) / 0.1)',
+    backgroundColor: themeColors.composer,
+    animationName: enter,
+    animationDuration: themeDuration[300],
+    animationTimingFunction: 'ease',
+    transitionDuration: themeDuration[300],
+  },
+  iconWell: {
+    display: 'flex',
+    height: themeSpace[6],
+    width: themeSpace[6],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.full,
+    backgroundColor: 'hsl(var(--foreground) / 0.06)',
+  },
+  icon: { height: themeSpace[3.5], width: themeSpace[3.5] },
+  muted: { color: themeColors.mutedForeground },
+  body: { minWidth: 0, flexGrow: 1, flexShrink: 1, flexBasis: '0%' },
+  title: { fontWeight: themeFontWeight.medium, color: themeColors.foreground },
+  description: {
+    marginTop: themeSpace[0.5],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+  actions: { marginTop: themeSpace[2], display: 'flex', alignItems: 'center', gap: themeSpace[2] },
+  close: { flexShrink: 0 },
+});

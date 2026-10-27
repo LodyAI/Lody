@@ -1,0 +1,59 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "iphone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "android",
+      "device": "Pixel 5",
+      "width": 393,
+      "height": 851
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "no-preference",
+  "ids": [
+    "shared-swipeactionmigration--single-archive",
+    "shared-swipeactionmigration--multiple-actions",
+    "shared-swipeactionmigration--long-labels",
+    "shared-swipeactionmigration--commit",
+    "shared-swipeactionmigration--disabled",
+    "shared-swipeactionmigration--empty-actions",
+    "shared-swipeactionmigration--independent-rows"
+  ],
+  "states": {
+    "shared-swipeactionmigration--single-archive": [
+      {
+        "name": "content-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-swipe-face=\"primary\"]"
+          }
+        ]
+      },
+      {
+        "name": "content-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": "[data-swipe-face=\"primary\"]"
+          }
+        ]
+      }
+    ]
+  }
+}

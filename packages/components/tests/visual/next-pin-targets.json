@@ -1,0 +1,176 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "at-sm",
+      "width": 640,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "sessions-pinmigration--default",
+    "sessions-pinmigration--long-text",
+    "sessions-pinmigration--empty-text",
+    "sessions-pinmigration--invalid-role"
+  ],
+  "states": {
+    "sessions-pinmigration--default": [
+      {
+        "name": "pin-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "button[title]"
+          }
+        ]
+      },
+      {
+        "name": "pin-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": "button[title]"
+          }
+        ]
+      },
+      {
+        "name": "pin-keyboard-scroll",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "button[title]",
+            "key": "Space"
+          },
+          {
+            "action": "visible",
+            "text": "Scrolled to migration-pinned-message"
+          }
+        ]
+      },
+      {
+        "name": "wide-mode",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle wide mode"
+          }
+        ]
+      },
+      {
+        "name": "unpin",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Unpin message"
+          },
+          {
+            "action": "hidden",
+            "selector": "button[title]"
+          },
+          {
+            "action": "visible",
+            "text": "Unpinned"
+          }
+        ]
+      }
+    ],
+    "sessions-pinmigration--long-text": [
+      {
+        "name": "pin-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "button[title]"
+          }
+        ]
+      },
+      {
+        "name": "pin-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": "button[title]"
+          }
+        ]
+      },
+      {
+        "name": "pin-keyboard-scroll",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "button[title]",
+            "key": "Space"
+          },
+          {
+            "action": "visible",
+            "text": "Scrolled to migration-pinned-message"
+          }
+        ]
+      },
+      {
+        "name": "wide-mode",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle wide mode"
+          }
+        ]
+      },
+      {
+        "name": "unpin",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Unpin message"
+          },
+          {
+            "action": "hidden",
+            "selector": "button[title]"
+          },
+          {
+            "action": "visible",
+            "text": "Unpinned"
+          }
+        ]
+      }
+    ]
+  },
+  "ready": {
+    "sessions-pinmigration--empty-text": [
+      {
+        "action": "hidden",
+        "selector": "button[title]"
+      }
+    ],
+    "sessions-pinmigration--invalid-role": [
+      {
+        "action": "hidden",
+        "selector": "button[title]"
+      }
+    ]
+  }
+}

@@ -63,8 +63,8 @@ describe('SessionInfoBar ambient information', () => {
 
     expect(container.textContent).toContain('Syncing');
     // Sync-only mode: no staged item, no divider — the spinner keeps its
-    // right-edge pin via the ml-auto wrapper.
-    const wrapper = container.querySelector('.ml-auto');
+    // right-edge pin via the wrapper that carries the ambient sync state.
+    const wrapper = container.querySelector('[data-sync-indicator]')?.parentElement;
     expect(wrapper).not.toBeNull();
     expect(wrapper?.textContent).toContain('Syncing');
   });
@@ -73,7 +73,7 @@ describe('SessionInfoBar ambient information', () => {
     act(() => {
       root.render(<SessionInfoBar {...CONTEXT_LESS_PROPS} syncStatus="updating" />);
     });
-    expect(container.querySelector('.ml-auto')?.textContent).toContain('Updating');
+    expect(container.querySelector('[data-sync-indicator]')?.textContent).toContain('Updating');
 
     // An explicit null status wins over the legacy flag: nothing to announce.
     act(() => {

@@ -10,7 +10,7 @@ import { sidebar } from './sidebar.tokens.stylex';
  * never repeats a property a role sets, because two StyleX classes on one
  * element have no defined order.
  *
- * Structure StyleX cannot express stays with the callers: the named `group/row`
+ * Unmigrated ancestor-state hooks stay with the callers: the named `group/row`
  * that reveals trailing actions, `data-[menu-open]` and the keyboard focus ring.
  */
 export const sidebarSurface = stylex.create({

@@ -152,6 +152,15 @@ foreground and every 30s while the page is visible. [Decision](../notes/implemen
 
 ## Locally accepted messages
 
+Child-tab draft promotion uses the same first-message acceptance unit as other
+new conversations. `handleSendDraft` in `sessions/session-detail.tsx` commits the
+metadata and first turn together through `startSession`, then promotes the tab.
+This order prevents a visible promoted tab without its locally durable message;
+a ref flushed after mount would reverse that boundary. The input draft cache
+carries preserved composer text across promotion, while `requestSessionDispatch`
+accelerates the already durable pointer. Binding draft and close rules remain in
+[the product-surface instructions](../../packages/components/src/components/AGENTS.md#entry-points-drafts-and-layout).
+
 Loro ready messages commit to the live local history document. A ready Roost
 input instead appears from the workspace's immutable input projection and saves
 to account/workspace-scoped IndexedDB without waiting for owner RPC. Normal rows
@@ -266,6 +275,11 @@ fallbacks. `boot-shell.ts` mirrors the sidebar, edge and status colors before th
 renderer starts. Keep those sources aligned when changing this palette. The
 [neutral gray decision](../notes/implemented/bug-fix/2026-10-17-neutral-light-grays.md)
 records the color correction and its verification limits.
+
+The [sidebar tree background](components-sidebar-session-tree.md) explains row
+geometry and opener navigation. The
+[folded-group status decision](../notes/implemented/feature/2026-09-26-sidebar-folded-group-status.md)
+explains why a folded header uses one activity mark instead of counts.
 
 Settings' `CompactRow` keeps its label and helper in separate text nodes. Its
 optional `labelId` and `helperId` let a caller associate a control with those

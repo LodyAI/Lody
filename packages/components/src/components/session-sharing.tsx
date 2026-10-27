@@ -12,9 +12,9 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
-import { cn } from '@/lib/utils';
 import {
   shouldShowPrivateSharingStatus,
   type SessionPublicShareStatus,
@@ -29,6 +29,14 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { ease, space, text } from '@lody/ui/tokens/scales.stylex';
 import { AlertDialog } from '@/ui/dialog';
 import { shareSurface } from './sharing/surface';
+import { themeColors } from '../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../style/theme-scale.stylex';
 
 export type SessionSharingTranslator = (
   key: string,
@@ -149,19 +157,15 @@ export function SessionSharingIndicator({
           <span
             tabIndex={0}
             aria-label={`${label}: ${description}`}
-            className={cn(
-              '-m-1 box-content inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-xs p-1',
-              'text-sidebar-foreground-muted outline-hidden focus-visible:ring-2 focus-visible:ring-ring/50',
-              className
-            )}
+            className={clsx(stylex.props(styles.lockMark).className, className)}
           >
-            <LockKeyhole className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
+            <LockKeyhole {...stylex.props(styles.glyph)} strokeWidth={2} aria-hidden="true" />
           </span>
         }
       />
       <Tooltip.Content side="right" className="max-w-72 px-2.5 py-2">
-        <div className="font-medium">{label}</div>
-        <div className="mt-0.5 text-xs text-muted-foreground">{description}</div>
+        <div {...stylex.props(styles.tooltipTitle)}>{label}</div>
+        <div {...stylex.props(styles.tooltipDescription)}>{description}</div>
       </Tooltip.Content>
     </Tooltip.Root>
   );
@@ -196,12 +200,94 @@ function getSessionShareActionLabel(
  * The outline is a foreground tint, not `border-border`: the theme border is
  * tuned for dividers and nearly vanishes as a transparent button's only edge
  * on the dark canvas. */
-export const SESSION_HEADER_STATUS_PILL_CLASS =
-  'inline-flex h-7 shrink-0 select-none items-center gap-1.5 rounded-md border border-transparent bg-transparent px-2 ' +
-  'text-[0.7rem] font-medium leading-[normal] text-muted-foreground transition-colors ' +
-  'hover:bg-foreground/[0.05] hover:text-foreground ' +
-  'outline-hidden focus-visible:ring-2 focus-visible:ring-ring/50 ' +
-  'text-foreground/80';
+
+const styles = stylex.create({
+  /** The lock mark in the header: a small box the pointer can find. */
+  lockMark: {
+    margin: 'calc(var(--spacing) * -1)',
+    boxSizing: 'content-box',
+    display: 'inline-flex',
+    height: themeSpace[4],
+    width: themeSpace[4],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.xs,
+    padding: themeSpace[1],
+    color: themeColors.sidebarForegroundMuted,
+    // The old Tailwind `focus-visible:ring-*` painted nothing — the app forces
+    // Tailwind's own ring transparent — but it still declared a `box-shadow`,
+    // and a utility-layer shadow beats the base layer's inset focus ring. So
+    // the mark showed NO focus indicator at all. Keep it that way.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+  },
+  glyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+  },
+  chevron: {
+    width: themeSpace[3],
+    height: themeSpace[3],
+    opacity: 0.45,
+  },
+  /** The title in a tooltip: the name of the state. */
+  tooltipTitle: { fontWeight: themeFontWeight.medium },
+  /** The second line in a tooltip: what the state means. */
+  tooltipDescription: {
+    marginTop: themeSpace[0.5],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+  /**
+   * The status pill in the header. The line height is `normal`, not `leading-none`:
+   * `items-center` centres the label's LINE BOX, and a line box shorter than
+   * the font's own leaves the glyphs sitting ~1px above the icon beside them.
+   *
+   * The outline is a foreground tint, not `border-border`: the theme border is
+   * tuned for dividers and nearly vanishes as a transparent button's only edge
+   * on the dark canvas.
+   */
+  statusPill: {
+    display: 'inline-flex',
+    height: themeSpace[7],
+    flexShrink: 0,
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    borderRadius: themeRadius.md,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'transparent',
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': 'hsl(var(--foreground) / 0.05)',
+    },
+    paddingInline: themeSpace[2],
+    fontSize: '0.7rem',
+    fontWeight: themeFontWeight.medium,
+    lineHeight: 'normal',
+    color: {
+      default: 'hsl(var(--foreground) / 0.8)',
+      ':hover': themeColors.foreground,
+    },
+    // Same as the lock mark above: the old Tailwind `focus-visible:ring-*`
+    // declared a shadow that erased the base layer's inset focus ring while
+    // painting nothing of its own, so the pill showed NO focus indicator.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+    transitionProperty:
+      'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  /** The pill while its popover is open: it keeps the open fill. */
+  statusPillOpen: {
+    backgroundColor: 'hsl(var(--foreground) / 0.07)',
+    color: themeColors.foreground,
+  },
+});
+
+export const SESSION_HEADER_STATUS_PILL_CLASS = stylex.props(styles.statusPill).className ?? '';
 
 /** Read-only status pill for archived conversations in the desktop toolbar. */
 export function SessionArchivedBadge({ className }: { className?: string }) {
@@ -220,16 +306,16 @@ export function SessionArchivedBadge({ className }: { className?: string }) {
           <span
             tabIndex={0}
             aria-label={`${label}: ${description}`}
-            className={cn(SESSION_HEADER_STATUS_PILL_CLASS, className)}
+            className={clsx(SESSION_HEADER_STATUS_PILL_CLASS, className)}
           >
-            <Archive className="h-3.5 w-3.5" aria-hidden="true" />
+            <Archive {...stylex.props(styles.glyph)} aria-hidden="true" />
             <span>{label}</span>
           </span>
         }
       />
       <Tooltip.Content side="bottom" align="end" className="max-w-72 px-2.5 py-2">
-        <div className="font-medium">{label}</div>
-        <div className="mt-0.5 text-xs text-muted-foreground">{description}</div>
+        <div {...stylex.props(styles.tooltipTitle)}>{label}</div>
+        <div {...stylex.props(styles.tooltipDescription)}>{description}</div>
       </Tooltip.Content>
     </Tooltip.Root>
   );
@@ -578,19 +664,19 @@ export function SessionAccessControl({
           <button
             type="button"
             aria-label={ariaLabel}
-            className={cn(
+            className={clsx(
               SESSION_HEADER_STATUS_PILL_CLASS,
-              'data-[popup-open]:bg-foreground/[0.07] data-[popup-open]:text-foreground',
+              open && stylex.props(styles.statusPillOpen).className,
               className
             )}
           >
             {isPrivate && !isShared ? (
-              <LockKeyhole className="h-3.5 w-3.5" aria-hidden="true" />
+              <LockKeyhole {...stylex.props(styles.glyph)} aria-hidden="true" />
             ) : (
-              <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
+              <Share2 {...stylex.props(styles.glyph)} aria-hidden="true" />
             )}
             <span>{isShared ? sharedLabel : shareLabel}</span>
-            <ChevronDown className="h-3 w-3 opacity-45" aria-hidden="true" />
+            <ChevronDown {...stylex.props(styles.chevron)} aria-hidden="true" />
           </button>
         }
       />

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
@@ -54,6 +55,10 @@ const styles = stylex.create({
     color: 'hsl(var(--muted-foreground))',
   },
   virtualContainer: { position: 'relative', width: '100%' },
+  /** A command row may shrink below its content, so a long path truncates. */
+  item: { minWidth: 0 },
+  /** The virtualized row is placed by the virtualizer. */
+  virtualItem: { left: 0, top: 0, minWidth: 0 },
 });
 
 export function mapSessionFileProviderEntriesToQuickOpenItems(
@@ -199,6 +204,8 @@ export function SessionFileQuickOpen({
     onOpenChange(false);
   };
   const shouldVirtualizeItems = shouldVirtualizeSessionFileQuickOpenItems(items.length);
+  const itemProps = stylex.props(styles.item);
+  const virtualItemProps = stylex.props(styles.virtualItem);
   const getVirtualItemKey = useCallback(
     (index: number) => items[index]?.fileId ?? items[index]?.path ?? index,
     [items]
@@ -268,7 +275,10 @@ export function SessionFileQuickOpen({
                         key={virtualItem.key}
                         value={item.path}
                         onSelect={() => handleSelect(item.path)}
-                        className="absolute left-0 top-0 min-w-0 py-2"
+                        // `absolute` and `py-2` override the shared command row's
+                        // own position and padding, so they stay Tailwind; the
+                        // placement and the shrink are this list's own.
+                        className={clsx('absolute', 'py-2', virtualItemProps.className)}
                         style={{
                           height: `${virtualItem.size}px`,
                           transform: `translateY(${virtualItem.start}px)`,
@@ -288,7 +298,7 @@ export function SessionFileQuickOpen({
                     key={item.fileId ?? item.path}
                     value={item.path}
                     onSelect={() => handleSelect(item.path)}
-                    className="min-w-0 py-2"
+                    className={clsx('py-2', itemProps.className)}
                   >
                     {renderItem(item)}
                   </CommandItem>

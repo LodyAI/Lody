@@ -2,8 +2,8 @@ import type { ReactNode } from 'react';
 import { Folder, Monitor, User } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { MachineId } from '@lody/shared';
+import * as stylex from '@stylexjs/stylex';
 import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
-import { cn } from '@/lib/utils';
 import { UserAvatar } from '@/components/user-avatar';
 import { SidebarHoverCard } from '@/components/session-info-hover-card';
 import {
@@ -12,6 +12,13 @@ import {
   useSidebarGroupActivityDescription,
   type SidebarGroupActivity,
 } from '@/components/sidebar-row-shared';
+import { themeColors } from '../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../style/theme-scale.stylex';
 
 /** A machine's `os` (Node's `process.platform`) as people name it. */
 const OS_LABELS: Readonly<Record<string, string>> = {
@@ -19,6 +26,116 @@ const OS_LABELS: Readonly<Record<string, string>> = {
   linux: 'Linux',
   win32: 'Windows',
 };
+
+const styles = stylex.create({
+  /** The pill that names an offline machine. */
+  offlinePill: {
+    display: 'inline-flex',
+    height: themeSpace[4],
+    flexShrink: 0,
+    alignItems: 'center',
+    borderRadius: themeRadius.full,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--sidebar-foreground-muted) / 0.3)',
+    paddingInline: themeSpace[1.5],
+    fontSize: '10px',
+    fontWeight: 400,
+    lineHeight: 1,
+    letterSpacing: '0rem',
+    color: themeColors.sidebarForegroundMuted,
+  },
+  card: {
+    display: 'flex',
+    minWidth: 0,
+    flexDirection: 'column',
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.foreground,
+  },
+  heading: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: themeSpace[2],
+    marginBottom: themeSpace[2],
+  },
+  name: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.foreground,
+  },
+  status: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[1],
+    color: themeColors.mutedForeground,
+  },
+  statusOnline: { color: themeColors.statusSuccess },
+  statusDot: {
+    height: themeSpace[1.5],
+    width: themeSpace[1.5],
+    borderRadius: themeRadius.full,
+    backgroundColor: 'hsl(var(--muted-foreground) / 0.6)',
+  },
+  statusDotOnline: { backgroundColor: themeColors.statusSuccess },
+  rows: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[1],
+  },
+  row: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+  },
+  rowIcon: {
+    display: 'flex',
+    height: themeSpace[3.5],
+    width: themeSpace[3.5],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: themeColors.mutedForeground,
+  },
+  rowValue: {
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+  },
+  valueText: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: themeColors.foreground,
+  },
+  /** A short value that never clips: the project count. */
+  valuePlain: { color: themeColors.foreground },
+  valueRow: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+  },
+  valueNote: {
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+  },
+  glyph: {
+    height: themeSpace[3.5],
+    width: themeSpace[3.5],
+  },
+});
 
 export type SidebarMachineInfo = {
   machineId: MachineId;
@@ -49,9 +166,7 @@ export function SidebarMachineOfflinePill({ machineId }: { machineId: MachineId 
   const status = useMachineOnlineStatus(machineId);
   if (status !== 'offline') return null;
   return (
-    <span className="inline-flex h-4 shrink-0 items-center rounded-full border border-sidebar-foreground-muted/30 px-1.5 text-[10px] font-normal leading-none tracking-normal text-sidebar-foreground-muted">
-      {t('workspace.machines.offline', 'Offline')}
-    </span>
+    <span {...stylex.props(styles.offlinePill)}>{t('workspace.machines.offline', 'Offline')}</span>
   );
 }
 
@@ -97,14 +212,14 @@ function SidebarMachineCard({ machine }: { machine: SidebarMachineInfo }) {
         !machine.isOwn && machine.owner ? (
           <UserAvatar user={machine.owner} className="h-3.5 w-3.5 text-[7px]" />
         ) : (
-          <User className="h-3.5 w-3.5" aria-hidden="true" />
+          <User {...stylex.props(styles.glyph)} aria-hidden="true" />
         ),
       label: t('sidebar.machineCard.owner', 'Owner'),
       value: (
-        <span className="flex min-w-0 items-center gap-1.5">
-          <span className="min-w-0 truncate text-foreground">{ownerLabel}</span>
+        <span {...stylex.props(styles.valueRow)}>
+          <span {...stylex.props(styles.valueText)}>{ownerLabel}</span>
           {machine.isCurrent ? (
-            <span className="shrink-0 text-muted-foreground">
+            <span {...stylex.props(styles.valueNote)}>
               · {t('sidebar.thisDevice', 'This device')}
             </span>
           ) : null}
@@ -115,21 +230,17 @@ function SidebarMachineCard({ machine }: { machine: SidebarMachineInfo }) {
   if (machine.os) {
     rows.push({
       key: 'os',
-      icon: <Monitor className="h-3.5 w-3.5" aria-hidden="true" />,
+      icon: <Monitor {...stylex.props(styles.glyph)} aria-hidden="true" />,
       label: t('sidebar.machineCard.system', 'System'),
-      value: (
-        <span className="min-w-0 truncate text-foreground">
-          {OS_LABELS[machine.os] ?? machine.os}
-        </span>
-      ),
+      value: <span {...stylex.props(styles.valueText)}>{OS_LABELS[machine.os] ?? machine.os}</span>,
     });
   }
   rows.push({
     key: 'projects',
-    icon: <Folder className="h-3.5 w-3.5" aria-hidden="true" />,
+    icon: <Folder {...stylex.props(styles.glyph)} aria-hidden="true" />,
     label: t('sidebar.machineCard.projects', 'Projects'),
     value: (
-      <span className="text-foreground">
+      <span {...stylex.props(styles.valuePlain)}>
         {t('sidebar.machineCard.projectCount', '{{count}} projects', {
           count: machine.projectCount,
         })}
@@ -149,29 +260,21 @@ function SidebarMachineCard({ machine }: { machine: SidebarMachineInfo }) {
         />
       ),
       label: t('sidebar.machineCard.activity', 'Activity'),
-      value: <span className="min-w-0 truncate text-foreground">{activityDescription}</span>,
+      value: <span {...stylex.props(styles.valueText)}>{activityDescription}</span>,
     });
   }
 
   return (
-    <div className="flex min-w-0 flex-col text-xs text-foreground">
-      <div className="mb-2 flex items-baseline gap-2">
-        <span className="min-w-0 flex-1 truncate text-sm text-foreground" title={machine.name}>
+    <div {...stylex.props(styles.card)}>
+      <div {...stylex.props(styles.heading)}>
+        <span {...stylex.props(styles.name)} title={machine.name}>
           {machine.name}
         </span>
         {status === 'unknown' ? null : (
-          <span
-            className={cn(
-              'flex shrink-0 items-center gap-1',
-              status === 'online' ? 'text-status-success' : 'text-muted-foreground'
-            )}
-          >
+          <span {...stylex.props(styles.status, status === 'online' && styles.statusOnline)}>
             <span
               aria-hidden="true"
-              className={cn(
-                'h-1.5 w-1.5 rounded-full',
-                status === 'online' ? 'bg-status-success' : 'bg-muted-foreground/60'
-              )}
+              {...stylex.props(styles.statusDot, status === 'online' && styles.statusDotOnline)}
             />
             {status === 'online'
               ? t('workspace.machines.online', 'Online')
@@ -179,17 +282,13 @@ function SidebarMachineCard({ machine }: { machine: SidebarMachineInfo }) {
           </span>
         )}
       </div>
-      <div className="flex flex-col gap-1">
+      <div {...stylex.props(styles.rows)}>
         {rows.map((row) => (
-          <div key={row.key} className="flex items-center gap-2">
-            <span
-              className="flex h-3.5 w-3.5 shrink-0 items-center justify-center text-muted-foreground"
-              title={row.label}
-              aria-label={row.label}
-            >
+          <div key={row.key} {...stylex.props(styles.row)}>
+            <span {...stylex.props(styles.rowIcon)} title={row.label} aria-label={row.label}>
               {row.icon}
             </span>
-            <div className="flex min-w-0 flex-1">{row.value}</div>
+            <div {...stylex.props(styles.rowValue)}>{row.value}</div>
           </div>
         ))}
       </div>

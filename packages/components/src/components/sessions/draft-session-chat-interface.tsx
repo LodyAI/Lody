@@ -1,4 +1,5 @@
 import { snapshotAgentRole, type McpServerId } from '@lody/shared';
+import * as stylex from '@stylexjs/stylex';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import {
   forwardRef,
@@ -80,6 +81,23 @@ import {
 } from '@/hooks/use-workspace-agent-roles';
 import type { SessionAgentRoleControl } from '@/hooks/use-session-agent-role';
 import { buildAgentPrompt } from '@/lib';
+import { themeColors } from '../../style/theme-colors.stylex';
+
+const draftStyles = stylex.create({
+  root: {
+    display: 'flex',
+    height: '100%',
+    flexDirection: 'column',
+  },
+  body: {
+    position: 'relative',
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    backgroundColor: themeColors.background,
+  },
+});
 
 const areConfigOptionValuesEqual = (
   left?: Record<string, AcpConfigOptionValue>,
@@ -624,8 +642,8 @@ export const DraftSessionChatInterface = memo(
       );
 
       return (
-        <div className="flex h-full flex-col">
-          <div className="relative min-h-0 flex-1 bg-background">
+        <div {...stylex.props(draftStyles.root)}>
+          <div {...stylex.props(draftStyles.body)}>
             <ChildTabEmptyState onSuggest={(text) => inputAreaRef.current?.setInputText(text)} />
           </div>
           <SessionChatInputArea

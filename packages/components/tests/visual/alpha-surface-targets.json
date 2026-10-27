@@ -1,0 +1,197 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 900
+    },
+    {
+      "name": "compact-desktop",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "migration-alphasurfaces--notice",
+    "migration-alphasurfaces--long-notice",
+    "migration-alphasurfaces--notice-caller-overrides",
+    "migration-alphasurfaces--read-completed",
+    "migration-alphasurfaces--read-failed",
+    "migration-alphasurfaces--read-running",
+    "migration-alphasurfaces--execute-completed"
+  ],
+  "ready": {
+    "migration-alphasurfaces--notice": [
+      {
+        "action": "visible",
+        "selector": "[data-alpha-notice] span[title]",
+        "index": 0
+      }
+    ],
+    "migration-alphasurfaces--long-notice": [
+      {
+        "action": "visible",
+        "selector": "[data-alpha-notice] span[title]",
+        "index": 0
+      }
+    ],
+    "migration-alphasurfaces--notice-caller-overrides": [
+      {
+        "action": "visible",
+        "selector": "[data-alpha-notice] span[title]",
+        "index": 0
+      }
+    ],
+    "migration-alphasurfaces--read-completed": [
+      {
+        "action": "click",
+        "selector": "[data-alpha-tools] button[aria-expanded=\"false\"]",
+        "index": 0
+      },
+      {
+        "action": "visible",
+        "selector": "[data-alpha-tools] span:not(:has(*)):text-is(\"Read\")",
+        "index": 0
+      }
+    ],
+    "migration-alphasurfaces--read-failed": [
+      {
+        "action": "click",
+        "selector": "[data-alpha-tools] button[aria-expanded=\"false\"]",
+        "index": 0
+      },
+      {
+        "action": "visible",
+        "selector": "[data-alpha-tools] span:not(:has(*)):text-is(\"Read\")",
+        "index": 0
+      }
+    ],
+    "migration-alphasurfaces--read-running": [
+      {
+        "action": "click",
+        "selector": "[data-alpha-tools] button[aria-expanded=\"false\"]",
+        "index": 0
+      },
+      {
+        "action": "visible",
+        "selector": "[data-alpha-tools] span:not(:has(*)):text-is(\"Reading\")",
+        "index": 0
+      }
+    ],
+    "migration-alphasurfaces--execute-completed": [
+      {
+        "action": "click",
+        "selector": "[data-alpha-tools] button[aria-expanded=\"false\"]",
+        "index": 0
+      },
+      {
+        "action": "visible",
+        "selector": "[data-alpha-tools] span:not(:has(*)):text-is(\"Ran\")",
+        "index": 0
+      }
+    ]
+  },
+  "states": {
+    "migration-alphasurfaces--notice": [
+      {
+        "name": "file-open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open file"
+          },
+          {
+            "action": "visible",
+            "selector": "output[aria-label=\"Notice action\"]:has-text(\"Opened src/local/alpha-notice.ts\")"
+          }
+        ]
+      },
+      {
+        "name": "collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle section"
+          },
+          {
+            "action": "hidden",
+            "text": "Synthetic file contents are unavailable. Preserve the original notice."
+          }
+        ]
+      },
+      {
+        "name": "keyboard-reopened",
+        "steps": [
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Toggle section",
+            "key": "Space"
+          },
+          {
+            "action": "visible",
+            "text": "Synthetic file contents are unavailable. Preserve the original notice."
+          }
+        ]
+      }
+    ],
+    "migration-alphasurfaces--long-notice": [
+      {
+        "name": "collapsed-long",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle section"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-alpha-notice] span[title]"
+          }
+        ]
+      }
+    ],
+    "migration-alphasurfaces--read-completed": [
+      {
+        "name": "keyboard-open-file",
+        "steps": [
+          {
+            "action": "press",
+            "role": "button",
+            "name": "alpha-source.ts",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "output[aria-label=\"Tool action\"]:has-text(\"Opened src/local/alpha-source.ts\")"
+          }
+        ]
+      }
+    ],
+    "migration-alphasurfaces--execute-completed": [
+      {
+        "name": "tool-detail-expanded",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Ran local alpha check"
+          },
+          {
+            "action": "visible",
+            "text": "Synthetic local tool output."
+          }
+        ]
+      }
+    ]
+  }
+}

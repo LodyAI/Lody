@@ -223,6 +223,149 @@ import { HomeDashboardHost } from './home/home-dashboard-host';
 import { getSessionCreationNavigation } from './submission/use-composer-navigation-focus';
 import { BranchSelector } from './chat-landing-selectors';
 import { composerSurface } from '@/components/shared/composer-surface';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeShadow,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
+
+/**
+ * The landing chrome. The amber notices keep their hard-coded Tailwind
+ * palette colours — a `dark:` step needs the `.dark` ancestor StyleX cannot
+ * select — so those stay Tailwind classes beside the styles.
+ */
+const landingStyles = stylex.create({
+  branchSlot: { display: 'inline-flex', minWidth: 0, alignItems: 'center', gap: themeSpace[1] },
+  topSelectorRow: {
+    display: 'flex',
+    width: '100%',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: themeSpace[2],
+  },
+  footerSlot: { display: 'contents' },
+  glyph14: { width: themeSpace[3.5], height: themeSpace[3.5] },
+  glyph14Muted: { width: themeSpace[3.5], height: themeSpace[3.5], flexShrink: 0, opacity: 0.7 },
+  glyph16: { width: themeSpace[4], height: themeSpace[4] },
+  glyph20: { width: themeSpace[5], height: themeSpace[5] },
+  truncate: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  mobileFooterRow: {
+    display: 'flex',
+    width: '100%',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    flexWrap: 'nowrap',
+    alignItems: 'center',
+    columnGap: themeSpace[1.5],
+    overflow: 'hidden',
+  },
+  mobileFooterRunConfig: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+  },
+  hidden: { display: 'none' },
+  topSelector: { width: '100%', minWidth: 0 },
+
+  /* The free-session limit notice. */
+  sessionLimitNotice: {
+    marginBottom: themeSpace[2],
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: themeSpace[1.5],
+    rowGap: themeSpace[1],
+    borderRadius: themeRadius.lg,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    fontWeight: themeFontWeight.medium,
+    boxShadow: themeShadow.xs,
+  },
+  sessionLimitAction: {
+    fontWeight: themeFontWeight.semibold,
+    textDecorationLine: 'underline',
+    textUnderlineOffset: '2px',
+  },
+
+  /* The sharing-review notice. */
+  sharingReviewNotice: {
+    marginBottom: themeSpace[2],
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: themeSpace[2.5],
+    borderRadius: themeRadius.lg,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.7)',
+    backgroundColor: 'hsl(var(--muted) / 0.35)',
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2.5],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.foreground,
+    boxShadow: themeShadow.xs,
+  },
+  sharingReviewGlyph: {
+    marginTop: '0.5px',
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+  },
+  sharingReviewBody: { minWidth: 0, flexGrow: 1, flexShrink: 1, flexBasis: '0%' },
+  sharingReviewTitle: { fontWeight: themeFontWeight.medium },
+  sharingReviewText: {
+    marginTop: themeSpace[0.5],
+    fontSize: themeFontSize.xs,
+    lineHeight: '1.625',
+    color: themeColors.mutedForeground,
+  },
+  sharingReviewActions: {
+    marginTop: themeSpace[1.5],
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: themeSpace[3],
+    rowGap: themeSpace[1],
+  },
+  sharingReviewPrimary: {
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    fontWeight: themeFontWeight.semibold,
+    color: themeColors.primary,
+    textDecorationLine: { default: 'none', ':hover': 'underline' },
+  },
+  sharingReviewSecondary: {
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    fontWeight: themeFontWeight.medium,
+    color: { default: themeColors.mutedForeground, ':hover': themeColors.foreground },
+    textDecorationLine: { default: 'none', ':hover': 'underline' },
+  },
+  sharingReviewDismiss: {
+    display: 'flex',
+    height: themeSpace[7],
+    width: themeSpace[7],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.md,
+    color: { default: themeColors.mutedForeground, ':hover': themeColors.foreground },
+    backgroundColor: { default: 'transparent', ':hover': themeColors.hover },
+  },
+});
 import {
   extractIssuePRMentionsFromText,
   useKnownIssuePrItems,
@@ -3606,7 +3749,7 @@ function WorkspaceChatLanding({
     });
 
   const branchSelectorNode = showBranchSelector ? (
-    <span className="inline-flex min-w-0 items-center gap-1">
+    <span {...stylex.props(landingStyles.branchSlot)}>
       <BranchSelector
         key={branchSelectorKey}
         value={currentBranch}
@@ -4045,7 +4188,7 @@ function WorkspaceChatLanding({
         </Button>
       )}
     >
-      <div className="flex w-full min-w-0 items-center gap-2">
+      <div {...stylex.props(landingStyles.topSelectorRow)}>
         <DesktopMachineMenu
           value={desktopSelectedMachineId}
           visibleLocalMachineId={visibleLocalMachineId}
@@ -4084,7 +4227,7 @@ function WorkspaceChatLanding({
       resetKeys={[workspaceId, selectedAgent?.agentId]}
       fallback={null}
     >
-      <div className="contents">
+      <div {...stylex.props(landingStyles.footerSlot)}>
         <DesktopRunConfigMenu
           agentSelection={selectedAgent}
           allowedMachineIds={desktopAgentMachineIds}
@@ -4165,7 +4308,9 @@ function WorkspaceChatLanding({
       value: m.id as MachineId,
       label: m.name,
       searchText: m.name,
-      icon: <Monitor className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />,
+      icon: (
+        <Monitor {...stylex.props(landingStyles.glyph14)} strokeWidth={1.8} aria-hidden="true" />
+      ),
     }));
   }, [mobileSheetOnlineMachines]);
   const mobileSheetSelectedMachineLabel = useMemo(() => {
@@ -4186,8 +4331,8 @@ function WorkspaceChatLanding({
       searchPlaceholder={t('chat.machineSelector.searchPlaceholder', 'Search machines')}
       triggerContent={
         <>
-          <Monitor className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
-          <span className="truncate">
+          <Monitor {...stylex.props(landingStyles.glyph14Muted)} aria-hidden="true" />
+          <span {...stylex.props(landingStyles.truncate)}>
             {isInitialDataLoading
               ? t('chat.machineSelector.loading', 'Loading machine...')
               : (mobileSheetSelectedMachineLabel ??
@@ -4209,7 +4354,9 @@ function WorkspaceChatLanding({
       label: repo.fullName,
       searchText: repo.fullName,
       description: repo.description ?? undefined,
-      icon: <GithubIcon className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />,
+      icon: (
+        <GithubIcon {...stylex.props(landingStyles.glyph14)} strokeWidth={1.8} aria-hidden="true" />
+      ),
     }));
   }, [contextType, repositories, mobileSheetRecency]);
   const mobileSheetLocalProjectOptions = useMemo<MobileInlinePickerOption<string>[]>(() => {
@@ -4227,7 +4374,9 @@ function WorkspaceChatLanding({
       label: entry.project.name,
       searchText: `${entry.project.name} ${entry.project.rootPath}`,
       description: entry.project.rootPath,
-      icon: <FolderOpen className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />,
+      icon: (
+        <FolderOpen {...stylex.props(landingStyles.glyph14)} strokeWidth={1.8} aria-hidden="true" />
+      ),
     }));
   }, [contextType, localProjectSelectorMachineId, visibleLocalProjectMap, mobileSheetRecency]);
   const mobileSheetSelectedLocalProjectKey = selectedLocalProject
@@ -4260,8 +4409,8 @@ function WorkspaceChatLanding({
         searchPlaceholder={t('chat.mobileHome.repoSearchPlaceholder', 'Search repositories')}
         triggerContent={
           <>
-            <GithubIcon className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
-            <span className="truncate">
+            <GithubIcon {...stylex.props(landingStyles.glyph14Muted)} aria-hidden="true" />
+            <span {...stylex.props(landingStyles.truncate)}>
               {mobileSheetSelectedRepoLabel ?? t('chat.repoPlaceholder', 'Repository')}
             </span>
           </>
@@ -4287,8 +4436,8 @@ function WorkspaceChatLanding({
         searchPlaceholder={t('chat.mobileHome.localProjectSearchPlaceholder', 'Search projects')}
         triggerContent={
           <>
-            <FolderOpen className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
-            <span className="truncate">
+            <FolderOpen {...stylex.props(landingStyles.glyph14Muted)} aria-hidden="true" />
+            <span {...stylex.props(landingStyles.truncate)}>
               {mobileSheetSelectedLocalProjectLabel ??
                 t('chat.validation.missingProject', 'Select a project')}
             </span>
@@ -4305,7 +4454,13 @@ function WorkspaceChatLanding({
         label: opt.label,
         searchText: opt.label,
         description: opt.description,
-        icon: <GitBranchIcon className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />,
+        icon: (
+          <GitBranchIcon
+            {...stylex.props(landingStyles.glyph14)}
+            strokeWidth={1.8}
+            aria-hidden="true"
+          />
+        ),
       })),
     [branchOptions]
   );
@@ -4326,11 +4481,11 @@ function WorkspaceChatLanding({
       triggerContent={
         <>
           <GitBranchIcon
-            className="h-3.5 w-3.5 shrink-0 opacity-70"
+            {...stylex.props(landingStyles.glyph14Muted)}
             strokeWidth={1.8}
             aria-hidden="true"
           />
-          <span className="truncate">
+          <span {...stylex.props(landingStyles.truncate)}>
             {currentBranchLabel ?? t('chat.branchPlaceholder', 'Branch')}
           </span>
         </>
@@ -4360,7 +4515,7 @@ function WorkspaceChatLanding({
       >
         <Tabs.List size="large" stretch>
           <Tabs.Tab value="local">
-            <FolderIcon className="h-3.5 w-3.5" aria-hidden="true" />
+            <FolderIcon {...stylex.props(landingStyles.glyph14)} aria-hidden="true" />
             <span>{t('chat.mobileNewChat.workdirLocalLabel', '本地文件')}</span>
           </Tabs.Tab>
           <Tabs.Tab
@@ -4372,7 +4527,7 @@ function WorkspaceChatLanding({
             {worktreeLoading ? (
               <Spinner size="small" label={null} />
             ) : (
-              <GitBranchIcon className="h-3.5 w-3.5" aria-hidden="true" />
+              <GitBranchIcon {...stylex.props(landingStyles.glyph14)} aria-hidden="true" />
             )}
             <span>{t('chat.mobileNewChat.workdirWorktreeLabel', '新工作树')}</span>
           </Tabs.Tab>
@@ -4391,10 +4546,10 @@ function WorkspaceChatLanding({
       resetKeys={[workspaceId, selectedAgent?.agentId]}
       fallback={null}
     >
-      <div className="flex w-full min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-hidden">
+      <div {...stylex.props(landingStyles.mobileFooterRow)}>
         {/* flex-1 + overflow so the run-config button can shrink; only the
             model label inside it truncates. Usage stays full-width. */}
-        <div className="min-w-0 flex-1 overflow-hidden">
+        <div {...stylex.props(landingStyles.mobileFooterRunConfig)}>
           <MobileSessionRunConfig
             agentSelection={selectedAgent}
             allowedMachineIds={scopedMachineId ? [scopedMachineId] : []}
@@ -6207,7 +6362,16 @@ function WorkspaceChatLanding({
   const sessionLimitReached =
     !sessionLimitAdmission.allowed && sessionLimitAdmission.reason === 'limit_reached';
   const sessionLimitNoticeNode = sessionLimitReached ? (
-    <div className="mb-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-950 shadow-xs dark:text-amber-100">
+    <div
+      className={[
+        stylex.props(landingStyles.sessionLimitNotice).className,
+        // The amber notice is a hard-coded palette pair, and its dark step
+        // needs the `.dark` ancestor StyleX cannot select.
+        'border-amber-500/30 bg-amber-500/10 text-amber-950 dark:text-amber-100',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
       <span>
         {t(hidesBillingUi ? 'chat.sessionLimitNoticeMobile' : 'chat.sessionLimitNotice', {
           limit: FREE_SESSION_LIMIT_PER_WORKSPACE,
@@ -6216,7 +6380,12 @@ function WorkspaceChatLanding({
       {!hidesBillingUi ? (
         <button
           type="button"
-          className="font-semibold text-amber-700 underline underline-offset-2 hover:text-amber-800 dark:text-amber-200 dark:hover:text-amber-100"
+          className={[
+            stylex.props(landingStyles.sessionLimitAction).className,
+            'text-amber-700 hover:text-amber-800 dark:text-amber-200 dark:hover:text-amber-100',
+          ]
+            .filter(Boolean)
+            .join(' ')}
           onClick={() => {
             capturePostHogEvent(postHog, 'session/free_session_limit_upgrade_clicked', {
               user_id: userId,
@@ -6236,13 +6405,13 @@ function WorkspaceChatLanding({
       ? inboxRows?.find((item) => item.kind === 'sharing_review')
       : undefined;
   const sharingReviewNoticeNode = sharingReviewRow ? (
-    <div className="mb-2 flex items-start gap-2.5 rounded-lg border border-border/70 bg-muted/35 px-3 py-2.5 text-sm text-foreground shadow-xs">
-      <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-      <div className="min-w-0 flex-1">
-        <div className="font-medium">
+    <div {...stylex.props(landingStyles.sharingReviewNotice)}>
+      <LockKeyhole {...stylex.props(landingStyles.sharingReviewGlyph)} aria-hidden="true" />
+      <div {...stylex.props(landingStyles.sharingReviewBody)}>
+        <div {...stylex.props(landingStyles.sharingReviewTitle)}>
           {t('inbox.sharingReview.title', 'Review what your team can see')}
         </div>
-        <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+        <p {...stylex.props(landingStyles.sharingReviewText)}>
           {sharingReviewState.teamLooksEmpty
             ? t(
                 'inbox.sharingReview.emptyTeam',
@@ -6258,11 +6427,11 @@ function WorkspaceChatLanding({
                   'Private machines and projects are only visible to you. Share the ones your teammates should be able to use.'
                 )}
         </p>
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+        <div {...stylex.props(landingStyles.sharingReviewActions)}>
           {sharingReviewState.actionTarget ? (
             <button
               type="button"
-              className="text-xs font-semibold text-primary hover:underline"
+              {...stylex.props(landingStyles.sharingReviewPrimary)}
               onClick={() => {
                 void markInboxItemRead({ itemId: sharingReviewRow._id });
                 openSettings(sharingReviewState.actionTarget ?? 'projects');
@@ -6275,7 +6444,7 @@ function WorkspaceChatLanding({
           ) : null}
           <button
             type="button"
-            className="text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
+            {...stylex.props(landingStyles.sharingReviewSecondary)}
             onClick={() => void suppressSharingReview({ itemId: sharingReviewRow._id })}
           >
             {t('inbox.sharingReview.neverRemind', "Don't remind me again")}
@@ -6284,11 +6453,11 @@ function WorkspaceChatLanding({
       </div>
       <button
         type="button"
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-hover hover:text-foreground"
+        {...stylex.props(landingStyles.sharingReviewDismiss)}
         onClick={() => void dismissInboxItem({ itemId: sharingReviewRow._id })}
         aria-label={t('common.dismiss', 'Dismiss')}
       >
-        <X className="h-4 w-4" aria-hidden="true" />
+        <X {...stylex.props(landingStyles.glyph16)} aria-hidden="true" />
       </button>
     </div>
   ) : null;
@@ -6385,7 +6554,7 @@ function WorkspaceChatLanding({
             ref={attachmentInputRef}
             type="file"
             multiple
-            className="hidden"
+            {...stylex.props(landingStyles.hidden)}
             onChange={handleAttachmentInputChange}
           />
           {composerNoticeNode}
@@ -6441,7 +6610,11 @@ function WorkspaceChatLanding({
                   'bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]'
                 )}
               >
-                {submitting ? <Spinner className="h-5 w-5" /> : <ArrowUp className="h-5 w-5" />}
+                {submitting ? (
+                  <Spinner className="h-5 w-5" />
+                ) : (
+                  <ArrowUp {...stylex.props(landingStyles.glyph20)} />
+                )}
               </Button>
             }
             autoResize
@@ -6862,7 +7035,7 @@ function WorkspaceChatLanding({
         ref={attachmentInputRef}
         type="file"
         multiple
-        className="hidden"
+        {...stylex.props(landingStyles.hidden)}
         onChange={handleAttachmentInputChange}
       />
       <ChatLandingView
@@ -6902,7 +7075,7 @@ function WorkspaceChatLanding({
         onFileRemove={handleRemoveFile}
         onFileRetry={handleRetryFile}
         mcp={mcpSelection.menu}
-        topSelector={<div className="w-full min-w-0">{topSelectorNode}</div>}
+        topSelector={<div {...stylex.props(landingStyles.topSelector)}>{topSelectorNode}</div>}
         footerSelector={footerSelectorNode}
         bottomBar={bottomBarNode}
         composerNotice={composerNoticeNode}
@@ -6944,7 +7117,7 @@ function WorkspaceChatLanding({
               aria-label={t('chat.leftSidebar.show', 'Show navigation sidebar')}
               className="h-7 w-7 shrink-0 text-muted-foreground"
             >
-              <PanelLeft className="h-4 w-4" />
+              <PanelLeft {...stylex.props(landingStyles.glyph16)} />
             </Button>
           ) : null
         }

@@ -1,0 +1,113 @@
+{
+  "viewports": [
+    {
+      "name": "iphone-13",
+      "width": 390,
+      "height": 844,
+      "device": "iPhone 13"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "preview-visualannotationcommentsoverlay--native-states",
+    "preview-visualannotationcommentsoverlay--corner-peeks"
+  ],
+  "ready": {
+    "preview-visualannotationcommentsoverlay--native-states": [
+      {
+        "action": "visible",
+        "selector": "[data-visual-comment-id=\"migration-2\"]"
+      }
+    ],
+    "preview-visualannotationcommentsoverlay--corner-peeks": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Collapsed comment by Bottom Right"
+      }
+    ]
+  },
+  "states": {
+    "preview-visualannotationcommentsoverlay--native-states": [
+      {
+        "name": "touch-add",
+        "steps": [
+          {
+            "action": "tap",
+            "selector": "[data-visual-comment-id=\"migration-0\"] button:has-text(\"Send\")"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-visual-comment-id=\"migration-0\"] button:has-text(\"Added\")"
+          }
+        ]
+      },
+      {
+        "name": "touch-remove-staged",
+        "steps": [
+          {
+            "action": "tap",
+            "selector": "[data-visual-comment-id=\"migration-0\"] button:has-text(\"Added\")"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-visual-comment-id=\"migration-0\"] button:has-text(\"Send\")"
+          }
+        ]
+      },
+      {
+        "name": "touch-collapse",
+        "steps": [
+          {
+            "action": "tap",
+            "selector": "[data-visual-comment-id=\"migration-0\"] button[aria-label=\"Collapse comment\"]"
+          }
+        ]
+      },
+      {
+        "name": "touch-reopen",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "button",
+            "name": "Collapsed comment by Ada Lovelace"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-visual-comment-id=\"migration-0\"]"
+          }
+        ]
+      },
+      {
+        "name": "touch-resolve",
+        "steps": [
+          {
+            "action": "tap",
+            "selector": "[data-visual-comment-id=\"migration-0\"] button:has-text(\"Resolve\")"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-visual-comment-id=\"migration-0\"]"
+          }
+        ]
+      }
+    ],
+    "preview-visualannotationcommentsoverlay--corner-peeks": [
+      {
+        "name": "touch-bottom-corner-open",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "button",
+            "name": "Collapsed comment by Bottom Right"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-visual-comment-id=\"migration-3\"]"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,5 +1,15 @@
 import { useCallback, useRef } from 'react';
 import { useDrag } from '@use-gesture/react';
+import * as stylex from '@stylexjs/stylex';
+
+const styles = stylex.create({
+  zone: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+  },
+});
 
 /* Width of the left-edge strip where a back-swipe may begin. Kept
    generous (vs. the ~20px iOS system edge) because users reported the
@@ -120,7 +130,7 @@ export function MobileEdgeBackSwipeZone({
 
   return (
     <div
-      className="absolute inset-y-0 left-0"
+      {...stylex.props(styles.zone)}
       style={{ width: EDGE_ZONE_PX, touchAction: 'pan-y', zIndex }}
       aria-hidden="true"
       {...bindBackSwipe()}

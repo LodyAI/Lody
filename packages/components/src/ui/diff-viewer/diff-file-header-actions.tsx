@@ -1,8 +1,11 @@
 import { useState, type MouseEvent, type PointerEvent } from 'react';
 import { Check, Copy, FileText } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 
 import { cn } from '@/lib/utils';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeSpace } from '../../style/theme-scale.stylex';
 
 export type DiffFileHeaderActionsProps = {
   readonly path: string;
@@ -10,8 +13,32 @@ export type DiffFileHeaderActionsProps = {
   readonly className?: string;
 };
 
-const HEADER_ICON_BUTTON_CLASS =
-  'flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground';
+const styles = stylex.create({
+  actions: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: themeSpace[0.5] },
+  button: {
+    display: 'flex',
+    height: themeSpace[6],
+    width: themeSpace[6],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: '0.25rem',
+    color: {
+      default: themeColors.mutedForeground,
+      '@media (hover: hover)': { ':hover': themeColors.foreground },
+    },
+    backgroundColor: {
+      default: null,
+      '@media (hover: hover)': { ':hover': 'hsl(var(--accent) / 1)' },
+    },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: 'var(--tw-duration, var(--default-transition-duration, 150ms))',
+    transitionTimingFunction:
+      'var(--tw-ease, var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1)))',
+  },
+  glyph: { height: themeSpace[3.5], width: themeSpace[3.5] },
+});
 
 function stopHeaderTrigger(event: MouseEvent | PointerEvent): void {
   event.stopPropagation();
@@ -43,19 +70,19 @@ export function DiffFileHeaderActions({ path, onOpenFile, className }: DiffFileH
   };
 
   return (
-    <div className={cn('flex shrink-0 items-center gap-0.5', className)}>
+    <div className={cn(stylex.props(styles.actions).className, className)}>
       <button
         type="button"
         onPointerDown={stopHeaderTrigger}
         onClick={handleCopy}
         title={t('sessions.fileViewer.copyPath', 'Copy file path')}
         aria-label={t('sessions.fileViewer.copyPath', 'Copy file path')}
-        className={HEADER_ICON_BUTTON_CLASS}
+        {...stylex.props(styles.button)}
       >
         {copied ? (
-          <Check className="h-3.5 w-3.5" aria-hidden="true" />
+          <Check {...stylex.props(styles.glyph)} aria-hidden="true" />
         ) : (
-          <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+          <Copy {...stylex.props(styles.glyph)} aria-hidden="true" />
         )}
       </button>
       {onOpenFile ? (
@@ -65,9 +92,9 @@ export function DiffFileHeaderActions({ path, onOpenFile, className }: DiffFileH
           onClick={handleOpen}
           title={t('sessions.fileViewer.openFile', 'Open file')}
           aria-label={t('sessions.fileViewer.openFile', 'Open file')}
-          className={HEADER_ICON_BUTTON_CLASS}
+          {...stylex.props(styles.button)}
         >
-          <FileText className="h-3.5 w-3.5" aria-hidden="true" />
+          <FileText {...stylex.props(styles.glyph)} aria-hidden="true" />
         </button>
       ) : null}
     </div>

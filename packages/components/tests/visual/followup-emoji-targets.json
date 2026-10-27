@@ -1,0 +1,665 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "compact-desktop",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "android-touch",
+      "device": "Pixel 7",
+      "width": 393,
+      "height": 851
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "ui-emojipickermigration--inline",
+    "ui-emojipickermigration--disabled-search",
+    "ui-emojipickermigration--caller-overrides",
+    "ui-emojipickermigration--chinese",
+    "ui-emojipickermigration--compact-columns",
+    "ui-emojipickermigration--consumer-popover"
+  ],
+  "ready": {
+    "ui-emojipickermigration--inline": [
+      {
+        "action": "visible",
+        "selector": "[data-slot=\"emoji-picker-emoji\"]:visible",
+        "index": 0
+      },
+      {
+        "action": "visible",
+        "selector": "[data-slot=\"emoji-picker-list\"][aria-rowcount=\"195\"]"
+      }
+    ],
+    "ui-emojipickermigration--disabled-search": [
+      {
+        "action": "visible",
+        "selector": "[data-slot=\"emoji-picker-emoji\"]:visible",
+        "index": 0
+      },
+      {
+        "action": "visible",
+        "selector": "[data-slot=\"emoji-picker-list\"][aria-rowcount=\"195\"]"
+      }
+    ],
+    "ui-emojipickermigration--caller-overrides": [
+      {
+        "action": "visible",
+        "selector": "[data-slot=\"emoji-picker-emoji\"]:visible",
+        "index": 0
+      },
+      {
+        "action": "visible",
+        "selector": "[data-slot=\"emoji-picker-list\"][aria-rowcount=\"195\"]"
+      }
+    ],
+    "ui-emojipickermigration--chinese": [
+      {
+        "action": "visible",
+        "selector": "[data-slot=\"emoji-picker-emoji\"]:visible",
+        "index": 0
+      },
+      {
+        "action": "visible",
+        "selector": "[data-slot=\"emoji-picker-list\"][aria-rowcount=\"195\"]"
+      }
+    ],
+    "ui-emojipickermigration--compact-columns": [
+      {
+        "action": "visible",
+        "selector": "[data-slot=\"emoji-picker-emoji\"]:visible",
+        "index": 0
+      },
+      {
+        "action": "visible",
+        "selector": "[data-slot=\"emoji-picker-list\"][aria-rowcount=\"323\"]"
+      }
+    ],
+    "ui-emojipickermigration--consumer-popover": [
+      {
+        "action": "click",
+        "selector": "button[aria-label=\"Emoji\"]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-slot=\"emoji-picker-emoji\"]:visible",
+        "index": 0
+      },
+      {
+        "action": "visible",
+        "selector": "[data-slot=\"emoji-picker-list\"][aria-rowcount=\"216\"]"
+      }
+    ]
+  },
+  "states": {
+    "ui-emojipickermigration--inline": [
+      {
+        "name": "first-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-slot=\"emoji-picker-emoji\"]:visible",
+            "index": 0
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-emoji\"][data-active][aria-label=\"Grinning face\"]:visible"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-footer\"] span:text-is(\"Grinning face\")"
+          }
+        ]
+      },
+      {
+        "name": "search",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "fill",
+            "selector": "[data-slot=\"emoji-picker-search\"]",
+            "value": "heart"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-emoji\"]:visible",
+            "index": 0
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-list\"][aria-rowcount=\"9\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-emoji\"][data-active][aria-label=\"Smiling face with hearts\"]:visible"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-active",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-slot=\"emoji-picker-search\"]",
+            "key": "ArrowDown"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-emoji\"][data-active]:visible",
+            "index": 0
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"row\"][aria-rowindex=\"1\"] [data-slot=\"emoji-picker-emoji\"][data-active]:visible"
+          }
+        ]
+      },
+      {
+        "name": "empty",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "fill",
+            "selector": "[data-slot=\"emoji-picker-search\"]",
+            "value": "zzzz-no-matching-emoji"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-empty\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-list\"][aria-rowcount=\"0\"]"
+          }
+        ]
+      },
+      {
+        "name": "cleared",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "fill",
+            "selector": "[data-slot=\"emoji-picker-search\"]",
+            "value": ""
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-emoji\"]:visible",
+            "index": 0
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-list\"][aria-rowcount=\"195\"]"
+          },
+          {
+            "action": "visible",
+            "text": "Select an emoji…"
+          }
+        ]
+      },
+      {
+        "name": "bilingual-search",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "fill",
+            "selector": "[data-slot=\"emoji-picker-search\"]",
+            "value": "微笑"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-emoji\"]:visible",
+            "index": 0
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-list\"][aria-rowcount=\"2\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-emoji\"][data-active][aria-label=\"Smiling face with smiling eyes\"]:visible"
+          }
+        ]
+      }
+    ],
+    "ui-emojipickermigration--caller-overrides": [
+      {
+        "name": "first-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-slot=\"emoji-picker-emoji\"]:visible",
+            "index": 0
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-emoji\"][data-active][aria-label=\"Grinning face\"]:visible"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-footer\"] span:text-is(\"Grinning face\")"
+          }
+        ]
+      },
+      {
+        "name": "search",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "fill",
+            "selector": "[data-slot=\"emoji-picker-search\"]",
+            "value": "heart"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-emoji\"]:visible",
+            "index": 0
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-list\"][aria-rowcount=\"9\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-emoji\"][data-active][aria-label=\"Smiling face with hearts\"]:visible"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-active",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-slot=\"emoji-picker-search\"]",
+            "key": "ArrowDown"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-emoji\"][data-active]:visible",
+            "index": 0
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"row\"][aria-rowindex=\"1\"] [data-slot=\"emoji-picker-emoji\"][data-active]:visible"
+          }
+        ]
+      },
+      {
+        "name": "empty",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "fill",
+            "selector": "[data-slot=\"emoji-picker-search\"]",
+            "value": "zzzz-no-matching-emoji"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-empty\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-list\"][aria-rowcount=\"0\"]"
+          }
+        ]
+      },
+      {
+        "name": "cleared",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "fill",
+            "selector": "[data-slot=\"emoji-picker-search\"]",
+            "value": ""
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-emoji\"]:visible",
+            "index": 0
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-list\"][aria-rowcount=\"195\"]"
+          },
+          {
+            "action": "visible",
+            "text": "Select an emoji…"
+          }
+        ]
+      }
+    ],
+    "ui-emojipickermigration--compact-columns": [
+      {
+        "name": "first-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-slot=\"emoji-picker-emoji\"]:visible",
+            "index": 0
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-emoji\"][data-active][aria-label=\"Grinning face\"]:visible"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-footer\"] span:text-is(\"Grinning face\")"
+          }
+        ]
+      },
+      {
+        "name": "search",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "fill",
+            "selector": "[data-slot=\"emoji-picker-search\"]",
+            "value": "heart"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-emoji\"]:visible",
+            "index": 0
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-list\"][aria-rowcount=\"11\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-emoji\"][data-active][aria-label=\"Smiling face with hearts\"]:visible"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-active",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-slot=\"emoji-picker-search\"]",
+            "key": "ArrowDown"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-emoji\"][data-active]:visible",
+            "index": 0
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"row\"][aria-rowindex=\"1\"] [data-slot=\"emoji-picker-emoji\"][data-active]:visible"
+          }
+        ]
+      },
+      {
+        "name": "empty",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "fill",
+            "selector": "[data-slot=\"emoji-picker-search\"]",
+            "value": "zzzz-no-matching-emoji"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-empty\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-list\"][aria-rowcount=\"0\"]"
+          }
+        ]
+      },
+      {
+        "name": "cleared",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "fill",
+            "selector": "[data-slot=\"emoji-picker-search\"]",
+            "value": ""
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-emoji\"]:visible",
+            "index": 0
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-list\"][aria-rowcount=\"323\"]"
+          },
+          {
+            "action": "visible",
+            "text": "Select an emoji…"
+          }
+        ]
+      }
+    ],
+    "ui-emojipickermigration--consumer-popover": [
+      {
+        "name": "first-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-slot=\"emoji-picker-emoji\"]:visible",
+            "index": 0
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-emoji\"][data-active][aria-label=\"Grinning face\"]:visible"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-footer\"] span:text-is(\"Grinning face\")"
+          }
+        ]
+      },
+      {
+        "name": "search",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "fill",
+            "selector": "[data-slot=\"emoji-picker-search\"]",
+            "value": "heart"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-emoji\"]:visible",
+            "index": 0
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-list\"][aria-rowcount=\"9\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-emoji\"][data-active][aria-label=\"Smiling face with hearts\"]:visible"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-active",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-slot=\"emoji-picker-search\"]",
+            "key": "ArrowDown"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-emoji\"][data-active]:visible",
+            "index": 0
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"row\"][aria-rowindex=\"1\"] [data-slot=\"emoji-picker-emoji\"][data-active]:visible"
+          }
+        ]
+      },
+      {
+        "name": "empty",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "fill",
+            "selector": "[data-slot=\"emoji-picker-search\"]",
+            "value": "zzzz-no-matching-emoji"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-empty\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-list\"][aria-rowcount=\"0\"]"
+          }
+        ]
+      },
+      {
+        "name": "cleared",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "fill",
+            "selector": "[data-slot=\"emoji-picker-search\"]",
+            "value": ""
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-emoji\"]:visible",
+            "index": 0
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-list\"][aria-rowcount=\"216\"]"
+          },
+          {
+            "action": "visible",
+            "text": "Select an emoji…"
+          }
+        ]
+      },
+      {
+        "name": "selected",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-slot=\"emoji-picker-emoji\"]:visible",
+            "index": 0
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-slot=\"emoji-picker\"]"
+          },
+          {
+            "action": "visible",
+            "text": "Selected: 😀"
+          }
+        ]
+      },
+      {
+        "name": "reset-open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"Emoji\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-emoji\"]:visible",
+            "index": 0
+          }
+        ]
+      }
+    ],
+    "ui-emojipickermigration--chinese": [
+      {
+        "name": "chinese-search",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "fill",
+            "selector": "[data-slot=\"emoji-picker-search\"]",
+            "value": "微笑"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-emoji\"]:visible",
+            "index": 0
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-list\"][aria-rowcount=\"2\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"emoji-picker-emoji\"][data-active][aria-label=\"羞涩微笑\"]:visible"
+          }
+        ]
+      }
+    ]
+  }
+}

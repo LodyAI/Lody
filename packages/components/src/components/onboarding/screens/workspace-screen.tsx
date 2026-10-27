@@ -103,6 +103,8 @@ const styles = stylex.create({
     paddingBlock: space[2],
   },
   workspaceList: { display: 'flex', flexDirection: 'column', gap: space[2] },
+  /** The lock beside an encrypted workspace name: sits on the text baseline. */
+  encryptedMark: { display: 'inline-block', verticalAlign: '-2px' },
   /** An unpicked choice is the well a radio rests in. */
   unselectedMark: {
     flexShrink: 0,
@@ -544,7 +546,9 @@ export function WorkspaceScreenView({
                             {workspace.encrypted ? (
                               <>
                                 {' '}
-                                <EncryptedWorkspaceMark className="inline-block align-[-2px]" />
+                                <EncryptedWorkspaceMark
+                                  className={stylex.props(styles.encryptedMark).className}
+                                />
                               </>
                             ) : null}
                           </span>

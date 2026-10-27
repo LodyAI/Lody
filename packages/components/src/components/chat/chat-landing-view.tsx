@@ -9,7 +9,7 @@ import type { CombinedMentionTextareaHandle } from '@/components/mentions/combin
 import type { PersistedMentionRange } from '@/components/mentions/mention-persistence';
 
 import type { AcpCommandSummary, AgentConfigCliType } from '@lody/shared';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
 import { useSessionMentionDropZone } from '@/hooks/use-session-mention-drag';
 import { Button } from '@lody/ui/button';
 import {
@@ -29,6 +29,157 @@ import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { MobileChatLandingScreen } from '@/components/mobile/mobile-chat-landing-screen';
 import { NoMachineHint, type NoMachineHintVariant } from './no-machine-hint';
 import { WebChatLandingScreen } from './web-chat-landing-screen';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  /* The hint button. */
+  hintButton: {
+    display: 'flex',
+    width: 'fit-content',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    borderRadius: themeRadius.md,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: themeColors.border,
+    backgroundColor: {
+      default: 'hsl(var(--background) / 0.7)',
+      ':hover': 'hsl(var(--muted) / 0.6)',
+    },
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[1.5],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.foreground,
+    transitionProperty:
+      'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+
+  /* The no-agent-config hint. */
+  hint: {
+    marginTop: themeSpace[4],
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: themeSpace[3],
+    borderRadius: themeRadius.lg,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.6)',
+    backgroundColor: 'hsl(var(--background) / 0.6)',
+    paddingInline: themeSpace[4],
+    paddingBlock: themeSpace[3],
+    color: themeColors.mutedForeground,
+  },
+  hintGlyph: {
+    marginTop: '0.5px',
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+    opacity: 0.7,
+  },
+  hintBody: { display: 'flex', flexGrow: 1, flexDirection: 'column', gap: themeSpace[2] },
+  hintText: { fontSize: themeFontSize.sm, lineHeight: themeLineHeight.sm },
+
+  /* The composer glyphs. */
+  glyph16: { width: themeSpace[4], height: themeSpace[4] },
+
+  /* The composer fallback, when it fails to render. */
+  fallback: {
+    width: '100%',
+    borderRadius: themeRadius.xl,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.6)',
+    backgroundColor: 'hsl(var(--background) / 0.8)',
+    padding: themeSpace[4],
+  },
+  fallbackTitle: {
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.semibold,
+    color: themeColors.foreground,
+  },
+  fallbackDetail: {
+    marginTop: themeSpace[1],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+  fallbackPrompt: {
+    marginTop: themeSpace[3],
+    width: '100%',
+    resize: 'none',
+    borderRadius: themeRadius.lg,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--input-border) / 0.7)',
+    backgroundColor: themeColors.inputField,
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.inputForeground,
+    '::placeholder': { color: themeColors.inputPlaceholder },
+    /* The Tailwind `focus-visible:ring-2` this textarea used to carry declared
+       a full box-shadow in the utilities layer, which erased the global inset
+       focus ring. It painted no ring of its own — the app forces Tailwind rings
+       transparent — so the textarea showed NO focus indicator. Keep that: no
+       resting shadow, and no focus shadow. */
+    boxShadow: { default: null, ':focus-visible': 'none' },
+  },
+  fallbackStatus: {
+    marginTop: themeSpace[2],
+    paddingInline: themeSpace[1],
+    fontSize: themeFontSize.xs,
+    lineHeight: '1.375',
+  },
+  fallbackStatusMuted: { color: themeColors.mutedForeground },
+  fallbackStatusError: { color: themeColors.destructive },
+  fallbackActions: {
+    marginTop: themeSpace[3],
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: themeSpace[2],
+  },
+  fallbackSelectors: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: themeSpace[1],
+  },
+  fallbackActionsEnd: {
+    marginLeft: 'auto',
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+  },
+  retryButton: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.md,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: themeColors.inputBorder,
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.medium,
+    color: { default: themeColors.foreground, ':hover': themeColors.hoverForeground },
+    backgroundColor: { default: themeColors.background, ':hover': themeColors.hover },
+  },
+});
 
 export type ChatLandingTone = 'light' | 'dark';
 
@@ -319,23 +470,18 @@ export function ChatLandingView({
     tryAgain = 'Try again',
   } = errorLabels;
 
-  const hintButtonClassName = cn(
-    'group flex w-fit items-center gap-2 rounded-md border px-3 py-1.5 text-sm transition-colors',
-    'border-border bg-background/70 text-foreground hover:bg-muted/60'
-  );
+  // `group` stays a plain class: the hint button is the group anchor.
+  const hintButtonClassName = ['group', stylex.props(styles.hintButton).className]
+    .filter(Boolean)
+    .join(' ');
 
   // No-agent-config hint shown in scrollable area (not as overlay)
   const agentConfigHintNode =
     hintType === 'no-agent-config' ? (
-      <div
-        className={cn(
-          'mt-4 flex items-start gap-3 rounded-lg border px-4 py-3',
-          'border-border/60 bg-background/60 text-muted-foreground'
-        )}
-      >
-        <Settings className="mt-0.5 h-4 w-4 shrink-0 opacity-70" />
-        <div className="flex flex-1 flex-col gap-2">
-          <p className="text-sm">{hintNoAgentConfigMessage}</p>
+      <div {...stylex.props(styles.hint)}>
+        <Settings {...stylex.props(styles.hintGlyph)} />
+        <div {...stylex.props(styles.hintBody)}>
+          <p {...stylex.props(styles.hintText)}>{hintNoAgentConfigMessage}</p>
           <button type="button" onClick={onGoToAgentSettings} className={hintButtonClassName}>
             <span>{hintGoToSettingsLabel}</span>
           </button>
@@ -375,15 +521,35 @@ export function ChatLandingView({
         disabled={submitDisabled}
         aria-label={submissionPending ? submittingLabel : submitLabel}
       >
-        {submissionPending ? <Spinner className="h-4 w-4" /> : <ArrowUp className="h-4 w-4" />}
+        {submissionPending ? (
+          <Spinner className="h-4 w-4" />
+        ) : (
+          <ArrowUp {...stylex.props(styles.glyph16)} />
+        )}
       </Button>
     </ErrorBoundary>
   );
 
+  // The amber tone is a hard-coded pair, and its dark step needs the `.dark`
+  // ancestor StyleX cannot select, so that one stays a Tailwind class.
+  const composerStatusStyle =
+    composerStatusTone === 'warning'
+      ? stylex.props(styles.fallbackStatus)
+      : stylex.props(
+          styles.fallbackStatus,
+          composerStatusTone === 'error' ? styles.fallbackStatusError : styles.fallbackStatusMuted
+        );
+  const composerStatusClassName =
+    composerStatusTone === 'warning'
+      ? ['text-amber-600 dark:text-amber-400', composerStatusStyle.className]
+          .filter(Boolean)
+          .join(' ')
+      : composerStatusStyle.className;
+
   const fallbackRender = ({ resetErrorBoundary }: { resetErrorBoundary: () => void }) => (
-    <div className="w-full rounded-xl border border-border/60 bg-background/80 p-4">
-      <div className="text-sm font-semibold text-foreground">{somethingWentWrong}</div>
-      <div className="mt-1 text-xs text-muted-foreground">{composerCrashed}</div>
+    <div {...stylex.props(styles.fallback)}>
+      <div {...stylex.props(styles.fallbackTitle)}>{somethingWentWrong}</div>
+      <div {...stylex.props(styles.fallbackDetail)}>{composerCrashed}</div>
       <textarea
         id={isMobile ? 'chat-prompt-mobile' : 'chat-prompt'}
         ref={promptRef}
@@ -395,35 +561,26 @@ export function ChatLandingView({
         enterKeyHint={promptEnterKeyHint}
         placeholder={promptPlaceholder}
         disabled={submissionPending}
-        className={cn(
-          'input-scrollbar mt-3 w-full resize-none rounded-lg border border-input-border/70 bg-input-field px-3 py-2 text-sm text-input-foreground placeholder:text-input-placeholder focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
-        )}
+        // `input-scrollbar` is the global scrollbar class of the app.
+        className={['input-scrollbar', stylex.props(styles.fallbackPrompt).className]
+          .filter(Boolean)
+          .join(' ')}
       />
       {composerStatusMessage ? (
         <div
           role={composerStatusTone === 'error' ? 'alert' : 'status'}
           aria-live={composerStatusTone === 'error' ? 'assertive' : 'polite'}
-          className={cn(
-            'mt-2 px-1 text-xs leading-snug',
-            composerStatusTone === 'error'
-              ? 'text-destructive'
-              : composerStatusTone === 'warning'
-                ? 'text-amber-600 dark:text-amber-400'
-                : 'text-muted-foreground'
-          )}
+          className={composerStatusClassName}
+          style={composerStatusStyle.style}
         >
           {composerStatusMessage}
         </div>
-      ) : null}
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <div className="flex flex-wrap items-center gap-1">{selector ?? footerSelector}</div>
-        <div className="ml-auto flex items-center gap-2">
+      ) : null}{' '}
+      <div {...stylex.props(styles.fallbackActions)}>
+        <div {...stylex.props(styles.fallbackSelectors)}>{selector ?? footerSelector}</div>
+        <div {...stylex.props(styles.fallbackActionsEnd)}>
           {primaryActionNode}
-          <button
-            type="button"
-            className="inline-flex items-center justify-center rounded-md border border-input-border bg-background px-3 py-2 text-sm font-medium text-foreground hover:bg-hover hover:text-hover-foreground"
-            onClick={resetErrorBoundary}
-          >
+          <button type="button" {...stylex.props(styles.retryButton)} onClick={resetErrorBoundary}>
             {tryAgain}
           </button>
         </div>

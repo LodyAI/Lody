@@ -5,10 +5,13 @@ import type {
   WorktreeSetupScriptConfig,
   WorktreeSetupShell,
 } from '@lody/shared';
+import * as stylex from '@stylexjs/stylex';
+
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
-import { cn } from '@/lib/utils';
 import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { WorktreeSetupEditor } from '@/components/settings/project-settings';
+import { themeSpace } from '../../style/theme-scale.stylex';
+import { sheetSurface } from './sheet-surface';
 
 export type MobileWorktreeConfigSheetProps = {
   open: boolean;
@@ -28,6 +31,28 @@ export type MobileWorktreeConfigSheetProps = {
   onSetupSave: (config: WorktreeSetupScriptConfig) => Promise<void> | void;
   onCleanupSave: (config: WorktreeCleanupScriptConfig) => Promise<void> | void;
 };
+
+const styles = stylex.create({
+  /** The sheet's scrolling body. */
+  body: {
+    display: 'flex',
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    flexDirection: 'column',
+    gap: themeSpace[5],
+    overflowY: 'auto',
+    paddingInline: themeSpace[4],
+    paddingTop: themeSpace[1],
+  },
+  /** The rule between the two editors. */
+  divider: {
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'hsl(var(--border) / 0.4)',
+  },
+});
 
 /**
  * Second-level bottom sheet that holds the worktree setup + cleanup editors.
@@ -61,37 +86,26 @@ export function MobileWorktreeConfigSheet({
   return (
     <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
       <DrawerContent
-        className={cn(
-          'mobile-worktree-config-sheet',
-          'h-auto! max-h-[88dvh]! rounded-t-2xl border-border/60',
-          keyboard.contentClassName
-        )}
+        className={`mobile-worktree-config-sheet h-auto! max-h-[88dvh]! rounded-t-2xl border-border/60 ${keyboard.contentClassName}`}
       >
-        <div className="flex max-h-full min-h-0 flex-col">
-          <header className="relative flex shrink-0 items-center px-4 pb-2 pt-2">
-            <DrawerTitle className="mx-auto text-[0.95rem] font-semibold tracking-tight">
+        <div {...stylex.props(sheetSurface.columnAuto)}>
+          <header {...stylex.props(sheetSurface.header, sheetSurface.headerShrink)}>
+            <DrawerTitle {...stylex.props(sheetSurface.title, sheetSurface.titleCentered)}>
               {title}
             </DrawerTitle>
             <DrawerClose asChild>
               <button
                 type="button"
                 aria-label={t('common.close', 'Close')}
-                className={cn(
-                  'absolute right-3 top-1.5 inline-flex h-9 w-9 items-center justify-center rounded-full',
-                  'text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground'
-                )}
+                {...stylex.props(sheetSurface.iconButton, sheetSurface.iconButtonRight)}
               >
-                <X className="h-5 w-5" aria-hidden="true" strokeWidth={1.8} />
+                <X {...stylex.props(sheetSurface.glyph20)} aria-hidden="true" strokeWidth={1.8} />
               </button>
             </DrawerClose>
           </header>
-          <DrawerDescription className="sr-only">{title}</DrawerDescription>
+          <DrawerDescription {...stylex.props(sheetSurface.srOnly)}>{title}</DrawerDescription>
 
-          <div
-            ref={keyboard.scrollRef}
-            className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 pt-1"
-            style={keyboard.scrollStyle}
-          >
+          <div ref={keyboard.scrollRef} {...stylex.props(styles.body)} style={keyboard.scrollStyle}>
             <WorktreeSetupEditor
               phase="setup"
               shell={shell}
@@ -101,7 +115,7 @@ export function MobileWorktreeConfigSheet({
               errorMessage={setupError}
               onSave={onSetupSave}
             />
-            <div className="border-t border-border/40" />
+            <div {...stylex.props(styles.divider)} />
             <WorktreeSetupEditor
               phase="cleanup"
               shell={shell}

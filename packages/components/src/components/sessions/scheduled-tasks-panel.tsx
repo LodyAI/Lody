@@ -1,8 +1,145 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlarmClock, CalendarClock, ChevronDown, Repeat } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
 import { getServerNow, resolveFireMs, type PendingScheduledTask } from '@lody/shared';
-import { cn } from '@/lib/utils';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeDuration,
+  themeEasing,
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  panel: {
+    marginBottom: themeSpace[2],
+    overflow: 'hidden',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.6)',
+    borderRadius: themeRadius.md,
+    backgroundColor: 'hsl(var(--muted) / 0.5)',
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+  },
+  toggle: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    paddingInline: themeSpace[2],
+    paddingBlock: themeSpace[1.5],
+    textAlign: 'left',
+    color: {
+      default: themeColors.mutedForeground,
+      '@media (hover: hover)': { ':hover': themeColors.foreground },
+    },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  toggleGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    color: themeColors.primary,
+  },
+  toggleTitle: {
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+  },
+  toggleSummary: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  toggleChevron: {
+    marginLeft: 'auto',
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    transitionProperty: 'transform, translate, scale, rotate',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  toggleChevronOpen: { rotate: '180deg' },
+  listFrame: {
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'hsl(var(--border) / 0.5)',
+    paddingInline: themeSpace[2],
+    paddingBlock: themeSpace[1.5],
+  },
+  list: {
+    display: 'flex',
+    maxHeight: '13rem',
+    flexDirection: 'column',
+    gap: themeSpace[1.5],
+    overflowY: 'auto',
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+  },
+  row: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: themeSpace[2],
+  },
+  time: {
+    width: '3.25rem',
+    flexShrink: 0,
+    paddingTop: '1px',
+    textAlign: 'right',
+    fontWeight: themeFontWeight.medium,
+    fontVariantNumeric: 'tabular-nums',
+    color: themeColors.foreground,
+  },
+  timeFallback: {
+    display: 'flex',
+    width: '3.25rem',
+    flexShrink: 0,
+    justifyContent: 'flex-end',
+    paddingTop: themeSpace[0.5],
+  },
+  timeGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    color: themeColors.mutedForeground,
+  },
+  rowBody: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+  },
+  rowMeta: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: themeSpace[1.5],
+    rowGap: themeSpace[0.5],
+    color: themeColors.mutedForeground,
+  },
+  rowMetaTitle: {
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+  },
+  recurring: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: themeSpace[0.5],
+  },
+  recurringGlyph: { width: themeSpace[3], height: themeSpace[3] },
+  rowSummary: {
+    overflowWrap: 'break-word',
+    color: themeColors.mutedForeground,
+  },
+});
 
 export interface ScheduledTasksPanelProps {
   tasks: readonly PendingScheduledTask[] | undefined;
@@ -154,38 +291,30 @@ export function ScheduledTasksPanel({ tasks, className }: ScheduledTasksPanelPro
 
   if (rows.length === 0) return null;
 
+  const panelProps = stylex.props(styles.panel);
+  const chevronProps = stylex.props(styles.toggleChevron, expanded && styles.toggleChevronOpen);
+
   return (
-    <div
-      className={cn(
-        'mb-2 overflow-hidden rounded-md border border-border/60 bg-muted/50 text-xs',
-        className
-      )}
-    >
+    <div {...panelProps} className={clsx(panelProps.className, className)}>
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
         aria-expanded={expanded}
         aria-label={t('sessions.scheduledTasks.toggle')}
-        className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left text-muted-foreground transition-colors hover:text-foreground"
+        {...stylex.props(styles.toggle)}
       >
-        <AlarmClock className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
-        <span className="font-medium text-foreground">{t('sessions.scheduledTasks.heading')}</span>
-        <span className="truncate">
+        <AlarmClock {...stylex.props(styles.toggleGlyph)} aria-hidden="true" />
+        <span {...stylex.props(styles.toggleTitle)}>{t('sessions.scheduledTasks.heading')}</span>
+        <span {...stylex.props(styles.toggleSummary)}>
           · {t('sessions.scheduledTasks.summary', { count: rows.length })}
         </span>
-        <ChevronDown
-          className={cn(
-            'ml-auto h-3.5 w-3.5 shrink-0 transition-transform',
-            expanded && 'rotate-180'
-          )}
-          aria-hidden="true"
-        />
+        <ChevronDown {...chevronProps} aria-hidden="true" />
       </button>
       {expanded ? (
         <ScheduledTaskList
           rows={rows}
           nowMs={nowMs}
-          className="border-t border-border/50 px-2 py-1.5"
+          className={stylex.props(styles.listFrame).className}
         />
       ) : null}
     </div>
@@ -208,55 +337,44 @@ export function ScheduledTaskList({
   const { t } = useTranslation();
   const formatFireTime = useFireTimeFormatter();
   const relativeFireLabel = useRelativeFireLabel();
+  const listProps = stylex.props(styles.list);
 
   return (
-    <ul
-      className={cn(
-        'scrollbar-pro flex max-h-52 flex-col gap-1.5 overflow-y-auto text-xs',
-        className
-      )}
-    >
+    <ul {...listProps} className={clsx('scrollbar-pro', listProps.className, className)}>
       {rows.map(({ task, fireMs }) => {
         const isWakeup = task.kind === 'wakeup';
         const timeLabel = fireMs !== undefined ? formatFireTime(fireMs, nowMs) : undefined;
         const countdown = fireMs !== undefined ? relativeFireLabel(fireMs, nowMs) : undefined;
         return (
-          <li key={task.id} className="flex items-start gap-2">
+          <li key={task.id} {...stylex.props(styles.row)}>
             {/* Fire time, left-aligned. Falls back to a kind icon when unresolved. */}
             {timeLabel ? (
-              <time className="w-[3.25rem] shrink-0 pt-px text-right font-medium tabular-nums text-foreground">
-                {timeLabel}
-              </time>
+              <time {...stylex.props(styles.time)}>{timeLabel}</time>
             ) : (
-              <span className="flex w-[3.25rem] shrink-0 justify-end pt-0.5">
+              <span {...stylex.props(styles.timeFallback)}>
                 {isWakeup ? (
-                  <AlarmClock className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+                  <AlarmClock {...stylex.props(styles.timeGlyph)} aria-hidden="true" />
                 ) : (
-                  <CalendarClock
-                    className="h-3.5 w-3.5 text-muted-foreground"
-                    aria-hidden="true"
-                  />
+                  <CalendarClock {...stylex.props(styles.timeGlyph)} aria-hidden="true" />
                 )}
               </span>
             )}
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-muted-foreground">
-                <span className="font-medium text-foreground">
+            <div {...stylex.props(styles.rowBody)}>
+              <div {...stylex.props(styles.rowMeta)}>
+                <span {...stylex.props(styles.rowMetaTitle)}>
                   {isWakeup
                     ? t('sessions.scheduledTasks.wakeupLabel')
                     : t('sessions.scheduledTasks.cronLabel')}
                 </span>
                 {countdown ? <span>· {countdown}</span> : null}
                 {!isWakeup && task.recurring ? (
-                  <span className="inline-flex items-center gap-0.5">
-                    <Repeat className="h-3 w-3" aria-hidden="true" />
+                  <span {...stylex.props(styles.recurring)}>
+                    <Repeat {...stylex.props(styles.recurringGlyph)} aria-hidden="true" />
                     {t('sessions.scheduledTasks.recurring')}
                   </span>
                 ) : null}
               </div>
-              {task.summary ? (
-                <div className="break-words text-muted-foreground">{task.summary}</div>
-              ) : null}
+              {task.summary ? <div {...stylex.props(styles.rowSummary)}>{task.summary}</div> : null}
             </div>
           </li>
         );

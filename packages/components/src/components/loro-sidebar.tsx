@@ -19,6 +19,7 @@ import {
 } from 'react';
 import { useStore } from 'jotai';
 import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import { sidebarScrollTopByWorkspaceAtom } from '@/atoms/sidebar-state';
 import {
   WINDOW_DRAG_EXEMPT_CLASS,
@@ -31,6 +32,15 @@ import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import * as stylex from '@stylexjs/stylex';
 import { sidebarSurface } from './sidebar-surface';
+import { themeColors } from '../style/theme-colors.stylex';
+import {
+  themeFontWeight,
+  themeRadius,
+  themeSpace,
+  themeDuration,
+  themeEasing,
+  themeShadow,
+} from '../style/theme-scale.stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space } from '@lody/ui/tokens/scales.stylex';
 import { Kbd } from '@lody/ui/kbd';
@@ -86,6 +96,397 @@ import {
   SIDEBAR_HELPER_TEXT_CLASS,
   SIDEBAR_CONTROL_TEXT_CLASS,
 } from './sidebar-row-shared';
+
+/**
+ * The parts of the sidebar shell that were Tailwind. The rows' own box, ink
+ * and fills come from `sidebarSurface`; these are the pieces around it.
+ */
+const shellStyles = stylex.create({
+  headerTooltipRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+  switcherAvatar: { fontSize: '9px' },
+  switcherMenuAvatar: { fontSize: '10px' },
+  switcherMenu: { width: 'calc(var(--spacing) * 64)' },
+  switcherMenuHeading: { fontWeight: 'var(--font-weight-medium)' },
+  switcherMenuChoice: {
+    paddingInlineStart: 'calc(var(--spacing) * 2)',
+  },
+
+  relative: { position: 'relative' },
+  navLabel: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  flexFill: { minWidth: 0, flex: '1 1 0%' },
+  currentInk: { color: 'currentColor' },
+  nativeControl: {
+    outlineStyle: { default: 'none', '@media (forced-colors: active)': 'solid' },
+    outlineWidth: { default: null, '@media (forced-colors: active)': '2px' },
+    outlineColor: { default: null, '@media (forced-colors: active)': 'transparent' },
+    outlineOffset: { default: null, '@media (forced-colors: active)': '2px' },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  unselectable: { userSelect: 'none' },
+  disabledControl: {
+    pointerEvents: 'none',
+    cursor: 'default',
+    color: 'hsl(var(--sidebar-foreground-muted) / 0.6)',
+  },
+  accessibleLabel: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clipPath: 'inset(50%)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+  navControl: {
+    display: 'flex',
+    width: '100%',
+    userSelect: 'none',
+    alignItems: 'center',
+    textAlign: 'left',
+    outlineStyle: { default: 'none', '@media (forced-colors: active)': 'solid' },
+    outlineWidth: { default: null, '@media (forced-colors: active)': '2px' },
+    outlineColor: { default: null, '@media (forced-colors: active)': 'transparent' },
+    outlineOffset: { default: null, '@media (forced-colors: active)': '2px' },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to, opacity, box-shadow, transform, translate, scale, rotate, filter, -webkit-backdrop-filter, backdrop-filter, display, content-visibility, overlay, pointer-events',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  navGapDesktop: { gap: themeSpace[1.5] },
+  navGapMobile: { gap: themeSpace[2] },
+  glass: {
+    position: 'relative',
+    overflow: 'hidden',
+    borderRadius: themeRadius.xl,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--sidebar-border) / 0.8)',
+    backgroundColor: 'hsl(var(--sidebar) / 0.8)',
+    color: themeColors.sidebarForeground,
+    boxShadow: themeShadow.xs,
+  },
+  trayPadding: { padding: themeSpace[1] },
+  trayItem: { marginBottom: { default: themeSpace[1], ':last-child': 0 } },
+  chatsPadding: { paddingTop: themeSpace[2] },
+  viewportDesktop: { paddingInline: themeSpace[1.5], paddingBottom: themeSpace[3] },
+  viewportMobile: {
+    paddingLeft: 'calc(12px + env(safe-area-inset-left, 0px))',
+    paddingRight: 'calc(12px + env(safe-area-inset-right, 0px))',
+  },
+  /**
+   * The focus state these rows had before the migration. The header's icon
+   * button carried `focus-visible:ring-1 focus-visible:ring-sidebar-ring/40`,
+   * the footer's icon button carried
+   * `focus-visible:ring-1 focus-visible:ring-sidebar-ring/40`, the navigation
+   * row carried `focus-visible:ring-1 focus-visible:ring-sidebar-ring/30`, and
+   * the footer's workspace row carried
+   * `focus-visible:ring-1 focus-visible:ring-sidebar-ring/30`. Each of them
+   * declared a full box-shadow in the utilities layer, which erased the app's
+   * global inset focus ring, and the app forces Tailwind's own ring
+   * transparent — so the focused row painted NO focus indicator of its own.
+   * Keep that: no resting shadow, and no focus shadow.
+   */
+  noFocusRing: { boxShadow: { default: null, ':focus-visible': 'none' } },
+  /** A navigation row's own box. */
+  navRow: { position: 'relative', display: 'flex', width: '100%', alignItems: 'center' },
+  /** The navigation row's icon slot. */
+  navIcon: {
+    display: 'flex',
+    height: themeSpace[5],
+    width: themeSpace[4],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    transitionProperty:
+      'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  /** The icon rests one step quieter than the label. */
+  navIconIdle: { color: themeColors.sidebarForegroundMuted },
+  /** A navigation row's trailing control. */
+  navAction: { position: 'absolute', right: themeSpace[1], display: 'flex', alignItems: 'center' },
+  /** A clipped label. */
+  clipped: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  /** The workspace switcher's trailing count. */
+  switcherMeta: {
+    marginLeft: 'auto',
+    flexShrink: 0,
+    fontVariantNumeric: 'tabular-nums',
+    color: themeColors.mutedForeground,
+  },
+  /** The sidebar's own plane. */
+  shell: {
+    position: 'relative',
+    height: '100%',
+    userSelect: 'none',
+    backgroundColor: themeColors.sidebar,
+    color: themeColors.sidebarForeground,
+  },
+  /** The column the sidebar's rows live in. */
+  column: {
+    position: 'relative',
+    display: 'flex',
+    height: '100%',
+    flexDirection: 'column',
+    overflow: 'hidden',
+  },
+  /** The header row. */
+  header: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: themeSpace[2],
+  },
+  headerDesktop: { height: themeSpace[11], paddingInline: themeSpace[1.5] },
+  headerMobile: {
+    paddingTop: 'calc(12px + var(--safe-area-top))',
+    paddingInlineStart: 'calc(12px + var(--safe-area-left))',
+    paddingInlineEnd: 'calc(12px + var(--safe-area-right))',
+  },
+  /** The wordmark. */
+  wordmark: {
+    userSelect: 'none',
+    paddingInlineStart: '9px',
+    fontSize: '18px',
+    fontWeight: themeFontWeight.semibold,
+    lineHeight: 1,
+    letterSpacing: '-0.03em',
+    color: themeColors.reading,
+  },
+  /** The header's trailing buttons. */
+  headerActions: {
+    marginLeft: 'auto',
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[0.5],
+  },
+  /** The navigation rows' column. */
+  navColumn: { display: 'flex', flexDirection: 'column', gap: '1px' },
+  navColumnDesktop: { paddingInline: themeSpace[1.5] },
+  navColumnMobile: {
+    marginTop: themeSpace[2],
+    paddingInlineStart: 'calc(12px + var(--safe-area-left))',
+    paddingInlineEnd: 'calc(12px + var(--safe-area-right))',
+  },
+  /** The scroll area's own column. */
+  scrollColumn: { minHeight: 0, flexGrow: 1, flexShrink: 1, flexBasis: '0%' },
+  scrollColumnDesktop: { marginTop: themeSpace[3] },
+  scrollColumnMobile: {
+    marginTop: themeSpace[4],
+    paddingBottom: 'calc(12px + env(safe-area-inset-bottom, 0px))',
+  },
+  /** The empty state's own column. */
+  emptyState: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    paddingInline: themeSpace[6],
+    paddingBottom: themeSpace[5],
+    paddingTop: themeSpace[7],
+    textAlign: 'center',
+  },
+  /** The empty state's mark. */
+  emptyMark: {
+    display: 'flex',
+    height: themeSpace[9],
+    width: themeSpace[9],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.xl,
+    backgroundColor: 'hsl(var(--sidebar-accent))',
+    color: themeColors.sidebarForegroundMuted,
+    boxShadow: 'inset 0 0 0 1px hsl(var(--sidebar-border) / 0.6)',
+  },
+  emptyMarkGlyph: { width: themeSpace[4], height: themeSpace[4] },
+  emptyTitle: {
+    marginTop: themeSpace[3],
+    maxWidth: '220px',
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.sidebarForeground,
+  },
+  emptyDescription: {
+    marginTop: themeSpace[0.5],
+    maxWidth: '220px',
+    color: themeColors.sidebarForegroundMuted,
+  },
+  /** A floating panel above the bottom dock. */
+  floating: {
+    pointerEvents: 'none',
+    position: 'absolute',
+    zIndex: 10,
+  },
+  floatingMobile: {
+    bottom: themeSpace[12],
+    left: 'calc(16px + var(--safe-area-left))',
+  },
+  floatingDesktop: { bottom: '44px', left: themeSpace[3], right: themeSpace[3] },
+  floatingContent: { pointerEvents: 'auto' },
+  /** The workspace identity row on mobile. */
+  identityMobile: {
+    display: 'flex',
+    width: '100%',
+    minWidth: 0,
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    borderRadius: themeRadius.lg,
+    paddingInline: themeSpace[2],
+    paddingBlock: themeSpace[1.5],
+    textAlign: 'left',
+    height: themeSpace[9],
+    color: themeColors.sidebarForeground,
+  },
+  /** The repository section's header. */
+  repoHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[1],
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.sidebarForegroundMuted,
+  },
+  repoHeaderGlyph: { width: themeSpace[3.5], height: themeSpace[3.5] },
+  repoHeaderAction: { marginLeft: 'auto', flexShrink: 0 },
+  /** A repository's own row. */
+  repoRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    borderRadius: themeRadius.lg,
+    paddingInline: themeSpace[2],
+    paddingBlock: themeSpace[2],
+  },
+  repoRowIdle: {
+    color: themeColors.sidebarForegroundMuted,
+    backgroundColor: { default: 'transparent', ':hover': themeColors.sidebarHover },
+  },
+  repoRowSelected: {
+    color: themeColors.sidebarSelectionForeground,
+    backgroundColor: themeColors.sidebarSelection,
+  },
+  repoDot: {
+    height: themeSpace[2],
+    width: themeSpace[2],
+    borderRadius: themeRadius.full,
+    backgroundColor: themeColors.sidebarBorder,
+  },
+  repoTitle: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  repoAge: { flexShrink: 0, color: themeColors.sidebarForegroundMuted },
+  /** The pinned section's own column. */
+  pinnedStack: { paddingTop: themeSpace[1] },
+  pinnedStackCollapsed: { paddingTop: themeSpace[1], paddingBottom: themeSpace[1] },
+  pinnedStackOpen: { paddingTop: themeSpace[1], paddingBottom: themeSpace[3] },
+  /** The floating content's own box. */
+  floatGlyph: { width: '100%', height: '100%' },
+  /** The shell's own glyphs. */
+  glyph16: { width: themeSpace[4], height: themeSpace[4] },
+  glyph12: { width: themeSpace[3], height: themeSpace[3] },
+  glyph14Spaced: { width: themeSpace[3.5], height: themeSpace[3.5], marginRight: themeSpace[1.5] },
+  glyphBox16: {
+    display: 'flex',
+    width: themeSpace[4],
+    height: themeSpace[4],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  glyphBox20: {
+    display: 'flex',
+    width: themeSpace[5],
+    height: themeSpace[5],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** The archive glyph, and the arrow that replaces it while hovered. */
+  glyphFull: { width: '100%', height: '100%' },
+  glyphHidden: { width: '100%', height: '100%', display: 'none' },
+  /** The desktop workspace row. */
+  desktopIdentity: {
+    display: 'flex',
+    width: '100%',
+    minWidth: 0,
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    textAlign: 'left',
+    outlineStyle: 'none',
+    transitionProperty:
+      'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  /** The mobile workspace row's hover. */
+  identityMobileHover: {
+    backgroundColor: { default: 'transparent', ':hover': themeColors.sidebarHover },
+    color: { default: themeColors.sidebarForeground, ':hover': themeColors.sidebarHoverForeground },
+  },
+  /** The workspace identity's own box and name. */
+  identityBox: { minWidth: 0, flexGrow: 1, flexShrink: 1, flexBasis: '0%' },
+  identityRow: {
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    alignItems: 'center',
+    gap: themeSpace[2],
+  },
+  identityIconSlot: {
+    display: 'flex',
+    height: themeSpace[5],
+    width: themeSpace[4],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  identityName: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: themeFontWeight.medium,
+  },
+  /** A group label's type: a sentence, not a shout. */
+  groupLabelType: {
+    textTransform: 'none',
+    fontWeight: 400,
+    letterSpacing: '0rem',
+  },
+  /** The repository section's own column. */
+  repoStack: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[3],
+    paddingTop: themeSpace[1],
+  },
+  repoGroup: { display: 'flex', flexDirection: 'column', gap: themeSpace[2] },
+  pinnedBottom: { paddingBottom: themeSpace[1] },
+});
 
 export type LoroSidebarNavKey = 'home' | 'archive' | 'schedules';
 
@@ -342,6 +743,17 @@ const resizeStyles = stylex.create({
 });
 
 const footerStyles = stylex.create({
+  layout: { display: 'flex', flexShrink: 0, alignItems: 'center', justifyContent: 'space-between' },
+  mobile: {
+    borderTopWidth: '0.5px',
+    borderTopStyle: 'solid',
+    borderTopColor: themeColors.sidebarBorder,
+    paddingLeft: 'calc(6px + var(--safe-area-left))',
+    paddingRight: 'calc(12px + var(--safe-area-right))',
+    paddingTop: themeSpace[1],
+    paddingBottom: themeSpace[2],
+  },
+  paddingDesktop: { paddingInline: themeSpace[2.5], paddingBlock: themeSpace[1.5] },
   desktop: { columnGap: space[1] },
   workspace: { display: 'flex', minWidth: 0, flex: 1, alignItems: 'center' },
   actions: {
@@ -494,13 +906,8 @@ function clamp(value: number, min: number, max: number): number {
 
 function GlassSurface({ className, children }: { className?: string; children: ReactNode }) {
   return (
-    <div
-      className={cn(
-        'relative overflow-hidden rounded-xl border border-sidebar-border/80 bg-sidebar/80 text-sidebar-foreground shadow-xs',
-        className
-      )}
-    >
-      <div className="relative">{children}</div>
+    <div className={cn(stylex.props(shellStyles.glass).className, className)}>
+      <div {...stylex.props(shellStyles.relative)}>{children}</div>
     </div>
   );
 }
@@ -529,7 +936,7 @@ function ConnectionPill({
   return (
     <Badge
       tone={isLoading ? 'running' : 'danger'}
-      icon={isLoading ? <WorkingGrid className="h-3 w-3" /> : undefined}
+      icon={isLoading ? <WorkingGrid {...stylex.props(shellStyles.glyph12)} /> : undefined}
       aria-label={label}
       data-workspace-status={state}
     >
@@ -560,15 +967,19 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconB
         aria-label={label}
         aria-current={active ? 'page' : undefined}
         className={cn(
-          stylex.props(sidebarSurface.iconButton, active && sidebarSurface.selected).className,
-          'select-none outline-hidden transition-colors',
-          'focus-visible:ring-1 focus-visible:ring-sidebar-ring/40',
+          stylex.props(
+            sidebarSurface.iconButton,
+            active && sidebarSurface.selected,
+            shellStyles.unselectable,
+            shellStyles.nativeControl,
+            shellStyles.noFocusRing
+          ).className,
           className
         )}
         {...buttonProps}
       >
-        <span className="flex size-4 items-center justify-center">{children}</span>
-        <span className="sr-only">{label}</span>
+        <span {...stylex.props(shellStyles.glyphBox16)}>{children}</span>
+        <span {...stylex.props(shellStyles.accessibleLabel)}>{label}</span>
       </button>
     );
   }
@@ -583,8 +994,8 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconB
       className={cn('h-12 w-12', className)}
       {...buttonProps}
     >
-      <span className="flex size-5 items-center justify-center">{children}</span>
-      <span className="sr-only">{label}</span>
+      <span {...stylex.props(shellStyles.glyphBox20)}>{children}</span>
+      <span {...stylex.props(shellStyles.accessibleLabel)}>{label}</span>
     </Button>
   );
   return active ? (
@@ -693,14 +1104,12 @@ function SidebarHeaderIconButton({
       onClick={onClick}
       className={cn(
         // The same box, ink and fills as the footer's icon buttons.
-        stylex.props(sidebarSurface.iconButton).className,
-        'outline-hidden transition-colors',
-        disabled
-          ? // pointer-events-none keeps the hover fill off a control that cannot act.
-            // 60% keeps a disabled Back or Forward legible as "unavailable"
-            // rather than missing.
-            'pointer-events-none cursor-default text-sidebar-foreground-muted/60'
-          : 'focus-visible:ring-1 focus-visible:ring-sidebar-ring/40',
+        stylex.props(
+          sidebarSurface.iconButton,
+          shellStyles.nativeControl,
+          // Disabled controls retain their muted ink without a hover fill.
+          disabled ? shellStyles.disabledControl : shellStyles.noFocusRing
+        ).className,
         className
       )}
     >
@@ -711,7 +1120,7 @@ function SidebarHeaderIconButton({
   return (
     <Tooltip.Root>
       <Tooltip.Trigger render={button} />
-      <Tooltip.Content side="bottom" className="flex items-center gap-1.5">
+      <Tooltip.Content side="bottom" {...stylex.props(shellStyles.headerTooltipRow)}>
         <span>{label}</span>
         {shortcut ? <Kbd>{shortcut}</Kbd> : null}
       </Tooltip.Content>
@@ -743,7 +1152,7 @@ function NavButton({
   action?: ReactNode;
 }) {
   return (
-    <div className="relative flex w-full items-center">
+    <div {...stylex.props(shellStyles.navRow)}>
       <button
         type="button"
         onClick={onClick}
@@ -751,12 +1160,13 @@ function NavButton({
           // Same size as the session titles below: a smaller label reads as
           // undersized next to its 16px icon.
           SIDEBAR_ROW_TEXT_CLASS,
-          'group flex w-full select-none items-center text-left outline-hidden transition',
-          isMobile ? 'gap-2' : 'gap-1.5',
+          'group',
           // Desktop rows share a +15px icon and +37px text column with the
           // project, repository, and session rows below them. Same brightness as
           // unselected session titles; hover changes the fill only.
           stylex.props(
+            shellStyles.navControl,
+            isMobile ? shellStyles.navGapMobile : shellStyles.navGapDesktop,
             sidebarSurface.row,
             // Desktop: the 20px icon slot plus 4px padding is the same 28px as a
             // Workspace conversation row (its 20px end slot sets that height), so
@@ -768,7 +1178,7 @@ function NavButton({
             // truncate under it.
             Boolean(action) && sidebarSurface.navAction
           ).className,
-          'focus-visible:ring-1 focus-visible:ring-sidebar-ring/30'
+          stylex.props(shellStyles.noFocusRing).className
         )}
       >
         {/* The slot is the 16px icon box itself, not a padded frame. On desktop,
@@ -777,41 +1187,36 @@ function NavButton({
         {/* Icons rest one step quieter than the label so the words lead; they
             come up to full ink with the hover or the selected fill. */}
         <span
-          className={cn(
-            'flex h-5 w-4 shrink-0 items-center justify-center transition-colors',
-            active ? 'text-current' : 'text-sidebar-foreground-muted group-hover:text-current'
+          className={clsx(
+            stylex.props(shellStyles.navIcon).className,
+            stylex.props(active ? shellStyles.currentInk : shellStyles.navIconIdle).className,
+            // The icon comes up to the row's ink when the pointer is over it.
+            'group-hover:text-current'
           )}
         >
           {icon}
         </span>
-        <span className="truncate">{label}</span>
+        <span {...stylex.props(shellStyles.navLabel)}>{label}</span>
         {badge !== undefined && badge > 0 ? (
           <span
-            className={cn(
+            className={clsx(
               SIDEBAR_CAPTION_TEXT_CLASS,
-              'ml-auto shrink-0 tabular-nums text-muted-foreground'
+              stylex.props(shellStyles.switcherMeta).className
             )}
           >
             {badge > 99 ? '99+' : badge}
           </span>
         ) : null}
       </button>
-      {action ? <span className="absolute right-1 flex items-center">{action}</span> : null}
+      {action ? <span {...stylex.props(shellStyles.navAction)}>{action}</span> : null}
     </div>
   );
 }
 
 export function getLoroSidebarFooterClassName(isMobile: boolean): string {
-  return cn(
-    'flex shrink-0 items-center justify-between',
-    isMobile
-      ? // The mobile drawer has no page card beside it, so its footer keeps the rule.
-        'border-t-[0.5px] border-sidebar-border pl-[calc(6px+var(--safe-area-left))] pr-[calc(12px+var(--safe-area-right))] pt-1 pb-2'
-      : // Desktop: the footer is the window's own colour and parts from the page
-        // card by lightness, not by a hairline that dead-ends at the card's corner.
-        // The 12px sides give the avatar and the Settings glyph the same 18px from
-        // the edge.
-        'px-2.5 py-1.5'
+  return (
+    stylex.props(footerStyles.layout, isMobile ? footerStyles.mobile : footerStyles.paddingDesktop)
+      .className ?? ''
   );
 }
 
@@ -1044,29 +1449,31 @@ export const LoroSidebar = memo(function LoroSidebar({
     !afterSessionListContent &&
     !sessionListProps?.isLoading;
   const workspaceEmptyState = isWorkspaceEmpty ? (
-    <div
-      className="flex flex-col items-center px-6 pb-5 pt-7 text-center"
-      data-sidebar-empty-state={chatScope}
-    >
-      <div className="flex size-9 items-center justify-center rounded-xl bg-sidebar-accent text-sidebar-foreground-muted ring-1 ring-inset ring-sidebar-border/60">
+    <div {...stylex.props(shellStyles.emptyState)} data-sidebar-empty-state={chatScope}>
+      <div {...stylex.props(shellStyles.emptyMark)}>
         {chatScope === 'my' ? (
-          <ListFilter className="size-4" strokeWidth={1.8} aria-hidden="true" />
+          <ListFilter
+            {...stylex.props(shellStyles.emptyMarkGlyph)}
+            strokeWidth={1.8}
+            aria-hidden="true"
+          />
         ) : (
-          <ClipboardList className="size-4" strokeWidth={1.8} aria-hidden="true" />
+          <ClipboardList
+            {...stylex.props(shellStyles.emptyMarkGlyph)}
+            strokeWidth={1.8}
+            aria-hidden="true"
+          />
         )}
       </div>
       <p
-        className={cn(
-          SIDEBAR_CONTROL_TEXT_CLASS,
-          'mt-3 max-w-[220px] font-medium text-sidebar-foreground'
-        )}
+        className={clsx(SIDEBAR_CONTROL_TEXT_CLASS, stylex.props(shellStyles.emptyTitle).className)}
       >
         {chatScope === 'my' ? mergedLabels.filter.emptyMyTasks : mergedLabels.filter.emptyAllTasks}
       </p>
       <p
-        className={cn(
+        className={clsx(
           SIDEBAR_HELPER_TEXT_CLASS,
-          'mt-0.5 max-w-[220px] text-sidebar-foreground-muted'
+          stylex.props(shellStyles.emptyDescription).className
         )}
       >
         {chatScope === 'my'
@@ -1084,7 +1491,11 @@ export const LoroSidebar = memo(function LoroSidebar({
           )}
           onClick={() => onChatScopeChange('team')}
         >
-          <Users className="mr-1.5 size-3.5" strokeWidth={1.8} aria-hidden="true" />
+          <Users
+            {...stylex.props(shellStyles.glyph14Spaced)}
+            strokeWidth={1.8}
+            aria-hidden="true"
+          />
           {mergedLabels.filter.showAllTasksAction}
         </Button>
       ) : null}
@@ -1105,8 +1516,8 @@ export const LoroSidebar = memo(function LoroSidebar({
         }}
         size="small"
       />
-      <span className="min-w-0 flex flex-1 items-center gap-2">
-        <span className="min-w-0 flex-1 truncate font-medium">{workspaceName}</span>
+      <span {...stylex.props(shellStyles.identityRow)}>
+        <span {...stylex.props(shellStyles.identityName)}>{workspaceName}</span>
         {workspaceIdentityStatus ? (
           <ConnectionPill state={workspaceIdentityStatus} labels={mergedLabels} />
         ) : null}
@@ -1117,17 +1528,17 @@ export const LoroSidebar = memo(function LoroSidebar({
   // slot, as `NavButton`), then the name in the row's regular weight.
   const desktopWorkspaceIdentity = (
     <>
-      <span className="flex h-5 w-4 shrink-0 items-center justify-center">
+      <span {...stylex.props(shellStyles.identityIconSlot)}>
         <WorkspaceAvatar
           workspace={{
             name: workspaceName,
             logo: workspaces.find((ws) => ws.id === currentWorkspaceId)?.logo,
           }}
-          className="h-4 w-4 text-[9px]"
+          className={clsx(stylex.props(shellStyles.switcherAvatar).className, 'h-4 w-4')}
         />
       </span>
-      <span className="flex min-w-0 flex-1 items-center gap-2">
-        <span className="min-w-0 flex-1 truncate">{workspaceName}</span>
+      <span {...stylex.props(shellStyles.identityRow)}>
+        <span {...stylex.props(shellStyles.identityName)}>{workspaceName}</span>
         {workspaceIdentityStatus ? (
           <ConnectionPill state={workspaceIdentityStatus} labels={mergedLabels} />
         ) : null}
@@ -1135,24 +1546,24 @@ export const LoroSidebar = memo(function LoroSidebar({
     </>
   );
   const desktopWorkspaceRowClassName = (interactive: boolean) =>
-    cn(
+    clsx(
       SIDEBAR_ROW_TEXT_CLASS,
-      'flex w-full min-w-0 select-none items-center gap-1.5 text-left outline-hidden transition',
       stylex.props(
         sidebarSurface.row,
         sidebarSurface.footerRow,
         interactive && sidebarSurface.hover
       ).className,
-      interactive && 'focus-visible:ring-1 focus-visible:ring-sidebar-ring/30'
+      stylex.props(shellStyles.desktopIdentity).className,
+      interactive && stylex.props(shellStyles.noFocusRing).className
     );
   const windowDrag = isElectron && !isElectronFullscreen;
-  const mobileWorkspaceIdentityClassName = cn(
+  const mobileWorkspaceIdentityClassName = clsx(
     SIDEBAR_CONTROL_TEXT_CLASS,
-    'flex w-full min-w-0 select-none items-center gap-2 rounded-lg px-2 py-1.5 text-left',
-    'h-9',
-    'text-sidebar-foreground dark:text-sidebar-foreground/75',
-    workspaceSwitcherEnabled &&
-      'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground focus-visible:outline-hidden focus-visible:bg-sidebar-hover'
+    stylex.props(shellStyles.identityMobile).className,
+    // Preserve this explicit dark-ancestor ink step until the marker/theme
+    // contract covers the mobile workspace identity.
+    'dark:text-sidebar-foreground/75',
+    workspaceSwitcherEnabled && stylex.props(shellStyles.identityMobileHover).className
   );
   const getPlanLabel = (planTier: LoroSidebarWorkspace['planTier']) =>
     planTier === 'enterprise'
@@ -1166,7 +1577,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   const renderWorkspaceControl = (menuSide: 'top' | 'bottom') =>
     workspaceSwitcherEnabled ? (
       <Menu.Root modal={!isMobile}>
-        <div className="flex min-w-0 flex-1">
+        <div {...stylex.props(shellStyles.identityBox)}>
           <Menu.Trigger
             render={
               isMobile ? (
@@ -1199,9 +1610,12 @@ export const LoroSidebar = memo(function LoroSidebar({
             }
           />
         </div>
-        <Menu.Content align="start" side={menuSide} className="w-64">
+        <Menu.Content align="start" side={menuSide} {...stylex.props(shellStyles.switcherMenu)}>
           <Menu.GroupLabel
-            className={cn(SIDEBAR_HELPER_TEXT_CLASS, 'normal-case font-normal tracking-normal')}
+            className={clsx(
+              SIDEBAR_HELPER_TEXT_CLASS,
+              stylex.props(shellStyles.groupLabelType).className
+            )}
           >
             {userEmail}
           </Menu.GroupLabel>
@@ -1209,7 +1623,12 @@ export const LoroSidebar = memo(function LoroSidebar({
 
           {workspaces.length > 0 ? (
             <>
-              <Menu.GroupLabel className={cn(SIDEBAR_HELPER_TEXT_CLASS, 'font-medium')}>
+              <Menu.GroupLabel
+                className={clsx(
+                  SIDEBAR_HELPER_TEXT_CLASS,
+                  stylex.props(shellStyles.switcherMenuHeading).className
+                )}
+              >
                 {mergedLabels.switchWorkspace}
               </Menu.GroupLabel>
               <Menu.RadioGroup
@@ -1256,10 +1675,16 @@ export const LoroSidebar = memo(function LoroSidebar({
                         icon={
                           <WorkspaceAvatar
                             workspace={{ name: ws.name, logo: ws.logo }}
-                            className="h-5 w-5 text-[10px]"
+                            className={clsx(
+                              stylex.props(shellStyles.switcherMenuAvatar).className,
+                              'h-5 w-5'
+                            )}
                           />
                         }
-                        className="gap-1.5 ps-2"
+                        className={clsx(
+                          stylex.props(shellStyles.switcherMenuChoice).className,
+                          'gap-1.5'
+                        )}
                         onClickCapture={(event) => {
                           if (!workspaceSlug || !isNewWindowClick(event)) return;
                           if (openDesktopWindow(undefined, workspaceSlug, 'modifier_click')) {
@@ -1273,9 +1698,10 @@ export const LoroSidebar = memo(function LoroSidebar({
                             // carries the richer plan/members line that used to
                             // need a separate header card.
                             <span
-                              className={cn(
+                              className={clsx(
                                 SIDEBAR_CAPTION_TEXT_CLASS,
-                                'truncate text-muted-foreground'
+                                stylex.props(shellStyles.switcherMeta).className,
+                                stylex.props(shellStyles.clipped).className
                               )}
                             >
                               {typeof ws.memberCount === 'number'
@@ -1331,7 +1757,7 @@ export const LoroSidebar = memo(function LoroSidebar({
         </Menu.Content>
       </Menu.Root>
     ) : (
-      <div className="min-w-0 flex-1">
+      <div {...stylex.props(shellStyles.identityBox)}>
         <div
           className={
             isMobile ? mobileWorkspaceIdentityClassName : desktopWorkspaceRowClassName(false)
@@ -1347,7 +1773,7 @@ export const LoroSidebar = memo(function LoroSidebar({
     <div
       // No overflow-hidden here: the resize sash extends past the right border
       // so its hit area straddles the edge; the inner content div clips instead.
-      className={cn('relative h-full select-none bg-sidebar text-sidebar-foreground', className)}
+      className={clsx(stylex.props(shellStyles.shell).className, className)}
       style={
         isMobile || overlay
           ? undefined
@@ -1367,13 +1793,14 @@ export const LoroSidebar = memo(function LoroSidebar({
         </div>
       )}
 
-      <div className="relative flex h-full flex-col overflow-hidden">
+      <div {...stylex.props(shellStyles.column)}>
         <div
-          className={cn(
-            'relative flex items-center justify-between gap-2',
-            isMobile
-              ? 'pl-[calc(12px+var(--safe-area-left))] pr-[calc(12px+var(--safe-area-right))] pt-[calc(12px+var(--safe-area-top))]'
-              : cn('h-11 px-1.5', macTrafficLightRowPadClass, windowsCaptionRowPadClass),
+          className={clsx(
+            stylex.props(
+              shellStyles.header,
+              isMobile ? shellStyles.headerMobile : shellStyles.headerDesktop
+            ).className,
+            cn(macTrafficLightRowPadClass, windowsCaptionRowPadClass),
             windowDrag && WINDOW_DRAG_HEADER_CLASS
           )}
         >
@@ -1383,11 +1810,11 @@ export const LoroSidebar = memo(function LoroSidebar({
               <AuthRecoveryEntrySlot />
             </div>
           ) : isElectron ? (
-            <span className="min-w-0 flex-1" />
+            <span {...stylex.props(shellStyles.flexFill)} />
           ) : (
             <span
               aria-label="Lody"
-              className="select-none px-[9px] text-[18px] font-semibold leading-none tracking-[-0.03em] text-reading"
+              {...stylex.props(shellStyles.wordmark)}
               style={{ fontFamily: 'var(--font-wordmark)' }}
             >
               Lody
@@ -1396,10 +1823,10 @@ export const LoroSidebar = memo(function LoroSidebar({
           {!isMobile ? (
             <Tooltip.Provider delay={400}>
               <div
-                className={cn(
+                className={clsx(
                   // `gap-0.5` between full-size buttons keeps Back and Forward
                   // apart as two targets instead of one fused control.
-                  'ml-auto flex shrink-0 items-center gap-0.5',
+                  stylex.props(shellStyles.headerActions).className,
                   windowDrag && WINDOW_DRAG_EXEMPT_CLASS
                 )}
               >
@@ -1412,7 +1839,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     // was last seen, not revealed by hovering the header.
                     className="focus-visible:outline-hidden"
                   >
-                    <CuidaSidebarExpandOutline className="h-4 w-4" />
+                    <CuidaSidebarExpandOutline {...stylex.props(shellStyles.glyph16)} />
                   </SidebarHeaderIconButton>
                 ) : null}
                 <SidebarHeaderIconButton
@@ -1424,7 +1851,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     if (!commands.execute('nav.back')) window.history.back();
                   }}
                 >
-                  <ChevronLeft className="h-4 w-4" strokeWidth={1.5} />
+                  <ChevronLeft {...stylex.props(shellStyles.glyph16)} strokeWidth={1.5} />
                 </SidebarHeaderIconButton>
                 <SidebarHeaderIconButton
                   disabled={!canGoForward}
@@ -1435,7 +1862,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     if (!commands.execute('nav.forward')) window.history.forward();
                   }}
                 >
-                  <ChevronRight className="h-4 w-4" strokeWidth={1.5} />
+                  <ChevronRight {...stylex.props(shellStyles.glyph16)} strokeWidth={1.5} />
                 </SidebarHeaderIconButton>
               </div>
             </Tooltip.Provider>
@@ -1443,20 +1870,20 @@ export const LoroSidebar = memo(function LoroSidebar({
         </div>
 
         <div
-          className={cn(
+          className={clsx(
             // `gap-px` keeps navigation rows from painting as one fused block
             // when both are selected-adjacent or hover-highlighted.
-            'flex flex-col gap-px',
-            isMobile
-              ? 'mt-2 pl-[calc(12px+var(--safe-area-left))] pr-[calc(12px+var(--safe-area-right))]'
-              : 'px-1.5'
+            stylex.props(
+              shellStyles.navColumn,
+              isMobile ? shellStyles.navColumnMobile : shellStyles.navColumnDesktop
+            ).className
           )}
         >
           <NavButton
             active={activeNav === 'home'}
             isMobile={isMobile}
             label={mergedLabels.home}
-            icon={<MynauiEditOne className="h-4 w-4" />}
+            icon={<MynauiEditOne {...stylex.props(shellStyles.glyph16)} />}
             onClick={onHomeClicked}
           />
           {onSchedulesClicked && schedulesAllowed ? (
@@ -1464,7 +1891,7 @@ export const LoroSidebar = memo(function LoroSidebar({
               active={activeNav === 'schedules'}
               isMobile={isMobile}
               label={mergedLabels.schedules}
-              icon={<ListTodo className="h-4 w-4" strokeWidth={1.5} />}
+              icon={<ListTodo {...stylex.props(shellStyles.glyph16)} strokeWidth={1.5} />}
               onClick={onSchedulesClicked}
             />
           ) : null}
@@ -1472,18 +1899,18 @@ export const LoroSidebar = memo(function LoroSidebar({
             active={false}
             isMobile={isMobile}
             label={t('common.search', 'Search')}
-            icon={<Search className="h-4 w-4" strokeWidth={1.5} />}
+            icon={<Search {...stylex.props(shellStyles.glyph16)} strokeWidth={1.5} />}
             onClick={() => setCommandPaletteOpen(true)}
           />
         </div>
 
         <ScrollArea
           viewportRef={scrollViewportRef}
-          className={cn(
-            'min-h-0 flex-1',
-            // Desktop: 12px between navigation and the first group label, so the
-            // first group is set off like the 16px between the groups below it.
-            isMobile ? 'mt-4 pb-[calc(12px+env(safe-area-inset-bottom,0px))]' : 'mt-3'
+          className={clsx(
+            stylex.props(
+              shellStyles.scrollColumn,
+              isMobile ? shellStyles.scrollColumnMobile : shellStyles.scrollColumnDesktop
+            ).className
           )}
           // Overlay only while the list is scrolling. ScrollArea defaults to `hover`,
           // which paints the thumb as soon as the pointer enters the sidebar.
@@ -1496,15 +1923,22 @@ export const LoroSidebar = memo(function LoroSidebar({
           // scrolls vertically. Padding the viewport insets the rows from that clip
           // edge so the highlight outline renders fully. Geometry/scrollbar position
           // are unchanged (the absolutely-positioned scrollbar tracks the root edge).
-          viewportClassName={cn(
-            isMobile
-              ? 'pl-[calc(12px+env(safe-area-inset-left,0px))] pr-[calc(12px+env(safe-area-inset-right,0px))]'
-              : 'px-1.5 pb-3'
-          )}
+          viewportClassName={
+            stylex.props(isMobile ? shellStyles.viewportMobile : shellStyles.viewportDesktop)
+              .className
+          }
         >
-          <div className="relative">
+          <div {...stylex.props(shellStyles.relative)}>
             {hasPinnedItems ? (
-              <div className={cn('pt-1', pinnedSectionCollapsed ? 'pb-1' : 'pb-3')}>
+              <div
+                className={
+                  stylex.props(
+                    pinnedSectionCollapsed
+                      ? shellStyles.pinnedStackCollapsed
+                      : shellStyles.pinnedStackOpen
+                  ).className
+                }
+              >
                 <SidebarUpdatedSessionList
                   items={pinnedItems ?? []}
                   now={now}
@@ -1546,7 +1980,11 @@ export const LoroSidebar = memo(function LoroSidebar({
               // are at parity for individual sessions even though section-
               // level affordances diverge.
               !hasPinnedItems || updatedIsLoading || Boolean(updatedItems?.length) ? (
-                <div className={hasPinnedItems ? undefined : 'pt-1'}>
+                <div
+                  className={
+                    hasPinnedItems ? undefined : stylex.props(shellStyles.pinnedStack).className
+                  }
+                >
                   <SidebarUpdatedSessionList
                     items={updatedItems ?? []}
                     now={now}
@@ -1580,7 +2018,15 @@ export const LoroSidebar = memo(function LoroSidebar({
                   Worktrees section header, whose repo list renders just below
                   as the sibling SessionList — the header must hug its content. */}
                 {topContent ? (
-                  <div className={cn(hasPinnedItems ? 'pb-1' : 'pt-1 pb-1')}>{topContent}</div>
+                  <div
+                    className={
+                      stylex.props(
+                        hasPinnedItems ? shellStyles.pinnedBottom : shellStyles.pinnedStack
+                      ).className
+                    }
+                  >
+                    {topContent}
+                  </div>
                 ) : null}
                 {sessionListProps ? (
                   <SessionList
@@ -1598,44 +2044,48 @@ export const LoroSidebar = memo(function LoroSidebar({
               </>
             )}
             {organizeMode === 'workspace' && !topContent && !sessionListProps ? (
-              <div className="space-y-3 pt-1">
+              <div {...stylex.props(shellStyles.repoStack)}>
                 {repoSections.map((section, sectionIndex) => (
-                  <div key={section.id} className="space-y-2">
+                  <div key={section.id} {...stylex.props(shellStyles.repoGroup)}>
                     <div
-                      className={cn(
+                      className={clsx(
                         SIDEBAR_CONTROL_TEXT_CLASS,
-                        'flex items-center gap-2 px-1 font-medium text-sidebar-foreground-muted'
+                        stylex.props(shellStyles.repoHeader).className
                       )}
                     >
-                      <Github className="h-3.5 w-3.5" />
-                      <span className="truncate">{section.repoFullName}</span>
+                      <Github {...stylex.props(shellStyles.repoHeaderGlyph)} />
+                      <span {...stylex.props(shellStyles.clipped)}>{section.repoFullName}</span>
                       {sectionIndex === 0 && sectionHeaderFilterAction ? (
-                        <span className="ml-auto shrink-0">{sectionHeaderFilterAction}</span>
+                        <span {...stylex.props(shellStyles.repoHeaderAction)}>
+                          {sectionHeaderFilterAction}
+                        </span>
                       ) : null}
                     </div>
 
                     {/* A project with no sessions yet is its header alone, not an empty tray. */}
                     {section.items.length > 0 ? (
-                      <GlassSurface className="p-1">
-                        <ul className="space-y-1">
+                      <GlassSurface className={stylex.props(shellStyles.trayPadding).className}>
+                        <ul>
                           {section.items.map((item) => (
-                            <li key={item.id}>
+                            <li key={item.id} {...stylex.props(shellStyles.trayItem)}>
                               <div
-                                className={cn(
+                                className={clsx(
                                   SIDEBAR_ROW_TEXT_CLASS,
-                                  'flex items-center gap-2 rounded-lg px-2 py-2',
-                                  item.isSelected
-                                    ? 'bg-sidebar-selection text-sidebar-selection-foreground'
-                                    : 'text-sidebar-foreground-muted hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
+                                  stylex.props(
+                                    shellStyles.repoRow,
+                                    item.isSelected
+                                      ? shellStyles.repoRowSelected
+                                      : shellStyles.repoRowIdle
+                                  ).className
                                 )}
                               >
-                                <span className="h-2 w-2 rounded-full bg-sidebar-border" />
-                                <span className="min-w-0 flex-1 truncate">{item.title}</span>
+                                <span {...stylex.props(shellStyles.repoDot)} />
+                                <span {...stylex.props(shellStyles.repoTitle)}>{item.title}</span>
                                 {item.ageLabel ? (
                                   <span
-                                    className={cn(
+                                    className={clsx(
                                       SIDEBAR_CAPTION_TEXT_CLASS,
-                                      'shrink-0 text-sidebar-foreground-muted'
+                                      stylex.props(shellStyles.repoAge).className
                                     )}
                                   >
                                     {item.ageLabel}
@@ -1650,7 +2100,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                   </div>
                 ))}
 
-                <div className="pt-2">
+                <div {...stylex.props(shellStyles.chatsPadding)}>
                   {resolvedChatsSessionListProps ? (
                     <SessionList
                       {...resolvedChatsSessionListProps}
@@ -1665,14 +2115,14 @@ export const LoroSidebar = memo(function LoroSidebar({
 
         {bottomFloatingContent ? (
           <div
-            className={cn(
-              'pointer-events-none absolute z-10',
-              isMobile
-                ? 'bottom-12 left-[calc(16px+var(--safe-area-left))] '
-                : 'bottom-[44px] left-3 right-3'
+            className={clsx(
+              stylex.props(
+                shellStyles.floating,
+                isMobile ? shellStyles.floatingMobile : shellStyles.floatingDesktop
+              ).className
             )}
           >
-            <div className="pointer-events-auto">{bottomFloatingContent}</div>
+            <div {...stylex.props(shellStyles.floatingContent)}>{bottomFloatingContent}</div>
           </div>
         ) : null}
 
@@ -1694,7 +2144,7 @@ export const LoroSidebar = memo(function LoroSidebar({
               <Menu.Trigger
                 render={
                   <IconButton label={t('menu.help', 'Help')}>
-                    <CircleHelp className="size-full" strokeWidth={1.5} />
+                    <CircleHelp {...stylex.props(shellStyles.glyphFull)} strokeWidth={1.5} />
                   </IconButton>
                 }
               />
@@ -1736,21 +2186,27 @@ export const LoroSidebar = memo(function LoroSidebar({
               >
                 <Archive
                   strokeWidth={1.5}
-                  className="size-full group-hover:hidden group-focus-visible:hidden"
+                  className={clsx(
+                    stylex.props(shellStyles.glyphFull).className,
+                    'group-hover:hidden group-focus-visible:hidden'
+                  )}
                 />
                 <ArrowLeft
                   strokeWidth={1.5}
-                  className="hidden size-full group-hover:block group-focus-visible:block"
+                  className={clsx(
+                    stylex.props(shellStyles.glyphHidden).className,
+                    'group-hover:block group-focus-visible:block'
+                  )}
                 />
               </IconButton>
             ) : (
               <IconButton label={t('archive.title', 'Archive')} onClick={onArchiveClicked}>
-                <Archive className="size-full" strokeWidth={1.5} />
+                <Archive {...stylex.props(shellStyles.glyphFull)} strokeWidth={1.5} />
               </IconButton>
             )}
 
             <IconButton label={t('settings.title', 'Settings')} onClick={onSettingsClicked}>
-              <Settings className="size-full" strokeWidth={1.5} />
+              <Settings {...stylex.props(shellStyles.glyphFull)} strokeWidth={1.5} />
             </IconButton>
           </div>
 

@@ -1,0 +1,369 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "blockedHosts": ["avatars.githubusercontent.com"],
+  "ids": [
+    "ui-roundlayoutmigration--horizontal",
+    "ui-roundlayoutmigration--vertical",
+    "ui-roundlayoutmigration--nested",
+    "ui-roundlayoutmigration--disabled",
+    "ui-roundlayoutmigration--consumer-handle",
+    "ui-roundlayoutmigration--card-states",
+    "ui-roundlayoutmigration--card-sticky",
+    "ui-roundlayoutmigration--card-consumers"
+  ],
+  "states": {
+    "ui-roundlayoutmigration--horizontal": [
+      {
+        "name": "handle-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "#layout-handle"
+          }
+        ]
+      },
+      {
+        "name": "handle-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#layout-handle"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-resize",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "#layout-handle",
+            "key": "ArrowRight"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-boundary",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "#layout-handle",
+            "key": "End"
+          },
+          {
+            "action": "visible",
+            "selector": "#layout-handle[aria-valuenow=\"80\"]"
+          }
+        ]
+      }
+    ],
+    "ui-roundlayoutmigration--vertical": [
+      {
+        "name": "handle-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "#layout-handle"
+          }
+        ]
+      },
+      {
+        "name": "handle-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#layout-handle"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-resize",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "#layout-handle",
+            "key": "ArrowDown"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-boundary",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "#layout-handle",
+            "key": "End"
+          },
+          {
+            "action": "visible",
+            "selector": "#layout-handle[aria-valuenow=\"80\"]"
+          }
+        ]
+      }
+    ],
+    "ui-roundlayoutmigration--consumer-handle": [
+      {
+        "name": "handle-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "#layout-handle"
+          }
+        ]
+      },
+      {
+        "name": "handle-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#layout-handle"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-resize",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "#layout-handle",
+            "key": "ArrowRight"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-boundary",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "#layout-handle",
+            "key": "End"
+          },
+          {
+            "action": "visible",
+            "selector": "#layout-handle[aria-valuenow=\"80\"]"
+          }
+        ]
+      }
+    ],
+    "ui-roundlayoutmigration--nested": [
+      {
+        "name": "outer-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#layout-handle"
+          }
+        ]
+      },
+      {
+        "name": "outer-resize",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "#layout-handle",
+            "key": "ArrowRight"
+          }
+        ]
+      },
+      {
+        "name": "inner-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#layout-inner-handle"
+          }
+        ]
+      },
+      {
+        "name": "inner-resize",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "#layout-inner-handle",
+            "key": "ArrowDown"
+          }
+        ]
+      }
+    ],
+    "ui-roundlayoutmigration--disabled": [
+      {
+        "name": "disabled-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "#layout-handle"
+          }
+        ]
+      }
+    ],
+    "ui-roundlayoutmigration--card-states": [
+      {
+        "name": "title-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-layout-header=\"open\"] p"
+          }
+        ]
+      },
+      {
+        "name": "open-header-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-layout-header=\"open\"] button[aria-label=\"Toggle section\"]"
+          }
+        ]
+      },
+      {
+        "name": "collapse-by-keyboard",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-layout-header=\"open\"] button[aria-label=\"Toggle section\"]",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-layout-card=\"open\"][data-state=\"closed\"]"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-layout-content=\"open\"]"
+          }
+        ]
+      },
+      {
+        "name": "reopen-by-keyboard",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-layout-header=\"open\"] button[aria-label=\"Toggle section\"]",
+            "key": "Space"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-layout-card=\"open\"][data-state=\"open\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-layout-content=\"open\"]"
+          }
+        ]
+      },
+      {
+        "name": "initially-closed-open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-layout-header=\"closed\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-layout-content=\"closed\"]"
+          }
+        ]
+      },
+      {
+        "name": "disabled-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-layout-header=\"disabled\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-layout-card=\"disabled\"][data-state=\"open\"]"
+          }
+        ]
+      }
+    ],
+    "ui-roundlayoutmigration--card-sticky": [
+      {
+        "name": "sticky-header-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-layout-header=\"sticky\"] button[aria-label=\"Toggle section\"]"
+          }
+        ]
+      },
+      {
+        "name": "sticky-collapse",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-layout-header=\"sticky\"] button[aria-label=\"Toggle section\"]",
+            "key": "Enter"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-layout-content=\"sticky\"]"
+          }
+        ]
+      },
+      {
+        "name": "sticky-reopen",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-layout-header=\"sticky\"] button[aria-label=\"Toggle section\"]",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-layout-content=\"sticky\"]"
+          }
+        ]
+      }
+    ],
+    "ui-roundlayoutmigration--card-consumers": [
+      {
+        "name": "notice-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[aria-expanded] button[aria-label=\"Toggle section\"]",
+            "index": 0
+          }
+        ]
+      },
+      {
+        "name": "notice-collapse",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[aria-expanded] button[aria-label=\"Toggle section\"]",
+            "index": 0,
+            "key": "Enter"
+          }
+        ]
+      }
+    ]
+  },
+  "ready": {
+    "ui-roundlayoutmigration--card-consumers": [
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-line-index=\"2,1\"]"
+      }
+    ]
+  }
+}

@@ -15,7 +15,7 @@ import {
   isMermaidRuntimeDependency,
   rendererBundleAliases
 } from '../../packages/components/vite-renderer-bundle-aliases'
-import { stylexOptions } from '../../packages/ui/stylex-options'
+import { componentsStylexOptions } from '../../packages/components/stylex-options'
 import { emojibaseAssetsPlugin } from '../../packages/components/vite-emojibase-assets'
 import { bootShellPlugin } from '../../packages/components/vite-boot-shell'
 import { preservePdfWorkerExports } from '../../packages/components/vite-pdf-worker'
@@ -183,7 +183,7 @@ export default defineConfig(({ mode }) => {
       // Tailwind via Vite plugin so @fontsource url() assets are emitted by Vite.
       plugins: [
         tailwindcss(),
-        stylex.vite(stylexOptions),
+        stylex.vite(componentsStylexOptions),
         loroCrdtWasmUrlWorkaround(),
         react(),
         wasm(),

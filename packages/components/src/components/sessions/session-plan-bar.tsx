@@ -1,12 +1,114 @@
 import { useMemo } from 'react';
 import { CheckCircle2, Circle, ChevronRight } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 
 import type { SessionPlanEntry } from '@lody/shared';
 
 import { CarbonInProgress } from '@/components/icons/carbon-in-progress';
-import { cn } from '@/lib/utils';
 import { Collapsible } from '@lody/ui/collapsible';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeDuration,
+  themeEasing,
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  root: {
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderRadius: themeRadius.lg,
+    backgroundColor: 'hsl(var(--muted) / 0.3)',
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2],
+  },
+  trigger: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: themeSpace[3],
+    textAlign: 'left',
+    // The old Tailwind `focus-visible:ring-*` painted nothing — the app forces
+    // Tailwind's own ring transparent — but it still declared a `box-shadow`,
+    // and a utility-layer shadow beats the base layer's inset focus ring. So
+    // the trigger showed NO focus indicator at all. Keep it that way.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+  },
+  summaryRow: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: themeSpace[2],
+  },
+  summaryText: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.medium,
+  },
+  countRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+  },
+  count: {
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+  chevron: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    transitionProperty: 'transform, translate, scale, rotate',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  list: {
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'hsl(var(--border) / 0.6)',
+    paddingTop: themeSpace[2],
+  },
+  entry: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: themeSpace[2],
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[1.5],
+    paddingBlock: themeSpace[1],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    backgroundColor: {
+      default: 'transparent',
+      '@media (hover: hover)': { ':hover': themeColors.hover },
+    },
+  },
+  entryBody: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+  },
+  entryText: { overflowWrap: 'break-word', lineHeight: 1.375 },
+  entryIconOffset: { marginTop: themeSpace[0.5] },
+  icon: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+  },
+  iconSuccess: { color: themeColors.statusSuccess },
+  iconPrimary: { color: themeColors.primary },
+  iconMuted: { color: themeColors.mutedForeground },
+});
 
 type SessionPlanBarProps = {
   entries?: SessionPlanEntry[] | null;
@@ -24,13 +126,19 @@ const emptyEntries: SessionPlanEntry[] = [];
 
 const PlanStatusIcon = ({ status, className }: { status: PlanStatus; className?: string }) => {
   switch (status) {
-    case 'completed':
-      return <CheckCircle2 className={cn('h-4 w-4 text-status-success', className)} />;
-    case 'in_progress':
-      return <CarbonInProgress className={cn('h-4 w-4 text-primary', className)} />;
+    case 'completed': {
+      const iconProps = stylex.props(styles.icon, styles.iconSuccess);
+      return <CheckCircle2 {...iconProps} className={clsx(iconProps.className, className)} />;
+    }
+    case 'in_progress': {
+      const iconProps = stylex.props(styles.icon, styles.iconPrimary);
+      return <CarbonInProgress {...iconProps} className={clsx(iconProps.className, className)} />;
+    }
     case 'pending':
-    default:
-      return <Circle className={cn('h-4 w-4 text-muted-foreground', className)} />;
+    default: {
+      const iconProps = stylex.props(styles.icon, styles.iconMuted);
+      return <Circle {...iconProps} className={clsx(iconProps.className, className)} />;
+    }
   }
 };
 
@@ -66,46 +174,52 @@ export const SessionPlanBar = ({
     : t('codexMessage.plan.empty', 'Plan cleared');
   const summaryText = summary ? summary.content : t('codexMessage.plan.empty', 'Plan cleared');
 
+  const rootProps = stylex.props(styles.root);
+  const triggerProps = stylex.props(styles.trigger);
+  const listProps = stylex.props(styles.list);
+  const chevronProps = stylex.props(styles.chevron);
+  const entryIconOffsetClassName = stylex.props(styles.entryIconOffset).className;
+
   return (
     <Collapsible.Root defaultOpen={defaultOpen} open={open} onOpenChange={onOpenChange}>
-      <div className={cn('rounded-lg border bg-muted/30 px-3 py-2', className)}>
+      <div {...rootProps} className={clsx(rootProps.className, className)}>
         <Collapsible.Trigger
           render={
             <button
               type="button"
-              className={cn(
-                'group flex w-full items-center justify-between gap-3 text-left',
-                'focus:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
-              )}
+              {...triggerProps}
+              // `group` is the marker the chevron's `group-data-[panel-open]`
+              // rotation reads; StyleX has no group variant.
+              className={clsx(triggerProps.className, 'group')}
             />
           }
         >
-          <div className="flex min-w-0 items-center gap-2">
+          <div {...stylex.props(styles.summaryRow)}>
             <PlanStatusIcon status={summary?.status ?? 'pending'} />
-            <span className="min-w-0 truncate text-sm font-medium">
+            <span {...stylex.props(styles.summaryText)}>
               {statusLabel}: {summaryText}
             </span>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">
+          <div {...stylex.props(styles.countRow)}>
+            <span {...stylex.props(styles.count)}>
               {completedCount}/{totalCount}
             </span>
-            <ChevronRight className="h-4 w-4 transition-transform group-data-[panel-open]:rotate-90" />
+            <ChevronRight
+              {...chevronProps}
+              className={clsx(chevronProps.className, 'group-data-[panel-open]:rotate-90')}
+            />
           </div>
         </Collapsible.Trigger>
         <Collapsible.Panel className="mt-2">
           {/* The rule and the space above the list ride on a child: the panel's
               own height is what the reveal animates, and Base UI measures it
               with `scrollHeight`, which counts padding. */}
-          <ul className="space-y-1 border-t border-border/60 pt-2">
+          <ul {...listProps} className={clsx(listProps.className, 'space-y-1')}>
             {safeEntries.map((entry, index) => (
-              <li
-                key={`${index}-${entry.content}`}
-                className="flex items-start gap-2 rounded-md px-1.5 py-1 text-sm hover:bg-hover"
-              >
-                <PlanStatusIcon status={entry.status} className="mt-0.5" />
-                <div className="min-w-0 flex-1">
-                  <span className="break-words leading-snug">{entry.content}</span>
+              <li key={`${index}-${entry.content}`} {...stylex.props(styles.entry)}>
+                <PlanStatusIcon status={entry.status} className={entryIconOffsetClassName} />
+                <div {...stylex.props(styles.entryBody)}>
+                  <span {...stylex.props(styles.entryText)}>{entry.content}</span>
                 </div>
               </li>
             ))}

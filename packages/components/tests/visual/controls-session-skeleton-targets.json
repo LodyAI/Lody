@@ -1,0 +1,45 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 900
+    },
+    {
+      "name": "phone-compact",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "blockedHosts": [
+    "avatars.githubusercontent.com"
+  ],
+  "titles": [
+    "Components/SessionList"
+  ],
+  "states": {},
+  "allowBlankIds": [
+    "components-sessionlist--loading"
+  ],
+  "ready": {
+    "components-sessionlist--loading": [
+      {
+        "action": "visible",
+        "selector": "[data-sidebar-loading-skeleton] [aria-hidden=\"true\"]",
+        "index": 0
+      }
+    ]
+  },
+  "ids": [
+    "components-sessionlist--loading"
+  ]
+}

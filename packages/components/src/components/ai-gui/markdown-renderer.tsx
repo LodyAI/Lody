@@ -55,6 +55,16 @@ import {
   remarkSingleDollarTextMath,
 } from '@/lib/markdown-single-dollar-math';
 import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeDuration,
+  themeEasing,
+  themeFontSize,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 import { usePrLinkInterceptor } from './pr-link-context';
 import { parseSessionLinkHref, useSessionLinkNavigator } from './session-link-context';
 import { parseSessionLink, type SessionLink } from '@lody/shared/session-link';
@@ -280,6 +290,108 @@ const markdownStyles = stylex.create({
     lineHeight: 'var(--markdown-code-line-height)',
     color: conversation.reading,
   },
+  /** The chip a session link wears inside prose. Its own colour lives in the
+   *  `markdown-reference-chip` rule, which is a descendant of the renderer. */
+  sessionChip: {
+    marginInline: '0.1em',
+    display: 'inline-flex',
+    maxWidth: '100%',
+    alignItems: 'center',
+    gap: '0.35em',
+    borderRadius: themeRadius.md,
+    paddingInline: '0.4em',
+    verticalAlign: '-0.12em',
+    fontSize: '0.92em',
+    lineHeight: '1.55',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  sessionChipInteractive: { cursor: 'pointer' },
+  githubReference: {
+    marginInline: '0.1em',
+    display: 'inline-flex',
+    maxWidth: '100%',
+    alignItems: 'baseline',
+    borderRadius: 'var(--radius-md)',
+    paddingInline: '0.4em',
+    verticalAlign: 'baseline',
+    fontSize: '1em',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
+    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+  },
+  /** The file link inside prose: a button that reads as the link it stands for. */
+  agentFileLink: {
+    margin: 0,
+    display: 'inline-flex',
+    maxWidth: '100%',
+    alignItems: 'baseline',
+    gap: themeSpace[1],
+    borderRadius: themeRadius.sm,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    padding: 0,
+    verticalAlign: 'baseline',
+    fontFamily: 'inherit',
+    lineHeight: 'inherit',
+    textDecorationLine: {
+      default: 'none',
+      '@media (hover: hover)': { ':hover': 'underline' },
+    },
+    textUnderlineOffset: '2px',
+    // The Tailwind ring painted nothing and erased the app's own focus ring
+    // with it, so the link stays as blind as it was.
+    boxShadow: { default: 'none', ':focus-visible': 'none' },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  emGlyph: {
+    width: '1.38em',
+    height: '1.38em',
+    flexShrink: 0,
+    alignSelf: 'center',
+  },
+  emActionGlyph: {
+    width: '0.85em',
+    height: '0.85em',
+    flexShrink: 0,
+    alignSelf: 'center',
+  },
+  emText: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  emLinkGlyph: {
+    width: '0.95em',
+    height: '0.95em',
+    flexShrink: 0,
+    alignSelf: 'center',
+  },
+  menuGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+  },
+  image: {
+    marginBlock: themeSpace[2],
+    maxHeight: '32rem',
+    maxWidth: '100%',
+    borderRadius: themeRadius.md,
+    objectFit: 'contain',
+  },
+  imageFallback: {
+    marginBlock: themeSpace[2],
+    display: 'block',
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.mutedForeground,
+  },
 });
 
 const MarkdownListKindContext = createContext<'unordered' | 'ordered' | 'task'>('unordered');
@@ -410,8 +522,7 @@ function MarkdownExternalLink({
   );
 }
 
-const SESSION_LINK_CHIP_CLASS_NAME =
-  'markdown-reference-chip mx-[0.1em] inline-flex max-w-full items-center gap-[0.35em] rounded-md px-[0.4em] align-[-0.12em] text-[0.92em] leading-[1.55] transition-colors';
+const SESSION_LINK_CHIP_CLASS_NAME = 'markdown-reference-chip';
 
 /**
  * A session resource link as a conversation chip, using in-app navigation
@@ -433,13 +544,20 @@ function MarkdownSessionLink({
   const title = markdownLinkText(children).trim().replace(/^@/u, '') || sessionId;
   const body = (
     <>
-      <MessagesSquare className="h-[0.95em] w-[0.95em] shrink-0 self-center" aria-hidden="true" />
-      <span className="min-w-0 truncate">{title}</span>
+      <MessagesSquare {...stylex.props(markdownStyles.emLinkGlyph)} aria-hidden="true" />
+      <span {...stylex.props(markdownStyles.emText)}>{title}</span>
     </>
   );
   if (!navigate || inert) {
     return (
-      <span data-session-link={sessionId} title={title} className={SESSION_LINK_CHIP_CLASS_NAME}>
+      <span
+        data-session-link={sessionId}
+        title={title}
+        className={clsx(
+          SESSION_LINK_CHIP_CLASS_NAME,
+          stylex.props(markdownStyles.sessionChip).className
+        )}
+      >
         {body}
       </span>
     );
@@ -449,7 +567,10 @@ function MarkdownSessionLink({
       type="button"
       data-session-link={sessionId}
       title={title}
-      className={cn(SESSION_LINK_CHIP_CLASS_NAME, 'cursor-pointer')}
+      className={clsx(
+        SESSION_LINK_CHIP_CLASS_NAME,
+        stylex.props(markdownStyles.sessionChip, markdownStyles.sessionChipInteractive).className
+      )}
       onClick={() =>
         navigate({
           ...target,
@@ -1032,32 +1153,55 @@ const AgentFileLink = ({
       }}
       title={href}
       aria-label={`${hasOpenAction ? openAgentFileLabel : copyAgentFileLabel}: ${href}`}
-      className={cn(
-        'm-0 inline-flex max-w-full items-baseline gap-1 rounded-sm border-0 bg-transparent p-0 align-baseline font-[inherit] leading-[inherit] text-markdown-link no-underline shadow-none transition-colors',
-        'hover:underline underline-offset-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+      className={clsx(
+        'text-markdown-link',
         // In a table cell the chip flows as inline text so the cell decides
         // whether the path wraps (see `markdown-table.tsx`); a truncated path
         // there would dictate the column's minimum width.
-        '[:is(th,td)_&]:inline [:is(th,td)_&]:text-start'
+        '[:is(th,td)_&]:inline',
+        '[:is(th,td)_&]:text-start',
+        stylex.props(markdownStyles.agentFileLink).className
       )}
     >
       <MonochromeFileIcon
         filePath={iconPath}
-        className="h-[1.38em] w-[1.38em] shrink-0 self-center [:is(th,td)_&]:mr-1 [:is(th,td)_&]:inline-block [:is(th,td)_&]:align-[-0.33em]"
+        className={clsx(
+          '[:is(th,td)_&]:mr-1',
+          '[:is(th,td)_&]:inline-block',
+          '[:is(th,td)_&]:align-[-0.33em]',
+          stylex.props(markdownStyles.emGlyph).className
+        )}
       />
       <span
-        className={cn(
-          'min-w-0 truncate',
-          '[:is(th,td)_&]:overflow-visible [:is(th,td)_&]:text-clip [:is(th,td)_&]:[white-space:inherit] [:is(th,td)_&]:[line-break:anywhere]'
+        className={clsx(
+          '[:is(th,td)_&]:overflow-visible',
+          '[:is(th,td)_&]:text-clip',
+          '[:is(th,td)_&]:[white-space:inherit]',
+          '[:is(th,td)_&]:[line-break:anywhere]',
+          stylex.props(markdownStyles.emText).className
         )}
       >
         {children}
       </span>
       {!hasOpenAction ? (
         didCopy ? (
-          <Check className="h-[0.85em] w-[0.85em] shrink-0 self-center [:is(th,td)_&]:ml-1 [:is(th,td)_&]:inline-block [:is(th,td)_&]:align-[-0.1em]" />
+          <Check
+            className={clsx(
+              '[:is(th,td)_&]:ml-1',
+              '[:is(th,td)_&]:inline-block',
+              '[:is(th,td)_&]:align-[-0.1em]',
+              stylex.props(markdownStyles.emActionGlyph).className
+            )}
+          />
         ) : (
-          <Copy className="h-[0.85em] w-[0.85em] shrink-0 self-center [:is(th,td)_&]:ml-1 [:is(th,td)_&]:inline-block [:is(th,td)_&]:align-[-0.1em]" />
+          <Copy
+            className={clsx(
+              '[:is(th,td)_&]:ml-1',
+              '[:is(th,td)_&]:inline-block',
+              '[:is(th,td)_&]:align-[-0.1em]',
+              stylex.props(markdownStyles.emActionGlyph).className
+            )}
+          />
         )
       ) : null}
     </button>
@@ -1074,7 +1218,9 @@ const AgentFileLink = ({
           if (item.kind === 'submenu') {
             return (
               <ContextMenu.Submenu key={item.id}>
-                <ContextMenu.SubmenuTrigger icon={<ItemIcon className="h-3.5 w-3.5" />}>
+                <ContextMenu.SubmenuTrigger
+                  icon={<ItemIcon {...stylex.props(markdownStyles.menuGlyph)} />}
+                >
                   {item.label}
                 </ContextMenu.SubmenuTrigger>
                 <ContextMenu.SubmenuContent className="min-w-[190px]">
@@ -1083,7 +1229,7 @@ const AgentFileLink = ({
                     return (
                       <ContextMenu.Item
                         key={child.id}
-                        icon={<ChildIcon className="h-3.5 w-3.5" />}
+                        icon={<ChildIcon {...stylex.props(markdownStyles.menuGlyph)} />}
                         onClick={child.run}
                       >
                         {child.label}
@@ -1097,7 +1243,7 @@ const AgentFileLink = ({
           return (
             <ContextMenu.Item
               key={item.id}
-              icon={<ItemIcon className="h-3.5 w-3.5" />}
+              icon={<ItemIcon {...stylex.props(markdownStyles.menuGlyph)} />}
               onClick={item.run}
             >
               {item.label}
@@ -1342,7 +1488,8 @@ const createMarkdownComponents = ({
           {...rest}
           className={cn(
             rest.className,
-            'markdown-reference-chip mx-[0.1em] inline-flex max-w-full items-baseline rounded-md px-[0.4em] align-baseline text-[1em] leading-[1.55] transition-colors'
+            'markdown-reference-chip leading-[1.55]',
+            stylex.props(markdownStyles.githubReference).className
           )}
         >
           <GitHubReferenceChip reference={githubReference} />
@@ -1373,16 +1520,12 @@ function ConversationMarkdownImage(props: MarkdownImageProps) {
       typeof props.src === 'string' &&
       /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=\s]+$/.test(props.src);
     return inline ? (
-      <img
-        src={props.src}
-        alt={props.alt ?? ''}
-        className="my-2 max-h-[32rem] max-w-full rounded-md object-contain"
-      />
+      <img src={props.src} alt={props.alt ?? ''} {...stylex.props(markdownStyles.image)} />
     ) : (
       <span
         role="img"
         aria-label={props.alt || 'Image'}
-        className="my-2 block text-sm text-muted-foreground"
+        {...stylex.props(markdownStyles.imageFallback)}
       >
         {props.alt || 'Image'}
       </span>
@@ -1427,11 +1570,7 @@ function SizedMarkdownImage(props: MarkdownImageProps) {
   );
   if (outcome === 'failed') {
     return (
-      <span
-        role="img"
-        aria-label={alt || 'Image'}
-        className="my-2 block text-sm text-muted-foreground"
-      >
+      <span role="img" aria-label={alt || 'Image'} {...stylex.props(markdownStyles.imageFallback)}>
         {alt || 'Image'}
       </span>
     );
@@ -1444,7 +1583,7 @@ function SizedMarkdownImage(props: MarkdownImageProps) {
       // With `height: auto`, these reserve the image's aspect ratio before it loads.
       width={outcome?.width ?? rest.width}
       height={outcome?.height ?? rest.height}
-      className={cn('my-2 max-h-[32rem] max-w-full rounded-md object-contain', rest.className)}
+      className={clsx(stylex.props(markdownStyles.image).className, rest.className)}
       onLoad={(event) => {
         const image = event.currentTarget;
         if (key !== undefined && image.naturalWidth > 0) {

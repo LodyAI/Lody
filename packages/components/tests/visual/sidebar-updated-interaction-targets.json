@@ -1,0 +1,78 @@
+{
+  "viewports": [
+    { "name": "desktop", "width": 1280, "height": 900 },
+    { "name": "tablet", "width": 768, "height": 900 },
+    { "name": "phone", "width": 390, "height": 844 }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": ["components-sidebar-migration--updated-overflow"],
+  "states": {
+    "components-sidebar-migration--updated-overflow": [
+      {
+        "name": "show-more-keyboard-focus",
+        "steps": [
+          { "action": "press", "role": "button", "name": "Show all (24)", "key": "Tab" },
+          { "action": "focus", "role": "button", "name": "Show all (24)" },
+          { "action": "visible", "selector": "[data-sidebar-updated-show-more]:focus-visible" }
+        ]
+      },
+      {
+        "name": "show-more-hover",
+        "steps": [
+          { "action": "hover", "role": "button", "name": "Show all (24)" },
+          { "action": "visible", "selector": "[data-sidebar-updated-show-more]:hover" }
+        ]
+      },
+      {
+        "name": "show-all",
+        "steps": [
+          { "action": "click", "role": "button", "name": "Show all (24)" },
+          { "action": "visible", "selector": "[data-sidebar-updated-id=\"fixture-23\"]" },
+          { "action": "visible", "role": "button", "name": "Show less" }
+        ]
+      },
+      {
+        "name": "selected",
+        "steps": [
+          { "action": "click", "selector": "[data-sidebar-updated-id=\"fixture-1\"]" },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-updated-id=\"fixture-1\"][aria-current=\"page\"]"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-updated-id=\"fixture-0\"][aria-current=\"page\"]"
+          }
+        ]
+      },
+      {
+        "name": "collapsed",
+        "steps": [
+          { "action": "click", "selector": "[aria-expanded=\"true\"]" },
+          { "action": "hidden", "selector": "[data-sidebar-updated-id=\"fixture-0\"]" },
+          { "action": "visible", "selector": "[aria-expanded=\"false\"]" }
+        ]
+      },
+      {
+        "name": "expanded-again",
+        "steps": [
+          { "action": "click", "selector": "[aria-expanded=\"false\"]" },
+          { "action": "visible", "selector": "[data-sidebar-updated-id=\"fixture-23\"]" },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-updated-id=\"fixture-1\"][aria-current=\"page\"]"
+          }
+        ]
+      },
+      {
+        "name": "show-less",
+        "steps": [
+          { "action": "click", "role": "button", "name": "Show less" },
+          { "action": "hidden", "selector": "[data-sidebar-updated-id=\"fixture-23\"]" },
+          { "action": "visible", "role": "button", "name": "Show all (24)" }
+        ]
+      }
+    ]
+  }
+}

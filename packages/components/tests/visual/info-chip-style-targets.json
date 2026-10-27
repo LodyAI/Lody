@@ -1,0 +1,606 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "below-container",
+      "width": 419,
+      "height": 900
+    },
+    {
+      "name": "at-container",
+      "width": 420,
+      "height": 900
+    },
+    {
+      "name": "above-container",
+      "width": 421,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "sessions-infochipstylemigration--primitives",
+    "sessions-infochipstylemigration--anchored-popover",
+    "sessions-infochipstylemigration--stage-popover",
+    "sessions-infochipstylemigration--context-actions",
+    "sessions-infochipstylemigration--context-disabled",
+    "sessions-infochipstylemigration--goal-cleared",
+    "sessions-infochipstylemigration--status-and-source",
+    "sessions-infochipstylemigration--full-bar",
+    "sessions-infochipstylemigration--ci-details"
+  ],
+  "ready": {
+    "sessions-infochipstylemigration--primitives": [
+      {
+        "action": "visible",
+        "selector": "#storybook-root button",
+        "index": 0
+      }
+    ],
+    "sessions-infochipstylemigration--anchored-popover": [
+      {
+        "action": "visible",
+        "selector": "#storybook-root button",
+        "index": 0
+      }
+    ],
+    "sessions-infochipstylemigration--stage-popover": [
+      {
+        "action": "visible",
+        "selector": "#storybook-root button",
+        "index": 0
+      }
+    ],
+    "sessions-infochipstylemigration--context-actions": [
+      {
+        "action": "visible",
+        "selector": "#storybook-root button",
+        "index": 0
+      }
+    ],
+    "sessions-infochipstylemigration--context-disabled": [
+      {
+        "action": "visible",
+        "selector": "#storybook-root button",
+        "index": 0
+      }
+    ],
+    "sessions-infochipstylemigration--goal-cleared": [
+      {
+        "action": "visible",
+        "selector": "#storybook-root button",
+        "index": 0
+      }
+    ],
+    "sessions-infochipstylemigration--status-and-source": [
+      {
+        "action": "visible",
+        "selector": "#storybook-root button",
+        "index": 0
+      }
+    ],
+    "sessions-infochipstylemigration--full-bar": [
+      {
+        "action": "visible",
+        "selector": "#storybook-root button",
+        "index": 0
+      }
+    ],
+    "sessions-infochipstylemigration--ci-details": [
+      {
+        "action": "visible",
+        "selector": "#storybook-root button",
+        "index": 0
+      }
+    ]
+  },
+  "states": {
+    "sessions-infochipstylemigration--primitives": [
+      {
+        "name": "action-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Open preview"
+          }
+        ]
+      },
+      {
+        "name": "action-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Open preview"
+          }
+        ]
+      },
+      {
+        "name": "cluster-promoted",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Promote goal"
+          }
+        ]
+      },
+      {
+        "name": "stage-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Open stage details"
+          }
+        ]
+      },
+      {
+        "name": "stage-activated",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open stage details"
+          },
+          {
+            "action": "visible",
+            "text": "Stage opened"
+          }
+        ]
+      }
+    ],
+    "sessions-infochipstylemigration--anchored-popover": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Related sessions"
+          }
+        ]
+      },
+      {
+        "name": "focus",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Related sessions"
+          }
+        ]
+      },
+      {
+        "name": "open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Related sessions"
+          },
+          {
+            "action": "visible",
+            "role": "dialog"
+          }
+        ]
+      },
+      {
+        "name": "escape",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "dialog"
+          }
+        ]
+      },
+      {
+        "name": "reopen-close",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Related sessions"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Close related sessions"
+          },
+          {
+            "action": "hidden",
+            "role": "dialog"
+          }
+        ]
+      }
+    ],
+    "sessions-infochipstylemigration--stage-popover": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Open goal details"
+          }
+        ]
+      },
+      {
+        "name": "focus",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Open goal details"
+          }
+        ]
+      },
+      {
+        "name": "open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open goal details"
+          },
+          {
+            "action": "visible",
+            "role": "dialog"
+          }
+        ]
+      },
+      {
+        "name": "escape",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "dialog"
+          }
+        ]
+      }
+    ],
+    "sessions-infochipstylemigration--context-actions": [
+      {
+        "name": "primary-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Commit & Push"
+          }
+        ]
+      },
+      {
+        "name": "primary-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Commit & Push"
+          }
+        ]
+      },
+      {
+        "name": "diff-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "All Changes"
+          }
+        ]
+      },
+      {
+        "name": "diff-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "All Changes"
+          }
+        ]
+      },
+      {
+        "name": "menu-open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "More actions"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Fix CI Errors"
+          }
+        ]
+      },
+      {
+        "name": "menu-escape",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "menuitem",
+            "name": "Fix CI Errors"
+          }
+        ]
+      },
+      {
+        "name": "menu-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "More actions"
+          }
+        ]
+      }
+    ],
+    "sessions-infochipstylemigration--context-disabled": [
+      {
+        "name": "disabled-hover",
+        "steps": [
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Commit & Push"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "All Changes"
+          },
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Commit & Push"
+          }
+        ]
+      },
+      {
+        "name": "menu-open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "More actions"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Fix CI Errors"
+          }
+        ]
+      },
+      {
+        "name": "escape",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "menuitem",
+            "name": "Fix CI Errors"
+          }
+        ]
+      }
+    ],
+    "sessions-infochipstylemigration--goal-cleared": [
+      {
+        "name": "open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Goal"
+          },
+          {
+            "action": "visible",
+            "role": "dialog"
+          }
+        ]
+      },
+      {
+        "name": "dismiss-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Dismiss goal banner"
+          }
+        ]
+      },
+      {
+        "name": "dismiss-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Dismiss goal banner"
+          }
+        ]
+      },
+      {
+        "name": "escape",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "dialog"
+          }
+        ]
+      }
+    ],
+    "sessions-infochipstylemigration--status-and-source": [
+      {
+        "name": "warning-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "button[aria-expanded=\"false\"]",
+            "index": 0
+          }
+        ]
+      },
+      {
+        "name": "warning-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "button[aria-expanded=\"false\"]",
+            "index": 0
+          }
+        ]
+      },
+      {
+        "name": "warning-promoted",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button[aria-expanded=\"false\"]",
+            "index": 0
+          }
+        ]
+      },
+      {
+        "name": "neutral-promoted",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button[aria-expanded=\"false\"]",
+            "index": 1
+          }
+        ]
+      }
+    ],
+    "sessions-infochipstylemigration--full-bar": [
+      {
+        "name": "primary-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Commit & Push"
+          }
+        ]
+      },
+      {
+        "name": "primary-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Commit & Push"
+          }
+        ]
+      },
+      {
+        "name": "changes-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "All Changes"
+          }
+        ]
+      }
+    ],
+    "sessions-infochipstylemigration--ci-details": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "#storybook-root button"
+          }
+        ]
+      },
+      {
+        "name": "focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#storybook-root button"
+          }
+        ]
+      },
+      {
+        "name": "open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "#storybook-root button"
+          },
+          {
+            "action": "visible",
+            "role": "dialog"
+          }
+        ]
+      },
+      {
+        "name": "long-run-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[role=\"dialog\"] button"
+          }
+        ]
+      },
+      {
+        "name": "run-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[role=\"dialog\"] button"
+          }
+        ]
+      },
+      {
+        "name": "escape",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "dialog"
+          }
+        ]
+      }
+    ]
+  }
+}

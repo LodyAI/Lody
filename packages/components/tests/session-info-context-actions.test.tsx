@@ -141,13 +141,12 @@ describe('ContextChip actions', () => {
     expect(createPrButton).toBeInstanceOf(HTMLButtonElement);
     expect(commitButton).toBeUndefined();
     expect(menuButton).toBeInstanceOf(HTMLButtonElement);
-    expect(createPrButton?.className).toContain('focus-visible:ring-0');
-    expect(createPrButton?.className).toContain('text-muted-foreground/80');
-    expect(menuButton?.className).toContain('focus-visible:ring-0');
-    // One borderless tinted surface in both themes — the bar keeps controls flat.
-    expect(createPrButton?.parentElement?.className).not.toContain('border');
-    expect(createPrButton?.parentElement?.className).toContain('bg-foreground/[0.05]');
-    expect(createPrButton?.parentElement?.className).toContain('dark:bg-muted-foreground/[0.08]');
+    // One flat tinted surface in both themes — the bar keeps controls flat.
+    // The tint, the borderless edge and the absence of a focus indicator are
+    // the component's own StyleX style now (`styles.actionsShell`,
+    // `styles.actionButton`), not class names a test can read.
+    expect(createPrButton?.parentElement).not.toBeNull();
+    expect(menuButton?.parentElement).toBe(createPrButton?.parentElement);
 
     await act(async () => createPrButton?.click());
 
@@ -302,8 +301,8 @@ describe('ContextChip actions', () => {
     const methodButton = buttons.find(
       (button) => button.getAttribute('aria-label') === 'Choose merge method'
     );
-    expect(mergeControl?.className).not.toContain('border');
-    expect(mergeControl?.className).toContain('bg-status-success/[0.08]');
+    // The merge control's success tint is the component's own StyleX style now.
+    expect(mergeControl).not.toBeNull();
     expect(mergeButton).toBeInstanceOf(HTMLButtonElement);
     expect(methodButton).toBeInstanceOf(HTMLButtonElement);
 

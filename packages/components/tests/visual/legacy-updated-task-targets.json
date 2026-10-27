@@ -1,0 +1,698 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "components-legacyupdatedtasklistmigration--status-matrix",
+    "components-legacyupdatedtasklistmigration--interactions",
+    "components-legacyupdatedtasklistmigration--anchor-rows",
+    "components-legacyupdatedtasklistmigration--overflow",
+    "components-legacyupdatedtasklistmigration--empty",
+    "components-legacyupdatedtasklistmigration--loading",
+    "components-legacyupdatedtasklistmigration--mobile-rows",
+    "components-legacyupdatedtasklistmigration--scoped-variables"
+  ],
+  "ready": {
+    "components-legacyupdatedtasklistmigration--status-matrix": [
+      {
+        "action": "visible",
+        "selector": "[data-legacy-updated-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-legacy-updated-result]"
+      }
+    ],
+    "components-legacyupdatedtasklistmigration--interactions": [
+      {
+        "action": "visible",
+        "selector": "[data-legacy-updated-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-legacy-updated-result]"
+      }
+    ],
+    "components-legacyupdatedtasklistmigration--anchor-rows": [
+      {
+        "action": "visible",
+        "selector": "[data-legacy-updated-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-legacy-updated-result]"
+      }
+    ],
+    "components-legacyupdatedtasklistmigration--overflow": [
+      {
+        "action": "visible",
+        "selector": "[data-legacy-updated-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-legacy-updated-result]"
+      }
+    ],
+    "components-legacyupdatedtasklistmigration--empty": [
+      {
+        "action": "visible",
+        "selector": "[data-legacy-updated-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-legacy-updated-result]"
+      }
+    ],
+    "components-legacyupdatedtasklistmigration--loading": [
+      {
+        "action": "visible",
+        "selector": "[data-legacy-updated-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-legacy-updated-result]"
+      }
+    ],
+    "components-legacyupdatedtasklistmigration--mobile-rows": [
+      {
+        "action": "visible",
+        "selector": "[data-legacy-updated-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-legacy-updated-result]"
+      }
+    ],
+    "components-legacyupdatedtasklistmigration--scoped-variables": [
+      {
+        "action": "visible",
+        "selector": "[data-legacy-updated-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-legacy-updated-result]"
+      }
+    ]
+  },
+  "states": {
+    "components-legacyupdatedtasklistmigration--status-matrix": [
+      {
+        "name": "unread-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"unread\"]"
+          }
+        ]
+      },
+      {
+        "name": "selected-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"selected\"]"
+          }
+        ]
+      },
+      {
+        "name": "long-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"long\"]"
+          }
+        ]
+      }
+    ],
+    "components-legacyupdatedtasklistmigration--interactions": [
+      {
+        "name": "row-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"long\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-updated-id=\"long\"] button[aria-label=\"Archive session\"]"
+          }
+        ]
+      },
+      {
+        "name": "row-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 600,
+            "y": 700
+          },
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Tab"
+          },
+          {
+            "action": "focus",
+            "selector": "[data-sidebar-updated-id=\"long\"]"
+          }
+        ]
+      },
+      {
+        "name": "menu-open",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"long\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-updated-id=\"long\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Rename"
+          }
+        ]
+      },
+      {
+        "name": "menu-escape",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "menuitem",
+            "name": "Rename"
+          }
+        ]
+      },
+      {
+        "name": "rename-long-input",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"long\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-updated-id=\"long\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-updated-id=\"long\"] input"
+          },
+          {
+            "action": "fill",
+            "selector": "[data-sidebar-updated-id=\"long\"] input",
+            "value": "  Renamed extremely long title · 中文名称 / feature / repository  "
+          }
+        ]
+      },
+      {
+        "name": "rename-committed",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-sidebar-updated-id=\"long\"] input",
+            "key": "Enter"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-updated-id=\"long\"] input"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-legacy-updated-result]"
+          }
+        ]
+      },
+      {
+        "name": "rename-cancel-input",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"long\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-updated-id=\"long\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-updated-id=\"long\"] input"
+          },
+          {
+            "action": "fill",
+            "selector": "[data-sidebar-updated-id=\"long\"] input",
+            "value": "This title must be cancelled"
+          }
+        ]
+      },
+      {
+        "name": "rename-escaped",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-sidebar-updated-id=\"long\"] input",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-updated-id=\"long\"] input"
+          }
+        ]
+      },
+      {
+        "name": "rename-blur-input",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"long\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-updated-id=\"long\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-updated-id=\"long\"] input"
+          },
+          {
+            "action": "fill",
+            "selector": "[data-sidebar-updated-id=\"long\"] input",
+            "value": "Committed by blur 中文"
+          }
+        ]
+      },
+      {
+        "name": "rename-blurred",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-legacy-blur-target]"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-updated-id=\"long\"] input"
+          }
+        ]
+      },
+      {
+        "name": "archive-confirm",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"long\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-updated-id=\"long\"] button[aria-label=\"Archive session\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-updated-id=\"long\"] button[aria-label=\"Confirm Archive session\"]"
+          }
+        ]
+      },
+      {
+        "name": "archive-completed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-updated-id=\"long\"] button[aria-label=\"Confirm Archive session\"]"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-updated-id=\"long\"]"
+          }
+        ]
+      }
+    ],
+    "components-legacyupdatedtasklistmigration--anchor-rows": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"long\"]"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 600,
+            "y": 700
+          },
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Tab"
+          },
+          {
+            "action": "focus",
+            "selector": "[data-sidebar-updated-id=\"long\"] a"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-updated-id=\"long\"] a:focus-visible"
+          }
+        ]
+      },
+      {
+        "name": "menu-open",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"long\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-updated-id=\"long\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Rename"
+          }
+        ]
+      },
+      {
+        "name": "rename-open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-updated-id=\"long\"] input"
+          }
+        ]
+      },
+      {
+        "name": "rename-cancelled",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-sidebar-updated-id=\"long\"] input",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-updated-id=\"long\"] input"
+          }
+        ]
+      }
+    ],
+    "components-legacyupdatedtasklistmigration--overflow": [
+      {
+        "name": "show-all-focus",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Tab"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Show all (24)"
+          }
+        ]
+      },
+      {
+        "name": "show-all-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Show all (24)"
+          }
+        ]
+      },
+      {
+        "name": "show-all",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Show all (24)"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-updated-id=\"overflow-23\"]"
+          }
+        ]
+      },
+      {
+        "name": "collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle legacy chats"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-updated-id=\"overflow-0\"]"
+          }
+        ]
+      },
+      {
+        "name": "expanded",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle legacy chats"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-updated-id=\"overflow-23\"]"
+          }
+        ]
+      },
+      {
+        "name": "show-less",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Show less"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-updated-id=\"overflow-23\"]"
+          }
+        ]
+      }
+    ],
+    "components-legacyupdatedtasklistmigration--scoped-variables": [
+      {
+        "name": "row-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"long\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-updated-id=\"long\"] button[aria-label=\"Archive session\"]"
+          }
+        ]
+      },
+      {
+        "name": "row-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 600,
+            "y": 700
+          },
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Tab"
+          },
+          {
+            "action": "focus",
+            "selector": "[data-sidebar-updated-id=\"long\"]"
+          }
+        ]
+      },
+      {
+        "name": "menu-open",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"long\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-updated-id=\"long\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Rename"
+          }
+        ]
+      },
+      {
+        "name": "menu-escape",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "menuitem",
+            "name": "Rename"
+          }
+        ]
+      },
+      {
+        "name": "scoped-rename",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"long\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-updated-id=\"long\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-updated-id=\"long\"] input"
+          }
+        ]
+      },
+      {
+        "name": "scoped-rename-escaped",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-sidebar-updated-id=\"long\"] input",
+            "key": "Escape"
+          }
+        ]
+      },
+      {
+        "name": "scoped-archive-confirm",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"long\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-updated-id=\"long\"] button[aria-label=\"Archive session\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-updated-id=\"long\"] button[aria-label=\"Confirm Archive session\"]"
+          }
+        ]
+      }
+    ],
+    "components-legacyupdatedtasklistmigration--empty": [
+      {
+        "name": "header-action",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Legacy header action"
+          },
+          {
+            "action": "visible",
+            "text": "Header action invoked"
+          }
+        ]
+      }
+    ],
+    "components-legacyupdatedtasklistmigration--loading": [
+      {
+        "name": "header-action",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Legacy header action"
+          },
+          {
+            "action": "visible",
+            "text": "Header action invoked"
+          }
+        ]
+      }
+    ]
+  }
+}

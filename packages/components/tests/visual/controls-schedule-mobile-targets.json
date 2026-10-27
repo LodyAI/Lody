@@ -1,0 +1,68 @@
+{
+  "viewports": [
+    {
+      "name": "iphone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "android",
+      "device": "Pixel 5",
+      "width": 393,
+      "height": 851
+    }
+  ],
+  "themes": ["light", "dark"],
+  "blockedHosts": ["avatars.githubusercontent.com"],
+  "ids": [
+    "schedules-migration--weekly",
+    "schedules-migration--once",
+    "schedules-migration--disabled",
+    "workspace-schedules--editor-weekly"
+  ],
+  "states": {
+    "schedules-migration--weekly": [
+      {
+        "name": "frequency-open",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "combobox",
+            "name": "Repeat"
+          },
+          {
+            "action": "visible",
+            "role": "listbox"
+          }
+        ]
+      },
+      {
+        "name": "frequency-dismissed",
+        "steps": [
+          {
+            "action": "press",
+            "role": "combobox",
+            "name": "Repeat",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "listbox"
+          }
+        ]
+      }
+    ],
+    "schedules-migration--once": [
+      {
+        "name": "datetime-focused",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "input[type=\"datetime-local\"]"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
+import * as stylex from '@stylexjs/stylex';
 import { MdChat, MdSettings } from 'react-icons/md';
 import { FaRegFileCode } from 'react-icons/fa';
 import type { IconType } from 'react-icons';
@@ -22,6 +23,7 @@ import type { SessionPullRequestCiState, SessionPullRequestReadiness } from '@lo
 import { isNativeAppShell } from '@/lib/native-platform';
 import { consumeMobileBackNavigation } from '@/lib/mobile-back-navigation';
 import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
 import { useLongPress } from '@/hooks/use-long-press';
 import { Checkbox } from '@lody/ui/checkbox';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
@@ -45,14 +47,523 @@ import {
   type MobileBottomTabBarTabSpec,
   type MobileWorkspaceTabBarScrollSignal,
 } from './mobile-workspace-tabbar';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
+
+/** Tailwind's `transition-colors`: colour properties only, 150ms, standard ease. */
+const TRANSITION_COLORS = {
+  transitionProperty: 'color, background-color, border-color, text-decoration-color, fill, stroke',
+  transitionDuration: '150ms',
+  transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+} as const;
+
+const styles = stylex.create({
+  /** A react-icon, sized to fill its box. */
+  reactIcon: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** The status mark in a row's leading slot. */
+  statusGlyph: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+  },
+  statusWaiting: { color: themeColors.statusWarning },
+  statusWorking: { color: themeColors.primary },
+  /** The dot that says a conversation is unread. */
+  unreadDot: {
+    display: 'inline-block',
+    width: themeSpace[2],
+    height: themeSpace[2],
+    flexShrink: 0,
+    borderRadius: '9999px',
+    backgroundColor: themeColors.primary,
+  },
+
+  /** The widened leading slot of an opened conversation. */
+  treeChildSlot: { width: themeSpace[8], justifyContent: 'flex-start' },
+  /** The plain leading slot of a top-level row. */
+  treeSlot: { width: themeSpace[4], justifyContent: 'center' },
+  /** The node's centre: the trunk, the elbow and the glyph all start here. */
+  treeNodeStart: { insetInlineStart: '23px' },
+  /** The elbow that reaches the child's content. */
+  treeElbowWidth: { width: '21px' },
+  /** The trunk and the elbow's own line. */
+  treeLine: { backgroundColor: 'hsl(var(--muted-foreground) / 0.3)' },
+  /** The connector that runs the row's full height. */
+  treeConnector: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    pointerEvents: 'none',
+  },
+  /** The trunk. */
+  treeTrunk: {
+    position: 'absolute',
+    top: 0,
+    width: '1px',
+  },
+  treeTrunkLast: { height: '50%' },
+  treeTrunkFull: { bottom: 0 },
+  /** The elbow. */
+  treeElbow: {
+    position: 'absolute',
+    top: '50%',
+    height: '1px',
+  },
+  /** The opener's fold control. */
+  treeToggle: {
+    position: 'absolute',
+    top: '50%',
+    zIndex: 30,
+    display: 'flex',
+    height: themeSpace[9],
+    width: themeSpace[7],
+    alignItems: 'center',
+    justifyContent: 'center',
+    translate: '0 -50%',
+    insetInlineStart: '9px',
+    borderRadius: themeRadius.md,
+    color: themeColors.mutedForeground,
+    backgroundColor: { default: null, ':active': 'hsl(var(--muted) / 0.6)' },
+  },
+  /** The fold control's chevron. */
+  treeChevron: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    rotate: '0deg',
+    transitionProperty: 'transform',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0, 0, 0.2, 1)',
+  },
+  treeChevronClosed: { rotate: '-90deg' },
+
+  /** The conversation row itself. */
+  row: {
+    position: 'relative',
+    display: 'flex',
+    minHeight: themeSpace[11],
+    width: '100%',
+    alignItems: 'center',
+    gap: themeSpace[2.5],
+    borderWidth: 0,
+    paddingInline: themeSpace[4],
+    paddingTop: themeSpace[2.5],
+    paddingBottom: themeSpace[2.5],
+    textAlign: 'left',
+    boxShadow: 'none',
+    ...TRANSITION_COLORS,
+  },
+  /** The row at rest. */
+  rowIdle: {
+    backgroundColor: { default: themeColors.background, ':active': 'hsl(var(--muted) / 0.4)' },
+  },
+  /** The selected row. */
+  rowSelected: { backgroundColor: 'hsl(var(--muted) / 0.5)' },
+  /** The row in a multi-select, picked. */
+  rowPicked: { backgroundColor: 'hsl(var(--primary) / 0.1)' },
+  /** A row's leading slot. */
+  rowSlot: {
+    display: 'flex',
+    height: themeSpace[4],
+    flexShrink: 0,
+    alignItems: 'center',
+  },
+  /** A row's title cluster. */
+  rowTitleLine: {
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+  },
+  /** A row's title. */
+  rowTitle: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '15px',
+    fontWeight: themeFontWeight.medium,
+    lineHeight: 1.375,
+    letterSpacing: '-0.01em',
+    color: themeColors.foreground,
+  },
+  /** An archived row's title. */
+  rowTitleArchived: { color: themeColors.mutedForeground },
+  /** The pin mark. */
+  rowPin: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+  },
+  /** The line-diff numbers. */
+  rowDiff: {
+    flexShrink: 0,
+    fontSize: '11px',
+    lineHeight: 1,
+    letterSpacing: '-0.025em',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  rowDiffAdded: { color: themeColors.githubAddition },
+  rowDiffRemoved: {
+    marginInlineStart: themeSpace[1],
+    color: themeColors.githubDeletion,
+  },
+  /** The worktree mark. */
+  rowWorktree: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    color: 'hsl(var(--muted-foreground) / 0.55)',
+  },
+
+  /** The screen's own column. */
+  screen: {
+    position: 'relative',
+    height: '100%',
+    minHeight: 0,
+    width: '100%',
+    overflow: 'hidden',
+    color: themeColors.foreground,
+  },
+  /** The shell the header + list stack in. */
+  shell: {
+    position: 'relative',
+    display: 'flex',
+    height: '100%',
+    width: '100%',
+    flexDirection: 'column',
+    backgroundColor: themeColors.background,
+  },
+  /** The filter pill bar's accordion. */
+  accordion: { overflow: 'hidden' },
+  /** The scrolling region. */
+  scroll: {
+    position: 'relative',
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflowY: 'auto',
+    paddingTop: themeSpace[1],
+    paddingBottom: 'calc(var(--mobile-tabbar-height) + var(--k-safe-area-bottom, 0px) + 1rem)',
+    scrollbarGutter: 'auto',
+  },
+  /** The row that holds the filter toggle above an empty list. */
+  filterRow: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingInline: themeSpace[4],
+    paddingTop: themeSpace[2],
+    paddingBottom: themeSpace[1.5],
+  },
+
+  /** A placeholder page: the same shell the empty conversation state uses. */
+  placeholder: {
+    display: 'flex',
+    marginInline: themeSpace[3],
+    marginTop: themeSpace[3],
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[4],
+    paddingTop: themeSpace[12],
+    paddingBottom: themeSpace[12],
+    textAlign: 'center',
+    borderRadius: themeRadius['2xl'],
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.4)',
+    backgroundColor: themeColors.card,
+  },
+  placeholderTitle: {
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+  },
+  placeholderBody: {
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+
+  /** The header row of the chat tab. */
+  chatHeader: {
+    position: 'sticky',
+    top: 0,
+    zIndex: 30,
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    paddingTop: 'calc(var(--k-safe-area-top) + var(--spacing) * 2)',
+    paddingBottom: themeSpace[2],
+    paddingInlineStart: 'calc(var(--k-safe-area-left) + var(--spacing) * 3)',
+    paddingInlineEnd: 'calc(var(--k-safe-area-right) + var(--spacing) * 3)',
+  },
+  /** The header row of the files / settings tabs. */
+  plainHeader: {
+    position: 'sticky',
+    top: 0,
+    zIndex: 30,
+    display: 'grid',
+    gridTemplateColumns: '2.25rem minmax(0, 1fr) 2.25rem',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    paddingTop: 'calc(var(--k-safe-area-top) + var(--spacing) * 2)',
+    paddingBottom: themeSpace[2],
+    paddingInlineStart: 'calc(var(--k-safe-area-left) + var(--spacing) * 3)',
+    paddingInlineEnd: 'calc(var(--k-safe-area-right) + var(--spacing) * 3)',
+  },
+  /** The centred project identity. */
+  identity: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: themeSpace[2],
+  },
+  identityName: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.98rem',
+    fontWeight: themeFontWeight.semibold,
+    letterSpacing: '-0.025em',
+  },
+
+  /** A chip in the header's corner. */
+  headerChip: {
+    display: 'inline-flex',
+    width: themeSpace[9],
+    height: themeSpace[9],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.full,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    scale: { default: null, ':active': '0.97' },
+    ...TRANSITION_COLORS,
+  },
+  headerChipActive: {
+    borderColor: 'hsl(var(--primary) / 0.4)',
+    backgroundColor: 'hsl(var(--primary) / 0.15)',
+    color: themeColors.primary,
+  },
+  headerChipIdle: {
+    borderColor: 'hsl(var(--border) / 0.5)',
+    backgroundColor: { default: themeColors.muted, ':active': 'hsl(var(--muted) / 0.8)' },
+    color: themeColors.foreground,
+  },
+
+  /** The filter chip on the first group heading. */
+  filterChip: {
+    position: 'relative',
+    display: 'inline-flex',
+    width: themeSpace[8],
+    height: themeSpace[8],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.full,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.5)',
+    backgroundColor: { default: themeColors.muted, ':hover': 'hsl(var(--muted) / 0.8)' },
+    color: { default: themeColors.mutedForeground, ':hover': themeColors.foreground },
+    scale: { default: null, ':active': '0.97' },
+    // The global "Pro focus style" paints an inset ring on every focused
+    // input and button; the picker's own focus-scoped ring never painted
+    // (the app zeroes Tailwind's ring on focus), so it must not appear
+    // here either.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+    ...TRANSITION_COLORS,
+  },
+  /** The filter chip while the bar is open. */
+  filterChipOpen: {
+    borderColor: 'hsl(var(--primary) / 0.4)',
+    backgroundColor: 'hsl(var(--primary) / 0.15)',
+    color: themeColors.primary,
+  },
+  /** The filter chip's glyph. */
+  filterChipGlyph: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    color: 'currentColor',
+  },
+  /** The dot that says filters are applied. */
+  filterDot: {
+    position: 'absolute',
+    top: themeSpace[1],
+    right: themeSpace[1],
+    width: themeSpace[1.5],
+    height: themeSpace[1.5],
+    borderRadius: '9999px',
+    backgroundColor: themeColors.primary,
+  },
+
+  /** The project avatar. */
+  avatar: {
+    width: themeSpace[6],
+    height: themeSpace[6],
+    flexShrink: 0,
+    borderRadius: themeRadius.full,
+    objectFit: 'cover',
+  },
+  avatarGlyph: {
+    width: themeSpace[6],
+    height: themeSpace[6],
+    flexShrink: 0,
+  },
+
+  /** The search pill in the header. */
+  searchPill: {
+    display: 'flex',
+    height: themeSpace[9],
+    width: '100%',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    paddingInline: themeSpace[3],
+    borderRadius: themeRadius.full,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.5)',
+    backgroundColor: { default: themeColors.muted, ':focus-within': 'hsl(var(--muted) / 0.8)' },
+    color: themeColors.foreground,
+    ...TRANSITION_COLORS,
+  },
+  searchGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+  },
+  searchInput: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    borderStyle: 'none',
+    backgroundColor: 'transparent',
+    fontSize: '0.82rem',
+    // The global "Pro focus style" paints an inset ring on every focused
+    // input and button; the picker's own focus-scoped ring never painted
+    // (the app zeroes Tailwind's ring on focus), so it must not appear
+    // here either.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+    '::placeholder': { color: themeColors.mutedForeground },
+  },
+  /** The button that clears the search. */
+  searchClear: {
+    display: 'inline-flex',
+    marginRight: 'calc(var(--spacing) * -1)',
+    width: themeSpace[6],
+    height: themeSpace[6],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.full,
+    color: { default: themeColors.mutedForeground, ':hover': themeColors.foreground },
+    backgroundColor: { default: null, ':hover': 'hsl(var(--muted) / 0.6)' },
+    ...TRANSITION_COLORS,
+  },
+  searchClearGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+  },
+
+  /** The wrapper that lets the fold chevron sit beside the row button. */
+  treeOpenerWrap: { position: 'relative' },
+  /** The glyph of a placeholder page. */
+  placeholderIcon: {
+    width: themeSpace[8],
+    height: themeSpace[8],
+    color: 'hsl(var(--muted-foreground) / 0.7)',
+  },
+  /** The tab bar's glyphs. */
+  tabIcon: {
+    width: themeSpace[6],
+    height: themeSpace[6],
+  },
+  /** The header's back chevron. */
+  headerChevron: {
+    width: themeSpace[5],
+    height: themeSpace[5],
+  },
+  /** The header's archive mark. */
+  headerArchive: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+  },
+  /** The search column in the header. */
+  searchColumn: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+  },
+  /** Said to a screen reader and to nobody else. */
+  srOnly: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    margin: '-1px',
+    padding: 0,
+    overflow: 'hidden',
+    clipPath: 'inset(50%)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+
+  /** The empty conversation state. */
+  emptyState: {
+    marginInline: themeSpace[3],
+    marginTop: themeSpace[3],
+    paddingInline: themeSpace[4],
+    paddingTop: themeSpace[6],
+    paddingBottom: themeSpace[6],
+    textAlign: 'center',
+    borderRadius: themeRadius['2xl'],
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.4)',
+    backgroundColor: themeColors.card,
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.mutedForeground,
+  },
+});
 
 function MobileReactIcon({ icon: Icon, className }: { icon: IconType; className?: string }) {
   /* Fill the sized wrapper — not size="1em" (inherits the tab label's 0.72rem). */
   return (
     <span
-      className={cn(
-        'inline-flex shrink-0 items-center justify-center [&_svg]:h-full [&_svg]:w-full',
-        className
+      {...withClassName(
+        stylex.props(styles.reactIcon),
+        cn('[&_svg]:h-full [&_svg]:w-full', className)
       )}
       aria-hidden="true"
     >
@@ -295,16 +806,17 @@ function StatusIndicator({
 }): ReactNode {
   if (isWaitingPermission) {
     return (
-      <Hand className="h-4 w-4 shrink-0 text-status-warning" aria-label="waiting permission" />
+      <Hand
+        {...stylex.props(styles.statusGlyph, styles.statusWaiting)}
+        aria-label="waiting permission"
+      />
     );
   }
   if (isWorking) {
     return <Spinner className="h-4 w-4 shrink-0 text-primary" aria-label="running" />;
   }
   if (hasUnreadMessages) {
-    return (
-      <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-primary" aria-label="unread" />
-    );
+    return <span data-unread-dot="" {...stylex.props(styles.unreadDot)} aria-label="unread" />;
   }
   return null;
 }
@@ -322,13 +834,9 @@ function StatusIndicator({
  * widens it (16px → 32px, left-aligned so the node stays at the same x),
  * producing a 16px content indent without moving the node or the background.
  * ----------------------------------------------------------------------- */
-/** Widened leading slot for an opened Session: the indent, and nothing else. */
-const TREE_CHILD_SLOT_CLASS = 'w-8 justify-start';
-/** Node centre — `ps-4` + half of the 16px slot. Shared by chevron/lines/status. */
-const TREE_NODE_START_CLASS = 'start-[23px]';
-/** 23px node → 44px, i.e. 4px shy of the child's 48px content start. */
-const TREE_ELBOW_WIDTH_CLASS = 'w-[21px]';
-const TREE_LINE_CLASS = 'bg-muted-foreground/30';
+/** The node centre — `ps-4` + half of the 16px slot. Shared by chevron, lines and
+    status. The elbow reaches 44px, i.e. 4px shy of the child's 48px content
+    start. Both live in `styles`. */
 
 function ConversationRowTreeConnector({ isLastChild }: { isLastChild: boolean }) {
   return (
@@ -337,24 +845,25 @@ function ConversationRowTreeConnector({ isLastChild }: { isLastChild: boolean })
     <span
       aria-hidden="true"
       data-conversation-tree-connector=""
-      className="pointer-events-none absolute inset-0"
+      {...stylex.props(styles.treeConnector)}
     >
       <span
-        className={cn(
-          'absolute top-0 w-px',
-          TREE_NODE_START_CLASS,
-          TREE_LINE_CLASS,
+        data-tree-trunk={isLastChild ? 'last' : 'full'}
+        {...stylex.props(
+          styles.treeTrunk,
+          styles.treeNodeStart,
+          styles.treeLine,
           /* Last child stops at the elbow so the trunk does not dangle past
              the group; every other child carries it into the next row. */
-          isLastChild ? 'h-1/2' : 'bottom-0'
+          isLastChild ? styles.treeTrunkLast : styles.treeTrunkFull
         )}
       />
       <span
-        className={cn(
-          'absolute top-1/2 h-px',
-          TREE_NODE_START_CLASS,
-          TREE_ELBOW_WIDTH_CLASS,
-          TREE_LINE_CLASS
+        {...stylex.props(
+          styles.treeElbow,
+          styles.treeNodeStart,
+          styles.treeElbowWidth,
+          styles.treeLine
         )}
       />
     </span>
@@ -395,18 +904,10 @@ function ConversationRowTreeToggle({
         event.stopPropagation();
         onToggle();
       }}
-      className={cn(
-        /* 28x36 hit box centred on the node — comfortably past the 24px
-           minimum, and it only overlaps the row's own padding + status slot. */
-        'absolute top-1/2 z-30 flex h-9 w-7 -translate-y-1/2 items-center justify-center',
-        'start-[9px] rounded-md text-muted-foreground active:bg-muted/60'
-      )}
+      {...stylex.props(styles.treeToggle)}
     >
       <ChevronDown
-        className={cn(
-          'h-4 w-4 transition-transform duration-150 ease-out',
-          expanded ? 'rotate-0' : '-rotate-90'
-        )}
+        {...stylex.props(styles.treeChevron, !expanded && styles.treeChevronClosed)}
         aria-hidden="true"
       />
     </button>
@@ -522,6 +1023,9 @@ export function ConversationRow({
   const rowButton = (
     <button
       type="button"
+      /* The row itself is never indented: an opened Session widens its
+         LEADING SLOT, so the row's background never shifts. */
+      data-conversation-row-indent="flat"
       onClick={(event) => {
         if (shouldSwallowClick()) {
           /* Long-press already fired during this gesture — the
@@ -538,14 +1042,15 @@ export function ConversationRow({
       }}
       aria-pressed={selectionMode ? isSelected : selected}
       {...longPressHandlers}
-      className={cn(
-        /* Linear issue-row cadence: ~44px min height, full-bleed press
-           wash, fixed leading status so every title shares one x. */
-        'mobile-project-conversation-row relative flex min-h-11 w-full items-center gap-2.5 border-0 px-4 py-2.5 text-left shadow-none outline-none transition-colors',
-        /* Solid canvas (not transparent) so nothing under the row can
+      {...withClassName(
+        stylex.props(
+          styles.row,
+          /* Solid canvas (not transparent) so nothing under the row can
            read as a divider hairline between list items. */
-        selected && !selectionMode ? 'bg-muted/50' : 'bg-background active:bg-muted/40',
-        selectionMode && isSelected && 'bg-primary/10'
+          selected && !selectionMode ? styles.rowSelected : styles.rowIdle,
+          selectionMode && isSelected && styles.rowPicked
+        ),
+        'mobile-project-conversation-row'
       )}
     >
       {showChildConnectors ? (
@@ -555,10 +1060,8 @@ export function ConversationRow({
           the node itself does not move) to indent everything after it. */}
       <div
         data-conversation-row-leading-slot=""
-        className={cn(
-          'flex h-4 shrink-0 items-center',
-          treeChild ? TREE_CHILD_SLOT_CLASS : 'w-4 justify-center'
-        )}
+        data-conversation-row-slot={treeChild ? 'nested' : 'flat'}
+        {...stylex.props(styles.rowSlot, treeChild ? styles.treeChildSlot : styles.treeSlot)}
       >
         {selectionMode ? (
           <Checkbox
@@ -576,39 +1079,26 @@ export function ConversationRow({
         )}
       </div>
       <SessionRowAuthorAvatar author={conversation.owner} />
-      <div className="flex min-w-0 flex-1 items-center gap-1.5">
+      <div {...stylex.props(styles.rowTitleLine)}>
         {conversation.isPinned ? (
           /* h-4 matches ~15px title optically (glyph fills less than
              the box, so h-3 read as much smaller than the type). */
-          <Pin
-            aria-label="pinned"
-            className="h-4 w-4 shrink-0 text-muted-foreground"
-            strokeWidth={2}
-          />
+          <Pin {...stylex.props(styles.rowPin)} aria-label="pinned" strokeWidth={2} />
         ) : null}
-        <span
-          className={cn(
-            /* Linear titles: ~15px medium, comfortable line-height. */
-            'min-w-0 flex-1 truncate text-[15px] font-medium leading-snug tracking-[-0.01em] text-foreground',
-            archived && 'text-muted-foreground'
-          )}
-        >
+        <span {...stylex.props(styles.rowTitle, archived && styles.rowTitleArchived)}>
           {conversation.title}
         </span>
       </div>
       {showMergeablePill ? (
         <SessionMergeablePill />
       ) : hasChanges && !isMergeable ? (
-        <span className="shrink-0 text-[11px] tabular-nums leading-none tracking-tight">
-          <span className="text-github-addition">+{conversation.addedLines}</span>
-          <span className="ms-1 text-github-deletion">-{conversation.deletedLines}</span>
+        <span {...stylex.props(styles.rowDiff)}>
+          <span {...stylex.props(styles.rowDiffAdded)}>+{conversation.addedLines}</span>
+          <span {...stylex.props(styles.rowDiffRemoved)}>-{conversation.deletedLines}</span>
         </span>
       ) : null}
       {conversation.isWorktree ? (
-        <WorktreeIcon
-          className="h-3.5 w-3.5 shrink-0 text-muted-foreground/55"
-          aria-label="Worktree"
-        />
+        <WorktreeIcon {...stylex.props(styles.rowWorktree)} aria-label="Worktree" />
       ) : null}
       {showPr ? <SessionPrIcon prStatus={prStatus} prCiState={conversation.prCiState} /> : null}
     </button>
@@ -620,7 +1110,7 @@ export function ConversationRow({
      the flat DOM is unchanged for them. */
   if (!treeOpener) return rowButton;
   return (
-    <div className="relative">
+    <div {...stylex.props(styles.treeOpenerWrap)}>
       {rowButton}
       <ConversationRowTreeToggle
         expanded={treeOpener.expanded}
@@ -751,7 +1241,7 @@ export function MobileProjectScreen({
   const [skipEnterAnimation] = useState(() => consumeMobileBackNavigation());
 
   return (
-    <div className="mobile-home-app safe-areas relative h-full min-h-0 w-full overflow-hidden text-foreground">
+    <div {...withClassName(stylex.props(styles.screen), 'mobile-home-app safe-areas')}>
       {/* iOS-style push enter: slide in from the right on mount, unless
          we're a back-navigation destination (see `skipEnterAnimation`
          above). The back navigation has no exit animation — see
@@ -768,7 +1258,7 @@ export function MobileProjectScreen({
            conversation list, not running through the header + pills.
            See the user-reported bug "scrollbar should be above the
            pills". */
-        className="mobile-home-shell relative flex h-full w-full flex-col bg-background"
+        {...withClassName(stylex.props(styles.shell), 'mobile-home-shell')}
       >
         {filesTabNested ? null : (
           <MobileEdgeBackSwipeZone isNativeApp={isNativeAppShell()} onBack={onBack} zIndex={20} />
@@ -811,28 +1301,19 @@ export function MobileProjectScreen({
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
               transition={{ duration: 0.2, ease: 'easeInOut' }}
-              className="overflow-hidden"
+              {...stylex.props(styles.accordion)}
             >
               <MobileFilterPillBar pills={filterPills} />
             </motion.div>
           ) : null}
         </AnimatePresence>
 
-        <div
-          ref={listScrollRef}
-          className={cn(
-            'scrollbar-pro relative min-h-0 flex-1 overflow-y-auto pt-1 [scrollbar-gutter:auto]',
-            /* The bottom tabbar floats fixed at the viewport bottom,
-               so the scrollable content needs padding to clear it
-               (height + safe-area). Same trick the home screen uses. */
-            'pb-[calc(var(--mobile-tabbar-height)+var(--k-safe-area-bottom,0px)+1rem)]'
-          )}
-        >
+        <div ref={listScrollRef} {...withClassName(stylex.props(styles.scroll), 'scrollbar-pro')}>
           {selectedProjectTab === 'chat' ? (
             visibleConversations.length === 0 ? (
               <>
                 {hasFilterPills ? (
-                  <div className="flex w-full items-center justify-end px-4 pb-1.5 pt-2">
+                  <div {...stylex.props(styles.filterRow)}>
                     <ProjectListFilterToggle
                       open={filtersOpen}
                       hasActiveFilters={hasActiveProjectFilters}
@@ -889,7 +1370,7 @@ export function MobileProjectScreen({
                 <ProjectTabPlaceholder
                   icon={
                     <SettingsIcon
-                      className="h-8 w-8 text-muted-foreground/70"
+                      {...stylex.props(styles.placeholderIcon)}
                       strokeWidth={1.6}
                       aria-hidden="true"
                     />
@@ -937,20 +1418,26 @@ function projectTabSpecs(
   return [
     {
       key: 'chat',
-      ios: <MessageCircle className="h-6 w-6" strokeWidth={1.75} />,
-      material: <MobileReactIcon icon={MdChat} className="h-6 w-6" />,
+      ios: <MessageCircle {...stylex.props(styles.tabIcon)} strokeWidth={1.75} />,
+      material: (
+        <MobileReactIcon icon={MdChat} className={stylex.props(styles.tabIcon).className} />
+      ),
       label: labels.chatTab ?? '对话',
     },
     {
       key: 'files',
-      ios: <FileIcon className="h-6 w-6" strokeWidth={1.75} />,
-      material: <MobileReactIcon icon={FaRegFileCode} className="h-6 w-6" />,
+      ios: <FileIcon {...stylex.props(styles.tabIcon)} strokeWidth={1.75} />,
+      material: (
+        <MobileReactIcon icon={FaRegFileCode} className={stylex.props(styles.tabIcon).className} />
+      ),
       label: labels.filesTab ?? '文件',
     },
     {
       key: 'settings',
-      ios: <SettingsIcon className="h-6 w-6" strokeWidth={1.75} />,
-      material: <MobileReactIcon icon={MdSettings} className="h-6 w-6" />,
+      ios: <SettingsIcon {...stylex.props(styles.tabIcon)} strokeWidth={1.75} />,
+      material: (
+        <MobileReactIcon icon={MdSettings} className={stylex.props(styles.tabIcon).className} />
+      ),
       label: labels.settingsTab ?? '设置',
     },
   ];
@@ -970,10 +1457,10 @@ function ProjectTabPlaceholder({
   body: string;
 }) {
   return (
-    <div className="mx-3 mt-3 flex flex-col items-center justify-center gap-2 rounded-2xl border border-border/40 bg-card px-4 py-12 text-center">
+    <div {...stylex.props(styles.placeholder)}>
       {icon}
-      <p className="text-sm font-medium text-foreground">{title}</p>
-      <p className="text-xs text-muted-foreground">{body}</p>
+      <p {...stylex.props(styles.placeholderTitle)}>{title}</p>
+      <p {...stylex.props(styles.placeholderBody)}>{body}</p>
     </div>
   );
 }
@@ -1003,18 +1490,13 @@ function ProjectChatTopBar({
   onShowArchivedToggle?: () => void;
 }) {
   return (
-    <header
-      className={cn(
-        'mobile-home-glass sticky top-0 z-30 flex items-center gap-2',
-        'pt-safe-2 pb-2 ps-safe-3 pe-safe-3'
-      )}
-    >
+    <header {...withClassName(stylex.props(styles.chatHeader), 'mobile-home-glass')}>
       <HeaderChip onClick={onBack} ariaLabel={labels.backAriaLabel ?? 'Back'}>
-        <ChevronLeft className="h-5 w-5" aria-hidden="true" />
+        <ChevronLeft {...stylex.props(styles.headerChevron)} aria-hidden="true" />
       </HeaderChip>
-      <span className="sr-only">{displayName}</span>
+      <span {...stylex.props(styles.srOnly)}>{displayName}</span>
       <ProjectAvatar project={project} />
-      <div className="min-w-0 flex-1">
+      <div {...stylex.props(styles.searchColumn)}>
         <ProjectSearchInput value={searchQuery} onChange={onSearchChange} labels={labels} />
       </div>
       {onShowArchivedToggle ? (
@@ -1024,7 +1506,7 @@ function ProjectChatTopBar({
           ariaPressed={showArchived}
           active={showArchived}
         >
-          <Archive className="h-4 w-4" aria-hidden="true" strokeWidth={2} />
+          <Archive {...stylex.props(styles.headerArchive)} aria-hidden="true" strokeWidth={2} />
         </HeaderChip>
       ) : null}
     </header>
@@ -1045,18 +1527,9 @@ function ProjectPlainTopBar({
   onBack: () => void;
 }) {
   return (
-    <header
-      className={cn(
-        'mobile-home-glass sticky top-0 z-30',
-        /* `2.25rem` back chip + flexible centered identity + a matching
-           `2.25rem` spacer so the identity stays optically centered now
-           that the right-hand chips are gone. */
-        'grid grid-cols-[2.25rem_minmax(0,1fr)_2.25rem] items-center gap-2',
-        'pt-safe-2 pb-2 ps-safe-3 pe-safe-3'
-      )}
-    >
+    <header {...withClassName(stylex.props(styles.plainHeader), 'mobile-home-glass')}>
       <HeaderChip onClick={onBack} ariaLabel={labels.backAriaLabel ?? 'Back'}>
-        <ChevronLeft className="h-5 w-5" aria-hidden="true" />
+        <ChevronLeft {...stylex.props(styles.headerChevron)} aria-hidden="true" />
       </HeaderChip>
       <ProjectHeaderIdentity project={project} displayName={displayName} />
       <span aria-hidden />
@@ -1072,9 +1545,9 @@ function ProjectHeaderIdentity({
   displayName: string;
 }) {
   return (
-    <div className="flex min-w-0 items-center justify-center gap-2">
+    <div {...stylex.props(styles.identity)}>
       <ProjectAvatar project={project} />
-      <h1 className="truncate text-[0.98rem] font-semibold tracking-tight">{displayName}</h1>
+      <h1 {...stylex.props(styles.identityName)}>{displayName}</h1>
     </div>
   );
 }
@@ -1102,12 +1575,11 @@ function HeaderChip({
       onClick={onClick}
       aria-label={ariaLabel}
       aria-pressed={ariaPressed}
-      className={cn(
-        'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border',
-        'transition-colors active:scale-[0.97]',
-        active
-          ? 'border-primary/40 bg-primary/15 text-primary'
-          : 'border-border/50 bg-muted text-foreground active:bg-muted/80 dark:border-white/12 dark:bg-white/10 dark:active:bg-white/14'
+      /* The dark-mode fills are hard-coded colours, so they stay Tailwind
+         classes on this element. */
+      {...withClassName(
+        stylex.props(styles.headerChip, active ? styles.headerChipActive : styles.headerChipIdle),
+        active ? undefined : 'dark:border-white/12 dark:bg-white/10 dark:active:bg-white/14'
       )}
     >
       {children}
@@ -1134,22 +1606,20 @@ function ProjectListFilterToggle({
       onClick={onToggle}
       aria-label={ariaLabel}
       aria-pressed={open}
-      className={cn(
-        'relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border',
-        'border-border/50 bg-muted text-muted-foreground',
-        'dark:border-white/12 dark:bg-white/10',
-        'transition-colors active:scale-[0.97]',
-        'hover:bg-muted/80 hover:text-foreground dark:hover:bg-white/14',
-        'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/30',
-        open && 'border-primary/40 bg-primary/15 text-primary'
+      /* The dark-mode fills are hard-coded colours, so they stay Tailwind
+         classes on this element. */
+      {...withClassName(
+        stylex.props(styles.filterChip, open && styles.filterChipOpen),
+        'dark:border-white/12 dark:bg-white/10 dark:hover:bg-white/14'
       )}
     >
-      <SlidersHorizontal className="h-4 w-4 text-current" strokeWidth={1.8} aria-hidden="true" />
+      <SlidersHorizontal
+        {...stylex.props(styles.filterChipGlyph)}
+        strokeWidth={1.8}
+        aria-hidden="true"
+      />
       {hasActiveFilters && !open ? (
-        <span
-          aria-hidden="true"
-          className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-primary"
-        />
+        <span aria-hidden="true" {...stylex.props(styles.filterDot)} />
       ) : null}
     </button>
   );
@@ -1169,11 +1639,11 @@ function ProjectAvatar({ project }: { project: MobileProjectContext }) {
           src={project.avatarUrl}
           alt=""
           loading="lazy"
-          className="h-6 w-6 shrink-0 rounded-full object-cover"
+          className={stylex.props(styles.avatar).className}
         />
       );
     }
-    return <Github className="h-6 w-6 shrink-0" strokeWidth={1.6} aria-hidden="true" />;
+    return <Github {...stylex.props(styles.avatarGlyph)} strokeWidth={1.6} aria-hidden="true" />;
   }
   return (
     <MobileInitialLetterAvatar
@@ -1199,17 +1669,14 @@ function ProjectSearchInput({
 }) {
   return (
     <label
-      className={cn(
-        'flex h-9 w-full min-w-0 items-center gap-1.5 rounded-full border border-border/50 bg-muted px-3 text-foreground',
-        'dark:border-white/12 dark:bg-white/10',
-        'transition-colors focus-within:bg-muted/80 dark:focus-within:bg-white/14'
+      /* The dark-mode fills are hard-coded colours, so they stay Tailwind
+         classes on this element. */
+      {...withClassName(
+        stylex.props(styles.searchPill),
+        'dark:border-white/12 dark:bg-white/10 dark:focus-within:bg-white/14'
       )}
     >
-      <Search
-        className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-        strokeWidth={1.8}
-        aria-hidden="true"
-      />
+      <Search {...stylex.props(styles.searchGlyph)} strokeWidth={1.8} aria-hidden="true" />
       <input
         type="search"
         value={value}
@@ -1217,16 +1684,16 @@ function ProjectSearchInput({
         placeholder={labels.searchPlaceholder ?? '搜索对话'}
         aria-label={labels.searchAriaLabel ?? '搜索'}
         enterKeyHint="search"
-        className="min-w-0 flex-1 border-none bg-transparent text-[0.82rem] outline-none focus:outline-none focus:ring-0 placeholder:text-muted-foreground"
+        {...stylex.props(styles.searchInput)}
       />
       {value ? (
         <button
           type="button"
           onClick={() => onChange('')}
           aria-label={labels.clearSearchAriaLabel ?? 'Clear search'}
-          className="-mr-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+          {...stylex.props(styles.searchClear)}
         >
-          <X className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />
+          <X {...stylex.props(styles.searchClearGlyph)} strokeWidth={1.8} aria-hidden="true" />
         </button>
       ) : null}
     </label>
@@ -1234,9 +1701,5 @@ function ProjectSearchInput({
 }
 
 function ProjectEmptyState({ label }: { label: string }) {
-  return (
-    <div className="mx-3 mt-3 rounded-2xl border border-border/40 bg-card px-4 py-6 text-center text-sm text-muted-foreground">
-      {label}
-    </div>
-  );
+  return <div {...stylex.props(styles.emptyState)}>{label}</div>;
 }

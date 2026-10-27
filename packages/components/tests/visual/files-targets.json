@@ -1,0 +1,101 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "below-md",
+      "width": 767,
+      "height": 900
+    },
+    {
+      "name": "at-md",
+      "width": 768,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "titles": ["Files/ProjectFileBrowser"],
+  "states": {
+    "files-projectfilebrowser--default": [
+      {
+        "name": "text-file",
+        "steps": [
+          {
+            "action": "click",
+            "role": "treeitem",
+            "name": "README.md"
+          },
+          {
+            "action": "visible",
+            "selector": "#storybook-root pre"
+          }
+        ]
+      },
+      {
+        "name": "folder-expanded",
+        "steps": [
+          {
+            "action": "click",
+            "role": "treeitem",
+            "name": "src"
+          },
+          {
+            "action": "visible",
+            "role": "treeitem",
+            "name": "index.ts"
+          }
+        ]
+      },
+      {
+        "name": "code-file",
+        "steps": [
+          {
+            "action": "click",
+            "role": "treeitem",
+            "name": "index.ts"
+          },
+          {
+            "action": "visible",
+            "text": "export const project = \"Lody\";"
+          }
+        ]
+      },
+      {
+        "name": "binary-file",
+        "steps": [
+          {
+            "action": "click",
+            "role": "treeitem",
+            "name": "archive.zip"
+          },
+          {
+            "action": "visible",
+            "text": "Preview is unavailable for this file."
+          }
+        ]
+      },
+      {
+        "name": "error-file",
+        "steps": [
+          {
+            "action": "click",
+            "role": "treeitem",
+            "name": "unavailable.txt"
+          },
+          {
+            "action": "visible",
+            "text": "File unavailable"
+          }
+        ]
+      }
+    ]
+  }
+}

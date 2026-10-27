@@ -1,0 +1,673 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 1024
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "ui-commandmigration--inline",
+    "ui-commandmigration--input-disabled",
+    "ui-commandmigration--overflow",
+    "ui-commandmigration--caller-overrides",
+    "ui-commandmigration--in-dialog",
+    "ui-commandmigration--quick-open",
+    "ui-commandmigration--quick-open-virtualized",
+    "ui-commandmigration--quick-open-pending"
+  ],
+  "ready": {
+    "ui-commandmigration--inline": [
+      {
+        "action": "visible",
+        "selector": "input[cmdk-input]"
+      },
+      {
+        "action": "visible",
+        "selector": "[cmdk-item][data-value=\"new-session\"][aria-selected=\"true\"]"
+      }
+    ],
+    "ui-commandmigration--input-disabled": [
+      {
+        "action": "disabled",
+        "selector": "input[cmdk-input]"
+      }
+    ],
+    "ui-commandmigration--overflow": [
+      {
+        "action": "visible",
+        "selector": "input[cmdk-input]"
+      },
+      {
+        "action": "visible",
+        "selector": "[cmdk-item][data-value=\"file-00\"][aria-selected=\"true\"]"
+      }
+    ],
+    "ui-commandmigration--caller-overrides": [
+      {
+        "action": "visible",
+        "selector": "input[cmdk-input]"
+      },
+      {
+        "action": "visible",
+        "selector": "[cmdk-item][data-value=\"new-session\"][aria-selected=\"true\"]"
+      }
+    ],
+    "ui-commandmigration--in-dialog": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Open command dialog"
+      }
+    ],
+    "ui-commandmigration--quick-open": [
+      {
+        "action": "visible",
+        "selector": "input[cmdk-input]"
+      },
+      {
+        "action": "visible",
+        "selector": "[cmdk-item][data-value=\"README.md\"][aria-selected=\"true\"]"
+      }
+    ],
+    "ui-commandmigration--quick-open-virtualized": [
+      {
+        "action": "visible",
+        "selector": "input[cmdk-input]"
+      },
+      {
+        "action": "fill",
+        "selector": "input[cmdk-input]",
+        "value": "file-079"
+      },
+      {
+        "action": "visible",
+        "selector": "[cmdk-item][data-value=\"src/files/file-079.tsx\"]"
+      },
+      {
+        "action": "fill",
+        "selector": "input[cmdk-input]",
+        "value": ""
+      },
+      {
+        "action": "visible",
+        "selector": "[cmdk-item][data-value=\"src/files/file-000.tsx\"][aria-selected=\"true\"]"
+      }
+    ],
+    "ui-commandmigration--quick-open-pending": [
+      {
+        "action": "visible",
+        "selector": "input[cmdk-input]"
+      },
+      {
+        "action": "visible",
+        "selector": "[cmdk-empty]:has-text(\"Waiting for file index\u2026\")"
+      }
+    ]
+  },
+  "states": {
+    "ui-commandmigration--inline": [
+      {
+        "name": "keyboard-next",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "input[cmdk-input]"
+          },
+          {
+            "action": "press",
+            "selector": "input[cmdk-input]",
+            "key": "ArrowDown"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"open-workspace\"][aria-selected=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-skips-disabled",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "input[cmdk-input]",
+            "key": "ArrowDown"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"settings\"][aria-selected=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-previous",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "input[cmdk-input]",
+            "key": "ArrowUp"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"open-workspace\"][aria-selected=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "hover-small",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[cmdk-item][data-value=\"small-icon\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"small-icon\"][aria-selected=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "activate-small",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "input[cmdk-input]",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "output[aria-label=\"Selected command\"]:has-text(\"small-icon\")"
+          }
+        ]
+      },
+      {
+        "name": "keyword-filter",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "input[cmdk-input]",
+            "value": "project"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"open-workspace\"][aria-selected=\"true\"]"
+          },
+          {
+            "action": "hidden",
+            "selector": "[cmdk-item][data-value=\"new-session\"]"
+          }
+        ]
+      },
+      {
+        "name": "no-results",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "input[cmdk-input]",
+            "value": "no_such_command___"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-empty]"
+          }
+        ]
+      },
+      {
+        "name": "clear",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "input[cmdk-input]",
+            "value": ""
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"new-session\"][aria-selected=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "end",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "input[cmdk-input]",
+            "key": "End"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"small-icon\"][aria-selected=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "wrap-next",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "input[cmdk-input]",
+            "key": "ArrowDown"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"new-session\"][aria-selected=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "home",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "input[cmdk-input]",
+            "key": "End"
+          },
+          {
+            "action": "press",
+            "selector": "input[cmdk-input]",
+            "key": "Home"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"new-session\"][aria-selected=\"true\"]"
+          }
+        ]
+      }
+    ],
+    "ui-commandmigration--input-disabled": [],
+    "ui-commandmigration--overflow": [
+      {
+        "name": "last-row",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "input[cmdk-input]"
+          },
+          {
+            "action": "press",
+            "selector": "input[cmdk-input]",
+            "key": "End"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"file-35\"][aria-selected=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "first-row",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "input[cmdk-input]",
+            "key": "Home"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"file-00\"][aria-selected=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "filtered-long",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "input[cmdk-input]",
+            "value": "file-02"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"file-02\"][aria-selected=\"true\"]"
+          }
+        ]
+      }
+    ],
+    "ui-commandmigration--caller-overrides": [
+      {
+        "name": "caller-row",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "input[cmdk-input]"
+          },
+          {
+            "action": "press",
+            "selector": "input[cmdk-input]",
+            "key": "End"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"override\"][aria-selected=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "select-caller",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "input[cmdk-input]",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "output[aria-label=\"Selected command\"]:has-text(\"override\")"
+          }
+        ]
+      },
+      {
+        "name": "empty-caller",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "input[cmdk-input]",
+            "value": "no_such_command___"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-empty]"
+          }
+        ]
+      },
+      {
+        "name": "restore",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "input[cmdk-input]",
+            "value": ""
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"new-session\"][aria-selected=\"true\"]"
+          }
+        ]
+      }
+    ],
+    "ui-commandmigration--in-dialog": [
+      {
+        "name": "open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open command dialog"
+          },
+          {
+            "action": "visible",
+            "selector": "input[cmdk-input]"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"new-session\"][aria-selected=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-next",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "input[cmdk-input]",
+            "key": "ArrowDown"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"open-workspace\"][aria-selected=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "filter",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "input[cmdk-input]",
+            "value": "settings"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"settings\"][aria-selected=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "empty",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "input[cmdk-input]",
+            "value": "no_such_command___"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-empty]"
+          }
+        ]
+      },
+      {
+        "name": "clear",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "input[cmdk-input]",
+            "value": ""
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"new-session\"][aria-selected=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "escape-close",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "input[cmdk-input]",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "selector": "input[cmdk-input]"
+          }
+        ]
+      },
+      {
+        "name": "reopen",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open command dialog"
+          },
+          {
+            "action": "visible",
+            "selector": "input[cmdk-input]"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"new-session\"][aria-selected=\"true\"]"
+          }
+        ]
+      }
+    ],
+    "ui-commandmigration--quick-open": [
+      {
+        "name": "filter-file",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "input[cmdk-input]",
+            "value": "command.tsx"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"src/ui/command.tsx\"][aria-selected=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "open-file",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "input[cmdk-input]",
+            "key": "Enter"
+          },
+          {
+            "action": "hidden",
+            "selector": "input[cmdk-input]"
+          },
+          {
+            "action": "visible",
+            "selector": "output[aria-label=\"Opened file\"]:has-text(\"src/ui/command.tsx\")"
+          }
+        ]
+      },
+      {
+        "name": "reopen",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open file picker"
+          },
+          {
+            "action": "visible",
+            "selector": "input[cmdk-input]"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"README.md\"][aria-selected=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "empty",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "input[cmdk-input]",
+            "value": "no_such_file___"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-empty]"
+          }
+        ]
+      },
+      {
+        "name": "escape-close",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "input[cmdk-input]",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "selector": "input[cmdk-input]"
+          }
+        ]
+      }
+    ],
+    "ui-commandmigration--quick-open-virtualized": [
+      {
+        "name": "keyboard-next",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "input[cmdk-input]"
+          },
+          {
+            "action": "press",
+            "selector": "input[cmdk-input]",
+            "key": "ArrowDown"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"src/files/file-001.tsx\"][aria-selected=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "filter-last",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "input[cmdk-input]",
+            "value": "file-079"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"src/files/file-079.tsx\"][aria-selected=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "open-last",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "input[cmdk-input]",
+            "key": "Enter"
+          },
+          {
+            "action": "hidden",
+            "selector": "input[cmdk-input]"
+          },
+          {
+            "action": "visible",
+            "selector": "output[aria-label=\"Opened file\"]:has-text(\"src/files/file-079.tsx\")"
+          }
+        ]
+      },
+      {
+        "name": "reopen-virtualized",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open file picker"
+          },
+          {
+            "action": "visible",
+            "selector": "input[cmdk-input]"
+          },
+          {
+            "action": "fill",
+            "selector": "input[cmdk-input]",
+            "value": "file-079"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"src/files/file-079.tsx\"]"
+          },
+          {
+            "action": "fill",
+            "selector": "input[cmdk-input]",
+            "value": ""
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"src/files/file-000.tsx\"][aria-selected=\"true\"]"
+          }
+        ]
+      }
+    ],
+    "ui-commandmigration--quick-open-pending": []
+  }
+}

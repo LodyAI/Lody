@@ -1,6 +1,7 @@
 import { lazy, Suspense, type ReactNode } from 'react';
 import { useAtom } from 'jotai';
 import { useLocation, useMatchRoute, useParams } from '@tanstack/react-router';
+import * as stylex from '@stylexjs/stylex';
 import { mobileDrawerOpenAtom } from '../../atoms';
 import { ErrorBoundary } from '../error-boundary';
 import { LoroAppSidebar } from '../loro-app-sidebar';
@@ -10,6 +11,23 @@ import {
   getMobileMainLayoutContentClassName,
   getMobileMainLayoutRootClassName,
 } from '../workspace-layout-utils';
+import { themeColors } from '../../style/theme-colors.stylex';
+
+const styles = stylex.create({
+  content: {
+    position: 'relative',
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+  },
+  fallback: {
+    height: '100%',
+    width: '100%',
+    backgroundColor: themeColors.background,
+  },
+});
 
 /* Lazy so the (mobile-only) home/project + session stack — and its heavy
    `ChatLanding` / `SessionDetail` dependency graphs — are not pulled into the
@@ -64,7 +82,7 @@ export function MobileWorkspaceLayout({
       </MobileSidebarDrawer>
 
       <div className={getMobileMainLayoutContentClassName()}>
-        <div className="relative min-h-0 flex-1 overflow-hidden">
+        <div {...stylex.props(styles.content)}>
           <ErrorBoundary name="AppContent" variant="section" resetKeys={[pathname]}>
             {/* On a stack route the stack owns the *visible* surface; on every
                other route it renders nothing and the route `<Outlet/>` (inside
@@ -81,7 +99,7 @@ export function MobileWorkspaceLayout({
                The stack is layered on top; since the route components render
                nothing on mobile there is no duplicate content. */}
             {workspaceReady && onStackRoute && workspaceName != null && (
-              <Suspense fallback={<div className="h-full w-full bg-background" />}>
+              <Suspense fallback={<div {...stylex.props(styles.fallback)} />}>
                 <MobileWorkspaceStack workspaceName={workspaceName} />
               </Suspense>
             )}

@@ -13,6 +13,8 @@ import {
 import { createPortal } from 'react-dom';
 import { usePostHog } from '@posthog/react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
 import { cn } from '@/lib/utils';
 import { Popover } from '@/ui/armed-overlays';
 import type { ConversationOutlineEntry } from '@/lib/conversation-outline';
@@ -45,6 +47,14 @@ import {
   type ArrivalIntentEvaluation,
   type ArrivalIntentRect,
 } from './conversation-outline-arrival-intent';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeDuration,
+  themeEasing,
+  themeFontWeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 
 /**
  * A fixed left rail of one tick per conversation round, so a reader can see
@@ -145,6 +155,89 @@ export type ConversationOutlineArrivalIntentDebugEvent =
 
 const OUTLINE_INDEX_ATTRIBUTE = 'data-outline-index';
 
+const styles = stylex.create({
+  tickListItem: { display: 'contents' },
+  tickButton: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+  },
+  /**
+   * The tick line itself. The colour it lifts to when the RAIL is hovered, the
+   * tick under the pointer and the tick the keyboard is on retain their
+   * utilities-layer priority over a caller's lower-specificity descendant ink.
+   */
+  tickLine: {
+    height: '2px',
+    borderRadius: themeRadius.full,
+    backgroundColor: 'hsl(var(--muted-foreground) / 0.32)',
+    transitionProperty: 'background-color,width',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing.out,
+  },
+  rail: {
+    pointerEvents: 'none',
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 10,
+    display: 'none',
+    alignItems: 'center',
+  },
+  strip: {
+    pointerEvents: 'auto',
+    overflowY: 'auto',
+    scrollbarWidth: 'none',
+    '::-webkit-scrollbar': { display: 'none' },
+  },
+  track: { position: 'relative' },
+  list: {
+    margin: 0,
+    display: 'flex',
+    listStyleType: 'none',
+    flexDirection: 'column',
+    padding: 0,
+  },
+  activeBar: {
+    pointerEvents: 'none',
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    height: '2px',
+    borderRadius: themeRadius.full,
+    backgroundColor: 'hsl(var(--foreground) / 0.8)',
+    transitionProperty: 'transform,width',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing.out,
+  },
+  card: {
+    pointerEvents: 'none',
+    width: '18rem',
+    userSelect: 'none',
+  },
+  cardTitle: {
+    overflow: 'hidden',
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 3,
+    fontSize: '13px',
+    fontWeight: themeFontWeight.medium,
+    lineHeight: '1.375',
+    color: themeColors.foreground,
+  },
+  cardPreview: {
+    marginTop: themeSpace[1.5],
+    overflow: 'hidden',
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 6,
+    fontSize: '12px',
+    lineHeight: '1.625',
+    color: themeColors.mutedForeground,
+  },
+});
+
 /** All rail interaction is delegated from the list, so events resolve here. */
 const readTickElement = (target: EventTarget | null): HTMLElement | null => {
   if (!(target instanceof Element)) return null;
@@ -200,7 +293,7 @@ const OutlineTick = memo(function OutlineTick({
   label: string;
 }) {
   return (
-    <li className="contents">
+    <li {...stylex.props(styles.tickListItem)}>
       <button
         type="button"
         {...{ [OUTLINE_INDEX_ATTRIBUTE]: index }}
@@ -209,24 +302,24 @@ const OutlineTick = memo(function OutlineTick({
         // The hit area spans the whole track and one full pitch of height; only
         // the inner line is visible. Focus shows on the line (via the group),
         // never as a ring around the invisible hit box.
-        className="group/tick flex w-full items-center outline-hidden"
+        className={clsx('group/tick', stylex.props(styles.tickButton).className)}
         style={{ height: TICK_PITCH }}
       >
         <span
           aria-hidden="true"
           style={{ width }}
-          className={cn(
+          className={clsx(
             // Resting contrast has to carry the edge fade: at /25 the ticks
             // were faint enough that a gradient over them had almost nothing
             // to take away, so a scrollable edge looked the same as a hard one.
             // /45 at rest read as a barcode beside the text in peripheral
             // vision, so the rail rests at /32 and lifts while the pointer is on it.
-            'h-[2px] rounded-full bg-muted-foreground/32 group-hover/rail:bg-muted-foreground/50',
+            'group-hover/rail:bg-muted-foreground/50',
             // Ease-out so the swell tracks the cursor immediately and settles,
             // rather than lagging behind it.
-            'transition-[background-color,width] duration-150 ease-out',
             'group-hover/tick:bg-muted-foreground/80',
-            'group-focus-visible/tick:bg-foreground/80'
+            'group-focus-visible/tick:bg-foreground/80',
+            stylex.props(styles.tickLine).className
           )}
         />
       </button>
@@ -615,21 +708,24 @@ export function ConversationOutlineRail({
       // Low contrast at rest so the rail reads as a margin marker, not chrome;
       // the whole strip lifts together on hover so a single tick never has to
       // be found before it becomes visible.
-      className={cn(
-        'group/rail pointer-events-none absolute inset-y-0 left-0 z-10 hidden items-center',
-        // The conversation column is 804px wide (768px of content plus its
-        // gutter) and centered. Below this the rail would sit on top of message
-        // content, so it does not render at all. A container query keeps that
-        // decision in CSS — no JS measurement, no layout shift on mount.
-        '@[928px]:flex',
-        className
+      className={clsx(
+        cn(
+          'group/rail',
+          // The conversation column is 804px wide (768px of content plus its
+          // gutter) and centered. Below this the rail would sit on top of message
+          // content, so it does not render at all. A container query keeps that
+          // decision in CSS — no JS measurement, no layout shift on mount.
+          '@[928px]:flex',
+          className
+        ),
+        stylex.props(styles.rail).className
       )}
       style={{ width: RAIL_WIDTH }}
     >
       <div
         ref={scrollRef}
         onScroll={syncEdgeFade}
-        className="pointer-events-auto overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        {...stylex.props(styles.strip)}
         style={{
           // Capped rather than full-height: a long session otherwise runs the
           // ticks edge to edge and the rail reads as page chrome instead of a
@@ -650,10 +746,13 @@ export function ConversationOutlineRail({
             The list also stays IN FLOW — an absolutely-positioned list would
             leave this box with nothing to size from, collapsing every tick to
             zero width. Only the active bar is taken out of flow. */}
-        <div className="relative" style={{ width: RAIL_TRACK_WIDTH, height: contentHeight }}>
+        <div
+          {...stylex.props(styles.track)}
+          style={{ width: RAIL_TRACK_WIDTH, height: contentHeight }}
+        >
           <ol
             ref={listRef}
-            className="m-0 flex list-none flex-col p-0"
+            {...stylex.props(styles.list)}
             onPointerOver={handlePointerOver}
             onPointerLeave={handlePointerLeave}
             onClick={handleClick}
@@ -670,7 +769,7 @@ export function ConversationOutlineRail({
           {activeIndex < 0 ? null : (
             <span
               aria-hidden="true"
-              className="pointer-events-none absolute left-0 top-0 h-[2px] rounded-full bg-foreground/80 transition-[transform,width] duration-150 ease-out"
+              {...stylex.props(styles.activeBar)}
               style={{
                 width: activeBarWidth,
                 transform: `translateY(${activeBarTop}px)`,
@@ -693,7 +792,7 @@ export function ConversationOutlineRail({
           // dismissing it is the pointer's job.
           initialFocus={false}
           finalFocus={false}
-          className="pointer-events-none w-72 select-none p-3"
+          className={clsx('p-3', stylex.props(styles.card).className)}
           onTransitionEnd={(event) => {
             // The surface transitions out before Base UI unmounts it; clear the
             // anchor's state only once that fade has ended.
@@ -708,10 +807,8 @@ export function ConversationOutlineRail({
         >
           {hoveredEntry === null ? null : (
             <>
-              <div className="line-clamp-3 text-[13px] font-medium leading-snug text-foreground">
-                {jumpLabel(hoveredEntry)}
-              </div>
-              <div className="mt-1.5 line-clamp-6 text-[12px] leading-relaxed text-muted-foreground">
+              <div {...stylex.props(styles.cardTitle)}>{jumpLabel(hoveredEntry)}</div>
+              <div {...stylex.props(styles.cardPreview)}>
                 {hoveredEntry.preview ||
                   (hoveredEntry.startsWithAgent
                     ? t('sessions.outline.noUserMessage', 'Started by the agent.')

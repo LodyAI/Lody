@@ -1,0 +1,162 @@
+{
+  "viewports": [
+    {
+      "name": "iphone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "android",
+      "device": "Pixel 5",
+      "width": 393,
+      "height": 851
+    }
+  ],
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "blockedHosts": [
+    "avatars.githubusercontent.com"
+  ],
+  "ids": [
+    "chat-chatcomposer--session-with-attachments",
+    "chat-chatcomposer--attachment-upload-states",
+    "chat-chatcomposer--landing-with-pasted-text",
+    "chat-migration--connection-states",
+    "chat-migration--connection-large-type",
+    "chat-migration--connection-controls",
+    "chat-migration--context-disabled-tooltip",
+    "chat-migration--context-disabled-action",
+    "chat-chatlandingview--mobile-light",
+    "chat-chatlandingview--mobile-dark"
+  ],
+  "states": {
+    "chat-migration--context-disabled-action": [
+      {
+        "name": "local-action",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "button",
+            "name": "Local Add folder"
+          },
+          {
+            "action": "visible",
+            "selector": "output[aria-label=\"Last action\"]:has-text(\"Add folder\")"
+          }
+        ]
+      },
+      {
+        "name": "github-action",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "button",
+            "name": "GitHub Connect GitHub"
+          }
+        ]
+      }
+    ],
+    "chat-migration--context-disabled-tooltip": [
+      {
+        "name": "tooltip-keyboard-open",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Local"
+          },
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Local",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "text": "Desktop only"
+          }
+        ]
+      },
+      {
+        "name": "tooltip-close",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "button",
+            "name": "Outside control"
+          },
+          {
+            "action": "hidden",
+            "text": "Desktop only"
+          }
+        ]
+      }
+    ],
+    "chat-migration--connection-controls": [
+      {
+        "name": "refreshing",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "button",
+            "name": "Toggle refresh"
+          },
+          {
+            "action": "visible",
+            "text": "Refreshing"
+          }
+        ]
+      },
+      {
+        "name": "pull-priority",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "button",
+            "name": "Toggle pull"
+          },
+          {
+            "action": "visible",
+            "text": "Release to refresh"
+          }
+        ]
+      },
+      {
+        "name": "refresh-restored",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "button",
+            "name": "Toggle pull"
+          },
+          {
+            "action": "visible",
+            "text": "Refreshing"
+          }
+        ]
+      },
+      {
+        "name": "reconnecting",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "button",
+            "name": "Toggle refresh"
+          },
+          {
+            "action": "tap",
+            "role": "button",
+            "name": "Reconnect"
+          },
+          {
+            "action": "visible",
+            "text": "Reconnecting"
+          }
+        ]
+      }
+    ]
+  }
+}

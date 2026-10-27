@@ -83,7 +83,9 @@ describe('desktop assistant-turn action bar visibility', () => {
     });
 
     const actions = container.querySelector('[data-assistant-turn-actions]');
-    expect(actions?.classList.contains('opacity-100')).toBe(true);
+    // The bar's opacity is the component's own StyleX style now, so the DOM
+    // says whether the bar is showing instead of how it is painted.
+    expect(actions?.hasAttribute('data-assistant-turn-actions-visible')).toBe(true);
     expect(container.querySelector('[aria-label="Copy response"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="Fork session"] .animate-spin')).not.toBeNull();
 

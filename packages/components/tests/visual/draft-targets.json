@@ -1,0 +1,86 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "titles": ["Preview/VisualAnnotationDraftComposer"],
+  "states": {
+    "preview-visualannotationdraftcomposer--empty": [
+      {
+        "name": "disabled",
+        "steps": [
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Send"
+          }
+        ]
+      },
+      {
+        "name": "focus",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "textarea",
+            "key": "Tab"
+          },
+          {
+            "action": "focus",
+            "selector": "textarea"
+          }
+        ]
+      },
+      {
+        "name": "typing",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "textarea",
+            "value": "Keep this heading aligned."
+          },
+          {
+            "action": "enabled",
+            "role": "button",
+            "name": "Send"
+          }
+        ]
+      },
+      {
+        "name": "hover-submit",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Send"
+          }
+        ]
+      }
+    ],
+    "preview-visualannotationdraftcomposer--submitting": [
+      {
+        "name": "disabled",
+        "steps": [
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Loading Send"
+          }
+        ]
+      }
+    ]
+  }
+}

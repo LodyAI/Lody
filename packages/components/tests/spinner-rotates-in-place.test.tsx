@@ -20,10 +20,10 @@
  *     truncating label in a tight flex row was compressed to 13.55×15.43 and
  *     swept an ellipse.
  *
- * jsdom has no layout, so these assert the structural facts that make the
- * geometry correct: the animated element is HTML, explicitly square, cannot
- * be squished, and contains exactly the glyph. The `transform-box` /
- * `transform-origin` half of the fix lives in `src/tailwind/index.css`.
+ * jsdom checks the HTML animation target, glyph-only structure and loading
+ * state behavior. `tests/visual/status-native.mjs` checks actual wrapper/glyph
+ * geometry and caller composition in a browser. The `transform-box` /
+ * `transform-origin` contract lives in `src/tailwind/index.css`.
  */
 
 import React from 'react';
@@ -48,14 +48,6 @@ vi.mock('../src/components/sessions/session-monaco-text-viewer', () => ({
 }));
 
 const XHTML = 'http://www.w3.org/1999/xhtml';
-
-/** A sizing utility that pins BOTH axes, e.g. `h-3 w-3` / `size-4`. */
-function hasExplicitSquareSize(el: Element): boolean {
-  const classes = [...el.classList];
-  const has = (prefix: string) =>
-    classes.some((c) => new RegExp(String.raw`^-?${prefix}-\[?[\d./]`).test(c));
-  return (has('h') && has('w')) || has('size');
-}
 
 let container: HTMLDivElement;
 let root: Root | undefined;
@@ -98,13 +90,6 @@ function expectCompositableSpinner(): Element {
   expect(wrapper.firstElementChild?.tagName).toBe('svg');
   expect(wrapper.textContent).toBe('');
   expect(wrapper.querySelector('.animate-spin, [data-slot="spinner"]')).toBeNull();
-
-  // The local spinner's square, unsquishable box is Tailwind; `@lody/ui`'s is
-  // StyleX on the same wrapper (pinned in `packages/ui`'s own tests).
-  if (wrapper.classList.contains('animate-spin')) {
-    expect(hasExplicitSquareSize(wrapper)).toBe(true);
-    expect(wrapper.classList.contains('shrink-0')).toBe(true);
-  }
 
   return wrapper;
 }

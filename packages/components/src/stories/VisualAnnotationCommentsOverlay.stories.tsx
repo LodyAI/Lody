@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { RefreshCw, SendHorizontal } from 'lucide-react';
 
@@ -9,6 +10,9 @@ import {
 } from '@lody/shared/preview-comment-types';
 import { VisualAnnotationCommentsOverlay } from '@/components/preview/visual-annotation-comments-overlay';
 import { Button } from '@lody/ui/button';
+import { themeColors } from '../style/theme-colors.stylex';
+import { themeSpace } from '../style/theme-scale.stylex';
+import { withClassName } from '../lib/stylex';
 
 const overlayDevices = [
   { id: 'desktop', label: 'Desktop', width: 960, height: 620 },
@@ -344,3 +348,183 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const AnchoredThreads: Story = {};
+
+const migrationStyles = stylex.create({
+  canvas: { padding: themeSpace[4], backgroundColor: themeColors.background },
+  frame: {
+    position: 'relative',
+    width: '100%',
+    maxWidth: 960,
+    height: 520,
+    backgroundColor: themeColors.background,
+    outline: `1px solid ${themeColors.border}`,
+  },
+  corners: { height: 360 },
+  controls: { display: 'flex', gap: themeSpace[2], marginBottom: themeSpace[4] },
+  scopes: { display: 'flex', flexWrap: 'wrap', gap: themeSpace[4] },
+  scope: { width: 330, maxWidth: '100%' },
+  scopeFrame: { height: 190 },
+  label: { color: themeColors.foreground, marginBottom: themeSpace[2] },
+});
+
+function MigrationOverlayFixture({
+  corners = false,
+  scope = false,
+}: {
+  corners?: boolean;
+  scope?: boolean;
+}) {
+  const frame = useRef<HTMLDivElement>(null);
+  const height = scope ? 190 : corners ? 360 : 520;
+  const [width, setWidth] = useState(0);
+  const makeComments = (): PreviewVisualComment[] => {
+    const positions = corners
+      ? [
+          { name: 'Top Left', x: 0.08, y: 0.08 },
+          { name: 'Top Right', x: 0.9, y: 0.08 },
+          { name: 'Bottom Left', x: 0.08, y: 0.9 },
+          { name: 'Bottom Right', x: 0.9, y: 0.9 },
+        ]
+      : scope
+        ? [{ name: 'Scoped Reviewer', x: 0.08, y: 0.14 }]
+        : [
+            { name: 'Ada Lovelace', x: 0.08, y: 0.08 },
+            { name: 'Grace Hopper', x: 0.08, y: 0.4 },
+            { name: 'Edsger Dijkstra', x: 0.08, y: 0.72 },
+          ];
+    return positions.map((position, index) => ({
+      ...createPreviewVisualComment({
+        id: `migration-${index}`,
+        turnId: 'synthetic-overlay-migration',
+        body: corners
+          ? `${position.name}: a deliberately long comment checks the two-line collapsed preview and its original corner placement.`
+          : 'Keep the original review marker, card and action feedback.',
+        anchor: createAnchor({
+          selector: `#synthetic-review-target-${index}`,
+          tag: 'div',
+          text: position.name,
+          rectRatio: { x: position.x, y: position.y, width: 0.02, height: 0.02 },
+        }),
+        authorId: `synthetic-reviewer-${index}`,
+        authorName: position.name,
+        createdAt: 1_800_000 + index,
+      }),
+      ...(!corners && !scope && index === 2
+        ? {
+            status: 'submitted' as const,
+            submittedAt: 1_800_100,
+            submittedMessageId: 'synthetic-message',
+          }
+        : {}),
+    }));
+  };
+  const [comments, setComments] = useState(makeComments);
+  const [collapsed, setCollapsed] = useState<string[]>(() =>
+    corners ? makeComments().map((comment) => comment.id) : []
+  );
+  const [active, setActive] = useState<string | null>(corners || scope ? null : 'migration-0');
+  const [staged, setStaged] = useState<string[]>(scope ? ['migration-0'] : ['migration-1']);
+
+  useLayoutEffect(() => {
+    const node = frame.current;
+    if (!node) return undefined;
+    const update = () => setWidth(node.clientWidth);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  const toggleCollapsed = (id: string) => {
+    setCollapsed((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
+    );
+    setActive((current) => (current === id ? null : current));
+  };
+
+  return (
+    <>
+      {!scope ? (
+        <div {...stylex.props(migrationStyles.controls)}>
+          <Button
+            onClick={() => {
+              setComments(makeComments());
+              setCollapsed(corners ? makeComments().map((comment) => comment.id) : []);
+              setActive(corners ? null : 'migration-0');
+              setStaged(['migration-1']);
+            }}
+          >
+            Reset overlay fixture
+          </Button>
+        </div>
+      ) : null}
+      <div
+        ref={frame}
+        data-overlay-migration-frame={corners ? 'corners' : scope ? 'scope' : 'states'}
+        {...stylex.props(
+          migrationStyles.frame,
+          corners && migrationStyles.corners,
+          scope && migrationStyles.scopeFrame
+        )}
+      >
+        <VisualAnnotationCommentsOverlay
+          comments={comments}
+          viewport={{ width, height }}
+          activeCommentId={active}
+          collapsedCommentIds={collapsed}
+          stagedCommentIds={staged}
+          onSelectComment={setActive}
+          onToggleCollapsed={toggleCollapsed}
+          onSendToChat={(comment) => {
+            setStaged((current) =>
+              current.includes(comment.id)
+                ? current.filter((id) => id !== comment.id)
+                : [...current, comment.id]
+            );
+            setActive(comment.id);
+          }}
+          onToggleResolved={({ commentId }) =>
+            setComments((current) =>
+              current.map((comment) =>
+                comment.id === commentId
+                  ? { ...comment, resolvedAt: 1_800_200, resolvedBy: 'synthetic-reviewer' }
+                  : comment
+              )
+            )
+          }
+        />
+      </div>
+    </>
+  );
+}
+
+export const NativeStates: Story = {
+  render: () => (
+    <div {...stylex.props(migrationStyles.canvas)}>
+      <MigrationOverlayFixture />
+    </div>
+  ),
+};
+
+export const CornerPeeks: Story = {
+  render: () => (
+    <div {...stylex.props(migrationStyles.canvas)}>
+      <MigrationOverlayFixture corners />
+    </div>
+  ),
+};
+
+export const ThemeScopes: Story = {
+  render: () => (
+    <div {...stylex.props(migrationStyles.canvas, migrationStyles.scopes)}>
+      <section {...withClassName(stylex.props(migrationStyles.scope), 'dark-scope')}>
+        <p {...stylex.props(migrationStyles.label)}>Explicit dark scope</p>
+        <MigrationOverlayFixture scope />
+      </section>
+      <section {...withClassName(stylex.props(migrationStyles.scope), 'dark-scope light-scope')}>
+        <p {...stylex.props(migrationStyles.label)}>Light scope inside dark scope</p>
+        <MigrationOverlayFixture scope />
+      </section>
+    </div>
+  ),
+};

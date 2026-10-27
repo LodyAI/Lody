@@ -1,3 +1,5 @@
+import * as stylex from '@stylexjs/stylex';
+import { pageSurface as surface } from './surface';
 import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Mail } from 'lucide-react';
@@ -31,19 +33,19 @@ export function ForgotPasswordPage({
   const { t } = useTranslation();
 
   return (
-    <div className="flex min-h-screen w-full items-center justify-center bg-background p-4">
-      <Card.Root className="w-full max-w-md">
-        <Card.Header className="space-y-4 text-center">
-          <div className="flex justify-center">
-            <div className="rounded-full bg-primary/10 p-3">
-              <Mail className="h-6 w-6 text-primary" aria-hidden="true" />
+    <div {...stylex.props(surface.page)}>
+      <Card.Root {...stylex.props(surface.card)}>
+        <Card.Header {...stylex.props(surface.center)}>
+          <div {...stylex.props(surface.centeredRow, surface.stack4)}>
+            <div {...stylex.props(surface.iconWell)}>
+              <Mail {...stylex.props(surface.heroIcon)} aria-hidden="true" />
             </div>
           </div>
-          <div className="space-y-1">
+          <div>
             <Card.Title
               id="forgot-password-title"
               as="h1"
-              className="text-2xl font-semibold tracking-tight"
+              className={`text-2xl font-semibold tracking-tight ${stylex.props(surface.stack1).className}`}
             >
               {t('forgotPassword.title', 'Reset your password')}
             </Card.Title>
@@ -58,12 +60,12 @@ export function ForgotPasswordPage({
         <Card.Content>
           <form
             onSubmit={onSubmit}
-            className="grid gap-4"
+            {...stylex.props(surface.form)}
             aria-labelledby="forgot-password-title"
             aria-describedby={submitError ? 'forgot-password-error' : undefined}
             aria-busy={submitting}
           >
-            <div className="grid gap-2">
+            <div {...stylex.props(surface.field)}>
               <UiField.Label htmlFor="forgot-password-email">
                 {t('forgotPassword.emailLabel', 'Email address')}
               </UiField.Label>
@@ -96,10 +98,10 @@ export function ForgotPasswordPage({
               </Alert.Root>
             ) : null}
 
-            <Button type="submit" className="w-full" disabled={submitting}>
+            <Button type="submit" {...stylex.props(surface.fullWidth)} disabled={submitting}>
               {submitting ? (
                 <>
-                  <Spinner className="mr-2 h-4 w-4" />
+                  <Spinner className={`h-4 w-4 ${stylex.props(surface.spinnerMargin).className}`} />
                   {t('forgotPassword.sending', 'Sending reset link...')}
                 </>
               ) : (

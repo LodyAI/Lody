@@ -1,10 +1,14 @@
 import { Fragment, type ReactNode } from 'react';
 import { Check, Plus, Users } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+
 import { EncryptedWorkspaceMark } from '@/components/e2ee/encrypted-workspace-mark';
 
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
-import { cn } from '@/lib/utils';
 import { WorkspaceAvatar } from '@/components/workspace-avatar';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
+import { sheetSurface } from './sheet-surface';
 
 export type MobileWorkspaceSwitcherWorkspace = {
   id: string;
@@ -38,6 +42,123 @@ export type MobileWorkspaceSwitcherSheetProps = {
   labels?: MobileWorkspaceSwitcherSheetLabels;
 };
 
+/** Tailwind's `transition-colors`: colour properties only, 150ms, standard ease. */
+const TRANSITION_COLORS = {
+  transitionProperty: 'color, background-color, border-color, text-decoration-color, fill, stroke',
+  transitionDuration: '150ms',
+  transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+} as const;
+
+const styles = stylex.create({
+  /** The sheet's scrolling body. */
+  body: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflowY: 'auto',
+    paddingInline: themeSpace[3],
+    paddingTop: themeSpace[3],
+    paddingBottom: 'calc(var(--safe-area-bottom, 0px) + 12px)',
+  },
+  /** The signed-in user's caption. */
+  caption: {
+    paddingInline: themeSpace[2],
+    paddingTop: themeSpace[1],
+    paddingBottom: themeSpace[2],
+    fontSize: '0.72rem',
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.mutedForeground,
+  },
+  /** The heading above the workspace list. */
+  heading: {
+    paddingInline: themeSpace[2],
+    paddingTop: themeSpace[2],
+    paddingBottom: themeSpace[1],
+    fontSize: '0.72rem',
+    fontWeight: themeFontWeight.semibold,
+    letterSpacing: '0.025em',
+    color: themeColors.mutedForeground,
+  },
+  /** The list of workspaces. */
+  list: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[0.5],
+  },
+  /** The create / invite block, under the list. */
+  actions: {
+    marginTop: themeSpace[3],
+    paddingTop: themeSpace[2],
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'hsl(var(--border) / 0.4)',
+  },
+  /** A row of the sheet: a workspace, or an action. */
+  row: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    gap: themeSpace[3],
+    paddingInline: themeSpace[2],
+    paddingTop: themeSpace[2],
+    paddingBottom: themeSpace[2],
+    textAlign: 'left',
+    borderRadius: themeRadius.xl,
+    color: themeColors.foreground,
+    backgroundColor: { default: null, ':hover': 'hsl(var(--muted) / 0.6)' },
+    scale: { default: null, ':active': '0.99' },
+    // The global "Pro focus style" paints an inset ring on every focused
+    // input and button; the picker's own focus-scoped ring never painted
+    // (the app zeroes Tailwind's ring on focus), so it must not appear
+    // here either.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+    ...TRANSITION_COLORS,
+  },
+  /** The row of the workspace that is open. */
+  rowActive: {
+    backgroundColor: {
+      default: 'hsl(var(--muted) / 0.5)',
+      ':hover': 'hsl(var(--muted) / 0.6)',
+    },
+  },
+  /** The row's content column. */
+  rowBody: {
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    alignItems: 'center',
+  },
+  /** The row's name. */
+  rowLabel: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.95rem',
+    fontWeight: themeFontWeight.medium,
+  },
+  /** The mark in front of a create / invite action. */
+  actionGlyph: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: themeSpace[9],
+    height: themeSpace[9],
+    borderRadius: themeRadius.xl,
+    backgroundColor: themeColors.muted,
+    color: 'hsl(var(--foreground) / 0.8)',
+  },
+  /** The check beside the open workspace. */
+  checkGlyph: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+    color: 'hsl(var(--foreground) / 0.7)',
+  },
+});
+
 /**
  * Bottom sheet that hosts the workspace switcher on mobile. Mirrors the
  * desktop `OrganizationSwitcher` content shape (user email caption,
@@ -62,27 +183,18 @@ export function MobileWorkspaceSwitcherSheet({
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
-      <DrawerContent
-        className={cn(
-          'mobile-workspace-switcher-sheet',
-          'h-auto! max-h-[80dvh]! rounded-t-2xl border-border/60'
-        )}
-      >
-        <div className="flex max-h-full min-h-0 flex-col">
-          <DrawerTitle className="sr-only">{title}</DrawerTitle>
-          <DrawerDescription className="sr-only">{description ?? title}</DrawerDescription>
+      <DrawerContent className="mobile-workspace-switcher-sheet h-auto! max-h-[80dvh]! rounded-t-2xl border-border/60">
+        <div {...stylex.props(sheetSurface.columnAuto)}>
+          <DrawerTitle {...stylex.props(sheetSurface.srOnly)}>{title}</DrawerTitle>
+          <DrawerDescription {...stylex.props(sheetSurface.srOnly)}>
+            {description ?? title}
+          </DrawerDescription>
 
-          <div className="flex-1 overflow-y-auto px-3 pb-[calc(var(--safe-area-bottom,0px)+12px)] pt-3">
-            {userEmail ? (
-              <div className="px-2 pb-2 pt-1 text-[0.72rem] font-medium text-muted-foreground">
-                {userEmail}
-              </div>
-            ) : null}
+          <div {...stylex.props(styles.body)}>
+            {userEmail ? <div {...stylex.props(styles.caption)}>{userEmail}</div> : null}
 
-            <div className="px-2 pb-1 pt-2 text-[0.72rem] font-semibold tracking-wide text-muted-foreground">
-              {workspacesHeading}
-            </div>
-            <ul className="flex flex-col gap-0.5">
+            <div {...stylex.props(styles.heading)}>{workspacesHeading}</div>
+            <ul {...stylex.props(styles.list)}>
               {workspaces.map((workspace) => (
                 <li key={workspace.id}>
                   <SheetRow
@@ -94,11 +206,11 @@ export function MobileWorkspaceSwitcherSheet({
                     leading={<WorkspaceLeadingAvatar workspace={workspace} />}
                     trailing={
                       workspace.isActive ? (
-                        <Check className="h-4 w-4 shrink-0 text-foreground/70" aria-hidden="true" />
+                        <Check {...stylex.props(styles.checkGlyph)} aria-hidden="true" />
                       ) : null
                     }
                   >
-                    <span className="truncate text-[0.95rem] font-medium">{workspace.name}</span>
+                    <span {...stylex.props(styles.rowLabel)}>{workspace.name}</span>
                     {workspace.encrypted ? <EncryptedWorkspaceMark /> : null}
                   </SheetRow>
                 </li>
@@ -106,7 +218,7 @@ export function MobileWorkspaceSwitcherSheet({
             </ul>
 
             {onCreateWorkspace || onInviteMembers ? (
-              <div className="mt-3 border-t border-border/40 pt-2">
+              <div {...stylex.props(styles.actions)}>
                 {onCreateWorkspace ? (
                   <Fragment>
                     <SheetRow
@@ -115,14 +227,16 @@ export function MobileWorkspaceSwitcherSheet({
                         onCreateWorkspace();
                       }}
                       leading={
-                        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted text-foreground/80">
-                          <Plus className="h-4 w-4" strokeWidth={1.8} aria-hidden="true" />
+                        <span {...stylex.props(styles.actionGlyph)}>
+                          <Plus
+                            {...stylex.props(sheetSurface.glyph16)}
+                            strokeWidth={1.8}
+                            aria-hidden="true"
+                          />
                         </span>
                       }
                     >
-                      <span className="truncate text-[0.95rem] font-medium">
-                        {createWorkspaceLabel}
-                      </span>
+                      <span {...stylex.props(styles.rowLabel)}>{createWorkspaceLabel}</span>
                     </SheetRow>
                   </Fragment>
                 ) : null}
@@ -133,14 +247,16 @@ export function MobileWorkspaceSwitcherSheet({
                       onInviteMembers();
                     }}
                     leading={
-                      <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted text-foreground/80">
-                        <Users className="h-4 w-4" strokeWidth={1.8} aria-hidden="true" />
+                      <span {...stylex.props(styles.actionGlyph)}>
+                        <Users
+                          {...stylex.props(sheetSurface.glyph16)}
+                          strokeWidth={1.8}
+                          aria-hidden="true"
+                        />
                       </span>
                     }
                   >
-                    <span className="truncate text-[0.95rem] font-medium">
-                      {inviteMembersLabel}
-                    </span>
+                    <span {...stylex.props(styles.rowLabel)}>{inviteMembersLabel}</span>
                   </SheetRow>
                 ) : null}
               </div>
@@ -149,7 +265,7 @@ export function MobileWorkspaceSwitcherSheet({
 
           {/* Trap a hidden close target for keyboard / accessibility — the
              sheet's primary dismissal is the backdrop tap on vaul. */}
-          <DrawerClose className="sr-only">Close</DrawerClose>
+          <DrawerClose {...stylex.props(sheetSurface.srOnly)}>Close</DrawerClose>
         </div>
       </DrawerContent>
     </Drawer>
@@ -189,15 +305,10 @@ function SheetRow({
     <button
       type="button"
       onClick={onClick}
-      className={cn(
-        'flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left text-foreground',
-        'transition-colors hover:bg-muted/60 active:scale-[0.99]',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
-        active && 'bg-muted/50'
-      )}
+      {...stylex.props(styles.row, active && styles.rowActive)}
     >
       {leading}
-      <span className="flex min-w-0 flex-1 items-center">{children}</span>
+      <span {...stylex.props(styles.rowBody)}>{children}</span>
       {trailing}
     </button>
   );

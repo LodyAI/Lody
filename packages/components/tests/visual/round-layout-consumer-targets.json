@@ -1,0 +1,56 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "blockedHosts": ["avatars.githubusercontent.com"],
+  "ids": ["ui-roundlayoutmigration--card-consumers"],
+  "states": {
+    "ui-roundlayoutmigration--card-consumers": [
+      {
+        "name": "notice-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[aria-expanded] button[aria-label=\"Toggle section\"]",
+            "index": 0
+          }
+        ]
+      },
+      {
+        "name": "notice-collapse",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[aria-expanded] button[aria-label=\"Toggle section\"]",
+            "index": 0,
+            "key": "Enter"
+          }
+        ]
+      }
+    ]
+  },
+  "ready": {
+    "ui-roundlayoutmigration--card-consumers": [
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-line-index=\"2,1\"]"
+      }
+    ]
+  }
+}

@@ -1,0 +1,104 @@
+{
+  "viewports": [
+    {
+      "name": "iphone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "android",
+      "device": "Pixel 5",
+      "width": 393,
+      "height": 851
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "components-lodysidebar--default",
+    "components-lodysidebar--updated-mode-opened-sessions",
+    "components-lodysidebar--with-projects",
+    "components-sidebarfooter--default",
+    "components-sidebarfooter--local-identity",
+    "projects-localprojectremovalux--mobile-project-waiting-for-device",
+    "projects-localprojectremovalux--mobile-remove-confirmation"
+  ],
+  "allowBlankIds": [],
+  "states": {
+    "components-sidebarfooter--default": [
+      {
+        "name": "workspace-menu-touch",
+        "steps": [
+          {
+            "action": "tap",
+            "selector": "[data-workspace-switcher-trigger]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitemradio",
+            "name": "D Demo workspace"
+          }
+        ]
+      },
+      {
+        "name": "workspace-selected-touch",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "menuitemradio",
+            "name": "D Demo workspace"
+          },
+          {
+            "action": "hidden",
+            "selector": "[role=\"menu\"]"
+          }
+        ]
+      },
+      {
+        "name": "archive-selected-touch",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "button",
+            "name": "Archive"
+          },
+          {
+            "action": "visible",
+            "role": "button",
+            "name": "Leave Archive"
+          }
+        ]
+      },
+      {
+        "name": "archive-left-touch",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "button",
+            "name": "Leave Archive"
+          },
+          {
+            "action": "visible",
+            "role": "button",
+            "name": "Archive"
+          }
+        ]
+      }
+    ]
+  },
+  "blockedHosts": ["avatars.githubusercontent.com"],
+  "ready": {
+    "components-sidebarfooter--default": [
+      {
+        "action": "visible",
+        "selector": "[data-shape=\"tile\"] img"
+      }
+    ],
+    "components-sidebarfooter--local-identity": [
+      {
+        "action": "visible",
+        "selector": "[data-shape=\"tile\"] img"
+      }
+    ]
+  }
+}

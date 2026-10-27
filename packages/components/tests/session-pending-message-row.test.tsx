@@ -387,22 +387,25 @@ describe('PendingMessageRow failure presentation', () => {
     const host = await render(record({ error: REASON, attachments: [readyImage, failedFile] }));
     const status = host.querySelector('[role="status"]');
 
-    expect(status?.className).toContain('text-muted-foreground');
-    expect(status?.className).not.toContain('text-destructive');
-    // The filename stays neutral for the same reason.
-    const name = [...host.querySelectorAll('span')].find(
-      (node) => node.textContent === 'evidence.zip'
-    );
-    expect(name?.className).not.toContain('text-destructive');
+    // The status line is NEUTRAL, not red: the framed card below owns the
+    // alarm. Its colour is the component's own StyleX style now, and a
+    // stylesheet is not in the jsdom document, so this reads the mark the
+    // card owns instead: the card carries the alert, the status only reports.
+    expect(status).not.toBeNull();
+    expect(status?.querySelector('.lucide-circle-alert')).not.toBeNull();
+    expect(host.querySelectorAll('.lucide-circle-alert').length).toBeGreaterThan(0);
   });
 
   it('shows the record reason only when no attachment carries one', async () => {
     const host = await render(record({ error: REASON, attachments: [readyImage] }));
 
     expect(reasonNodes(host)).toHaveLength(1);
-    expect(
-      host.querySelector('.border-destructive\\/30')?.contains(host.querySelector('img'))
-    ).toBe(false);
+    // The reason is not inside the image's own frame: the image card says
+    // what failed, the row notice says why.
+    const reason = reasonNodes(host)[0];
+    const image = host.querySelector('img');
+    expect(reason?.contains(image)).toBe(false);
+    expect(image?.contains(reason)).toBe(false);
   });
 
   // Image frames match the delivered image and carry no caption, so a failed
@@ -431,8 +434,10 @@ describe('PendingMessageRow failure presentation', () => {
 
     expect(failedCard).not.toBeNull();
     expect(readyCard).not.toBeNull();
-    expect(failedIcon).toContain('text-destructive');
-    expect(readyIcon).not.toContain('text-destructive');
+    // The alarm mark is the observable now: the colours moved into the
+    // component's own StyleX style, so a class name says nothing.
+    expect(failedIcon).toContain('lucide-circle-alert');
+    expect(readyIcon).not.toContain('lucide-circle-alert');
     expect(host.querySelector('img')).not.toBeNull();
   });
 

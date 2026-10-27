@@ -1,0 +1,78 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "compact-desktop",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "ui-copybuttonmigration--interactive",
+    "ui-copybuttonmigration--empty-value",
+    "ui-copybuttonmigration--disabled",
+    "ui-copybuttonmigration--long-value",
+    "ui-copybuttonmigration--consumer-card"
+  ],
+  "ready": {
+    "ui-copybuttonmigration--disabled": [
+      {
+        "action": "disabled",
+        "selector": "[aria-label=\"Copy fixture value\"]"
+      }
+    ]
+  },
+  "states": {
+    "ui-copybuttonmigration--interactive": [
+      {
+        "name": "button-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[aria-label=\"Copy fixture value\"]"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": "[aria-label=\"Copy fixture value\"]"
+          },
+          {
+            "action": "press",
+            "selector": "[aria-label=\"Copy fixture value\"]",
+            "key": "Tab"
+          },
+          {
+            "action": "press",
+            "selector": "[data-copy-after]",
+            "key": "Shift+Tab"
+          }
+        ]
+      }
+    ],
+    "ui-copybuttonmigration--consumer-card": [
+      {
+        "name": "consumer-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-copy-consumer]"
+          }
+        ]
+      }
+    ]
+  }
+}

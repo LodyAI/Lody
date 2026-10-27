@@ -1,0 +1,483 @@
+{
+  "viewports": [
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "sm-before",
+      "width": 639,
+      "height": 900
+    },
+    {
+      "name": "sm",
+      "width": 640,
+      "height": 900
+    },
+    {
+      "name": "md-before",
+      "width": 767,
+      "height": 900
+    },
+    {
+      "name": "md",
+      "width": 768,
+      "height": 900
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "ui-drawermigration--bottom",
+    "ui-drawermigration--top",
+    "ui-drawermigration--left",
+    "ui-drawermigration--right",
+    "ui-drawermigration--long-content",
+    "ui-drawermigration--caller-overrides",
+    "ui-drawermigration--worktree-configuration",
+    "ui-drawermigration--fullscreen-left",
+    "ui-drawermigration--inline-height"
+  ],
+  "states": {
+    "ui-drawermigration--bottom": [
+      {
+        "name": "opened",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open drawer"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"drawer-content\"]"
+          }
+        ]
+      },
+      {
+        "name": "input-focused",
+        "steps": [
+          {
+            "action": "fill",
+            "role": "textbox",
+            "name": "Drawer input",
+            "value": "A local draft note"
+          },
+          {
+            "action": "focus",
+            "role": "textbox",
+            "name": "Drawer input"
+          }
+        ]
+      },
+      {
+        "name": "close",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Close drawer"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-slot=\"drawer-content\"]"
+          },
+          {
+            "action": "visible",
+            "text": "Drawer closed"
+          }
+        ]
+      }
+    ],
+    "ui-drawermigration--top": [
+      {
+        "name": "opened",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open drawer"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"drawer-content\"]"
+          }
+        ]
+      },
+      {
+        "name": "input-focused",
+        "steps": [
+          {
+            "action": "fill",
+            "role": "textbox",
+            "name": "Drawer input",
+            "value": "A local draft note"
+          },
+          {
+            "action": "focus",
+            "role": "textbox",
+            "name": "Drawer input"
+          }
+        ]
+      },
+      {
+        "name": "close",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Close drawer"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-slot=\"drawer-content\"]"
+          },
+          {
+            "action": "visible",
+            "text": "Drawer closed"
+          }
+        ]
+      }
+    ],
+    "ui-drawermigration--left": [
+      {
+        "name": "opened",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open drawer"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"drawer-content\"]"
+          }
+        ]
+      },
+      {
+        "name": "input-focused",
+        "steps": [
+          {
+            "action": "fill",
+            "role": "textbox",
+            "name": "Drawer input",
+            "value": "A local draft note"
+          },
+          {
+            "action": "focus",
+            "role": "textbox",
+            "name": "Drawer input"
+          }
+        ]
+      },
+      {
+        "name": "close",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Close drawer"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-slot=\"drawer-content\"]"
+          },
+          {
+            "action": "visible",
+            "text": "Drawer closed"
+          }
+        ]
+      }
+    ],
+    "ui-drawermigration--right": [
+      {
+        "name": "opened",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open drawer"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"drawer-content\"]"
+          }
+        ]
+      },
+      {
+        "name": "input-focused",
+        "steps": [
+          {
+            "action": "fill",
+            "role": "textbox",
+            "name": "Drawer input",
+            "value": "A local draft note"
+          },
+          {
+            "action": "focus",
+            "role": "textbox",
+            "name": "Drawer input"
+          }
+        ]
+      },
+      {
+        "name": "close",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Close drawer"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-slot=\"drawer-content\"]"
+          },
+          {
+            "action": "visible",
+            "text": "Drawer closed"
+          }
+        ]
+      }
+    ],
+    "ui-drawermigration--long-content": [
+      {
+        "name": "opened",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open drawer"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"drawer-content\"]"
+          }
+        ]
+      },
+      {
+        "name": "input-focused",
+        "steps": [
+          {
+            "action": "fill",
+            "role": "textbox",
+            "name": "Drawer input",
+            "value": "A local draft note"
+          },
+          {
+            "action": "focus",
+            "role": "textbox",
+            "name": "Drawer input"
+          }
+        ]
+      },
+      {
+        "name": "close",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Close drawer"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-slot=\"drawer-content\"]"
+          },
+          {
+            "action": "visible",
+            "text": "Drawer closed"
+          }
+        ]
+      }
+    ],
+    "ui-drawermigration--caller-overrides": [
+      {
+        "name": "opened",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open drawer"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"drawer-content\"]"
+          }
+        ]
+      },
+      {
+        "name": "input-focused",
+        "steps": [
+          {
+            "action": "fill",
+            "role": "textbox",
+            "name": "Drawer input",
+            "value": "A local draft note"
+          },
+          {
+            "action": "focus",
+            "role": "textbox",
+            "name": "Drawer input"
+          }
+        ]
+      },
+      {
+        "name": "close",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Close drawer"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-slot=\"drawer-content\"]"
+          },
+          {
+            "action": "visible",
+            "text": "Drawer closed"
+          }
+        ]
+      }
+    ],
+    "ui-drawermigration--worktree-configuration": [
+      {
+        "name": "opened",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open worktree configuration"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"drawer-content\"]"
+          },
+          {
+            "action": "visible",
+            "role": "heading",
+            "name": "Worktree setup & cleanup"
+          }
+        ]
+      },
+      {
+        "name": "close",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Close"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-slot=\"drawer-content\"]"
+          }
+        ]
+      }
+    ],
+    "ui-drawermigration--fullscreen-left": [
+      {
+        "name": "opened",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open drawer"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"drawer-content\"]"
+          }
+        ]
+      },
+      {
+        "name": "input-focused",
+        "steps": [
+          {
+            "action": "fill",
+            "role": "textbox",
+            "name": "Drawer input",
+            "value": "A local draft note"
+          },
+          {
+            "action": "focus",
+            "role": "textbox",
+            "name": "Drawer input"
+          }
+        ]
+      },
+      {
+        "name": "close",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Close drawer"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-slot=\"drawer-content\"]"
+          },
+          {
+            "action": "visible",
+            "text": "Drawer closed"
+          }
+        ]
+      }
+    ],
+    "ui-drawermigration--inline-height": [
+      {
+        "name": "opened",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open drawer"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"drawer-content\"]"
+          }
+        ]
+      },
+      {
+        "name": "input-focused",
+        "steps": [
+          {
+            "action": "fill",
+            "role": "textbox",
+            "name": "Drawer input",
+            "value": "A local draft note"
+          },
+          {
+            "action": "focus",
+            "role": "textbox",
+            "name": "Drawer input"
+          }
+        ]
+      },
+      {
+        "name": "close",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Close drawer"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-slot=\"drawer-content\"]"
+          },
+          {
+            "action": "visible",
+            "text": "Drawer closed"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,8 +1,14 @@
 import { useEffect, useRef } from 'react';
 
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
+import * as stylex from '@stylexjs/stylex';
 
 import { deriveFabricUniforms, type FabricRecipe } from './fabric-recipe';
+
+const styles = stylex.create({
+  /** The canvas fills whatever box its owner gives it. */
+  canvas: { height: '100%', width: '100%' },
+});
 
 const VERTEX_SHADER = `#version 300 es
 in vec2 aPos;
@@ -547,5 +553,13 @@ export function FabricSimulator({
     };
   }, [recipe, mode, light, followPointer, seed]);
 
-  return <canvas ref={canvasRef} aria-hidden className={cn('h-full w-full', className)} />;
+  const canvasProps = stylex.props(styles.canvas);
+  return (
+    <canvas
+      ref={canvasRef}
+      aria-hidden
+      {...canvasProps}
+      className={clsx(canvasProps.className, className)}
+    />
+  );
 }

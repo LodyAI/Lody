@@ -1,5 +1,10 @@
 import type { ReactNode } from 'react';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { withClassName } from '@/lib/stylex';
+// The theme tokens are imported by path, not by the `@/` alias: the StyleX
+// compiler links a theme file on its own and does not follow bundler aliases.
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
 
 /* Shared mobile form-row primitives for the settings sub-pages. They
    render the home-style "section heading + rounded card + divided
@@ -9,6 +14,96 @@ import { cn } from '@/lib/utils';
    visual family as the rest of the mobile app.
    Pure-render — no isMobile gating here. Sub-pages decide whether to
    render the mobile or the desktop layout. */
+
+const styles = stylex.create({
+  /** A group of settings: its heading, then its rows. */
+  section: {
+    marginTop: themeSpace[5],
+    ':first-child': { marginTop: themeSpace[3] },
+  },
+  /** The heading block: the title and its actions, then the description. */
+  sectionHeader: { paddingInline: themeSpace[5], paddingBottom: themeSpace[1.5] },
+  sectionHeaderRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: themeSpace[2],
+  },
+  sectionTitle: {
+    minWidth: 0,
+    fontSize: '0.82rem',
+    fontWeight: themeFontWeight.normal,
+    color: themeColors.mutedForeground,
+  },
+  sectionActions: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: themeSpace[1] },
+  sectionDescription: {
+    marginTop: themeSpace[0.5],
+    fontSize: '0.78rem',
+    color: 'hsl(var(--muted-foreground) / 0.8)',
+  },
+  /** The card a group's rows sit in. */
+  card: {
+    marginInline: themeSpace[3],
+    overflow: 'hidden',
+    borderRadius: themeRadius['2xl'],
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.6)',
+    backgroundColor: themeColors.card,
+  },
+  /** One row: the label column and the control beside it. */
+  row: {
+    display: 'flex',
+    gap: themeSpace[3],
+    paddingInline: themeSpace[4],
+    paddingBlock: themeSpace[3],
+  },
+  /** A row whose control sits under the label instead of beside it. */
+  rowStacked: { flexDirection: 'column', alignItems: 'stretch' },
+  rowInline: { alignItems: 'center' },
+  /** The label column: it takes the remaining width so the copy wraps or
+      truncates instead of pushing the control off-screen. */
+  rowBody: { minWidth: 0, flexGrow: 1, flexShrink: 1, flexBasis: '0%' },
+  /** The row's label. */
+  rowLabel: {
+    fontSize: '0.95rem',
+    fontWeight: themeFontWeight.normal,
+    lineHeight: 1.25,
+    color: themeColors.foreground,
+  },
+  /** The row's helper copy. */
+  rowHelper: {
+    marginTop: themeSpace[0.5],
+    fontSize: '0.78rem',
+    lineHeight: 1.25,
+    color: themeColors.mutedForeground,
+  },
+  /** The control column: it hugs its content against a narrow viewport. */
+  rowControl: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: themeSpace[2] },
+  /** The row's trailing mark. */
+  rowTrailing: { flexShrink: 0, color: 'hsl(var(--muted-foreground) / 0.6)' },
+  /** A stacked control, under the label. */
+  rowStackedControl: { paddingInline: themeSpace[4], paddingBottom: themeSpace[3] },
+  /** A stacked control with no label above it: it rides up under the row. */
+  rowStackedControlTight: { marginTop: 'calc(-1 * var(--spacing))' },
+  /** The rule between two rows of a card. */
+  rowDivider: {
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: themeColors.border,
+  },
+  /** A row that opens something: the whole line answers the pointer. */
+  rowButton: {
+    display: 'block',
+    width: '100%',
+    textAlign: 'left',
+    transitionProperty:
+      'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    backgroundColor: { default: null, ':active': 'hsl(var(--muted) / 0.4)' },
+  },
+});
 
 export type MobileSettingsSectionProps = {
   title?: ReactNode;
@@ -32,35 +127,21 @@ export function MobileSettingsSection({
   noCard = false,
 }: MobileSettingsSectionProps) {
   return (
-    <section className={cn('mt-5 first:mt-3', className)}>
+    <section {...withClassName(stylex.props(styles.section), className)}>
       {title || actions ? (
-        <header className="px-5 pb-1.5">
-          <div className="flex items-center justify-between gap-2">
-            {title ? (
-              <h2 className="min-w-0 text-[0.82rem] font-normal text-muted-foreground">
-                {title}
-              </h2>
-            ) : (
-              <span />
-            )}
-            {actions ? <div className="flex shrink-0 items-center gap-1">{actions}</div> : null}
+        <header {...stylex.props(styles.sectionHeader)}>
+          <div {...stylex.props(styles.sectionHeaderRow)}>
+            {title ? <h2 {...stylex.props(styles.sectionTitle)}>{title}</h2> : <span />}
+            {actions ? <div {...stylex.props(styles.sectionActions)}>{actions}</div> : null}
           </div>
           {/* Description gets its own full-width line under the title/action
              row — squeezing it into the title column wrapped it to 3+ lines
              next to wide actions (e.g. the CLI Token "Create token" button)
              on narrow viewports. */}
-          {description ? (
-            <p className="mt-0.5 text-[0.78rem] text-muted-foreground/80">{description}</p>
-          ) : null}
+          {description ? <p {...stylex.props(styles.sectionDescription)}>{description}</p> : null}
         </header>
       ) : null}
-      {noCard ? (
-        children
-      ) : (
-        <div className="mx-3 overflow-hidden rounded-2xl border border-border/60 bg-card">
-          {children}
-        </div>
-      )}
+      {noCard ? children : <div {...stylex.props(styles.card)}>{children}</div>}
     </section>
   );
 }
@@ -103,56 +184,49 @@ export function MobileSettingsRow({
   trailing,
   className,
 }: MobileSettingsRowProps) {
-  /* The label column always wraps in `min-w-0 flex-1` so long labels
-     truncate or wrap instead of pushing the control off-screen. The
-     control column is `shrink-0` so it stays sized to its content
-     against narrow viewports. */
+  /* The label column always takes the remaining width (grows, shrinks, and
+     starts from nothing) so long labels truncate or wrap instead of pushing
+     the control off-screen. The control column hugs its content against
+     narrow viewports. */
   const body = (
     <div
-      className={cn(
-        'flex gap-3 px-4 py-3',
-        stack ? 'flex-col items-stretch' : 'items-center',
+      {...withClassName(
+        stylex.props(styles.row, stack ? styles.rowStacked : styles.rowInline),
         className
       )}
     >
-      <div className="min-w-0 flex-1">
-        {typeof label === 'string' ? (
-          <p className="text-[0.95rem] font-normal leading-tight text-foreground">{label}</p>
-        ) : (
-          label
-        )}
+      <div {...stylex.props(styles.rowBody)}>
+        {typeof label === 'string' ? <p {...stylex.props(styles.rowLabel)}>{label}</p> : label}
         {helper ? (
           typeof helper === 'string' ? (
-            <p className="mt-0.5 text-[0.78rem] leading-tight text-muted-foreground">{helper}</p>
+            <p {...stylex.props(styles.rowHelper)}>{helper}</p>
           ) : (
-            <div className="mt-0.5 text-[0.78rem] leading-tight text-muted-foreground">
-              {helper}
-            </div>
+            <div {...stylex.props(styles.rowHelper)}>{helper}</div>
           )
         ) : null}
       </div>
       {children != null && !stack ? (
-        <div className="flex shrink-0 items-center gap-2">{children}</div>
+        <div {...stylex.props(styles.rowControl)}>{children}</div>
       ) : null}
       {trailing != null && !stack ? (
-        <div className="shrink-0 text-muted-foreground/60">{trailing}</div>
+        <div {...stylex.props(styles.rowTrailing)}>{trailing}</div>
       ) : null}
     </div>
   );
 
   const stackedControl =
     children != null && stack ? (
-      <div className={cn('px-4 pb-3', !label && '-mt-1')}>{children}</div>
+      <div {...stylex.props(styles.rowStackedControl, !label && styles.rowStackedControlTight)}>
+        {children}
+      </div>
     ) : null;
-
-  const wrapperClass = cn(hasDivider && 'border-t border-border');
 
   if (onClick) {
     return (
       <button
         type="button"
         onClick={onClick}
-        className={cn('block w-full text-left transition-colors active:bg-muted/40', wrapperClass)}
+        {...stylex.props(styles.rowButton, hasDivider && styles.rowDivider)}
       >
         {body}
         {stackedControl}
@@ -161,7 +235,7 @@ export function MobileSettingsRow({
   }
 
   return (
-    <div className={wrapperClass}>
+    <div {...stylex.props(hasDivider && styles.rowDivider)}>
       {body}
       {stackedControl}
     </div>

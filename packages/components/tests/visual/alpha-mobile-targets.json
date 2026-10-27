@@ -1,0 +1,152 @@
+{
+  "viewports": [
+    {
+      "name": "narrow-desktop",
+      "width": 390,
+      "height": 1000
+    },
+    {
+      "name": "boundary320",
+      "width": 320,
+      "height": 900
+    },
+    {
+      "name": "iphone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 1000
+    },
+    {
+      "name": "android",
+      "device": "Pixel 5",
+      "width": 393,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "mobile-alphamobilemigration--tabs-all-states",
+    "mobile-alphamobilemigration--tabs-compact",
+    "mobile-alphamobilemigration--tabs-empty",
+    "mobile-alphamobilemigration--tabs-read-only"
+  ],
+  "ready": {
+    "mobile-alphamobilemigration--tabs-all-states": [
+      {
+        "action": "visible",
+        "selector": "[role=dialog]"
+      }
+    ],
+    "mobile-alphamobilemigration--tabs-compact": [
+      {
+        "action": "visible",
+        "selector": "[role=dialog]"
+      }
+    ],
+    "mobile-alphamobilemigration--tabs-empty": [
+      {
+        "action": "visible",
+        "selector": "[role=dialog]"
+      }
+    ],
+    "mobile-alphamobilemigration--tabs-read-only": [
+      {
+        "action": "visible",
+        "selector": "[role=dialog]"
+      }
+    ]
+  },
+  "states": {
+    "mobile-alphamobilemigration--tabs-all-states": [
+      {
+        "name": "closed-list",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button[aria-expanded]"
+          },
+          {
+            "action": "visible",
+            "text": "Closed synthetic conversation",
+            "exact": false
+          }
+        ]
+      },
+      {
+        "name": "idle-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "button[aria-current=\"false\"]",
+            "index": 0
+          }
+        ]
+      },
+      {
+        "name": "idle-keyboard-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "button[aria-current=\"false\"]",
+            "index": 0
+          },
+          {
+            "action": "press",
+            "selector": "button[aria-current=\"false\"]",
+            "index": 0,
+            "key": "ArrowLeft"
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          }
+        ]
+      },
+      {
+        "name": "close-idle-keeps-sheet",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"Close\"]",
+            "index": 1
+          },
+          {
+            "action": "visible",
+            "text": "Closed: idle"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=dialog]"
+          }
+        ]
+      }
+    ],
+    "mobile-alphamobilemigration--tabs-compact": [
+      {
+        "name": "closed-list",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button[aria-expanded]"
+          },
+          {
+            "action": "visible",
+            "text": "Closed synthetic conversation",
+            "exact": false
+          }
+        ]
+      },
+      {
+        "name": "idle-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "button[aria-current=\"false\"]",
+            "index": 0
+          }
+        ]
+      }
+    ]
+  }
+}

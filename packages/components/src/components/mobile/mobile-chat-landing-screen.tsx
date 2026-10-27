@@ -1,7 +1,83 @@
 import type { ReactNode } from 'react';
 import { PanelLeft } from 'lucide-react';
 import { Button } from '@lody/ui/button';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  root: {
+    position: 'relative',
+    display: 'flex',
+    height: '100%',
+    width: '100%',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    backgroundColor: themeColors.background,
+    color: themeColors.foreground,
+  },
+  column: {
+    position: 'relative',
+    display: 'flex',
+    height: '100%',
+    width: '100%',
+    flexDirection: 'column',
+  },
+  header: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    paddingBottom: themeSpace[2],
+    paddingLeft: 'calc(16px + var(--safe-area-left))',
+    paddingRight: 'calc(16px + var(--safe-area-right))',
+    paddingTop: 'calc(16px + var(--safe-area-top))',
+  },
+  menuIcon: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+  },
+  scroll: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'auto',
+    paddingBottom: 'calc(24px + env(safe-area-inset-bottom, 0px))',
+    paddingLeft: 'calc(16px + env(safe-area-inset-left, 0px))',
+    paddingRight: 'calc(16px + env(safe-area-inset-right, 0px))',
+  },
+  content: {
+    marginInline: 'auto',
+    display: 'flex',
+    width: '100%',
+    maxWidth: '48rem',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: themeSpace[4],
+    paddingTop: themeSpace[6],
+    paddingBottom: themeSpace[6],
+  },
+  title: {
+    fontSize: themeFontSize['3xl'],
+    lineHeight: themeLineHeight['3xl'],
+    fontWeight: themeFontWeight.semibold,
+    color: themeColors.foreground,
+  },
+  composerBlock: {
+    marginTop: themeSpace[2],
+    width: '100%',
+  },
+  noMachineHint: {
+    marginTop: themeSpace[2],
+  },
+  agentConfigHint: {
+    width: '100%',
+  },
+});
 
 export type MobileChatLandingScreenProps = {
   title: string;
@@ -21,36 +97,35 @@ export function MobileChatLandingScreen({
   onOpenMobileDrawer,
 }: MobileChatLandingScreenProps) {
   return (
-    <div
-      className={cn(
-        'relative flex h-full w-full flex-col overflow-hidden',
-        'bg-background text-foreground'
-      )}
-    >
-      <div className="relative flex h-full w-full flex-col">
-        <div className="relative flex items-center pb-2 pl-[calc(16px+var(--safe-area-left))] pr-[calc(16px+var(--safe-area-right))] pt-[calc(16px+var(--safe-area-top))]">
+    <div {...stylex.props(styles.root)}>
+      <div {...stylex.props(styles.column)}>
+        <div {...stylex.props(styles.header)}>
           <Button
             variant="ghost"
             size="large"
             icon
-            className={cn('md:hidden')}
+            className="md:hidden"
             onClick={onOpenMobileDrawer}
           >
-            <PanelLeft className="size-4" />
+            <PanelLeft className={stylex.props(styles.menuIcon).className} />
             <span className="sr-only">Open sidebar</span>
           </Button>
           <span className="sr-only">{title}</span>
         </div>
 
-        <div className="flex-1 overflow-auto pb-[calc(24px+env(safe-area-inset-bottom,0px))] pl-[calc(16px+env(safe-area-inset-left,0px))] pr-[calc(16px+env(safe-area-inset-right,0px))]">
-          <div className="mx-auto flex w-full max-w-3xl flex-col items-center gap-4 py-6">
-            <h1 className="text-3xl font-semibold text-foreground">{title}</h1>
+        <div {...stylex.props(styles.scroll)}>
+          <div {...stylex.props(styles.content)}>
+            <h1 {...stylex.props(styles.title)}>{title}</h1>
             {contextSwitch}
-            <div className="mt-2 w-full">
+            <div {...stylex.props(styles.composerBlock)}>
               {composer}
-              {noMachineHint != null ? <div className="mt-2">{noMachineHint}</div> : null}
+              {noMachineHint != null ? (
+                <div {...stylex.props(styles.noMachineHint)}>{noMachineHint}</div>
+              ) : null}
             </div>
-            {agentConfigHint != null ? <div className="w-full">{agentConfigHint}</div> : null}
+            {agentConfigHint != null ? (
+              <div {...stylex.props(styles.agentConfigHint)}>{agentConfigHint}</div>
+            ) : null}
           </div>
         </div>
       </div>

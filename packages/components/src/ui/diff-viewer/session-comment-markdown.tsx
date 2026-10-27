@@ -14,8 +14,8 @@ interface SessionCommentMarkdownProps {
 /**
  * Chat prose sits 4px inside its rail (`tailwind/index.css`). A comment sits
  * under its author's name instead, and a PR description under its title, so
- * its prose starts flush on the text edge above it. A descendant rule, which
- * StyleX cannot express.
+ * its prose starts flush on the text edge above it. Keep this descendant
+ * compatibility rule while the shared Markdown renderer owns those elements.
  */
 const FLUSH_PROSE = '[&_:is(p,h1,h2,h3,h4,h5,h6)]:px-0';
 

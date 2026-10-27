@@ -1,8 +1,16 @@
 import { useRef, useState, type ComponentType, type ReactNode, type SVGProps } from 'react';
 import { ArrowUpRight } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
 import { Popover } from '@lody/ui/popover';
 import { INFO_BAR_TEXT_CLASS } from './info-bar-type';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeDuration,
+  themeEasing,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 
 export type InfoChipIcon = ComponentType<SVGProps<SVGSVGElement> & { className?: string }>;
 
@@ -27,16 +35,117 @@ export type InfoChipIcon = ComponentType<SVGProps<SVGSVGElement> & { className?:
  * hover treatment; width varies only by the glanceable short `value`
  * ("12m", "#2857", "2/5") that some items keep while collapsed.
  */
-const CHIP_BUTTON_CLASS = cn(
-  'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 transition-colors hover:bg-muted-foreground/10',
-  INFO_BAR_TEXT_CLASS
-);
+const styles = stylex.create({
+  /** The chrome every chip button shares. */
+  chipButton: {
+    display: 'flex',
+    height: themeSpace[6],
+    flexShrink: 0,
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[1],
+    backgroundColor: {
+      default: 'transparent',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--muted-foreground) / 0.1)' },
+    },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  anchoredPopover: {
+    width: 'var(--anchor-width)',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+  },
+  stagePopover: {
+    width: 'calc(var(--spacing) * 96)',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+  },
+  chipTextMuted: { color: themeColors.mutedForeground },
+  chipTextForeground: { color: themeColors.foreground },
+  /** An open popover chip keeps its well filled and says so in brighter ink. */
+  chipButtonOpen: {
+    backgroundColor: 'hsl(var(--muted-foreground) / 0.1)',
+    color: themeColors.foreground,
+  },
+  chipIcon: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+  },
+  chipValue: {
+    display: { default: 'none', '@container (min-width: 420px)': 'inline' },
+    flexShrink: 0,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  iconBadge: {
+    display: 'flex',
+    height: themeSpace[6],
+    flexShrink: 0,
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    paddingInline: themeSpace[1],
+  },
+  summary: {
+    display: 'flex',
+    height: themeSpace[6],
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[1],
+  },
+  /** A summary that opens something answers the pointer like a control. */
+  summaryInteractive: {
+    userSelect: 'none',
+    backgroundColor: {
+      default: 'transparent',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--muted-foreground) / 0.1)' },
+    },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  summaryOpen: { backgroundColor: 'hsl(var(--muted-foreground) / 0.1)' },
+  summaryText: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    textAlign: 'left',
+  },
+  summaryGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    color: 'hsl(var(--muted-foreground) / 0.7)',
+  },
+  root: {
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    alignItems: 'center',
+    gap: themeSpace[1],
+  },
+});
 
 function ChipFace({ icon: Icon, value }: { icon: InfoChipIcon; value?: string }) {
   return (
     <>
-      <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      {value ? <span className="hidden shrink-0 tabular-nums @[420px]:inline">{value}</span> : null}
+      <Icon {...stylex.props(styles.chipIcon)} aria-hidden="true" />
+      {value ? <span {...stylex.props(styles.chipValue)}>{value}</span> : null}
     </>
   );
 }
@@ -56,13 +165,19 @@ export function ActionChip({
   textClassName?: string;
   onAction: () => void;
 }) {
+  const chipProps = stylex.props(styles.chipButton);
   return (
     <button
       type="button"
       aria-label={label}
       title={label}
       onClick={onAction}
-      className={cn(CHIP_BUTTON_CLASS, textClassName ?? 'text-muted-foreground')}
+      {...chipProps}
+      className={clsx(
+        chipProps.className,
+        INFO_BAR_TEXT_CLASS,
+        textClassName ?? stylex.props(styles.chipTextMuted).className
+      )}
     >
       <ChipFace icon={icon} />
     </button>
@@ -91,6 +206,7 @@ export function PopoverActionChip({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const chipProps = stylex.props(styles.chipButton, open && styles.chipButtonOpen);
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger
@@ -100,10 +216,11 @@ export function PopoverActionChip({
             type="button"
             aria-label={label}
             title={label}
-            className={cn(
-              CHIP_BUTTON_CLASS,
-              'text-muted-foreground',
-              open && 'bg-muted-foreground/10 text-foreground'
+            {...chipProps}
+            className={clsx(
+              chipProps.className,
+              INFO_BAR_TEXT_CLASS,
+              stylex.props(open ? styles.chipTextForeground : styles.chipTextMuted).className
             )}
           >
             <ChipFace icon={icon} value={value} />
@@ -119,7 +236,7 @@ export function PopoverActionChip({
           return button?.closest('[data-info-bar-surface]') ?? button;
         }}
         aria-label={label}
-        className="w-[var(--anchor-width)] border-border/60 p-0 shadow-xl"
+        className={clsx(stylex.props(styles.anchoredPopover).className, 'p-0 shadow-xl')}
       >
         {typeof content === 'function' ? content(() => setOpen(false)) : content}
       </Popover.Content>
@@ -141,6 +258,7 @@ export function ClusterChip({
   textClassName?: string;
   onPromote: () => void;
 }) {
+  const chipProps = stylex.props(styles.chipButton);
   return (
     <button
       type="button"
@@ -148,7 +266,12 @@ export function ClusterChip({
       aria-expanded={false}
       title={label}
       onClick={onPromote}
-      className={cn(CHIP_BUTTON_CLASS, textClassName ?? 'text-muted-foreground')}
+      {...chipProps}
+      className={clsx(
+        chipProps.className,
+        INFO_BAR_TEXT_CLASS,
+        textClassName ?? stylex.props(styles.chipTextMuted).className
+      )}
     >
       <ChipFace icon={icon} value={value} />
     </button>
@@ -193,12 +316,14 @@ export function StageChip({
 }) {
   const [popoverOpen, setPopoverOpen] = useState(false);
 
+  const iconBadgeProps = stylex.props(styles.iconBadge);
   const iconBadge = iconOverride ?? (
     <span
-      className={cn(
-        'flex h-6 shrink-0 select-none items-center gap-1 px-1',
+      {...iconBadgeProps}
+      className={clsx(
+        iconBadgeProps.className,
         INFO_BAR_TEXT_CLASS,
-        textClassName ?? 'text-muted-foreground'
+        textClassName ?? stylex.props(styles.chipTextMuted).className
       )}
     >
       <ChipFace icon={icon} value={value} />
@@ -207,25 +332,30 @@ export function StageChip({
 
   const summaryInner = (
     <>
-      <span className="min-w-0 flex-1 truncate text-left">{summary}</span>
-      {detail ? (
-        <ArrowUpRight
-          className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70"
-          aria-hidden="true"
-        />
-      ) : null}
+      <span {...stylex.props(styles.summaryText)}>{summary}</span>
+      {detail ? <ArrowUpRight {...stylex.props(styles.summaryGlyph)} aria-hidden="true" /> : null}
     </>
   );
 
-  const summaryClassName = cn(
-    'flex h-6 min-w-0 flex-1 items-center gap-1 rounded-md px-1',
+  const isInteractive = detail?.kind === 'action' || detail?.kind === 'popover';
+  const summaryStyleProps = stylex.props(
+    styles.summary,
+    isInteractive && styles.summaryInteractive,
+    detail?.kind === 'popover' && popoverOpen && styles.summaryOpen
+  );
+  const summaryClassName = clsx(
+    summaryStyleProps.className,
     INFO_BAR_TEXT_CLASS,
-    textClassName ?? 'text-muted-foreground'
+    textClassName ?? stylex.props(styles.chipTextMuted).className
   );
 
   let summaryNode: ReactNode;
   if (!detail) {
-    summaryNode = <span className={summaryClassName}>{summaryInner}</span>;
+    summaryNode = (
+      <span {...summaryStyleProps} className={summaryClassName}>
+        {summaryInner}
+      </span>
+    );
   } else if (detail.kind === 'action') {
     summaryNode = (
       <button
@@ -233,10 +363,8 @@ export function StageChip({
         aria-label={detail.ariaLabel}
         title={detail.ariaLabel}
         onClick={detail.onAction}
-        className={cn(
-          summaryClassName,
-          'select-none transition-colors hover:bg-muted-foreground/10'
-        )}
+        {...summaryStyleProps}
+        className={summaryClassName}
       >
         {summaryInner}
       </button>
@@ -250,11 +378,8 @@ export function StageChip({
               type="button"
               aria-label={detail.ariaLabel}
               title={detail.ariaLabel}
-              className={cn(
-                summaryClassName,
-                'select-none transition-colors hover:bg-muted-foreground/10',
-                popoverOpen && 'bg-muted-foreground/10'
-              )}
+              {...summaryStyleProps}
+              className={summaryClassName}
             >
               {summaryInner}
             </button>
@@ -265,7 +390,10 @@ export function StageChip({
           align="start"
           sideOffset={8}
           aria-label={detail.ariaLabel}
-          className="w-96 max-w-[min(24rem,90vw)] border-border/60 p-0 shadow-xl"
+          className={clsx(
+            stylex.props(styles.stagePopover).className,
+            'max-w-[min(24rem,90vw)] p-0 shadow-xl'
+          )}
         >
           {detail.content}
         </Popover.Content>
@@ -276,7 +404,7 @@ export function StageChip({
   return (
     // No enter animation — the stage remounts on every promotion, so any
     // fade/slide reads as jitter. Content appears instantly.
-    <div role="group" aria-label={label} className="flex min-w-0 flex-1 items-center gap-1">
+    <div role="group" aria-label={label} {...stylex.props(styles.root)}>
       {iconBadge}
       {leading}
       {summaryNode}

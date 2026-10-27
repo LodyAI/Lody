@@ -1,0 +1,63 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "components-lodysidebar--default",
+    "components-lodysidebar--workspace-syncing",
+    "components-lodysidebar--filtered-workspace-empty",
+    "components-lodysidebar--workspace-empty",
+    "components-lodysidebar--electron-always-visible-collapse-toggle",
+    "components-lodysidebar--electron-mac-os-collapse-toggle",
+    "components-lodysidebar--updated-mode",
+    "components-lodysidebar--updated-mode-show-project-overview",
+    "components-lodysidebar--updated-mode-opened-sessions",
+    "components-lodysidebar--updated-mode-team",
+    "components-lodysidebar--external-history-providers",
+    "components-lodysidebar--with-projects",
+    "components-lodysidebar--all-sessions-working",
+    "components-lodysidebar--machine-group-scrolling-header",
+    "components-sidebarfooter--default",
+    "components-sidebarfooter--long-name",
+    "components-sidebarfooter--syncing",
+    "components-sidebarfooter--local-identity"
+  ],
+  "allowBlankIds": [],
+  "states": {},
+  "ready": {
+    "components-sidebarfooter--default": [
+      {
+        "action": "visible",
+        "selector": "[data-shape=\"tile\"] img"
+      }
+    ],
+    "components-sidebarfooter--long-name": [
+      {
+        "action": "visible",
+        "selector": "[data-shape=\"tile\"] img"
+      }
+    ],
+    "components-sidebarfooter--local-identity": [
+      {
+        "action": "visible",
+        "selector": "[data-shape=\"tile\"] img"
+      }
+    ]
+  },
+  "blockedHosts": ["avatars.githubusercontent.com"]
+}

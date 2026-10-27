@@ -1,0 +1,158 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": ["components-sidebarfooter--default", "components-sidebarfooter--long-name"],
+  "allowBlankIds": [],
+  "states": {
+    "components-sidebarfooter--default": [
+      {
+        "name": "workspace-menu",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-workspace-switcher-trigger]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitemradio",
+            "name": "D Demo workspace"
+          }
+        ]
+      },
+      {
+        "name": "workspace-selected",
+        "steps": [
+          {
+            "action": "click",
+            "role": "menuitemradio",
+            "name": "D Demo workspace"
+          },
+          {
+            "action": "hidden",
+            "selector": "[role=\"menu\"]"
+          }
+        ]
+      },
+      {
+        "name": "archive-selected",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Archive"
+          },
+          {
+            "action": "visible",
+            "role": "button",
+            "name": "Leave Archive"
+          }
+        ]
+      },
+      {
+        "name": "archive-left",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Leave Archive"
+          },
+          {
+            "action": "visible",
+            "role": "button",
+            "name": "Archive"
+          }
+        ]
+      },
+      {
+        "name": "help-menu",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Help"
+          },
+          {
+            "action": "visible",
+            "role": "menu",
+            "name": "Help"
+          }
+        ]
+      },
+      {
+        "name": "help-closed",
+        "steps": [
+          {
+            "action": "press",
+            "role": "menu",
+            "name": "Help",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "menu",
+            "name": "Help"
+          }
+        ]
+      }
+    ],
+    "components-sidebarfooter--long-name": [
+      {
+        "name": "workspace-menu",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-workspace-switcher-trigger]"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"menu\"]"
+          }
+        ]
+      },
+      {
+        "name": "workspace-closed",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[role=\"menu\"]",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "selector": "[role=\"menu\"]"
+          }
+        ]
+      }
+    ]
+  },
+  "ready": {
+    "components-sidebarfooter--default": [
+      {
+        "action": "visible",
+        "selector": "[data-shape=\"tile\"] img"
+      }
+    ],
+    "components-sidebarfooter--long-name": [
+      {
+        "action": "visible",
+        "selector": "[data-shape=\"tile\"] img"
+      }
+    ]
+  }
+}

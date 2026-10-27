@@ -1,0 +1,82 @@
+{
+  "viewports": [
+    { "name": "desktop", "width": 1280, "height": 900 },
+    { "name": "tablet", "width": 768, "height": 900 },
+    { "name": "phone", "width": 390, "height": 844 }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "sessions-sessionusagepopover--context-and-quota",
+    "sessions-sessionusagepopover--compacting",
+    "sessions-sessionusagepopover--quota-only",
+    "sessions-sessionusagepopover--weekly-only",
+    "sessions-sessionusagepopover--five-hour-only",
+    "sessions-sessionusagepopover--claude-fable-weekly",
+    "sessions-sessionusagepopover--context-only"
+  ],
+  "states": {
+    "sessions-sessionusagepopover--context-and-quota": [
+      {
+        "name": "open",
+        "steps": [
+          { "action": "click", "selector": "#storybook-root button" },
+          { "action": "visible", "role": "dialog" }
+        ]
+      }
+    ],
+    "sessions-sessionusagepopover--compacting": [
+      {
+        "name": "open",
+        "steps": [
+          { "action": "click", "selector": "#storybook-root button" },
+          { "action": "visible", "role": "dialog" }
+        ]
+      }
+    ],
+    "sessions-sessionusagepopover--quota-only": [
+      {
+        "name": "open",
+        "steps": [
+          { "action": "click", "selector": "#storybook-root button" },
+          { "action": "visible", "role": "dialog" }
+        ]
+      }
+    ],
+    "sessions-sessionusagepopover--weekly-only": [
+      {
+        "name": "open",
+        "steps": [
+          { "action": "click", "selector": "#storybook-root button" },
+          { "action": "visible", "role": "dialog" }
+        ]
+      }
+    ],
+    "sessions-sessionusagepopover--five-hour-only": [
+      {
+        "name": "open",
+        "steps": [
+          { "action": "click", "selector": "#storybook-root button" },
+          { "action": "visible", "role": "dialog" }
+        ]
+      }
+    ],
+    "sessions-sessionusagepopover--claude-fable-weekly": [
+      {
+        "name": "open",
+        "steps": [
+          { "action": "click", "selector": "#storybook-root button" },
+          { "action": "visible", "role": "dialog" }
+        ]
+      }
+    ],
+    "sessions-sessionusagepopover--context-only": [
+      {
+        "name": "open",
+        "steps": [
+          { "action": "click", "selector": "#storybook-root button" },
+          { "action": "visible", "role": "dialog" }
+        ]
+      }
+    ]
+  }
+}

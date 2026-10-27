@@ -1,6 +1,9 @@
 import { createContext, useContext, useMemo, type ReactNode, Fragment } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { cn } from '@/lib/utils';
 import { buildSessionSearchTextParts } from '@/lib/session-chat-search';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeRadius } from '../../style/theme-scale.stylex';
 
 export type SessionSearchBlockMatch = {
   blockId: string;
@@ -21,11 +24,22 @@ type SessionSearchContextValue = {
 
 const SessionSearchContext = createContext<SessionSearchContextValue | null>(null);
 
-export const SEARCH_HIGHLIGHT_MARK_CLASS_NAME =
-  'rounded-xs bg-amber-200/75 text-foreground shadow-[inset_0_-1px_0_rgba(0,0,0,0.12)] dark:bg-amber-400/25';
+const styles = stylex.create({
+  mark: { borderRadius: themeRadius.xs },
+  ink: { color: themeColors.foreground },
+});
 
-export const SEARCH_HIGHLIGHT_ACTIVE_MARK_CLASS_NAME =
-  'bg-amber-300 text-foreground ring-1 ring-amber-400/80 dark:bg-amber-300/55 dark:ring-amber-200/60';
+// Markdown also consumes these strings when inserting marks into rendered text.
+// Shared radius/ink do not conflict with the active mark's palette and ring.
+export const SEARCH_HIGHLIGHT_MARK_CLASS_NAME = cn(
+  stylex.props(styles.mark, styles.ink).className,
+  'bg-amber-200/75 shadow-[inset_0_-1px_0_rgba(0,0,0,0.12)] dark:bg-amber-400/25'
+);
+
+export const SEARCH_HIGHLIGHT_ACTIVE_MARK_CLASS_NAME = cn(
+  stylex.props(styles.ink).className,
+  'bg-amber-300 ring-1 ring-amber-400/80 dark:bg-amber-300/55 dark:ring-amber-200/60'
+);
 
 export const SEARCH_HIGHLIGHT_CONTAINER_MATCHED_CLASS_NAME = '';
 

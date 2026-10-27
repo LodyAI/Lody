@@ -1,0 +1,482 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "before-sm",
+      "width": 639,
+      "height": 900
+    },
+    {
+      "name": "sm",
+      "width": 640,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "blockedHosts": ["avatars.githubusercontent.com"],
+  "ids": [
+    "sessions-searchmigration--interactive",
+    "sessions-searchmigration--many-matches",
+    "sessions-searchmigration--literal-markdown"
+  ],
+  "ready": {
+    "sessions-searchmigration--interactive": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Open search"
+      }
+    ],
+    "sessions-searchmigration--many-matches": [
+      {
+        "action": "visible",
+        "role": "searchbox",
+        "name": "Find in session"
+      },
+      {
+        "action": "visible",
+        "selector": "[role=\"search\"] [aria-live=\"polite\"]:has-text(\"128 / 128\")"
+      }
+    ],
+    "sessions-searchmigration--literal-markdown": [
+      {
+        "action": "visible",
+        "role": "searchbox",
+        "name": "Find in session"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-session-search-mark=\"true\"]",
+        "index": 0
+      }
+    ]
+  },
+  "states": {
+    "sessions-searchmigration--interactive": [
+      {
+        "name": "open-empty",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open search"
+          },
+          {
+            "action": "visible",
+            "role": "searchbox",
+            "name": "Find in session"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Previous result"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Next result"
+          }
+        ]
+      },
+      {
+        "name": "matches",
+        "steps": [
+          {
+            "action": "fill",
+            "role": "searchbox",
+            "name": "Find in session",
+            "value": "search"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"search\"] [aria-live=\"polite\"]:has-text(\"1 / 6\")"
+          },
+          {
+            "action": "enabled",
+            "role": "button",
+            "name": "Next result"
+          },
+          {
+            "action": "visible",
+            "selector": "mark[data-search-result-id]",
+            "index": 0
+          }
+        ]
+      },
+      {
+        "name": "next-keyboard",
+        "steps": [
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"search\"] [aria-live=\"polite\"]:has-text(\"2 / 6\")"
+          }
+        ]
+      },
+      {
+        "name": "thought-expanded",
+        "steps": [
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"search\"] [aria-live=\"polite\"]:has-text(\"3 / 6\")"
+          },
+          {
+            "action": "visible",
+            "selector": "button[aria-expanded=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "previous-keyboard",
+        "steps": [
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "key": "Shift+Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"search\"] [aria-live=\"polite\"]:has-text(\"2 / 6\")"
+          }
+        ]
+      },
+      {
+        "name": "next-hover-tooltip",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Next result"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-open][data-base-ui-focusable]:has-text(\"Next result\")"
+          }
+        ]
+      },
+      {
+        "name": "clear-escape",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "searchbox",
+            "name": "Find in session"
+          },
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "key": "Escape"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Next result"
+          },
+          {
+            "action": "hidden",
+            "selector": "mark[data-search-result-id]"
+          }
+        ]
+      },
+      {
+        "name": "no-results",
+        "steps": [
+          {
+            "action": "fill",
+            "role": "searchbox",
+            "name": "Find in session",
+            "value": "not_present___"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"search\"] [aria-live=\"polite\"]:has-text(\"0 / 0\")"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Previous result"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Next result"
+          }
+        ]
+      },
+      {
+        "name": "long-no-results",
+        "steps": [
+          {
+            "action": "fill",
+            "role": "searchbox",
+            "name": "Find in session",
+            "value": "a-very-long-absent-search-value-a-very-long-absent-search-value-a-very-long-absent-search-value-a-very-long-absent-search-value-a-very-long-absent-search-value-"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"search\"] [aria-live=\"polite\"]:has-text(\"0 / 0\")"
+          }
+        ]
+      },
+      {
+        "name": "clear-second-query",
+        "steps": [
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "key": "Escape"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Next result"
+          }
+        ]
+      },
+      {
+        "name": "close-escape",
+        "steps": [
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "searchbox",
+            "name": "Find in session"
+          }
+        ]
+      },
+      {
+        "name": "reopened-empty",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open search"
+          },
+          {
+            "action": "visible",
+            "role": "searchbox",
+            "name": "Find in session"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Next result"
+          }
+        ]
+      },
+      {
+        "name": "close-button",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Close"
+          },
+          {
+            "action": "hidden",
+            "role": "searchbox",
+            "name": "Find in session"
+          }
+        ]
+      },
+      {
+        "name": "reopened-query",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open search"
+          },
+          {
+            "action": "fill",
+            "role": "searchbox",
+            "name": "Find in session",
+            "value": "search"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"search\"] [aria-live=\"polite\"]:has-text(\"1 / 6\")"
+          }
+        ]
+      }
+    ],
+    "sessions-searchmigration--many-matches": [
+      {
+        "name": "wrap-next",
+        "steps": [
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"search\"] [aria-live=\"polite\"]:has-text(\"1 / 128\")"
+          }
+        ]
+      },
+      {
+        "name": "wrap-previous",
+        "steps": [
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "key": "Shift+Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"search\"] [aria-live=\"polite\"]:has-text(\"128 / 128\")"
+          }
+        ]
+      },
+      {
+        "name": "previous-hover-tooltip",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Previous result"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-open][data-base-ui-focusable]:has-text(\"Previous result\")"
+          }
+        ]
+      },
+      {
+        "name": "clear",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "searchbox",
+            "name": "Find in session"
+          },
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "key": "Escape"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Next result"
+          }
+        ]
+      },
+      {
+        "name": "closed",
+        "steps": [
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "searchbox",
+            "name": "Find in session"
+          }
+        ]
+      }
+    ],
+    "sessions-searchmigration--literal-markdown": [
+      {
+        "name": "active-plain",
+        "steps": [
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-session-search-mark=\"true\"]",
+            "index": 0
+          }
+        ]
+      },
+      {
+        "name": "active-bold",
+        "steps": [
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "key": "Enter"
+          }
+        ]
+      },
+      {
+        "name": "active-code",
+        "steps": [
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "key": "Enter"
+          }
+        ]
+      },
+      {
+        "name": "return-thought",
+        "steps": [
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "key": "Shift+Enter"
+          },
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "key": "Shift+Enter"
+          },
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "key": "Shift+Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "button[aria-expanded=\"true\"]"
+          }
+        ]
+      }
+    ]
+  }
+}

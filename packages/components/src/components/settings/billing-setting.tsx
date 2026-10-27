@@ -10,6 +10,15 @@ import type { BillingInvoiceDetail } from '@lody/cloud-api';
 import { BillingInvoiceDetails } from './billing-invoice-details';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { usePostHog } from '@posthog/react';
+import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
@@ -92,6 +101,77 @@ const BILLING_ERROR_TOAST_KEYS: Record<string, string> = {
 /** How long a just-finished checkout may keep polling Stripe for confirmation. */
 const CHECKOUT_CONFIRMATION_WINDOW_MS = 2 * 60 * 1000;
 const CHECKOUT_CONFIRMATION_INTERVAL_MS = 3_000;
+
+/**
+ * The switch-interval preview: what today's charge would be, before the switch
+ * is committed. It is printed inside the confirmation dialog, so it reads the
+ * theme's own inks rather than the palette a product surface would use.
+ */
+const styles = stylex.create({
+  /** The preview's loading line. */
+  loading: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    paddingBlock: themeSpace[2],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.mutedForeground,
+  },
+  error: {
+    margin: 0,
+    paddingBlock: themeSpace[2],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.destructive,
+  },
+  /** The panel the charge is broken down in. */
+  panel: {
+    borderRadius: themeRadius.lg,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.7)',
+    backgroundColor: 'hsl(var(--muted) / 0.3)',
+    padding: themeSpace[3],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+  },
+  /** One line of the breakdown: what it is on the left, what it costs on the right. */
+  line: {
+    display: 'flex',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: themeSpace[4],
+  },
+  /** A line that follows the one above it. */
+  lineSpaced: { marginTop: themeSpace[1.5] },
+  /** The charge itself: ruled off from the lines that explain it. */
+  lineTotal: {
+    marginTop: themeSpace[2],
+    paddingTop: themeSpace[2],
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'hsl(var(--border) / 0.6)',
+    fontWeight: themeFontWeight.normal,
+  },
+  /** The note under the breakdown, ruled off the same way. */
+  note: {
+    margin: 0,
+    marginTop: themeSpace[2.5],
+    paddingTop: themeSpace[2.5],
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'hsl(var(--border) / 0.6)',
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+  muted: { color: themeColors.mutedForeground },
+  strong: { color: themeColors.foreground },
+  primary: { color: themeColors.primary },
+  /** Money reads as a column of digits. */
+  amount: { fontVariantNumeric: 'tabular-nums' },
+});
 
 export function BillingSettingsComponent() {
   // Registry-level gating already hides the billing tab without the 'billing'
@@ -806,17 +886,17 @@ function CloudBillingSettings() {
             </AlertDialog.Description>
           </AlertDialog.Header>
           {intervalPreview === undefined ? (
-            <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
+            <div {...stylex.props(styles.loading)}>
               <Spinner className="h-4 w-4" />
               {t('billing.historyLoading')}
             </div>
           ) : intervalPreview === null ? (
-            <p className="py-2 text-sm text-destructive">{t('billing.switchPreviewError')}</p>
+            <p {...stylex.props(styles.error)}>{t('billing.switchPreviewError')}</p>
           ) : (
-            <div className="rounded-lg border border-border/70 bg-muted/30 p-3 text-sm">
+            <div {...stylex.props(styles.panel)}>
               {/* Subtotal: seats × unit price */}
-              <div className="flex items-baseline justify-between gap-4">
-                <span className="text-muted-foreground">
+              <div {...stylex.props(styles.line)}>
+                <span {...stylex.props(styles.muted)}>
                   {t(
                     targetInterval === 'year'
                       ? 'billing.switchLineSeatsYearly'
@@ -827,24 +907,24 @@ function CloudBillingSettings() {
                     }
                   )}
                 </span>
-                <span className="tabular-nums text-foreground">
+                <span {...stylex.props(styles.amount, styles.strong)}>
                   {formatUsd(intervalPreview.subtotalAmount)}
                 </span>
               </div>
               {/* Existing subscription discount */}
               {intervalPreview.promoDiscountAmount !== 0 ? (
-                <div className="mt-1.5 flex items-baseline justify-between gap-4">
-                  <span className="text-primary">{t('billing.upcomingDiscount')}</span>
-                  <span className="tabular-nums text-primary">
+                <div {...stylex.props(styles.line, styles.lineSpaced)}>
+                  <span {...stylex.props(styles.primary)}>{t('billing.upcomingDiscount')}</span>
+                  <span {...stylex.props(styles.amount, styles.primary)}>
                     {formatUsd(intervalPreview.promoDiscountAmount)}
                   </span>
                 </div>
               ) : null}
               {/* Credit for the unused portion of the current period */}
               {intervalPreview.creditAmount !== 0 ? (
-                <div className="mt-1.5 flex items-baseline justify-between gap-4">
-                  <span className="text-muted-foreground">{t('billing.switchLineCredit')}</span>
-                  <span className="tabular-nums text-foreground">
+                <div {...stylex.props(styles.line, styles.lineSpaced)}>
+                  <span {...stylex.props(styles.muted)}>{t('billing.switchLineCredit')}</span>
+                  <span {...stylex.props(styles.amount, styles.strong)}>
                     {formatUsd(intervalPreview.creditAmount)}
                   </span>
                 </div>
@@ -852,26 +932,26 @@ function CloudBillingSettings() {
               {/* Credit that exceeds today's charge, saved to account balance —
                   keeps the lines reconciling to the $0 charged today. */}
               {intervalPreview.deferredToBalanceAmount !== 0 ? (
-                <div className="mt-1.5 flex items-baseline justify-between gap-4">
-                  <span className="text-muted-foreground">
+                <div {...stylex.props(styles.line, styles.lineSpaced)}>
+                  <span {...stylex.props(styles.muted)}>
                     {t('billing.switchLineDeferredCredit')}
                   </span>
-                  <span className="tabular-nums text-foreground">
+                  <span {...stylex.props(styles.amount, styles.strong)}>
                     {formatUsd(intervalPreview.deferredToBalanceAmount)}
                   </span>
                 </div>
               ) : null}
               {/* Net charged today */}
-              <div className="mt-2 flex items-baseline justify-between gap-4 border-t border-border/60 pt-2 font-normal">
-                <span className="text-foreground">{t('billing.switchLineDueNow')}</span>
-                <span className="tabular-nums text-foreground">
+              <div {...stylex.props(styles.line, styles.lineTotal)}>
+                <span {...stylex.props(styles.strong)}>{t('billing.switchLineDueNow')}</span>
+                <span {...stylex.props(styles.amount, styles.strong)}>
                   {formatUsd(intervalPreview.amountDueNow)}
                 </span>
               </div>
               {/* When leftover credit remains (e.g. year→month), spell out how
                   long it covers renewals before billing resumes. */}
               {intervalPreview.remainingCredit > 0 ? (
-                <p className="mt-2.5 border-t border-border/60 pt-2.5 text-xs text-muted-foreground">
+                <p {...stylex.props(styles.note)}>
                   {switchCreditCoverageDate
                     ? t('billing.switchCreditCoverageNote', {
                         amount: formatUsd(intervalPreview.remainingCredit),

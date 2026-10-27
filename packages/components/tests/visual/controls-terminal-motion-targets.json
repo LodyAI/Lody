@@ -1,0 +1,68 @@
+{
+  "viewports": [
+    {
+      "name": "desktop-motion",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "short-motion",
+      "width": 1280,
+      "height": 320
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "no-preference",
+  "ids": ["terminal-migration--row-states"],
+  "ready": {
+    "terminal-migration--row-states": [
+      {
+        "action": "visible",
+        "selector": ".xterm-rows:has-text(\"Synthetic local shell\")"
+      },
+      {
+        "action": "focus",
+        "role": "button",
+        "name": "Toggle terminal dock"
+      }
+    ]
+  },
+  "states": {
+    "terminal-migration--row-states": [
+      {
+        "name": "collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Hide panel"
+          },
+          {
+            "action": "hidden",
+            "role": "button",
+            "name": "Hide panel"
+          }
+        ]
+      },
+      {
+        "name": "restored",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          },
+          {
+            "action": "visible",
+            "selector": ".xterm-rows:has-text(\"Synthetic local shell\")"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          }
+        ]
+      }
+    ]
+  }
+}

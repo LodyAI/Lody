@@ -1,0 +1,485 @@
+{
+  "viewports": [
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 720
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 1024
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "components-ownedmobileworkspacesheetsmigration--create",
+    "components-ownedmobileworkspacesheetsmigration--create-blocked",
+    "components-ownedmobileworkspacesheetsmigration--create-checking",
+    "components-ownedmobileworkspacesheetsmigration--create-unavailable",
+    "components-ownedmobileworkspacesheetsmigration--create-long-text",
+    "components-ownedmobileworkspacesheetsmigration--delete",
+    "components-ownedmobileworkspacesheetsmigration--delete-warning",
+    "components-ownedmobileworkspacesheetsmigration--delete-long-text"
+  ],
+  "ready": {
+    "components-ownedmobileworkspacesheetsmigration--create": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-workspace-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-slot=\"drawer-content\"]"
+      }
+    ],
+    "components-ownedmobileworkspacesheetsmigration--create-blocked": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-workspace-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-slot=\"drawer-content\"]"
+      }
+    ],
+    "components-ownedmobileworkspacesheetsmigration--create-checking": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-workspace-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-slot=\"drawer-content\"]"
+      }
+    ],
+    "components-ownedmobileworkspacesheetsmigration--create-unavailable": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-workspace-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-slot=\"drawer-content\"]"
+      }
+    ],
+    "components-ownedmobileworkspacesheetsmigration--create-long-text": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-workspace-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-slot=\"drawer-content\"]"
+      }
+    ],
+    "components-ownedmobileworkspacesheetsmigration--delete": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-workspace-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-slot=\"drawer-content\"]"
+      }
+    ],
+    "components-ownedmobileworkspacesheetsmigration--delete-warning": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-workspace-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-slot=\"drawer-content\"]"
+      }
+    ],
+    "components-ownedmobileworkspacesheetsmigration--delete-long-text": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-workspace-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-slot=\"drawer-content\"]"
+      }
+    ]
+  },
+  "states": {
+    "components-ownedmobileworkspacesheetsmigration--create": [
+      {
+        "name": "name-entered",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#mobile-create-workspace-name",
+            "value": "Synthetic Team"
+          }
+        ]
+      },
+      {
+        "name": "invalid-slug",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#mobile-create-workspace-slug",
+            "value": "a"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Create"
+          }
+        ]
+      },
+      {
+        "name": "reset-suggestion",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Use suggestion"
+          }
+        ]
+      },
+      {
+        "name": "closed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Cancel"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-slot=\"drawer-content\"]"
+          }
+        ]
+      },
+      {
+        "name": "reopened-empty",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-mobile-workspace-reopen]"
+          },
+          {
+            "action": "visible",
+            "selector": "#mobile-create-workspace-name"
+          }
+        ]
+      }
+    ],
+    "components-ownedmobileworkspacesheetsmigration--create-blocked": [
+      {
+        "name": "closed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Close",
+            "index": 1
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-slot=\"drawer-content\"]"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-mobile-workspace-reopen]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-slot=\"drawer-content\"]"
+          }
+        ]
+      }
+    ],
+    "components-ownedmobileworkspacesheetsmigration--create-checking": [
+      {
+        "name": "name-entered",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#mobile-create-workspace-name",
+            "value": "Synthetic Team"
+          }
+        ]
+      },
+      {
+        "name": "invalid-slug",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#mobile-create-workspace-slug",
+            "value": "a"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Create"
+          }
+        ]
+      }
+    ],
+    "components-ownedmobileworkspacesheetsmigration--create-unavailable": [
+      {
+        "name": "name-entered",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#mobile-create-workspace-name",
+            "value": "Synthetic Team"
+          }
+        ]
+      },
+      {
+        "name": "invalid-slug",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#mobile-create-workspace-slug",
+            "value": "a"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Create"
+          }
+        ]
+      }
+    ],
+    "components-ownedmobileworkspacesheetsmigration--create-long-text": [
+      {
+        "name": "name-entered",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#mobile-create-workspace-name",
+            "value": "Synthetic Team"
+          }
+        ]
+      },
+      {
+        "name": "invalid-slug",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#mobile-create-workspace-slug",
+            "value": "a"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Create"
+          }
+        ]
+      }
+    ],
+    "components-ownedmobileworkspacesheetsmigration--delete": [
+      {
+        "name": "keyboard-focus",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-slot=\"drawer-content\"]",
+            "key": "Tab"
+          }
+        ]
+      },
+      {
+        "name": "mismatch",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#mobile-delete-workspace-confirm",
+            "value": "Synthetic WorkspacE"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Delete Permanently"
+          }
+        ]
+      },
+      {
+        "name": "matching",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#mobile-delete-workspace-confirm",
+            "value": "Synthetic Workspace"
+          },
+          {
+            "action": "enabled",
+            "role": "button",
+            "name": "Delete Permanently"
+          }
+        ]
+      },
+      {
+        "name": "pending",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Delete Permanently"
+          },
+          {
+            "action": "disabled",
+            "selector": "#mobile-delete-workspace-confirm"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Cancel"
+          },
+          {
+            "action": "visible",
+            "selector": "button:has([data-slot=\"spinner\"])"
+          }
+        ]
+      }
+    ],
+    "components-ownedmobileworkspacesheetsmigration--delete-warning": [
+      {
+        "name": "keyboard-focus",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-slot=\"drawer-content\"]",
+            "key": "Tab"
+          }
+        ]
+      },
+      {
+        "name": "mismatch",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#mobile-delete-workspace-confirm",
+            "value": "Synthetic WorkspacE"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Delete Permanently"
+          }
+        ]
+      },
+      {
+        "name": "matching",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#mobile-delete-workspace-confirm",
+            "value": "Synthetic Workspace"
+          },
+          {
+            "action": "enabled",
+            "role": "button",
+            "name": "Delete Permanently"
+          }
+        ]
+      },
+      {
+        "name": "pending",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Delete Permanently"
+          },
+          {
+            "action": "disabled",
+            "selector": "#mobile-delete-workspace-confirm"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Cancel"
+          },
+          {
+            "action": "visible",
+            "selector": "button:has([data-slot=\"spinner\"])"
+          }
+        ]
+      }
+    ],
+    "components-ownedmobileworkspacesheetsmigration--delete-long-text": [
+      {
+        "name": "keyboard-focus",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-slot=\"drawer-content\"]",
+            "key": "Tab"
+          }
+        ]
+      },
+      {
+        "name": "mismatch",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#mobile-delete-workspace-confirm",
+            "value": "Synthetic WorkspacE"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Delete Permanently"
+          }
+        ]
+      },
+      {
+        "name": "matching",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#mobile-delete-workspace-confirm",
+            "value": "Synthetic collaborative development workspace — international team"
+          },
+          {
+            "action": "enabled",
+            "role": "button",
+            "name": "Delete Permanently"
+          }
+        ]
+      },
+      {
+        "name": "pending",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Delete Permanently"
+          },
+          {
+            "action": "disabled",
+            "selector": "#mobile-delete-workspace-confirm"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Cancel"
+          },
+          {
+            "action": "visible",
+            "selector": "button:has([data-slot=\"spinner\"])"
+          }
+        ]
+      }
+    ]
+  }
+}

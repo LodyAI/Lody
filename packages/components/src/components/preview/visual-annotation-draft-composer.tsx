@@ -1,3 +1,13 @@
+import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeShadow,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 import type { CSSProperties } from 'react';
 import { Send, X } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
@@ -35,18 +45,15 @@ export function VisualAnnotationDraftComposer({
   return (
     <div
       data-lody-visual-comment-draft="true"
-      className={cn(
-        'pointer-events-auto w-[280px] max-w-[calc(100%-24px)] rounded-md border border-border bg-popover p-3 text-popover-foreground shadow-xl',
-        className
-      )}
+      className={cn(stylex.props(styles.root).className, className)}
       style={style}
     >
-      <div className="mb-2 flex items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="text-xs font-semibold">
+      <div {...stylex.props(styles.header)}>
+        <div {...stylex.props(styles.headerText)}>
+          <div {...stylex.props(styles.title)}>
             {t('sessions.preview.annotation.addComment', 'Add comment')}
           </div>
-          <div className="truncate font-mono text-[10px] text-muted-foreground">{targetLabel}</div>
+          <div {...stylex.props(styles.target)}>{targetLabel}</div>
         </div>
         <Button
           type="button"
@@ -56,7 +63,7 @@ export function VisualAnnotationDraftComposer({
           aria-label={t('common.cancel', 'Cancel')}
           onClick={onCancel}
         >
-          <X className="h-3.5 w-3.5" />
+          <X {...stylex.props(styles.icon)} />
         </Button>
       </div>
       <Textarea
@@ -66,17 +73,60 @@ export function VisualAnnotationDraftComposer({
         className="min-h-20 resize-none bg-background text-xs"
         autoFocus={autoFocus}
       />
-      <div className="mt-2 flex justify-end">
+      <div {...stylex.props(styles.footer)}>
         <Button
           type="button"
           size="small"
           disabled={!value.trim() || submitting}
           onClick={onSubmit}
         >
-          {submitting ? <Spinner className="h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5" />}
+          {submitting ? (
+            <Spinner {...stylex.props(styles.icon)} />
+          ) : (
+            <Send {...stylex.props(styles.icon)} />
+          )}
           {t('sessions.preview.annotation.send', 'Send')}
         </Button>
       </div>
     </div>
   );
 }
+
+const styles = stylex.create({
+  root: {
+    pointerEvents: 'auto',
+    width: '280px',
+    maxWidth: 'calc(100% - 24px)',
+    borderRadius: themeRadius.md,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: themeColors.border,
+    backgroundColor: themeColors.popover,
+    padding: themeSpace[3],
+    color: themeColors.popoverForeground,
+    boxShadow: themeShadow.xl,
+  },
+  header: {
+    marginBottom: themeSpace[2],
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: themeSpace[2],
+  },
+  headerText: { minWidth: 0, flex: '1 1 0%' },
+  title: {
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    fontWeight: themeFontWeight.semibold,
+  },
+  target: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily: 'var(--font-mono)',
+    fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
+    fontSize: '10px',
+    color: themeColors.mutedForeground,
+  },
+  icon: { width: themeSpace[3.5], height: themeSpace[3.5] },
+  footer: { marginTop: themeSpace[2], display: 'flex', justifyContent: 'flex-end' },
+});

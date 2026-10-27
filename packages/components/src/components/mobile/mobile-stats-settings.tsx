@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import { useOrganization } from '@/hooks/useOrganization';
 import { Tabs } from '@lody/ui/tabs';
 import {
@@ -23,6 +24,70 @@ import {
 } from '@/components/settings/usage-timeline-bucket-label';
 import { formatCompactNumber, formatUsdAmount } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
+// The theme tokens are imported by path, not by the `@/` alias: the StyleX
+// compiler links a theme file on its own and does not follow bundler aliases.
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  /** The page: the sections stacked, set apart by the page's own rhythm. */
+  page: { paddingBottom: themeSpace[6], paddingTop: themeSpace[1] },
+  /** The range tabs, in the section's card. */
+  tabs: { paddingInline: themeSpace[3], paddingBlock: themeSpace[3] },
+  /** The hero stats, one per line. */
+  heroes: {
+    marginInline: themeSpace[3],
+    display: 'grid',
+    gridTemplateColumns: 'repeat(1, minmax(0, 1fr))',
+    gap: themeSpace[3],
+  },
+  /** The page's own inset for the sections that own their card. */
+  inset: { marginInline: themeSpace[3] },
+  /** A hero stat: a quiet label above a big number, in its own card. */
+  hero: {
+    borderRadius: themeRadius['2xl'],
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.4)',
+    backgroundColor: themeColors.card,
+    paddingInline: themeSpace[5],
+    paddingBlock: themeSpace[5],
+  },
+  heroLabel: {
+    fontSize: '0.82rem',
+    fontWeight: themeFontWeight.semibold,
+    color: themeColors.mutedForeground,
+  },
+  heroValue: {
+    marginTop: themeSpace[2],
+    fontSize: '2.5rem',
+    fontWeight: themeFontWeight.semibold,
+    lineHeight: 1,
+    letterSpacing: '-0.025em',
+    fontVariantNumeric: 'tabular-nums',
+    color: themeColors.foreground,
+  },
+  /** The note that stands in for the charts when no workspace is chosen. */
+  hint: {
+    marginInline: themeSpace[3],
+    marginTop: themeSpace[5],
+    borderRadius: themeRadius['2xl'],
+    borderWidth: '1px',
+    borderStyle: 'dashed',
+    borderColor: 'hsl(var(--border) / 0.6)',
+    backgroundColor: themeColors.card,
+    padding: themeSpace[4],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.mutedForeground,
+  },
+});
 
 /* Full-bleed hero stat: oversized count-up number with a quiet label
    above it. Used for the headline tokens + cost totals so they read
@@ -44,11 +109,9 @@ function HeroStat({
 }) {
   const animated = useCountUp(value, { enabled: ready });
   return (
-    <div className="rounded-2xl border border-border/40 bg-card px-5 py-5">
-      <div className="text-[0.82rem] font-semibold text-muted-foreground">{label}</div>
-      <div className="mt-2 text-[2.5rem] font-semibold leading-none tracking-tight tabular-nums text-foreground">
-        {ready ? format(animated) : '—'}
-      </div>
+    <div {...stylex.props(styles.hero)}>
+      <div {...stylex.props(styles.heroLabel)}>{label}</div>
+      <div {...stylex.props(styles.heroValue)}>{ready ? format(animated) : '—'}</div>
     </div>
   );
 }
@@ -118,9 +181,9 @@ export function MobileStatsSettings() {
   }, [getBucketLabel, usageTimeline]);
 
   return (
-    <div className="pb-6 pt-1">
+    <div {...stylex.props(styles.page)}>
       <MobileSettingsSection title={activeOrganization?.name || t('workspace.usage.title')}>
-        <div className="px-3 py-3">
+        <div {...stylex.props(styles.tabs)}>
           <Tabs.Root
             value={range}
             onValueChange={(nextValue) => {
@@ -138,7 +201,7 @@ export function MobileStatsSettings() {
       </MobileSettingsSection>
 
       <MobileSettingsSection title={t('workspace.usage.title')} noCard>
-        <div className="mx-3 grid grid-cols-1 gap-3">
+        <div {...stylex.props(styles.heroes)}>
           <HeroStat
             label={t('workspace.usage.tokens')}
             value={activeTotals?.tokens ?? 0}
@@ -158,7 +221,7 @@ export function MobileStatsSettings() {
          is still in flight — keep the section's shape with the skeleton. */}
       {workspaceId ? (
         <MobileSettingsSection noCard>
-          <div className="mx-3">
+          <div {...stylex.props(styles.inset)}>
             {usageCalendar ? (
               <UsageCalendarVisualization
                 calendar={usageCalendar}
@@ -180,7 +243,7 @@ export function MobileStatsSettings() {
          title would duplicate it. `noCard` lets the chart claim the full
          horizontal scroll area inside the section gutter. */}
       <MobileSettingsSection noCard>
-        <div className="mx-3">
+        <div {...stylex.props(styles.inset)}>
           <UsageStackedAreaChart
             title={t('workspace.usage.byModel')}
             buckets={byModelBuckets}
@@ -194,7 +257,7 @@ export function MobileStatsSettings() {
       </MobileSettingsSection>
 
       <MobileSettingsSection noCard>
-        <div className="mx-3">
+        <div {...stylex.props(styles.inset)}>
           <UsageStackedAreaChart
             title={t('workspace.usage.byUser')}
             buckets={byMemberBuckets}
@@ -208,7 +271,7 @@ export function MobileStatsSettings() {
       </MobileSettingsSection>
 
       {!workspaceId && (
-        <div className="mx-3 mt-5 rounded-2xl border border-dashed border-border/60 bg-card p-4 text-sm text-muted-foreground">
+        <div {...stylex.props(styles.hint)}>
           {t('workspace.usage.workspaceRequired', 'Select a workspace to view usage')}
         </div>
       )}

@@ -2,6 +2,7 @@ import { memo, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useReducedMotion } from 'framer-motion';
 import { useLocation } from '@tanstack/react-router';
+import * as stylex from '@stylexjs/stylex';
 import { LoroAppSidebar } from './loro-app-sidebar';
 import {
   DEFAULT_DESKTOP_SIDEBAR_WIDTH,
@@ -80,7 +81,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
     return (
       <div className={getWebWorkspaceLayoutRootClassName({ settingsRoute: true })}>
         <WindowDragStrip />
-        <div className="min-h-0 flex-1 overflow-hidden">
+        <div {...stylex.props(styles.settingsPane)}>
           <ErrorBoundary name="AppContent" variant="section" resetKeys={[pathname]}>
             {children}
           </ErrorBoundary>
@@ -101,11 +102,13 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
     ),
     MAX_DESKTOP_SIDEBAR_WIDTH
   );
+  const rootProps = stylex.props(styles.root);
   return (
     // `bg-sidebar` after the base class: the sidebar's colour is the window's ground.
     <div
       ref={setLayoutRoot}
-      className={cn(getWebWorkspaceLayoutRootClassName(), 'relative bg-sidebar')}
+      {...rootProps}
+      className={cn(getWebWorkspaceLayoutRootClassName(), rootProps.className, 'bg-sidebar')}
     >
       {compact ? (
         <CompactNavigationDialog
@@ -121,7 +124,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
       ) : (
         <div
           ref={sidebarRef}
-          className="relative z-10 h-full shrink-0"
+          {...stylex.props(styles.sidebarColumn)}
           style={{
             transform: `translateX(${sidebarVisible ? 0 : -sidebarSlideWidth}px)`,
             marginRight: sidebarVisible ? 0 : -sidebarSlideWidth,
@@ -153,3 +156,23 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
     </div>
   );
 }
+
+const styles = stylex.create({
+  /** The settings route's single pane, under the window drag strip. */
+  settingsPane: {
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+  },
+  /** The layout root: the sidebar's plane, with the content beside it. */
+  root: { position: 'relative' },
+  /** The sidebar's own column, slid out of view when it is closed. */
+  sidebarColumn: {
+    position: 'relative',
+    zIndex: 10,
+    height: '100%',
+    flexShrink: 0,
+  },
+});

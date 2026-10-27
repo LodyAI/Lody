@@ -16,16 +16,293 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Check, Search, X } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
+import * as stylex from '@stylexjs/stylex';
 
 import { filterFuzzyOptions } from '@/lib/fuzzy-option-filter';
 import { capturePickerSearchSelected, type SearchPickerKind } from '@/lib/picker-search-analytics';
 import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeShadow,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 
 // Above this many (filtered) options the dropdown list is virtualized — big branch
 // lists can run into the thousands. Small lists render plainly (cheaper, no measuring).
 const PICKER_VIRTUALIZE_THRESHOLD = 40;
 const PICKER_ROW_ESTIMATE_PX = 36;
 const PICKER_OVERSCAN = 8;
+
+/** Tailwind's `transition-colors`: colour properties only, 150ms, standard ease. */
+const TRANSITION_COLORS = {
+  transitionProperty: 'color, background-color, border-color, text-decoration-color, fill, stroke',
+  transitionDuration: '150ms',
+  transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+} as const;
+
+const styles = stylex.create({
+  /** The picker's own column. */
+  root: { width: '100%' },
+  /** The slot a picker projects its list into. */
+  slot: { width: '100%' },
+
+  /** One option in the list. */
+  option: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    userSelect: 'none',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[3],
+    paddingTop: themeSpace[2],
+    paddingBottom: themeSpace[2],
+    textAlign: 'left',
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    backgroundColor: {
+      default: null,
+      ':hover': 'hsl(var(--hover) / 0.6)',
+      ':focus-visible': 'hsl(var(--hover) / 0.6)',
+    },
+    ...TRANSITION_COLORS,
+  },
+  /** The option the keyboard is on. */
+  optionActive: { backgroundColor: 'hsl(var(--hover) / 0.6)' },
+  /** The option that is chosen. */
+  optionSelected: { color: themeColors.foreground },
+  /** An option that cannot be chosen. */
+  optionDisabled: {
+    cursor: 'not-allowed',
+    opacity: 0.5,
+    backgroundColor: {
+      default: null,
+      ':hover': 'transparent',
+      ':focus-visible': 'hsl(var(--hover) / 0.6)',
+    },
+  },
+  /** An option's icon. */
+  optionIcon: {
+    display: 'flex',
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    opacity: 0.8,
+  },
+  /** An option's text column. */
+  optionText: {
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    flexDirection: 'column',
+  },
+  /** An option's name. */
+  optionLabel: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  /** An option's second line. */
+  optionDescription: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+  /** The check beside the chosen option. */
+  optionCheck: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+    color: themeColors.primary,
+  },
+
+  /** The closed-state trigger. */
+  trigger: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    userSelect: 'none',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[3],
+    paddingTop: themeSpace[1.5],
+    paddingBottom: themeSpace[1.5],
+    textAlign: 'left',
+    borderRadius: themeRadius.md,
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.medium,
+    backgroundColor: {
+      default: 'hsl(var(--input) / 0.4)',
+      ':hover': 'hsl(var(--muted) / 0.6)',
+    },
+    color: { default: 'hsl(var(--foreground) / 0.85)', ':hover': themeColors.foreground },
+    scale: { default: null, ':active': '0.985' },
+    // The global "Pro focus style" paints an inset ring on every focused
+    // input and button; the picker's own focus-scoped ring never painted
+    // (the app zeroes Tailwind's ring on focus), so it must not appear
+    // here either.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+    transitionProperty: 'all',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  /**
+   * The open trigger: a deeper fill and a ring, so it reads as "expanded"
+   * even without a chevron. The ring is gone while the trigger holds
+   * focus — the same ring the picker never painted at focus.
+   */
+  triggerOpen: {
+    backgroundColor: {
+      default: 'hsl(var(--muted) / 0.7)',
+      ':hover': 'hsl(var(--muted) / 0.6)',
+    },
+    color: { default: themeColors.foreground, ':hover': themeColors.foreground },
+    boxShadow: { default: '0 0 0 2px hsl(var(--primary) / 0.3)', ':focus-visible': 'none' },
+  },
+  /** A trigger that cannot be opened. */
+  triggerDisabled: {
+    cursor: 'not-allowed',
+    opacity: 0.6,
+  },
+  /** A label clipped to its column. */
+  truncate: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  /** The trigger's content column. */
+  triggerBody: {
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    alignItems: 'center',
+    gap: themeSpace[2],
+  },
+
+  /** The accordion the list opens in. */
+  expansion: { overflow: 'hidden' },
+  /** The list's own panel. */
+  panel: {
+    display: 'flex',
+    flexDirection: 'column',
+    marginTop: '0.375rem',
+    overflow: 'hidden',
+    borderRadius: themeRadius.lg,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.6)',
+    backgroundColor: themeColors.popover,
+    color: themeColors.popoverForeground,
+    boxShadow: themeShadow.lg,
+  },
+  /** The menu's own panel. */
+  menuPanel: {
+    marginTop: '0.375rem',
+    padding: themeSpace[1],
+    borderRadius: themeRadius.lg,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.6)',
+    backgroundColor: themeColors.popover,
+    color: themeColors.popoverForeground,
+    boxShadow: themeShadow.lg,
+  },
+  /** The list's scroll area. */
+  list: {
+    maxHeight: '200px',
+    overflowY: 'auto',
+    paddingTop: themeSpace[1],
+    paddingBottom: themeSpace[1],
+    scrollbarGutter: 'auto',
+  },
+  /** The virtualized list's frame. */
+  virtualList: { position: 'relative', width: '100%' },
+  /** The list's empty state. */
+  empty: {
+    paddingInline: themeSpace[3],
+    paddingTop: themeSpace[2],
+    paddingBottom: themeSpace[2],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.mutedForeground,
+  },
+
+  /** The search row above the list. */
+  searchRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[3],
+    paddingTop: themeSpace[2],
+    paddingBottom: themeSpace[2],
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: 'hsl(var(--border) / 0.4)',
+  },
+  /** The search glyph. */
+  searchGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+  },
+  /** The search field. */
+  searchInput: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    borderStyle: 'none',
+    backgroundColor: 'transparent',
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    // The global "Pro focus style" paints an inset ring on every focused
+    // input and button; the picker's own focus-scoped ring never painted
+    // (the app zeroes Tailwind's ring on focus), so it must not appear
+    // here either.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+    '::placeholder': { color: themeColors.mutedForeground },
+  },
+  /** The button that clears the search. */
+  clearButton: {
+    display: 'flex',
+    marginRight: 'calc(var(--spacing) * -1)',
+    width: themeSpace[6],
+    height: themeSpace[6],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.full,
+    color: { default: themeColors.mutedForeground, ':hover': themeColors.foreground },
+    backgroundColor: {
+      default: null,
+      ':hover': 'hsl(var(--hover) / 0.6)',
+      ':active': 'hsl(var(--hover) / 0.6)',
+    },
+    ...TRANSITION_COLORS,
+  },
+  /** The clear button's glyph. */
+  clearGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+  },
+
+  /** A menu's trigger. */
+  menuTrigger: { userSelect: 'none' },
+});
 
 export type MobileInlinePickerOption<T extends string = string> = {
   value: T;
@@ -138,7 +415,11 @@ export function MobileInlinePickerRowSlot({
   return (
     <RowExpansionSlotContext.Provider value={slot}>
       {children}
-      <div ref={setSlot} className={cn('w-full', slotClassName)} aria-hidden="true" />
+      <div
+        ref={setSlot}
+        {...withClassName(stylex.props(styles.slot), slotClassName)}
+        aria-hidden="true"
+      />
     </RowExpansionSlotContext.Provider>
   );
 }
@@ -431,28 +712,27 @@ export function MobileInlinePicker<T extends string = string>({
           onPointerMove={() => {
             if (!opt.disabled && !isActive) setActiveIndex(index);
           }}
-          className={cn(
-            'flex w-full select-none items-center gap-2 px-3 py-2 text-left text-sm transition-colors',
-            'hover:bg-hover/60 focus-visible:outline-none focus-visible:bg-hover/60',
-            isActive && 'bg-hover/60',
-            isSelected && 'text-foreground',
-            opt.disabled && 'cursor-not-allowed opacity-50 hover:bg-transparent'
+          {...stylex.props(
+            styles.option,
+            isActive && styles.optionActive,
+            isSelected && styles.optionSelected,
+            opt.disabled && styles.optionDisabled
           )}
         >
           {opt.icon ? (
-            <span className="flex h-4 w-4 shrink-0 items-center justify-center opacity-80">
+            /* The option's icon box. Its size is what lines every option's
+               label up, including the ones whose icon is an empty glyph. */
+            <span data-picker-option-icon="" {...stylex.props(styles.optionIcon)}>
               {opt.icon}
             </span>
           ) : null}
-          <span className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate">{opt.label}</span>
+          <span {...stylex.props(styles.optionText)}>
+            <span {...stylex.props(styles.optionLabel)}>{opt.label}</span>
             {opt.description ? (
-              <span className="truncate text-xs text-muted-foreground">{opt.description}</span>
+              <span {...stylex.props(styles.optionDescription)}>{opt.description}</span>
             ) : null}
           </span>
-          {isSelected ? (
-            <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
-          ) : null}
+          {isSelected ? <Check {...stylex.props(styles.optionCheck)} aria-hidden="true" /> : null}
         </button>
       </div>
     );
@@ -473,24 +753,24 @@ export function MobileInlinePicker<T extends string = string>({
       aria-controls={open ? listboxId : undefined}
       aria-activedescendant={open && activeIndex >= 0 ? optionId(activeIndex) : undefined}
       aria-label={ariaLabel}
-      className={cn(
-        'group/picker-trigger flex w-full select-none items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm font-medium transition-all',
-        'bg-input/40 text-foreground/85',
-        'hover:bg-muted/60 hover:text-foreground',
-        'active:scale-[0.985]',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
-        /* Open state: subtle ring + slightly darker bg so the trigger
-           reads as "expanded" even without a chevron. */
-        open && 'bg-muted/70 text-foreground ring-2 ring-primary/30',
-        (disabled || loading) && 'cursor-not-allowed opacity-60',
-        triggerClassName
+      {...withClassName(
+        stylex.props(
+          styles.trigger,
+          open && styles.triggerOpen,
+          (disabled || loading) && styles.triggerDisabled
+        ),
+        cn('group/picker-trigger', triggerClassName)
       )}
     >
-      <span className="flex min-w-0 flex-1 items-center gap-2">
+      <span {...stylex.props(styles.triggerBody)}>
         {loading ? (
           <>
             <Spinner className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
-            {loadingText ? <span className="truncate">{loadingText}</span> : triggerContent}
+            {loadingText ? (
+              <span {...stylex.props(styles.truncate)}>{loadingText}</span>
+            ) : (
+              triggerContent
+            )}
           </>
         ) : (
           triggerContent
@@ -517,24 +797,9 @@ export function MobileInlinePicker<T extends string = string>({
           animate={{ height: 'auto', opacity: 1 }}
           exit={{ height: 0, opacity: 0 }}
           transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
-          className={cn('overflow-hidden', expansionClassName)}
+          {...withClassName(stylex.props(styles.expansion), expansionClassName)}
         >
-          <div
-            className={cn(
-              /* Search at the top, list below — the standard mobile
-                 list-with-search layout (iOS Contacts, Telegram,
-                 Gmail compose, Material UI Autocomplete). The first
-                 reachable target is the search input right under the
-                 trigger; the keyboard rising from the bottom never
-                 competes with the search input because the input
-                 sits high in the panel. List below it has its own
-                 `max-h + overflow-y-auto`, so long lists scroll
-                 within their bounded area instead of pushing the
-                 search away. */
-              'mt-1.5 flex flex-col rounded-lg border border-border/60 bg-popover text-popover-foreground shadow-lg overflow-hidden',
-              expansionPanelClassName
-            )}
-          >
+          <div {...withClassName(stylex.props(styles.panel), expansionPanelClassName)}>
             {searchable ? (
               <PickerSearchInput
                 query={query}
@@ -547,13 +812,13 @@ export function MobileInlinePicker<T extends string = string>({
             ) : null}
             <div
               ref={listRef}
-              className="scroll-pro scrollbar-pro max-h-[200px] overflow-y-auto py-1 [scrollbar-gutter:auto]"
+              {...withClassName(stylex.props(styles.list), 'scroll-pro scrollbar-pro')}
             >
               {filteredOptions.length === 0 ? (
-                <div className="px-3 py-2 text-sm text-muted-foreground">{emptyText ?? '—'}</div>
+                <div {...stylex.props(styles.empty)}>{emptyText ?? '—'}</div>
               ) : shouldVirtualize ? (
                 <div
-                  className="relative w-full"
+                  {...stylex.props(styles.virtualList)}
                   style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
                 >
                   {rowVirtualizer.getVirtualItems().map((virtualItem) => {
@@ -585,7 +850,7 @@ export function MobileInlinePicker<T extends string = string>({
   }
 
   return (
-    <div className="w-full">
+    <div {...stylex.props(styles.root)}>
       {triggerElement}
       {expansionElement}
     </div>
@@ -595,8 +860,8 @@ export function MobileInlinePicker<T extends string = string>({
 /* ── Menu (arbitrary-content sibling of MobileInlinePicker) ──────────── */
 
 export type MobileInlineMenuProps = {
-  /** Unique id within the active `MobileInlinePickerCoordinator`; used
-     to enforce "only one open at a time" across the sheet AND to let
+  /** Unique id within the active `MobileInlinePickerCoordinator`; used to
+     enforce "only one open at a time" across the sheet AND to let
      an external button open this menu via
      `useMobileInlinePickerCoordinator().requestActive(id)`. */
   id: string;
@@ -772,7 +1037,7 @@ export function MobileInlineMenu({
       aria-expanded={open}
       aria-controls={open ? menuId : undefined}
       aria-label={ariaLabel}
-      className={cn(triggerClassName, 'select-none')}
+      {...withClassName(stylex.props(styles.menuTrigger), triggerClassName)}
     >
       {triggerContent}
     </button>
@@ -791,14 +1056,9 @@ export function MobileInlineMenu({
           animate={{ height: 'auto', opacity: 1 }}
           exit={{ height: 0, opacity: 0 }}
           transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
-          className={cn('overflow-hidden', expansionClassName)}
+          {...withClassName(stylex.props(styles.expansion), expansionClassName)}
         >
-          <div
-            className={cn(
-              'mt-1.5 rounded-lg border border-border/60 bg-popover p-1 text-popover-foreground shadow-lg',
-              expansionPanelClassName
-            )}
-          >
+          <div {...withClassName(stylex.props(styles.menuPanel), expansionPanelClassName)}>
             {children({ close })}
           </div>
         </motion.div>
@@ -816,7 +1076,7 @@ export function MobileInlineMenu({
   }
 
   return (
-    <div className="w-full">
+    <div {...stylex.props(styles.root)}>
       {triggerElement}
       {expansionElement}
     </div>
@@ -862,8 +1122,8 @@ function PickerSearchInput({
   const inputRef = useRef<HTMLInputElement>(null);
 
   return (
-    <div className="flex items-center gap-2 border-b border-border/40 px-3 py-2">
-      <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+    <div {...stylex.props(styles.searchRow)}>
+      <Search {...stylex.props(styles.searchGlyph)} aria-hidden="true" />
       <input
         ref={inputRef}
         type="text"
@@ -874,7 +1134,7 @@ function PickerSearchInput({
         aria-label={ariaLabel}
         // eslint-disable-next-line jsx-a11y/no-autofocus -- desktop-only (pointer: fine); the picker opens on explicit user action, so focusing its search is expected.
         autoFocus={autoFocus}
-        className="min-w-0 flex-1 border-none bg-transparent text-sm outline-none focus:outline-none focus:ring-0 placeholder:text-muted-foreground"
+        {...stylex.props(styles.searchInput)}
       />
       {query ? (
         <button
@@ -886,9 +1146,9 @@ function PickerSearchInput({
             onQueryChange('');
             inputRef.current?.focus();
           }}
-          className="-mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-hover/60 hover:text-foreground active:bg-hover/60"
+          {...stylex.props(styles.clearButton)}
         >
-          <X className="h-3.5 w-3.5" aria-hidden="true" />
+          <X {...stylex.props(styles.clearGlyph)} aria-hidden="true" />
         </button>
       ) : null}
     </div>

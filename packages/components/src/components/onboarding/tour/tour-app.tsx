@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Provider } from 'jotai';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import type {
   AgentBrandId,
   AgentConfigCliType,
@@ -53,6 +54,7 @@ import {
 } from './tour-fixtures';
 import { TourBrowserPreview } from './tour-browser-preview';
 import { TourCloudBoundary } from './tour-cloud-boundary';
+import { tourSurface } from './surface';
 
 // The app the tour is a tour OF.
 //
@@ -468,6 +470,7 @@ function TourWindow({
   );
 
   const panelOpen = tracks.panel >= 0.5;
+  const windowProps = stylex.props(tourSurface.window);
   const configurationActivity = (() => {
     if (!configurationState) return null;
     switch (configurationState.agentStatus) {
@@ -517,30 +520,28 @@ function TourWindow({
   return (
     <div
       data-tour-anchor="window"
-      className={cn(
-        'relative flex h-full w-full flex-col overflow-hidden rounded-xl border border-border/70 bg-background text-foreground',
-        className
-      )}
+      {...windowProps}
+      className={cn(windowProps.className, className)}
     >
       {/* Window chrome. The tour is a WINDOW on a desk, not a fullscreen slab:
           nobody runs their editor fullscreen, and a frameless rectangle reads
           as a screenshot of a product rather than a product. */}
-      <div data-tour-anchor="window.chrome" className="flex h-9 shrink-0 items-center gap-2  px-4">
-        <span className="flex items-center gap-1.5">
-          <span className="size-[11px] rounded-full bg-[#ff5f57]" />
-          <span className="size-[11px] rounded-full bg-[#febc2e]" />
-          <span className="size-[11px] rounded-full bg-[#28c840]" />
+      <div data-tour-anchor="window.chrome" {...stylex.props(tourSurface.chrome)}>
+        <span {...stylex.props(tourSurface.chromeDots)}>
+          <span {...stylex.props(tourSurface.chromeDot, tourSurface.chromeDotRed)} />
+          <span {...stylex.props(tourSurface.chromeDot, tourSurface.chromeDotYellow)} />
+          <span {...stylex.props(tourSurface.chromeDot, tourSurface.chromeDotGreen)} />
         </span>
         {/* <span className="flex-1 text-center text-[11.5px] text-muted-foreground">
           {identity.projectName}
         </span> */}
-        <span className="w-14" />
+        <span {...stylex.props(tourSurface.chromeSpacer)} />
       </div>
 
-      <div className="flex min-h-0 flex-1">
-        <div data-tour-anchor="sidebar" className="h-full w-[280px] shrink-0 overflow-hidden">
+      <div {...stylex.props(tourSurface.body)}>
+        <div data-tour-anchor="sidebar" {...stylex.props(tourSurface.sidebarColumn)}>
           <LoroSidebar
-            className="h-full w-[280px] border-r-[0.5px] border-sidebar-border/70 bg-sidebar"
+            {...stylex.props(tourSurface.sidebar)}
             defaultWidth={280}
             minWidth={280}
             maxWidth={280}
@@ -557,7 +558,7 @@ function TourWindow({
           />
         </div>
 
-        <div className="min-w-0 flex-1">
+        <div {...stylex.props(tourSurface.conversation)}>
           <DesktopSessionDetailLayout
             // Its OWN key. The film is a fixed composition in a window of a
             // fixed size; inheriting the user's saved split makes it open at
@@ -593,11 +594,11 @@ function TourWindow({
             }
             chatSurfaces={
               <SessionConversationPage
-                className="h-full"
+                className={stylex.props(tourSurface.fullHeight).className}
                 bodySlot={
                   <SessionConversationPageBody
                     streamSlot={
-                      <div data-tour-anchor="stream" className="h-full">
+                      <div data-tour-anchor="stream" {...stylex.props(tourSurface.fullHeight)}>
                         <SessionChatStreamView
                           sessionId={TOUR_SESSION_ID}
                           items={items}
@@ -607,7 +608,7 @@ function TourWindow({
                           renderMessageRow={({ message, sessionId }) => (
                             <MessageRowView message={message} sessionId={sessionId} />
                           )}
-                          className="h-full"
+                          className={stylex.props(tourSurface.fullHeight).className}
                           agentActivityLabel={
                             emptyConversation
                               ? (configurationActivity?.label ?? null)
@@ -630,7 +631,10 @@ function TourWindow({
                         // The product's own card, in the product's own slot. The
                         // scripted cursor presses the real button inside it; the
                         // resolution is this component resolving, not a flag.
-                        <div data-tour-anchor="permission" className="px-3 pb-2">
+                        <div
+                          data-tour-anchor="permission"
+                          {...stylex.props(tourSurface.permissionSlot)}
+                        >
                           <PermissionPrompt
                             toolCall={TOUR_PERMISSION_TOOL_CALL}
                             permission={TOUR_PERMISSION_TOOL_CALL.permissionRequest!}
@@ -748,10 +752,7 @@ function TourWindow({
                 // The edge belongs to an OPEN panel. Collapsed, the panel is a
                 // zero-width sliver whose border drew a notch into the window's
                 // right edge.
-                className={cn(
-                  'flex h-full min-w-0 flex-col overflow-hidden bg-background',
-                  panelOpen && 'border-l border-border/70'
-                )}
+                {...stylex.props(tourSurface.sidePanel, panelOpen && tourSurface.sidePanelOpen)}
               >
                 <SessionSidePanelTabBar
                   tabs={sidePanelTabs}
@@ -768,9 +769,9 @@ function TourWindow({
                       })
                     )
                   }
-                  className="h-11 border-b border-border/60"
+                  className={stylex.props(tourSurface.sidePanelTabs).className}
                 />
-                <div className="relative min-h-0 flex-1 overflow-hidden">
+                <div {...stylex.props(tourSurface.sidePanelBody)}>
                   {/*
                     ALL of these stay mounted; only visibility switches.
 
@@ -845,7 +846,11 @@ function TourPanelSurface({
   children: React.ReactNode;
 }): React.JSX.Element {
   return (
-    <div className="h-full" style={{ display: active ? 'block' : 'none' }} aria-hidden={!active}>
+    <div
+      {...stylex.props(tourSurface.fullHeight)}
+      style={{ display: active ? 'block' : 'none' }}
+      aria-hidden={!active}
+    >
       {children}
     </div>
   );
@@ -871,15 +876,15 @@ function TourDiffPlaceholder(): React.JSX.Element {
     ['ctx', '}'],
   ];
   return (
-    <div className="h-full overflow-hidden bg-background/40 px-3 py-2 font-mono text-[11.5px] leading-[1.65]">
+    <div {...stylex.props(tourSurface.diffSurface)}>
       {lines.map(([kind, text], index) => (
         <div
           key={index}
-          className={cn(
-            'whitespace-pre rounded px-2',
-            kind === 'add' && 'bg-code-added/15 text-code-added',
-            kind === 'del' && 'bg-code-removed/15 text-code-removed',
-            kind === 'ctx' && 'text-muted-foreground'
+          {...stylex.props(
+            tourSurface.diffLine,
+            kind === 'add' && tourSurface.diffAdded,
+            kind === 'del' && tourSurface.diffRemoved,
+            kind === 'ctx' && tourSurface.diffContext
           )}
         >
           {kind === 'add' ? '+' : kind === 'del' ? '-' : ' '} {text}

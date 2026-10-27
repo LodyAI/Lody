@@ -1,0 +1,456 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 900
+    },
+    {
+      "name": "phone-compact",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "preview-visualannotationcommentsoverlay--native-states",
+    "preview-visualannotationcommentsoverlay--corner-peeks",
+    "preview-visualannotationcommentsoverlay--theme-scopes",
+    "preview-visualannotationcommentsoverlay--anchored-threads"
+  ],
+  "ready": {
+    "preview-visualannotationcommentsoverlay--native-states": [
+      {
+        "action": "visible",
+        "selector": "[data-visual-comment-id=\"migration-2\"]"
+      }
+    ],
+    "preview-visualannotationcommentsoverlay--corner-peeks": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Collapsed comment by Bottom Right"
+      }
+    ],
+    "preview-visualannotationcommentsoverlay--theme-scopes": [
+      {
+        "action": "visible",
+        "selector": ".light-scope button:has-text(\"Added\")"
+      }
+    ]
+  },
+  "states": {
+    "preview-visualannotationcommentsoverlay--native-states": [
+      {
+        "name": "inactive-card-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-visual-comment-id=\"migration-1\"]"
+          }
+        ]
+      },
+      {
+        "name": "inactive-pin-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "button[aria-label=\"Visual comment by Grace Hopper\"]"
+          }
+        ]
+      },
+      {
+        "name": "send-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-visual-comment-id=\"migration-0\"] button:has-text(\"Send\")"
+          }
+        ]
+      },
+      {
+        "name": "added-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-visual-comment-id=\"migration-1\"] button:has-text(\"Added\")"
+          }
+        ]
+      },
+      {
+        "name": "submitted-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-visual-comment-id=\"migration-2\"] button:has-text(\"Sent\")"
+          },
+          {
+            "action": "disabled",
+            "selector": "[data-visual-comment-id=\"migration-2\"] button:has-text(\"Sent\")"
+          }
+        ]
+      },
+      {
+        "name": "resolve-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-visual-comment-id=\"migration-1\"] button:has-text(\"Resolve\")"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-send-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Reset overlay fixture",
+            "key": "Tab"
+          },
+          {
+            "action": "focus",
+            "selector": "[data-visual-comment-id=\"migration-0\"] button:has-text(\"Send\")"
+          }
+        ]
+      },
+      {
+        "name": "send-toggle-added",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-visual-comment-id=\"migration-0\"] button:has-text(\"Send\")"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-visual-comment-id=\"migration-0\"] button:has-text(\"Added\")"
+          }
+        ]
+      },
+      {
+        "name": "collapse-active",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-visual-comment-id=\"migration-0\"] button[aria-label=\"Collapse comment\"]"
+          },
+          {
+            "action": "visible",
+            "role": "button",
+            "name": "Collapsed comment by Ada Lovelace"
+          }
+        ]
+      },
+      {
+        "name": "collapsed-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Collapsed comment by Ada Lovelace"
+          }
+        ]
+      },
+      {
+        "name": "collapsed-keyboard",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Reset overlay fixture",
+            "key": "Tab"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Collapsed comment by Ada Lovelace"
+          }
+        ]
+      },
+      {
+        "name": "peek-keyboard-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "button:has(p):has-text(\"Ada Lovelace\")"
+          }
+        ]
+      },
+      {
+        "name": "peek-open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button:has(p):has-text(\"Ada Lovelace\")"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-visual-comment-id=\"migration-0\"]"
+          }
+        ]
+      },
+      {
+        "name": "resolve-hides-card",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-visual-comment-id=\"migration-0\"] button:has-text(\"Resolve\")"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-visual-comment-id=\"migration-0\"]"
+          }
+        ]
+      }
+    ],
+    "preview-visualannotationcommentsoverlay--corner-peeks": [
+      {
+        "name": "top-left-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Collapsed comment by Top Left"
+          }
+        ]
+      },
+      {
+        "name": "top-right-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Collapsed comment by Top Right"
+          }
+        ]
+      },
+      {
+        "name": "bottom-left-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Collapsed comment by Bottom Left"
+          }
+        ]
+      },
+      {
+        "name": "bottom-right-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Collapsed comment by Bottom Right"
+          }
+        ]
+      },
+      {
+        "name": "top-left-keyboard",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Reset overlay fixture",
+            "key": "Tab"
+          },
+          {
+            "action": "focus",
+            "selector": "button[aria-label=\"Collapsed comment by Top Left\"]"
+          }
+        ]
+      },
+      {
+        "name": "top-right-keyboard",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Reset overlay fixture",
+            "key": "Tab"
+          },
+          {
+            "action": "focus",
+            "selector": "button[aria-label=\"Collapsed comment by Top Right\"]"
+          }
+        ]
+      },
+      {
+        "name": "bottom-left-keyboard",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Reset overlay fixture",
+            "key": "Tab"
+          },
+          {
+            "action": "focus",
+            "selector": "button[aria-label=\"Collapsed comment by Bottom Left\"]"
+          }
+        ]
+      },
+      {
+        "name": "bottom-right-keyboard",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Reset overlay fixture",
+            "key": "Tab"
+          },
+          {
+            "action": "focus",
+            "selector": "button[aria-label=\"Collapsed comment by Bottom Right\"]"
+          }
+        ]
+      },
+      {
+        "name": "peek-keyboard-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "button:has(p):has-text(\"Bottom Right\")"
+          }
+        ]
+      },
+      {
+        "name": "corner-open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button:has(p):has-text(\"Bottom Right\")"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-visual-comment-id=\"migration-3\"]"
+          }
+        ]
+      }
+    ],
+    "preview-visualannotationcommentsoverlay--theme-scopes": [
+      {
+        "name": "explicit-dark-action-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": ".dark-scope:not(.light-scope) button:has-text(\"Added\")"
+          }
+        ]
+      },
+      {
+        "name": "light-scope-action-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": ".light-scope button:has-text(\"Added\")"
+          }
+        ]
+      },
+      {
+        "name": "light-scope-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "focus",
+            "selector": ".light-scope button:has-text(\"Added\")"
+          }
+        ]
+      }
+    ],
+    "preview-visualannotationcommentsoverlay--anchored-threads": [
+      {
+        "name": "active-pin-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Visual comment by Ada Lovelace"
+          }
+        ]
+      },
+      {
+        "name": "added-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-visual-comment-id=\"comment-cta\"] button:has-text(\"Added\")"
+          }
+        ]
+      },
+      {
+        "name": "collapse-heading",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-visual-comment-id=\"comment-heading\"] button[aria-label=\"Collapse comment\"]"
+          }
+        ]
+      },
+      {
+        "name": "heading-peek-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Collapsed comment by Ada Lovelace"
+          }
+        ]
+      },
+      {
+        "name": "submit-staged",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Submit staged"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Submit staged"
+          }
+        ]
+      }
+    ]
+  }
+}

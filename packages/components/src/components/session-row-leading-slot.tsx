@@ -3,6 +3,8 @@ import { ChevronDown, MoreHorizontal } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { text } from '@lody/ui/tokens/scales.stylex';
 import { cn } from '@/lib/utils';
+import { themeColors } from '../style/theme-colors.stylex';
+import { themeDuration, themeEasing, themeRadius, themeSpace } from '../style/theme-scale.stylex';
 
 // Shared presentation only: anonymous readers must not import sidebar workspace controls.
 export type SessionRowOpenedByTreeSlot =
@@ -29,9 +31,6 @@ export type SessionRowOpenedByTreeSlot =
       tallOpener?: boolean;
     };
 
-const TREE_CHILD_SLOT_CLASS = 'w-[26px] justify-start';
-const TREE_CONTROL_LEFT_CLASS = 'left-[7px]';
-const TREE_LINE_CLASS = 'bg-sidebar-foreground/20';
 /**
  * The trunk is drawn from the ROW's height, not from a copy of it.
  *
@@ -53,6 +52,79 @@ const TREE_LINE_CLASS = 'bg-sidebar-foreground/20';
  * opener's project/branch line: its 4px gap plus one footnote line.
  */
 const tree = stylex.create({
+  slot: {
+    position: 'relative',
+    display: 'flex',
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    alignItems: 'center',
+  },
+  childSlot: { width: '26px', justifyContent: 'flex-start' },
+  flatSlot: { width: themeSpace[3.5], justifyContent: 'center' },
+  fade: {
+    transitionProperty: 'opacity',
+    transitionDuration: themeDuration[100],
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  childControlLeft: { left: '7px' },
+  flatControlLeft: { left: '50%' },
+  disclosure: {
+    position: 'relative',
+    zIndex: 20,
+    display: 'flex',
+    height: themeSpace[3.5],
+    width: themeSpace[3.5],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.sm,
+    color: { default: themeColors.sidebarForegroundMuted, ':hover': themeColors.sidebarForeground },
+    transitionProperty: 'opacity, color',
+    transitionDuration: themeDuration[100],
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  glyph: { height: themeSpace[3.5], width: themeSpace[3.5] },
+  chevron: {
+    transitionProperty: 'transform, translate, scale, rotate',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing.out,
+  },
+  expanded: { rotate: '0deg' },
+  collapsed: { rotate: '-90deg' },
+  connectorBox: { position: 'absolute', inset: 0 },
+  trunk: {
+    position: 'absolute',
+    width: '1px',
+    backgroundColor: 'hsl(var(--sidebar-foreground) / 0.2)',
+    left: '7px',
+  },
+  lastTrunk: { bottom: '50%' },
+  elbow: {
+    position: 'absolute',
+    top: '50%',
+    height: '1px',
+    width: '13px',
+    backgroundColor: 'hsl(var(--sidebar-foreground) / 0.2)',
+    left: '7px',
+  },
+  menu: {
+    position: 'absolute',
+    top: '50%',
+    zIndex: 20,
+    display: 'flex',
+    height: themeSpace[5],
+    width: themeSpace[5],
+    translate: '-50% -50%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.md,
+    opacity: 0,
+    pointerEvents: 'none',
+    color: { default: themeColors.sidebarForegroundMuted, ':hover': themeColors.sidebarForeground },
+    backgroundColor: { default: null, ':hover': 'hsl(var(--sidebar-foreground) / 0.15)' },
+    transitionProperty: 'opacity, color, background-color',
+    transitionDuration: themeDuration[100],
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
   fromPreviousRow: {
     top: `calc((var(--sidebar-row-height, calc(8px + ${text.subheadlineLeading})) - 14px) / -2)`,
   },
@@ -113,18 +185,13 @@ export function SessionRowLeadingSlot({
 }) {
   const childTree = openedByTree?.kind === 'child' ? openedByTree : null;
   const openerTree = openedByTree?.kind === 'opener' ? openedByTree : null;
-  const restClassName = showMenuButton
-    ? cn('transition-opacity duration-100', fadeClassName)
-    : undefined;
-  const controlLeftClassName = childTree ? TREE_CONTROL_LEFT_CLASS : 'left-1/2';
+  const restClassName = showMenuButton ? fadeClassName : undefined;
+  const controlLeft = childTree ? tree.childControlLeft : tree.flatControlLeft;
 
   return (
     <div
       data-session-row-leading-slot=""
-      className={cn(
-        'relative flex h-3.5 shrink-0 items-center',
-        childTree ? TREE_CHILD_SLOT_CLASS : 'w-3.5 justify-center'
-      )}
+      {...stylex.props(tree.slot, childTree ? tree.childSlot : tree.flatSlot)}
     >
       {openerTree ? (
         <button
@@ -139,46 +206,41 @@ export function SessionRowLeadingSlot({
             openerTree.onToggle();
           }}
           className={cn(
-            'relative z-20 flex h-3.5 w-3.5 items-center justify-center rounded-sm',
-            'text-sidebar-foreground-muted transition-[opacity,color] duration-100',
-            'hover:text-sidebar-foreground focus-visible:outline-hidden',
+            stylex.props(tree.disclosure, showMenuButton && tree.fade).className,
             showMenuButton && cn(restClassName, restPointerClassName)
           )}
         >
           <ChevronDown
-            className={cn(
-              'h-3.5 w-3.5 transition-transform duration-150 ease-out',
-              openerTree.expanded ? 'rotate-0' : '-rotate-90'
+            {...stylex.props(
+              tree.glyph,
+              tree.chevron,
+              openerTree.expanded ? tree.expanded : tree.collapsed
             )}
             aria-hidden="true"
           />
         </button>
       ) : childTree ? (
-        <div className={cn('absolute inset-0', restClassName)}>
+        <div
+          className={cn(
+            stylex.props(tree.connectorBox, showMenuButton && tree.fade).className,
+            restClassName
+          )}
+        >
           <span
             aria-hidden="true"
             data-session-tree-connector="trunk"
-            className={cn(
-              'absolute w-px',
-              TREE_LINE_CLASS,
-              TREE_CONTROL_LEFT_CLASS,
-              stylex.props(
-                childTree.isFirstChild && childTree.tallOpener
-                  ? tree.fromTallOpener
-                  : tree.fromPreviousRow,
-                !childTree.isLastChild && tree.intoNextRow
-              ).className,
-              childTree.isLastChild && 'bottom-1/2'
+            {...stylex.props(
+              tree.trunk,
+              childTree.isFirstChild && childTree.tallOpener
+                ? tree.fromTallOpener
+                : tree.fromPreviousRow,
+              childTree.isLastChild ? tree.lastTrunk : tree.intoNextRow
             )}
           />
           <span
             aria-hidden="true"
             data-session-tree-connector="elbow"
-            className={cn(
-              'absolute top-1/2 h-px w-[13px]',
-              TREE_LINE_CLASS,
-              TREE_CONTROL_LEFT_CLASS
-            )}
+            {...stylex.props(tree.elbow)}
           />
         </div>
       ) : null}
@@ -204,17 +266,14 @@ export function SessionRowLeadingSlot({
             // Overlay a 20px hit target centered on the 14px leading slot so the ⋯
             // gets a visible rounded hover chip (it reads as clickable) without
             // the tiny slot footprint clipping the background.
-            'absolute top-1/2 z-20 flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-md opacity-0 pointer-events-none',
-            controlLeftClassName,
-            'text-sidebar-foreground-muted transition-[opacity,color,background-color] duration-100',
-            'hover:bg-sidebar-foreground/15 hover:text-sidebar-foreground',
+            stylex.props(tree.menu, controlLeft).className,
             // The trigger itself stays pressed-looking while its menu is open,
             // not just the row around it.
             'group-data-[menu-open]:bg-sidebar-foreground/15 group-data-[menu-open]:text-sidebar-foreground',
             revealClassName
           )}
         >
-          <MoreHorizontal className="h-3.5 w-3.5" />
+          <MoreHorizontal {...stylex.props(tree.glyph)} />
         </button>
       ) : null}
     </div>

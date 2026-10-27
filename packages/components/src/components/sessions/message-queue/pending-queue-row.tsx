@@ -6,14 +6,65 @@ import { SessionSendProgressRing } from '@/components/sidebar-row-shared';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import type { PendingSessionSend } from '@/lib/session-pending-sends';
 import { deriveSessionSendProgress } from '@/lib/session-send-status';
-import { cn } from '@/lib/utils';
 import { queueSurface } from './surface';
-import { IconAction, TextAction } from './message-queue-row';
+import { IconAction, TextAction, queueRowStyles } from './message-queue-row';
+import { themeColors } from '../../../style/theme-colors.stylex';
+import { themeFontSize, themeSpace } from '../../../style/theme-scale.stylex';
 
 const MAX_INLINE_ATTACHMENTS = 3;
 
-/** Same first-line box as a queued row's index and actions. */
-const FIRST_LINE_BOX_CLASS = 'flex h-[calc(0.75rem*1.375)] shrink-0 items-center';
+const styles = stylex.create({
+  thumbnail: {
+    display: 'flex',
+    width: '18px',
+    height: '18px',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    borderRadius: '0.25rem',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.4)',
+    backgroundColor: 'hsl(var(--background) / 0.6)',
+  },
+  thumbnailImage: { width: '100%', height: '100%', objectFit: 'cover' },
+  thumbnailIcon: {
+    width: themeSpace[2.5],
+    height: themeSpace[2.5],
+    color: themeColors.mutedForeground,
+  },
+  divider: {
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'hsl(var(--border) / 0.3)',
+  },
+  text: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+    fontSize: themeFontSize.xs,
+    lineHeight: '1.375',
+  },
+  textInstant: { color: 'hsl(var(--foreground) / 0.8)' },
+  textUploading: { color: 'hsl(var(--foreground) / 0.55)' },
+  actions: { display: 'flex', flexShrink: 0, alignItems: 'center' },
+  alertIcon: {
+    width: themeSpace[3],
+    height: themeSpace[3],
+    color: themeColors.destructive,
+  },
+  status: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    fontSize: '11px',
+    color: themeColors.mutedForeground,
+    fontVariantNumeric: 'tabular-nums',
+  },
+});
 
 function LocalThumbnail({ attachment }: { attachment: SessionAttachmentDraft }) {
   const [url, setUrl] = useState<string | null>(null);
@@ -24,14 +75,11 @@ function LocalThumbnail({ attachment }: { attachment: SessionAttachmentDraft }) 
     return () => URL.revokeObjectURL(next);
   }, [attachment.kind, attachment.source]);
   return (
-    <span
-      className="flex size-[18px] shrink-0 items-center justify-center overflow-hidden rounded border border-border/40 bg-background/60"
-      title={attachment.name}
-    >
+    <span {...stylex.props(styles.thumbnail)} title={attachment.name}>
       {url ? (
-        <img src={url} alt={attachment.name} className="h-full w-full object-cover" />
+        <img src={url} alt={attachment.name} {...stylex.props(styles.thumbnailImage)} />
       ) : (
-        <FileIcon className="size-2.5 text-muted-foreground" aria-hidden="true" />
+        <FileIcon {...stylex.props(styles.thumbnailIcon)} aria-hidden="true" />
       )}
     </span>
   );
@@ -82,60 +130,48 @@ export function PendingQueueRow({
       ? t('sessions.attachmentUploading', { progress: status.progress })
       : t('sessions.sendStatus.sendingWithoutSize');
 
+  const rowProps = stylex.props(queueSurface.row, queueRowStyles.row, divided && styles.divider);
+
   return (
-    <div
-      className={cn(
-        'relative gap-2 px-2 py-1.5',
-        stylex.props(queueSurface.row).className,
-        divided && 'border-t border-border/30'
-      )}
-      data-pending-queue-row={record.id}
-      data-pending-queue-state={status.state}
-    >
+    <div {...rowProps} data-pending-queue-row={record.id} data-pending-queue-state={status.state}>
       <div
         aria-hidden="true"
-        className={cn(
-          FIRST_LINE_BOX_CLASS,
-          'w-4 justify-center text-[10px] font-medium tabular-nums text-muted-foreground/60'
+        {...stylex.props(
+          queueRowStyles.leadingBox,
+          queueRowStyles.leadingIndex,
+          queueRowStyles.leadingIndexMuted
         )}
       >
         {index + 1}
       </div>
-      <div className="flex min-w-0 flex-1 items-start gap-1.5">
+      <div {...stylex.props(queueRowStyles.rowBody)}>
         {inline.length > 0 ? (
-          <div className="flex shrink-0 items-center gap-0.5 pt-px">
+          <div {...stylex.props(queueRowStyles.rowImages)}>
             {inline.map((attachment) => (
               <LocalThumbnail key={attachment.id} attachment={attachment} />
             ))}
             {overflow > 0 ? (
-              <span className="ml-0.5 text-[10px] text-muted-foreground/70 tabular-nums">
-                +{overflow}
-              </span>
+              <span {...stylex.props(queueRowStyles.rowOverflow)}>+{overflow}</span>
             ) : null}
           </div>
         ) : null}
         {/* Muted until it is a real queue item, like an unsent conversation's title. */}
         <div
-          className={cn(
-            'min-w-0 flex-1 overflow-hidden text-xs leading-snug',
-            stylex.props(queueSurface.text).className,
-            instant ? 'text-foreground/80' : 'text-foreground/55'
+          {...stylex.props(
+            queueSurface.text,
+            styles.text,
+            instant ? styles.textInstant : styles.textUploading
           )}
           style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}
         >
           {queuedText(record)}
         </div>
       </div>
-      <div
-        className={cn(
-          'flex shrink-0 items-center',
-          stylex.props(queueSurface.actions, queueSurface.pendingActions).className
-        )}
-      >
+      <div {...stylex.props(queueSurface.actions, queueSurface.pendingActions, styles.actions)}>
         {failed ? (
           <>
             <CircleAlert
-              className="size-3 text-destructive"
+              {...stylex.props(styles.alertIcon)}
               strokeWidth={2.25}
               aria-label={t('sessions.pendingMessageUploadFailed')}
             />
@@ -148,10 +184,7 @@ export function PendingQueueRow({
             />
           </>
         ) : instant ? null : (
-          <span
-            role="status"
-            className="flex items-center gap-1 text-[11px] text-muted-foreground tabular-nums"
-          >
+          <span role="status" {...stylex.props(styles.status)}>
             <SessionSendProgressRing
               progress={status.totalBytes > 0 ? status.progress : undefined}
             />

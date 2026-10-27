@@ -1,3 +1,13 @@
+import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
+import { pageSurface as surface } from './surface';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
@@ -49,27 +59,27 @@ export function WorkspaceJoinRequestPage({
   const busy = state === 'loading' || state === 'submitting';
 
   return (
-    <div className="flex min-h-screen w-full items-center justify-center bg-background p-4">
-      <div className="w-full max-w-md overflow-hidden rounded-2xl border border-border/60 bg-card shadow-[0_8px_30px_-12px_rgba(0,0,0,0.12)]">
-        <div className="flex flex-col items-center px-7 pb-7 pt-8 text-center">
-          {busy ? <Spinner size="large" className="mb-4 text-muted-foreground" /> : null}
+    <div {...stylex.props(surface.page)}>
+      <div {...stylex.props(surface.card, styles.card)}>
+        <div {...stylex.props(styles.content)}>
+          {busy ? <Spinner size="large" {...stylex.props(styles.spinner)} /> : null}
           {!busy ? (
             <img
               src={workspaceAvatarPlaceholder}
               alt=""
               aria-hidden="true"
-              className="mb-4 h-12 w-12 object-contain"
+              {...stylex.props(styles.avatar)}
             />
           ) : null}
-          <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground/80">
+          <p {...stylex.props(styles.eyebrow)}>
             {t('joinRequest.eyebrow', 'Workspace access request')}
           </p>
-          <h1 className="mt-1.5 text-xl font-semibold tracking-tight">
+          <h1 {...stylex.props(styles.title)}>
             {state === 'unavailable' ? t('joinRequest.unavailableTitle', 'Link unavailable') : name}
           </h1>
 
           {state === 'loading' ? (
-            <p className="mt-2 text-sm text-muted-foreground">
+            <p {...stylex.props(styles.loading)}>
               {t('joinRequest.loading', 'Checking this link…')}
             </p>
           ) : null}
@@ -86,7 +96,11 @@ export function WorkspaceJoinRequestPage({
                   'Sign in or create an account to request access. You can use any verified email.'
                 )}
               </Message>
-              <Button size="large" className="mt-6 w-full" onClick={onContinue}>
+              <Button
+                size="large"
+                {...stylex.props(surface.fullWidth, styles.action)}
+                onClick={onContinue}
+              >
                 {t('joinRequest.continue', 'Continue')}
               </Button>
             </>
@@ -98,27 +112,31 @@ export function WorkspaceJoinRequestPage({
                   email: currentEmail || '',
                 })}
               </Message>
-              <Button size="large" className="mt-6 w-full" onClick={onVerifyEmail}>
+              <Button
+                size="large"
+                {...stylex.props(surface.fullWidth, styles.action)}
+                onClick={onVerifyEmail}
+              >
                 {t('joinRequest.verifyAction', 'Verify email')}
               </Button>
             </>
           ) : null}
           {state === 'form' || state === 'submitting' || state === 'rejected' ? (
-            <div className="mt-5 w-full text-left">
+            <div {...stylex.props(surface.fullWidth, styles.form)}>
               {state === 'rejected' ? (
-                <p className="mb-4 rounded-lg bg-muted/60 p-3 text-sm text-muted-foreground">
+                <p {...stylex.props(styles.rejected)}>
                   {t(
                     'joinRequest.rejected',
                     'Your previous request was not approved. You may submit a new reason.'
                   )}
                 </p>
               ) : null}
-              <label htmlFor="join-request-reason" className="text-sm font-medium">
+              <label htmlFor="join-request-reason" {...stylex.props(styles.label)}>
                 {t('joinRequest.reasonLabel', 'Why do you want to join?')}
               </label>
               <Textarea
                 id="join-request-reason"
-                className="mt-2 min-h-28 resize-y"
+                className={`min-h-28 ${stylex.props(styles.reason).className}`}
                 value={reason}
                 maxLength={1000}
                 disabled={state === 'submitting'}
@@ -128,14 +146,14 @@ export function WorkspaceJoinRequestPage({
                 )}
                 onChange={(event) => onReasonChange(event.target.value)}
               />
-              <p className="mt-2 text-xs text-muted-foreground">
+              <p {...stylex.props(surface.hint, styles.identity)}>
                 {t('joinRequest.identity', 'Submitting as {{email}}', {
                   email: currentEmail || '',
                 })}
               </p>
               <Button
                 size="large"
-                className="mt-5 w-full"
+                {...stylex.props(surface.fullWidth, styles.submit)}
                 disabled={!reason.trim() || state === 'submitting'}
                 onClick={onSubmit}
               >
@@ -157,14 +175,18 @@ export function WorkspaceJoinRequestPage({
                   ? t('joinRequest.approved', 'Your request was approved.')
                   : t('joinRequest.alreadyMember', 'You are already a member of this workspace.')}
               </Message>
-              <Button size="large" className="mt-6 w-full" onClick={onOpenWorkspace}>
+              <Button
+                size="large"
+                {...stylex.props(surface.fullWidth, styles.action)}
+                onClick={onOpenWorkspace}
+              >
                 {t('joinRequest.openWorkspace', 'Open workspace')}
               </Button>
             </>
           ) : null}
           {state === 'error' ? <Message>{errorMessage || t('common.tryAgain')}</Message> : null}
           {state === 'unavailable' || state === 'error' ? (
-            <Button variant="ghost" className="mt-4" onClick={onBackHome}>
+            <Button variant="ghost" {...stylex.props(styles.back)} onClick={onBackHome}>
               {t('invite.error.backButton', 'Back to home')}
             </Button>
           ) : null}
@@ -175,5 +197,79 @@ export function WorkspaceJoinRequestPage({
 }
 
 function Message({ children }: { children: React.ReactNode }) {
-  return <p className="mt-3 text-sm leading-6 text-muted-foreground">{children}</p>;
+  return <p {...stylex.props(styles.message)}>{children}</p>;
 }
+
+const styles = stylex.create({
+  card: {
+    overflow: 'hidden',
+    borderRadius: themeRadius['2xl'],
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.6)',
+    backgroundColor: themeColors.card,
+    boxShadow: '0 8px 30px -12px rgba(0,0,0,0.12)',
+  },
+  content: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    paddingInline: themeSpace[7],
+    paddingBottom: themeSpace[7],
+    paddingTop: themeSpace[8],
+    textAlign: 'center',
+  },
+  spinner: { marginBottom: themeSpace[4], color: themeColors.mutedForeground },
+  avatar: {
+    marginBottom: themeSpace[4],
+    height: themeSpace[12],
+    width: themeSpace[12],
+    objectFit: 'contain',
+  },
+  eyebrow: {
+    fontSize: '11px',
+    fontWeight: themeFontWeight.medium,
+    textTransform: 'uppercase',
+    letterSpacing: '0.14em',
+    color: 'hsl(var(--muted-foreground) / 0.8)',
+  },
+  title: {
+    marginTop: themeSpace[1.5],
+    fontSize: themeFontSize.xl,
+    lineHeight: themeLineHeight.xl,
+    fontWeight: themeFontWeight.semibold,
+    letterSpacing: '-0.025em',
+  },
+  loading: {
+    marginTop: themeSpace[2],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.mutedForeground,
+  },
+  action: { marginTop: themeSpace[6] },
+  form: { marginTop: themeSpace[5], textAlign: 'left' },
+  rejected: {
+    marginBottom: themeSpace[4],
+    borderRadius: themeRadius.lg,
+    backgroundColor: 'hsl(var(--muted) / 0.6)',
+    padding: themeSpace[3],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.mutedForeground,
+  },
+  label: {
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.medium,
+  },
+  reason: { marginTop: themeSpace[2] },
+  identity: { marginTop: themeSpace[2] },
+  submit: { marginTop: themeSpace[5] },
+  back: { marginTop: themeSpace[4] },
+  message: {
+    marginTop: themeSpace[3],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeSpace[6],
+    color: themeColors.mutedForeground,
+  },
+});

@@ -1,0 +1,51 @@
+{
+  "viewports": [
+    {
+      "name": "iphone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "android",
+      "device": "Pixel 5",
+      "width": 393,
+      "height": 851
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": ["schedules-recurrencemigration--weekly", "schedules-recurrencemigration--monthly"],
+  "states": {
+    "schedules-recurrencemigration--weekly": [
+      {
+        "name": "day-tapped",
+        "steps": [
+          {
+            "action": "tap",
+            "selector": "button[aria-label=\"Tuesday\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "button[aria-label=\"Tuesday\"][aria-pressed=\"true\"]"
+          }
+        ]
+      }
+    ],
+    "schedules-recurrencemigration--monthly": [
+      {
+        "name": "day-tapped",
+        "steps": [
+          {
+            "action": "tap",
+            "selector": "button[aria-label=\"Day 2\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "button[aria-label=\"Day 2\"][aria-pressed=\"true\"]"
+          }
+        ]
+      }
+    ]
+  },
+  "ready": {}
+}

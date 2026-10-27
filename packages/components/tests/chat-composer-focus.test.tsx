@@ -66,7 +66,7 @@ describe('ChatComposer focusOnContainerClick', () => {
       );
     });
 
-    const boxContainer = container.querySelector('.group.relative') as HTMLElement;
+    const boxContainer = container.querySelector('[data-lody-composer-box]') as HTMLElement;
     expect(boxContainer).not.toBeNull();
     expect(document.activeElement).not.toBe(promptRef.current);
 
@@ -90,7 +90,7 @@ describe('ChatComposer focusOnContainerClick', () => {
       );
     });
 
-    const boxContainer = container.querySelector('.group.relative') as HTMLElement;
+    const boxContainer = container.querySelector('[data-lody-composer-box]') as HTMLElement;
     await act(async () => {
       boxContainer.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });

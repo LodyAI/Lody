@@ -1,16 +1,93 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Globe2, ShieldAlert } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
+import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import type { ElectronPublicBrowserBounds, ElectronPublicBrowserState } from '@lody/shared';
 
 import { isElectronRenderer } from '@/lib/electron';
 import { getPublicBrowserBridge } from '@/lib/electron-ipc-client';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
-import { cn } from '@/lib/utils';
 import { useAtomValue } from 'jotai';
 import { semanticShortcutsFeatureEnabledAtom } from '@/atoms/settings';
 import { reportSemanticActionInteraction } from '@/lib/commands/semantic-action-router';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  fallback: {
+    display: 'flex',
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: themeColors.background,
+    padding: themeSpace[6],
+    textAlign: 'center',
+  },
+  fallbackCard: { maxWidth: '24rem' },
+  fallbackGlyph: {
+    marginInline: 'auto',
+    marginBottom: themeSpace[3],
+    width: themeSpace[6],
+    height: themeSpace[6],
+    color: themeColors.mutedForeground,
+  },
+  fallbackTitle: {
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+  },
+  host: {
+    position: 'relative',
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+    backgroundColor: 'white',
+  },
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: themeColors.background,
+  },
+  overlayPadded: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: themeColors.background,
+    padding: themeSpace[6],
+    textAlign: 'center',
+  },
+  errorDetail: {
+    marginTop: themeSpace[1],
+    overflowWrap: 'break-word',
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+});
 
 type PublicBrowserSurfaceProps = {
   browserId: string;
@@ -242,16 +319,12 @@ export function PublicBrowserSurface({
   }, [bridge, browserId, electron, navigationRequest, onNavigationRequestConsumed, surfaceReady]);
 
   if (!electron) {
+    const fallbackProps = stylex.props(styles.fallback);
     return (
-      <div
-        className={cn(
-          'flex min-h-0 flex-1 items-center justify-center bg-background p-6 text-center',
-          className
-        )}
-      >
-        <div className="max-w-sm">
-          <ShieldAlert className="mx-auto mb-3 h-6 w-6 text-muted-foreground" />
-          <p className="text-sm font-medium text-foreground">
+      <div {...fallbackProps} className={clsx(fallbackProps.className, className)}>
+        <div {...stylex.props(styles.fallbackCard)}>
+          <ShieldAlert {...stylex.props(styles.fallbackGlyph)} />
+          <p {...stylex.props(styles.fallbackTitle)}>
             {t(
               'sessions.browser.errors.desktopOnly',
               'Only the desktop app can browse arbitrary URLs.'
@@ -262,25 +335,28 @@ export function PublicBrowserSurface({
     );
   }
 
+  const hostProps = stylex.props(styles.host);
+
   return (
     <div
       ref={hostRef}
-      className={cn('relative min-h-0 flex-1 overflow-hidden bg-white', className)}
+      {...hostProps}
+      className={clsx(hostProps.className, className)}
       data-public-browser-surface
     >
       {phase === 'loading' ? (
-        <div className="absolute inset-0 flex items-center justify-center bg-background">
+        <div {...stylex.props(styles.overlay)}>
           <Spinner className="h-5 w-5 text-muted-foreground" />
         </div>
       ) : null}
       {localError ? (
-        <div className="absolute inset-0 flex items-center justify-center bg-background p-6 text-center">
-          <div className="max-w-sm">
-            <Globe2 className="mx-auto mb-3 h-6 w-6 text-muted-foreground" />
-            <p className="text-sm font-medium text-foreground">
+        <div {...stylex.props(styles.overlayPadded)}>
+          <div {...stylex.props(styles.fallbackCard)}>
+            <Globe2 {...stylex.props(styles.fallbackGlyph)} />
+            <p {...stylex.props(styles.fallbackTitle)}>
               {t('sessions.browser.errors.navigationFailed', 'Page could not be opened')}
             </p>
-            <p className="mt-1 break-words text-xs text-muted-foreground">{localError}</p>
+            <p {...stylex.props(styles.errorDetail)}>{localError}</p>
           </div>
         </div>
       ) : null}

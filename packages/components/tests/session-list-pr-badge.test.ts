@@ -12,29 +12,27 @@ import { initI18n } from '../src/i18n';
 import { WORKING_HAND_OVER_MS } from '../src/ui/working-status-mark';
 
 const PR_STATUS_CASES = [
-  ['open', '.lucide-git-pull-request', 'text-github-open'],
-  ['merged', '.lucide-git-merge', 'text-pr-merged'],
-  ['closed', '.lucide-git-pull-request-closed', 'text-github-closed'],
-  ['draft', '.lucide-git-pull-request-draft', 'text-github-draft'],
+  ['open', '.lucide-git-pull-request'],
+  ['merged', '.lucide-git-merge'],
+  ['closed', '.lucide-git-pull-request-closed'],
+  ['draft', '.lucide-git-pull-request-draft'],
 ] as const;
 
 const PR_CI_CASES = [
-  ['s', 'success', '.lucide-check', 'text-status-success', '5'],
-  ['f', 'failure', '.lucide-x', 'text-destructive', '5'],
-  ['e', 'failure', '.lucide-x', 'text-destructive', '5'],
-  ['p', 'pending', '[data-pr-ci-verdict-slot] > circle', 'text-status-warning', '3.75'],
-  ['x', 'expected', '.lucide-circle-dot', 'text-status-warning', '5'],
+  ['s', 'success', '.lucide-check', '5'],
+  ['f', 'failure', '.lucide-x', '5'],
+  ['e', 'failure', '.lucide-x', '5'],
+  ['p', 'pending', '[data-pr-ci-verdict-slot] > circle', '3.75'],
+  ['x', 'expected', '.lucide-circle-dot', '5'],
 ] as const;
 
-const PR_STATUS_CI_CASES = PR_STATUS_CASES.flatMap(([prStatus, baseSelector, baseToneClassName]) =>
-  PR_CI_CASES.map(([prCiState, verdict, verdictSelector, verdictToneClassName, cutoutRadius]) => ({
+const PR_STATUS_CI_CASES = PR_STATUS_CASES.flatMap(([prStatus, baseSelector]) =>
+  PR_CI_CASES.map(([prCiState, verdict, verdictSelector, cutoutRadius]) => ({
     prStatus,
     baseSelector,
-    baseToneClassName,
     prCiState,
     verdict,
     verdictSelector,
-    verdictToneClassName,
     cutoutRadius,
   }))
 );
@@ -191,12 +189,10 @@ describe('SessionList PR badge', () => {
     expect(passedPrIcon?.querySelector('mask')).not.toBeNull();
     expect(passedBase?.getAttribute('width')).toBe('14');
     expect(passedBase?.getAttribute('height')).toBe('14');
-    expect(passedBase?.classList.contains('text-github-open')).toBe(true);
     expect(passedVerdict).not.toBeNull();
     expect(passedVerdict?.parentElement?.getAttribute('transform')).toBe('translate(7 7)');
     expect(passedVerdict?.getAttribute('width')).toBe('10');
     expect(passedVerdict?.getAttribute('height')).toBe('10');
-    expect(passedVerdict?.classList.contains('text-status-success')).toBe(true);
     expect(passedPrIcon?.querySelector('.bg-sidebar')).toBeNull();
     expect(rowWithPr?.querySelector('.text-github-addition')).toBeNull();
     expect(rowWithPr?.querySelector('.text-github-deletion')).toBeNull();
@@ -261,17 +257,8 @@ describe('SessionList PR badge', () => {
   });
 
   it.each(PR_STATUS_CI_CASES)(
-    'keeps the $prStatus PR tone independent from CI $prCiState',
-    ({
-      prStatus,
-      baseSelector,
-      baseToneClassName,
-      prCiState,
-      verdict,
-      verdictSelector,
-      verdictToneClassName,
-      cutoutRadius,
-    }) => {
+    'keeps the $prStatus PR glyph masked separately from CI $prCiState',
+    ({ prStatus, baseSelector, prCiState, verdict, verdictSelector, cutoutRadius }) => {
       container = document.createElement('div');
       document.body.appendChild(container);
       root = createRoot(container);
@@ -286,24 +273,22 @@ describe('SessionList PR badge', () => {
       const verdictIcon = icon?.querySelector(verdictSelector);
       expect(icon).not.toBeNull();
       expect(baseIcon).not.toBeNull();
-      expect(baseIcon?.classList.contains(baseToneClassName)).toBe(true);
-      expect(baseIcon?.classList.contains(verdictToneClassName)).toBe(false);
+      const mask = icon?.querySelector('mask');
+      expect(baseIcon?.closest('g')?.getAttribute('mask')).toBe(`url(#${mask?.id})`);
       expect(cutout?.getAttribute('cx')).toBe('12');
       expect(cutout?.getAttribute('cy')).toBe('12');
       expect(cutout?.getAttribute('r')).toBe(cutoutRadius);
       expect(verdictIcon).not.toBeNull();
-      expect(verdictIcon?.classList.contains(verdictToneClassName)).toBe(true);
-      expect(verdictIcon?.classList.contains(baseToneClassName)).toBe(false);
+      expect(verdictIcon?.closest('g[mask]')).toBeNull();
       expect(verdictIcon?.parentElement?.getAttribute('transform')).toBe('translate(7 7)');
-      expect(icon?.querySelector('.bg-sidebar')).toBeNull();
-      expect(icon?.querySelector('.rounded-full')).toBeNull();
+      expect(icon?.querySelectorAll('rect')).toHaveLength(1);
+      expect(icon?.querySelector('rect')?.parentElement).toBe(mask);
       if (verdict === 'pending') {
         expect(verdictIcon?.getAttribute('cx')).toBe('5');
         expect(verdictIcon?.getAttribute('cy')).toBe('5');
         expect(verdictIcon?.getAttribute('r')).toBe('2.5');
         expect(verdictIcon?.getAttribute('fill')).toBe('currentColor');
         expect(icon?.querySelector('.lucide-loader-circle')).toBeNull();
-        expect(icon?.querySelector('.animate-spin')).toBeNull();
       }
     }
   );

@@ -1,6 +1,8 @@
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import { openExternalUrl } from '@/lib/native-browser';
-import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
+import { sharedSurface } from './surface';
 
 /**
  * Pre-checkout consent line shown on every surface that starts a paid
@@ -20,12 +22,12 @@ export function SubscribeConsentNotice({ className }: { className?: string }) {
   const parts = t('billing.subscribeConsentNotice', { terms: sentinel }).split(sentinel);
 
   return (
-    <p className={cn('text-xs leading-relaxed text-muted-foreground', className)}>
+    <p {...withClassName(stylex.props(sharedSurface.consentNotice), className)}>
       {parts[0] ?? ''}
       <button
         type="button"
         onClick={() => void openExternalUrl(termsUrl)}
-        className="underline underline-offset-2 hover:text-foreground"
+        {...stylex.props(sharedSurface.consentLink)}
       >
         {t('billing.subscribeConsentTerms')}
       </button>

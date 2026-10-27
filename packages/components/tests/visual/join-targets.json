@@ -1,0 +1,34 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "pages-workspacejoinrequestpage--form",
+    "pages-workspacejoinrequestpage--loading",
+    "pages-workspacejoinrequestpage--sign-in-required",
+    "pages-workspacejoinrequestpage--verification-required",
+    "pages-workspacejoinrequestpage--submitting",
+    "pages-workspacejoinrequestpage--pending",
+    "pages-workspacejoinrequestpage--approved",
+    "pages-workspacejoinrequestpage--already-member",
+    "pages-workspacejoinrequestpage--rejected",
+    "pages-workspacejoinrequestpage--unavailable",
+    "pages-workspacejoinrequestpage--error"
+  ],
+  "titles": []
+}

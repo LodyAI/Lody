@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
 import type { SessionId } from '@lody/shared';
@@ -8,6 +10,32 @@ import { Textarea } from '@lody/ui/textarea';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
+import { themeSpace } from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  content: { overflow: 'hidden' },
+  header: {
+    borderBottomWidth: 1,
+    borderBottomStyle: 'solid',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+    paddingLeft: { default: themeSpace[4], '@media (min-width: 40rem)': themeSpace[5] },
+    paddingRight: themeSpace[12],
+    paddingBlock: themeSpace[4],
+    textAlign: 'left',
+  },
+  body: {
+    paddingInline: { default: themeSpace[4], '@media (min-width: 640px)': themeSpace[5] },
+    paddingBlock: themeSpace[4],
+  },
+  footer: {
+    borderTopWidth: 1,
+    borderTopStyle: 'solid',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--muted) / 1) 30%, transparent)',
+    paddingInline: { default: themeSpace[4], '@media (min-width: 40rem)': themeSpace[5] },
+    paddingBlock: themeSpace[3],
+  },
+});
 
 const MAX_VISIBLE_TITLE_LINES = 4;
 
@@ -122,8 +150,10 @@ export function RenameSessionDialogView({
 
   return (
     <Dialog.Root open={target != null} onOpenChange={handleOpenChange}>
-      <Dialog.Content className="max-w-sm gap-0 overflow-hidden p-0 sm:p-0">
-        <Dialog.Header className="border-b border-border/70 px-4 py-4 pr-12 text-left sm:px-5 sm:pr-12">
+      <Dialog.Content
+        className={clsx(stylex.props(styles.content).className, 'max-w-sm gap-0 p-0 sm:p-0')}
+      >
+        <Dialog.Header className={stylex.props(styles.header).className}>
           <Dialog.Title className="text-base">
             {t('sidebar.renameChat.title', 'Rename Chat')}
           </Dialog.Title>
@@ -132,7 +162,7 @@ export function RenameSessionDialogView({
           </Dialog.Description>
         </Dialog.Header>
 
-        <div className="px-4 py-4 sm:px-5">
+        <div {...stylex.props(styles.body)}>
           <Textarea
             ref={setTitleField}
             autoFocus
@@ -151,7 +181,7 @@ export function RenameSessionDialogView({
           />
         </div>
 
-        <Dialog.Footer className="border-t border-border/70 bg-muted/30 px-4 py-3 sm:px-5">
+        <Dialog.Footer className={stylex.props(styles.footer).className}>
           <Button variant="secondary" size="small" onClick={onClose} disabled={saving}>
             {t('common.cancel', 'Cancel')}
           </Button>

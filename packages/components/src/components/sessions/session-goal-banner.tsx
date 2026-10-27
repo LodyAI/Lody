@@ -10,6 +10,8 @@ import {
 } from 'react';
 import { ChevronDown, Clock, Pause, Play, Target, X } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
+import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
@@ -24,6 +26,161 @@ import {
   type SessionGoalCommand,
   type SessionGoalMessage,
 } from '@lody/shared';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeDuration,
+  themeEasing,
+  themeFontSize,
+  themeFontWeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  banner: {
+    position: 'relative',
+    zIndex: 10,
+    width: '100%',
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+  },
+  /** Desktop dims the banner at rest so it yields to the conversation. */
+  bannerDimmed: {
+    opacity: {
+      default: 0.75,
+      '@media (hover: hover)': { ':hover': 1 },
+    },
+    transitionProperty: 'opacity',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  body: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[1],
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[1.5],
+  },
+  headerRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: themeSpace[2],
+  },
+  headerStart: {
+    display: 'flex',
+    minWidth: 0,
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: themeSpace[2],
+    rowGap: themeSpace[1],
+  },
+  targetGlyph: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+  },
+  label: {
+    fontSize: '11px',
+    fontWeight: themeFontWeight.semibold,
+    textTransform: 'uppercase',
+    letterSpacing: '0.025em',
+  },
+  metrics: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: themeSpace[2],
+    rowGap: themeSpace[0.5],
+    fontSize: '11px',
+    color: themeColors.mutedForeground,
+  },
+  metric: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    fontVariantNumeric: 'tabular-nums',
+    lineHeight: 1,
+  },
+  clockGlyph: {
+    position: 'relative',
+    top: '-1px',
+    width: themeSpace[3],
+    height: themeSpace[3],
+  },
+  metricValue: { fontVariantNumeric: 'tabular-nums' },
+  actions: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+  },
+  actionGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+  },
+  objectiveRow: {
+    display: 'flex',
+    width: '100%',
+    minWidth: 0,
+    alignItems: 'flex-start',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[1],
+    paddingBlock: themeSpace[0.5],
+  },
+  /** The expandable objective row answers the pointer like a control. */
+  objectiveRowExpandable: {
+    cursor: 'pointer',
+    borderRadius: themeRadius.xs,
+    backgroundColor: {
+      default: 'transparent',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--background) / 0.4)' },
+    },
+    // The old Tailwind `focus-visible:ring-*` painted nothing — the app forces
+    // Tailwind's own ring transparent — but it still declared a `box-shadow`,
+    // and a utility-layer shadow beats the base layer's inset focus ring. So
+    // the row showed NO focus indicator at all. Keep it that way.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  objective: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    fontSize: themeFontSize.sm,
+    fontWeight: themeFontWeight.medium,
+    lineHeight: 1.375,
+  },
+  objectiveExpanded: {
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'break-word',
+  },
+  objectiveCollapsed: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  objectiveCleared: {
+    color: themeColors.mutedForeground,
+    textDecorationLine: 'line-through',
+  },
+  objectiveActive: { color: themeColors.foreground },
+  chevron: {
+    marginTop: themeSpace[0.5],
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+    transitionProperty: 'transform, translate, scale, rotate',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  chevronOpen: { rotate: '180deg' },
+});
 
 export type SessionGoalBannerCommandHandler = (
   command: SessionGoalCommand,
@@ -77,7 +234,7 @@ export const GoalActionButton = ({
       {loading ? (
         <Spinner className="h-3.5 w-3.5" aria-hidden="true" />
       ) : (
-        <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+        <Icon {...stylex.props(styles.actionGlyph)} aria-hidden="true" />
       )}
       <span>{label}</span>
     </Button>
@@ -215,51 +372,57 @@ export const SessionGoalBanner = memo(function SessionGoalBanner({
     ? t('sessions.goal.banner.collapseObjective', 'Collapse goal objective')
     : t('sessions.goal.banner.expandObjective', 'Expand goal objective');
 
+  const bannerProps = stylex.props(styles.banner, !isMobile && styles.bannerDimmed);
+  const objectiveRowProps = stylex.props(
+    styles.objectiveRow,
+    isExpandable && styles.objectiveRowExpandable
+  );
+  const objectiveProps = stylex.props(
+    styles.objective,
+    expanded ? styles.objectiveExpanded : styles.objectiveCollapsed,
+    isCleared ? styles.objectiveCleared : styles.objectiveActive
+  );
+  const chevronProps = stylex.props(styles.chevron, expanded && styles.chevronOpen);
+  const targetGlyphProps = stylex.props(styles.targetGlyph);
+  const labelProps = stylex.props(styles.label);
+
   return (
     <div
-      className={cn(
-        'relative z-10 w-full border-b',
-        meta.surfaceClassName,
-        meta.borderClassName,
-        // Desktop: dim at rest so the banner yields to the conversation; lift
-        // on hover. Skipped on mobile — touch UI shouldn't dim chrome based on
-        // a (non-existent) cursor.
-        !isMobile && 'opacity-75 transition-opacity hover:opacity-100'
-      )}
+      {...bannerProps}
+      className={clsx(bannerProps.className, meta.surfaceClassName, meta.borderClassName)}
       role="status"
       aria-label={statusLabel}
     >
-      <div className="flex flex-col gap-1 px-3 py-1.5">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-            <Target className={cn('h-4 w-4 flex-none', meta.textClassName)} aria-hidden="true" />
-            <span
-              className={cn(
-                'text-[11px] font-semibold uppercase tracking-wide',
-                meta.textClassName
-              )}
-            >
+      <div {...stylex.props(styles.body)}>
+        <div {...stylex.props(styles.headerRow)}>
+          <div {...stylex.props(styles.headerStart)}>
+            <Target
+              {...targetGlyphProps}
+              className={clsx(targetGlyphProps.className, meta.textClassName)}
+              aria-hidden="true"
+            />
+            <span {...labelProps} className={clsx(labelProps.className, meta.textClassName)}>
               {t('sessions.goal.banner.label', 'Goal')}
             </span>
             {showMetrics ? (
               <div
-                className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground"
+                {...stylex.props(styles.metrics)}
                 aria-label={t('sessions.goal.metrics.label', 'Goal usage')}
               >
                 {timeLabel ? (
                   <span
-                    className="inline-flex items-center gap-1 tabular-nums leading-none"
+                    {...stylex.props(styles.metric)}
                     title={t('sessions.goal.metrics.elapsed', 'Elapsed time')}
                   >
                     {/* Inter sits ~1px above the line-box center; nudge the
                         icon up so it optically aligns with the digit row. */}
-                    <Clock className="relative -top-px h-3 w-3" aria-hidden="true" />
+                    <Clock {...stylex.props(styles.clockGlyph)} aria-hidden="true" />
                     <span>{timeLabel}</span>
                   </span>
                 ) : null}
                 {showTokens ? (
                   <span
-                    className="tabular-nums"
+                    {...stylex.props(styles.metricValue)}
                     title={tokensA11yLabel}
                     aria-label={tokensA11yLabel}
                   >
@@ -270,7 +433,7 @@ export const SessionGoalBanner = memo(function SessionGoalBanner({
             ) : null}
           </div>
 
-          <div className="flex shrink-0 items-center gap-1.5">
+          <div {...stylex.props(styles.actions)}>
             {showPause ? (
               <GoalActionButton
                 icon={Pause}
@@ -311,7 +474,7 @@ export const SessionGoalBanner = memo(function SessionGoalBanner({
                 title={t('sessions.goal.actions.dismiss', 'Dismiss goal banner')}
                 className="shrink-0"
               >
-                <X className="h-3.5 w-3.5" aria-hidden="true" />
+                <X {...stylex.props(styles.actionGlyph)} aria-hidden="true" />
               </Button>
             ) : null}
           </div>
@@ -342,31 +505,12 @@ export const SessionGoalBanner = memo(function SessionGoalBanner({
                 title: objective,
                 'aria-label': t('sessions.goal.banner.objective', 'Goal objective'),
               })}
-          className={cn(
-            'flex w-full min-w-0 items-start gap-2 px-1 py-0.5',
-            isExpandable &&
-              'cursor-pointer rounded-xs transition-colors hover:bg-background/40 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/40'
-          )}
+          {...objectiveRowProps}
         >
-          <span
-            ref={objectiveRef}
-            className={cn(
-              'min-w-0 flex-1 text-sm font-medium leading-snug',
-              expanded ? 'whitespace-pre-wrap break-words' : 'truncate',
-              isCleared ? 'text-muted-foreground line-through' : 'text-foreground'
-            )}
-          >
+          <span ref={objectiveRef} {...objectiveProps}>
             {objective}
           </span>
-          {isExpandable ? (
-            <ChevronDown
-              aria-hidden="true"
-              className={cn(
-                'mt-0.5 h-3.5 w-3.5 flex-none text-muted-foreground transition-transform',
-                expanded && 'rotate-180'
-              )}
-            />
-          ) : null}
+          {isExpandable ? <ChevronDown aria-hidden="true" {...chevronProps} /> : null}
         </div>
       </div>
     </div>

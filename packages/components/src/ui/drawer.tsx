@@ -1,9 +1,64 @@
 import * as React from 'react';
 import { Drawer as DrawerPrimitive } from 'vaul';
+import * as stylex from '@stylexjs/stylex';
 import { ModalContainerProvider, PopupContainerProvider } from '@lody/ui/popup-container';
 
 import { cn } from '@/lib/utils';
 import { isNativeAppShell, isNativeIOSAppShell } from '@/lib/native-platform';
+import { themeColors } from '../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeSpace,
+} from '../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  overlay: {
+    position: 'fixed',
+    inset: 0,
+    zIndex: 50,
+    backgroundColor: 'color-mix(in oklab, var(--color-black, #000) 50%, transparent)',
+  },
+  content: {
+    backgroundColor: themeColors.background,
+    position: 'fixed',
+    zIndex: 50,
+    display: 'flex',
+    height: 'auto',
+    flexDirection: 'column',
+  },
+  grabber: {
+    backgroundColor: `color-mix(in oklab, ${themeColors.mutedForeground} 40%, transparent)`,
+    marginInline: 'auto',
+    marginTop: themeSpace[3],
+    display: 'none',
+    height: themeSpace[1.5],
+    width: themeSpace[10],
+    flexShrink: 0,
+    borderRadius: 'calc(infinity * 1px)',
+  },
+  popupHost: { display: 'contents' },
+  header: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[0.5],
+    padding: themeSpace[4],
+  },
+  footer: {
+    marginTop: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[2],
+    padding: themeSpace[4],
+  },
+  title: { color: themeColors.foreground, fontWeight: themeFontWeight.semibold },
+  description: {
+    color: themeColors.mutedForeground,
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+  },
+});
 
 const DrawerViewportContext = React.createContext(false);
 
@@ -82,7 +137,8 @@ const DrawerOverlay = React.forwardRef<
     ref={ref}
     data-slot="drawer-overlay"
     className={cn(
-      'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/50',
+      stylex.props(styles.overlay).className,
+      'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
       className
     )}
     {...props}
@@ -110,7 +166,10 @@ function DrawerContent({
       <DrawerPrimitive.Content
         data-slot="drawer-content"
         className={cn(
-          'group/drawer-content bg-background fixed z-50 flex h-auto flex-col',
+          stylex.props(styles.content).className,
+          'group/drawer-content',
+          // Directional variants outrank ordinary caller classes in the original
+          // utilities layer. Keep that public override order during coexistence.
           'data-[vaul-drawer-direction=top]:inset-x-0 data-[vaul-drawer-direction=top]:top-0 data-[vaul-drawer-direction=top]:mb-24 data-[vaul-drawer-direction=top]:max-h-[80dvh] data-[vaul-drawer-direction=top]:rounded-b-lg data-[vaul-drawer-direction=top]:border-b data-[vaul-drawer-direction=top]:border-border',
           'data-[vaul-drawer-direction=bottom]:inset-x-0 data-[vaul-drawer-direction=bottom]:bottom-0 data-[vaul-drawer-direction=bottom]:mt-24 data-[vaul-drawer-direction=bottom]:max-h-[80dvh] data-[vaul-drawer-direction=bottom]:rounded-t-lg data-[vaul-drawer-direction=bottom]:border-t data-[vaul-drawer-direction=bottom]:border-border',
           'data-[vaul-drawer-direction=right]:inset-y-0 data-[vaul-drawer-direction=right]:right-0 data-[vaul-drawer-direction=right]:w-3/4 data-[vaul-drawer-direction=right]:border-l data-[vaul-drawer-direction=right]:border-border data-[vaul-drawer-direction=right]:sm:max-w-sm',
@@ -123,14 +182,23 @@ function DrawerContent({
         {/* Drag grabber for bottom sheets. Uses `muted-foreground/40` (not
            `bg-muted`, which equals `--background` in the dark theme and renders
            invisible) so the handle actually reads as draggable. */}
-        <div className="bg-muted-foreground/40 mx-auto mt-3 hidden h-1.5 w-10 shrink-0 rounded-full group-data-[vaul-drawer-direction=bottom]/drawer-content:block" />
+        <div
+          className={cn(
+            stylex.props(styles.grabber).className,
+            'group-data-[vaul-drawer-direction=bottom]/drawer-content:block'
+          )}
+        />
         <ModalContainerProvider container={popupContainer}>
           <PopupContainerProvider container={popupContainer}>{children}</PopupContainerProvider>
         </ModalContainerProvider>
         {/* Body portals inherit Vaul's pointer lock and leave its focus scope.
             Keep floating controls inside the modal, outside scrolling content;
             a boxless host adds no flex item, and menu gestures never drag Vaul. */}
-        <div ref={setPopupContainer} className="contents" data-vaul-no-drag="" />
+        <div
+          ref={setPopupContainer}
+          className={stylex.props(styles.popupHost).className}
+          data-vaul-no-drag=""
+        />
       </DrawerPrimitive.Content>
     </DrawerPortal>
   );
@@ -141,7 +209,8 @@ function DrawerHeader({ className, ...props }: React.ComponentProps<'div'>) {
     <div
       data-slot="drawer-header"
       className={cn(
-        'flex flex-col gap-0.5 p-4 group-data-[vaul-drawer-direction=bottom]/drawer-content:text-center group-data-[vaul-drawer-direction=top]/drawer-content:text-center md:gap-1.5 md:text-left',
+        stylex.props(styles.header).className,
+        'group-data-[vaul-drawer-direction=bottom]/drawer-content:text-center group-data-[vaul-drawer-direction=top]/drawer-content:text-center md:gap-1.5 md:text-left',
         className
       )}
       {...props}
@@ -153,7 +222,7 @@ function DrawerFooter({ className, ...props }: React.ComponentProps<'div'>) {
   return (
     <div
       data-slot="drawer-footer"
-      className={cn('mt-auto flex flex-col gap-2 p-4', className)}
+      className={cn(stylex.props(styles.footer).className, className)}
       {...props}
     />
   );
@@ -163,7 +232,7 @@ function DrawerTitle({ className, ...props }: React.ComponentProps<typeof Drawer
   return (
     <DrawerPrimitive.Title
       data-slot="drawer-title"
-      className={cn('text-foreground font-semibold', className)}
+      className={cn(stylex.props(styles.title).className, className)}
       {...props}
     />
   );
@@ -176,7 +245,7 @@ function DrawerDescription({
   return (
     <DrawerPrimitive.Description
       data-slot="drawer-description"
-      className={cn('text-muted-foreground text-sm', className)}
+      className={cn(stylex.props(styles.description).className, className)}
       {...props}
     />
   );

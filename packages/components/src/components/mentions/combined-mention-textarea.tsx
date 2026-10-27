@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useMentionFileSearch } from './file-search/use-file-search';
 import { useShortcutMentionSource } from './use-shortcut-mention-source';
 import { shortcutComposerScope } from './shortcut-composer-state';
@@ -1055,9 +1056,10 @@ export const CombinedMentionTextarea = React.forwardRef<
           onChange={(event) => {
             onValueChange(event.target.value);
           }}
-          className={cn('resize-none', className)}
+          className={className}
           aria-label={props['aria-label'] ?? label}
           {...props}
+          resize="none"
         />
       );
 
@@ -1086,7 +1088,7 @@ export const CombinedMentionTextarea = React.forwardRef<
         onFilter={(options) => options}
         autoCloseOnEmpty={false}
         loop
-        className="w-full"
+        {...stylex.props(styles.root)}
       >
         <React.Fragment key={hydrationKey}>
           <FileMentionHydrator
@@ -1134,14 +1136,14 @@ export const CombinedMentionTextarea = React.forwardRef<
             </>
           ) : null}
         </React.Fragment>
-        <MentionLabel className="sr-only">{label}</MentionLabel>
+        <MentionLabel {...stylex.props(styles.label)}>{label}</MentionLabel>
         <MentionInput
           ref={ref}
           // See the data attribute note above — scopes the ⇧Tab mode cycle.
           data-lody-composer-input=""
           value={value}
           containerClassName={containerClassName}
-          className={cn('resize-none', className)}
+          className={cn(stylex.props(styles.input).className, className)}
           {...props}
         />
         <TwoLevelMentionMenu
@@ -1178,3 +1180,19 @@ export const CombinedMentionTextarea = React.forwardRef<
 );
 
 CombinedMentionTextarea.displayName = 'CombinedMentionTextarea';
+
+const styles = stylex.create({
+  input: { resize: 'none' },
+  root: { width: '100%' },
+  label: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clip: 'rect(0, 0, 0, 0)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+});

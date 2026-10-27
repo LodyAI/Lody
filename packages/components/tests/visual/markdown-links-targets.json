@@ -1,0 +1,207 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 960,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "components-ownedmarkdownlinksmigration--copy-links",
+    "components-ownedmarkdownlinksmigration--open-links",
+    "components-ownedmarkdownlinksmigration--context-menus",
+    "components-ownedmarkdownlinksmigration--scoped-caller-overrides",
+    "components-ownedmarkdownlinksmigration--read-only"
+  ],
+  "ready": {
+    "components-ownedmarkdownlinksmigration--copy-links": [
+      {
+        "action": "visible",
+        "selector": "[data-markdown-links-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-markdown-table]"
+      },
+      {
+        "action": "visible",
+        "selector": ".markdown-reference-chip[href=\"https://github.com/synthetic-owner/synthetic-repo/pull/42\"]"
+      }
+    ],
+    "components-ownedmarkdownlinksmigration--open-links": [
+      {
+        "action": "visible",
+        "selector": "[data-markdown-links-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-markdown-table]"
+      },
+      {
+        "action": "visible",
+        "selector": ".markdown-reference-chip[href=\"https://github.com/synthetic-owner/synthetic-repo/pull/42\"]"
+      }
+    ],
+    "components-ownedmarkdownlinksmigration--context-menus": [
+      {
+        "action": "visible",
+        "selector": "[data-markdown-links-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-markdown-table]"
+      },
+      {
+        "action": "visible",
+        "selector": ".markdown-reference-chip[href=\"https://github.com/synthetic-owner/synthetic-repo/pull/42\"]"
+      }
+    ],
+    "components-ownedmarkdownlinksmigration--scoped-caller-overrides": [
+      {
+        "action": "visible",
+        "selector": "[data-markdown-links-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-markdown-table]"
+      },
+      {
+        "action": "visible",
+        "selector": ".markdown-reference-chip[href=\"https://github.com/synthetic-owner/synthetic-repo/pull/42\"]"
+      }
+    ],
+    "components-ownedmarkdownlinksmigration--read-only": [
+      {
+        "action": "visible",
+        "selector": "[data-markdown-links-fixture]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-markdown-table]"
+      },
+      {
+        "action": "visible",
+        "selector": ".markdown-reference-chip[href=\"https://github.com/synthetic-owner/synthetic-repo/pull/42\"]"
+      }
+    ]
+  },
+  "states": {
+    "components-ownedmarkdownlinksmigration--copy-links": [
+      {
+        "name": "table-file-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": ".markdown-renderer button[title=\"./body.tsx#L8\"]"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": ".markdown-renderer button[title=\"./header.tsx#L3\"]"
+          },
+          {
+            "action": "press",
+            "selector": ".markdown-renderer button[title=\"./header.tsx#L3\"]",
+            "key": "Tab"
+          }
+        ]
+      },
+      {
+        "name": "copy-pending",
+        "steps": [
+          {
+            "action": "click",
+            "selector": ".markdown-renderer button[title=\"./body.tsx#L8\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "document.querySelector(\"[data-markdown-links-result]\").textContent === \"Copy pending: ./body.tsx#L8\""
+          }
+        ]
+      }
+    ],
+    "components-ownedmarkdownlinksmigration--open-links": [
+      {
+        "name": "file-opened",
+        "steps": [
+          {
+            "action": "click",
+            "selector": ".markdown-renderer button[title=\"./body.tsx#L8\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "document.querySelector(\"[data-markdown-links-result]\").textContent === \"Opened: ./body.tsx#L8\""
+          }
+        ]
+      },
+      {
+        "name": "pr-opened",
+        "steps": [
+          {
+            "action": "click",
+            "selector": ".markdown-reference-chip[href=\"https://github.com/synthetic-owner/synthetic-repo/pull/42\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "document.querySelector(\"[data-markdown-links-result]\").textContent === \"PR opened: synthetic #42\""
+          }
+        ]
+      }
+    ],
+    "components-ownedmarkdownlinksmigration--context-menus": [
+      {
+        "name": "header-file-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": ".markdown-renderer button[title=\"./header.tsx#L3\"]"
+          }
+        ]
+      },
+      {
+        "name": "file-opened",
+        "steps": [
+          {
+            "action": "click",
+            "selector": ".markdown-renderer button[title=\"./body.tsx#L8\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "document.querySelector(\"[data-markdown-links-result]\").textContent === \"Opened: ./body.tsx#L8\""
+          }
+        ]
+      }
+    ],
+    "components-ownedmarkdownlinksmigration--scoped-caller-overrides": [
+      {
+        "name": "table-file-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": ".markdown-renderer button[title=\"./body.tsx#L8\"]"
+          }
+        ]
+      },
+      {
+        "name": "github-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": ".markdown-reference-chip[href=\"https://github.com/synthetic-owner/synthetic-repo/pull/42\"]"
+          }
+        ]
+      }
+    ]
+  }
+}

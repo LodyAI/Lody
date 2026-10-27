@@ -11,6 +11,7 @@ import Anser from 'anser';
 import { Terminal } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { text as textScale } from '@lody/ui/tokens/scales.stylex';
+import { clsx } from 'clsx';
 import { cn } from '@/lib/utils';
 import {
   CONVERSATION_PANEL_FRAME_CLASS,
@@ -26,11 +27,97 @@ import { useActiveVSCodeTheme } from '../../theme-provider';
 import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/atoms/settings';
 import { terminalTextFontSizeStyle } from './conversation-font-size-classes';
 import { prepareTerminalPreview } from './terminal-preview';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeDuration,
+  themeEasing,
+  themeFontWeight,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 
 export { prepareTerminalPreview } from './terminal-preview';
 
 const typography = stylex.create({
   caption: { fontSize: textScale.captionSize, lineHeight: textScale.captionLeading },
+  title: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: themeFontWeight.medium,
+  },
+});
+
+const styles = stylex.create({
+  root: { overflow: 'hidden' },
+  surfaceFallback: { backgroundColor: 'hsl(var(--muted) / 0.35)' },
+  glyph: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+  },
+  headerButton: {
+    width: '100%',
+    textAlign: 'left',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+    '@media (hover: hover)': { ':hover': { backgroundColor: themeColors.hover } },
+  },
+  body: { color: themeColors.foreground },
+  commandRow: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2],
+  },
+  commandPrompt: { color: themeColors.mutedForeground },
+  commandText: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflowX: 'auto',
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'break-word',
+  },
+  outputFrame: { position: 'relative' },
+  outputScroll: { overflow: 'auto' },
+  // A static ring, not a focus ring: it paints while the output sits there.
+  outputFocusRing: { boxShadow: '0 0 0 1px hsl(var(--ring) / 0.3)' },
+  outputRest: { overflow: 'hidden' },
+  outputText: {
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2],
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'break-word',
+  },
+  focusOverlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    height: '100%',
+    cursor: 'pointer',
+    backgroundColor: 'transparent',
+  },
+  outputFade: {
+    pointerEvents: 'none',
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    height: themeSpace[8],
+    backgroundImage:
+      'linear-gradient(to bottom in oklab, hsl(var(--muted) / 0.9), transparent)',
+  },
 });
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -158,11 +245,11 @@ export const TerminalComponent = memo(function TerminalComponent({
 
   const headerContent = (
     <>
-      <Terminal className="h-4 w-4 shrink-0 text-muted-foreground" />
+      <Terminal {...stylex.props(styles.glyph)} />
       <div
-        className={cn(
-          'min-w-0 flex-1 truncate font-medium',
-          stylex.props(typography.caption).className
+        className={clsx(
+          stylex.props(typography.caption).className,
+          stylex.props(typography.title).className
         )}
       >
         {title}
@@ -172,10 +259,9 @@ export const TerminalComponent = memo(function TerminalComponent({
 
   return (
     <div
-      className={cn(
-        'overflow-hidden',
-        showBorder ? CONVERSATION_PANEL_FRAME_CLASS : null,
-        className
+      className={clsx(
+        stylex.props(styles.root).className,
+        cn(showBorder ? CONVERSATION_PANEL_FRAME_CLASS : null, className)
       )}
     >
       {/* The terminal's own surface (VS Code `terminal.background`, or the muted
@@ -184,16 +270,18 @@ export const TerminalComponent = memo(function TerminalComponent({
           lived on the body alone, the header was tinting the frame instead and
           the step measured -1 in dark and inverted to +7 in light. */}
       <div
-        className={cn(showBackground && !terminalBackgroundColor ? 'bg-muted/[0.35]' : null)}
+        {...stylex.props(
+          showBackground && !terminalBackgroundColor ? styles.surfaceFallback : null
+        )}
         style={terminalContainerStyle}
       >
         {showHeader ? (
           onHeaderClick ? (
             <button
               type="button"
-              className={cn(
+              className={clsx(
                 CONVERSATION_PANEL_HEADER_CLASS,
-                'w-full text-left transition-colors hover:bg-hover',
+                stylex.props(styles.headerButton).className,
                 bodyVisible ? CONVERSATION_PANEL_HEADER_RULE_CLASS : null
               )}
               onClick={onHeaderClick}
@@ -203,7 +291,7 @@ export const TerminalComponent = memo(function TerminalComponent({
             </button>
           ) : (
             <div
-              className={cn(
+              className={clsx(
                 CONVERSATION_PANEL_HEADER_CLASS,
                 bodyVisible ? CONVERSATION_PANEL_HEADER_RULE_CLASS : null
               )}
@@ -214,19 +302,27 @@ export const TerminalComponent = memo(function TerminalComponent({
         ) : null}
 
         {bodyVisible ? (
-          <div className="text-foreground">
+          <div {...stylex.props(styles.body)}>
             {shouldRenderInput ? (
               <div
-                className={cn(
-                  'flex items-start gap-2 px-3 py-2 font-terminal',
+                className={clsx(
+                  'font-terminal',
+                  stylex.props(styles.commandRow).className,
                   hasOutput ? 'border-b border-border/50' : null
                 )}
               >
-                <span className="text-muted-foreground" style={terminalTextFontSizeStyle(fontSize)}>
+                <span
+                  {...stylex.props(styles.commandPrompt)}
+                  style={terminalTextFontSizeStyle(fontSize)}
+                >
                   $
                 </span>
                 <pre
-                  className="scrollbar-pro min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-words font-terminal"
+                  className={clsx(
+                    'scrollbar-pro',
+                    'font-terminal',
+                    stylex.props(styles.commandText).className
+                  )}
                   style={terminalTextFontSizeStyle(fontSize)}
                 >
                   {command}
@@ -237,16 +333,19 @@ export const TerminalComponent = memo(function TerminalComponent({
             {hasOutput ? (
               <div
                 ref={outputRef}
-                className={cn(
-                  'relative',
+                className={clsx(
+                  stylex.props(styles.outputFrame).className,
                   shouldUseFullOutput
                     ? null
                     : shouldUseScrollOutput || isFocused
-                      ? cn(
-                          'scrollbar-pro overflow-auto',
-                          shouldUseScrollOutput ? null : 'ring-1 ring-ring/30'
+                      ? clsx(
+                          'scrollbar-pro',
+                          stylex.props(styles.outputScroll).className,
+                          shouldUseScrollOutput
+                            ? null
+                            : stylex.props(styles.outputFocusRing).className
                         )
-                      : 'overflow-hidden'
+                      : stylex.props(styles.outputRest).className
                 )}
                 style={{
                   maxHeight:
@@ -256,7 +355,10 @@ export const TerminalComponent = memo(function TerminalComponent({
                 }}
               >
                 <pre
-                  className="px-3 py-2 font-terminal whitespace-pre-wrap break-words"
+                  className={clsx(
+                    'font-terminal',
+                    stylex.props(styles.outputText).className
+                  )}
                   style={terminalTextFontSizeStyle(fontSize)}
                 >
                   {renderAnsiToReactNodes({ value: outputTextForDisplay, terminalTheme })}
@@ -265,12 +367,12 @@ export const TerminalComponent = memo(function TerminalComponent({
                 {!shouldUseScrollOutput && !shouldUseFullOutput && !isFocused && isTruncatedView ? (
                   <button
                     type="button"
-                    className="absolute inset-0 h-full cursor-pointer bg-transparent"
+                    {...stylex.props(styles.focusOverlay)}
                     onClick={() => setIsFocused(true)}
                     aria-label="Focus terminal output"
                   >
                     <div
-                      className="pointer-events-none absolute inset-x-0 top-0 h-8 bg-gradient-to-b from-muted/90 to-transparent"
+                      {...stylex.props(styles.outputFade)}
                       style={collapsedOutputFadeStyle}
                     />
                   </button>

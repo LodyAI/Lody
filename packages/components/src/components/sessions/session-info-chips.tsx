@@ -18,6 +18,8 @@ import {
   X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
 import {
   getSessionPullRequestLegacyFields,
   isSessionGoalCleared,
@@ -33,7 +35,6 @@ import {
   type SessionPullRequestCiState,
   type SessionPullRequestMeta,
 } from '@lody/shared';
-import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { getGoalStatusPresentation } from '@/lib/session-goal-status';
@@ -50,6 +51,458 @@ import { SessionPrIcon } from '@/components/sidebar-row-shared';
 import { PR_STATUS_META } from './pull-request-badge';
 import { useSessionStatusPresentation, type SessionStatusStripState } from './session-status-strip';
 import { PrMergeButton, PrMergeMethodLabel } from './pr-merge-button';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeDuration,
+  themeEasing,
+  themeFontWeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  textMuted: { color: 'hsl(var(--muted-foreground) / 1)' },
+  textWarning: { color: 'hsl(var(--status-warning) / 1)' },
+  ciPopover: {
+    width: 'calc(var(--spacing) * 96)',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+  },
+  /* ── Goal popover ─────────────────────────────────────────────────── */
+  goalPanel: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[2],
+    padding: themeSpace[3],
+  },
+  goalHeaderRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+  },
+  goalGlyph: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+  },
+  goalLabel: { fontWeight: themeFontWeight.medium },
+  goalMetrics: {
+    marginLeft: 'auto',
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[2],
+    color: themeColors.mutedForeground,
+  },
+  goalMetric: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    fontVariantNumeric: 'tabular-nums',
+    lineHeight: 1,
+  },
+  goalClock: {
+    position: 'relative',
+    top: '-1px',
+    width: themeSpace[3],
+    height: themeSpace[3],
+  },
+  goalMetricValue: { fontVariantNumeric: 'tabular-nums' },
+  goalObjective: {
+    maxHeight: '12rem',
+    overflowY: 'auto',
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'break-word',
+    color: themeColors.foreground,
+  },
+  goalActions: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: themeSpace[1.5],
+  },
+  dismissGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+  },
+
+  /* ── Schedule popover ─────────────────────────────────────────────── */
+  schedulePanel: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[1.5],
+    padding: themeSpace[3],
+  },
+  scheduleHeaderRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+  },
+  scheduleGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    color: themeColors.primary,
+  },
+  scheduleTitle: {
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+  },
+  scheduleSummary: { color: themeColors.mutedForeground },
+
+  /* ── Context chip actions ─────────────────────────────────────────── */
+  actionsShell: {
+    display: 'flex',
+    minWidth: themeSpace[12],
+    flexShrink: 8,
+    alignItems: 'center',
+    overflow: 'hidden',
+    borderRadius: themeRadius.md,
+    backgroundColor: {
+      default: 'hsl(var(--foreground) / 0.05)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 8%, transparent)',
+    },
+  },
+  actionButton: {
+    display: 'flex',
+    minWidth: 0,
+    flexShrink: 0,
+    userSelect: 'none',
+    alignItems: 'center',
+    paddingInline: themeSpace[1.5],
+    paddingBlock: themeSpace[0.5],
+    fontWeight: themeFontWeight.medium,
+    color: {
+      default: themeColors.mutedForeground,
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 80%, transparent)',
+      ':focus-visible': themeColors.foreground,
+      ':focus-visible:where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 80%, transparent)',
+      '@media (hover: hover)': { ':enabled:hover': 'hsl(var(--foreground) / 1)' },
+    },
+    backgroundColor: {
+      default: 'transparent',
+      ':focus-visible': 'hsl(var(--foreground) / 0.05)',
+      ':focus-visible:where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 8%, transparent)',
+      '@media (hover: hover)': {
+        ':enabled:hover': 'color-mix(in oklab, hsl(var(--foreground) / 1) 5%, transparent)',
+        ':enabled:hover:where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+          'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 8%, transparent)',
+      },
+    },
+    // The old Tailwind `focus:ring-*` (and its `focus-visible:` twin) painted
+    // nothing — the app forces Tailwind's own ring transparent — but it still
+    // declared a `box-shadow`, and a utility-layer shadow beats the base
+    // layer's inset focus ring. So the chip showed NO focus indicator at all.
+    // Keep it that way.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+    ':disabled': { opacity: 0.5 },
+  },
+  actionLabel: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  overflowButton: {
+    position: 'relative',
+    display: 'flex',
+    width: themeSpace[5],
+    flexShrink: 0,
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: 'hsl(var(--muted-foreground) / 0.75)',
+    backgroundColor: {
+      default: 'transparent',
+      ':focus-visible': 'hsl(var(--foreground) / 0.05)',
+      ':focus-visible:where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 8%, transparent)',
+      '@media (hover: hover)': {
+        ':hover': 'hsl(var(--foreground) / 0.05)',
+        ':hover:where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+          'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 8%, transparent)',
+      },
+    },
+    // Same as the action chip above: the old Tailwind `focus:ring-*` erased
+    // the base layer's inset focus ring, so the button showed NO focus
+    // indicator. Keep it that way.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+    '::before': {
+      content: '""',
+      position: 'absolute',
+      left: 0,
+      height: themeSpace[3],
+      width: '1px',
+      backgroundColor: {
+        default: 'hsl(var(--foreground) / 0.1)',
+        ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+          'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 15%, transparent)',
+      },
+    },
+    '@media (hover: hover)': {
+      ':hover': {
+        color: themeColors.foreground,
+      },
+    },
+    ':focus-visible': { color: themeColors.foreground },
+  },
+  overflowGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+  },
+
+  /* ── Workspace-location control ───────────────────────────────────── */
+  locationGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+  },
+  locationButton: {
+    // -mr-1 cancels the stage's icon→summary gap so the glyph sits close to
+    // the repo/branch text (a lone icon otherwise floats).
+    marginRight: `calc(-1 * ${themeSpace[1]})`,
+    display: 'flex',
+    height: themeSpace[6],
+    flexShrink: 0,
+    userSelect: 'none',
+    alignItems: 'center',
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[1],
+    color: themeColors.mutedForeground,
+    backgroundColor: {
+      default: 'transparent',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--muted-foreground) / 0.1)' },
+    },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+    '@media (hover: hover)': {
+      ':hover': { color: themeColors.foreground },
+    },
+  },
+  locationStatic: {
+    display: 'flex',
+    height: themeSpace[6],
+    flexShrink: 0,
+    userSelect: 'none',
+    alignItems: 'center',
+    paddingInline: themeSpace[1],
+    color: themeColors.mutedForeground,
+  },
+  tooltipLabel: {
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+  },
+  tooltipHint: {
+    marginLeft: themeSpace[1.5],
+    color: themeColors.mutedForeground,
+  },
+
+  /* ── Context chip summary ─────────────────────────────────────────── */
+  prButton: {
+    display: 'flex',
+    height: themeSpace[6],
+    flexShrink: 0,
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[1],
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.mutedForeground,
+    backgroundColor: {
+      default: 'transparent',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--muted-foreground) / 0.1)' },
+    },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  prStatic: {
+    display: 'flex',
+    height: themeSpace[6],
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[1],
+    paddingInline: themeSpace[1],
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.mutedForeground,
+  },
+  chipValue: {
+    display: { default: 'none', '@container (min-width: 420px)': 'inline' },
+    flexShrink: 0,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  summaryRow: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: themeSpace[2],
+    fontWeight: themeFontWeight.normal,
+  },
+  projectName: {
+    minWidth: 0,
+    flexShrink: 2,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: themeColors.mutedForeground,
+  },
+  branchButton: {
+    marginInline: `calc(-1 * ${themeSpace[1]})`,
+    display: 'flex',
+    height: themeSpace[6],
+    minWidth: 0,
+    flexShrink: 0,
+    alignItems: 'center',
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[1],
+    color: themeColors.reading,
+    backgroundColor: {
+      default: 'transparent',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--muted-foreground) / 0.1)' },
+    },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  branchName: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  diffChip: {
+    display: 'flex',
+    height: themeSpace[5],
+    minWidth: 0,
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    overflow: 'hidden',
+    borderRadius: themeRadius.md,
+    backgroundColor: {
+      default: 'hsl(var(--foreground) / 0.06)',
+      '@media (hover: hover)': {
+        ':enabled:hover': 'color-mix(in oklab, hsl(var(--foreground) / 1) 10%, transparent)',
+      },
+    },
+    paddingInline: themeSpace[1.5],
+    fontWeight: themeFontWeight.medium,
+    fontVariantNumeric: 'tabular-nums',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+    ':disabled': { pointerEvents: 'none' },
+  },
+  diffAdded: { color: themeColors.githubAddition },
+  diffRemoved: { color: themeColors.githubDeletion },
+  ciSlot: {
+    display: { default: 'none', '@container (min-width: 420px)': 'contents' },
+  },
+
+  /* ── CI popover ───────────────────────────────────────────────────── */
+  ciPanel: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[1.5],
+    padding: themeSpace[3],
+  },
+  ciHeaderRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+  },
+  ciOverall: { fontWeight: themeFontWeight.medium },
+  ciCount: { color: themeColors.mutedForeground },
+  ciList: {
+    display: 'flex',
+    maxHeight: '14rem',
+    flexDirection: 'column',
+    overflowY: 'auto',
+  },
+  ciRunGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+  },
+  ciRunName: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: themeColors.foreground,
+  },
+  ciRunDuration: {
+    flexShrink: 0,
+    fontVariantNumeric: 'tabular-nums',
+    color: themeColors.mutedForeground,
+  },
+  ciRunRow: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[1.5],
+    paddingBlock: themeSpace[1],
+    textAlign: 'left',
+  },
+  ciRunButton: {
+    backgroundColor: {
+      default: 'transparent',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--muted-foreground) / 0.1)' },
+    },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  ciPillButton: {
+    display: 'flex',
+    height: themeSpace[6],
+    flexShrink: 0,
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[1],
+    color: themeColors.mutedForeground,
+    backgroundColor: {
+      default: 'transparent',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--muted-foreground) / 0.1)' },
+    },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  ciPillOpen: { backgroundColor: 'hsl(var(--muted-foreground) / 0.1)' },
+  ciPillCount: { fontVariantNumeric: 'tabular-nums' },
+
+  /* CI run tones. */
+  ciSuccess: { color: themeColors.statusSuccess },
+  ciFailure: { color: themeColors.destructive },
+  ciRunning: { color: themeColors.statusWarning },
+  ciQueued: { color: themeColors.mutedForeground },
+  ciSkipped: { color: 'hsl(var(--muted-foreground) / 0.7)' },
+});
 
 /**
  * Shared contract: the bar renders each item either collapsed in the cluster
@@ -73,7 +526,7 @@ export function ScheduleSourceChip({
       <ClusterChip
         icon={Clock}
         label={label}
-        textClassName="text-muted-foreground"
+        textClassName={stylex.props(styles.textMuted).className}
         onPromote={itemMode.onPromote}
       />
     );
@@ -83,7 +536,7 @@ export function ScheduleSourceChip({
     <StageChip
       icon={Clock}
       label={label}
-      textClassName="text-muted-foreground"
+      textClassName={stylex.props(styles.textMuted).className}
       summary={label}
       {...(onOpen ? { detail: { kind: 'action', onAction: onOpen, ariaLabel: label } } : {})}
     />
@@ -97,7 +550,7 @@ export function StatusChip({
   const presentation = useSessionStatusPresentation(state);
   if (!presentation) return null;
   const { Icon, text, warning } = presentation;
-  const textClassName = warning ? 'text-status-warning' : 'text-muted-foreground';
+  const textClassName = stylex.props(warning ? styles.textWarning : styles.textMuted).className;
 
   if (itemMode.mode === 'cluster') {
     return (
@@ -198,36 +651,55 @@ export function GoalChip({
         kind: 'popover',
         ariaLabel: t('sessions.goal.banner.label', 'Goal'),
         content: (
-          <div className={cn('flex flex-col gap-2 p-3', INFO_BAR_TEXT_CLASS)}>
-            <div className="flex items-center gap-2">
-              <Target className={cn('h-4 w-4 shrink-0', meta.textClassName)} aria-hidden="true" />
-              <span className={cn('font-medium  ', meta.textClassName)}>
+          <div
+            {...stylex.props(styles.goalPanel)}
+            className={clsx(stylex.props(styles.goalPanel).className, INFO_BAR_TEXT_CLASS)}
+          >
+            <div {...stylex.props(styles.goalHeaderRow)}>
+              <Target
+                {...stylex.props(styles.goalGlyph)}
+                className={clsx(stylex.props(styles.goalGlyph).className, meta.textClassName)}
+                aria-hidden="true"
+              />
+              <span
+                {...stylex.props(styles.goalLabel)}
+                className={clsx(stylex.props(styles.goalLabel).className, meta.textClassName)}
+              >
                 {t('sessions.goal.banner.label', 'Goal')}
               </span>
-              <span className={cn('font-medium', meta.textClassName)}>{statusLabel}</span>
-              <span className="ml-auto flex shrink-0 items-center gap-2 text-muted-foreground">
+              <span
+                {...stylex.props(styles.goalLabel)}
+                className={clsx(stylex.props(styles.goalLabel).className, meta.textClassName)}
+              >
+                {statusLabel}
+              </span>
+              <span {...stylex.props(styles.goalMetrics)}>
                 {timeLabel ? (
                   <span
-                    className="inline-flex items-center gap-1 tabular-nums leading-none"
+                    {...stylex.props(styles.goalMetric)}
                     title={t('sessions.goal.metrics.elapsed', 'Elapsed time')}
                   >
-                    <Clock className="relative -top-px h-3 w-3" aria-hidden="true" />
+                    <Clock {...stylex.props(styles.goalClock)} aria-hidden="true" />
                     <span>{timeLabel}</span>
                   </span>
                 ) : null}
-                {tokensLabel ? <span className="tabular-nums">{tokensLabel}</span> : null}
+                {tokensLabel ? (
+                  <span {...stylex.props(styles.goalMetricValue)}>{tokensLabel}</span>
+                ) : null}
               </span>
             </div>
             <p
-              className={cn(
-                'scrollbar-pro max-h-48 overflow-y-auto whitespace-pre-wrap break-words text-foreground',
+              {...stylex.props(styles.goalObjective)}
+              className={clsx(
+                stylex.props(styles.goalObjective).className,
+                'scrollbar-pro',
                 INFO_BAR_PROSE_CLASS
               )}
             >
               {objective}
             </p>
             {showPause || showResume || showClear || showDismiss ? (
-              <div className="flex items-center justify-end gap-1.5">
+              <div {...stylex.props(styles.goalActions)}>
                 {showPause ? (
                   <GoalActionButton
                     icon={Pause}
@@ -266,9 +738,8 @@ export function GoalChip({
                     onClick={() => onDismiss?.(goal)}
                     aria-label={t('sessions.goal.actions.dismiss', 'Dismiss goal banner')}
                     title={t('sessions.goal.actions.dismiss', 'Dismiss goal banner')}
-                    className="shrink-0"
                   >
-                    <X className="h-3.5 w-3.5" aria-hidden="true" />
+                    <X {...stylex.props(styles.dismissGlyph)} aria-hidden="true" />
                   </Button>
                 ) : null}
               </div>
@@ -339,11 +810,17 @@ export function ScheduleChip({
         kind: 'popover',
         ariaLabel: heading,
         content: (
-          <div className="flex flex-col gap-1.5 p-3">
-            <div className={cn('flex items-center gap-1.5', INFO_BAR_TEXT_CLASS)}>
-              <AlarmClock className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
-              <span className="font-medium text-foreground">{heading}</span>
-              <span className="text-muted-foreground">· {summary}</span>
+          <div {...stylex.props(styles.schedulePanel)}>
+            <div
+              {...stylex.props(styles.scheduleHeaderRow)}
+              className={clsx(
+                stylex.props(styles.scheduleHeaderRow).className,
+                INFO_BAR_TEXT_CLASS
+              )}
+            >
+              <AlarmClock {...stylex.props(styles.scheduleGlyph)} aria-hidden="true" />
+              <span {...stylex.props(styles.scheduleTitle)}>{heading}</span>
+              <span {...stylex.props(styles.scheduleSummary)}>· {summary}</span>
             </div>
             <ScheduledTaskList rows={rows} nowMs={nowMs} />
           </div>
@@ -409,18 +886,16 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
   }
 
   return (
-    <div className="flex min-w-12 shrink-[8] items-center overflow-hidden rounded-md bg-foreground/[0.05] dark:bg-muted-foreground/[0.08]">
+    <div {...stylex.props(styles.actionsShell)}>
       <button
         type="button"
         onClick={primaryAction.onClick}
         disabled={primaryAction.disabled}
         title={primaryAction.label}
-        className={cn(
-          'flex min-w-0 shrink select-none items-center px-1.5 py-0.5 font-medium text-muted-foreground outline-none transition-colors enabled:hover:bg-foreground/[0.05] enabled:hover:text-foreground focus:outline-none focus:ring-0 focus:ring-offset-0 focus:shadow-none focus-visible:bg-foreground/[0.05] focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-50 dark:text-muted-foreground/80 dark:enabled:hover:bg-muted-foreground/[0.08] dark:focus-visible:bg-muted-foreground/[0.08]',
-          INFO_BAR_TEXT_CLASS
-        )}
+        {...stylex.props(styles.actionButton)}
+        className={clsx(stylex.props(styles.actionButton).className, INFO_BAR_TEXT_CLASS)}
       >
-        <span className="truncate">{primaryAction.label}</span>
+        <span {...stylex.props(styles.actionLabel)}>{primaryAction.label}</span>
       </button>
       {overflowActions.length > 0 ? (
         <Menu.Root>
@@ -430,9 +905,9 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
                 type="button"
                 aria-label={t('sessions.moreActions', 'More actions')}
                 title={t('sessions.moreActions', 'More actions')}
-                className="relative flex w-5 shrink-0 self-stretch items-center justify-center text-muted-foreground/75 outline-none transition-colors before:absolute before:left-0 before:h-3 before:w-px before:bg-foreground/10 hover:bg-foreground/[0.05] hover:text-foreground focus:outline-none focus:ring-0 focus:ring-offset-0 focus:shadow-none focus-visible:bg-foreground/[0.05] focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 dark:before:bg-muted-foreground/15 dark:hover:bg-muted-foreground/[0.08] dark:focus-visible:bg-muted-foreground/[0.08]"
+                {...stylex.props(styles.overflowButton)}
               >
-                <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+                <ChevronDown {...stylex.props(styles.overflowGlyph)} aria-hidden="true" />
               </button>
             }
           >
@@ -440,9 +915,9 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
               type="button"
               aria-label={t('sessions.moreActions', 'More actions')}
               title={t('sessions.moreActions', 'More actions')}
-              className="relative flex w-5 shrink-0 self-stretch items-center justify-center text-muted-foreground/75 outline-none transition-colors before:absolute before:left-0 before:h-3 before:w-px before:bg-foreground/10 hover:bg-foreground/[0.05] hover:text-foreground focus:outline-none focus:ring-0 focus:ring-offset-0 focus:shadow-none focus-visible:bg-foreground/[0.05] focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 dark:before:bg-muted-foreground/15 dark:hover:bg-muted-foreground/[0.08] dark:focus-visible:bg-muted-foreground/[0.08]"
+              {...stylex.props(styles.overflowButton)}
             >
-              <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+              <ChevronDown {...stylex.props(styles.overflowGlyph)} aria-hidden="true" />
             </button>
           </Menu.Trigger>
           <Menu.Content side="top" align="end" sideOffset={6}>
@@ -520,7 +995,8 @@ function LocationControl({
   }, [trimmedPath, copiedMessage]);
 
   const Icon = isGitHub ? Github : isFolder ? Folder : WorktreeIcon;
-  const glyph = <Icon className={cn('h-3.5 w-3.5 shrink-0', className)} />;
+  const glyphProps = stylex.props(styles.locationGlyph);
+  const glyph = <Icon {...glyphProps} className={clsx(glyphProps.className, className)} />;
 
   return (
     <Tooltip.Provider delay={300}>
@@ -532,23 +1008,19 @@ function LocationControl({
                 type="button"
                 onClick={handleCopy}
                 aria-label={label}
-                // -mr-1 cancels the stage's icon→summary gap so the glyph sits
-                // close to the repo/branch text (a lone icon otherwise floats).
-                className="-mr-1 flex h-6 shrink-0 select-none items-center rounded-md px-1 text-muted-foreground transition-colors hover:bg-muted-foreground/10 hover:text-foreground"
+                {...stylex.props(styles.locationButton)}
               >
                 {glyph}
               </button>
             ) : (
-              <span className="flex h-6 shrink-0 select-none items-center px-1 text-muted-foreground">
-                {glyph}
-              </span>
+              <span {...stylex.props(styles.locationStatic)}>{glyph}</span>
             )
           }
         />
         <Tooltip.Content side="top">
-          <span className="font-medium text-foreground">{label}</span>
+          <span {...stylex.props(styles.tooltipLabel)}>{label}</span>
           {canCopy ? (
-            <span className="ml-1.5 text-muted-foreground">
+            <span {...stylex.props(styles.tooltipHint)}>
               {t('sessions.infoBar.copyPathHint', 'click to copy path')}
             </span>
           ) : null}
@@ -654,40 +1126,32 @@ export function ContextChip({
         onClick={onOpenPr}
         aria-label={t('sessions.pr.openTab', 'Open pull request')}
         title={t('sessions.pr.openTab', 'Open pull request')}
-        className={cn(
-          'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 font-medium text-muted-foreground transition-colors hover:bg-muted-foreground/10',
-          INFO_BAR_TEXT_CLASS
-        )}
+        {...stylex.props(styles.prButton)}
+        className={clsx(stylex.props(styles.prButton).className, INFO_BAR_TEXT_CLASS)}
       >
         <SessionPrIcon prStatus={status ?? 'open'} prCiState={compactCiState} />
-        {value ? (
-          <span className="hidden shrink-0 tabular-nums @[420px]:inline">{value}</span>
-        ) : null}
+        {value ? <span {...stylex.props(styles.chipValue)}>{value}</span> : null}
       </button>
     ) : (
-      <span className="flex h-6 shrink-0 items-center gap-1 px-1 font-medium text-muted-foreground">
+      <span {...stylex.props(styles.prStatic)}>
         <SessionPrIcon prStatus={status ?? 'open'} prCiState={compactCiState} />
-        {value ? (
-          <span className="hidden shrink-0 tabular-nums @[420px]:inline">{value}</span>
-        ) : null}
+        {value ? <span {...stylex.props(styles.chipValue)}>{value}</span> : null}
       </span>
     )
   ) : undefined;
 
   const summary = (
-    <span className="flex min-w-0 items-center gap-2 font-normal">
-      {projectName ? (
-        <span className="min-w-0 shrink-[2] truncate text-muted-foreground">{projectName}</span>
-      ) : null}
+    <span {...stylex.props(styles.summaryRow)}>
+      {projectName ? <span {...stylex.props(styles.projectName)}>{projectName}</span> : null}
       {trimmedBranch ? (
         <button
           type="button"
           onClick={handleCopyBranch}
           aria-label={`${copyBranchLabel}: ${trimmedBranch}`}
           title={copyBranchLabel}
-          className="-mx-1 flex h-6 min-w-0 shrink items-center rounded-md px-1 text-reading transition-colors hover:bg-muted-foreground/10"
+          {...stylex.props(styles.branchButton)}
         >
-          <span className="truncate">{trimmedBranch}</span>
+          <span {...stylex.props(styles.branchName)}>{trimmedBranch}</span>
         </button>
       ) : null}
     </span>
@@ -704,13 +1168,11 @@ export function ContextChip({
       disabled={!onOpenAllChanges}
       aria-label={t('sessions.detailTabs.allChanges', 'All Changes')}
       title={t('sessions.detailTabs.allChanges', 'All Changes')}
-      className={cn(
-        'flex h-5 min-w-0 shrink items-center gap-1.5 overflow-hidden rounded-md bg-foreground/[0.06] px-1.5 font-medium tabular-nums transition-colors enabled:hover:bg-foreground/[0.1] disabled:pointer-events-none',
-        INFO_BAR_TEXT_CLASS
-      )}
+      {...stylex.props(styles.diffChip)}
+      className={clsx(stylex.props(styles.diffChip).className, INFO_BAR_TEXT_CLASS)}
     >
-      <span className="text-github-addition">+{diffStat.add}</span>
-      <span className="text-github-deletion">−{diffStat.del}</span>
+      <span {...stylex.props(styles.diffAdded)}>+{diffStat.add}</span>
+      <span {...stylex.props(styles.diffRemoved)}>−{diffStat.del}</span>
     </button>
   ) : null;
   const trailing =
@@ -733,14 +1195,14 @@ export function ContextChip({
       // control rides in the `leading` slot instead so both stay reachable.
       iconOverride={pr ? prControl : (locationControl ?? undefined)}
       label={label}
-      textClassName="text-muted-foreground"
+      textClassName={stylex.props(styles.textMuted).className}
       summary={summary}
       leading={
         pr ? (
           <>
             {/* CI pill stays adjacent to the PR number; the location control
                 trails it, sitting right before the repo/branch summary. */}
-            <span className="hidden @[420px]:contents">
+            <span {...stylex.props(styles.ciSlot)}>
               <PrCiPill runs={prCiRuns} onOpenRun={onOpenPrCiRun} />
             </span>
             {locationControl}
@@ -810,12 +1272,12 @@ export const PR_CI_RUN_ICON: Record<
   PrCiRunStatus,
   { Icon: typeof CircleCheck; className: string }
 > = {
-  success: { Icon: CircleCheck, className: 'text-status-success' },
-  failure: { Icon: CircleX, className: 'text-destructive' },
-  running: { Icon: CircleDot, className: 'text-status-warning' },
-  queued: { Icon: CircleDot, className: 'text-muted-foreground' },
-  skipped: { Icon: CircleMinus, className: 'text-muted-foreground/70' },
-  cancelled: { Icon: CircleSlash, className: 'text-muted-foreground/70' },
+  success: { Icon: CircleCheck, className: stylex.props(styles.ciSuccess).className ?? '' },
+  failure: { Icon: CircleX, className: stylex.props(styles.ciFailure).className ?? '' },
+  running: { Icon: CircleDot, className: stylex.props(styles.ciRunning).className ?? '' },
+  queued: { Icon: CircleDot, className: stylex.props(styles.ciQueued).className ?? '' },
+  skipped: { Icon: CircleMinus, className: stylex.props(styles.ciSkipped).className ?? '' },
+  cancelled: { Icon: CircleSlash, className: stylex.props(styles.ciSkipped).className ?? '' },
 };
 
 export function usePrCiPresentation(runs: readonly PrCiRun[]) {
@@ -830,10 +1292,10 @@ export function usePrCiPresentation(runs: readonly PrCiRun[]) {
         : t('sessions.prCi.running', 'CI running');
   const toneClassName =
     overall === 'passing'
-      ? 'text-status-success'
+      ? stylex.props(styles.ciSuccess).className
       : overall === 'failing'
-        ? 'text-destructive'
-        : 'text-status-warning';
+        ? stylex.props(styles.ciFailure).className
+        : stylex.props(styles.ciRunning).className;
   const VerdictIcon =
     overall === 'passing' ? CircleCheck : overall === 'failing' ? CircleX : CircleDot;
   return { overall, settled, overallLabel, toneClassName, VerdictIcon };
@@ -849,16 +1311,25 @@ function PrCiPopoverBody({
   const { t } = useTranslation();
   const durationUnitLabels = getDurationUnitLabels(t);
   const { settled, overallLabel, toneClassName } = usePrCiPresentation(runs);
+  const ciOverallProps = stylex.props(styles.ciOverall);
+  const ciListProps = stylex.props(styles.ciList);
+  const ciRunGlyphProps = stylex.props(styles.ciRunGlyph);
   return (
-    <div className="flex flex-col gap-1.5 p-3">
-      <div className={cn('flex items-center gap-1.5', INFO_BAR_TEXT_CLASS)}>
-        <span className={cn('font-medium', toneClassName)}>{overallLabel}</span>
-        <span className="text-muted-foreground">
+    <div {...stylex.props(styles.ciPanel)}>
+      <div
+        {...stylex.props(styles.ciHeaderRow)}
+        className={clsx(stylex.props(styles.ciHeaderRow).className, INFO_BAR_TEXT_CLASS)}
+      >
+        <span {...ciOverallProps} className={clsx(ciOverallProps.className, toneClassName)}>
+          {overallLabel}
+        </span>
+        <span {...stylex.props(styles.ciCount)}>
           · {settled}/{runs.length}
         </span>
       </div>
       <ul
-        className={cn('scrollbar-pro flex max-h-56 flex-col overflow-y-auto', INFO_BAR_TEXT_CLASS)}
+        {...ciListProps}
+        className={clsx(ciListProps.className, 'scrollbar-pro', INFO_BAR_TEXT_CLASS)}
       >
         {runs.map((run) => {
           const { Icon: RunIcon, className: runClassName } = PR_CI_RUN_ICON[run.status];
@@ -868,11 +1339,13 @@ function PrCiPopoverBody({
               : null;
           const row = (
             <>
-              <RunIcon className={cn('h-3.5 w-3.5 shrink-0', runClassName)} aria-hidden="true" />
-              <span className="min-w-0 flex-1 truncate text-foreground">{run.name}</span>
-              {duration ? (
-                <span className="shrink-0 tabular-nums text-muted-foreground">{duration}</span>
-              ) : null}
+              <RunIcon
+                {...ciRunGlyphProps}
+                className={clsx(ciRunGlyphProps.className, runClassName)}
+                aria-hidden="true"
+              />
+              <span {...stylex.props(styles.ciRunName)}>{run.name}</span>
+              {duration ? <span {...stylex.props(styles.ciRunDuration)}>{duration}</span> : null}
             </>
           );
           return (
@@ -881,12 +1354,12 @@ function PrCiPopoverBody({
                 <button
                   type="button"
                   onClick={() => onOpenRun(run)}
-                  className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-muted-foreground/10"
+                  {...stylex.props(styles.ciRunRow, styles.ciRunButton)}
                 >
                   {row}
                 </button>
               ) : (
-                <span className="flex w-full items-center gap-2 px-1.5 py-1">{row}</span>
+                <span {...stylex.props(styles.ciRunRow)}>{row}</span>
               )}
             </li>
           );
@@ -919,6 +1392,8 @@ export function PrCiPill({
 
   const { overall, settled, overallLabel, toneClassName, VerdictIcon } = presentation;
   const label = `${t('sessions.prCi.label', 'CI checks')} · ${overallLabel}`;
+  const pillProps = stylex.props(styles.ciPillButton, open && styles.ciPillOpen);
+  const ciRunGlyphProps = stylex.props(styles.ciRunGlyph);
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
@@ -928,15 +1403,16 @@ export function PrCiPill({
             type="button"
             aria-label={label}
             title={label}
-            className={cn(
-              'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 text-muted-foreground transition-colors hover:bg-muted-foreground/10',
-              INFO_BAR_TEXT_CLASS,
-              open && 'bg-muted-foreground/10'
-            )}
+            {...pillProps}
+            className={clsx(pillProps.className, INFO_BAR_TEXT_CLASS)}
           >
-            <VerdictIcon className={cn('h-3.5 w-3.5 shrink-0', toneClassName)} aria-hidden="true" />
+            <VerdictIcon
+              {...ciRunGlyphProps}
+              className={clsx(ciRunGlyphProps.className, toneClassName)}
+              aria-hidden="true"
+            />
             {overall === 'running' ? (
-              <span className="tabular-nums">
+              <span {...stylex.props(styles.ciPillCount)}>
                 {settled}/{runs!.length}
               </span>
             ) : null}
@@ -948,7 +1424,10 @@ export function PrCiPill({
         align="start"
         sideOffset={8}
         aria-label={t('sessions.prCi.label', 'CI checks')}
-        className="w-96 max-w-[min(24rem,90vw)] border-border/60 p-0 shadow-xl"
+        className={clsx(
+          stylex.props(styles.ciPopover).className,
+          'max-w-[min(24rem,90vw)] p-0 shadow-xl'
+        )}
       >
         <PrCiPopoverBody runs={runs!} onOpenRun={onOpenRun} />
       </Popover.Content>

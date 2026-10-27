@@ -1,0 +1,112 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "blockedHosts": ["avatars.githubusercontent.com"],
+  "ids": ["sessions-searchmigration--literal-markdown"],
+  "ready": {
+    "sessions-searchmigration--literal-markdown": [
+      {
+        "action": "visible",
+        "selector": "[role=\"search\"] [aria-live=\"polite\"]:has-text(\"2 / 7\")"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-session-search-mark=\"true\"]",
+        "index": 0
+      }
+    ]
+  },
+  "states": {
+    "sessions-searchmigration--literal-markdown": [
+      {
+        "name": "active-link",
+        "steps": [
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "key": "Enter"
+          },
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "key": "Enter"
+          },
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "key": "Enter"
+          },
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"search\"] [aria-live=\"polite\"]:has-text(\"6 / 7\")"
+          },
+          {
+            "action": "visible",
+            "selector": "a mark[data-session-search-mark=\"true\"]",
+            "index": 0
+          }
+        ]
+      },
+      {
+        "name": "active-fenced-code",
+        "steps": [
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"search\"] [aria-live=\"polite\"]:has-text(\"7 / 7\")"
+          },
+          {
+            "action": "visible",
+            "selector": "pre mark[data-session-search-mark=\"true\"]",
+            "index": 0
+          }
+        ]
+      },
+      {
+        "name": "wrap-to-user",
+        "steps": [
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"search\"] [aria-live=\"polite\"]:has-text(\"1 / 7\")"
+          },
+          {
+            "action": "visible",
+            "selector": "mark[data-search-result-id]",
+            "index": 0
+          }
+        ]
+      }
+    ]
+  }
+}

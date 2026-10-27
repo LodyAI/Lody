@@ -1,5 +1,30 @@
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  card: {
+    marginBottom: themeSpace[3],
+    borderRadius: themeRadius.lg,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    backgroundColor: themeColors.background,
+    padding: themeSpace[4],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+  },
+  title: { fontWeight: themeFontWeight.medium },
+  description: { marginTop: themeSpace[1], color: themeColors.mutedForeground },
+  error: { marginTop: themeSpace[2], color: themeColors.destructive },
+});
 
 export function PiProviderMigrationCard({
   count,
@@ -18,18 +43,18 @@ export function PiProviderMigrationCard({
   if (!count || !canMigrate) return null;
   return (
     <section
-      className="mb-3 rounded-lg border bg-background p-4 text-sm"
+      {...stylex.props(styles.card)}
       aria-label={t('chat.piMigration.title', 'Upgrade Pi providers')}
     >
-      <p className="font-medium">{t('chat.piMigration.title', 'Upgrade Pi providers')}</p>
-      <p className="mt-1 text-muted-foreground">
+      <p {...stylex.props(styles.title)}>{t('chat.piMigration.title', 'Upgrade Pi providers')}</p>
+      <p {...stylex.props(styles.description)}>
         {t(
           'chat.piMigration.description',
           'Switch your existing Pi providers to the built-in version managed by Lody. Names, credentials and settings are kept. Start a new chat after upgrading; old Pi sessions cannot be resumed by the new adapter.'
         )}
       </p>
       {error && (
-        <p role="alert" className="mt-2 text-destructive">
+        <p role="alert" {...stylex.props(styles.error)}>
           {t(
             'chat.piMigration.error',
             'Some providers could not be upgraded. Your remaining providers are unchanged. Try again.'

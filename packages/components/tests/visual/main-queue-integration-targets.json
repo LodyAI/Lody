@@ -1,0 +1,77 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone390",
+      "width": 390,
+      "height": 844,
+      "device": "iPhone 13"
+    },
+    {
+      "name": "phone320",
+      "width": 320,
+      "height": 720,
+      "device": "iPhone SE"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "chat-chatcomposer--queued-scheduled-message",
+    "chat-chatcomposer--queued-time-leading",
+    "chat-chatcomposer--queued-time-airy",
+    "sessions-messagequeuedisplay--few-items",
+    "sessions-messagequeuedisplay--editing-first-item",
+    "sessions-messagequeuedisplay--local-upload-rows",
+    "sessions-messagequeuedisplay--deferred-editing"
+  ],
+  "ready": {
+    "chat-chatcomposer--queued-scheduled-message": [
+      {
+        "action": "visible",
+        "selector": "[data-message-queue-toggle]"
+      }
+    ],
+    "chat-chatcomposer--queued-time-leading": [
+      {
+        "action": "visible",
+        "selector": "[data-message-queue-toggle]"
+      }
+    ],
+    "chat-chatcomposer--queued-time-airy": [
+      {
+        "action": "visible",
+        "selector": "[data-message-queue-toggle]"
+      }
+    ],
+    "sessions-messagequeuedisplay--few-items": [
+      {
+        "action": "visible",
+        "selector": "[data-message-queue-toggle]"
+      }
+    ],
+    "sessions-messagequeuedisplay--editing-first-item": [
+      {
+        "action": "visible",
+        "selector": "[data-message-queue-toggle]"
+      }
+    ],
+    "sessions-messagequeuedisplay--local-upload-rows": [
+      {
+        "action": "visible",
+        "selector": "[data-message-queue-toggle]"
+      }
+    ],
+    "sessions-messagequeuedisplay--deferred-editing": [
+      {
+        "action": "visible",
+        "selector": "[data-message-queue-toggle]"
+      }
+    ]
+  }
+}

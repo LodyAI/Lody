@@ -52,8 +52,8 @@ describe('MessageTextWithChips', () => {
     });
 
     expect(container.textContent).toBe(text);
-    expect(container.querySelector('.whitespace-nowrap')?.textContent).toBe(
-      '@👨‍👩‍👧‍👦-r'
-    );
+    const chip = container.querySelector('span');
+    expect(chip?.firstElementChild?.textContent).toBe('@👨‍👩‍👧‍👦-r');
+    expect(chip?.lastChild?.textContent).toBe('eviewer');
   });
 });

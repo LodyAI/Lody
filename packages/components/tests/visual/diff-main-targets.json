@@ -1,0 +1,319 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 1000
+    },
+    {
+      "name": "compact-desktop",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "ui-diffviewermigration--unified",
+    "ui-diffviewermigration--split",
+    "ui-diffviewermigration--long-lines",
+    "ui-diffviewermigration--headerless",
+    "ui-diffviewermigration--custom-header",
+    "ui-diffviewermigration--deferred-collapsed",
+    "ui-diffviewermigration--comments",
+    "ui-diffviewermigration--responsive-context",
+    "ui-diffviewermigration--source-error",
+    "ui-diffviewermigration--source-loading",
+    "ui-diffviewermigration--caller-overrides"
+  ],
+  "ready": {
+    "ui-diffviewermigration--unified": [
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-line]",
+        "index": 0
+      }
+    ],
+    "ui-diffviewermigration--split": [
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-line]",
+        "index": 0
+      }
+    ],
+    "ui-diffviewermigration--long-lines": [
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-line]",
+        "index": 0
+      }
+    ],
+    "ui-diffviewermigration--headerless": [
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-line]",
+        "index": 0
+      }
+    ],
+    "ui-diffviewermigration--custom-header": [
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-line]",
+        "index": 0
+      }
+    ],
+    "ui-diffviewermigration--comments": [
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-line]",
+        "index": 0
+      },
+      {
+        "action": "visible",
+        "selector": "[data-diff-comment-line=\"5\"]"
+      }
+    ],
+    "ui-diffviewermigration--responsive-context": [
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-line]",
+        "index": 0
+      }
+    ],
+    "ui-diffviewermigration--caller-overrides": [
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-line]",
+        "index": 0
+      }
+    ],
+    "ui-diffviewermigration--deferred-collapsed": [
+      {
+        "action": "visible",
+        "selector": "output[aria-label=\"Controlled diff state\"]:has-text(\"Closed\")"
+      }
+    ],
+    "ui-diffviewermigration--source-error": [
+      {
+        "action": "visible",
+        "text": "Diff unavailable"
+      }
+    ],
+    "ui-diffviewermigration--source-loading": [
+      {
+        "action": "visible",
+        "text": "Preparing diff"
+      }
+    ]
+  },
+  "states": {
+    "ui-diffviewermigration--unified": [
+      {
+        "name": "open-file",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open file"
+          },
+          {
+            "action": "visible",
+            "selector": "output[aria-label=\"Diff action\"]:has-text(\"Opened src/local/diff-migration.ts\")"
+          }
+        ]
+      },
+      {
+        "name": "collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle section"
+          },
+          {
+            "action": "visible",
+            "selector": "#diff-viewer[data-state=\"closed\"]"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Toggle section",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "diffs-container [data-line]",
+            "index": 0
+          }
+        ]
+      }
+    ],
+    "ui-diffviewermigration--split": [
+      {
+        "name": "collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle section"
+          },
+          {
+            "action": "visible",
+            "selector": "#diff-viewer[data-state=\"closed\"]"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle section"
+          },
+          {
+            "action": "visible",
+            "selector": "diffs-container [data-line]",
+            "index": 0
+          }
+        ]
+      }
+    ],
+    "ui-diffviewermigration--custom-header": [
+      {
+        "name": "custom-collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-diff-custom-header] button"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-diff-width-host] > [data-state=\"closed\"]"
+          }
+        ]
+      },
+      {
+        "name": "custom-reopened",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-diff-custom-header] button",
+            "key": "Space"
+          },
+          {
+            "action": "visible",
+            "selector": "diffs-container [data-line]",
+            "index": 0
+          }
+        ]
+      }
+    ],
+    "ui-diffviewermigration--deferred-collapsed": [
+      {
+        "name": "opened-first-time",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle section"
+          },
+          {
+            "action": "visible",
+            "selector": "diffs-container [data-line]",
+            "index": 0
+          },
+          {
+            "action": "visible",
+            "selector": "output[aria-label=\"Controlled diff state\"]:has-text(\"Open\")"
+          }
+        ]
+      },
+      {
+        "name": "closed-after-mount",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle section"
+          },
+          {
+            "action": "visible",
+            "selector": "#diff-viewer[data-state=\"closed\"]"
+          }
+        ]
+      }
+    ],
+    "ui-diffviewermigration--comments": [
+      {
+        "name": "thread-collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-diff-comment-line=\"5\"] button[aria-expanded=\"true\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-diff-comment-line=\"5\"] button[aria-expanded=\"false\"]"
+          }
+        ]
+      },
+      {
+        "name": "thread-reopened",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-diff-comment-line=\"5\"] button[aria-expanded=\"false\"]",
+            "key": "Space"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-diff-comment-line=\"5\"] button[aria-expanded=\"true\"]"
+          }
+        ]
+      }
+    ],
+    "ui-diffviewermigration--source-loading": [
+      {
+        "name": "released-real-source",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Release local text"
+          },
+          {
+            "action": "visible",
+            "selector": "diffs-container [data-line]",
+            "index": 0
+          }
+        ]
+      }
+    ],
+    "ui-diffviewermigration--caller-overrides": [
+      {
+        "name": "caller-collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle section"
+          },
+          {
+            "action": "visible",
+            "selector": "#diff-viewer[data-state=\"closed\"]"
+          }
+        ]
+      }
+    ]
+  }
+}

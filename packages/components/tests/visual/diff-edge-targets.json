@@ -1,0 +1,71 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "compact-desktop",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "ui-diffviewer--new-file",
+    "ui-diffviewer--deleted-file",
+    "ui-diffviewer--provider-side-preparsed-large-diff",
+    "ui-diffviewer--sparse-changes-split"
+  ],
+  "ready": {
+    "ui-diffviewer--new-file": [
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-line]",
+        "index": 0
+      },
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-column-content] span[style*=\"color\"]",
+        "index": 0
+      }
+    ],
+    "ui-diffviewer--deleted-file": [
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-line]",
+        "index": 0
+      },
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-column-content] span[style*=\"color\"]",
+        "index": 0
+      }
+    ],
+    "ui-diffviewer--provider-side-preparsed-large-diff": [
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-line]",
+        "index": 0
+      },
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-column-content] span[style*=\"color\"]",
+        "index": 0
+      }
+    ],
+    "ui-diffviewer--sparse-changes-split": [
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-line]",
+        "index": 0
+      },
+      {
+        "action": "visible",
+        "selector": "diffs-container [data-column-content] span[style*=\"color\"]",
+        "index": 0
+      }
+    ]
+  }
+}

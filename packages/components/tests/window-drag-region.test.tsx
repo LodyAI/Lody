@@ -142,22 +142,4 @@ describe('WebChatLandingScreen window drag', () => {
     expect(strip).not.toBeNull();
     expect(strip!.className).toContain('h-11');
   });
-
-  it('aligns the sidebar expander with the macOS traffic lights inside the thin frame', () => {
-    window.__LODY_PLATFORM__ = { os: 'darwin', homeDir: '/Users/test' };
-    root = createRoot(container!);
-    act(() => {
-      root!.render(
-        <WebChatLandingScreen
-          title="New session"
-          composer={<textarea aria-label="composer" />}
-          leftSidebarExpandSlot={<button type="button">Open sidebar</button>}
-        />
-      );
-    });
-
-    const expander = container!.querySelector('button')!.parentElement!;
-    expect(expander.className).toContain('top-[5px]');
-    expect(expander.className).toContain('left-[92px]');
-  });
 });

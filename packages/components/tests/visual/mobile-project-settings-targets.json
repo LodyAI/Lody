@@ -1,0 +1,169 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 720
+    },
+    {
+      "name": "iphone",
+      "width": 390,
+      "height": 844,
+      "device": "iPhone 13"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "mobile-ownedmobileprojectsettingsmigration--multiple-machines",
+    "mobile-ownedmobileprojectsettingsmigration--local-editors",
+    "mobile-ownedmobileprojectsettingsmigration--loading",
+    "mobile-ownedmobileprojectsettingsmigration--empty",
+    "mobile-ownedmobileprojectsettingsmigration--long-translation",
+    "mobile-ownedmobileprojectsettingsmigration--read-only",
+    "mobile-ownedmobileprojectsettingsmigration--pending",
+    "mobile-ownedmobileprojectsettingsmigration--machine-filtered"
+  ],
+  "ready": {
+    "mobile-ownedmobileprojectsettingsmigration--multiple-machines": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-project-settings] section",
+        "index": 0
+      },
+      {
+        "action": "visible",
+        "selector": "[data-mobile-project-intent]"
+      }
+    ],
+    "mobile-ownedmobileprojectsettingsmigration--local-editors": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-project-settings] section",
+        "index": 0
+      },
+      {
+        "action": "visible",
+        "selector": "[data-mobile-project-intent]"
+      }
+    ],
+    "mobile-ownedmobileprojectsettingsmigration--loading": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-project-settings] section",
+        "index": 0
+      },
+      {
+        "action": "visible",
+        "selector": "[data-mobile-project-intent]"
+      }
+    ],
+    "mobile-ownedmobileprojectsettingsmigration--empty": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-project-settings] section",
+        "index": 0
+      },
+      {
+        "action": "visible",
+        "selector": "[data-mobile-project-intent]"
+      }
+    ],
+    "mobile-ownedmobileprojectsettingsmigration--long-translation": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-project-settings] section",
+        "index": 0
+      },
+      {
+        "action": "visible",
+        "selector": "[data-mobile-project-intent]"
+      }
+    ],
+    "mobile-ownedmobileprojectsettingsmigration--read-only": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-project-settings] section",
+        "index": 0
+      },
+      {
+        "action": "visible",
+        "selector": "[data-mobile-project-intent]"
+      }
+    ],
+    "mobile-ownedmobileprojectsettingsmigration--pending": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-project-settings] section",
+        "index": 0
+      },
+      {
+        "action": "visible",
+        "selector": "[data-mobile-project-intent]"
+      }
+    ],
+    "mobile-ownedmobileprojectsettingsmigration--machine-filtered": [
+      {
+        "action": "visible",
+        "selector": "[data-mobile-project-settings] section",
+        "index": 0
+      },
+      {
+        "action": "visible",
+        "selector": "[data-mobile-project-intent]"
+      }
+    ]
+  },
+  "states": {
+    "mobile-ownedmobileprojectsettingsmigration--multiple-machines": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-mobile-project-settings] section:first-of-type button:last-of-type"
+          }
+        ]
+      },
+      {
+        "name": "focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": "[data-mobile-project-settings] section:first-of-type button:last-of-type"
+          }
+        ]
+      },
+      {
+        "name": "open",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-mobile-project-settings] section:first-of-type button:last-of-type",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-mobile-project-intent]"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -33,9 +33,8 @@ strings on i18n rather than the registry's inline English.
 - Anchor the URL on the Vite BASE, never `document.baseURI`: router paths are deep
   routes, so document-relative resolution asks for `…/settings/emojibase` and gets
   SPA-fallback HTML parsed as JSON.
-- Keep `focus-visible:shadow-none` on its search input: `tailwind/index.css`'s
-  zero-specificity "Pro focus style" rings every focused input unless a
-  `focus-visible:` utility overrides it, and this bare registry input had none.
+- Keep the search input's `:focus-visible` shadow neutralized: the app's global
+  inset input ring otherwise appears inside this bare registry field.
 
 ## Field colors
 
@@ -70,7 +69,7 @@ strings on i18n rather than the registry's inline English.
   while work is in flight is a plain `Button`, never `Action`/`Cancel` —
   those are `Close`, and `Close` always closes.
 - Tooltips come from `@lody/ui/tooltip` (Base UI): `Tooltip.Provider/Root/
-  Trigger/Content`, `render` instead of `asChild`, `delay` on the trigger or
+Trigger/Content`, `render` instead of `asChild`, `delay` on the trigger or
   provider. The chip is visual-only — no `role="tooltip"`, no
   `aria-describedby` — so an icon-only trigger names itself with `aria-label`.
 - Overlay list hover (menus, command palette, select) is
@@ -119,13 +118,13 @@ strings on i18n rather than the registry's inline English.
   are why this is a primitive rather than an inline `<input type="range">`.
   The "Pro focus style" paints an inset `box-shadow` on any focused input through
   a zero-specificity `:where(…)`, which on a range input outlines the whole
-  control, so the input carries `focus-visible:shadow-none` and the focus ring
+  control, so the input neutralizes its `:focus-visible` shadow and the focus ring
   lives on the thumb. The global `*:focus-visible` reset forces `--tw-ring-shadow`
   to none with `!important` and custom properties inherit into pseudo-elements, so
   `ring-*` utilities are dead on the thumb too — its ring is an explicit
   `box-shadow`.
-- Write every `::-webkit-slider-*` / `::-moz-range-*` class out in full. Tailwind
-  scans source text for literal candidates, so a class built from a template
-  literal is never generated, and a variant prefix binds only to the class right
-  after it. The track fill is a `--lody-slider-fill` percentage set inline, because
-  a pseudo-element cannot take a style attribute.
+- Declare `::-webkit-slider-*` and `::-moz-range-*` as separate static StyleX
+  selectors, including their hover and focus states. Verify both browser engines;
+  Chromium cannot validate the Mozilla selectors. The track fill is a
+  `--lody-slider-fill` percentage set inline, because a pseudo-element cannot
+  take a style attribute.

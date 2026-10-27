@@ -1,8 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FolderOpen, FolderPlus, Github, MessageCircle } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import { Tabs } from '@lody/ui/tabs';
 import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeDuration,
+  themeEasing,
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 import type { ChatLandingTone } from './chat-landing-view';
 
 export type SessionContextType = 'local' | 'github' | 'chat';
@@ -31,12 +42,92 @@ interface ContextSwitchProps {
   triggerJustifyClassName?: string;
 }
 
+const styles = stylex.create({
+  disabledTab: {
+    display: 'inline-flex',
+    flex: '1 1 0%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    whiteSpace: 'nowrap',
+    borderRadius: themeRadius.md,
+    paddingInline: { default: themeSpace[2], '@media (min-width: 640px)': themeSpace[3] },
+    paddingBlock: themeSpace[1.5],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.mutedForeground,
+    opacity: 0.4,
+    transitionProperty: 'all',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  disabledTabDark: {
+    color: {
+      default: themeColors.mutedForeground,
+      '@media (hover: hover)': { ':hover': themeColors.foreground },
+    },
+  },
+  tooltipTab: { cursor: 'default' },
+  actionTab: {
+    position: 'relative',
+    cursor: 'pointer',
+    opacity: { default: 0.4, '@media (hover: hover)': { ':hover': 0.8 } },
+    transitionProperty: 'opacity',
+  },
+  /** Icon + label bonded as one unit so justify-* positions the pair together
+   *  rather than stretching them apart (which broke affinity on the mobile
+   *  new-chat Type row). */
+  face: { display: 'inline-flex', alignItems: 'center', gap: themeSpace[1] },
+  icon: { width: themeSpace[3.5], height: themeSpace[3.5], flexShrink: 0 },
+  /** The overlay's own mark: it is not a flex item that may shrink. */
+  overlayIcon: { width: themeSpace[3.5], height: themeSpace[3.5] },
+  /** The overlay that replaces a disabled tab's face while the pointer is on it. */
+  overlay: {
+    position: 'absolute',
+    inset: 0,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: themeSpace[1],
+    borderRadius: themeRadius.md,
+    opacity: {
+      default: 0,
+      '@media (hover: hover)': {
+        [stylex.when.ancestor(':is([data-context-disabled-action]):hover')]: 1,
+      },
+    },
+    transitionProperty: 'opacity',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  overlayDark: {
+    backgroundColor: 'hsl(var(--hover) / 0.9)',
+    color: themeColors.hoverForeground,
+  },
+  overlayLight: {
+    backgroundColor: 'hsl(var(--muted) / 0.9)',
+    color: themeColors.foreground,
+  },
+  /** The face that fades out under the overlay. */
+  faceFade: {
+    opacity: {
+      default: 1,
+      '@media (hover: hover)': {
+        [stylex.when.ancestor(':is([data-context-disabled-action]):hover')]: 0,
+      },
+    },
+    transitionProperty: 'opacity',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+});
+
 /** Icon + label bonded as one unit so justify-* positions the pair together
  *  rather than stretching them apart (which broke affinity on the mobile
  *  new-chat Type row). */
 function TabFace({ icon, label }: { icon: React.ReactNode; label: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center gap-1">
+    <span {...stylex.props(styles.face)}>
       {icon}
       <span>{label}</span>
     </span>
@@ -56,8 +147,12 @@ export function ContextSwitch({
   triggerJustifyClassName = 'justify-center',
 }: ContextSwitchProps) {
   const isDark = tone === 'dark';
-  const iconClassName = 'h-3.5 w-3.5 shrink-0';
+  const iconClassName = stylex.props(styles.icon).className;
+  const overlayIconClassName = stylex.props(styles.overlayIcon).className;
 
+  // The tabs are `@lody/ui` primitives, so their own face keeps its Tailwind
+  // classes: a StyleX class would compete with the primitive's own styles
+  // inside the `stylex` layer, where the winner is the stylesheet's order.
   const triggerClassName = cn(
     'flex-1 rounded-md px-2 sm:px-3 py-1.5 text-sm font-medium transition-all',
     triggerJustifyClassName,
@@ -83,8 +178,7 @@ export function ContextSwitch({
             icon={<FolderOpen className={iconClassName} />}
             label={localLabel}
             overlay={localDisabled}
-            overlayIcon={<FolderPlus className="h-3.5 w-3.5" />}
-            className={triggerClassName}
+            overlayIcon={<FolderPlus className={overlayIconClassName} />}
             tone={tone}
           />
         ) : (
@@ -97,8 +191,7 @@ export function ContextSwitch({
             icon={<Github className={iconClassName} />}
             label={githubLabel}
             overlay={githubDisabled}
-            overlayIcon={<Github className="h-3.5 w-3.5" />}
-            className={triggerClassName}
+            overlayIcon={<Github className={overlayIconClassName} />}
             tone={tone}
           />
         ) : (
@@ -119,14 +212,12 @@ function DisabledTab({
   label,
   overlay,
   overlayIcon,
-  className,
   tone,
 }: {
   icon: React.ReactNode;
   label: string;
   overlay: DisabledTabOverlay;
   overlayIcon: React.ReactNode;
-  className?: string;
   tone: ChatLandingTone;
 }) {
   const isDark = tone === 'dark';
@@ -166,19 +257,25 @@ function DisabledTab({
   if (!overlay.onClick) {
     return (
       <Tooltip.Root open={tooltipOpen}>
-        <Tooltip.Trigger delay={200} render={<button
-            ref={triggerRef}
-            type="button"
-            onClick={handleClick}
-            onPointerEnter={() => setTooltipOpen(true)}
-            onPointerLeave={handlePointerLeave}
-            className={cn(
-              className,
-              'inline-flex flex-1 cursor-default items-center justify-center whitespace-nowrap opacity-40'
-            )}
-          >
-            <TabFace icon={icon} label={label} />
-          </button>}/>
+        <Tooltip.Trigger
+          delay={200}
+          render={
+            <button
+              ref={triggerRef}
+              type="button"
+              onClick={handleClick}
+              onPointerEnter={() => setTooltipOpen(true)}
+              onPointerLeave={handlePointerLeave}
+              {...stylex.props(
+                styles.disabledTab,
+                isDark && styles.disabledTabDark,
+                styles.tooltipTab
+              )}
+            >
+              <TabFace icon={icon} label={label} />
+            </button>
+          }
+        />
         <Tooltip.Content
           ref={contentRef}
           side="bottom"
@@ -196,23 +293,19 @@ function DisabledTab({
   return (
     <button
       type="button"
+      data-context-disabled-action=""
       onClick={overlay.onClick}
-      className={cn(
-        className,
-        'group relative inline-flex flex-1 cursor-pointer items-center justify-center whitespace-nowrap',
-        'opacity-40 transition-opacity hover:opacity-80'
+      {...stylex.props(
+        stylex.defaultMarker(),
+        styles.disabledTab,
+        isDark && styles.disabledTabDark,
+        styles.actionTab
       )}
     >
-      <span className="transition-opacity group-hover:opacity-0">
+      <span {...stylex.props(styles.faceFade)}>
         <TabFace icon={icon} label={label} />
       </span>
-      <span
-        className={cn(
-          'absolute inset-0 inline-flex items-center justify-center gap-1 rounded-md',
-          'opacity-0 transition-opacity group-hover:opacity-100',
-          isDark ? 'bg-hover/90 text-hover-foreground' : 'bg-muted/90 text-foreground'
-        )}
-      >
+      <span {...stylex.props(styles.overlay, isDark ? styles.overlayDark : styles.overlayLight)}>
         {overlayIcon}
         <span>{overlay.label}</span>
       </span>

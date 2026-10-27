@@ -6,9 +6,98 @@ import { motion } from 'framer-motion';
 import { X } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
+import * as stylex from '@stylexjs/stylex';
 import { useStuckConnectionHint } from '@/hooks/use-stuck-connection';
 import { useWorkspaceDataScopeState } from '@/hooks/use-workspace-data-scope-state';
 import { RecoveryPage, reportRecoveryShown } from './blocking-wait-placeholder';
+import { themeColors } from '../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeShadow,
+  themeSpace,
+} from '../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  /** The sheet's place: pinned above the mobile dock, letting the pointer through. */
+  sheet: {
+    pointerEvents: 'none',
+    position: 'fixed',
+    left: 0,
+    right: 0,
+    bottom: 'calc(var(--k-safe-area-bottom,0px) + 5.25rem)',
+    zIndex: 40,
+    display: 'flex',
+    justifyContent: 'center',
+    paddingInline: themeSpace[4],
+  },
+  card: {
+    pointerEvents: 'auto',
+    width: '100%',
+    maxWidth: '28rem',
+    borderRadius: themeRadius['2xl'],
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.7)',
+    backgroundColor: 'hsl(var(--card) / 0.95)',
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2.5],
+    boxShadow: themeShadow.lg,
+    backdropFilter: 'blur(8px)',
+  },
+  row: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+  },
+  title: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.medium,
+  },
+  dismissIcon: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+  },
+  /** Reason and action share one row: the action alone on its own row
+      left a wide empty gutter. */
+  reasonRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    marginTop: themeSpace[1],
+    paddingInlineStart: themeSpace[6],
+  },
+  reason: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    fontSize: themeFontSize.xs,
+    lineHeight: 1.375,
+    color: themeColors.mutedForeground,
+  },
+  /** The recovery page takes the whole window, over the sheet. */
+  recovery: {
+    position: 'fixed',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 50,
+    overflowY: 'auto',
+    backgroundColor: themeColors.background,
+  },
+});
 
 /** Names this wait in recovery reports and diagnostics. */
 export const STUCK_CONNECTION_RECOVERY_GATE = 'control_connection_loading';
@@ -49,19 +138,16 @@ export function StuckConnectionBanner({
   onDismiss: () => void;
 }) {
   return (
-    <div
-      className="pointer-events-none fixed inset-x-0 bottom-[calc(var(--k-safe-area-bottom,0px)+5.25rem)] z-40 flex justify-center px-4"
-      role="status"
-    >
+    <div {...stylex.props(styles.sheet)} role="status">
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ type: 'spring', stiffness: 420, damping: 34, mass: 0.8 }}
-        className="pointer-events-auto w-full max-w-md rounded-2xl border border-border/70 bg-card/95 px-3 py-2.5 shadow-lg backdrop-blur"
+        {...stylex.props(styles.card)}
       >
-        <div className="flex items-center gap-2">
+        <div {...stylex.props(styles.row)}>
           <Spinner className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-          <p className="min-w-0 flex-1 truncate text-sm font-medium">{labels.title}</p>
+          <p {...stylex.props(styles.title)}>{labels.title}</p>
           <Button
             variant="ghost"
             icon
@@ -69,15 +155,13 @@ export function StuckConnectionBanner({
             onClick={onDismiss}
             aria-label={labels.dismissAriaLabel}
           >
-            <X className="h-3.5 w-3.5" />
+            <X {...stylex.props(styles.dismissIcon)} />
           </Button>
         </div>
         {/* Reason and action share one row: the action alone on its own row
             left a wide empty gutter. */}
-        <div className="mt-1 flex items-center gap-2 pl-6">
-          <p className="min-w-0 flex-1 text-xs leading-snug text-muted-foreground">
-            {labels.description}
-          </p>
+        <div {...stylex.props(styles.reasonRow)}>
+          <p {...stylex.props(styles.reason)}>{labels.description}</p>
           <Button
             size="small"
             className="h-7 shrink-0 rounded-full px-3 text-xs"
@@ -127,7 +211,7 @@ export function StuckConnectionBannerContainer() {
 
   if (recoveryOpenedAt !== null) {
     return (
-      <div className="fixed inset-0 z-50 overflow-y-auto bg-background">
+      <div {...stylex.props(styles.recovery)}>
         <RecoveryPage
           layout="window"
           gate={STUCK_CONNECTION_RECOVERY_GATE}

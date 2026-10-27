@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { themeRadius, themeFontWeight, themeSpace } from '../../style/theme-scale.stylex';
+import { withClassName } from '@/lib/stylex';
 
 /* Deterministic 0–359 hue from a string. Tiny FNV-ish hash; collisions
    are fine because we only need visual variety, not uniqueness. */
@@ -13,14 +15,37 @@ function stringToHue(value: string): number {
 
 export type MobileInitialLetterAvatarSize = 'sm' | 'md' | 'lg';
 
-const SIZE_CLASSNAMES: Record<MobileInitialLetterAvatarSize, string> = {
+const styles = stylex.create({
+  base: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontWeight: themeFontWeight.semibold,
+    color: '#ffffff',
+  },
   /* Header chip — paired with `text-base` titles. */
-  sm: 'h-6 w-6 rounded-md text-[0.72rem]',
+  sm: {
+    width: themeSpace[6],
+    height: themeSpace[6],
+    borderRadius: themeRadius.md,
+    fontSize: '0.72rem',
+  },
   /* Default — used in the project header next to a `text-[0.98rem]` title. */
-  md: 'h-7 w-7 rounded-lg text-[0.82rem]',
+  md: {
+    width: themeSpace[7],
+    height: themeSpace[7],
+    borderRadius: themeRadius.lg,
+    fontSize: '0.82rem',
+  },
   /* Home row leading tile. */
-  lg: 'h-10 w-10 rounded-xl text-[1.05rem]',
-};
+  lg: {
+    width: themeSpace[10],
+    height: themeSpace[10],
+    borderRadius: themeRadius.xl,
+    fontSize: '1.05rem',
+  },
+});
 
 /**
  * Default avatar for any "named entity without its own image" surface
@@ -53,11 +78,7 @@ export function MobileInitialLetterAvatar({
   return (
     <span
       style={{ backgroundColor: `hsl(${hue} 62% 52%)` }}
-      className={cn(
-        'inline-flex shrink-0 items-center justify-center font-semibold text-white',
-        SIZE_CLASSNAMES[size],
-        className
-      )}
+      {...withClassName(stylex.props(styles.base, styles[size]), className)}
       aria-hidden="true"
     >
       {initial ?? fallbackIcon}

@@ -1,0 +1,196 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "files-mobileprojectfilebrowser--default",
+    "preview-visualannotationcommentsoverlay--anchored-threads",
+    "pages-workspacejoinrequestpage--form",
+    "pages-workspacejoinrequestpage--submitting",
+    "mentions-mentiontwolevelmenu--categories"
+  ],
+  "states": {
+    "files-mobileprojectfilebrowser--default": [
+      {
+        "name": "docs-folder",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "docs"
+          },
+          {
+            "action": "visible",
+            "role": "button",
+            "name": "local-project-file-browsing.md"
+          }
+        ]
+      },
+      {
+        "name": "markdown-preview",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "README.md"
+          },
+          {
+            "action": "visible",
+            "role": "heading",
+            "name": "Docs"
+          }
+        ]
+      },
+      {
+        "name": "back-root",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Root"
+          },
+          {
+            "action": "visible",
+            "role": "button",
+            "name": "preview.html"
+          }
+        ]
+      },
+      {
+        "name": "html-preview",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "preview.html"
+          },
+          {
+            "action": "visible",
+            "role": "button",
+            "name": "Hide preview"
+          }
+        ]
+      }
+    ],
+    "preview-visualannotationcommentsoverlay--anchored-threads": [
+      {
+        "name": "collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-visual-comment-id=\"comment-heading\"] button[aria-label=\"Collapse comment\"]"
+          }
+        ]
+      },
+      {
+        "name": "peek-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Collapsed comment by Ada Lovelace"
+          }
+        ]
+      },
+      {
+        "name": "peek-keyboard",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Collapsed comment by Ada Lovelace",
+            "key": "Tab"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Collapsed comment by Ada Lovelace"
+          }
+        ]
+      },
+      {
+        "name": "reopen",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Collapsed comment by Ada Lovelace"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-visual-comment-id=\"comment-heading\"]"
+          }
+        ]
+      },
+      {
+        "name": "resolved",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-visual-comment-id=\"comment-heading\"] button",
+            "index": 2
+          }
+        ]
+      }
+    ],
+    "pages-workspacejoinrequestpage--form": [
+      {
+        "name": "focus",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "textarea",
+            "key": "Tab"
+          },
+          {
+            "action": "focus",
+            "selector": "textarea"
+          }
+        ]
+      }
+    ],
+    "pages-workspacejoinrequestpage--submitting": [
+      {
+        "name": "disabled",
+        "steps": [
+          {
+            "action": "disabled",
+            "selector": "textarea"
+          }
+        ]
+      }
+    ],
+    "mentions-mentiontwolevelmenu--categories": [
+      {
+        "name": "row-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-slot=\"mention-item\"]",
+            "index": 0
+          }
+        ]
+      }
+    ]
+  }
+}

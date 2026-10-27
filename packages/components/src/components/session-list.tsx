@@ -2,8 +2,17 @@ import { isElectronRenderer } from '@/lib/electron';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { SessionWindowMenuItem } from './session-window-menu-item';
 import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
 import { SIDEBAR_ROW_LINE_CLASS, sidebarSurface } from './sidebar-surface';
+import { themeColors } from '../style/theme-colors.stylex';
+import {
+  themeDuration,
+  themeEasing,
+  themeFontWeight,
+  themeRadius,
+  themeSpace,
+} from '../style/theme-scale.stylex';
 import {
   closestCenter,
   DndContext,
@@ -120,6 +129,428 @@ import {
 } from '@/components/sessions/rename-session-dialog';
 
 export type { PrStatus };
+
+/**
+ * The parts of a session row that were Tailwind. The row's own box, ink and
+ * fills come from `sidebarSurface`; these are the pieces around it.
+ */
+const rowStyles = stylex.create({
+  // Project-group declarations keep element-local app variables, including scoped themes.
+  projectHeader: {
+    position: 'relative',
+    width: '100%',
+    borderRadius: 'var(--radius-md)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 1)',
+    textAlign: 'left',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'transparent',
+    display: 'flex',
+    minWidth: 0,
+    flex: '1',
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    fontWeight: 'var(--font-weight-normal)',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
+    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+  },
+  projectHeaderPlain: {
+    backgroundColor: 'transparent',
+    color: 'hsl(var(--sidebar-row-foreground) / 1)',
+  },
+  projectHeaderInteractive: {
+    backgroundColor: {
+      default: 'transparent',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--sidebar-hover) / 1)' },
+      ':is([data-menu-open])': 'hsl(var(--sidebar-hover) / 1)',
+    },
+    color: {
+      default: 'hsl(var(--sidebar-row-foreground) / 1)',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--sidebar-hover-foreground) / 1)' },
+      ':is([data-menu-open])': 'hsl(var(--sidebar-hover-foreground) / 1)',
+    },
+  },
+  projectHeaderSelected: {
+    borderColor: 'color-mix(in oklab, hsl(var(--sidebar-ring) / 1) 30%, transparent)',
+    backgroundColor: {
+      default: 'hsl(var(--sidebar-selection) / 1)',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--sidebar-selection) / 1)' },
+    },
+    color: 'hsl(var(--sidebar-selection-foreground) / 1)',
+  },
+  projectToggle: {
+    position: 'relative',
+    marginRight: 'calc(var(--spacing) * -1.5)',
+    display: 'flex',
+    height: 'calc(var(--spacing) * 5)',
+    width: 'calc(var(--spacing) * 5)',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  projectGlyph: {
+    position: 'absolute',
+    left: 0,
+    top: '50%',
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    translate: '0 calc(calc(1 / 2 * 100%) * -1)',
+    color: 'currentcolor',
+    transitionProperty: 'opacity',
+    transitionDuration: '100ms',
+    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+  },
+  projectChevron: { transitionProperty: 'opacity,translate,scale,rotate' },
+  projectChevronCollapsed: { rotate: 'calc(90deg * -1)' },
+  projectChevronOpen: { rotate: '0deg' },
+  projectGlyphVisible: { opacity: 1 },
+  projectLabel: {
+    minWidth: 0,
+    flex: '1',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    textAlign: 'left',
+  },
+  projectControls: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 0.5)',
+  },
+  projectSmallGlyph: { height: 'calc(var(--spacing) * 3.5)', width: 'calc(var(--spacing) * 3.5)' },
+  projectHeaderWrap: { display: 'flex', alignItems: 'center' },
+  projectHeaderAction: { marginRight: 'calc(var(--spacing) * 2)', flexShrink: 0 },
+  projectDragHandle: { cursor: { default: 'grab', ':active': 'grabbing' }, touchAction: 'none' },
+  projectSortable: {
+    width: '100%',
+    marginBottom: { default: 'calc(var(--spacing) * 0.5)', ':last-child': 0 },
+  },
+  projectDragging: { zIndex: 10, opacity: 0.6 },
+  rowBox: { position: 'relative', width: '100%', textAlign: 'left' },
+  pointer: { cursor: 'pointer' },
+  defaultCursor: { cursor: 'default' },
+  muted: { color: themeColors.mutedForeground },
+  fullWidth: { width: '100%' },
+  dragging: { opacity: 0.6 },
+  spacer: { flex: '1 1 0%' },
+  repoMedium: { fontWeight: themeFontWeight.medium },
+  groupSpacing: { marginBottom: { default: themeSpace[3], ':last-child': 0 } },
+  groupSpacingCollapsed: { marginBottom: { default: themeSpace[1], ':last-child': 0 } },
+  projectGroupSpacing: { marginBottom: { default: themeSpace[0.5], ':last-child': 0 } },
+  hidden: { opacity: 0 },
+  groupFade: {
+    opacity: {
+      default: 1,
+      '@media (hover: hover)': {
+        [stylex.when.ancestor(':is([data-session-list-group]):hover')]: 0,
+      },
+    },
+  },
+  groupGlyphReveal: {
+    opacity: {
+      default: 0,
+      '@media (hover: hover)': {
+        [stylex.when.ancestor(':is([data-session-list-group]):hover')]: 1,
+      },
+    },
+  },
+  groupControlReveal: {
+    opacity: {
+      default: 0,
+      '@media (hover: hover)': {
+        [stylex.when.ancestor(':is([data-session-list-group]):hover')]: 1,
+      },
+    },
+    pointerEvents: {
+      default: 'none',
+      '@media (hover: hover)': {
+        [stylex.when.ancestor(':is([data-session-list-group]):hover')]: 'auto',
+      },
+    },
+  },
+  /** The relative time at the row's end. */
+  time: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: themeSpace[1],
+  },
+  timeValue: { userSelect: 'none', fontVariantNumeric: 'tabular-nums' },
+  /** The title's clip box: the marquee measures against it. */
+  titleClip: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+  },
+  title: {
+    display: 'block',
+    maxWidth: '100%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: 400,
+  },
+  /** The leading slot's box, when the row is two lines. */
+  lineBox: { display: 'flex', flexShrink: 0, alignItems: 'center' },
+  /** The stretched link that covers the row. */
+  anchor: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 10,
+    borderRadius: themeRadius.md,
+    boxShadow: { default: null, ':focus-visible': 'none' },
+  },
+  /** The row's body: the title, and under it the meta line. */
+  rowContent: { display: 'flex', minWidth: 0 },
+  rowContentTop: { alignItems: 'flex-start' },
+  rowContentCenter: { alignItems: 'center' },
+  rowContentMobile: { gap: themeSpace[1.5] },
+  rowContentDesktop: { gap: themeSpace[2] },
+  metaColumn: {
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    flexDirection: 'column',
+    gap: themeSpace[1],
+  },
+  /** Without a meta line the column is only a wrapper: it must not make a box. */
+  contents: { display: 'contents' },
+  /** The title's own row. */
+  titleRow: { display: 'flex', alignItems: 'center', gap: themeSpace[1] },
+  pin: {
+    width: themeSpace[3],
+    height: themeSpace[3],
+    flexShrink: 0,
+    color: 'hsl(var(--sidebar-foreground-muted) / 0.8)',
+  },
+  /** The row's end slot: the time and the leading slot's companions. */
+  endRow: { display: 'flex', alignItems: 'center', gap: themeSpace[1.5] },
+  /** The end slot that carries the row's own metrics. */
+  endRowMeta: {
+    display: 'flex',
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    fontVariantNumeric: 'tabular-nums',
+    color: 'hsl(var(--sidebar-foreground-muted) / 0.8)',
+  },
+  /** The end slot escapes the stretched link so its own pointer events fire. */
+  endRowRaised: { position: 'relative', zIndex: 20 },
+  archiveIcon: { width: themeSpace[4], height: themeSpace[4] },
+  archiveAction: {
+    backgroundColor: themeColors.sidebarHover,
+    color: themeColors.sidebarHoverForeground,
+  },
+  /** A group: the label row and the conversations under it. */
+  groupStack: { display: 'flex', flexDirection: 'column', gap: themeSpace[0.5] },
+  groupStackTop: { marginTop: { default: themeSpace[1], ':first-child': 0 } },
+  groupRow: { display: 'flex', alignItems: 'center' },
+  groupRowLabel: { height: '26px' },
+  groupRowSection: { height: themeSpace[7] },
+  groupHeader: {
+    position: 'relative',
+    display: 'flex',
+    width: '100%',
+    userSelect: 'none',
+    alignItems: 'center',
+    textAlign: 'left',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'transparent',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    transitionProperty:
+      'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  groupHeaderLabel: { height: '26px', gap: themeSpace[1.5] },
+  groupHeaderSectionMobile: { height: themeSpace[7], gap: themeSpace[1] },
+  groupHeaderSectionDesktop: { height: themeSpace[7], gap: themeSpace[0.5] },
+  /** The active group: the pointer's cursor and the ring's edge. */
+  groupHeaderActive: {
+    cursor: 'pointer',
+    borderColor: 'hsl(var(--sidebar-ring) / 0.3)',
+  },
+  groupHeaderPointer: { cursor: 'pointer' },
+  groupHeaderDefault: { cursor: 'default' },
+  groupToggle: {
+    position: 'relative',
+    display: 'flex',
+    height: themeSpace[5],
+    width: themeSpace[5],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** The group's own mark, left-anchored on the toggle's centre line. */
+  groupMark: {
+    position: 'absolute',
+    left: 0,
+    top: '50%',
+    transform: 'translateY(-50%)',
+    width: themeSpace[4],
+    height: themeSpace[4],
+    transitionProperty: 'opacity',
+    transitionDuration: themeDuration[100],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  /** The chevron on the toggle, with the same left anchor. */
+  groupChevron: {
+    position: 'absolute',
+    left: 0,
+    top: '50%',
+    transform: 'translateY(-50%)',
+    width: themeSpace[4],
+    height: themeSpace[4],
+    transitionProperty: 'opacity, translate, scale, rotate',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing.out,
+  },
+  groupChevronCollapsed: { rotate: '-90deg' },
+  groupChevronOpen: { rotate: '0deg' },
+  /** The trailing chevron of a group that has no mark of its own. */
+  groupChevronTrailing: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    color: 'currentcolor',
+    transitionProperty: 'opacity, translate, scale, rotate',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing.out,
+  },
+  groupName: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    textAlign: 'left',
+  },
+  /** The group's new-session button, revealed on hover. */
+  groupNewButton: {
+    marginLeft: 'auto',
+    display: 'inline-flex',
+    height: themeSpace[6],
+    width: themeSpace[6],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.sm,
+    transitionProperty: 'opacity, background-color, color',
+    transitionDuration: themeDuration[100],
+    transitionTimingFunction: themeEasing['in-out'],
+    opacity: 0,
+    pointerEvents: 'none',
+    backgroundColor: { default: 'transparent', ':hover': themeColors.sidebarHover },
+    color: {
+      default: 'hsl(var(--sidebar-foreground-muted) / 0.8)',
+      ':hover': themeColors.sidebarHoverForeground,
+    },
+    // The Tailwind `focus-visible:ring-2 focus-visible:ring-sidebar-ring/40`
+    // this button used to carry declared a full box-shadow in the utilities
+    // layer, which erased the app's global inset focus ring, and the app
+    // forces Tailwind's own ring transparent — so the button showed NO focus
+    // indicator of its own. Keep that: no resting shadow, and no focus
+    // shadow.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+  },
+  /** The group's trailing slot. */
+  groupAction: { marginRight: themeSpace[2], flexShrink: 0 },
+  /** The small square that stands in for the toggle list's chevron. */
+  toggleBox: {
+    display: 'flex',
+    height: themeSpace[4],
+    width: themeSpace[4],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** A row's own hairline edge: a transparent border that a focus ring can
+      replace without moving anything. */
+  rowBorder: {
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'transparent',
+  },
+  /** The row that shows the rest of a group. */
+  showMore: {
+    display: 'flex',
+    height: '26px',
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[2],
+    textAlign: 'left',
+    transitionProperty:
+      'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    backgroundColor: { default: 'transparent', ':hover': themeColors.sidebarHover },
+    color: {
+      default: 'hsl(var(--sidebar-foreground-muted) / 0.8)',
+      ':hover': themeColors.sidebarHoverForeground,
+    },
+    // The Tailwind `focus-visible:ring-2 focus-visible:ring-sidebar-ring/40`
+    // this row used to carry declared a full box-shadow in the utilities
+    // layer, which erased the app's global inset focus ring, and the app
+    // forces Tailwind's own ring transparent — so the row showed NO focus
+    // indicator of its own. Keep that: no resting shadow, and no focus
+    // shadow.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+  },
+  smallGlyph: { width: themeSpace[3.5], height: themeSpace[3.5] },
+  /** The drag handle's own box. */
+  dragHandle: {
+    display: 'inline-flex',
+    height: themeSpace[6],
+    width: themeSpace[6],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.sm,
+    transitionProperty: 'opacity, background-color, color',
+    transitionDuration: themeDuration[100],
+    transitionTimingFunction: themeEasing['in-out'],
+    opacity: 0,
+    pointerEvents: 'none',
+    backgroundColor: { default: 'transparent', ':hover': themeColors.sidebarHover },
+    color: {
+      default: 'hsl(var(--sidebar-foreground-muted) / 0.8)',
+      ':hover': themeColors.sidebarHoverForeground,
+    },
+    cursor: { default: 'grab', ':active': 'grabbing' },
+    // The Tailwind `focus-visible:ring-2 focus-visible:ring-sidebar-ring/40`
+    // this handle used to carry declared a full box-shadow in the utilities
+    // layer, which erased the app's global inset focus ring, and the app
+    // forces Tailwind's own ring transparent — so the handle showed NO focus
+    // indicator of its own. Keep that: no resting shadow, and no focus
+    // shadow.
+    boxShadow: { default: null, ':focus-visible': 'none' },
+  },
+  /** A list's own column: the header action sits above the rows. */
+  listStack: { display: 'flex', flexDirection: 'column' },
+  listHeader: {
+    display: 'flex',
+    height: themeSpace[7],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingRight: themeSpace[2],
+  },
+});
 
 export type SessionListRowOwner = {
   name?: string | null;
@@ -546,8 +977,8 @@ function SessionRowTime({
   const now = useStableNow();
   const relativeTime = formatCompactRelativeTime(latestMessageAt, now);
   return (
-    <span className={cn('inline-flex items-center justify-end gap-1', className)}>
-      <span className="select-none tabular-nums">{relativeTime}</span>
+    <span className={clsx(stylex.props(rowStyles.time).className, className)}>
+      <span {...stylex.props(rowStyles.timeValue)}>{relativeTime}</span>
     </span>
   );
 }
@@ -821,10 +1252,14 @@ const SessionGroupRow = memo(function SessionGroupRow({
   const useAnchor = typeof sessionHref === 'string' && sessionHref.length > 0;
   const isUnsent = useSessionUnsentNewConversation(session.sessionId);
   const renderTitle = (extraClassName?: string) => (
-    <span className="sidebar-session-title-clip min-w-0 flex-1" data-sidebar-title-clip>
+    <span
+      className={clsx('sidebar-session-title-clip', stylex.props(rowStyles.titleClip).className)}
+      data-sidebar-title-clip
+    >
       <span
-        className={cn(
-          'sidebar-session-title block max-w-full truncate font-normal',
+        className={clsx(
+          'sidebar-session-title',
+          stylex.props(rowStyles.title).className,
           isUnsent && !showSelectedState && SIDEBAR_UNSENT_TITLE_CLASS,
           extraClassName
         )}
@@ -834,7 +1269,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
       </span>
     </span>
   );
-  const lineBoxClassName = cn('flex shrink-0 items-center', SIDEBAR_ROW_LINE_CLASS);
+  const lineBoxClassName = clsx(stylex.props(rowStyles.lineBox).className, SIDEBAR_ROW_LINE_CLASS);
   const handleAnchorClick = useAnchor
     ? (event: ReactMouseEvent<HTMLAnchorElement>) => {
         if (openSessionOnModifiedClick(event, session.sessionId)) return;
@@ -911,27 +1346,27 @@ const SessionGroupRow = memo(function SessionGroupRow({
             })
       }
       className={cn(
-        'group relative w-full text-left',
+        'group',
         // A desktop repo row is two lines (title, then branch and time); chats,
         // nested children and every mobile row stay one. The rest of the metadata (repo /
         // PR / line totals) stays in the desktop hover info card.
         // Hover marks the row with its fill only; the title keeps its color.
         stylex.props(
           sidebarSurface.row,
+          rowStyles.rowBox,
           showMetaLine ? sidebarSurface.tall : sidebarSurface.snug,
           showSelectedState
             ? sidebarSurface.selected
-            : isSelectable && !isMobile && sidebarSurface.hover
+            : isSelectable && !isMobile && sidebarSurface.hover,
+          isSelectable ? rowStyles.pointer : rowStyles.defaultCursor
         ).className,
-        'border border-transparent',
+        stylex.props(rowStyles.rowBorder).className,
         // Keyboard-only focus ring. Plain :focus-within also matches
         // after a mouse click (the overlay <a> keeps focus), which
         // left a permanent inset ring on the selected row that read
         // as a misplaced border.
         useAnchor &&
-          'has-[a:focus-visible]:outline-hidden has-[a:focus-visible]:ring-1 has-[a:focus-visible]:ring-inset has-[a:focus-visible]:ring-sidebar-ring/40',
-        !isSelectable && 'cursor-default',
-        isSelectable && 'cursor-pointer'
+          'has-[a:focus-visible]:outline-hidden has-[a:focus-visible]:ring-1 has-[a:focus-visible]:ring-inset has-[a:focus-visible]:ring-sidebar-ring/40'
       )}
       onMouseOver={(event) => {
         if (!event.currentTarget.hasAttribute('data-sidebar-title-measured')) {
@@ -1116,31 +1551,33 @@ const SessionGroupRow = memo(function SessionGroupRow({
           // The overlay anchor covers the row, so it is what a drag
           // starts on; left draggable it would drag its link instead.
           draggable={false}
-          className="absolute inset-0 z-10 rounded-md focus:outline-hidden focus-visible:shadow-none"
+          {...stylex.props(rowStyles.anchor)}
           onClick={handleAnchorClick}
         />
       ) : null}
       <div
-        className={cn(
-          'flex min-w-0',
-          showMetaLine ? 'items-start' : 'items-center',
-          isMobile ? 'gap-1.5' : 'gap-2'
+        {...stylex.props(
+          rowStyles.rowContent,
+          showMetaLine ? rowStyles.rowContentTop : rowStyles.rowContentCenter,
+          isMobile ? rowStyles.rowContentMobile : rowStyles.rowContentDesktop
         )}
       >
         {/* On a two-line row the leading and end slots sit in a box one title line
             tall, so they stay on the title line; otherwise the box disappears. */}
-        <div className={showMetaLine ? lineBoxClassName : 'contents'}>
+        <div
+          className={showMetaLine ? lineBoxClassName : stylex.props(rowStyles.contents).className}
+        >
           <SessionRowLeadingSlot
             showMenuButton={hasMenuActions}
             menuLabel={moreActionsLabel}
             openedByTree={openedByTreeSlot}
           />
         </div>
-        <div className={showMetaLine ? 'flex min-w-0 flex-1 flex-col gap-1' : 'contents'}>
+        <div {...stylex.props(showMetaLine ? rowStyles.metaColumn : rowStyles.contents)}>
           <div
-            className={cn(
+            className={clsx(
               // Body role: conversation titles match prose in every organize mode.
-              'flex items-center gap-1',
+              stylex.props(rowStyles.titleRow).className,
               SIDEBAR_ROW_TEXT_CLASS,
               stylex.props(sidebarSurface.title, showSelectedState && sidebarSurface.titleSelected)
                 .className
@@ -1155,12 +1592,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
             }}
           >
             <SessionRowAuthorAvatar author={session.owner} />
-            {session.isPinned ? (
-              <Pin
-                aria-hidden="true"
-                className="h-3 w-3 shrink-0 text-sidebar-foreground-muted/80"
-              />
-            ) : null}
+            {session.isPinned ? <Pin aria-hidden="true" {...stylex.props(rowStyles.pin)} /> : null}
             {renderTitle()}
           </div>
           {showMetaLine ? (
@@ -1171,7 +1603,9 @@ const SessionGroupRow = memo(function SessionGroupRow({
           ) : null}
         </div>
         {/* Keep PR at the right edge. Line totals stay in the hover card. */}
-        <div className={showMetaLine ? lineBoxClassName : 'contents'}>
+        <div
+          className={showMetaLine ? lineBoxClassName : stylex.props(rowStyles.contents).className}
+        >
           <SidebarRowEndSlot
             sessionId={session.sessionId}
             isWaitingPermission={session.isWaitingPermission}
@@ -1179,24 +1613,32 @@ const SessionGroupRow = memo(function SessionGroupRow({
             hasUnreadMessages={session.hasUnreadMessages}
             restIcon={
               isChatSession ? (
-                <span className={cn('flex items-center gap-1.5', useAnchor && 'z-20')}>
+                <span
+                  className={clsx(
+                    stylex.props(rowStyles.endRow).className,
+                    useAnchor && stylex.props(rowStyles.endRowRaised).className
+                  )}
+                >
                   <SessionRowTime
                     latestMessageAt={session.latestMessageAt}
-                    className={cn(SIDEBAR_CAPTION_TEXT_CLASS, 'text-muted-foreground')}
+                    className={clsx(
+                      SIDEBAR_CAPTION_TEXT_CLASS,
+                      stylex.props(rowStyles.muted).className
+                    )}
                   />
                 </span>
               ) : hasPr || showMergeablePill || isMobile ? (
                 <span
-                  className={cn(
+                  className={clsx(
                     SIDEBAR_CAPTION_TEXT_CLASS,
-                    'flex select-none items-center gap-1.5 tabular-nums text-sidebar-foreground-muted/80',
-                    useAnchor && 'z-20'
+                    stylex.props(rowStyles.endRowMeta).className,
+                    useAnchor && stylex.props(rowStyles.endRowRaised).className
                   )}
                 >
                   {isMobile ? (
                     <SessionRowTime
                       latestMessageAt={session.latestMessageAt}
-                      className="text-muted-foreground"
+                      className={stylex.props(rowStyles.muted).className}
                     />
                   ) : null}
                   {showMergeablePill ? <SessionMergeablePill /> : null}
@@ -1434,9 +1876,9 @@ const SessionGroupRow = memo(function SessionGroupRow({
             key: 'archive',
             label: archiveActionLabel,
             ariaLabel: archiveTooltipLabel,
-            icon: <Archive className="h-4 w-4" />,
+            icon: <Archive className={stylex.props(rowStyles.archiveIcon).className} />,
             hideLabel: groupKind === 'chat',
-            className: 'bg-sidebar-hover text-sidebar-hover-foreground',
+            className: stylex.props(rowStyles.archiveAction).className,
             onClick: () => onArchiveSession?.(session.sessionId),
           },
         ]}
@@ -1502,17 +1944,17 @@ function ProjectGroupHeaderRow({
       data-scope-item="row"
       data-sidebar-group-key={group.key}
       data-menu-open={menuOpen ? '' : undefined}
-      className={cn(
-        'group relative w-full rounded-md px-2 py-1 text-left',
-        'border border-transparent bg-transparent',
-        !selected &&
-          !isMobile &&
-          'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground',
-        selected && 'border-sidebar-ring/30 bg-sidebar-selection hover:bg-sidebar-selection',
-        SIDEBAR_ROW_TEXT_CLASS,
-        'flex min-w-0 flex-1 select-none items-center gap-2 font-normal transition-colors',
-        activate ? 'cursor-pointer' : 'cursor-default',
-        selected ? 'text-sidebar-selection-foreground' : 'text-sidebar-row-foreground'
+      className={clsx(
+        'group',
+        stylex.props(
+          rowStyles.projectHeader,
+          !selected && !isMobile
+            ? rowStyles.projectHeaderInteractive
+            : rowStyles.projectHeaderPlain,
+          selected && rowStyles.projectHeaderSelected,
+          activate ? rowStyles.pointer : rowStyles.defaultCursor
+        ).className,
+        SIDEBAR_ROW_TEXT_CLASS
       )}
       onClick={activate}
       onKeyDown={(event) => {
@@ -1523,7 +1965,7 @@ function ProjectGroupHeaderRow({
     >
       <button
         type="button"
-        className="relative -mr-1.5 flex h-5 w-5 shrink-0 items-center justify-center"
+        {...stylex.props(rowStyles.projectToggle)}
         aria-label={t('common.toggle', 'Toggle')}
         onClick={(event) => {
           event.preventDefault();
@@ -1533,24 +1975,27 @@ function ProjectGroupHeaderRow({
       >
         <Folders
           aria-hidden="true"
-          className={cn(
-            'absolute left-0 top-1/2 h-4 w-4 -translate-y-1/2 text-current transition-opacity duration-100',
-            isMobile ? 'opacity-0' : 'group-hover:opacity-0'
+          className={clsx(
+            stylex.props(rowStyles.projectGlyph, isMobile && rowStyles.hidden).className,
+            !isMobile && 'group-hover:opacity-0'
           )}
         />
         <ChevronDown
           aria-hidden="true"
-          className={cn(
-            'absolute left-0 top-1/2 h-4 w-4 -translate-y-1/2 text-current',
-            'transition-[opacity,translate,scale,rotate] duration-100',
-            isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
-            group.collapsed ? '-rotate-90' : 'rotate-0'
+          className={clsx(
+            stylex.props(
+              rowStyles.projectGlyph,
+              rowStyles.projectChevron,
+              isMobile ? rowStyles.projectGlyphVisible : rowStyles.hidden,
+              group.collapsed ? rowStyles.projectChevronCollapsed : rowStyles.projectChevronOpen
+            ).className,
+            !isMobile && 'group-hover:opacity-100'
           )}
         />
       </button>
-      <span className="min-w-0 flex-1 truncate text-left">{group.label}</span>
+      <span {...stylex.props(rowStyles.projectLabel)}>{group.label}</span>
       {showMenu || showNew || dragHandle ? (
-        <div className="flex shrink-0 items-center gap-0.5">
+        <div {...stylex.props(rowStyles.projectControls)}>
           {showMenu ? (
             <button
               type="button"
@@ -1571,7 +2016,7 @@ function ProjectGroupHeaderRow({
                 );
               }}
             >
-              <MoreHorizontal className="h-3.5 w-3.5" />
+              <MoreHorizontal {...stylex.props(rowStyles.projectSmallGlyph)} />
             </button>
           ) : null}
           {showNew ? (
@@ -1585,7 +2030,7 @@ function ProjectGroupHeaderRow({
                 onNew?.();
               }}
             >
-              <SquarePen className="h-3.5 w-3.5" />
+              <SquarePen {...stylex.props(rowStyles.projectSmallGlyph)} />
             </button>
           ) : null}
           {dragHandle}
@@ -1596,7 +2041,7 @@ function ProjectGroupHeaderRow({
   );
 
   return (
-    <div className="group flex items-center">
+    <div className={clsx('group', stylex.props(rowStyles.projectHeaderWrap).className)}>
       {showMenu ? (
         <ContextMenu.Root onOpenChange={setMenuOpen}>
           <ContextMenu.Trigger render={row} />
@@ -1626,7 +2071,9 @@ function ProjectGroupHeaderRow({
       ) : (
         row
       )}
-      {headerAction ? <div className="mr-2 shrink-0">{headerAction}</div> : null}
+      {headerAction ? (
+        <div {...stylex.props(rowStyles.projectHeaderAction)}>{headerAction}</div>
+      ) : null}
     </div>
   );
 }
@@ -1771,18 +2218,21 @@ const SessionGroupSection = memo(function SessionGroupSection({
   const headerBaseColorClass = isGroupLabel ? SIDEBAR_GROUP_LABEL_COLOR_CLASS : undefined;
   const headerTypographyClass = isGroupLabel
     ? SIDEBAR_GROUP_LABEL_CLASS
-    : cn(SIDEBAR_ROW_TEXT_CLASS, 'font-medium');
+    : clsx(SIDEBAR_ROW_TEXT_CLASS, stylex.props(rowStyles.repoMedium).className);
 
   return (
     <div
-      className={cn(
-        'flex flex-col gap-0.5',
-        // Project groups stack like a machine's projects, 2px apart; repo
-        // groups and Chats keep the wider group rhythm.
-        isProjectGroup ? 'mb-0.5 last:mb-0' : getSidebarGroupSpacingClass(group.collapsed),
-        // 16px above a top-level group (the repo groups before it end in 12px).
-        isGroupLabel && 'mt-1 first:mt-0'
-      )}
+      className={
+        stylex.props(
+          rowStyles.groupStack,
+          isProjectGroup
+            ? rowStyles.projectGroupSpacing
+            : group.collapsed
+              ? rowStyles.groupSpacingCollapsed
+              : rowStyles.groupSpacing,
+          isGroupLabel && rowStyles.groupStackTop
+        ).className
+      }
     >
       {isProjectGroup ? (
         <ProjectGroupHeaderRow
@@ -1811,7 +2261,17 @@ const SessionGroupSection = memo(function SessionGroupSection({
           headerAction={headerAction}
         />
       ) : (
-        <div className={cn('group flex items-center', isGroupLabel ? 'h-[26px]' : 'h-7')}>
+        <div
+          data-session-list-group
+          className={clsx(
+            'group',
+            stylex.props(
+              stylex.defaultMarker(),
+              rowStyles.groupRow,
+              isGroupLabel ? rowStyles.groupRowLabel : rowStyles.groupRowSection
+            ).className
+          )}
+        >
           {(() => {
             const headerRow = (
               <div
@@ -1821,29 +2281,31 @@ const SessionGroupSection = memo(function SessionGroupSection({
                 data-scope-item="row"
                 data-sidebar-group-key={group.key}
                 data-menu-open={repoMenuOpen ? '' : undefined}
-                className={cn(
-                  'relative flex w-full select-none items-center text-left',
-                  isGroupLabel ? 'h-[26px] gap-1.5' : cn('h-7', isMobile ? 'gap-1' : 'gap-0.5'),
-                  'border border-transparent',
-                  'min-w-0 flex-1 transition-colors',
-                  headerTypographyClass,
+                className={clsx(
                   stylex.props(
+                    rowStyles.groupHeader,
+                    isGroupLabel
+                      ? rowStyles.groupHeaderLabel
+                      : isMobile
+                        ? rowStyles.groupHeaderSectionMobile
+                        : rowStyles.groupHeaderSectionDesktop,
+                    showActiveGroupState
+                      ? rowStyles.groupHeaderActive
+                      : canNavigate || canToggle
+                        ? rowStyles.groupHeaderPointer
+                        : rowStyles.groupHeaderDefault,
                     sidebarSurface.row,
                     showActiveGroupState
                       ? sidebarSurface.selected
                       : canNavigate && !isMobile && !isGroupLabel && sidebarSurface.hover
                   ).className,
-                  showActiveGroupState
-                    ? 'cursor-pointer border-sidebar-ring/30'
-                    : canNavigate
-                      ? cn(
-                          'cursor-pointer',
-                          headerBaseColorClass,
-                          !isMobile && isGroupLabel && 'hover:text-sidebar-foreground'
-                        )
-                      : canToggle
-                        ? cn('cursor-pointer', headerBaseColorClass)
-                        : cn('cursor-default', headerBaseColorClass)
+                  headerTypographyClass,
+                  !showActiveGroupState && headerBaseColorClass,
+                  !showActiveGroupState &&
+                    canNavigate &&
+                    !isMobile &&
+                    isGroupLabel &&
+                    'hover:text-sidebar-foreground'
                 )}
                 onClick={canNavigate ? handleNavigate : handleToggleGroup}
                 onKeyDown={
@@ -1867,7 +2329,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
                 {showGroupHeaderIcon ? (
                   <button
                     type="button"
-                    className="relative flex h-5 w-5 shrink-0 items-center justify-center"
+                    {...stylex.props(rowStyles.groupToggle)}
                     onClick={
                       canToggle
                         ? (e) => {
@@ -1880,46 +2342,40 @@ const SessionGroupSection = memo(function SessionGroupSection({
                   >
                     <GitHubOwnerIcon
                       repoFullName={group.repoFullName}
-                      className={cn(
-                        // Left-anchored (not centered in the 20px button) so its left edge
-                        // lines up with the session rows' leading status slot below.
-                        'absolute left-0 top-1/2 -translate-y-1/2 h-4 w-4 transition-opacity duration-100',
-                        // Mobile: chevron is always shown so the owner avatar must hide
-                        // permanently to avoid the two icons overlapping.
-                        canToggle && isMobile
-                          ? 'opacity-0'
-                          : cn(canToggle && 'group-hover:opacity-0')
-                      )}
+                      className={
+                        stylex.props(
+                          rowStyles.groupMark,
+                          canToggle && (isMobile ? rowStyles.hidden : rowStyles.groupFade)
+                        ).className
+                      }
                     />
                     {canToggle && (
                       <ChevronDown
-                        className={cn(
-                          'absolute left-0 top-1/2 -translate-y-1/2 h-4 w-4',
-                          'transition-[opacity,translate,scale,rotate] duration-150 ease-out',
-                          isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
-                          group.collapsed ? '-rotate-90' : 'rotate-0'
+                        {...stylex.props(
+                          rowStyles.groupChevron,
+                          group.collapsed
+                            ? rowStyles.groupChevronCollapsed
+                            : rowStyles.groupChevronOpen,
+                          !isMobile && rowStyles.groupGlyphReveal
                         )}
                       />
                     )}
                   </button>
                 ) : null}
-                <span className="min-w-0 truncate text-left">{group.label}</span>
+                <span {...stylex.props(rowStyles.groupName)}>{group.label}</span>
                 {!showGroupHeaderIcon && canToggle ? (
                   <ChevronDown
-                    className={cn(
-                      'h-3.5 w-3.5 shrink-0 text-current',
-                      'transition-[opacity,translate,scale,rotate] duration-150 ease-out',
-                      group.collapsed || isMobile
-                        ? 'opacity-100'
-                        : 'opacity-0 group-hover:opacity-100',
-                      // Chats is a top-level sidebar section, so its collapsed chevron
-                      // stays visible without hover.
-                      group.collapsed ? '-rotate-90' : 'rotate-0'
+                    {...stylex.props(
+                      rowStyles.groupChevronTrailing,
+                      group.collapsed
+                        ? rowStyles.groupChevronCollapsed
+                        : rowStyles.groupChevronOpen,
+                      !group.collapsed && !isMobile && rowStyles.groupGlyphReveal
                     )}
                     aria-hidden="true"
                   />
                 ) : null}
-                <span className="flex-1" aria-hidden="true" />
+                <span {...stylex.props(rowStyles.spacer)} aria-hidden="true" />
                 {repoMenuEnabled ? (
                   <button
                     type="button"
@@ -1940,7 +2396,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
                       );
                     }}
                   >
-                    <MoreHorizontal className="h-3.5 w-3.5" />
+                    <MoreHorizontal {...stylex.props(rowStyles.smallGlyph)} />
                   </button>
                 ) : null}
                 {collapsedActivity ? (
@@ -1981,21 +2437,15 @@ const SessionGroupSection = memo(function SessionGroupSection({
           {canCreateNew && (
             <button
               type="button"
-              className={cn(
-                'ml-auto inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-sm',
-                'text-sidebar-foreground-muted/80 transition-[opacity,background-color,color] duration-100',
-                'opacity-0 pointer-events-none',
-                'group-hover:opacity-100 group-hover:pointer-events-auto',
-                'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'
-              )}
+              {...stylex.props(rowStyles.groupNewButton, rowStyles.groupControlReveal)}
               aria-label="New session"
               onClick={() => onNew?.(group.repoFullName ?? undefined)}
             >
-              <Plus className="h-3.5 w-3.5" />
+              <Plus {...stylex.props(rowStyles.smallGlyph)} />
             </button>
           )}
 
-          {headerAction ? <div className="mr-2 shrink-0">{headerAction}</div> : null}
+          {headerAction ? <div {...stylex.props(rowStyles.groupAction)}>{headerAction}</div> : null}
         </div>
       )}
       {!group.collapsed && (
@@ -2035,18 +2485,15 @@ const SessionGroupSection = memo(function SessionGroupSection({
               data-id={`show-more:${group.key}`}
               data-scope-item="row"
               data-sidebar-show-more={group.key}
-              className={cn(
+              className={clsx(
                 // Same height as a conversation row (3px padding + 1px borders + 18px line).
                 SIDEBAR_CAPTION_TEXT_CLASS,
-                'flex h-[26px] select-none items-center gap-2 rounded-md px-2 text-left text-sidebar-foreground-muted/80',
-                'transition-colors',
-                'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
-                'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'
+                stylex.props(rowStyles.showMore).className
               )}
               aria-label={toggleListLabel}
               onClick={() => onToggleFullList?.(group.key)}
             >
-              <span className="flex h-4 w-4 items-center justify-center" aria-hidden="true" />
+              <span {...stylex.props(rowStyles.toggleBox)} aria-hidden="true" />
               <span>{toggleListLabel}</span>
             </button>
           )}
@@ -2087,7 +2534,10 @@ const SortableProjectGroupSection = memo(function SortableProjectGroupSection({
     <button
       type="button"
       ref={setActivatorNodeRef}
-      className={cn(SIDEBAR_HOVER_ACTION_CLASS, 'cursor-grab touch-none active:cursor-grabbing')}
+      className={clsx(
+        SIDEBAR_HOVER_ACTION_CLASS,
+        stylex.props(rowStyles.projectDragHandle).className
+      )}
       aria-label={t('sidebar.projectGroups.reorder', 'Reorder project group')}
       {...attributes}
       {...listeners}
@@ -2096,7 +2546,7 @@ const SortableProjectGroupSection = memo(function SortableProjectGroupSection({
         event.stopPropagation();
       }}
     >
-      <GripVertical className="h-3.5 w-3.5" />
+      <GripVertical {...stylex.props(rowStyles.projectSmallGlyph)} />
     </button>
   ) : undefined;
 
@@ -2104,7 +2554,7 @@ const SortableProjectGroupSection = memo(function SortableProjectGroupSection({
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(constrainedTransform), transition }}
-      className={cn('w-full', 'mb-0.5 last:mb-0', isDragging && 'z-10 opacity-60')}
+      {...stylex.props(rowStyles.projectSortable, isDragging && rowStyles.projectDragging)}
     >
       <SessionGroupSection {...props} group={group} dragHandle={dragHandle} />
     </div>
@@ -2147,19 +2597,12 @@ const SortableRepoGroupSection = memo(function SortableRepoGroupSection({
     <button
       type="button"
       ref={setActivatorNodeRef}
-      className={cn(
-        'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-sm',
-        'text-sidebar-foreground-muted/80 transition-[opacity,background-color,color] duration-100',
-        'opacity-0 pointer-events-none',
-        'group-hover:opacity-100 group-hover:pointer-events-auto',
-        'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40',
-        'cursor-grab active:cursor-grabbing'
-      )}
+      {...stylex.props(rowStyles.dragHandle, rowStyles.groupControlReveal)}
       aria-label="Reorder repo"
       {...attributes}
       {...listeners}
     >
-      <GripVertical className="h-3.5 w-3.5" />
+      <GripVertical {...stylex.props(rowStyles.smallGlyph)} />
     </button>
   ) : null;
   const trailingContent = dragHandle;
@@ -2170,10 +2613,10 @@ const SortableRepoGroupSection = memo(function SortableRepoGroupSection({
       style={style}
       // The group spacing lives on this sortable wrapper: inside it the section
       // is always `:last-child`, so its own `last:mb-0` would erase the gap.
-      className={cn(
-        'w-full',
-        getSidebarGroupSpacingClass(group.collapsed),
-        isDragging && 'opacity-60'
+      {...stylex.props(
+        rowStyles.fullWidth,
+        group.collapsed ? rowStyles.groupSpacingCollapsed : rowStyles.groupSpacing,
+        isDragging && rowStyles.dragging
       )}
       data-repo-full-name={group.repoFullName}
     >
@@ -2319,10 +2762,8 @@ export const SessionList = memo(function SessionList({
 
   if (isLoading && sessions.length === 0) {
     return (
-      <div className="flex flex-col">
-        {headerAction ? (
-          <div className="flex h-7 shrink-0 items-center justify-end pr-2">{headerAction}</div>
-        ) : null}
+      <div {...stylex.props(rowStyles.listStack)}>
+        {headerAction ? <div {...stylex.props(rowStyles.listHeader)}>{headerAction}</div> : null}
         <SidebarListSkeleton className={className} />
       </div>
     );
@@ -2369,10 +2810,8 @@ export const SessionList = memo(function SessionList({
     // Keep the header action reachable even when every group filtered out.
     if (headerAction || emptyState) {
       return (
-        <div className="flex flex-col">
-          {headerAction ? (
-            <div className="flex h-7 shrink-0 items-center justify-end pr-2">{headerAction}</div>
-          ) : null}
+        <div {...stylex.props(rowStyles.listStack)}>
+          {headerAction ? <div {...stylex.props(rowStyles.listHeader)}>{headerAction}</div> : null}
           {emptyState}
         </div>
       );
@@ -2384,7 +2823,7 @@ export const SessionList = memo(function SessionList({
     <Tooltip.Provider>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
-          <div className={cn('flex flex-col', className)}>
+          <div className={clsx(stylex.props(rowStyles.listStack).className, className)}>
             {groups.map((group, groupIndex) => {
               const whetherShowFullList = resolvedShowFullListByGroup[group.key] ?? false;
               const groupHeaderAction = groupIndex === 0 ? headerAction : undefined;

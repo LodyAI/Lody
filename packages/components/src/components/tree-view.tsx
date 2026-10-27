@@ -1,25 +1,131 @@
 import React from 'react';
 import * as AccordionPrimitive from '@radix-ui/react-accordion';
 import { ChevronRight } from 'lucide-react';
-import { cva } from 'class-variance-authority';
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
+import * as stylex from '@stylexjs/stylex';
 import { Tooltip } from '@lody/ui/tooltip';
+import { cn } from '@/lib/utils';
+import { themeColors } from '../style/theme-colors.stylex';
+import {
+  themeDuration,
+  themeEasing,
+  themeFontSize,
+  themeLineHeight,
+  themeSpace,
+} from '../style/theme-scale.stylex';
 
 // VSCode-inspired tree layout constants
 // Row height: 22px (VSCode standard for file explorer items)
 // Indent per level: 8px (configurable in VSCode via workbench.tree.indent)
 const TREE_INDENT_PX = 8;
 
-// Simple row styles - each row handles its own padding based on level
-// Background naturally covers the full row width
-const treeVariants = cva('group relative pr-2 hover:bg-hover hover:text-hover-foreground');
+/**
+ * A tree row's look. The `group` marker and the `group-hover:` reveal of the
+ * trailing actions stay Tailwind: StyleX cannot select an ancestor, so the
+ * hover that reveals the actions is the one rule a row keeps in the old
+ * vocabulary.
+ */
+const GROUP_CLASS = 'group';
+const GROUP_HOVER_REVEAL_CLASS = 'group-hover:block';
+/** The twisty follows the group's open state; StyleX cannot select a child. */
+const OPEN_CHEVRON_CLASS = '[&[data-state=open]>svg:first-child]:rotate-90';
 
-// Selected state: VSCode active selection colors, hover:bg overrides the base hover style
-const selectedTreeVariants = cva(
-  'bg-selection text-selection-foreground hover:bg-selection hover:text-selection-foreground'
-);
+const styles = stylex.create({
+  root: {
+    position: 'relative',
+    padding: themeSpace[2],
+    overflow: 'hidden',
+  },
+  /** The strip below the tree that accepts a drop on the tree itself. */
+  dropTarget: { width: '100%', height: '48px' },
 
-const dragOverVariants = cva('bg-primary/30');
+  /**
+   * A row at rest: no fill, the pointer's wash on hover, the row's own ink.
+   * The selected and dragged-over rows restate the whole pair, because a
+   * later StyleX style replaces a property rather than adding a condition to
+   * it.
+   */
+  rowIdle: {
+    position: 'relative',
+    paddingInlineEnd: themeSpace[2],
+    backgroundColor: { default: 'transparent', ':hover': themeColors.hover },
+    color: { default: 'inherit', ':hover': themeColors.hoverForeground },
+  },
+  rowSelected: {
+    position: 'relative',
+    paddingInlineEnd: themeSpace[2],
+    backgroundColor: { default: themeColors.selection, ':hover': themeColors.selection },
+    color: { default: themeColors.selectionForeground, ':hover': themeColors.selectionForeground },
+  },
+  rowDragOver: {
+    position: 'relative',
+    paddingInlineEnd: themeSpace[2],
+    backgroundColor: { default: 'hsl(var(--primary) / 0.3)', ':hover': themeColors.hover },
+    color: { default: 'inherit', ':hover': themeColors.hoverForeground },
+  },
+  rowSelectedDragOver: {
+    position: 'relative',
+    paddingInlineEnd: themeSpace[2],
+    backgroundColor: { default: 'hsl(var(--primary) / 0.3)', ':hover': themeColors.selection },
+    color: { default: themeColors.selectionForeground, ':hover': themeColors.selectionForeground },
+  },
+
+  /** A leaf row: the box a file name sits in. */
+  leaf: {
+    display: 'flex',
+    textAlign: 'left',
+    alignItems: 'center',
+    height: '22px',
+    cursor: 'pointer',
+  },
+  leafDisabled: { opacity: 0.5, cursor: 'not-allowed', pointerEvents: 'none' },
+
+  /** A node's trigger: the same box, plus the twisty. */
+  trigger: {
+    display: 'flex',
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    width: '100%',
+    alignItems: 'center',
+    height: '22px',
+    textAlign: 'left',
+  },
+  accordionContent: {
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+  },
+  chevron: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+    marginRight: themeSpace[0.5],
+    color: 'hsl(var(--muted-foreground) / 0.7)',
+    transitionProperty: 'transform, translate, scale, rotate',
+    transitionDuration: themeDuration[200],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  icon: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+    marginRight: themeSpace[1],
+  },
+  label: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+  },
+  /** The trailing actions: hidden until the row is hovered or selected. */
+  actions: {
+    position: 'absolute',
+    right: themeSpace[3],
+  },
+  actionsVisible: { display: 'block' },
+  actionsHidden: { display: 'none' },
+});
 
 interface TreeDataItem {
   id: string;
@@ -150,9 +256,10 @@ const TreeView = React.forwardRef<HTMLDivElement, TreeProps>(
       return ids;
     }, [data, expandAll, initialSelectedItemId]);
 
+    const rootProps = stylex.props(styles.root);
     return (
       <Tooltip.Provider delay={500}>
-        <div className={cn('relative p-2 overflow-hidden', className)}>
+        <div {...rootProps} className={clsx(rootProps.className, className)}>
           <TreeItem
             data={data}
             ref={ref}
@@ -169,7 +276,7 @@ const TreeView = React.forwardRef<HTMLDivElement, TreeProps>(
             {...props}
           />
           <div
-            className="w-full h-[48px]"
+            {...stylex.props(styles.dropTarget)}
             onDrop={() => {
               handleDrop({ id: '', name: 'parent_div' });
             }}
@@ -317,6 +424,16 @@ const TreeNode = ({
     handleDrop?.(item);
   };
 
+  const rowProps = stylex.props(
+    isSelected
+      ? isDragOver
+        ? styles.rowSelectedDragOver
+        : styles.rowSelected
+      : isDragOver
+        ? styles.rowDragOver
+        : styles.rowIdle
+  );
+
   return (
     <AccordionPrimitive.Root type="multiple" value={value} onValueChange={(s) => setValue(s)}>
       <AccordionPrimitive.Item value={item.id}>
@@ -326,12 +443,7 @@ const TreeNode = ({
           aria-level={level + 1}
           aria-selected={isSelected}
           aria-disabled={item.disabled === true ? true : undefined}
-          className={cn(
-            treeVariants(),
-            isSelected && selectedTreeVariants(),
-            isDragOver && dragOverVariants(),
-            item.className
-          )}
+          className={clsx(rowProps.className, GROUP_CLASS, item.className)}
           onClick={() => {
             handleSelectChange(item);
             item.onClick?.();
@@ -453,6 +565,17 @@ const TreeLeaf = React.forwardRef<
     // Leaf padding: level indent + 8px base + 18px for chevron alignment
     const leafPaddingLeft = level * TREE_INDENT_PX + 8 + 18;
 
+    const rowProps = stylex.props(
+      isSelected
+        ? isDragOver
+          ? styles.rowSelectedDragOver
+          : styles.rowSelected
+        : isDragOver
+          ? styles.rowDragOver
+          : styles.rowIdle
+    );
+    const leafProps = stylex.props(styles.leaf, item.disabled && styles.leafDisabled);
+
     return (
       <div
         ref={ref}
@@ -461,14 +584,11 @@ const TreeLeaf = React.forwardRef<
         aria-level={level + 1}
         aria-selected={isSelected}
         aria-disabled={item.disabled === true ? true : undefined}
-        className={cn(
-          'flex text-left items-center h-[22px] cursor-pointer',
-          treeVariants(),
-          className,
-          isSelected && selectedTreeVariants(),
-          isDragOver && dragOverVariants(),
-          item.disabled && 'opacity-50 cursor-not-allowed pointer-events-none',
-          item.className
+        className={clsx(
+          leafProps.className,
+          rowProps.className,
+          GROUP_CLASS,
+          cn(className, item.className)
         )}
         style={{ paddingLeft: leafPaddingLeft }}
         onClick={activate}
@@ -509,44 +629,40 @@ TreeLeaf.displayName = 'TreeLeaf';
 const AccordionTrigger = React.forwardRef<
   React.ElementRef<typeof AccordionPrimitive.Trigger>,
   React.ComponentPropsWithoutRef<typeof AccordionPrimitive.Trigger> & { level?: number }
->(({ className, children, level = 0, ...props }, ref) => (
-  <AccordionPrimitive.Header>
-    <AccordionPrimitive.Trigger
-      ref={ref}
-      className={cn(
-        // VSCode-style: 22px height, centered content
-        // text-left: button elements default to text-align:center, which centers label text
-        // inside the flex-1 label span; override so folder names left-align like file rows.
-        'flex flex-1 w-full items-center h-[22px] text-left [&[data-state=open]>svg:first-child]:rotate-90',
-        className
-      )}
-      style={{ paddingLeft: level * TREE_INDENT_PX + 8 }}
-      {...props}
-    >
-      {/* Twisty arrow */}
-      <ChevronRight className="h-4 w-4 shrink-0 transition-transform duration-200 text-muted-foreground/70 mr-0.5" />
-      {children}
-    </AccordionPrimitive.Trigger>
-  </AccordionPrimitive.Header>
-));
+>(({ className, children, level = 0, ...props }, ref) => {
+  const triggerProps = stylex.props(styles.trigger);
+  return (
+    <AccordionPrimitive.Header>
+      <AccordionPrimitive.Trigger
+        ref={ref}
+        className={clsx(triggerProps.className, className, OPEN_CHEVRON_CLASS)}
+        style={{ paddingLeft: level * TREE_INDENT_PX + 8 }}
+        {...props}
+      >
+        {/* Twisty arrow */}
+        <ChevronRight {...stylex.props(styles.chevron)} />
+        {children}
+      </AccordionPrimitive.Trigger>
+    </AccordionPrimitive.Header>
+  );
+});
 AccordionTrigger.displayName = AccordionPrimitive.Trigger.displayName;
 
 const AccordionContent = React.forwardRef<
   React.ElementRef<typeof AccordionPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof AccordionPrimitive.Content>
->(({ className, children, ...props }, ref) => (
-  <AccordionPrimitive.Content
-    ref={ref}
-    className={cn(
-      // No animation, no overflow-hidden to allow full-row highlight
-      'text-sm',
-      className
-    )}
-    {...props}
-  >
-    <div>{children}</div>
-  </AccordionPrimitive.Content>
-));
+>(({ className, children, ...props }, ref) => {
+  const contentProps = stylex.props(styles.accordionContent);
+  return (
+    <AccordionPrimitive.Content
+      ref={ref}
+      className={clsx(contentProps.className, className)}
+      {...props}
+    >
+      <div>{children}</div>
+    </AccordionPrimitive.Content>
+  );
+});
 AccordionContent.displayName = AccordionPrimitive.Content.displayName;
 
 const TreeIcon = ({
@@ -568,7 +684,7 @@ const TreeIcon = ({
   } else if (item.icon) {
     Icon = item.icon;
   }
-  return Icon ? <Icon className="h-4 w-4 shrink-0 mr-1" /> : <></>;
+  return Icon ? <Icon {...stylex.props(styles.icon)} /> : <></>;
 };
 
 const TreeItemLabel = ({ name, className }: { name: string; className?: string }) => {
@@ -582,8 +698,9 @@ const TreeItemLabel = ({ name, className }: { name: string; className?: string }
     }
   }, [name]);
 
+  const labelProps = stylex.props(styles.label);
   const label = (
-    <span ref={textRef} className={cn('text-sm truncate', className)}>
+    <span ref={textRef} className={clsx(labelProps.className, className)}>
       {name}
     </span>
   );
@@ -594,7 +711,7 @@ const TreeItemLabel = ({ name, className }: { name: string; className?: string }
 
   return (
     <Tooltip.Root>
-      <Tooltip.Trigger render={label}/>
+      <Tooltip.Trigger render={label} />
       <Tooltip.Content side="top" align="start">
         {name}
       </Tooltip.Content>
@@ -609,11 +726,11 @@ const TreeActions = ({
   children: React.ReactNode;
   isSelected: boolean;
 }) => {
-  return (
-    <div className={cn(isSelected ? 'block' : 'hidden', 'absolute right-3 group-hover:block')}>
-      {children}
-    </div>
+  const actionsProps = stylex.props(
+    styles.actions,
+    isSelected ? styles.actionsVisible : styles.actionsHidden
   );
+  return <div className={clsx(actionsProps.className, GROUP_HOVER_REVEAL_CLASS)}>{children}</div>;
 };
 
 export {

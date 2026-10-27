@@ -1,11 +1,17 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronLeft } from 'lucide-react';
+import { clsx } from 'clsx';
 import { useLocation } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
 import { ScrollArea } from '@lody/ui/scroll-area';
 import { consumeMobileBackNavigation } from '@/lib/mobile-back-navigation';
+import { withClassName } from '@/lib/stylex';
+// The theme tokens are imported by path, not by the `@/` alias: the StyleX
+// compiler links a theme file on its own and does not follow bundler aliases.
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
 import type { MobileWorkspaceTab, MobileWorkspaceTabBarLabels } from './mobile-workspace-tabbar';
 import { MobileDrillPageLayout, useMobileDrillAnimatedBack } from './mobile-drill-page-layout';
 
@@ -21,6 +27,79 @@ export type MobileSettingsLayoutProps = {
   workspaceTabLabels?: MobileWorkspaceTabBarLabels;
   children: ReactNode;
 };
+
+/**
+ * The settings chrome: the drill header, the scroll region, and the safe-area
+ * padding the last row needs.
+ *
+ * The safe-area insets are Konsta's `--k-safe-area-*` variables, added to the
+ * theme's own spacing step — the same expressions Konsta's `pt-safe-*` and
+ * `pb-safe-*` utilities resolve to.
+ */
+const styles = stylex.create({
+  /**
+   * The drill header: a sticky bar over the scrolling body, laid out as
+   * three columns so the title sits between the back chip and an empty slot.
+   */
+  header: {
+    position: 'sticky',
+    top: 0,
+    zIndex: 30,
+    display: 'grid',
+    gridTemplateColumns: '2.25rem minmax(0,1fr) 2.25rem',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    paddingTop: 'calc(var(--k-safe-area-top) + var(--spacing) * 2)',
+    paddingBottom: themeSpace[2],
+    paddingInlineStart: 'calc(var(--k-safe-area-left) + var(--spacing) * 3)',
+    paddingInlineEnd: 'calc(var(--k-safe-area-right) + var(--spacing) * 3)',
+  },
+  /** The slot a machine detail's own header portals into. */
+  headerSlot: { gridColumn: 'span 2 / span 2', minWidth: 0 },
+  headerTitle: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    textAlign: 'center',
+    fontSize: '0.98rem',
+    fontWeight: themeFontWeight.normal,
+    letterSpacing: '-0.025em',
+  },
+  /** The scroll region's own box. */
+  main: { minHeight: 0, minWidth: 0, flexGrow: 1, flexShrink: 1, flexBasis: '0%' },
+  fill: { height: '100%' },
+  fillMinHeight: { height: '100%', minHeight: 0 },
+  /**
+   * The inner body: a column that fills the region, with the bottom safe-area
+   * padding so the last setting row clears the home indicator.
+   */
+  body: {
+    position: 'relative',
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    minHeight: 0,
+    paddingBottom: 'calc(var(--k-safe-area-bottom) + var(--spacing) * 4)',
+  },
+  /** The header's back chip: the same shape as the home screen's chip. */
+  backButton: {
+    display: 'inline-flex',
+    height: themeSpace[9],
+    width: themeSpace[9],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.full,
+    backgroundColor: themeColors.card,
+    color: themeColors.foreground,
+    boxShadow: '0 1px 2px rgba(0,0,0,0.04),0 8px 24px -12px rgba(0,0,0,0.18)',
+    transitionProperty: 'transform, translate, scale, rotate',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    scale: { default: null, ':active': '0.97' },
+  },
+  backIcon: { height: themeSpace[5], width: themeSpace[5] },
+});
 
 const MobileSettingsDetailHeaderContext = createContext<HTMLElement | null | undefined>(undefined);
 
@@ -61,24 +140,13 @@ export function MobileSettingsLayout({
   return (
     <MobileSettingsDetailHeaderContext.Provider value={detailHeaderTarget}>
       <MobileDrillPageLayout onBack={onBack}>
-        <header
-          className={cn(
-            'mobile-home-glass sticky top-0 z-30',
-            /* Three-column grid centers the title between the back chip
-               and an empty right slot — mirrors MobileProjectScreen's
-               ProjectTopBar. */
-            'grid grid-cols-[2.25rem_minmax(0,1fr)_2.25rem] items-center gap-2',
-            'pt-safe-2 pb-2 ps-safe-3 pe-safe-3'
-          )}
-        >
+        <header {...withClassName(stylex.props(styles.header), 'mobile-home-glass')}>
           <SettingsHeaderBackButton fallback={onBack} />
           {isMachineDetail ? (
-            <div ref={setDetailHeaderTarget} className="col-span-2 min-w-0" />
+            <div ref={setDetailHeaderTarget} {...stylex.props(styles.headerSlot)} />
           ) : (
             <>
-              <h1 className="truncate text-center text-[0.98rem] font-normal tracking-tight">
-                {title}
-              </h1>
+              <h1 {...stylex.props(styles.headerTitle)}>{title}</h1>
               <div aria-hidden="true" />
             </>
           )}
@@ -125,11 +193,11 @@ function SettingsInnerContent({
   );
 
   return (
-    <main className="min-h-0 min-w-0 flex-1">
+    <main {...stylex.props(styles.main)}>
       {isAgentConfigTab ? (
-        <div className="h-full min-h-0">{body}</div>
+        <div {...stylex.props(styles.fillMinHeight)}>{body}</div>
       ) : (
-        <ScrollArea className="h-full">{body}</ScrollArea>
+        <ScrollArea className={stylex.props(styles.fill).className}>{body}</ScrollArea>
       )}
     </main>
   );
@@ -154,19 +222,11 @@ function SettingsInnerBody({ children, hasMounted }: { children: ReactNode; hasM
     return consumeMobileBackNavigation();
   });
 
+  const bodyProps = stylex.props(styles.body);
   return (
     <div
-      className={cn(
-        'relative flex h-full min-h-0 flex-col',
-        /* Bottom safe-area padding so the last setting row clears the
-           home-indicator (iOS) / navigation bar (Android) on native.
-           Konsta's `pb-safe-*` resolves to `--k-safe-area-bottom + N`,
-           giving us a small breathing buffer beyond the system inset.
-           Pages with their own scroll regions (agent-config) opt out
-           by overriding inside their own component. */
-        'pb-safe-4',
-        !skipDrill && 'mobile-drill-in'
-      )}
+      {...bodyProps}
+      className={clsx(bodyProps.className, skipDrill ? undefined : 'mobile-drill-in')}
     >
       {children}
     </div>
@@ -186,14 +246,9 @@ function SettingsHeaderBackButton({ fallback }: { fallback: () => void }) {
       type="button"
       onClick={animatedBack ?? fallback}
       aria-label={t('common.back', 'Back')}
-      className={cn(
-        'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full',
-        'bg-card text-foreground',
-        'shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_-12px_rgba(0,0,0,0.18)]',
-        'transition-transform active:scale-[0.97]'
-      )}
+      {...stylex.props(styles.backButton)}
     >
-      <ChevronLeft className="h-5 w-5" aria-hidden="true" />
+      <ChevronLeft {...stylex.props(styles.backIcon)} aria-hidden="true" />
     </button>
   );
 }

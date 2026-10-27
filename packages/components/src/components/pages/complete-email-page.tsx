@@ -1,3 +1,7 @@
+import * as stylex from '@stylexjs/stylex';
+import { pageSurface as surface } from './surface';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontSize, themeLineHeight, themeSpace } from '../../style/theme-scale.stylex';
 import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Mail } from 'lucide-react';
@@ -33,11 +37,11 @@ export function CompleteEmailPage({
   const { t } = useTranslation();
 
   return (
-    <div className="flex min-h-screen w-full items-center justify-center bg-background p-4">
-      <Card.Root className="w-full max-w-md">
-        <Card.Header className="space-y-4">
-          <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
-            <div className="min-w-0 truncate">
+    <div {...stylex.props(surface.page)}>
+      <Card.Root {...stylex.props(surface.card)}>
+        <Card.Header>
+          <div {...stylex.props(styles.account, surface.stack4)}>
+            <div {...stylex.props(styles.accountLabel)}>
               {t('completeEmail.signedInAs', 'Signed in as')}: {userLabel}
             </div>
             <Button
@@ -49,7 +53,7 @@ export function CompleteEmailPage({
             >
               {signingOut ? (
                 <>
-                  <Spinner className="mr-2 h-4 w-4" />
+                  <Spinner className={`h-4 w-4 ${stylex.props(surface.spinnerMargin).className}`} />
                   {t('completeEmail.loggingOut', 'Logging out')}
                 </>
               ) : (
@@ -57,13 +61,17 @@ export function CompleteEmailPage({
               )}
             </Button>
           </div>
-          <div className="space-y-1 text-center">
-            <div className="mb-4 flex justify-center">
-              <div className="rounded-full bg-primary/10 p-3">
-                <Mail className="h-6 w-6 text-primary" aria-hidden="true" />
+          <div {...stylex.props(surface.center)}>
+            <div {...stylex.props(surface.centeredRow, styles.heroSpacing)}>
+              <div {...stylex.props(surface.iconWell)}>
+                <Mail {...stylex.props(surface.heroIcon)} aria-hidden="true" />
               </div>
             </div>
-            <Card.Title id="complete-email-title" as="h1" className="text-2xl font-bold">
+            <Card.Title
+              id="complete-email-title"
+              as="h1"
+              className={`text-2xl font-bold ${stylex.props(surface.stack1).className}`}
+            >
               {t('completeEmail.title', 'Add your email')}
             </Card.Title>
             <Card.Description>
@@ -77,13 +85,12 @@ export function CompleteEmailPage({
         <Card.Content>
           <form
             onSubmit={onSubmit}
-            className="space-y-4"
             aria-labelledby="complete-email-title"
             aria-describedby={submitError ? 'complete-email-error' : undefined}
             aria-busy={submitting || signingOut}
           >
-            <div className="space-y-2">
-              <UiField.Label htmlFor="email">
+            <div {...stylex.props(surface.stack4)}>
+              <UiField.Label htmlFor="email" {...stylex.props(surface.stack2)}>
                 {t('completeEmail.emailLabel', 'Email address')}
               </UiField.Label>
               <Input
@@ -99,15 +106,19 @@ export function CompleteEmailPage({
             </div>
 
             {submitError ? (
-              <Alert.Root tone="danger">
+              <Alert.Root tone="danger" {...stylex.props(surface.stack4)}>
                 <Alert.Description id="complete-email-error">{submitError}</Alert.Description>
               </Alert.Root>
             ) : null}
 
-            <Button type="submit" className="w-full" disabled={submitting || signingOut}>
+            <Button
+              type="submit"
+              {...stylex.props(surface.fullWidth)}
+              disabled={submitting || signingOut}
+            >
               {submitting ? (
                 <>
-                  <Spinner className="mr-2 h-4 w-4" />
+                  <Spinner className={`h-4 w-4 ${stylex.props(surface.spinnerMargin).className}`} />
                   {t('completeEmail.saving', 'Saving email')}
                 </>
               ) : (
@@ -120,3 +131,17 @@ export function CompleteEmailPage({
     </div>
   );
 }
+
+const styles = stylex.create({
+  heroSpacing: { marginBottom: themeSpace[4] },
+  account: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: themeSpace[3],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.mutedForeground,
+  },
+  accountLabel: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+});

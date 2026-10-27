@@ -1,3 +1,11 @@
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
+import * as stylex from '@stylexjs/stylex';
 import { useMentionFileSearch } from './file-search/use-file-search';
 import * as React from 'react';
 import { forEachAtTokenSpan, type HydratedMentions } from '@/components/mentions/mention-hydration';
@@ -161,16 +169,16 @@ export function useKnownFileTokens(repoFullName?: string) {
 }
 
 function FileAtMentionLoadingSkeleton() {
-  const rows = ['w-[72%]', 'w-[54%]', 'w-[86%]', 'w-[63%]', 'w-[78%]', 'w-[58%]'];
+  const rows = ['72%', '54%', '86%', '63%', '78%', '58%'];
 
   return (
-    <div className="px-2 py-2">
-      <div className="animate-pulse space-y-2">
-        {rows.map((widthClass, index) => (
+    <div {...stylex.props(styles.skeleton)}>
+      <div {...stylex.props(styles.pulse)}>
+        {rows.map((width, index) => (
           <div
             // eslint-disable-next-line react/no-array-index-key
             key={index}
-            className={cn('h-4 rounded-xs', 'bg-muted/70', widthClass)}
+            {...stylex.props(styles.skeletonRow, styles.skeletonWidth(width))}
           />
         ))}
       </div>
@@ -206,41 +214,39 @@ function FileAtMentionMenu({
   }, [context, indexed]);
 
   return (
-    <MentionContent className="w-max max-w-[min(var(--mention-input-width),calc(100vw-2rem))]">
+    <MentionContent {...stylex.props(styles.content)}>
       {!repoFullName ? (
-        <div className="px-2 py-1.5 text-sm text-muted-foreground">
-          Select a repo to mention files.
-        </div>
+        <div {...stylex.props(styles.message)}>Select a repo to mention files.</div>
       ) : (status === 'loading' && !entry) || search.status === 'loading' ? (
         <FileAtMentionLoadingSkeleton />
       ) : status === 'error' || search.status === 'error' ? (
-        <div className="px-2 py-1.5 text-sm text-destructive">
+        <div {...stylex.props(styles.message, styles.error)}>
           {error ?? 'Failed to load files.'}
         </div>
       ) : entry && entry.truncated ? (
-        <div className="px-2 pt-2 pb-1 text-xs text-muted-foreground">
+        <div {...stylex.props(styles.truncated)}>
           Repo is very large; GitHub returned a truncated file list.
         </div>
       ) : null}
 
       {indexed.length > 0 ? (
-        <div className="scrollbar-pro max-h-[260px] overflow-auto overflow-x-auto">
+        <div className={`scrollbar-pro ${stylex.props(styles.list).className}`}>
           {indexed.map((item) => {
             const token = item.token;
             return (
               <MentionItem key={token} value={token} label={token}>
                 {item.kind === 'dir' ? (
-                  <FolderIcon folderPath={item.path} className="h-4 w-4 shrink-0 opacity-80" />
+                  <FolderIcon folderPath={item.path} {...stylex.props(styles.icon)} />
                 ) : (
-                  <FileIcon filePath={item.path} className="h-4 w-4 shrink-0 opacity-80" />
+                  <FileIcon filePath={item.path} {...stylex.props(styles.icon)} />
                 )}
-                <div className="min-w-0 whitespace-nowrap font-mono text-sm leading-5">{token}</div>
+                <div {...stylex.props(styles.path)}>{token}</div>
               </MentionItem>
             );
           })}
         </div>
       ) : repoFullName && status !== 'loading' ? (
-        <div className="px-2 py-1.5 text-sm text-muted-foreground">No results</div>
+        <div {...stylex.props(styles.message)}>No results</div>
       ) : null}
     </MentionContent>
   );
@@ -338,19 +344,19 @@ export const FileAtMentionTextarea = React.forwardRef<
         onFilter={(options) => options}
         autoCloseOnEmpty={false}
         loop
-        className="w-full"
+        {...stylex.props(styles.root)}
       >
         <FileAtMentionHydrator
           text={value}
           knownPaths={knownTokens}
           enabled={Boolean(repoFullName)}
         />
-        <MentionLabel className="sr-only">{label}</MentionLabel>
+        <MentionLabel {...stylex.props(styles.label)}>{label}</MentionLabel>
         <MentionInput
           ref={ref}
           value={value}
           containerClassName={containerClassName}
-          className={cn('resize-none', className)}
+          className={cn(stylex.props(styles.input).className, className)}
           {...props}
         />
         <FileAtMentionMenu
@@ -410,3 +416,62 @@ function FileAtMentionHydrator({
 
   return null;
 }
+
+const pulse = stylex.keyframes({ '50%': { opacity: 0.5 } });
+const styles = stylex.create({
+  input: { resize: 'none' },
+  root: { width: '100%' },
+  label: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clip: 'rect(0, 0, 0, 0)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+  skeleton: { padding: themeSpace[2] },
+  pulse: {
+    animationName: pulse,
+    animationDuration: '2s',
+    animationTimingFunction: 'cubic-bezier(0.4, 0, 0.6, 1)',
+    animationIterationCount: 'infinite',
+  },
+  skeletonRow: {
+    height: themeSpace[4],
+    borderRadius: themeRadius.xs,
+    backgroundColor: 'hsl(var(--muted) / 0.7)',
+    marginBlockStart: { default: null, ':not(:last-child)': 0 },
+    marginBlockEnd: { default: null, ':not(:last-child)': themeSpace[2] },
+  },
+  skeletonWidth: (width: string) => ({ width }),
+  content: { width: 'max-content', maxWidth: 'min(var(--mention-input-width),calc(100vw - 2rem))' },
+  message: {
+    paddingInline: themeSpace[2],
+    paddingBlock: themeSpace[1.5],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.mutedForeground,
+  },
+  error: { color: themeColors.destructive },
+  truncated: {
+    paddingInline: themeSpace[2],
+    paddingTop: themeSpace[2],
+    paddingBottom: themeSpace[1],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+  list: { maxHeight: '260px', overflow: 'auto' },
+  icon: { height: themeSpace[4], width: themeSpace[4], flexShrink: 0, opacity: 0.8 },
+  path: {
+    minWidth: 0,
+    whiteSpace: 'nowrap',
+    fontFamily: 'var(--font-mono)',
+    fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
+    fontSize: themeFontSize.sm,
+    lineHeight: themeSpace[5],
+  },
+});

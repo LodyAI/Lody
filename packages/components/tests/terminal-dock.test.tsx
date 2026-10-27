@@ -136,14 +136,9 @@ function getTerminalTabButton(container: HTMLElement, title: string): HTMLButton
 }
 
 function expectActiveTerminal(container: HTMLElement, title: string): void {
-  // Active tab = a flat fill against the strip's own `bg-sidebar` canvas.
-  // See the comment on `TERMINAL_TAB_ACTIVE_CLASS`.
   const tab = getTerminalTab(container, title);
   expect(tab.getAttribute('aria-selected')).toBe('true');
-  const classes = tab.className.split(/\s+/);
-  expect(classes).toContain('bg-background');
-  expect(classes).toContain('text-tab-active-foreground');
-  expect(classes).not.toContain('shadow-[0_1px_4px_-1px_rgba(0,0,0,0.18)]');
+  expect([...container.querySelectorAll('[role="tab"][aria-selected="true"]')]).toEqual([tab]);
 }
 
 describe('TerminalDock', () => {

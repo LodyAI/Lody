@@ -1,0 +1,128 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "below-sm",
+      "width": 639,
+      "height": 900
+    },
+    {
+      "name": "at-sm",
+      "width": 640,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "blockedHosts": ["avatars.githubusercontent.com"],
+  "ids": [
+    "schedules-migration--property-rows",
+    "schedules-migration--narrow-property-rows",
+    "schedules-migration--large-property-rows",
+    "schedules-migration--weekly",
+    "schedules-migration--once",
+    "schedules-migration--disabled",
+    "workspace-schedules--editor-in-narrow-panel",
+    "workspace-schedules--editor-weekly",
+    "workspace-schedules--editor-once-machine-clock"
+  ],
+  "states": {
+    "schedules-migration--weekly": [
+      {
+        "name": "time-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "input[type=\"time\"]"
+          }
+        ]
+      },
+      {
+        "name": "time-focused",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "input[type=\"time\"]"
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          }
+        ]
+      },
+      {
+        "name": "time-edited",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "input[type=\"time\"]",
+            "value": "10:45"
+          }
+        ]
+      },
+      {
+        "name": "frequency-open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "combobox",
+            "name": "Repeat"
+          },
+          {
+            "action": "visible",
+            "role": "listbox"
+          }
+        ]
+      }
+    ],
+    "schedules-migration--once": [
+      {
+        "name": "datetime-focused",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "input[type=\"datetime-local\"]"
+          }
+        ]
+      },
+      {
+        "name": "datetime-edited",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "input[type=\"datetime-local\"]",
+            "value": "2026-10-23T10:45"
+          }
+        ]
+      }
+    ],
+    "workspace-schedules--editor-weekly": [
+      {
+        "name": "time-focused",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "input[type=\"time\"]"
+          }
+        ]
+      }
+    ]
+  },
+  "ready": {
+    "schedules-migration--disabled": [
+      {
+        "action": "disabled",
+        "selector": "input[type=\"time\"]"
+      },
+      {
+        "action": "disabled",
+        "role": "combobox",
+        "name": "Repeat"
+      }
+    ]
+  }
+}

@@ -1,0 +1,307 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "compact-desktop",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "blockedHosts": ["avatars.githubusercontent.com"],
+  "ids": [
+    "components-legacy-task-list-migration--rows",
+    "components-legacy-task-list-migration--anchors",
+    "components-legacy-task-list-migration--narrow",
+    "components-legacy-task-list-migration--overflow",
+    "components-legacy-task-list-migration--read-only-collapsed",
+    "components-legacy-task-list-migration--caller-overrides",
+    "components-legacy-task-list-migration--subtree-variables",
+    "components-legacy-task-list-migration--root-variable-overrides",
+    "components-legacy-task-list-migration--natural-device",
+    "components-legacy-task-list-migration--loading-and-empty"
+  ],
+  "states": {
+    "components-legacy-task-list-migration--rows": [
+      {
+        "name": "row-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-session-id=\"alpha-pinned\"]"
+          }
+        ]
+      },
+      {
+        "name": "menu-pointer-out",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-session-id=\"alpha-pinned\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "movePointer",
+            "x": 370,
+            "y": 800
+          }
+        ]
+      },
+      {
+        "name": "rename-input",
+        "steps": [
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-session-id=\"alpha-pinned\"] input"
+          }
+        ]
+      },
+      {
+        "name": "rename-committed",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "[data-sidebar-session-id=\"alpha-pinned\"] input",
+            "value": "  Renamed synthetic session  "
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-session-id=\"alpha-pinned\"] input",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "text": "Renamed alpha-pinned: Renamed synthetic session"
+          }
+        ]
+      },
+      {
+        "name": "archive-confirming",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-session-id=\"alpha-pinned\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-session-id=\"alpha-pinned\"] button:has(svg.lucide-archive)"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-session-id=\"alpha-pinned\"] button:has-text(\"Confirm\")"
+          }
+        ]
+      },
+      {
+        "name": "archive-completed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-session-id=\"alpha-pinned\"] button:has-text(\"Confirm\")"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-session-id=\"alpha-pinned\"]"
+          },
+          {
+            "action": "visible",
+            "text": "Archived alpha-pinned"
+          }
+        ]
+      },
+      {
+        "name": "repo-collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-group-key=\"migration-fixture/alpha-project\"] > button"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-session-id=\"alpha-working\"]"
+          }
+        ]
+      }
+    ],
+    "components-legacy-task-list-migration--anchors": [
+      {
+        "name": "keyboard-focus",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-sidebar-session-id=\"chat-rest\"] a",
+            "key": "Tab"
+          },
+          {
+            "action": "focus",
+            "selector": "[data-sidebar-session-id=\"chat-rest\"] a"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-session-id=\"chat-rest\"] a:focus-visible"
+          }
+        ]
+      },
+      {
+        "name": "selected",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-session-id=\"chat-rest\"] a"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-session-id=\"chat-rest\"][aria-current=\"page\"]"
+          }
+        ]
+      }
+    ],
+    "components-legacy-task-list-migration--narrow": [
+      {
+        "name": "rename-input",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-session-id=\"alpha-pinned\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-session-id=\"alpha-pinned\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-session-id=\"alpha-pinned\"] input"
+          }
+        ]
+      },
+      {
+        "name": "rename-cancelled",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "[data-sidebar-session-id=\"alpha-pinned\"] input",
+            "value": "Cancelled draft"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-session-id=\"alpha-pinned\"] input",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-session-id=\"alpha-pinned\"] input"
+          }
+        ]
+      }
+    ],
+    "components-legacy-task-list-migration--overflow": [
+      {
+        "name": "show-more-focus",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-sidebar-show-more]",
+            "key": "Tab"
+          },
+          {
+            "action": "focus",
+            "selector": "[data-sidebar-show-more]"
+          }
+        ]
+      },
+      {
+        "name": "show-all",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-show-more]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-session-id=\"overflow-6\"]"
+          }
+        ]
+      },
+      {
+        "name": "show-less",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-show-more]"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-session-id=\"overflow-6\"]"
+          }
+        ]
+      }
+    ],
+    "components-legacy-task-list-migration--subtree-variables": [
+      {
+        "name": "rename-input",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-session-id=\"alpha-pinned\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-session-id=\"alpha-pinned\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-session-id=\"alpha-pinned\"] input"
+          }
+        ]
+      }
+    ],
+    "components-legacy-task-list-migration--root-variable-overrides": [
+      {
+        "name": "rename-input",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-session-id=\"alpha-pinned\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-session-id=\"alpha-pinned\"] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-session-id=\"alpha-pinned\"] input"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import { TestCloudPlatformProvider } from '../../tests/test-platform';
 import { Provider, createStore } from 'jotai';
 import { useEffect, useState, type ReactNode } from 'react';
 
@@ -51,13 +52,15 @@ const meta = {
   },
   decorators: [
     (Story) => (
-      <Provider store={storyStore}>
-        <DefaultNotificationPermission>
-          <div className="min-h-40 w-full bg-background py-6">
-            <Story />
-          </div>
-        </DefaultNotificationPermission>
-      </Provider>
+      <TestCloudPlatformProvider>
+        <Provider store={storyStore}>
+          <DefaultNotificationPermission>
+            <div className="min-h-40 w-full bg-background py-6">
+              <Story />
+            </div>
+          </DefaultNotificationPermission>
+        </Provider>
+      </TestCloudPlatformProvider>
     ),
   ],
   args: {

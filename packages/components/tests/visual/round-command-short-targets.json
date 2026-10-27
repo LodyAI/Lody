@@ -1,0 +1,130 @@
+{
+  "viewports": [
+    {
+      "name": "short",
+      "width": 1280,
+      "height": 320
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": ["ui-commandmigration--in-dialog"],
+  "ready": {
+    "ui-commandmigration--in-dialog": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Open command dialog"
+      }
+    ]
+  },
+  "states": {
+    "ui-commandmigration--in-dialog": [
+      {
+        "name": "open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open command dialog"
+          },
+          {
+            "action": "visible",
+            "selector": "input[cmdk-input]"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"new-session\"][aria-selected=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-next",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "input[cmdk-input]",
+            "key": "ArrowDown"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"open-workspace\"][aria-selected=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "filter",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "input[cmdk-input]",
+            "value": "settings"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"settings\"][aria-selected=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "empty",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "input[cmdk-input]",
+            "value": "no_such_command___"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-empty]"
+          }
+        ]
+      },
+      {
+        "name": "clear",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "input[cmdk-input]",
+            "value": ""
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"new-session\"][aria-selected=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "escape-close",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "input[cmdk-input]",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "selector": "input[cmdk-input]"
+          }
+        ]
+      },
+      {
+        "name": "reopen",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open command dialog"
+          },
+          {
+            "action": "visible",
+            "selector": "input[cmdk-input]"
+          },
+          {
+            "action": "visible",
+            "selector": "[cmdk-item][data-value=\"new-session\"][aria-selected=\"true\"]"
+          }
+        ]
+      }
+    ]
+  }
+}

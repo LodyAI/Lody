@@ -1,0 +1,154 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "compact-desktop",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "ui-slidermigration--interactive",
+    "ui-slidermigration--fractional",
+    "ui-slidermigration--disabled",
+    "ui-slidermigration--narrow",
+    "ui-slidermigration--degenerate",
+    "ui-slidermigration--endpoints",
+    "settings-profilesettings--avatar-cropper",
+    "sessions-chatshareimagedialog--default"
+  ],
+  "ready": {
+    "ui-slidermigration--disabled": [
+      {
+        "action": "disabled",
+        "selector": "input[type=\"range\"]"
+      }
+    ],
+    "settings-profilesettings--avatar-cropper": [
+      {
+        "action": "visible",
+        "selector": "#avatar-crop-zoom"
+      }
+    ],
+    "sessions-chatshareimagedialog--default": [
+      {
+        "action": "visible",
+        "selector": "input[aria-labelledby=\"chat-share-mat-label\"]"
+      }
+    ]
+  },
+  "states": {
+    "ui-slidermigration--interactive": [
+      {
+        "name": "thumb-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "input[type=\"range\"]"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "input[type=\"range\"]"
+          },
+          {
+            "action": "press",
+            "selector": "input[type=\"range\"]",
+            "key": "ArrowRight"
+          },
+          {
+            "action": "press",
+            "selector": "input[type=\"range\"]",
+            "key": "ArrowLeft"
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          }
+        ]
+      },
+      {
+        "name": "minimum",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "input[type=\"range\"]",
+            "key": "Home"
+          }
+        ]
+      },
+      {
+        "name": "maximum",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "input[type=\"range\"]",
+            "key": "End"
+          }
+        ]
+      }
+    ],
+    "ui-slidermigration--fractional": [
+      {
+        "name": "fractional-step",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "input[type=\"range\"]"
+          },
+          {
+            "action": "press",
+            "selector": "input[type=\"range\"]",
+            "key": "ArrowRight"
+          }
+        ]
+      }
+    ],
+    "settings-profilesettings--avatar-cropper": [
+      {
+        "name": "zoom-stepped",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#avatar-crop-zoom"
+          },
+          {
+            "action": "press",
+            "selector": "#avatar-crop-zoom",
+            "key": "ArrowRight"
+          }
+        ]
+      }
+    ],
+    "sessions-chatshareimagedialog--default": [
+      {
+        "name": "padding-stepped",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "input[type=\"range\"]"
+          },
+          {
+            "action": "press",
+            "selector": "input[type=\"range\"]",
+            "key": "ArrowRight"
+          }
+        ]
+      }
+    ]
+  },
+  "allowBlankIds": [
+    "settings-profilesettings--avatar-cropper",
+    "sessions-chatshareimagedialog--default"
+  ]
+}

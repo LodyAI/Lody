@@ -26,7 +26,7 @@ import {
   type VisualAnnotationReferenceChipItem,
 } from './visual-annotation-reference-chip';
 import { cn } from '@/lib/utils';
-import { COMPOSER_ELEVATION_CLASS, COMPOSER_SESSION_SURFACE_CLASS } from './composer-surface';
+import { composerSurfaceStyles } from './composer-surface';
 import {
   CombinedMentionTextarea,
   type CombinedMentionTextareaHandle,
@@ -65,6 +65,13 @@ import { Kbd } from '@/components/commands/kbd';
 import { commands, formatKeyBinding } from '@/lib/commands';
 import * as stylex from '@stylexjs/stylex';
 import { text as textScale, space } from '@lody/ui/tokens/scales.stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 
 const typography = stylex.create({
   imageMarkup: { position: 'absolute', insetInlineStart: space[1], bottom: space[1] },
@@ -72,6 +79,425 @@ const typography = stylex.create({
   helper: { fontSize: textScale.footnoteSize, lineHeight: textScale.footnoteLeading },
   code: { fontSize: textScale.subheadlineSize, lineHeight: textScale.subheadlineLeading },
   caption: { fontSize: textScale.captionSize, lineHeight: textScale.captionLeading },
+});
+
+const styles = stylex.create({
+  /* The composer's own frame. */
+  root: { display: 'flex', width: '100%', flexDirection: 'column' },
+  rootDialog: { gap: themeSpace[3] },
+  rootLanding: { gap: themeSpace[12] },
+  rootSession: { gap: themeSpace[2] },
+  title: { textAlign: 'center' },
+  titleText: {
+    userSelect: 'none',
+    fontSize: { default: themeFontSize['2xl'], '@media (min-width: 640px)': themeFontSize['3xl'] },
+    lineHeight: '1.25',
+  },
+  column: { display: 'flex', flexDirection: 'column' },
+  columnLanding: { gap: themeSpace[2] },
+  columnSession: { gap: themeSpace[1] },
+  topSelector: {
+    display: 'flex',
+    width: '100%',
+    minWidth: 0,
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: themeSpace[1],
+  },
+
+  /* The landing composer box. */
+  landingBox: {
+    containerType: 'inline-size',
+    containerName: 'composer-box',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[4],
+    borderRadius: themeRadius.xl,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    paddingInline: themeSpace[4],
+    paddingTop: themeSpace[4],
+    paddingBottom: themeSpace[3],
+    borderColor: 'hsl(var(--foreground) / 0.1)',
+    backgroundColor: themeColors.composer,
+    position: 'relative',
+  },
+  /* The dialog composer box, which has no container of its own. */
+  dialogBox: {
+    display: 'flex',
+    width: '100%',
+    flexDirection: 'column',
+    borderRadius: themeRadius['2xl'],
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--foreground) / 0.1)',
+    backgroundColor: themeColors.composer,
+  },
+  /* An image dragged over the box: the box takes the accent edge and fill. */
+  boxDropping: {
+    borderColor: 'hsl(var(--primary) / 0.5)',
+    backgroundColor: 'hsl(var(--primary) / 0.04)',
+    // The drop ring is composed with the composer's own lift, in Tailwind's
+    // order: the ring first, then the shadow. The lift is stated inline: the
+    // StyleX compiler evaluates a `stylex.create` argument statically and
+    // cannot read an identifier imported from a plain module.
+    boxShadow:
+      '0 0 0 2px hsl(var(--primary) / 0.25), var(--composer-elevation, 0 10px 28px -14px lch(0% 0 0/0.16), 0 1px 2px lch(0% 0 0/0.05))',
+  },
+
+  /* The attachment strips. */
+  referenceStrip: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: themeSpace[2],
+    paddingBottom: themeSpace[1],
+  },
+  attachmentStrip: {
+    display: 'flex',
+    gap: themeSpace[2],
+    overflowX: 'auto',
+    paddingBottom: themeSpace[1],
+  },
+  imageCard: {
+    position: 'relative',
+    flexShrink: 0,
+    overflow: 'hidden',
+    borderRadius: themeRadius.xl,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+  },
+  imageCardMobile: { width: '104px', height: '104px' },
+  imageCardDesktop: { width: themeSpace[20], height: themeSpace[20] },
+  imageCardFailed: { borderColor: 'hsl(var(--destructive) / 0.5)' },
+  imageButton: { width: '100%', height: '100%' },
+  imagePreview: { width: '100%', height: '100%', objectFit: 'cover' },
+  imageBadge: { color: themeColors.mutedForeground },
+  imageProgress: {
+    position: 'absolute',
+    inset: 0,
+    backgroundColor: 'hsl(0 0% 0% / 0.45)',
+    transitionProperty: 'clip-path',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  imageScrim: { position: 'absolute', inset: 0, backgroundColor: 'hsl(0 0% 0% / 0.45)' },
+  imageCorner: { position: 'absolute', top: themeSpace[1], right: themeSpace[1] },
+  imageProgressBar: {
+    position: 'absolute',
+    insetInline: 0,
+    bottom: 0,
+    backgroundColor: 'hsl(0 0% 0% / 0.6)',
+    paddingInline: themeSpace[1],
+    paddingBlock: themeSpace[0.5],
+    textAlign: 'center',
+    color: '#ffffff',
+  },
+  imageFailure: {
+    position: 'absolute',
+    insetInline: 0,
+    bottom: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: themeSpace[1],
+    backgroundColor: 'hsl(0 0% 0% / 0.65)',
+    paddingInline: themeSpace[1],
+    paddingBlock: themeSpace[1],
+    fontWeight: themeFontWeight.medium,
+    color: '#ffffff',
+    transitionProperty: 'all',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    ':hover': { backgroundColor: 'hsl(0 0% 0% / 0.75)' },
+  },
+  fileCard: {
+    position: 'relative',
+    display: 'flex',
+    flexShrink: 0,
+    flexDirection: 'column',
+    overflow: 'hidden',
+    borderRadius: themeRadius.xl,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    padding: themeSpace[2],
+  },
+  fileCardMobile: { width: '104px', height: '104px' },
+  fileCardDesktop: { width: themeSpace[20], height: themeSpace[20] },
+  fileCardFailed: {
+    borderColor: 'hsl(var(--destructive) / 0.45)',
+    backgroundColor: 'hsl(var(--muted) / 0.6)',
+  },
+  fileCardResting: {
+    borderColor: 'hsl(var(--border) / 0.6)',
+    backgroundColor: 'hsl(var(--muted) / 0.6)',
+  },
+  fileType: {
+    maxWidth: '64%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: themeFontWeight.semibold,
+    textTransform: 'uppercase',
+    letterSpacing: '0.025em',
+  },
+  fileTypeFailed: { color: 'hsl(var(--destructive) / 0.8)' },
+  fileTypeResting: { color: themeColors.mutedForeground },
+  fileName: {
+    marginTop: themeSpace[1],
+    overflowWrap: 'break-word',
+    textAlign: 'left',
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.inputForeground,
+  },
+  fileNameMobile: {
+    overflow: 'hidden',
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 3,
+  },
+  fileNameDesktop: {
+    overflow: 'hidden',
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 2,
+  },
+  fileRetry: {
+    marginTop: 'auto',
+    display: 'flex',
+    width: 'fit-content',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    paddingTop: themeSpace[1],
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.destructive,
+    transitionProperty: 'all',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    ':hover': { color: 'hsl(var(--destructive) / 0.8)' },
+  },
+  fileStatus: {
+    marginTop: 'auto',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    paddingTop: themeSpace[1],
+    color: themeColors.mutedForeground,
+  },
+  fileProgressTrack: {
+    position: 'absolute',
+    insetInline: 0,
+    bottom: 0,
+    height: themeSpace[1],
+    backgroundColor: themeColors.muted,
+  },
+  fileProgressFill: {
+    height: '100%',
+    backgroundColor: themeColors.primary,
+    transitionProperty: 'width',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+
+  /* The footers. */
+  footer: {
+    display: 'flex',
+    userSelect: 'none',
+    alignItems: 'center',
+    columnGap: themeSpace[1.5],
+  },
+  footerLanding: { paddingTop: themeSpace[2] },
+  footerSession: { paddingTop: themeSpace[0.5] },
+  footerFace: {
+    containerType: 'inline-size',
+    containerName: 'composer-face',
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    flexWrap: 'nowrap',
+    alignItems: 'center',
+    columnGap: themeSpace[1.5],
+    overflow: 'hidden',
+  },
+  footerActions: {
+    marginLeft: 'auto',
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: themeSpace[2],
+  },
+  bottomBar: { userSelect: 'none', paddingInline: themeSpace[4], paddingTop: themeSpace[1] },
+
+  /* The focus hint, hidden once the box takes focus. */
+  focusHint: {
+    pointerEvents: 'none',
+    position: 'absolute',
+    top: themeSpace[3],
+    right: themeSpace[3],
+    zIndex: 10,
+    display: 'flex',
+    alignItems: 'center',
+    opacity: 0.5,
+    transitionProperty: 'opacity',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+
+  /* The composer's status line. */
+  status: { paddingInline: themeSpace[1] },
+  statusError: { color: themeColors.destructive },
+  statusMuted: { color: themeColors.mutedForeground },
+
+  /* The dialog composer's own rows. */
+  dialogRow: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[3],
+    '@media (min-width: 640px)': {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      justifyContent: 'space-between',
+    },
+  },
+  dialogSelectors: {
+    display: 'flex',
+    width: '100%',
+    flexWrap: 'wrap',
+    userSelect: 'none',
+    alignItems: 'flex-end',
+    gap: themeSpace[2],
+  },
+  dialogActions: {
+    display: 'flex',
+    width: '100%',
+    flexDirection: 'column',
+    userSelect: 'none',
+    gap: themeSpace[2],
+    '@media (min-width: 640px)': {
+      marginLeft: 'auto',
+      width: 'auto',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+    },
+  },
+
+  /* The pasted-text editor and its frame. */
+  pastedEditor: {
+    display: 'block',
+    minHeight: 0,
+    width: '100%',
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    resize: 'none',
+    overflow: 'auto',
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    color: themeColors.inputForeground,
+  },
+  pastedEditorMobile: { paddingInline: themeSpace[4], paddingBlock: themeSpace[3] },
+  pastedEditorDesktop: {
+    height: '100%',
+    borderRadius: themeRadius.md,
+    backgroundColor: 'hsl(var(--muted) / 0.3)',
+    paddingInline: themeSpace[4],
+    paddingBlock: themeSpace[3],
+    // The Tailwind `focus-visible:ring-1 focus-visible:ring-ring/50` this
+    // editor used to carry declared a full box-shadow in the utilities layer,
+    // which erased the app's global inset focus ring — and the app forces
+    // Tailwind's own ring transparent, so the editor painted NO focus
+    // indicator of its own. Keep that: no resting shadow, and no focus
+    // shadow. (The mobile sheet's editor never carried the ring, so it keeps
+    // the global one.)
+    boxShadow: { default: null, ':focus-visible': 'none' },
+  },
+  pastedDrawer: {
+    display: 'flex',
+    height: '85dvh',
+    minHeight: 0,
+    flexDirection: 'column',
+  },
+  pastedDrawerGrabber: {
+    display: 'flex',
+    flexShrink: 0,
+    justifyContent: 'center',
+    paddingTop: themeSpace[2],
+    paddingBottom: themeSpace[1],
+  },
+  pastedDrawerHandle: {
+    height: themeSpace[1],
+    width: themeSpace[9],
+    borderRadius: themeRadius.full,
+    backgroundColor: 'hsl(var(--muted-foreground) / 0.3)',
+  },
+  pastedDrawerHeader: {
+    display: 'flex',
+    flexShrink: 0,
+    flexDirection: 'column',
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: 'hsl(var(--border) / 0.6)',
+    paddingTop: themeSpace[2],
+    paddingBottom: themeSpace[2],
+    paddingRight: themeSpace[2],
+    paddingLeft: themeSpace[4],
+  },
+  pastedDrawerTitleRow: { display: 'flex', alignItems: 'center', gap: themeSpace[3] },
+  pastedTitle: { display: 'flex', alignItems: 'center', gap: themeSpace[2] },
+  pastedDrawerTitle: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+  },
+  pastedSummary: { fontVariantNumeric: 'tabular-nums' },
+  pastedDrawerSummary: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    paddingRight: themeSpace[2],
+  },
+  pastedDialogContent: {
+    display: 'flex',
+    height: '85vh',
+    flexDirection: 'column',
+    overflow: 'hidden',
+  },
+  pastedDialogClose: {
+    borderRadius: themeRadius.xs,
+    opacity: { default: 0.7, ':hover': 1 },
+    transitionProperty: 'opacity',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    // The former focus ring utilities erased the app's inset focus shadow.
+    boxShadow: { default: null, ':focus': 'none' },
+  },
+  pastedDialogHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: themeSpace[3],
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: 'hsl(var(--border) / 0.6)',
+    paddingInline: themeSpace[5],
+    paddingBlock: themeSpace[3],
+  },
+  pastedDialogTitleRow: { display: 'flex', alignItems: 'center', gap: themeSpace[3] },
+  pastedDialogBody: {
+    display: 'flex',
+    minHeight: 0,
+    flexGrow: 1,
+    paddingInline: themeSpace[5],
+    paddingBlock: themeSpace[4],
+  },
+  glyph14: { width: themeSpace[3.5], height: themeSpace[3.5], flexShrink: 0 },
+  glyph16: { width: themeSpace[4], height: themeSpace[4] },
+  glyph12: { width: themeSpace[3], height: themeSpace[3] },
+  truncate: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  glyphMuted: { color: themeColors.mutedForeground },
 });
 
 type ChatComposerTone = 'light' | 'dark';
@@ -636,12 +1062,16 @@ export function ChatComposer({
 
   // Light surface: near-white composer on the gray canvas + 1px border.
   // Avoid heavy bg-input fills that read as muddy gray on cool-white themes.
+  // The mention surface is a custom property, which StyleX cannot carry, so it
+  // rides the element as a Tailwind class.
   const mentionContainerClassName = !isLanding
-    ? cn(
-        'w-full focus-within:outline-hidden',
-        'rounded-2xl border border-foreground/[0.10] bg-[hsl(var(--composer))] dark:border-input-border/70 dark:bg-input/90',
-        mentionSurfaceClassName
-      )
+    ? [
+        stylex.props(styles.dialogBox).className,
+        'dark:border-input-border/70 dark:bg-input/90',
+        mentionSurfaceClassName,
+      ]
+        .filter(Boolean)
+        .join(' ')
     : undefined;
 
   const dialogTextareaClassName = cn(
@@ -665,17 +1095,32 @@ export function ChatComposer({
 
   // Focus stays quiet: the caret and placeholder already show where typing
   // goes, so the composer keeps its resting border instead of an accent ring.
-  const landingContainerClassName = cn(
-    '@container/composer-box flex flex-col gap-4 rounded-xl border px-4 pt-4 pb-3',
-    'border-foreground/[0.10] bg-[hsl(var(--composer))]',
-    COMPOSER_ELEVATION_CLASS,
-    'dark:border-input-border/60 dark:bg-input/90',
-    mentionSurfaceClassName
-  );
+  // The box is the composer's own element, so its look is a StyleX style; the
+  // dark theme's own fill and edge stay Tailwind classes, and the mention
+  // surface is a custom property StyleX cannot carry.
+  const boxStyle = isLanding
+    ? stylex.props(
+        styles.landingBox,
+        composerSurfaceStyles.composerElevation,
+        isImageDropActive && styles.boxDropping
+      )
+    : stylex.props(
+        composerSurfaceStyles.sessionSurface,
+        composerSurfaceStyles.composerElevation,
+        isImageDropActive && styles.boxDropping
+      );
+  const boxClassName = [
+    // `group` is the focus hint's anchor: it fades when the box takes focus.
+    'group',
+    boxStyle.className,
+    isLanding
+      ? 'dark:border-input-border/60 dark:bg-input/90'
+      : 'dark:border-input-border/70 dark:bg-input/90',
+    mentionSurfaceClassName,
+  ]
+    .filter(Boolean)
+    .join(' ');
 
-  const sessionContainerClassName = cn(COMPOSER_SESSION_SURFACE_CLASS, mentionSurfaceClassName);
-
-  const boxContainerClassName = isLanding ? landingContainerClassName : sessionContainerClassName;
   const composerHasAttachments =
     imageItems.length > 0 ||
     fileItems.length > 0 ||
@@ -686,22 +1131,20 @@ export function ChatComposer({
   // yet (so the chip never collides with text or thumbnails). focus-within hides it too.
   const showFocusHint =
     focusHintSupported && Boolean(focusHintBinding) && !promptValue && !composerHasAttachments;
-  const imageDropClassName = isImageDropActive
-    ? 'border-primary/50 bg-primary/[0.04] ring-2 ring-primary/25'
-    : undefined;
-  const boxFooterClassName = cn(
-    'flex select-none items-center gap-x-1.5',
-    isLanding ? 'pt-2' : 'pt-0.5'
-  );
-  const statusClassName = cn(
-    'px-1',
-    stylex.props(typography.helper).className,
-    statusTone === 'error'
-      ? 'text-destructive'
-      : statusTone === 'warning'
-        ? 'text-amber-600 dark:text-amber-400'
-        : 'text-muted-foreground'
-  );
+  // The amber tone is a hard-coded pair, and its dark step needs the `.dark`
+  // ancestor StyleX cannot select, so that one stays a Tailwind class.
+  const statusStyle =
+    statusTone === 'warning'
+      ? stylex.props(styles.status, typography.helper)
+      : stylex.props(
+          styles.status,
+          typography.helper,
+          statusTone === 'error' ? styles.statusError : styles.statusMuted
+        );
+  const statusClassName =
+    statusTone === 'warning'
+      ? ['text-amber-600 dark:text-amber-400', statusStyle.className].filter(Boolean).join(' ')
+      : statusStyle.className;
 
   const secondaryButtonClassName = cn(
     actionBaseClassName,
@@ -709,33 +1152,41 @@ export function ChatComposer({
     'dark:border-input-border/60 dark:bg-input/60 dark:text-input-foreground dark:hover:bg-muted/60'
   );
 
+  const rootStyle = stylex.props(
+    styles.root,
+    isDialog ? styles.rootDialog : isLanding ? styles.rootLanding : styles.rootSession
+  );
+
   return (
     <>
       <div
-        className={cn(
-          'flex w-full flex-col',
-          isDialog ? 'gap-3' : isLanding ? 'gap-12' : 'gap-2',
-          className
-        )}
+        className={[rootStyle.className, className].filter(Boolean).join(' ')}
+        style={rootStyle.style}
       >
         {title ? (
-          <div className="text-center">
-            <h1 className="select-none text-2xl leading-tight sm:text-3xl">{title}</h1>
+          <div {...stylex.props(styles.title)}>
+            <h1 {...stylex.props(styles.titleText)}>{title}</h1>
           </div>
         ) : null}
 
         {!isDialog ? (
-          <div className={cn('flex flex-col', isLanding ? 'gap-2' : 'gap-1')}>
+          <div
+            {...stylex.props(
+              styles.column,
+              isLanding ? styles.columnLanding : styles.columnSession
+            )}
+          >
             {/* Top selector (repo, branch) - shown outside and above the input box */}
-            {topSelector ? (
-              <div className="flex w-full min-w-0 select-none items-center gap-1">
-                {topSelector}
-              </div>
-            ) : null}
+            {topSelector ? <div {...stylex.props(styles.topSelector)}>{topSelector}</div> : null}
             <div
               ref={composerBoxRef}
               data-mention-frame=""
-              className={cn(boxContainerClassName, imageDropClassName, 'group relative')}
+              /* The box's own landmark: the composer's classes are StyleX, so a
+                 test (and a reader) cannot find it by a utility class any
+                 more. */
+              data-lody-composer-box=""
+              className={boxClassName}
+              style={boxStyle.style}
               onDragEnter={canHandleImageDrop ? handleImageDragEnter : undefined}
               onDragOver={canHandleImageDrop ? handleImageDragOver : undefined}
               onDragLeave={canHandleImageDrop ? handleImageDragLeave : undefined}
@@ -764,7 +1215,7 @@ export function ChatComposer({
               }
             >
               {commentReferenceItems.length > 0 ? (
-                <div className="flex flex-wrap gap-2 pb-1">
+                <div {...stylex.props(styles.referenceStrip)}>
                   {commentReferenceItems.map((item) => (
                     <CommentReferenceChip
                       key={item.localId}
@@ -777,7 +1228,7 @@ export function ChatComposer({
                 </div>
               ) : null}
               {visualAnnotationReferenceItems.length > 0 ? (
-                <div className="flex flex-wrap gap-2 pb-1">
+                <div {...stylex.props(styles.referenceStrip)}>
                   {visualAnnotationReferenceItems.map((item) => (
                     <VisualAnnotationReferenceChip
                       key={item.localId}
@@ -792,17 +1243,21 @@ export function ChatComposer({
                 // Unified horizontal, scrollable attachment strip: image thumbnails
                 // and file cards share the same square-card shape and scroll
                 // sideways together (cards step up in size on mobile for touch).
-                <div className="input-scrollbar flex gap-2 overflow-x-auto pb-1">
+                <div
+                  className={['input-scrollbar', stylex.props(styles.attachmentStrip).className]
+                    .filter(Boolean)
+                    .join(' ')}
+                >
                   {imageItems.map((image) => (
                     <div
                       key={image.id}
                       title={
                         image.status === 'failed' ? image.error || uploadFailedLabel : undefined
                       }
-                      className={cn(
-                        'relative shrink-0 overflow-hidden rounded-xl border',
-                        isMobile ? 'h-[104px] w-[104px]' : 'h-20 w-20',
-                        image.status === 'failed' && 'border-destructive/50'
+                      {...stylex.props(
+                        styles.imageCard,
+                        isMobile ? styles.imageCardMobile : styles.imageCardDesktop,
+                        image.status === 'failed' && styles.imageCardFailed
                       )}
                     >
                       <ComposerImagePeek
@@ -810,36 +1265,42 @@ export function ChatComposer({
                         name={image.name}
                         alt={imagePreviewLabel}
                         trigger={
-                          <button type="button" className="h-full w-full" aria-label={image.name}>
+                          <button
+                            type="button"
+                            {...stylex.props(styles.imageButton)}
+                            aria-label={image.name}
+                          >
                             <img
                               src={image.previewUrl}
                               alt={image.name}
-                              className="h-full w-full object-cover"
+                              {...stylex.props(styles.imagePreview)}
                             />
                             {image.status === 'draft' ? (
                               <span
-                                className={cn(
-                                  ' text-muted-foreground',
-                                  stylex.props(typography.caption).className
-                                )}
+                                className={[
+                                  stylex.props(styles.imageBadge).className,
+                                  stylex.props(typography.caption).className,
+                                ]
+                                  .filter(Boolean)
+                                  .join(' ')}
                               >
                                 {t('sessions.attachmentDraft')}
                               </span>
                             ) : image.status === 'uploading' ? (
                               <div
-                                className="absolute inset-0 bg-black/45 transition-[clip-path]"
+                                {...stylex.props(styles.imageProgress)}
                                 style={{
                                   clipPath: `inset(${Math.max(0, Math.min(100, image.progress))}% 0 0 0)`,
                                 }}
                               />
                             ) : null}
                             {image.status === 'failed' ? (
-                              <div className="absolute inset-0 bg-black/45" />
+                              <div {...stylex.props(styles.imageScrim)} />
                             ) : null}
                           </button>
                         }
                       />
-                      <div className="absolute right-1 top-1">
+                      <div {...stylex.props(styles.imageCorner)}>
                         <Button
                           type="button"
                           variant="secondary"
@@ -849,24 +1310,28 @@ export function ChatComposer({
                           onClick={() => onImageRemove?.(image.id)}
                           aria-label={removeImageLabel}
                         >
-                          <X className="h-3 w-3" />
+                          <X className={stylex.props(styles.glyph12).className} />
                         </Button>
                       </div>
                       {image.status === 'draft' ? (
                         <span
-                          className={cn(
-                            ' text-muted-foreground',
-                            stylex.props(typography.caption).className
-                          )}
+                          className={[
+                            stylex.props(styles.imageBadge).className,
+                            stylex.props(typography.caption).className,
+                          ]
+                            .filter(Boolean)
+                            .join(' ')}
                         >
                           {t('sessions.attachmentDraft')}
                         </span>
                       ) : image.status === 'uploading' ? (
                         <div
-                          className={cn(
-                            'absolute inset-x-0 bottom-0 bg-black/60 px-1 py-0.5 text-center  text-white',
-                            stylex.props(typography.caption).className
-                          )}
+                          className={[
+                            stylex.props(styles.imageProgressBar).className,
+                            stylex.props(typography.caption).className,
+                          ]
+                            .filter(Boolean)
+                            .join(' ')}
                         >
                           {image.progress}%
                         </div>
@@ -893,13 +1358,15 @@ export function ChatComposer({
                           type="button"
                           onClick={() => onImageRetry?.(image.id)}
                           aria-label={retryUploadLabel}
-                          className={cn(
-                            'absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 bg-black/65 px-1 py-1  font-medium text-white transition hover:bg-black/75',
-                            stylex.props(typography.caption).className
-                          )}
+                          className={[
+                            stylex.props(styles.imageFailure).className,
+                            stylex.props(typography.caption).className,
+                          ]
+                            .filter(Boolean)
+                            .join(' ')}
                         >
-                          <RefreshCw className="h-3 w-3 shrink-0" />
-                          <span className="truncate">{uploadFailedShortLabel}</span>
+                          <RefreshCw className={stylex.props(styles.glyph12).className} />
+                          <span {...stylex.props(styles.truncate)}>{uploadFailedShortLabel}</span>
                         </button>
                       ) : null}
                     </div>
@@ -908,31 +1375,36 @@ export function ChatComposer({
                     <div
                       key={file.id}
                       title={file.status === 'failed' ? file.error || uploadFailedLabel : undefined}
-                      className={cn(
-                        'relative flex shrink-0 flex-col overflow-hidden rounded-xl border p-2',
-                        isMobile ? 'h-[104px] w-[104px]' : 'h-20 w-20',
-                        file.status === 'failed'
-                          ? 'border-destructive/45 bg-muted/60'
-                          : 'border-border/60 bg-muted/60'
+                      {...stylex.props(
+                        styles.fileCard,
+                        isMobile ? styles.fileCardMobile : styles.fileCardDesktop,
+                        file.status === 'failed' ? styles.fileCardFailed : styles.fileCardResting
                       )}
                     >
                       <span
-                        className={cn(
-                          'max-w-[64%] truncate font-semibold uppercase tracking-wide',
-                          file.status === 'failed'
-                            ? 'text-destructive/80'
-                            : 'text-muted-foreground',
-                          stylex.props(isMobile ? typography.helper : typography.caption).className
-                        )}
+                        className={[
+                          stylex.props(styles.fileType).className,
+                          stylex.props(
+                            file.status === 'failed'
+                              ? styles.fileTypeFailed
+                              : styles.fileTypeResting
+                          ).className,
+                          stylex.props(isMobile ? typography.helper : typography.caption).className,
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
                       >
                         {getFileTypeLabel(file.name)}
                       </span>
                       <span
-                        className={cn(
-                          'mt-1 break-words text-left font-medium text-input-foreground',
-                          isMobile ? 'line-clamp-3' : 'line-clamp-2',
-                          stylex.props(typography.helper).className
-                        )}
+                        className={[
+                          stylex.props(styles.fileName).className,
+                          stylex.props(isMobile ? styles.fileNameMobile : styles.fileNameDesktop)
+                            .className,
+                          stylex.props(typography.helper).className,
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
                       >
                         {file.name}
                       </span>
@@ -941,20 +1413,24 @@ export function ChatComposer({
                           type="button"
                           onClick={() => onFileRetry?.(file.id)}
                           aria-label={retryUploadLabel}
-                          className={cn(
-                            'mt-auto flex w-fit items-center gap-1 pt-1  font-medium text-destructive transition hover:text-destructive/80',
-                            stylex.props(typography.caption).className
-                          )}
+                          className={[
+                            stylex.props(styles.fileRetry).className,
+                            stylex.props(typography.caption).className,
+                          ]
+                            .filter(Boolean)
+                            .join(' ')}
                         >
-                          <RefreshCw className="h-3 w-3 shrink-0" />
-                          <span className="truncate">{uploadFailedShortLabel}</span>
+                          <RefreshCw className={stylex.props(styles.glyph12).className} />
+                          <span {...stylex.props(styles.truncate)}>{uploadFailedShortLabel}</span>
                         </button>
                       ) : (
                         <span
-                          className={cn(
-                            'mt-auto truncate pt-1  text-muted-foreground',
-                            stylex.props(typography.caption).className
-                          )}
+                          className={[
+                            stylex.props(styles.fileStatus).className,
+                            stylex.props(typography.caption).className,
+                          ]
+                            .filter(Boolean)
+                            .join(' ')}
                         >
                           {file.status === 'draft'
                             ? t('sessions.attachmentDraft')
@@ -974,16 +1450,16 @@ export function ChatComposer({
                       ) : file.status === 'preparing' ||
                         file.status === 'uploading' ||
                         file.status === 'verifying' ? (
-                        <div className="absolute inset-x-0 bottom-0 h-1 bg-muted">
+                        <div {...stylex.props(styles.fileProgressTrack)}>
                           <div
-                            className="h-full bg-primary transition-[width]"
+                            {...stylex.props(styles.fileProgressFill)}
                             style={{
                               width: `${Math.max(0, Math.min(100, file.progress))}%`,
                             }}
                           />
                         </div>
                       ) : null}
-                      <div className="absolute right-1 top-1">
+                      <div {...stylex.props(styles.imageCorner)}>
                         <Button
                           type="button"
                           variant="secondary"
@@ -993,7 +1469,7 @@ export function ChatComposer({
                           onClick={() => onFileRemove?.(file.id)}
                           aria-label={removeAttachmentLabel}
                         >
-                          <X className="h-3 w-3" />
+                          <X className={stylex.props(styles.glyph12).className} />
                         </Button>
                       </div>
                     </div>
@@ -1038,7 +1514,14 @@ export function ChatComposer({
 
               {showFocusHint ? (
                 <div
-                  className="pointer-events-none absolute right-3 top-3 z-10 flex items-center opacity-50 transition-opacity duration-150 group-focus-within:opacity-0"
+                  className={[
+                    stylex.props(styles.focusHint).className,
+                    // The hint fades when the box takes focus: the group variant
+                    // needs an ancestor, which StyleX cannot select.
+                    'group-focus-within:opacity-0',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
                   title={t('chat.composer.focusHint', {
                     defaultValue: 'Press {{shortcut}} to focus',
                     shortcut: formatKeyBinding(focusHintBinding!),
@@ -1059,7 +1542,12 @@ export function ChatComposer({
                 </div>
               ) : null}
 
-              <div className={boxFooterClassName}>
+              <div
+                {...stylex.props(
+                  styles.footer,
+                  isLanding ? styles.footerLanding : styles.footerSession
+                )}
+              >
                 {/* Single bottom-left "+" attachment entry (replaces the old
                     image + paperclip icons). Hidden when neither add callback
                     is provided. */}
@@ -1077,11 +1565,9 @@ export function ChatComposer({
                 {/* Single row only: long model names must shrink/truncate inside
                     the run-config face rather than wrapping config chips onto a
                     second line (especially on mobile). */}
-                <div className="@container/composer-face flex min-w-0 flex-1 flex-nowrap items-center gap-x-1.5 overflow-hidden">
-                  {footerSelector ?? selector}
-                </div>
+                <div {...stylex.props(styles.footerFace)}>{footerSelector ?? selector}</div>
 
-                <div className="ml-auto flex shrink-0 items-center gap-2">
+                <div {...stylex.props(styles.footerActions)}>
                   {secondaryAction ? (
                     <Button
                       type="button"
@@ -1103,7 +1589,7 @@ export function ChatComposer({
                 </div>
               </div>
             </div>
-            {bottomBar ? <div className="select-none px-4 pt-1">{bottomBar}</div> : null}
+            {bottomBar ? <div {...stylex.props(styles.bottomBar)}>{bottomBar}</div> : null}
           </div>
         ) : (
           <>
@@ -1148,10 +1634,10 @@ export function ChatComposer({
               </div>
             ) : null}
 
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div className="flex w-full flex-wrap select-none items-end gap-2">{selector}</div>
+            <div {...stylex.props(styles.dialogRow)}>
+              <div {...stylex.props(styles.dialogSelectors)}>{selector}</div>
 
-              <div className="flex w-full flex-col select-none gap-2 sm:ml-auto sm:w-auto sm:flex-row sm:items-center sm:justify-end">
+              <div {...stylex.props(styles.dialogActions)}>
                 {secondaryAction ? (
                   <Button
                     type="button"
@@ -1197,19 +1683,19 @@ export function ChatComposer({
         // like the prompt: same face, weight, size and leading. `@lody/ui`'s
         // Textarea is a form control (medium weight, control tracking), which is
         // why this is a plain textarea, as the prompt itself is.
-        const pastedTextEditor = (layoutClassName: string) => (
+        const pastedTextEditor = (layout: stylex.StyleXStyles) => (
           <textarea
             aria-label={pastedTextEditorLabel}
             value={previewPastedTextEditorValue}
             onChange={handlePastedTextDraftTextChange}
             readOnly={!onPastedTextDraftsChange}
             spellCheck={false}
-            className={cn(
-              'input-scrollbar block min-h-0 w-full flex-1 resize-none overflow-auto border-0 bg-transparent',
-              stylex.props(typography.prompt).className,
-              'text-input-foreground outline-hidden',
-              layoutClassName
-            )}
+            className={[
+              'input-scrollbar',
+              stylex.props(styles.pastedEditor, typography.prompt, layout).className,
+            ]
+              .filter(Boolean)
+              .join(' ')}
           />
         );
 
@@ -1225,16 +1711,21 @@ export function ChatComposer({
                   // Base UI wraps the children in a block box, so the column
                   // that lets the editor fill the sheet has to be ours, with a
                   // definite height for `flex-1` to divide.
-                  <div className="flex h-[85dvh] min-h-0 flex-col">
-                    <div className="flex shrink-0 justify-center pt-2 pb-1">
-                      <div className="h-1 w-9 rounded-full bg-muted-foreground/30" />
+                  <div {...stylex.props(styles.pastedDrawer)}>
+                    <div {...stylex.props(styles.pastedDrawerGrabber)}>
+                      <div {...stylex.props(styles.pastedDrawerHandle)} />
                     </div>
                     {/* The close shares the title's row so it centres on that
                         first line; the summary sits on its own line beneath. */}
-                    <div className="flex shrink-0 flex-col border-b border-border/60 py-2 pr-2 pl-4">
-                      <div className="flex items-center gap-3">
-                        <Drawer.Title className="flex min-w-0 flex-1 items-center gap-2 font-medium">
-                          <ClipboardPaste className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <div {...stylex.props(styles.pastedDrawerHeader)}>
+                      <div {...stylex.props(styles.pastedDrawerTitleRow)}>
+                        <Drawer.Title
+                          className={cn(
+                            stylex.props(styles.pastedTitle, styles.pastedDrawerTitle).className,
+                            'font-medium'
+                          )}
+                        >
+                          <ClipboardPaste {...stylex.props(styles.glyph14, styles.glyphMuted)} />
                           {pastedTextDialogTitle}
                         </Drawer.Title>
                         <Drawer.Close
@@ -1248,14 +1739,19 @@ export function ChatComposer({
                             />
                           }
                         >
-                          <X className="size-4" />
+                          <X className={stylex.props(styles.glyph16).className} />
                         </Drawer.Close>
                       </div>
-                      <Drawer.Description className="truncate pr-2 text-muted-foreground tabular-nums">
+                      <Drawer.Description
+                        className={cn(
+                          stylex.props(styles.pastedSummary, styles.pastedDrawerSummary).className,
+                          'text-muted-foreground'
+                        )}
+                      >
                         {summaryText}
                       </Drawer.Description>
                     </div>
-                    {pastedTextEditor('px-4 py-3')}
+                    {pastedTextEditor(styles.pastedEditorMobile)}
                   </div>
                 ) : null}
               </Drawer.Content>
@@ -1271,31 +1767,39 @@ export function ChatComposer({
             <Dialog.Content
               closeButton={false}
               width="48rem"
-              className="flex h-[85vh] max-h-[85vh] flex-col gap-0 overflow-hidden p-0"
+              className={cn(
+                stylex.props(styles.pastedDialogContent).className,
+                'max-h-[85vh] gap-0 p-0'
+              )}
             >
               {previewPastedTextDraft ? (
                 <>
-                  <div className="flex items-center justify-between gap-3 border-b border-border/60 px-5 py-3">
-                    <Dialog.Title className="flex items-center gap-2 font-medium">
-                      <ClipboardPaste className="h-3.5 w-3.5 text-muted-foreground" />
+                  <div {...stylex.props(styles.pastedDialogHeader)}>
+                    <Dialog.Title
+                      className={cn(stylex.props(styles.pastedTitle).className, 'font-medium')}
+                    >
+                      <ClipboardPaste {...stylex.props(styles.glyph14, styles.glyphMuted)} />
                       {pastedTextDialogTitle}
                     </Dialog.Title>
-                    <div className="flex items-center gap-3">
-                      <Dialog.Description className="text-muted-foreground tabular-nums">
+                    <div {...stylex.props(styles.pastedDialogTitleRow)}>
+                      <Dialog.Description
+                        className={cn(
+                          stylex.props(styles.pastedSummary).className,
+                          'text-muted-foreground'
+                        )}
+                      >
                         {summaryText}
                       </Dialog.Description>
                       <Dialog.Close
-                        className="rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                        {...stylex.props(styles.pastedDialogClose)}
                         aria-label={t('common.close', 'Close')}
                       >
-                        <X className="h-4 w-4" />
+                        <X className={stylex.props(styles.glyph16).className} />
                       </Dialog.Close>
                     </div>
                   </div>
-                  <div className="flex min-h-0 flex-1 px-5 py-4">
-                    {pastedTextEditor(
-                      'h-full rounded-md bg-muted/30 px-4 py-3 focus-visible:ring-1 focus-visible:ring-ring/50'
-                    )}
+                  <div {...stylex.props(styles.pastedDialogBody)}>
+                    {pastedTextEditor(styles.pastedEditorDesktop)}
                   </div>
                 </>
               ) : null}

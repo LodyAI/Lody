@@ -1,6 +1,10 @@
 'use client';
 
 import type { DiffLineAnnotation } from '@pierre/diffs';
+import * as stylex from '@stylexjs/stylex';
+import { cn } from '@/lib/utils';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontSize, themeLineHeight, themeSpace } from '../../style/theme-scale.stylex';
 import type {
   CommentAnnotationMeta,
   CommentUser,
@@ -11,6 +15,20 @@ import type {
 import { SessionCommentDraft } from './session-comment-draft';
 import { GitHubCommentThread } from './github-comment-thread';
 import type { DraftState } from './use-session-comments';
+
+const styles = stylex.create({
+  annotation: {
+    paddingBlock: themeSpace[2],
+    paddingInline: themeSpace[1],
+    fontFamily:
+      'PingFang SC, -apple-system, BlinkMacSystemFont, "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji", sans-serif',
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.foreground,
+    maxWidth: '100%',
+    overflow: 'hidden',
+  },
+});
 
 interface SessionCommentAnnotationProps {
   annotation: DiffLineAnnotation<CommentAnnotationMeta>;
@@ -41,7 +59,7 @@ export function SessionCommentAnnotation({
     <div
       data-diff-comment-line={lineNumber}
       data-diff-comment-side={side}
-      className="space-y-2 py-2 px-1 font-sans text-sm text-foreground max-w-full overflow-hidden"
+      className={cn('space-y-2', stylex.props(styles.annotation).className)}
     >
       {ghThreads.map((thread) => (
         <GitHubCommentThread

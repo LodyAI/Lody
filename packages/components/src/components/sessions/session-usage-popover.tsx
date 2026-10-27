@@ -2,6 +2,13 @@ import { memo, useCallback, useState, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { ArrowLeftRight } from 'lucide-react';
 import { space } from '@lody/ui/tokens/scales.stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 import { useTranslation } from 'react-i18next';
 import { formatDistance, type Locale } from 'date-fns';
 import { enUS } from 'date-fns/locale/en-US';
@@ -132,21 +139,25 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
               type="button"
               variant="ghost"
               size="small"
-              className={cn('select-none focus-visible:ring-1 focus-visible:ring-ring', className)}
+              className={cn(
+                stylex.props(styles.trigger).className,
+                'focus-visible:ring-1 focus-visible:ring-ring',
+                className
+              )}
               aria-label={triggerLabel}
               title={triggerLabel}
             >
               {isContextCompacting ? (
                 <>
                   <Spinner className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  <span className="text-[11px]">
+                  <span {...stylex.props(styles.tiny)}>
                     {t('sessions.usage.compacting', 'Compacting')}
                   </span>
                 </>
               ) : (
                 <>
                   <UsageRing value={triggerValue ?? 0} />
-                  <span className="font-mono text-[11px] tabular-nums">{roundedTriggerValue}%</span>
+                  <span {...stylex.props(styles.mono, styles.tiny)}>{roundedTriggerValue}%</span>
                 </>
               )}
             </Button>
@@ -157,14 +168,14 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
           align="start"
           sideOffset={8}
           aria-label={t('sessions.usage.title', 'Usage')}
-          className="w-[min(17rem,calc(100vw-1rem))] rounded-xl p-3 shadow-lg"
+          className={cn(stylex.props(styles.content).className, 'rounded-xl p-3 shadow-lg')}
         >
           {isContextCompacting ? (
-            <div className="space-y-2">
-              <div className="text-[11px] font-medium text-muted-foreground">
+            <div>
+              <div {...stylex.props(styles.sectionLabel, styles.stack2)}>
                 {t('sessions.usage.context', 'Context')}
               </div>
-              <div className="flex items-center gap-2 text-xs text-foreground">
+              <div {...stylex.props(styles.compacting)}>
                 <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 <span>{t('sessions.usage.compactingContext', 'Compacting context')}</span>
               </div>
@@ -181,18 +192,19 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
           ) : null}
 
           {(context || isContextCompacting) && hasRateLimitDetails ? (
-            <Separator className="my-2.5" />
+            <Separator {...stylex.props(styles.separator)} />
           ) : null}
 
           {hasRateLimitDetails ? (
-            <div className="space-y-2.5">
-              <div className="truncate text-[11px] font-medium text-muted-foreground">
+            <div>
+              <div {...stylex.props(styles.sectionLabel, styles.truncate, styles.stack25)}>
                 {resolvedModelLabel}
               </div>
               {hasRateLimit ? (
                 rateLimitWindows.map((window, index) => (
                   <UsageMeter
                     key={`${window.windowDurationSeconds ?? 'unknown'}-${index}`}
+                    className={stylex.props(styles.stack25).className}
                     label={formatAgentRateLimitWindowLabel(
                       window,
                       formatWindowLabel(window.windowDurationSeconds),
@@ -207,7 +219,7 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
                   />
                 ))
               ) : (
-                <div className="text-xs text-muted-foreground">
+                <div {...stylex.props(styles.unavailable, styles.stack25)}>
                   {t(
                     'sessions.usage.unavailable',
                     'The provider did not report usage for this plan'
@@ -215,20 +227,20 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
                 </div>
               )}
               {wallet ? (
-                <div className="space-y-1 border-t border-border/60 pt-2 text-[11px]">
-                  <div className="flex justify-between gap-3">
-                    <span className="text-muted-foreground">
+                <div {...stylex.props(styles.wallet, styles.stack25)}>
+                  <div {...stylex.props(styles.walletRow, styles.stack1)}>
+                    <span {...stylex.props(styles.muted)}>
                       {t('sessions.usage.extraBalance', 'Extra usage balance')}
                     </span>
-                    <span className="font-mono tabular-nums">
+                    <span {...stylex.props(styles.mono)}>
                       {formatMoney(wallet.balanceCents, wallet.currency, i18n.language)}
                     </span>
                   </div>
-                  <div className="flex justify-between gap-3">
-                    <span className="text-muted-foreground">
+                  <div {...stylex.props(styles.walletRow, styles.stack1)}>
+                    <span {...stylex.props(styles.muted)}>
                       {t('sessions.usage.monthlySpend', 'Monthly spend')}
                     </span>
-                    <span className="font-mono tabular-nums">
+                    <span {...stylex.props(styles.mono)}>
                       {formatMoney(wallet.monthlyUsedCents, wallet.currency, i18n.language)}
                       {wallet.monthlyChargeLimitEnabled
                         ? ` / ${formatMoney(
@@ -280,7 +292,13 @@ function UsageRing({ value }: { value: number }) {
   const circumference = 2 * Math.PI * radius;
 
   return (
-    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14" className="shrink-0">
+    <svg
+      aria-hidden="true"
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      {...stylex.props(styles.shrink)}
+    >
       <circle
         cx="7"
         cy="7"
@@ -288,7 +306,7 @@ function UsageRing({ value }: { value: number }) {
         fill="none"
         stroke="currentColor"
         strokeWidth="2"
-        className="opacity-20"
+        {...stylex.props(styles.ringTrack)}
       />
       <circle
         cx="7"
@@ -310,7 +328,9 @@ function UsageMeter({
   label,
   value,
   detail,
+  className,
 }: {
+  className?: string;
   label: string;
   value: number;
   detail?: ReactNode;
@@ -322,26 +342,95 @@ function UsageMeter({
   });
 
   return (
-    <div className="min-w-0">
-      <div className="flex items-baseline justify-between gap-3 text-[11px] leading-4">
-        <span className="font-medium text-foreground/85">{label}</span>
-        <span className="shrink-0 font-mono tabular-nums text-muted-foreground">{valueLabel}</span>
+    <div className={cn(stylex.props(styles.meter).className, className)}>
+      <div {...stylex.props(styles.meterRow)}>
+        <span {...stylex.props(styles.meterLabel)}>{label}</span>
+        <span {...stylex.props(styles.shrink, styles.mono, styles.muted)}>{valueLabel}</span>
       </div>
       <Progress
         value={value}
         tone="neutral"
         aria-label={`${label}: ${valueLabel}`}
-        className="mt-1"
+        {...stylex.props(styles.progress)}
       />
-      {detail ? (
-        <div className="mt-1 truncate text-[10px] leading-3.5 text-muted-foreground/75">
-          {detail}
-        </div>
-      ) : null}
+      {detail ? <div {...stylex.props(styles.detail)}>{detail}</div> : null}
     </div>
   );
 }
 
+const styles = stylex.create({
+  trigger: { userSelect: 'none' },
+  content: { width: 'min(17rem, calc(100vw - 1rem))' },
+  tiny: { fontSize: '11px' },
+  mono: {
+    fontFamily: 'var(--font-mono)',
+    fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  muted: { color: themeColors.mutedForeground },
+  truncate: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  stack1: {
+    marginBlockStart: { default: null, ':not(:last-child)': 0 },
+    marginBlockEnd: { default: null, ':not(:last-child)': themeSpace[1] },
+  },
+  stack2: {
+    marginBlockStart: { default: null, ':not(:last-child)': 0 },
+    marginBlockEnd: { default: null, ':not(:last-child)': themeSpace[2] },
+  },
+  stack25: {
+    marginBlockStart: { default: null, ':not(:last-child)': 0 },
+    marginBlockEnd: { default: null, ':not(:last-child)': themeSpace[2.5] },
+  },
+  sectionLabel: {
+    fontSize: '11px',
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.mutedForeground,
+  },
+  compacting: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.foreground,
+  },
+  separator: { marginBlock: themeSpace[2.5] },
+  unavailable: {
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+  wallet: {
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'hsl(var(--border) / 0.6)',
+    paddingTop: themeSpace[2],
+    fontSize: '11px',
+  },
+  walletRow: { display: 'flex', justifyContent: 'space-between', gap: themeSpace[3] },
+  shrink: { flexShrink: 0 },
+  ringTrack: { opacity: 0.2 },
+  meter: { minWidth: 0 },
+  meterRow: {
+    display: 'flex',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: themeSpace[3],
+    fontSize: '11px',
+    lineHeight: themeSpace[4],
+  },
+  meterLabel: { fontWeight: themeFontWeight.medium, color: 'hsl(var(--foreground) / 0.85)' },
+  progress: { marginTop: themeSpace[1] },
+  detail: {
+    marginTop: themeSpace[1],
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '10px',
+    lineHeight: themeSpace[3.5],
+    color: 'hsl(var(--muted-foreground) / 0.75)',
+  },
+});
 const resetTimeStyles = stylex.create({
   row: {
     display: 'flex',

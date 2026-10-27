@@ -1,5 +1,8 @@
 import type { ComponentType, ReactNode } from 'react';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
+import { themeColors } from '../../../style/theme-colors.stylex';
+import { themeFontWeight, themeRadius, themeSpace } from '../../../style/theme-scale.stylex';
 import { Skeleton } from '@lody/ui/skeleton';
 
 // Skeleton rows mirror the real file-tree layout: 22px row height, 8px indent
@@ -34,19 +37,78 @@ const SKELETON_ROWS: ReadonlyArray<{ level: number; width: number }> = [
 const TREE_INDENT_PX = 8;
 const ROW_BASE_PADDING_PX = 8;
 
+const styles = stylex.create({
+  skeletonRoot: { padding: themeSpace[1] },
+  skeletonRow: { display: 'flex', height: '22px', alignItems: 'center' },
+  visuallyHidden: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clipPath: 'inset(50%)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+  panel: {
+    display: 'flex',
+    height: '100%',
+    minHeight: '160px',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: themeSpace[3],
+    paddingInline: themeSpace[6],
+    paddingBlock: themeSpace[8],
+    textAlign: 'center',
+  },
+  iconWell: {
+    display: 'flex',
+    height: themeSpace[11],
+    width: themeSpace[11],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.full,
+  },
+  iconWellError: { backgroundColor: 'hsl(var(--destructive) / 0.1)' },
+  iconWellNeutral: { backgroundColor: themeColors.muted },
+  icon: { height: themeSpace[5], width: themeSpace[5] },
+  iconError: { color: themeColors.destructive },
+  iconNeutral: { color: themeColors.mutedForeground },
+  title: {
+    fontSize: '1em',
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+  },
+  /* The stack's gap: Tailwind's `space-y-1` put the space under the title,
+     which is the only child before the description. */
+  titleGap: { marginBottom: themeSpace[1] },
+  description: {
+    marginInline: 'auto',
+    maxWidth: '240px',
+    fontSize: '0.8em',
+    lineHeight: '1.25rem',
+    color: themeColors.mutedForeground,
+  },
+  action: { paddingTop: themeSpace[1] },
+});
+
 export function FileTreeSkeleton({ className }: { className?: string }) {
+  const rootProps = stylex.props(styles.skeletonRoot);
   return (
     <div
       role="status"
       aria-busy="true"
       aria-live="polite"
-      className={cn('p-1', className)}
+      {...rootProps}
+      className={clsx(rootProps.className, className)}
     >
-      <span className="sr-only">Loading files…</span>
+      <span {...stylex.props(styles.visuallyHidden)}>Loading files…</span>
       {SKELETON_ROWS.map((row, index) => (
         <div
           key={index}
-          className="flex h-[22px] items-center"
+          {...stylex.props(styles.skeletonRow)}
           style={{ paddingLeft: row.level * TREE_INDENT_PX + ROW_BASE_PADDING_PX }}
         >
           <Skeleton width={16} height={16} className="mr-1.5 shrink-0" />
@@ -72,27 +134,25 @@ export function FileTreeStatePanel({
   tone?: FileTreeStateTone;
   action?: ReactNode;
 }) {
+  const iconProps = stylex.props(
+    styles.icon,
+    tone === 'error' ? styles.iconError : styles.iconNeutral
+  );
   return (
-    <div className="flex h-full min-h-[160px] flex-col items-center justify-center gap-3 px-6 py-8 text-center">
+    <div {...stylex.props(styles.panel)}>
       <div
-        className={cn(
-          'flex h-11 w-11 items-center justify-center rounded-full',
-          tone === 'error' ? 'bg-destructive/10' : 'bg-muted'
+        {...stylex.props(
+          styles.iconWell,
+          tone === 'error' ? styles.iconWellError : styles.iconWellNeutral
         )}
       >
-        <Icon
-          className={cn('h-5 w-5', tone === 'error' ? 'text-destructive' : 'text-muted-foreground')}
-        />
+        <Icon className={iconProps.className} />
       </div>
-      <div className="space-y-1">
-        <p className="text-[1em] font-medium text-foreground">{title}</p>
-        {description ? (
-          <p className="mx-auto max-w-[240px] text-[0.8em] leading-5 text-muted-foreground">
-            {description}
-          </p>
-        ) : null}
+      <div>
+        <p {...stylex.props(styles.title, description ? styles.titleGap : undefined)}>{title}</p>
+        {description ? <p {...stylex.props(styles.description)}>{description}</p> : null}
       </div>
-      {action ? <div className="pt-1">{action}</div> : null}
+      {action ? <div {...stylex.props(styles.action)}>{action}</div> : null}
     </div>
   );
 }

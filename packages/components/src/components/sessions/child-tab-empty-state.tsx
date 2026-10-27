@@ -1,7 +1,65 @@
 import { FileText, RefreshCw, Search, type LucideIcon } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 
 import { ConversationColumn } from '@/components/shared/conversation-column';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeDuration,
+  themeEasing,
+  themeFontSize,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  root: {
+    display: 'flex',
+    height: '100%',
+    flexDirection: 'column',
+    justifyContent: 'flex-end',
+    paddingInline: themeSpace[3],
+    paddingBottom: themeSpace[4],
+  },
+  suggestions: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    gap: themeSpace[1],
+  },
+  suggestion: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.4)',
+    borderRadius: themeRadius.lg,
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[1.5],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+    '@media (hover: hover)': {
+      ':hover': {
+        borderColor: themeColors.border,
+        backgroundColor: themeColors.hover,
+        color: themeColors.foreground,
+      },
+    },
+  },
+  suggestionIcon: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    opacity: 0.6,
+  },
+});
 
 const CHILD_TAB_SUGGESTIONS: {
   labelKey: string;
@@ -29,9 +87,9 @@ export function ChildTabEmptyState({ onSuggest }: { onSuggest: (text: string) =>
   const { t } = useTranslation();
 
   return (
-    <div className="flex h-full flex-col justify-end px-3 pb-4">
+    <div {...stylex.props(styles.root)}>
       <ConversationColumn>
-        <div className="flex flex-col items-end gap-1">
+        <div {...stylex.props(styles.suggestions)}>
           {CHILD_TAB_SUGGESTIONS.map((suggestion) => {
             const Icon = suggestion.icon;
             const label = t(suggestion.labelKey, suggestion.fallback);
@@ -39,10 +97,10 @@ export function ChildTabEmptyState({ onSuggest }: { onSuggest: (text: string) =>
               <button
                 key={suggestion.labelKey}
                 type="button"
-                className="inline-flex items-center gap-2 rounded-lg border border-border/40 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-border hover:bg-hover hover:text-foreground"
+                {...stylex.props(styles.suggestion)}
                 onClick={() => onSuggest(label)}
               >
-                <Icon className="h-3.5 w-3.5 shrink-0 opacity-60" aria-hidden="true" />
+                <Icon {...stylex.props(styles.suggestionIcon)} aria-hidden="true" />
                 {label}
               </button>
             );

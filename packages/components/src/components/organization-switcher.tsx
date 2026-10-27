@@ -23,6 +23,130 @@ import { useImplicitLocalWorkspace } from '../providers/local-platform-provider'
 import { useAppCapability } from '@/lib/app-platform';
 import { WorkspaceAvatar } from './workspace-avatar';
 import { resolveWorkspaceIdentityLogo } from '@/lib/workspace-identity';
+import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  /** A row that says the workspace is still loading. */
+  loadingRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2],
+  },
+  buildingIcon: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    color: themeColors.mutedForeground,
+  },
+  loadingText: {
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    color: themeColors.mutedForeground,
+  },
+  /** The local build's nameplate: the workspace's name and nothing else. */
+  nameplateRow: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    gap: themeSpace[3],
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2],
+  },
+  nameplateName: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: themeFontSize.lg,
+    lineHeight: themeLineHeight.lg,
+    fontWeight: themeFontWeight.semibold,
+  },
+  /** The switcher row: the trigger fills it. */
+  switcherRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    width: '100%',
+  },
+  triggerContent: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[3],
+  },
+  nameColumn: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+  },
+  workspaceName: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    maxWidth: '120px',
+    fontSize: themeFontSize.lg,
+    lineHeight: themeLineHeight.lg,
+    fontWeight: themeFontWeight.semibold,
+  },
+  statusSlot: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    paddingInlineStart: themeSpace[2],
+  },
+  statusDot: {
+    width: themeSpace[2],
+    height: themeSpace[2],
+    borderRadius: themeRadius.full,
+    backgroundColor: themeColors.statusDanger,
+  },
+  chevron: {
+    marginLeft: themeSpace[2],
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+    opacity: 0.5,
+  },
+  /** The create form: the two fields, one step apart. */
+  formStack: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[4],
+    paddingBlock: themeSpace[4],
+  },
+  fieldStack: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: themeSpace[2],
+  },
+  fieldHead: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  resetButton: {
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: { default: themeColors.mutedForeground, ':hover': themeColors.foreground },
+  },
+  errorText: {
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.destructive,
+  },
+  statusText: {
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+});
 
 /**
  * 组织切换器组件
@@ -45,20 +169,20 @@ function LocalWorkspaceNameplate() {
 
   if (!workspace) {
     return (
-      <div className="flex items-center gap-2 px-3 py-2">
-        <Building2 className="h-4 w-4 text-muted-foreground" />
-        <span className="text-sm text-muted-foreground">{t('common.loading')}</span>
+      <div {...stylex.props(styles.loadingRow)}>
+        <Building2 {...stylex.props(styles.buildingIcon)} />
+        <span {...stylex.props(styles.loadingText)}>{t('common.loading')}</span>
       </div>
     );
   }
 
   return (
-    <div className="flex w-full items-center gap-3 px-3 py-2">
+    <div {...stylex.props(styles.nameplateRow)}>
       <WorkspaceAvatar
         workspace={{ name: workspace.name, logo: resolveWorkspaceIdentityLogo(null, false) }}
         size="large"
       />
-      <span className="truncate text-lg font-semibold">{workspace.name}</span>
+      <span {...stylex.props(styles.nameplateName)}>{workspace.name}</span>
     </div>
   );
 }
@@ -124,9 +248,9 @@ function CloudOrganizationSwitcher() {
 
   if (!activeOrganization || !organizations) {
     return (
-      <div className="flex items-center gap-2 px-3 py-2">
-        <Building2 className="h-4 w-4 text-muted-foreground" />
-        <span className="text-sm text-muted-foreground">
+      <div {...stylex.props(styles.loadingRow)}>
+        <Building2 {...stylex.props(styles.buildingIcon)} />
+        <span {...stylex.props(styles.loadingText)}>
           {loading ? t('common.loading') : t('organization.noOrganization')}
         </span>
       </div>
@@ -135,12 +259,12 @@ function CloudOrganizationSwitcher() {
 
   return (
     <>
-      <div className="flex items-center gap-1 w-full">
+      <div {...stylex.props(styles.switcherRow)}>
         <Menu.Root modal={!isMobile} open={open} onOpenChange={setOpen}>
           <Menu.Trigger
             render={
               <Button variant="ghost" className="flex-1 justify-between" disabled={loading}>
-                <div className="flex items-center gap-3">
+                <div {...stylex.props(styles.triggerContent)}>
                   <WorkspaceAvatar
                     workspace={{
                       name: activeOrganization.name,
@@ -148,12 +272,10 @@ function CloudOrganizationSwitcher() {
                     }}
                     size="large"
                   />
-                  <div className="flex flex-col items-start">
-                    <span className="text-lg font-semibold truncate max-w-[120px]">
-                      {activeOrganization.name}
-                    </span>
+                  <div {...stylex.props(styles.nameColumn)}>
+                    <span {...stylex.props(styles.workspaceName)}>{activeOrganization.name}</span>
                   </div>
-                  <div className="flex items-center gap-1 pl-2">
+                  <div {...stylex.props(styles.statusSlot)}>
                     {/* {loroConnect ? (
                     <Tooltip.Root>
                       <Tooltip.Trigger delay={500} render={<div className="h-2 w-2 rounded-full bg-status-success" />}/>
@@ -164,19 +286,19 @@ function CloudOrganizationSwitcher() {
                     <Tooltip.Root>
                       <Tooltip.Trigger
                         delay={500}
-                        render={<div className="h-2 w-2 rounded-full bg-status-danger" />}
+                        render={<div {...stylex.props(styles.statusDot)} />}
                       />
                       <Tooltip.Content>{t('common.disconnected')}</Tooltip.Content>
                     </Tooltip.Root>
                   </div>
                 </div>
 
-                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                <ChevronsUpDown {...stylex.props(styles.chevron)} />
               </Button>
             }
           >
             <Button variant="ghost" className="flex-1 justify-between" disabled={loading}>
-              <div className="flex items-center gap-3">
+              <div {...stylex.props(styles.triggerContent)}>
                 <WorkspaceAvatar
                   workspace={{
                     name: activeOrganization.name,
@@ -184,12 +306,10 @@ function CloudOrganizationSwitcher() {
                   }}
                   size="large"
                 />
-                <div className="flex flex-col items-start">
-                  <span className="text-lg font-semibold truncate max-w-[120px]">
-                    {activeOrganization.name}
-                  </span>
+                <div {...stylex.props(styles.nameColumn)}>
+                  <span {...stylex.props(styles.workspaceName)}>{activeOrganization.name}</span>
                 </div>
-                <div className="flex items-center gap-1 pl-2">
+                <div {...stylex.props(styles.statusSlot)}>
                   {/* {loroConnect ? (
                     <Tooltip.Root>
                       <Tooltip.Trigger delay={500} render={<div className="h-2 w-2 rounded-full bg-status-success" />}/>
@@ -200,14 +320,14 @@ function CloudOrganizationSwitcher() {
                   <Tooltip.Root>
                     <Tooltip.Trigger
                       delay={500}
-                      render={<div className="h-2 w-2 rounded-full bg-status-danger" />}
+                      render={<div {...stylex.props(styles.statusDot)} />}
                     />
                     <Tooltip.Content>{t('common.disconnected')}</Tooltip.Content>
                   </Tooltip.Root>
                 </div>
               </div>
 
-              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+              <ChevronsUpDown {...stylex.props(styles.chevron)} />
             </Button>
           </Menu.Trigger>
           <Menu.Content align="start" className="w-[250px]">
@@ -287,8 +407,8 @@ function CloudOrganizationSwitcher() {
               {t('organization.createNewWorkspaceDescription')}
             </Dialog.Description>
           </Dialog.Header>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
+          <div {...stylex.props(styles.formStack)}>
+            <div {...stylex.props(styles.fieldStack)}>
               <UiField.Label htmlFor="name">{t('organization.workspaceName')}</UiField.Label>
               <Input
                 id="name"
@@ -302,13 +422,13 @@ function CloudOrganizationSwitcher() {
                 }}
               />
             </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
+            <div {...stylex.props(styles.fieldStack)}>
+              <div {...stylex.props(styles.fieldHead)}>
                 <UiField.Label htmlFor="slug">{t('organization.workspaceSlug')}</UiField.Label>
                 {canResetNewOrgSlug && (
                   <button
                     type="button"
-                    className="text-xs text-muted-foreground hover:text-foreground"
+                    {...stylex.props(styles.resetButton)}
                     onClick={resetNewOrgSlug}
                     disabled={creating}
                   >
@@ -325,12 +445,12 @@ function CloudOrganizationSwitcher() {
                 disabled={creating}
               />
               {newOrgSlugError && (
-                <p className="text-xs text-destructive">
+                <p {...stylex.props(styles.errorText)}>
                   {t(`organization.workspaceSlugError.${newOrgSlugError}`)}
                 </p>
               )}
               {newOrgSlug && !newOrgSlugError && (
-                <p className="text-xs text-muted-foreground">
+                <p {...stylex.props(styles.statusText)}>
                   {newOrgSlugChecking
                     ? t('organization.workspaceSlugChecking')
                     : newOrgSlugAvailable

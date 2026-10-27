@@ -1,0 +1,60 @@
+{
+  "viewports": [
+    {
+      "name": "boundary-311",
+      "width": 311,
+      "height": 900
+    },
+    {
+      "name": "boundary-312",
+      "width": 312,
+      "height": 900
+    },
+    {
+      "name": "boundary-639",
+      "width": 639,
+      "height": 900
+    },
+    {
+      "name": "boundary-640",
+      "width": 640,
+      "height": 900
+    },
+    {
+      "name": "boundary-671",
+      "width": 671,
+      "height": 900
+    },
+    {
+      "name": "boundary-672",
+      "width": 672,
+      "height": 900
+    }
+  ],
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "blockedHosts": [
+    "avatars.githubusercontent.com"
+  ],
+  "ids": [
+    "chat-migration--context-disabled-action",
+    "chat-chatcomposer--session-with-attachments",
+    "chat-chatcomposer--landing-with-pasted-text"
+  ],
+  "states": {
+    "chat-migration--context-disabled-action": [
+      {
+        "name": "local-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Local Add folder"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -209,7 +209,10 @@ import {
   type PathLauncherOption,
 } from '@/lib/session-path-launchers';
 import { withClassName } from '@/lib/stylex';
+import { cn } from '@/lib/utils';
 import { colors } from '@lody/ui/tokens/colors.stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontSize, themeLineHeight, themeSpace } from '../../style/theme-scale.stylex';
 import * as stylex from '@stylexjs/stylex';
 import type { SessionSharingState } from '@/lib/session-sharing';
 import {
@@ -553,6 +556,7 @@ const styles = stylex.create({
   menuBranchIcon: { marginTop: 'calc(var(--spacing) * 0.5)' },
   menuText: { minWidth: 0, flex: '1 1 0%' },
   menuTextTruncated: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  menuTextBlock: { display: 'block' },
   menuTextNormal: { fontWeight: 400 },
   menuBranchValue: {
     display: 'block',
@@ -668,6 +672,16 @@ const styles = stylex.create({
   },
   searchCountNoResults: { color: 'hsl(var(--destructive) / 0.9)' },
   searchActions: { display: 'flex', alignItems: 'center', gap: '1px' },
+  searchInputLayout: { minWidth: 0, flex: '1 1 0%' },
+  searchTooltipLayout: { display: 'flex', alignItems: 'center', gap: themeSpace[1.5] },
+  searchSeparatorLayout: { height: themeSpace[4] },
+  forkWorktreeGlyph: { width: '100%', height: '100%' },
+  forkStatus: {
+    flexShrink: 0,
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
   headerPills: {
     display: {
       default: 'none',
@@ -1548,7 +1562,7 @@ export function SessionHeaderMenu({
                   title={repoFullName}
                   aria-label={`${t('sessions.copyRepository', 'Copy repository')}: ${repoFullName}`}
                   icon={Github}
-                  endContent={<Copy className="h-3 w-3 text-muted-foreground" />}
+                  endContent={<Copy {...stylex.props(styles.menuCopyIcon, styles.menuIconMuted)} />}
                 >
                   {repoFullName}
                 </Menu.Item>
@@ -1581,10 +1595,12 @@ export function SessionHeaderMenu({
                       : t('sessions.copyBaseBranch', 'Copy base branch')
                   }: ${branchDisplayValue}`}
                   icon={GitBranch}
-                  endContent={<Copy className="h-3 w-3 text-muted-foreground" />}
+                  endContent={<Copy {...stylex.props(styles.menuCopyIcon, styles.menuIconMuted)} />}
                 >
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate">{branchDisplayValue}</span>
+                  <span {...stylex.props(styles.menuText)}>
+                    <span {...stylex.props(styles.menuTextTruncated, styles.menuTextBlock)}>
+                      {branchDisplayValue}
+                    </span>
                     {showBaseBranchContext ? (
                       <span {...stylex.props(styles.menuBranchValue, styles.menuBaseBranch)}>
                         {t('sessions.baseBranch', 'Base branch')}: {baseBranch}
@@ -1603,7 +1619,7 @@ export function SessionHeaderMenu({
                   title={localPath}
                   aria-label={`${t('sessions.copyProjectPath', 'Copy project path')}: ${localPath}`}
                   icon={Folder}
-                  endContent={<Copy className="h-3 w-3 text-muted-foreground" />}
+                  endContent={<Copy {...stylex.props(styles.menuCopyIcon, styles.menuIconMuted)} />}
                 >
                   {localPath}
                 </Menu.Item>
@@ -1744,16 +1760,14 @@ export function SessionHeaderMenu({
                         }}
                         icon={
                           option.id === 'new-worktree' ? (
-                            <WorktreeIcon className="h-full w-full" />
+                            <WorktreeIcon {...stylex.props(styles.forkWorktreeGlyph)} />
                           ) : (
                             <Folder size="100%" />
                           )
                         }
                         endContent={
                           option.status ? (
-                            <span className="shrink-0 text-xs text-muted-foreground">
-                              {option.status}
-                            </span>
+                            <span {...stylex.props(styles.forkStatus)}>{option.status}</span>
                           ) : undefined
                         }
                       >
@@ -2054,7 +2068,13 @@ export function SessionSearchBar({
     return (
       <Tooltip.Root>
         <Tooltip.Trigger delay={400} render={button} />
-        <Tooltip.Content side="bottom" className="flex items-center gap-1.5 px-2 py-1 text-[11px]">
+        <Tooltip.Content
+          side="bottom"
+          className={cn(
+            stylex.props(styles.searchTooltipLayout).className,
+            'px-2 py-1 text-[11px]'
+          )}
+        >
           <span>{label}</span>
           <span {...stylex.props(styles.searchShortcut)}>{shortcut}</span>
         </Tooltip.Content>
@@ -2088,7 +2108,10 @@ export function SessionSearchBar({
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder={t('sessions.findInConversation', 'Find in session')}
           aria-label={t('sessions.findInConversation', 'Find in session')}
-          className="h-7 min-w-0 flex-1 border-0 bg-transparent px-1.5 py-0 text-[13px] tracking-tight shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 [&::-webkit-search-cancel-button]:hidden"
+          className={cn(
+            stylex.props(styles.searchInputLayout).className,
+            'h-7 border-0 bg-transparent px-1.5 py-0 text-[13px] tracking-tight shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 [&::-webkit-search-cancel-button]:hidden'
+          )}
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
               event.preventDefault();
@@ -2119,7 +2142,13 @@ export function SessionSearchBar({
           </span>
         )}
 
-        <Separator orientation="vertical" className="mx-0.5 h-4 bg-border/60" />
+        <Separator
+          orientation="vertical"
+          className={cn(
+            stylex.props(styles.searchSeparatorLayout).className,
+            'mx-0.5 bg-border/60'
+          )}
+        />
 
         <div {...stylex.props(styles.searchActions)}>
           {renderNavButton(
@@ -2147,7 +2176,10 @@ export function SessionSearchBar({
             />
             <Tooltip.Content
               side="bottom"
-              className="flex items-center gap-1.5 px-2 py-1 text-[11px]"
+              className={cn(
+                stylex.props(styles.searchTooltipLayout).className,
+                'px-2 py-1 text-[11px]'
+              )}
             >
               <span>{t('common.close', 'Close')}</span>
               <span {...stylex.props(styles.searchShortcut)}>Esc</span>

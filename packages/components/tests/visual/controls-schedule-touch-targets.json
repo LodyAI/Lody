@@ -1,0 +1,24 @@
+{
+  "viewports": [
+    { "name": "iphone", "device": "iPhone 13", "width": 390, "height": 844 },
+    { "name": "android", "device": "Pixel 5", "width": 393, "height": 851 }
+  ],
+  "themes": ["light", "dark"],
+  "blockedHosts": ["avatars.githubusercontent.com"],
+  "ids": ["schedules-migration--weekly", "schedules-migration--once"],
+  "states": {
+    "schedules-migration--weekly": [
+      { "name": "time-tapped", "steps": [{ "action": "tap", "selector": "input[type=\"time\"]" }] },
+      {
+        "name": "time-focused",
+        "steps": [{ "action": "focus", "selector": "input[type=\"time\"]" }]
+      }
+    ],
+    "schedules-migration--once": [
+      {
+        "name": "datetime-tapped",
+        "steps": [{ "action": "tap", "selector": "input[type=\"datetime-local\"]" }]
+      }
+    ]
+  }
+}

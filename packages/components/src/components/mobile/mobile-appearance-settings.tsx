@@ -2,6 +2,7 @@ import { useCallback, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtom } from 'jotai';
 import { usePostHog } from '@posthog/react';
+import * as stylex from '@stylexjs/stylex';
 import type { SupportedLanguage } from '@lody/shared';
 import { Check, ChevronDown, Monitor, Moon, Sun } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -24,11 +25,148 @@ import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mo
 import { MobileAppIconSettings } from '@/components/mobile/mobile-app-icon-settings';
 import { buildConversationFontSizeChoices } from '@/components/settings/conversation-font-size-options';
 import { currentSupportedLanguages, languageCodeToName } from '../../i18n';
-import { cn } from '@/lib/utils';
 import { Switch } from '@lody/ui/switch';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { withOneSignal } from '@/lib/onesignal';
 import { useTheme, type Theme } from '../../theme-provider';
+// The theme tokens are imported by path, not by the `@/` alias: the StyleX
+// compiler links a theme file on its own and does not follow bundler aliases.
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  /** The trigger's box: it hugs its label and never takes the whole row. */
+  triggerBox: { display: 'inline-block', maxWidth: '60vw' },
+  /**
+   * The trigger: a quiet chip that opens the theme menu. Its focus ring was a
+   * Tailwind `focus-visible:ring-*`, which this app paints as nothing (the
+   * global focus rule zeroes Tailwind's ring shadow), so it keeps no ring
+   * rather than gaining one.
+   */
+  trigger: {
+    display: 'inline-flex',
+    width: 'auto',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[1.5],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.medium,
+    textAlign: 'left',
+    transitionProperty: 'all',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    backgroundColor: {
+      default: 'hsl(var(--input) / 0.4)',
+      ':hover': 'hsl(var(--muted) / 0.6)',
+    },
+    color: {
+      default: 'hsl(var(--foreground) / 0.85)',
+      ':hover': themeColors.foreground,
+    },
+    scale: { default: null, ':active': '0.985' },
+  },
+  /** The trigger's icon slot. */
+  iconSlot: { flexShrink: 0 },
+  /** The trigger's label: it truncates and keeps the row on one line. */
+  label: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    textAlign: 'right',
+  },
+  /** The chevron that says the trigger opens a list. */
+  chevron: {
+    height: themeSpace[3.5],
+    width: themeSpace[3.5],
+    flexShrink: 0,
+    opacity: 0.6,
+  },
+  /** The three modes, side by side. */
+  modes: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+    gap: themeSpace[2],
+    padding: themeSpace[2],
+  },
+  /**
+   * One mode. The focus ring was a Tailwind `focus-visible:ring-*`, which this
+   * app paints as nothing, so the tile keeps no ring.
+   */
+  mode: {
+    position: 'relative',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: themeSpace[1],
+    borderRadius: themeRadius.xl,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[3],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    fontWeight: themeFontWeight.medium,
+    transitionProperty: 'all',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  /** The mode in use: the accent's edge, and a halo in the same accent. */
+  modeSelected: {
+    borderColor: 'hsl(var(--primary) / 0.6)',
+    backgroundColor: 'hsl(var(--primary) / 0.06)',
+    color: themeColors.foreground,
+    boxShadow: '0 0 0 3px hsl(var(--primary)/0.08)',
+  },
+  /** The other modes: the ordinary edge, quietened until the pointer arrives. */
+  modeIdle: {
+    borderColor: 'hsl(var(--border) / 0.6)',
+    backgroundColor: {
+      default: 'hsl(var(--card) / 0.4)',
+      ':hover': 'hsl(var(--card) / 0.7)',
+    },
+    color: {
+      default: themeColors.mutedForeground,
+      ':hover': themeColors.foreground,
+    },
+  },
+  /** The mode's mark. */
+  modeIcon: {
+    transitionProperty:
+      'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  modeIconSelected: { color: themeColors.primary },
+  modeIconIdle: { color: themeColors.mutedForeground },
+  /** The mark that says this mode is in use. */
+  modeMark: {
+    position: 'absolute',
+    right: themeSpace[1.5],
+    top: themeSpace[1.5],
+    display: 'flex',
+    height: themeSpace[3.5],
+    width: themeSpace[3.5],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.full,
+    backgroundColor: themeColors.primary,
+    color: themeColors.primaryForeground,
+  },
+  modeMarkGlyph: { height: themeSpace[2.5], width: themeSpace[2.5] },
+  /** A mode's mark in the list. */
+  icon: { height: themeSpace[4], width: themeSpace[4] },
+});
 
 export function MobileAppearanceSettings() {
   const { t, i18n } = useTranslation();
@@ -190,12 +328,12 @@ export function MobileAppearanceSettings() {
 
 function themeIconFor(value: Theme) {
   if (value === 'light') {
-    return <Sun className="h-4 w-4" aria-hidden="true" />;
+    return <Sun {...stylex.props(styles.icon)} aria-hidden="true" />;
   }
   if (value === 'dark') {
-    return <Moon className="h-4 w-4" aria-hidden="true" />;
+    return <Moon {...stylex.props(styles.icon)} aria-hidden="true" />;
   }
-  return <Monitor className="h-4 w-4" aria-hidden="true" />;
+  return <Monitor {...stylex.props(styles.icon)} aria-hidden="true" />;
 }
 
 function ThemeModeMenuTrigger({
@@ -218,48 +356,37 @@ function ThemeModeMenuTrigger({
     {
       value: 'light',
       label: String(t('settings.theme.light')),
-      icon: <Sun className="h-4 w-4" aria-hidden="true" />,
+      icon: <Sun {...stylex.props(styles.icon)} aria-hidden="true" />,
     },
     {
       value: 'dark',
       label: String(t('settings.theme.dark')),
-      icon: <Moon className="h-4 w-4" aria-hidden="true" />,
+      icon: <Moon {...stylex.props(styles.icon)} aria-hidden="true" />,
     },
     {
       value: 'system',
       label: String(t('settings.theme.system')),
-      icon: <Monitor className="h-4 w-4" aria-hidden="true" />,
+      icon: <Monitor {...stylex.props(styles.icon)} aria-hidden="true" />,
     },
   ];
 
   return (
-    <div className="inline-block max-w-[60vw]">
+    <div {...stylex.props(styles.triggerBox)}>
       <MobileInlineMenu
         id="settings-theme"
         ariaLabel={String(t('settings.theme.label'))}
-        triggerClassName={cn(
-          'group/picker-trigger inline-flex w-auto items-center gap-2 rounded-md px-3 py-1.5',
-          'text-sm font-medium text-left transition-all',
-          'bg-input/40 text-foreground/85',
-          'hover:bg-muted/60 hover:text-foreground',
-          'active:scale-[0.985]',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40'
-        )}
+        triggerClassName={stylex.props(styles.trigger).className}
         triggerContent={
           <>
-            {selectedIcon ? <span className="shrink-0">{selectedIcon}</span> : null}
-            <span className="min-w-0 truncate text-right">{selectedLabel}</span>
-            <ChevronDown
-              className="h-3.5 w-3.5 shrink-0 opacity-60"
-              strokeWidth={2}
-              aria-hidden="true"
-            />
+            {selectedIcon ? <span {...stylex.props(styles.iconSlot)}>{selectedIcon}</span> : null}
+            <span {...stylex.props(styles.label)}>{selectedLabel}</span>
+            <ChevronDown {...stylex.props(styles.chevron)} strokeWidth={2} aria-hidden="true" />
           </>
         }
         expansionPanelClassName="p-0"
       >
         {() => (
-          <div role="radiogroup" className="grid grid-cols-3 gap-2 p-2">
+          <div role="radiogroup" {...stylex.props(styles.modes)}>
             {modeTiles.map((tile) => {
               const selected = tile.value === value;
               return (
@@ -270,27 +397,24 @@ function ThemeModeMenuTrigger({
                   aria-checked={selected}
                   whileTap={{ scale: 0.97 }}
                   onClick={() => onChange(tile.value)}
-                  className={cn(
-                    'relative flex flex-col items-center justify-center gap-1 rounded-xl border px-3 py-3',
-                    'text-xs font-medium transition-all',
-                    'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring',
-                    selected
-                      ? 'border-primary/60 bg-primary/[0.06] text-foreground shadow-[0_0_0_3px_hsl(var(--primary)/0.08)]'
-                      : 'border-border/60 bg-card/40 text-muted-foreground hover:bg-card/70 hover:text-foreground'
-                  )}
+                  {...stylex.props(styles.mode, selected ? styles.modeSelected : styles.modeIdle)}
                 >
                   <span
-                    className={cn(
-                      'transition-colors',
-                      selected ? 'text-primary' : 'text-muted-foreground'
+                    {...stylex.props(
+                      styles.modeIcon,
+                      selected ? styles.modeIconSelected : styles.modeIconIdle
                     )}
                   >
                     {tile.icon}
                   </span>
                   <span>{tile.label}</span>
                   {selected ? (
-                    <span className="absolute right-1.5 top-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                      <Check className="h-2.5 w-2.5" strokeWidth={3} aria-hidden="true" />
+                    <span {...stylex.props(styles.modeMark)}>
+                      <Check
+                        {...stylex.props(styles.modeMarkGlyph)}
+                        strokeWidth={3}
+                        aria-hidden="true"
+                      />
                     </span>
                   ) : null}
                 </motion.button>

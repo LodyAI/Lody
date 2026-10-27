@@ -1,0 +1,26 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "titles": [
+    "Sessions/SessionUsagePopover",
+    "Sessions/SessionRelationsChip",
+    "Sessions/NotificationPermissionPrompt"
+  ],
+  "allowBlankIds": ["sessions-sessionusagepopover--unavailable"]
+}

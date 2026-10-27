@@ -1,0 +1,125 @@
+{
+  "viewports": [
+    {
+      "name": "desktop-motion",
+      "width": 1280,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": ["components-sidebar-migration--row-anatomy", "components-sidebar-send-status--states"],
+  "allowBlankIds": [],
+  "states": {
+    "components-sidebar-migration--row-anatomy": [
+      {
+        "name": "opener-collapsed",
+        "steps": [
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Collapse fixture children",
+            "key": "Enter"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-fixture-row=\"child-first\"]"
+          }
+        ]
+      },
+      {
+        "name": "opener-expanded",
+        "steps": [
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Expand fixture children",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-fixture-row=\"child-first\"]"
+          }
+        ]
+      },
+      {
+        "name": "child-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-fixture-row=\"child-first\"]"
+          }
+        ]
+      },
+      {
+        "name": "child-menu",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Menu Check nested row alignment"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Inspect fixture session"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-disclosure",
+        "steps": [
+          {
+            "action": "press",
+            "role": "menuitem",
+            "name": "Inspect fixture session",
+            "key": "Escape"
+          },
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Collapse fixture children"
+          }
+        ]
+      },
+      {
+        "name": "archive-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-fixture-row=\"plain\"]"
+          }
+        ]
+      },
+      {
+        "name": "archive-confirm",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Archive Resting session"
+          }
+        ]
+      },
+      {
+        "name": "archive-committed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Confirm Archive Resting session"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-fixture-row=\"plain\"]"
+          }
+        ]
+      }
+    ]
+  },
+  "reducedMotion": "no-preference"
+}

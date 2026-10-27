@@ -1,6 +1,24 @@
 import { useLayoutEffect, useRef, type ComponentPropsWithoutRef } from 'react';
 
 import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+
+const styles = stylex.create({
+  root: { position: 'relative', display: 'inline-block', flexShrink: 0 },
+  grid: { position: 'absolute', display: 'block' },
+  tile: {
+    position: 'absolute',
+    display: 'block',
+    borderRadius: '40%',
+    backgroundColor: 'currentColor',
+  },
+  dot: {
+    position: 'absolute',
+    display: 'block',
+    borderRadius: 'calc(infinity * 1px)',
+    backgroundColor: 'currentColor',
+  },
+});
 
 export type WorkingGridCollapseProps = Omit<ComponentPropsWithoutRef<'span'>, 'children'> & {
   /** Box the animation plays in, px; the grid and dot are centred inside it. */
@@ -125,13 +143,13 @@ export function WorkingGridCollapse({
       ref={rootRef}
       data-working-grid-collapse=""
       aria-hidden="true"
-      className={cn('relative inline-block shrink-0', className)}
+      className={cn(stylex.props(styles.root).className, className)}
       style={{ width: size, height: size, ...style }}
       {...props}
     >
       <span
         data-collapse-grid=""
-        className="absolute block"
+        className={stylex.props(styles.grid).className}
         style={{ left: inset, top: inset, width: gridSize, height: gridSize }}
       >
         {TILES.map(([row, col]) => (
@@ -140,7 +158,7 @@ export function WorkingGridCollapse({
             data-collapse-tile=""
             data-row={row}
             data-col={col}
-            className="absolute block rounded-[40%] bg-current"
+            className={stylex.props(styles.tile).className}
             style={{
               left: col * pitch + (cell - tile) / 2,
               top: row * pitch + (cell - tile) / 2,
@@ -152,7 +170,7 @@ export function WorkingGridCollapse({
       </span>
       <span
         data-collapse-dot=""
-        className="absolute block rounded-full bg-current"
+        className={stylex.props(styles.dot).className}
         style={{
           left: (size - dotSize) / 2,
           top: (size - dotSize) / 2,

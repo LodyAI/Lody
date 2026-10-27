@@ -1,3 +1,13 @@
+import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeDuration,
+  themeEasing,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 import type { CSSProperties } from 'react';
 import { Check, SendHorizontal, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -170,7 +180,7 @@ export function VisualAnnotationCommentsOverlay({
   return (
     <div
       data-lody-visual-comment-overlay="true"
-      className={cn('pointer-events-none absolute inset-0 overflow-hidden', className)}
+      className={cn(stylex.props(styles.root).className, className)}
       style={{ width: viewport.width, height: viewport.height }}
     >
       {visibleComments.map((comment, index) => {
@@ -253,28 +263,18 @@ function OpenComment({
       <button
         type="button"
         aria-label={`Visual comment by ${comment.authorName ?? 'reviewer'}`}
-        className="pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer p-1.5 outline-hidden"
+        {...stylex.props(styles.pin)}
         style={{ left: layout.pinX, top: layout.pinY, zIndex: isActive ? 80 : 40 + index }}
         onClick={(event) => {
           event.stopPropagation();
           onSelect?.(comment.id);
         }}
       >
-        <span
-          className={cn(
-            'block h-3 w-3 rounded-full bg-amber-500 ring-2 ring-background transition-transform duration-150 ease-out',
-            isActive ? 'scale-125' : 'hover:scale-110'
-          )}
-        />
+        <span {...stylex.props(styles.pinDot, isActive ? styles.activeDot : styles.inactiveDot)} />
       </button>
       <article
         data-visual-comment-id={comment.id}
-        className={cn(
-          'pointer-events-auto absolute overflow-hidden rounded-xl bg-popover text-popover-foreground shadow-[0_10px_30px_rgba(15,23,42,0.12)] ring-1 transition-shadow duration-150',
-          isActive
-            ? 'shadow-[0_18px_45px_rgba(15,23,42,0.18)] ring-ring/50'
-            : 'ring-border hover:shadow-[0_14px_36px_rgba(15,23,42,0.14)]'
-        )}
+        {...stylex.props(styles.card, isActive ? styles.activeCard : styles.inactiveCard)}
         style={{
           left: layout.cardLeft,
           top: layout.cardTop,
@@ -286,17 +286,13 @@ function OpenComment({
           onSelect?.(comment.id);
         }}
       >
-        <div className="flex items-start gap-2.5 px-3 pt-3">
-          <span
-            aria-hidden
-            className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold tracking-wide text-white"
-            style={getAuthorAvatarStyle(comment)}
-          >
+        <div {...stylex.props(styles.header)}>
+          <span aria-hidden {...stylex.props(styles.avatar)} style={getAuthorAvatarStyle(comment)}>
             {getInitials(comment)}
           </span>
-          <div className="min-w-0 flex-1">
-            <p className="flex items-center gap-1.5 text-xs font-semibold leading-4 text-popover-foreground">
-              <span className="truncate">{comment.authorName ?? 'Reviewer'}</span>
+          <div {...stylex.props(styles.textColumn)}>
+            <p {...stylex.props(styles.author)}>
+              <span {...stylex.props(styles.truncate)}>{comment.authorName ?? 'Reviewer'}</span>
               {isDraft ? (
                 <Badge tone="warning">
                   {t('sessions.preview.annotation.statusDraft', 'Draft')}
@@ -306,37 +302,35 @@ function OpenComment({
                 <Badge>{t('sessions.preview.annotation.statusSent', 'Sent')}</Badge>
               ) : null}
             </p>
-            <p className="mt-1 whitespace-pre-line break-words text-[13px] leading-5 text-popover-foreground/80">
-              {comment.body}
-            </p>
+            <p {...stylex.props(styles.body)}>{comment.body}</p>
           </div>
           {onCollapse ? (
             <button
               type="button"
               aria-label="Collapse comment"
-              className="-mr-1 -mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-popover-foreground"
+              {...stylex.props(styles.collapseButton)}
               onClick={(event) => {
                 event.stopPropagation();
                 onCollapse(comment.id);
               }}
             >
-              <X className="h-3.5 w-3.5" />
+              <X {...stylex.props(styles.closeIcon)} />
             </button>
           ) : null}
         </div>
         {onToggleResolved || onSendToChat ? (
-          <div className="mt-2 flex items-center justify-between gap-1 border-t border-border px-1.5 py-1">
+          <div {...stylex.props(styles.footer)}>
             {onSendToChat ? (
               <button
                 type="button"
                 aria-pressed={isSubmitted || isStaged}
-                className={cn(
-                  'inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors',
+                {...stylex.props(
+                  styles.action,
                   isSubmitted
-                    ? 'cursor-default text-muted-foreground'
+                    ? styles.sentAction
                     : isStaged
-                      ? 'text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-500/10'
-                      : 'text-muted-foreground hover:bg-hover hover:text-popover-foreground'
+                      ? styles.positiveAction
+                      : styles.sendAction
                 )}
                 disabled={isSubmitted}
                 onClick={(event) => {
@@ -347,9 +341,9 @@ function OpenComment({
                 }}
               >
                 {isSubmitted || isStaged ? (
-                  <Check className="h-3 w-3" />
+                  <Check {...stylex.props(styles.actionIcon)} />
                 ) : (
-                  <SendHorizontal className="h-3 w-3 -scale-x-100" />
+                  <SendHorizontal {...stylex.props(styles.sendIcon)} />
                 )}
                 {isSubmitted ? 'Sent' : isStaged ? 'Added' : 'Send'}
               </button>
@@ -359,13 +353,13 @@ function OpenComment({
             {onToggleResolved ? (
               <button
                 type="button"
-                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-emerald-700 transition-colors hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-500/10"
+                {...stylex.props(styles.action, styles.positiveAction)}
                 onClick={(event) => {
                   event.stopPropagation();
                   onToggleResolved({ commentId: comment.id, resolved: true });
                 }}
               >
-                <Check className="h-3 w-3" />
+                <Check {...stylex.props(styles.actionIcon)} />
                 Resolve
               </button>
             ) : (
@@ -397,69 +391,55 @@ function CollapsedComment({ comment, viewport, resolvedAnchor, onOpen }: Collaps
     [placeRight ? 'left' : 'right']: 10,
     [placeBelow ? 'top' : 'bottom']: 10,
   };
-  const originClass = placeBelow
+  const originStyle = placeBelow
     ? placeRight
-      ? 'origin-top-left'
-      : 'origin-top-right'
+      ? styles.peekTopLeft
+      : styles.peekTopRight
     : placeRight
-      ? 'origin-bottom-left'
-      : 'origin-bottom-right';
+      ? styles.peekBottomLeft
+      : styles.peekBottomRight;
 
   return (
     <div
       // Lift the wrapper above sibling open cards on hover/focus so the peek
       // never gets clipped by another comment that happens to sit nearby.
-      className="pointer-events-none group/dot absolute z-[30] hover:z-[90] focus-within:z-[90]"
+      data-visual-comment-dot="true"
+      {...stylex.props(styles.collapsedRoot, stylex.defaultMarker())}
       style={{ left: pin.x, top: pin.y }}
     >
       <button
         type="button"
         aria-label={`Collapsed comment by ${comment.authorName ?? 'reviewer'}`}
-        className="pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer p-2 outline-hidden"
+        {...stylex.props(styles.collapsedPin)}
         onClick={(event) => {
           event.stopPropagation();
           onOpen();
         }}
       >
-        <span
-          className={cn(
-            'block h-2.5 w-2.5 rounded-full bg-amber-500 ring-2 ring-background transition-transform duration-150 ease-out',
-            'group-hover/dot:scale-[1.6] group-focus-within/dot:scale-[1.6]'
-          )}
-        />
+        <span {...stylex.props(styles.pinDot, styles.collapsedDot)} />
       </button>
-      <div
-        className={cn(
-          'pointer-events-none absolute scale-90 opacity-0 transition-all duration-150 ease-out',
-          originClass,
-          'group-hover/dot:pointer-events-auto group-hover/dot:scale-100 group-hover/dot:opacity-100',
-          'group-focus-within/dot:pointer-events-auto group-focus-within/dot:scale-100 group-focus-within/dot:opacity-100'
-        )}
-        style={peekStyle}
-      >
+      <div {...stylex.props(styles.peek, originStyle)} style={peekStyle}>
         <button
           type="button"
-          className="block w-full overflow-hidden rounded-lg bg-popover text-left text-popover-foreground shadow-[0_12px_30px_rgba(15,23,42,0.18)] ring-1 ring-border outline-hidden transition-shadow hover:shadow-[0_18px_40px_rgba(15,23,42,0.22)] focus-visible:ring-2 focus-visible:ring-ring"
+          {...stylex.props(styles.peekCard)}
           onClick={(event) => {
             event.stopPropagation();
             onOpen();
           }}
         >
-          <div className="flex items-start gap-2 px-2.5 py-2">
+          <div {...stylex.props(styles.peekHeader)}>
             <span
               aria-hidden
-              className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9px] font-semibold tracking-wide text-white"
+              {...stylex.props(styles.peekAvatar)}
               style={getAuthorAvatarStyle(comment)}
             >
               {getInitials(comment)}
             </span>
-            <div className="min-w-0 flex-1">
-              <p className="flex items-center gap-1.5 text-[11px] font-semibold leading-4 text-popover-foreground">
-                <span className="truncate">{comment.authorName ?? 'Reviewer'}</span>
+            <div {...stylex.props(styles.textColumn)}>
+              <p {...stylex.props(styles.peekAuthor)}>
+                <span {...stylex.props(styles.truncate)}>{comment.authorName ?? 'Reviewer'}</span>
               </p>
-              <p className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-popover-foreground/75">
-                {comment.body}
-              </p>
+              <p {...stylex.props(styles.peekBody)}>{comment.body}</p>
             </div>
           </div>
         </button>
@@ -467,3 +447,279 @@ function CollapsedComment({ comment, viewport, resolvedAnchor, onOpen }: Collaps
     </div>
   );
 }
+
+const DARK =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+
+const styles = stylex.create({
+  root: { pointerEvents: 'none', position: 'absolute', inset: 0, overflow: 'hidden' },
+  pin: {
+    pointerEvents: 'auto',
+    position: 'absolute',
+    translate: '-50% -50%',
+    cursor: 'pointer',
+    padding: themeSpace[1.5],
+  },
+  pinDot: {
+    display: 'block',
+    width: themeSpace[3],
+    height: themeSpace[3],
+    borderRadius: 'calc(infinity * 1px)',
+    backgroundColor: 'var(--color-amber-500, oklch(76.9% 0.188 70.08))',
+    boxShadow: `0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 0 2px ${themeColors.background}, 0 0 #0000`,
+    transitionProperty: 'transform, translate, scale, rotate',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing.out,
+  },
+  activeDot: { scale: '1.25' },
+  inactiveDot: { scale: { default: 'none', '@media (hover: hover)': { ':hover': '1.1' } } },
+  card: {
+    pointerEvents: 'auto',
+    position: 'absolute',
+    overflow: 'hidden',
+    borderRadius: themeRadius.xl,
+    backgroundColor: themeColors.popover,
+    color: themeColors.popoverForeground,
+    transitionProperty: 'box-shadow',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  activeCard: {
+    boxShadow: `0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 0 1px color-mix(in oklab, ${themeColors.ring} 50%, transparent), 0 18px 45px rgba(15,23,42,0.18)`,
+  },
+  inactiveCard: {
+    boxShadow: {
+      default: `0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 0 1px ${themeColors.border}, 0 10px 30px rgba(15,23,42,0.12)`,
+      '@media (hover: hover)': {
+        ':hover': `0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 0 1px ${themeColors.border}, 0 14px 36px rgba(15,23,42,0.14)`,
+      },
+    },
+  },
+  header: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: themeSpace[2.5],
+    paddingInline: themeSpace[3],
+    paddingTop: themeSpace[3],
+  },
+  avatar: {
+    marginTop: themeSpace[0.5],
+    display: 'flex',
+    width: themeSpace[6],
+    height: themeSpace[6],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.full,
+    fontSize: '10px',
+    fontWeight: themeFontWeight.semibold,
+    letterSpacing: '0.025em',
+    color: 'white',
+  },
+  textColumn: { minWidth: 0, flex: '1 1 0%' },
+  author: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeSpace[4],
+    fontWeight: themeFontWeight.semibold,
+    color: themeColors.popoverForeground,
+  },
+  truncate: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  body: {
+    marginTop: themeSpace[1],
+    whiteSpace: 'pre-line',
+    overflowWrap: 'break-word',
+    fontSize: '13px',
+    lineHeight: themeSpace[5],
+    color: 'hsl(var(--popover-foreground) / 0.8)',
+  },
+  collapseButton: {
+    marginRight: 'calc(var(--spacing) * -1)',
+    marginTop: 'calc(var(--spacing) * -0.5)',
+    display: 'inline-flex',
+    width: themeSpace[6],
+    height: themeSpace[6],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.md,
+    color: { default: themeColors.mutedForeground, ':hover': themeColors.popoverForeground },
+    backgroundColor: { default: null, ':hover': themeColors.hover },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  closeIcon: { width: themeSpace[3.5], height: themeSpace[3.5] },
+  footer: {
+    marginTop: themeSpace[2],
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: themeSpace[1],
+    borderTopWidth: 1,
+    borderTopStyle: 'solid',
+    borderColor: themeColors.border,
+    paddingInline: themeSpace[1.5],
+    paddingBlock: themeSpace[1],
+  },
+  action: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    borderRadius: themeRadius.md,
+    paddingInline: themeSpace[2],
+    paddingBlock: themeSpace[1],
+    fontSize: '11px',
+    fontWeight: themeFontWeight.medium,
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  sentAction: { cursor: 'default', color: themeColors.mutedForeground },
+  sendAction: {
+    color: {
+      default: themeColors.mutedForeground,
+      '@media (hover: hover)': { ':hover': themeColors.popoverForeground },
+    },
+    backgroundColor: { default: null, '@media (hover: hover)': { ':hover': themeColors.hover } },
+  },
+  positiveAction: {
+    color: {
+      default: 'var(--color-emerald-700, oklch(50.8% 0.118 165.612))',
+      [DARK]: 'var(--color-emerald-300, oklch(84.5% 0.143 164.978))',
+    },
+    backgroundColor: {
+      default: null,
+      '@media (hover: hover)': { ':hover': 'var(--color-emerald-50, oklch(97.9% 0.021 166.113))' },
+      [DARK]: {
+        default: null,
+        '@media (hover: hover)': {
+          ':hover':
+            'color-mix(in oklab, var(--color-emerald-500, oklch(69.6% 0.17 162.48)) 10%, transparent)',
+        },
+      },
+    },
+  },
+  actionIcon: { width: themeSpace[3], height: themeSpace[3] },
+  sendIcon: { width: themeSpace[3], height: themeSpace[3], scale: '-1 1' },
+  collapsedRoot: {
+    pointerEvents: 'none',
+    position: 'absolute',
+    zIndex: { default: 30, ':hover': 90, ':focus-within': 90 },
+  },
+  collapsedPin: {
+    pointerEvents: 'auto',
+    position: 'absolute',
+    translate: '-50% -50%',
+    cursor: 'pointer',
+    padding: themeSpace[2],
+  },
+  collapsedDot: {
+    width: themeSpace[2.5],
+    height: themeSpace[2.5],
+    scale: {
+      default: 'none',
+      '@media (hover: hover)': {
+        [stylex.when.ancestor(':is([data-visual-comment-dot]):hover')]: '1.6',
+      },
+      [stylex.when.ancestor(':is([data-visual-comment-dot]):focus-within')]: '1.6',
+    },
+  },
+  peek: {
+    position: 'absolute',
+    pointerEvents: {
+      default: 'none',
+      '@media (hover: hover)': {
+        [stylex.when.ancestor(':is([data-visual-comment-dot]):hover')]: 'auto',
+      },
+      [stylex.when.ancestor(':is([data-visual-comment-dot]):focus-within')]: 'auto',
+    },
+    scale: {
+      default: '0.9',
+      '@media (hover: hover)': {
+        [stylex.when.ancestor(':is([data-visual-comment-dot]):hover')]: '1',
+      },
+      [stylex.when.ancestor(':is([data-visual-comment-dot]):focus-within')]: '1',
+    },
+    opacity: {
+      default: 0,
+      '@media (hover: hover)': {
+        [stylex.when.ancestor(':is([data-visual-comment-dot]):hover')]: 1,
+      },
+      [stylex.when.ancestor(':is([data-visual-comment-dot]):focus-within')]: 1,
+    },
+    transitionProperty: 'all',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing.out,
+  },
+  peekTopLeft: { transformOrigin: '0 0' },
+  peekTopRight: { transformOrigin: '100% 0' },
+  peekBottomLeft: { transformOrigin: '0 100%' },
+  peekBottomRight: { transformOrigin: '100% 100%' },
+  peekCard: {
+    display: 'block',
+    width: '100%',
+    overflow: 'hidden',
+    borderRadius: themeRadius.lg,
+    backgroundColor: themeColors.popover,
+    textAlign: 'left',
+    color: themeColors.popoverForeground,
+    boxShadow: {
+      default: `0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 0 1px ${themeColors.border}, 0 12px 30px rgba(15,23,42,0.18)`,
+      '@media (hover: hover)': {
+        ':hover': `0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 0 1px ${themeColors.border}, 0 18px 40px rgba(15,23,42,0.22)`,
+        ':focus:hover':
+          '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 18px 40px rgba(15,23,42,0.22)',
+      },
+      // The app's global :focus reset removes the original Tailwind ring, while its shadow survives.
+      ':focus': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 12px 30px rgba(15,23,42,0.18)',
+    },
+    transitionProperty: 'box-shadow',
+    transitionDuration: themeDuration[150],
+    transitionTimingFunction: themeEasing['in-out'],
+  },
+  peekHeader: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[2.5],
+    paddingBlock: themeSpace[2],
+  },
+  peekAvatar: {
+    marginTop: themeSpace[0.5],
+    display: 'flex',
+    width: themeSpace[5],
+    height: themeSpace[5],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.full,
+    fontSize: '9px',
+    fontWeight: themeFontWeight.semibold,
+    letterSpacing: '0.025em',
+    color: 'white',
+  },
+  peekAuthor: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    fontSize: '11px',
+    lineHeight: themeSpace[4],
+    fontWeight: themeFontWeight.semibold,
+    color: themeColors.popoverForeground,
+  },
+  peekBody: {
+    marginTop: themeSpace[0.5],
+    overflow: 'hidden',
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 2,
+    fontSize: '12px',
+    lineHeight: 1.375,
+    color: 'hsl(var(--popover-foreground) / 0.75)',
+  },
+});

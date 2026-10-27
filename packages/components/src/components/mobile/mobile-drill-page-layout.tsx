@@ -1,7 +1,27 @@
 import { createContext, useCallback, useContext, useRef, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { markMobileBackNavigation } from '@/lib/mobile-back-navigation';
+import { withClassName } from '@/lib/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
 import { MobileEdgeBackSwipeZone } from './mobile-edge-back-swipe';
+
+const styles = stylex.create({
+  root: {
+    position: 'relative',
+    height: '100%',
+    width: '100%',
+    overflow: 'hidden',
+    backgroundColor: themeColors.background,
+  },
+  inner: {
+    position: 'relative',
+    display: 'flex',
+    height: '100%',
+    flexDirection: 'column',
+    backgroundColor: themeColors.background,
+  },
+});
 
 export type MobileDrillPageLayoutProps = {
   children: ReactNode;
@@ -135,9 +155,9 @@ export function MobileDrillPageLayout({ children, onBack }: MobileDrillPageLayou
            tucked under the notch on iOS. The home screen does the
            same opt-in on its root container — see
            `mobile-home-screen.tsx`. */
-        className="safe-areas relative h-full w-full overflow-hidden bg-background"
+        {...withClassName(stylex.props(styles.root), 'safe-areas')}
       >
-        <div className="mobile-drill-in relative flex h-full flex-col bg-background">
+        <div {...withClassName(stylex.props(styles.inner), 'mobile-drill-in')}>
           {onBack ? (
             <MobileEdgeBackSwipeZone
               isNativeApp={isNativeAppShell()}

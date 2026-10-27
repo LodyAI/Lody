@@ -1,0 +1,139 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 900
+    },
+    {
+      "name": "phone-compact",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "blockedHosts": [
+    "avatars.githubusercontent.com"
+  ],
+  "titles": [
+    "Components/SessionList"
+  ],
+  "states": {
+    "components-sessionlist--default": [
+      {
+        "name": "group-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-group-key=\"loro-dev/loro\"]"
+          }
+        ]
+      },
+      {
+        "name": "new-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-repo-full-name=\"loro-dev/loro\"] button[aria-label=\"New session\"]"
+          }
+        ]
+      },
+      {
+        "name": "new-created",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-repo-full-name=\"loro-dev/loro\"] button[aria-label=\"New session\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-session-id=\"new-task-1\"]"
+          }
+        ]
+      },
+      {
+        "name": "group-collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-group-key=\"loro-dev/loro\"]"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-session-id=\"new-task-1\"]"
+          }
+        ]
+      },
+      {
+        "name": "group-expanded",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-group-key=\"loro-dev/loro\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-session-id=\"new-task-1\"]"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-collapse",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "focus",
+            "selector": "[data-sidebar-group-key=\"loro-dev/loro\"]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-sidebar-group-key=\"loro-dev/loro\"]",
+            "key": " "
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-session-id=\"new-task-1\"]"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-expand",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-sidebar-group-key=\"loro-dev/loro\"]",
+            "key": " "
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-session-id=\"new-task-1\"]"
+          }
+        ]
+      }
+    ]
+  },
+  "allowBlankIds": [
+    "components-sessionlist--loading"
+  ],
+  "ready": {
+    "components-sessionlist--loading": [
+      {
+        "action": "visible",
+        "selector": "[data-sidebar-loading-skeleton] [aria-hidden=\"true\"]",
+        "index": 0
+      }
+    ]
+  }
+}

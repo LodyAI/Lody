@@ -1,0 +1,26 @@
+{
+  "viewports": [
+    {
+      "name": "below-md",
+      "width": 767,
+      "height": 900
+    },
+    {
+      "name": "at-md",
+      "width": 768,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": [
+    "components-lodysidebar--default",
+    "components-lodysidebar--updated-mode-opened-sessions",
+    "components-lodysidebar--with-projects",
+    "components-sidebarfooter--default",
+    "components-sidebarfooter--local-identity",
+    "projects-localprojectremovalux--mobile-project-waiting-for-device",
+    "projects-localprojectremovalux--mobile-remove-confirmation"
+  ],
+  "allowBlankIds": [],
+  "states": {}
+}

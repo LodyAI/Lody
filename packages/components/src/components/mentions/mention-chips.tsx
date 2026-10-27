@@ -1,3 +1,5 @@
+import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
 import * as React from 'react';
 import { ClipboardList, MessagesSquare, UserRoundCog } from 'lucide-react';
 
@@ -53,7 +55,21 @@ export const wrapPastedTextChipLabel = (label: string) => `${CHIP_PAD}${label}${
  * Sized in `em` so it tracks the surrounding font size. In the composer the
  * slot clamps it further — it can never exceed the character it covers.
  */
-export const MENTION_ICON_CLASS_NAME = 'size-[1.05em] shrink-0';
+const styles = stylex.create({
+  icon: { width: '1.05em', height: '1.05em', flexShrink: 0 },
+  chip: { color: 'color-mix(in srgb,hsl(var(--primary)) 82%,hsl(var(--foreground)))' },
+  neutralChip: { color: themeColors.mutedForeground },
+  emoji: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    fontSize: '0.95em',
+    lineHeight: 1,
+  },
+});
+
+export const MENTION_ICON_CLASS_NAME = stylex.props(styles.icon).className;
 
 /**
  * Colour is the whole signal — a decorated range has no visible background — so
@@ -65,9 +81,8 @@ export const MENTION_ICON_CLASS_NAME = 'size-[1.05em] shrink-0';
  * must not re-derive the colour: two copies of one `color-mix` drift apart the
  * first time either is tuned.
  */
-export const MENTION_CHIP_CLASS_NAME =
-  'text-[color-mix(in_srgb,hsl(var(--primary))_82%,hsl(var(--foreground)))]';
-export const MENTION_NEUTRAL_CHIP_CLASS_NAME = 'text-muted-foreground';
+export const MENTION_CHIP_CLASS_NAME = stylex.props(styles.chip).className;
+export const MENTION_NEUTRAL_CHIP_CLASS_NAME = stylex.props(styles.neutralChip).className;
 
 /**
  * The kinds a mention range can carry, including the kindless fallback a range
@@ -171,10 +186,7 @@ export const getComposerMentionChip: MentionChipResolver = (mention: Mention, te
 export const applyAgentRoleEmojiChip = (chip: MentionChip, emoji: string): MentionChip => ({
   ...chip,
   icon: (
-    <span
-      aria-hidden="true"
-      className={`${MENTION_ICON_CLASS_NAME} inline-flex items-center justify-center overflow-hidden text-[0.95em] leading-none`}
-    >
+    <span aria-hidden="true" {...stylex.props(styles.icon, styles.emoji)}>
       {emoji}
     </span>
   ),

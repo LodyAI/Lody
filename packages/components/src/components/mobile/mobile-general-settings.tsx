@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import type {
   GetNotificationPermissionStatusResult,
   OpenSystemNotificationSettingsResult,
@@ -41,6 +42,31 @@ import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { QueuedMessageBehaviorControl } from '@/components/settings/queued-message-behavior-control';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { useElectronAutoLaunch } from '@/hooks/use-electron-auto-launch';
+// The theme tokens are imported by path, not by the `@/` alias: the StyleX
+// compiler links a theme file on its own and does not follow bundler aliases.
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontWeight, themeSpace } from '../../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  /** A row's helper copy: one line per reason. */
+  helper: { display: 'flex', flexDirection: 'column', gap: themeSpace[0.5] },
+  /** The line that says a thing cannot be done. */
+  helperError: { color: themeColors.destructive },
+  /** The box a spinner sits in, so the row does not resize while it works. */
+  spinnerBox: {
+    display: 'flex',
+    height: themeSpace[5],
+    width: themeSpace[9],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** A row's own label, in the row's weight. */
+  rowLabel: {
+    fontSize: '0.95rem',
+    fontWeight: themeFontWeight.medium,
+    lineHeight: 1.25,
+  },
+});
 
 type ElectronPlatform = 'darwin' | 'win32' | 'linux' | 'unknown';
 
@@ -584,12 +610,12 @@ export function MobileGeneralSettings() {
                 : t('settings.notifications.enableToggle')
             }
             helper={
-              <div className="flex flex-col gap-0.5">
+              <div {...stylex.props(styles.helper)}>
                 <span>{permissionLabel}</span>
                 {disableReason && !isProcessing ? <span>{disableReason}</span> : null}
                 {isElectron && permissionStatus !== 'granted' ? <span>{desktopHint}</span> : null}
                 {!notificationSupported ? (
-                  <span className="text-destructive">
+                  <span {...stylex.props(styles.helperError)}>
                     {isElectron
                       ? t('settings.notifications.unsupportedDesktop')
                       : t('settings.notifications.unsupported')}
@@ -599,7 +625,7 @@ export function MobileGeneralSettings() {
             }
           >
             {isProcessing ? (
-              <span className="flex h-5 w-9 items-center justify-center">
+              <span {...stylex.props(styles.spinnerBox)}>
                 <Spinner size="small" label={t('common.loading', 'Loading...')} />
               </span>
             ) : (
@@ -687,11 +713,7 @@ export function MobileGeneralSettings() {
             />
           </MobileSettingsRow>
           <MobileSettingsRow
-            label={
-              <p className="text-[0.95rem] font-medium leading-tight">
-                {t('settings.cache.clearCache.label')}
-              </p>
-            }
+            label={<p {...stylex.props(styles.rowLabel)}>{t('settings.cache.clearCache.label')}</p>}
             helper={t('settings.cache.clearCache.description')}
             onClick={() => clearCache.setDialogOpen(true)}
           />
@@ -703,7 +725,7 @@ export function MobileGeneralSettings() {
           <MobileSettingsRowGroup>
             <MobileSettingsRow label={t('settings.general.autoLaunch.label', 'Launch at startup')}>
               {autoLaunch.enabledLoading ? (
-                <span className="flex h-5 w-9 items-center justify-center">
+                <span {...stylex.props(styles.spinnerBox)}>
                   <Spinner size="small" label={t('common.loading', 'Loading...')} />
                 </span>
               ) : (
@@ -725,7 +747,7 @@ export function MobileGeneralSettings() {
               )}
             >
               {autoLaunch.hideWindowLoading ? (
-                <span className="flex h-5 w-9 items-center justify-center">
+                <span {...stylex.props(styles.spinnerBox)}>
                   <Spinner size="small" label={t('common.loading', 'Loading...')} />
                 </span>
               ) : (

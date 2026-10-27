@@ -2,8 +2,76 @@ import { useTranslation } from 'react-i18next';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import { Progress } from '@lody/ui/progress';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
 import type { UpdateBannerState } from '@/lib/electron-update-banner';
+import { themeColors } from '../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeShadow,
+  themeSpace,
+} from '../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  banner: {
+    borderRadius: themeRadius.lg,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.8)',
+    // A frosted panel: opaque where the platform cannot blur, translucent where
+    // it can.
+    backgroundColor: {
+      default: 'hsl(var(--background) / 0.95)',
+      '@supports (backdrop-filter: var(--tw))': 'hsl(var(--background) / 0.85)',
+    },
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2],
+    boxShadow: themeShadow.lg,
+    backdropFilter: 'blur(8px)',
+  },
+  title: {
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.semibold,
+    color: themeColors.foreground,
+  },
+  description: {
+    marginTop: themeSpace[1],
+    fontSize: themeFontSize.xs,
+    lineHeight: 1.625,
+    color: themeColors.mutedForeground,
+  },
+  progressRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: themeSpace[2],
+    marginTop: themeSpace[2],
+  },
+  percent: {
+    fontSize: '11px',
+    fontVariantNumeric: 'tabular-nums',
+    color: themeColors.mutedForeground,
+  },
+  changelog: {
+    display: 'inline-flex',
+    marginTop: themeSpace[1],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.primary,
+    textUnderlineOffset: '2px',
+    textDecorationLine: { default: 'none', ':hover': 'underline' },
+  },
+  actions: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: themeSpace[2],
+    marginTop: themeSpace[2],
+  },
+});
 
 /**
  * Floating sidebar notice for a desktop update that is downloading or ready to
@@ -28,18 +96,13 @@ export function SidebarUpdateBanner({
   const isDownloading = stage === 'downloading';
 
   return (
-    <div
-      className={cn(
-        'rounded-lg border border-border/80 bg-background/95 px-3 py-2 shadow-lg backdrop-blur-sm',
-        'supports-[backdrop-filter]:bg-background/85'
-      )}
-    >
-      <div className="text-sm font-semibold text-foreground">
+    <div {...stylex.props(styles.banner)}>
+      <div {...stylex.props(styles.title)}>
         {isDownloading
           ? t('sidebar.updateDownloading.title', 'Downloading update')
           : t('sidebar.updateReady.title', 'Update ready')}
       </div>
-      <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
+      <div {...stylex.props(styles.description)}>
         {isDownloading
           ? t(
               'sidebar.updateDownloading.description',
@@ -49,21 +112,17 @@ export function SidebarUpdateBanner({
           : t('sidebar.updateReady.description', 'Restart to update to {{version}}.', { version })}
       </div>
       {isDownloading && percent != null ? (
-        <div className="mt-2 flex items-center gap-2">
+        <div {...stylex.props(styles.progressRow)}>
           <Progress value={percent} className="h-1 flex-1" />
-          <span className="text-[11px] tabular-nums text-muted-foreground">
+          <span {...stylex.props(styles.percent)}>
             {t('sidebar.updateDownloading.percent', '{{percent}}%', { percent })}
           </span>
         </div>
       ) : null}
-      <button
-        type="button"
-        onClick={onViewChangelog}
-        className="mt-1 inline-flex text-xs font-medium text-primary underline-offset-2 hover:underline"
-      >
+      <button type="button" onClick={onViewChangelog} {...stylex.props(styles.changelog)}>
         {t('sidebar.updateReady.changelog', 'View changelog')}
       </button>
-      <div className="mt-2 flex items-center justify-end gap-2">
+      <div {...stylex.props(styles.actions)}>
         <Button type="button" variant="ghost" size="small" className="h-7 px-2.5" onClick={onLater}>
           {t('sidebar.updateReady.later', 'Later')}
         </Button>

@@ -66,6 +66,18 @@ const styles = stylex.create({
     paddingTop: space[2],
   },
   rows: { display: 'flex', flexDirection: 'column', gap: space[1] },
+  /** Said to a screen reader and to nobody else. */
+  srOnly: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    margin: '-1px',
+    padding: 0,
+    overflow: 'hidden',
+    clipPath: 'inset(50%)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
   /**
    * One labelled setting: the card rung, so the sheet's rows lift off the modal
    * the way a settings card does. Picker rows drop their inline expansion
@@ -189,8 +201,8 @@ export function MobileRunConfigSheet({
         )}
         onCloseAutoFocus={(event) => event.preventDefault()}
       >
-        <DrawerTitle className="sr-only">{title}</DrawerTitle>
-        <DrawerDescription className="sr-only">{title}</DrawerDescription>
+        <DrawerTitle {...stylex.props(styles.srOnly)}>{title}</DrawerTitle>
+        <DrawerDescription {...stylex.props(styles.srOnly)}>{title}</DrawerDescription>
         <header {...stylex.props(styles.header)}>
           <h2 {...stylex.props(styles.title)}>{title}</h2>
         </header>

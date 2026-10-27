@@ -1,0 +1,51 @@
+{
+  "$comment": "Targets for the Tailwind -> StyleX visual regression harness. `titles` are Storybook title prefixes; a story matches when its title starts with one of them. `viewports` and `themes` are the axes every matched story is captured on.",
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "titles": [
+    "AI GUI/",
+    "AI/",
+    "Chat/",
+    "Components/BaseHeader",
+    "Components/LodySidebar",
+    "Components/MobileSidebarDrawer",
+    "Components/SessionList",
+    "Components/Sidebar/",
+    "Components/TaskList",
+    "Components/TabPillStrip",
+    "DiffViewer/CommentReferenceChip",
+    "Design System/",
+    "Effects/",
+    "Files/",
+    "LocalProjects/",
+    "Mentions/",
+    "Mobile/",
+    "Onboarding/ThemeScreen",
+    "Preview/",
+    "Projects/",
+    "Sessions/AgentWarningNotice",
+    "Sessions/AskUserQuestionCard",
+    "Sessions/ChatMessageSelection",
+    "Sessions/ConversationDiffPanel",
+    "Sessions/MessageQueueDisplay",
+    "Sessions/ScheduledTasksPanel",
+    "Sessions/SessionChatInputArea",
+    "Sessions/SessionInfoBar",
+    "Sessions/SessionTabBar",
+    "Sessions/ToolCallSteps",
+    "Theme/",
+    "Workspace/Schedule",
+    "Workspace/Schedules"
+  ]
+}
