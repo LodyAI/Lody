@@ -1,4 +1,4 @@
-# PR20-C：换代接收与发送交接
+# PR20-C：接收新 epoch 时保持发送
 
 Status: proposed
 Translation: current
@@ -8,74 +8,28 @@ PR: https://github.com/LodyAI/Lody/pull/1954
 
 ## 摘要
 
-M2 在已验证 epoch 变化时停发，但还不能恢复。PR20-C 接收已提交的暂存信封，将桌面和 CLI
-现有房间交给已安装的新代，不替换 Repo、不删除本地队列。逐工作区 gate 拒绝旧 provider
-结果，等待实际 SDK 操作收束，确认新钥安装，替换会话后才恢复 seal。失败保持可见且可重试；
-撤销和发布动作仍属于 PR20-D。
+Owner 的可用性优先 MVP 决定覆盖原强制停发屏障。rotationRequired 只提示管理员手动操作；合格设备在新钥接收重试期间继续使用已发布的旧 epoch 封装。房间保留稳定 provider，每次操作开始时选择已安装 epoch。新钥读回确认后同步更新选择；失败或超时保留旧发送和本地数据。没有自动签署或已保存格式回退。
 
-## 权限与顺序
+## 权限与选择
 
-原生工作区持有已验证账本、已安装密钥及接收 journal。locator 来自真实发布原件，KeyReceiver
-重查签名、发布绑定、当前接收资格、HPKE 和 commitment。仅缺少当前密钥时进入 staging。
-快照加入缺少该发布原件、以及后来加入而不在该组的设备，仍走 mailbox／历史恢复。服务器
-进度从不授予权限。
+原生工作区拥有已验证账本、安装密钥和接收日志。Staging locator 来自真实 publication 原件，KeyReceiver 复查签名、publication、recipient、HPKE 和 commitment，历史 mailbox／history 恢复保留。即使使用较早的已发布 epoch，每次 seal 仍在加密前和签名后检查当前成员与设备权限；撤销、移除、Guest 和 Recovery 写者仍被拒绝。签名期间出现真实后续账本不再使合法的旧 epoch 密文失败。Namespace、线格式、签名域、commitment 和原件不变。
 
-每个 renderer／CLI 工作区拥有一个 gate 及 Promise SDK 交接。epoch 变化或 rotationRequired
-同步停发并退役旧 provider。等待已准入 crypto 与实际房间 I/O 结束后，安装并回读确认当前
-钥，建立新 provider／会话，然后恢复 seal。namespace 跨 epoch 保持 genesis 绑定，每次 seal
-仍由 core 核对当前权限。旧 transport 回调绑定其代次。
+每次操作只捕获一个 epoch。接收与真实读回确认之后，同步更新选择，无须 I/O、关闭 transport、重建 Repo 或清空队列。在途旧操作可完成合法的旧 epoch 密文。重启时原生 status 返回确认可用的 writeEpoch，因此新钥缺失不再丢弃可用的本地副本；身份丢失或没有任何可用密钥不能绕过。
 
-桌面已有内容会话时只先刷新账本；冷启动缺钥时没有旧会话，可以直接安装。renderer 保留
-Repo、Mirror、游标及待发数据，重试按钮和重连驱动同一有限尝试。CLI 先恢复本地存储再准入
-seal，避免 seal 等 refresh、refresh 的屏障又等同一 seal。上线回调只合并刷新请求，不等待
-嵌套换代。
+移除旧方案新增的 SDK 强 close 补丁、drain／restart API 及其过时测试，无 SDK 升级或外层镜像补丁要求。选择前进时使活跃 token owner 失效，桌面后续 token owner 的缓存身份也包含 epoch。仅 rotationRequired 变化不使 token 失效。
 
-## 实际 SDK 收束
+## 失败隔离
 
-锁定的 streams-crdt 0.19.2 和 loro-repo 0.25.0 关闭订阅时不等待全部实际操作。挂起真实
-POST 的实验复现 close 先返回；SDK 代码也证明旧游标仍可能迟到保存。两个同版本 pnpm 补丁
-增加显式 drainOnClose，普通传输保留默认 false。
+- 触发：启动、已验证 epoch 前进、重连或明确重试。手动签署及设置红点／按钮留给 20-D。
+- Owner：现有 renderer／CLI 工作区及原生 scope 中的单次接收／选择；没有全局网络锁或新重试 daemon。
+- 取消：十秒等待期限不代表原生任务结束；最多保留一个未完成安装 owner。超时、过时和迟到读回不得更新选择。Close 使选择回调失效并等待原生／加密工作收束。
+- 交接：先安装并确认，再同步更新选择；没有需要破坏后回滚的步骤，原 provider 和 transport 继续可用。
+- 失败：接收错误、缺钥和超时可见且可重试，同时用已验证旧 epoch 发送；其他工作区独立。本地存储／账本验证失败仍保留既有安全检查。
 
-CRDT 退役关闭新准入，持有完整启动／读取／直接操作，并等待它们及稳定的 opQueue 尾部。
-Repo 持有所有创建的 stream，包括临时建房，在等待前关闭准入；移除的 stream 直到强关闭
-成功才解除持有，并拒绝迟到的会话创建。快照保持禁用。包版本、线算法、签名和持久格式不变。
+此方案接受 owner 的 MVP 取舍：持有旧密钥的被撤销设备能解开它获取的密文，访问边界由服务端凭据／token 权限和绝对过期承担。不允许明文 fallback 或恢复撤销写权。
 
-未把第二次普通 close 当作证明：旧 SDK 失败时也会清空会话表。超时或清空队列均不能证明
-实际操作结束；新 opt-in receipt 等待的正是实际工作。
+## 证据与边界
 
-## 故障隔离与迁移
+确定性回归覆盖同一 provider 持续发送、失败、超时／迟到结果、缺钥与过时代次、另一个工作区发送、旧钥冷启动，以及真实 SQLite／加密重启和 committed staging 接收。改变的行为均撤回修复先 RED，再 GREEN。本地边界验证不等于安装产品验收；真实网关撤销／长连接、系统钥匙串、双设备安装包、跨平台和完整十五分钟访问上限仍未验证。完整仓库测试交给 CI。
 
-- 触发：已验证换代、启动、重连或显式重试。
-- 拥有者：受影响工作区的 gate 和原有原生／transport Scope；不在全局锁等待网络，不另建
-  Repo 或重试 daemon。
-- 取消：结束等待不代表请求停止。gate 关闭先退役代次再等已准入工作，原生 Scope 继续持有
-  crypto。
-- 交接：收束、新钥回读及新会话 receipt 全部成功才恢复发送。旧完成事件不能更新后继代次。
-- 恢复：drain／install／restart 失败保持停发，在同一拥有者重试。其他工作区照常发送；
-  本地数据及签名原件保留，注销／退出仍归原有终止拥有者。
-
-这不是 Repo 消费者的 Effect 迁移。core 接收保持原生 Effect，共享 Legacy gate 只组合
-既有 Promise SDK 拥有者。消费者迁移仍按[路线图](2026-09-27-effect-lifecycle-migration-roadmap.md#unit-ledger)
-延后，不增加执行 runtime、远端签名回调或密钥导出。
-
-## 证据与限制
-
-新增回归先撤回对应修复确认 RED，再验证 GREEN。受控测试覆盖逐步重试、旧 provider 和
-重启结果、工作区挂起时另一工作区发送、冷启动缺钥、发布者 Scope 关闭后的真实 SQLite／
-crypto 暂存接收，以及真实 SDK 上传／读取／游标／临时建房收束。真实 Repo／IndexedDB
-测试进一步证明挂起加密传输不影响另一工作区发送。受影响检查与独立审查绑定 PR 精确 head。
-
-真实网关到期／长连接、安装后双设备换代、系统钥匙串、跨平台打包及总十五分钟撤权界限
-尚未验证，完整仓库测试交 CI。本项只替换[M2 note](2026-10-22-e2ee-m2-product-integration.md)
-中的停发限制，不代表 draft Spec 获批或启用 PR20-D。
-
-## 采用与退出边界
-
-两个精确版本补丁都提供能力标记；缺少任一补丁时，加密 transport 拒绝启动。
-后续私有外层工作区采用此公开版本时，必须同步镜像两个补丁；嵌套配置不会继承。
-换代先使 token 失效再等待关闭，桌面缓存键额外包含 epoch，避免删除未生效时复用旧 token。
-若换代已移除 adapter 但 close 失败，退出仍保留并关闭该 owner，再销毁 Repo。
-
-初次同步的 deadline 只结束等待者，原始任务仍归强 close 收束；fake timer 回归覆盖
-超时后仍在保存的游标。强 close 也等待 SSE release；release 超时仅返回可重试失败，
-保留 owner，不能作为新代次发送许可。真实 SSE cancel fixture 覆盖失败与释放后重试。
+core 的 advisory 权限独立在 [#1956](https://github.com/LodyAI/Lody/pull/1956) 审查；文档旧 epoch 兼容属于本 PR，两者无分支堆栈依赖。此 owner 指令覆盖 [M2](2026-10-22-e2ee-m2-product-integration.md) 的停发解释。原生 Effect consumer 迁移仍由 [路线图](2026-09-27-effect-lifecycle-migration-roadmap.md#unit-ledger) 单独负责。

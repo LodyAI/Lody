@@ -66,8 +66,6 @@ export async function createCliStreamsTransport(args: {
       typeof content.snapshotUpload?.canUpload !== 'function')
   )
     throw new WorkspaceStreamsConfigurationError('Incomplete workspace Streams content protection');
-  if (content.mode === 'protected' && StreamsTransportAdapter.roomDrainVersion !== 1)
-    throw new WorkspaceStreamsConfigurationError('Workspace room drain capability is unavailable');
   const tokenProvider = args.tokenProvider;
   const gatewayBaseUrl = await prepareCliStreamsGatewayBaseUrl(tokenProvider);
 
@@ -75,7 +73,6 @@ export async function createCliStreamsTransport(args: {
     gatewayBaseUrl,
     tokenProvider,
     adapter: new StreamsTransportAdapter({
-      drainOnClose: content.mode === 'protected',
       diagnostics: (event) => {
         const diagnostic = getLoroSyncDiagnostic(event);
         if (diagnostic) {

@@ -60,11 +60,7 @@ function boundAuthority(
         () => new ContentError({ code: 'unauthorized' })
       );
       const currentEpoch = view.inspectState().epoch.number;
-      if (
-        mode === 'seal'
-          ? !permissions.maySealNewContent || epoch.epoch !== currentEpoch
-          : !permissions.mayWriteDocument || epoch.epoch > currentEpoch
-      )
+      if (!permissions.mayWriteDocument || epoch.epoch > currentEpoch)
         return yield* fail('unauthorized');
     }
     return author;

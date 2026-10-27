@@ -44,8 +44,8 @@
   Activation refreshes the verified ledger and mailbox and acknowledges only an
   installed current key; temporary failure leaves the same pairing retryable.
 
-- Stop seals on rotation; drain I/O, confirm keys, replace sessions, resume.
-  Keep data; retry. [M3](../../../../../.agents/notes/proposed/architecture/2026-10-27-e2ee-epoch-receive-barrier.md).
+- Retain old-epoch sends; select confirmed keys per operation.
+  Rotation hints never pause. [M3](../../../../../.agents/notes/proposed/architecture/2026-10-27-e2ee-epoch-receive-barrier.md).
 - Prepared bindings cannot start content replicas. Activation runs only the native
   ledger/key receiver, verifies a current installed key, closes that temporary owner,
   THEN writes `activation.json`; Fleet may attach rooms. The marker is no authority:

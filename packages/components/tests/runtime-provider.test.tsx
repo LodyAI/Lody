@@ -143,8 +143,6 @@ function runtimeFixture() {
     disposed: false,
     metadata: new Map([['session', 'already prepared']]),
     setAuthToken: async () => {},
-    suspendEncryptedContent: async () => {},
-    resumeEncryptedContent: async () => {},
     async dispose() {
       this.disposed = true;
     },
@@ -298,6 +296,43 @@ describe('RuntimeProvider warm workspace preparation', () => {
     } as unknown as E2eeWorkspaceRuntime;
     await render();
     expect(installed).toBe(true);
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    expect(prepared.disposed).toBe(false);
+  });
+
+  it('opens with a retained key while current-key reception fails', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    const status = {
+      genesisHash: '11'.repeat(32),
+      epoch: 1,
+      hasCurrentKey: false,
+      writeEpoch: 0,
+      rotationRequired: false,
+    };
+    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+    environment.e2eeWorkspaces!.runtime = {
+      open: async () => status,
+      status: async () => status,
+      refresh: async () => {
+        throw new Error('temporary staging failure');
+      },
+      close: async () => {},
+    } as unknown as E2eeWorkspaceRuntime;
+    await render();
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    expect(prepared.disposed).toBe(false);
+    expect(container.querySelector('[role="status"]')?.textContent).toContain(
+      'e2ee.content.keyUpdateRequired'
+    );
+    environment.e2eeWorkspaces!.runtime!.refresh = async () => ({
+      ...status,
+      hasCurrentKey: true,
+      writeEpoch: 1,
+    });
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('[role="status"] button')!.click()
+    );
     expect(store.get(runtimeAtom)).toBe(prepared);
     expect(prepared.disposed).toBe(false);
   });

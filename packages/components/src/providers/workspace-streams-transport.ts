@@ -79,10 +79,7 @@ export const createWorkspaceStreamsTransport = (
     throw new WorkspaceStreamsConfigurationError('Incomplete workspace Streams content protection');
   }
 
-  if (content.mode === 'protected' && StreamsTransportAdapter.roomDrainVersion !== 1)
-    throw new WorkspaceStreamsConfigurationError('Workspace room drain capability is unavailable');
   return new StreamsTransportAdapter({
-    drainOnClose: content.mode === 'protected',
     diagnostics: (event) => {
       const diagnostic = getLoroSyncDiagnostic(event);
       if (diagnostic) {

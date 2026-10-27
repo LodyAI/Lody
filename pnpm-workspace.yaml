@@ -284,8 +284,6 @@ packageExtensions:
 packageManagerStrictVersion: true
 
 patchedDependencies:
-  '@loro-dev/streams-crdt@0.19.2': patches/@loro-dev__streams-crdt@0.19.2.patch
-  'loro-repo@0.25.0': patches/loro-repo@0.25.0.patch
   '@loro-dev/sqlite-riverrun@0.3.0': patches/@loro-dev__sqlite-riverrun@0.3.0.patch
   pdfjs-dist@6.3.289: patches/pdfjs-dist@6.3.289.patch
   '@shinyoshiaki/binary-data@0.6.1': patches/@shinyoshiaki__binary-data@0.6.1.patch

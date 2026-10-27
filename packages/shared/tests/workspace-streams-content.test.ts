@@ -1,3 +1,4 @@
+import { LoroDoc } from 'loro-crdt';
 import { describe, expect, it, vi } from 'vitest';
 import { getMachineFlockDocId } from '../src/machine-flock';
 import { getWorkspaceFlockDocId } from '../src/workspace-flock';
@@ -6,12 +7,6 @@ import {
   encryptedWorkspaceRoom,
   createWorkspaceEpochTransitionLegacy,
 } from '../src/workspace-streams-content';
-import { LoroDoc } from 'loro-crdt';
-import {
-  StreamsCrdt,
-  createLoroDocAdapter,
-  createInitialRemoteCursor,
-} from '@loro-dev/streams-crdt/loro';
 
 describe('encrypted workspace room domains', () => {
   const workspace = 'room-owner' as WorkspaceId;
@@ -48,344 +43,118 @@ describe('encrypted workspace room domains', () => {
   });
 });
 
-// The same gate is consumed at the renderer and machine SDK boundaries.
-describe('workspace epoch handoff', () => {
-  const status = { epoch: 1, rotationRequired: false, hasCurrentKey: true };
-  const request = {
-    context: { protocol: 'loro-streams-crdt-payload-protection', version: 2, kind: 'update_batch' },
-    plaintext: new Uint8Array([7]),
-    additionalData: () => new Uint8Array(),
-  } as const;
-  const native = () => ({
-    maxSealOverheadBytes: 1,
-    seal: async () => ({ header: new Uint8Array([3]), sealed: new Uint8Array([9]) }),
-    open: async () => new Uint8Array([7]),
-  });
-
-  it('discards late old-provider seal and open results, drains, then uses only new providers', async () => {
-    const gate = createWorkspaceEpochTransitionLegacy({ epoch: 0 });
-    const seal = Promise.withResolvers<{ header: Uint8Array; sealed: Uint8Array }>();
-    const open = Promise.withResolvers<Uint8Array>();
-    const old = gate.provider(() => ({
-      ...native(),
-      seal: () => seal.promise,
-      open: () => open.promise,
-    }));
-    const sealed = old.seal(request).then(
-      () => 'accepted',
-      (error: Error) => error.message
-    );
-    const opened = old
-      .open({
-        context: request.context,
-        sealed: new Uint8Array([9]),
-        header: new Uint8Array([3]),
-        additionalData: new Uint8Array(),
-      })
-      .then(
-        () => 'accepted',
-        (error: Error) => error.message
-      );
+const request = {
+  context: {
+    protocol: 'loro-streams-crdt-payload-protection',
+    version: 2,
+    kind: 'update_batch',
+  } as const,
+  plaintext: new Uint8Array([7]),
+  additionalData: () => new Uint8Array(),
+};
+const status = { epoch: 1, rotationRequired: false, hasCurrentKey: true };
+const native = (epoch: number) => ({
+  maxSealOverheadBytes: 4096,
+  seal: async () => ({ header: new Uint8Array([3]), sealed: new Uint8Array([epoch]) }),
+  open: async () => new Uint8Array([epoch]),
+});
+describe('availability-first epoch selection', () => {
+  it('keeps rotation hints and pending reception available on the same room provider', async () => {
+    const gate = createWorkspaceEpochTransitionLegacy({ epoch: 0, rotationRequired: true });
+    const provider = gate.provider(native);
+    expect((await provider.seal(request)).sealed).toEqual(new Uint8Array([0]));
     gate.observe(status);
-    const order: string[] = [];
-    const handoff = gate.transition({
-      drain: async () => {
-        order.push('drain');
-      },
-      install: async () => {
-        order.push('install');
-        return status;
-      },
-      restart: async () => {
-        order.push('restart');
-      },
-    });
-    expect(order).toEqual([]);
-    seal.resolve({ header: new Uint8Array([3]), sealed: new Uint8Array([9]) });
-    open.resolve(new Uint8Array([7]));
-    expect(await sealed).toBe('e2ee_epoch_superseded');
-    expect(await opened).toBe('e2ee_epoch_superseded');
-    expect(await handoff).toBe(true);
-    expect(order).toEqual(['drain', 'install', 'restart']);
-    await expect(old.seal(request)).rejects.toThrow('e2ee_epoch_superseded');
-    expect(await gate.provider(native).seal(request)).toMatchObject({
-      sealed: new Uint8Array([9]),
-    });
-    expect(gate.epoch()).toBe(1);
-    expect(gate.phase()).toBe('ready');
-  });
-
-  it.each(['drain', 'install', 'restart'] as const)(
-    'retains edits and retries after %s failure',
-    async (step) => {
-      const gate = createWorkspaceEpochTransitionLegacy({ epoch: 0 });
-      const doc = new LoroDoc();
-      try {
-        gate.observe(status);
-        doc.getText('draft').insert(0, 'retained draft');
-        doc.commit();
-        let failed = false;
-        const failOnce = (at: string) => {
-          if (at === step && !failed) {
-            failed = true;
-            throw new Error('temporary');
-          }
-        };
-        const ports = {
-          drain: async () => {
-            failOnce('drain');
-          },
-          install: async () => {
-            failOnce('install');
-            return status;
-          },
-          restart: async () => {
-            failOnce('restart');
-          },
-        };
-        await expect(gate.transition(ports)).rejects.toThrow('temporary');
-        expect(gate.phase()).toBe('failed');
-        await expect(gate.provider(native).seal(request)).rejects.toThrow(
-          'e2ee_key_update_required'
-        );
-        expect(await gate.transition(ports)).toBe(true);
-        expect(doc.getText('draft').toString()).toBe('retained draft');
-        expect(await gate.provider(native).seal(request)).toMatchObject({
-          sealed: new Uint8Array([9]),
-        });
-      } finally {
-        doc.free();
-      }
-    }
-  );
-
-  it('keeps another workspace sending while one handoff waits for an actual operation', async () => {
-    const blocked = createWorkspaceEpochTransitionLegacy({ epoch: 0 });
-    const independent = createWorkspaceEpochTransitionLegacy({ epoch: 0 });
-    const release = Promise.withResolvers<void>();
     const entered = Promise.withResolvers<void>();
-    blocked.observe(status);
-    const handoff = blocked.transition({
-      drain: async () => {
+    const release = Promise.withResolvers<void>();
+    const work = gate.transition({
+      install: async () => {
         entered.resolve();
         await release.promise;
+        return status;
       },
-      install: async () => status,
-      restart: async () => {},
     });
     await entered.promise;
-    expect(await independent.provider(native).seal(request)).toMatchObject({
-      sealed: new Uint8Array([9]),
-    });
-    expect(blocked.phase()).toBe('draining');
+    const other = createWorkspaceEpochTransitionLegacy({ epoch: 0 });
+    expect((await other.provider(native).seal(request)).sealed).toEqual(new Uint8Array([0]));
+    await other.close();
+    expect((await provider.seal(request)).sealed).toEqual(new Uint8Array([0]));
     release.resolve();
-    expect(await handoff).toBe(true);
-    expect(await blocked.provider(native).seal(request)).toMatchObject({
-      sealed: new Uint8Array([9]),
-    });
+    expect(await work).toBe(true);
+    expect((await provider.seal(request)).sealed).toEqual(new Uint8Array([1]));
+    await gate.close();
   });
-
-  it('does not reopen after a superseded restart completes late', async () => {
+  it('keeps local edits and both workspaces sending after failed reception, then retries', async () => {
     const gate = createWorkspaceEpochTransitionLegacy({ epoch: 0 });
-    const entered = Promise.withResolvers<void>();
-    const release = Promise.withResolvers<void>();
-    gate.observe(status);
-    const old = gate
-      .transition({
-        drain: async () => {},
-        install: async () => status,
-        restart: async () => {
-          entered.resolve();
-          await release.promise;
-        },
-      })
-      .catch((error: Error) => error.message);
-    await entered.promise;
-    gate.observe({ ...status, epoch: 2 });
-    release.resolve();
-    expect(await old).toBe('e2ee_epoch_superseded');
-    expect(gate.phase()).toBe('failed');
-    expect(
-      await gate.transition({
-        drain: async () => {},
-        install: async () => ({ ...status, epoch: 2 }),
-        restart: async () => {},
-      })
-    ).toBe(true);
-    expect(gate.epoch()).toBe(2);
-  });
-});
-
-// Real SDK operations, not mocked close receipts: no network or wall-clock wait.
-describe('opt-in SDK epoch retirement', () => {
-  it.each(['upload', 'cursor', 'read', 'provision', 'deadline'] as const)(
-    'joins actual %s work before permitting a successor',
-    async (operation) => {
-      if (operation === 'deadline')
-        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
-      const entered = Promise.withResolvers<void>();
-      const release = Promise.withResolvers<void>();
-      const doc = new LoroDoc();
-      const url = 'https://epoch.synthetic.invalid/ds/content/room';
-      let cursorSaved = false;
-      const stream = new StreamsCrdt({
-        streamUrl: url,
-        adapter: createLoroDocAdapter(doc),
-        drainOnClose: true,
-        remoteCursorStore: {
-          load: async () =>
-            createInitialRemoteCursor({
-              streamUrl: url,
-              nextOffset: '00000000000000000000',
-              serverLowerBoundVersion: {},
-            }),
-          save: async () => {
-            if (operation === 'cursor' || operation === 'deadline') {
-              entered.resolve();
-              await release.promise;
-            }
-            cursorSaved = true;
-          },
-        },
-        fetch: async (_input, init) => {
-          if (operation !== 'cursor' && operation !== 'deadline') {
-            entered.resolve();
-            await release.promise;
-          }
-          const headers = new Headers(init?.headers);
-          return new Response(null, {
-            status: init?.method === 'PUT' ? 201 : 200,
-            headers: {
-              'Content-Type': 'application/octet-stream',
-              'Stream-Next-Offset': '00000000000000000100',
-              'Stream-Up-To-Date': 'true',
-              'Producer-Epoch': headers.get('Producer-Epoch') ?? '0',
-              'Producer-Seq': headers.get('Producer-Seq') ?? '0',
-            },
-          });
-        },
-      });
-      doc.getText('draft').insert(0, 'saved local content');
+    const other = createWorkspaceEpochTransitionLegacy({ epoch: 0 });
+    const doc = new LoroDoc();
+    const provider = gate.provider(native);
+    try {
+      doc.getText('draft').insert(0, 'saved edit');
       doc.commit();
-      const work =
-        operation === 'upload'
-          ? stream.appendWriteOnly()
-          : operation === 'provision'
-            ? stream.createStream()
-            : stream.catchup();
-      let stopped = false;
-      try {
-        await entered.promise;
-        if (operation === 'deadline') {
-          await vi.advanceTimersByTimeAsync(120_000);
-          expect((await work).ok).toBe(false);
-        }
-        const close = stream.close().then(() => {
-          stopped = true;
-        });
-        // The close continuation is queued before this checkpoint if it returned
-        // early. The held raw operation makes a correct close remain pending.
-        await new Promise<void>((resolve) => setImmediate(resolve));
-        expect(stopped).toBe(false);
-        release.resolve();
-        const result = await work;
-        await close;
-        expect(result.ok).toBe(operation !== 'deadline');
-        expect(stopped).toBe(true);
-        if (operation === 'cursor') expect(cursorSaved).toBe(true);
-        expect(doc.getText('draft').toString()).toBe('saved local content');
-      } finally {
-        release.resolve();
-        await work;
-        await stream.close();
-        doc.free();
-        if (operation === 'deadline') vi.useRealTimers();
-      }
+      gate.observe(status);
+      await expect(
+        gate.transition({
+          install: async () => {
+            throw new Error('temporary');
+          },
+        })
+      ).rejects.toThrow('temporary');
+      expect(gate.phase()).toBe('failed');
+      expect((await provider.seal(request)).sealed).toEqual(new Uint8Array([0]));
+      expect((await other.provider(native).seal(request)).sealed).toEqual(new Uint8Array([0]));
+      expect(doc.getText('draft').toString()).toBe('saved edit');
+      expect(await gate.transition({ install: async () => status })).toBe(true);
+      expect((await provider.seal(request)).sealed).toEqual(new Uint8Array([1]));
+    } finally {
+      doc.free();
+      await gate.close();
+      await other.close();
     }
-  );
-});
-
-it('retains an SSE release failure for a successful close retry', async () => {
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
-  const liveEntered = Promise.withResolvers<void>();
-  const cancelEntered = Promise.withResolvers<void>();
-  const release = Promise.withResolvers<void>();
-  let cancelled = false;
-  const url = 'https://epoch.synthetic.invalid/ds/content/sse-room';
-  const doc = new LoroDoc();
-  const stream = new StreamsCrdt({
-    streamUrl: url,
-    adapter: createLoroDocAdapter(doc),
-    drainOnClose: true,
-    remoteCursorStore: {
-      load: async () =>
-        createInitialRemoteCursor({
-          streamUrl: url,
-          nextOffset: '00000000000000000000',
-          serverLowerBoundVersion: {},
-        }),
-      save: async () => {},
-    },
-    fetch: async (input) => {
-      if (new URL(String(input)).searchParams.get('live') === 'sse') {
-        liveEntered.resolve();
-        return new Response(
-          new ReadableStream({
-            start(controller) {
-              controller.enqueue(new TextEncoder().encode(': connected\n\n'));
-            },
-            async cancel() {
-              cancelEntered.resolve();
-              await release.promise;
-              cancelled = true;
-            },
-          }),
-          {
-            status: 200,
-            headers: {
-              'Content-Type': 'text/event-stream',
-              'Stream-Next-Offset': '00000000000000000100',
-            },
-          }
-        );
-      }
-      return new Response(null, {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/octet-stream',
-          'Stream-Next-Offset': '00000000000000000100',
-          'Stream-Up-To-Date': 'true',
-        },
-      });
-    },
   });
-  let close: Promise<string> | undefined;
-  try {
-    expect((await stream.join()).ok).toBe(true);
-    await liveEntered.promise;
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    let stopped = false;
-    close = stream.close().then(
-      () => {
-        stopped = true;
-        return 'success';
-      },
-      () => 'failed'
-    );
-    await cancelEntered.promise;
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(stopped).toBe(false);
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(await close).toBe('failed');
-    expect(cancelled).toBe(false);
-    release.resolve();
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(cancelled).toBe(true);
-    await stream.close();
-  } finally {
-    release.resolve();
-    await close;
-    vi.useRealTimers();
-    doc.free();
-  }
+  it('times out without stopping sends and discards a late installation receipt', async () => {
+    vi.useFakeTimers();
+    const gate = createWorkspaceEpochTransitionLegacy({ epoch: 0, timeoutMs: 20 });
+    const release = Promise.withResolvers<typeof status>();
+    try {
+      gate.observe(status);
+      const work = gate.transition({ install: () => release.promise });
+      const result = work.catch((error: Error) => error.message);
+      await vi.advanceTimersByTimeAsync(20);
+      expect(await result).toBe('e2ee_key_update_timeout');
+      await expect(
+        gate.transition({
+          install: async () => {
+            throw new Error('duplicate installation owner');
+          },
+        })
+      ).resolves.toBe(false);
+      expect((await gate.provider(native).seal(request)).sealed).toEqual(new Uint8Array([0]));
+      release.resolve(status);
+      await release.promise;
+      await Promise.resolve();
+      expect(gate.epoch()).toBe(0);
+      expect(await gate.transition({ install: async () => status })).toBe(true);
+      expect(gate.epoch()).toBe(1);
+    } finally {
+      release.resolve(status);
+      await gate.close();
+      vi.useRealTimers();
+    }
+  });
+  it('never selects a keyless or superseded epoch and can retry the newer verified status', async () => {
+    const gate = createWorkspaceEpochTransitionLegacy({ epoch: 0 });
+    gate.observe(status);
+    expect(
+      await gate.transition({ install: async () => ({ ...status, hasCurrentKey: false }) })
+    ).toBe(false);
+    expect((await gate.provider(native).seal(request)).sealed).toEqual(new Uint8Array([0]));
+    const release = Promise.withResolvers<typeof status>();
+    const work = gate.transition({ install: () => release.promise });
+    gate.observe({ ...status, epoch: 2 });
+    release.resolve(status);
+    expect(await work).toBe(false);
+    expect(gate.epoch()).toBe(0);
+    expect(await gate.transition({ install: async () => ({ ...status, epoch: 2 }) })).toBe(true);
+    await gate.close();
+  });
 });

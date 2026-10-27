@@ -42,13 +42,10 @@ describe('desktop E2EE content epoch safety', () => {
       access.updateStatus({ epoch: 1, rotationRequired: false, hasCurrentKey: true });
       await access.transition({
         // Even a cache row that could not be removed cannot select the next token.
-        drain: () => first.close(),
         install: async () => ({ epoch: 1, rotationRequired: false, hasCurrentKey: true }),
-        restart: async () => {
-          successor = access.e2ee.createTokenProvider(new AbortController().signal);
-        },
       });
-      expect(await successor?.getToken()).toBe('epoch-token-2');
+      successor = access.e2ee.createTokenProvider(new AbortController().signal);
+      expect(await successor.getToken()).toBe('epoch-token-2');
       expect(access.e2ee.bucketId()).toBe('encrypted-content');
     } finally {
       await first.close();
@@ -103,7 +100,7 @@ describe('desktop E2EE content epoch safety', () => {
   it.each([
     { epoch: 1, rotationRequired: false },
     { epoch: 0, rotationRequired: true },
-  ])('retains local edits and stops encrypted sends after %j', async (status) => {
+  ])('retains local edits and continues encrypted sends after %j', async (status) => {
     const doc = new LoroDoc();
     const received: Uint8Array[] = [];
     let updateRequired = false;
@@ -136,19 +133,16 @@ describe('desktop E2EE content epoch safety', () => {
         additionalData: () => new Uint8Array([3]),
       };
       await room.config.provider.seal(request);
-      const accepted = received.slice();
+      const accepted = received.length;
       access.updateStatus(status);
       doc.getText('draft').insert(0, 'saved locally while keys update');
       doc.commit();
-      await expect(
-        room.config.provider.seal({ ...request, plaintext: doc.export({ mode: 'update' }) })
-      ).rejects.toThrow('e2ee_key_update_required');
-      // An older status response cannot reopen the stopped sender.
+      await room.config.provider.seal({ ...request, plaintext: doc.export({ mode: 'update' }) });
       access.updateStatus({ epoch: 0, rotationRequired: false });
-      await expect(room.config.provider.seal(request)).rejects.toThrow('e2ee_key_update_required');
-      expect(received).toEqual(accepted);
+      await room.config.provider.seal(request);
+      expect(received.length).toBe(accepted + 2);
       expect(doc.getText('draft').toString()).toBe('saved locally while keys update');
-      expect(updateRequired).toBe(true);
+      expect(updateRequired).toBe(status.epoch > 0);
     } finally {
       doc.free();
     }

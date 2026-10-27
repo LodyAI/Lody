@@ -343,10 +343,7 @@ export interface LoroDocumentManagerOptions {
   /** LoroDoc Streams cursors for this process; see `DocumentCursorScope`. */
   documentRemoteCursorStore?: RemoteCursorStore | null;
   remoteStreamsAttached?: boolean;
-  encryptedWorkspace?: Pick<
-    CliE2eeWorkspaceLegacy,
-    'content' | 'bucketId' | 'refresh' | 'close' | 'setEpochTransport'
-  >;
+  encryptedWorkspace?: Pick<CliE2eeWorkspaceLegacy, 'content' | 'bucketId' | 'refresh' | 'close'>;
   streamsTokens?: CloudStreamsTokenPort | null;
   cloudBilling?: CloudBillingPort | null;
   /** One-shot clients route history to the owner; daemons use installed local factories. */
@@ -395,7 +392,7 @@ export class LoroDocumentManager {
   private remoteTransportOpQueue: Promise<unknown> = Promise.resolve();
   private readonly encryptedWorkspace?: Pick<
     CliE2eeWorkspaceLegacy,
-    'content' | 'bucketId' | 'refresh' | 'close' | 'setEpochTransport'
+    'content' | 'bucketId' | 'refresh' | 'close'
   >;
   private readonly streamsTokens: CloudStreamsTokenPort | null;
   public readonly cloudBilling: CloudBillingPort | null;
@@ -431,7 +428,7 @@ export class LoroDocumentManager {
       documentCursorScope?: DocumentCursorScope;
       encryptedWorkspace?: Pick<
         CliE2eeWorkspaceLegacy,
-        'content' | 'bucketId' | 'refresh' | 'close' | 'setEpochTransport'
+        'content' | 'bucketId' | 'refresh' | 'close'
       >;
       streamsTokens?: CloudStreamsTokenPort | null;
       cloudBilling?: CloudBillingPort | null;
@@ -624,10 +621,6 @@ export class LoroDocumentManager {
     this.remoteStreamsAttached = options.remoteStreamsAttached ?? false;
     this.streamsTokens = options.streamsTokens ?? null;
     this.encryptedWorkspace = options.encryptedWorkspace;
-    this.encryptedWorkspace?.setEpochTransport({
-      drain: () => this.runRemoteTransportOp(() => this.drainEncryptedEpoch()),
-      restart: () => this.attachRemoteStreamsTransport(),
-    });
     this.cloudBilling = options.cloudBilling ?? null;
     this.sessionHistoryFactory = options.sessionHistoryFactory;
     this.ownerHistoryRouter = options.ownerHistoryRouter;
@@ -756,10 +749,8 @@ export class LoroDocumentManager {
       throw error;
     });
     installStreamsDiagnostics();
-    const epochGeneration = ++this.remoteStreamsGeneration;
     const detachStreamsTransportStatusListener = streamsTransport.adapter.onStatusChange(
       (status) => {
-        if (epochGeneration !== this.remoteStreamsGeneration || this.cleaningUp) return;
         this.logger.debug(`[${this.workspaceId}] Loro streams transport status: ${status}`);
         // With Streams attached, the adapter's own status is the workspace's
         // transport status (there is no other transport on the CLI repo).
@@ -786,6 +777,7 @@ export class LoroDocumentManager {
         });
       }
       this.remoteStreamsAttached = true;
+      this.remoteStreamsGeneration += 1;
       this.logger.info(`[${this.workspaceId}] Remote Streams transport attached`);
       // addTransport resolves even when individual rooms failed to attach at
       // the repo level (their bindings sit in 'error', and repo.reconnect does
@@ -840,32 +832,12 @@ export class LoroDocumentManager {
     }
   }
 
-  private retiredEpochAdapter: ReturnType<LoroRepo['getTransportAdapter']>;
-
-  /** Release cloud rooms only; retain the Repo, mirrors, cursors and local queues. */
-  private async drainEncryptedEpoch(): Promise<void> {
-    this.remoteStreamsGeneration += 1;
-    this.remoteStreamsStatusUnsubscribe?.();
-    this.remoteStreamsStatusUnsubscribe = null;
-    this.retiredEpochAdapter ??= this.repo.getTransportAdapter('streams');
-    await this.repo.removeTransport('streams', { close: false });
-    this.remoteStreamsAttached = false;
-    await this.retiredEpochAdapter?.close();
-    this.retiredEpochAdapter = undefined;
-    if (this.remoteStreamsTokens) {
-      await this.remoteStreamsTokens.legacy.retryCleanup();
-      this.remoteStreamsTokens.legacy.invalidate();
-      await this.remoteStreamsTokens.legacy.close();
-      this.remoteStreamsTokens = null;
-    }
-  }
-
   async detachRemoteStreamsTransport(): Promise<void> {
     await this.runRemoteTransportOp(() => this.detachRemoteStreamsTransportInner());
   }
 
   private async detachRemoteStreamsTransportInner(): Promise<void> {
-    if (!this.remoteStreamsAttached && !this.retiredEpochAdapter) {
+    if (!this.remoteStreamsAttached) {
       return;
     }
     this.remoteStreamsAttached = false;
@@ -883,15 +855,6 @@ export class LoroDocumentManager {
       await this.repo.removeTransport('streams', { close: true });
     } catch (error) {
       failures.push(error);
-    }
-    // A removed adapter remains ours after an epoch drain close failure.
-    if (this.retiredEpochAdapter) {
-      try {
-        await this.retiredEpochAdapter.close();
-        this.retiredEpochAdapter = undefined;
-      } catch (error) {
-        failures.push(error);
-      }
     }
     if (this.remoteStreamsTokens) {
       try {

@@ -6,6 +6,12 @@ import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { Effect, Fiber, Result } from 'effect';
 import { fileURLToPath } from 'node:url';
+import {
+  makeLoroStreamsTokenProvider,
+  makeLoroStreamsTokenWebPorts,
+  LoroStreamsTokenPorts,
+} from '@lody/shared';
+import { encodeEpochStagedGroup } from '@lody/e2ee-core/host';
 import { startProcessLegacy } from '@lody/shared/node/process';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -284,7 +290,7 @@ const page = (records: Uint8Array[], start = 0, end = records.length) => ({
 });
 
 describe('machine E2EE local runtime', () => {
-  it.each([false, true])(
+  it.each([false, true, 'published'] as const)(
     'recovers storage before seal admission without self-wait when rotation=%s',
     async (rotation) => {
       const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-storage-retry-'));
@@ -299,7 +305,9 @@ describe('machine E2EE local runtime', () => {
           createHash('sha256').update(accountId).digest('hex'),
           'workspace'
         );
-        const fixture = await execute(setup(directory, 2, join(root, 'custody'), rotation));
+        const fixture = await execute(
+          setup(directory, 2, join(root, 'custody'), Boolean(rotation), rotation === 'published')
+        );
         await retainCliE2eeWorkspaceBinding(accountId, {
           workspaceId: 'workspace',
           genesisHash: hex(fixture.genesis.toBytes()),
@@ -321,15 +329,43 @@ describe('machine E2EE local runtime', () => {
           })
         );
         let history = page(fixture.records);
+        let issuedToken = 'epoch-token-old';
         const cloud = {
           getHistory: async () => history,
+          readEpochGroup: async () =>
+            fixture.stagedGroup ? encodeEpochStagedGroup(fixture.stagedGroup) : null,
+          createContentTokenProvider: () =>
+            Effect.gen(function* () {
+              const provider = yield* makeLoroStreamsTokenProvider({
+                endpoint: 'https://synthetic.invalid/token',
+                workspaceId: 'workspace',
+              }).pipe(
+                Effect.provideService(
+                  LoroStreamsTokenPorts,
+                  makeLoroStreamsTokenWebPorts({
+                    credential: Effect.succeed('synthetic-token'),
+                    fetchImpl: async () =>
+                      Response.json({
+                        token: issuedToken,
+                        expiresIn: 900,
+                        expiresAt: Date.now() + 900_000,
+                        gatewayBaseUrl: 'https://synthetic.invalid',
+                      }),
+                  })
+                )
+              );
+              return { ...provider, getBucketId: () => 'synthetic-content' };
+            }),
           mailboxCall: async (
             method: keyof E2eeMailboxRequests,
             input: E2eeMailboxRequests[keyof E2eeMailboxRequests]
           ) => {
             if (method === 'fetch')
               return {
-                items: [{ sender: fixture.sender, frameHex: hex(fixture.frame) }],
+                items:
+                  (input as E2eeMailboxRequests['fetch']).epoch === 0
+                    ? [{ sender: fixture.sender, frameHex: hex(fixture.frame) }]
+                    : [],
                 next: null,
               };
             if (method === 'status')
@@ -374,20 +410,46 @@ describe('machine E2EE local runtime', () => {
         };
         await expect(protection.config.provider.seal(input)).rejects.toThrow('e2ee_invalid_ledger');
         unavailable = false;
+        if (rotation === 'published') {
+          const active = host;
+          await execute(
+            Effect.scoped(
+              Effect.gen(function* () {
+                if (!active.tokens.createTokenProvider)
+                  throw new Error('missing native token factory');
+                const token = yield* active.tokens.createTokenProvider();
+                expect(yield* token.getToken()).toBe('epoch-token-old');
+                issuedToken = 'epoch-token-new';
+                history = page([...fixture.records, ...fixture.rotationSuffix]);
+                yield* Effect.promise(() => active.refresh());
+                expect((yield* Effect.promise(() => active.status())).epochPhase).toBe('ready');
+                expect(yield* token.getToken()).toBe('epoch-token-new');
+                const sealed = yield* Effect.promise(() => protection.config.provider.seal(input));
+                expect(
+                  yield* Effect.promise(() =>
+                    protection.config.provider.open({
+                      ...sealed,
+                      context: input.context,
+                      additionalData: new Uint8Array([...sealed.header, 9]),
+                    })
+                  )
+                ).toEqual(input.plaintext);
+              })
+            )
+          );
+          return;
+        }
         if (rotation) {
           history = page([...fixture.records, ...fixture.rotationSuffix]);
-          let drained = false;
-          host.setEpochTransport({
-            drain: async () => {
-              drained = true;
-            },
-            restart: async () => {},
-          });
-          await expect(protection.config.provider.seal(input)).rejects.toThrow(
-            'e2ee_key_update_required'
-          );
-          expect(drained).toBe(true);
-          expect((await host.status()).epochPhase).toBe('waiting-key');
+          const stillAvailable = await protection.config.provider.seal(input);
+          expect(
+            await protection.config.provider.open({
+              ...stillAvailable,
+              context: input.context,
+              additionalData: new Uint8Array([...stillAvailable.header, 9]),
+            })
+          ).toEqual(input.plaintext);
+          expect((await host.status()).epochPhase).toBe('ready');
           return;
         }
         const sealed = await protection.config.provider.seal(input);
@@ -2263,7 +2325,11 @@ describe('machine E2EE local runtime', () => {
       const stagedGroup = fixture.stagedGroup;
       if (!stagedGroup) throw new Error('missing synthetic group');
       const mailbox: KeyMailbox['Service'] = {
-        fetch: () => Effect.succeed({ items: [], next: null }),
+        fetch: (slot) =>
+          Effect.succeed({
+            items: slot === 0 ? [{ sender: fixture.sender, frame: fixture.frame }] : [],
+            next: null,
+          }),
         status: (slot) => Effect.succeed({ ...slot, revision: 0, status: 'NeedsEnvelope' }),
         report: () => Effect.void,
         put: () => Effect.void,
@@ -2271,39 +2337,60 @@ describe('machine E2EE local runtime', () => {
         repair: () => Effect.void,
       };
       const records = [...fixture.records, ...fixture.rotationSuffix];
-      await execute(
-        Effect.gen(function* () {
-          const custody = yield* makeCliE2eeCustody({
-            directory: join(directory, 'machine'),
-            keyring: noKeyring,
-          });
-          const device = yield* custody.openDevice(fixture.genesis);
-          const runtime = yield* makeCliE2eeRuntime({
-            directory: join(directory, 'runtime'),
-            workspaceId: 'workspace',
-            custody,
-            device,
-            genesisRecord: fixture.genesisRecord,
-            mailbox,
-            staging: { readGroup: () => Effect.succeed(stagedGroup) },
-          });
-          yield* runtime.ingest(page(records));
-          expect((yield* runtime.status()).hasCurrentKey).toBe(false);
-          yield* runtime.receiveKeys();
-          expect((yield* runtime.status()).hasCurrentKey).toBe(true);
-          const binding = yield* runtime.binding('doc:after-rotation', 'loro', 1);
-          const sealed = yield* binding.seal({
-            context: {
-              protocol: 'loro-streams-crdt-payload-protection',
-              version: 2,
-              kind: 'update_batch',
-            },
-            plaintext: new Uint8Array([1, 2]),
-            additionalData: () => new Uint8Array([3]),
-          });
-          expect(sealed.sealed.length).toBeGreaterThan(2);
-        })
-      );
+      for (const reopened of [false, true])
+        await execute(
+          Effect.gen(function* () {
+            const custody = yield* makeCliE2eeCustody({
+              directory: join(directory, 'machine'),
+              keyring: noKeyring,
+            });
+            const device = yield* custody.openDevice(fixture.genesis);
+            const runtime = yield* makeCliE2eeRuntime({
+              directory: join(directory, 'runtime'),
+              workspaceId: 'workspace',
+              custody,
+              device,
+              genesisRecord: fixture.genesisRecord,
+              mailbox,
+              staging: { readGroup: () => Effect.succeed(stagedGroup) },
+            });
+            if (!reopened) {
+              yield* runtime.ingest(page(fixture.records));
+              yield* runtime.receiveKeys();
+              yield* runtime.ingest(page(records, fixture.records.length));
+            }
+            expect((yield* runtime.status()).hasCurrentKey).toBe(false);
+            const retainedStatus = yield* runtime.status();
+            expect(retainedStatus.writeEpoch, JSON.stringify({ reopened, ...retainedStatus })).toBe(
+              0
+            );
+            const old = yield* runtime.binding('doc:after-rotation', 'loro', 0);
+            const retained = yield* old.seal({
+              context: {
+                protocol: 'loro-streams-crdt-payload-protection',
+                version: 2,
+                kind: 'update_batch',
+              },
+              plaintext: new Uint8Array([1, 2]),
+              additionalData: () => new Uint8Array([3]),
+            });
+            expect(retained.sealed.length).toBeGreaterThan(2);
+            if (!reopened) return;
+            yield* runtime.receiveKeys();
+            expect((yield* runtime.status()).hasCurrentKey).toBe(true);
+            const binding = yield* runtime.binding('doc:after-rotation', 'loro', 1);
+            const sealed = yield* binding.seal({
+              context: {
+                protocol: 'loro-streams-crdt-payload-protection',
+                version: 2,
+                kind: 'update_batch',
+              },
+              plaintext: new Uint8Array([1, 2]),
+              additionalData: () => new Uint8Array([3]),
+            });
+            expect(sealed.sealed.length).toBeGreaterThan(2);
+          })
+        );
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -2394,7 +2481,7 @@ describe('machine E2EE local runtime', () => {
     }
   });
 
-  it('stops an existing content binding when another device is revoked, retaining local edits', async () => {
+  it('keeps an existing content binding sending when another device is revoked', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-rotation-stop-'));
     try {
       const fixture = await execute(setup(directory, 2, join(directory, 'machine'), true));
@@ -2441,7 +2528,7 @@ describe('machine E2EE local runtime', () => {
           yield* runtime.ingest(page(full, fixture.records.length));
           expect((yield* runtime.status()).rotationRequired).toBe(true);
           expect((yield* runtime.status()).hasCurrentKey).toBe(true);
-          expect(Result.isFailure(yield* Effect.result(binding.seal(request)))).toBe(true);
+          expect(Result.isSuccess(yield* Effect.result(binding.seal(request)))).toBe(true);
           expect(new TextDecoder().decode(plaintext)).toBe('local edit retained after revocation');
         })
       );

@@ -344,6 +344,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
   const receiver = receiving ? Context.get(receiving, KeyReceiver) : undefined;
   const repair = receiving ? Context.get(receiving, KeyRepair) : undefined;
   const guard = () => (closed ? Effect.fail(failure('closed')) : Effect.void);
+  let retainedWriteEpoch: number | undefined;
   const status = Effect.fnUntraced(function* () {
     yield* guard();
     const state = yield* feed.current();
@@ -352,7 +353,21 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
     const key = yield* Effect.result(installed.check(epoch));
     if (Result.isFailure(key) && !['missing-key', 'unauthorized'].includes(key.failure.reason))
       return yield* key.failure;
+    let writeEpoch: number | null = Result.isSuccess(key) ? epoch : null;
+    if (Result.isFailure(key) && key.failure.reason === 'missing-key') {
+      for (let candidate = retainedWriteEpoch ?? epoch - 1; candidate >= 0; candidate -= 1) {
+        const older = yield* Effect.result(installed.check(candidate));
+        if (Result.isSuccess(older)) {
+          writeEpoch = candidate;
+          break;
+        }
+        if (older.failure.reason === 'unauthorized') break;
+        if (older.failure.reason !== 'missing-key') return yield* older.failure;
+      }
+    }
+    if (writeEpoch !== null) retainedWriteEpoch = writeEpoch;
     return {
+      writeEpoch,
       length: view.length,
       headHash: hex(view.head.toBytes()),
       position: state.bootstrap ? null : state.offset,

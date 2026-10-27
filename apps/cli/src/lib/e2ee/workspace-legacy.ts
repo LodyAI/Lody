@@ -413,8 +413,14 @@ async function openWorkspace(
     throw error;
   });
   const initialStatus = await run(opened.runtime.status());
-  const epochTransition = createWorkspaceEpochTransitionLegacy(initialStatus);
-  let epochTransport: { drain(): Promise<void>; restart(): Promise<void> } | undefined;
+  const tokensInUse = new Set<
+    Awaited<Effect.Success<ReturnType<NonNullable<CloudE2eePort['createContentTokenProvider']>>>>
+  >();
+  const epochTransition = createWorkspaceEpochTransitionLegacy({
+    ...initialStatus,
+    epoch: initialStatus.writeEpoch ?? initialStatus.epoch,
+  });
+  epochTransition.observe(initialStatus);
   let ledgerBlocked = false;
   let pairingConfirmed = false;
   let pairingFailure: unknown;
@@ -456,8 +462,8 @@ async function openWorkspace(
       return {
         ...protectedProvider,
         seal: async (input) => {
-          // Recovery may itself start an epoch barrier. It precedes admission,
-          // so that barrier never waits on a seal waiting for its own refresh.
+          // Retry transient local-ledger storage before seal admission. Network
+          // key reception stays separate from the selected retained write key.
           if (ledgerBlocked && retryLedgerOnSeal) await refreshInBackground();
           if (ledgerBlocked) throw new Error('e2ee_invalid_ledger');
           return protectedProvider.seal(input);
@@ -475,6 +481,12 @@ async function openWorkspace(
           credential: opened.credential,
         });
         bucket = provider.getBucketId;
+        tokensInUse.add(provider);
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            tokensInUse.delete(provider);
+          })
+        );
         return provider;
       }),
     // E2EE never attaches the old Machine RPC or presence token consumers.
@@ -557,20 +569,18 @@ async function openWorkspace(
             await confirmPairing(pairing);
             pairingConfirmed = true;
           }
-          const transport = epochTransport;
-          if (epochTransition.phase() !== 'ready' && transport) {
+          if (epochTransition.needsUpdate()) {
             await epochTransition.transition({
-              drain: transport.drain,
               install: async () => {
                 await run(opened.runtime.receiveKeys());
-                return run(opened.runtime.status());
-              },
-              restart: async () => {
-                bindings.clear();
-                await transport.restart();
+                const installed = await run(opened.runtime.status());
+                if (installed.hasCurrentKey && installed.epoch > epochTransition.epoch()) {
+                  for (const token of tokensInUse) await run(token.invalidate());
+                }
+                return installed;
               },
             });
-          } else if (epochTransition.phase() === 'ready' && (requireActivation || pairing)) {
+          } else if (requireActivation || pairing) {
             await run(opened.runtime.receiveKeys());
           }
         }
@@ -598,9 +608,6 @@ async function openWorkspace(
     },
     confirmPairing,
     content,
-    setEpochTransport: (ports: { drain(): Promise<void>; restart(): Promise<void> }) => {
-      epochTransport = ports;
-    },
     tokens,
     bucketId: () => bucket?.(),
     status: () =>

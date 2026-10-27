@@ -554,25 +554,23 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       const acceptStatus = async (status: Awaited<ReturnType<typeof native.status>>) => {
         if (disposed || retired) return;
         encryptedAccess?.updateStatus(status);
-        if (encryptedAccess && workspaceRuntime && encryptedAccess.phase() !== 'ready') {
-          const active = workspaceRuntime;
+        if (encryptedAccess && workspaceRuntime && encryptedAccess.needsUpdate()) {
           await encryptedAccess.transition({
-            drain: () => active.suspendEncryptedContent(),
             install: () => native.refresh(leased),
-            restart: () => active.resumeEncryptedContent(),
           });
           if (disposed || retired) return;
           if (encryptedAccess.phase() === 'ready') setKeyUpdateWorkspace(null);
         }
-        if (!nativeHasKey && status.hasCurrentKey) retryAdmission((value) => value + 1);
+        if (!nativeHasKey && workspaceRuntime === null && status.hasCurrentKey)
+          retryAdmission((value) => value + 1);
       };
       const pending = native
         .refresh(leased, { installKeys: !nativeHasKey && workspaceRuntime === null })
         .then(acceptStatus)
         .catch(async () => {
           if (disposed || retired) return;
-          // A failed step remains visible and retryable; a status read only stops
-          // old sends and never marks that failed handoff complete.
+          // Reception failure stays visible and retryable. The retained epoch
+          // remains writable; a status read never confirms key installation.
           try {
             encryptedAccess?.updateStatus(await native.status(leased));
           } catch {
@@ -732,23 +730,23 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             refreshNative();
             if (status.genesisHash !== descriptor.genesisHash)
               throw new WorkspaceModeMismatchError();
-            if (!status.hasCurrentKey) {
+            if (!status.hasCurrentKey && status.writeEpoch == null) {
               setRuntime(null);
               setRuntimeInitializing(false);
               clearDocMetaCache();
               clearPresenceStates();
               return;
             }
-            if (status.rotationRequired) setKeyUpdateWorkspace(effectiveWorkspaceId);
             encryptedAccess = createDesktopE2eeContent({
               runtime: native,
               workspaceId: effectiveWorkspaceId,
               genesisHash: descriptor.genesisHash,
-              epoch: status.epoch,
+              epoch: status.writeEpoch ?? status.epoch,
               rotationRequired: status.rotationRequired,
               onKeyUpdateRequired: () => setKeyUpdateWorkspace(effectiveWorkspaceId),
               authToken: () => tokenRef.current,
             });
+            encryptedAccess.updateStatus(status);
           }
         } else if (modeCloud && storedDescriptor) {
           admitting = true;

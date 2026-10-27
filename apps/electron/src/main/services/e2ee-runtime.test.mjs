@@ -1767,6 +1767,26 @@ void test('reopens without a candidate and installs committed staging originals 
       yield* owner.host.open(workspaceId)
       yield* owner.host.ingestLedgerRecords(workspaceId, page(records, prepared.genesisHashHex, 0))
       assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, false)
+      assert.equal((yield* owner.host.status(workspaceId)).writeEpoch, 0)
+      yield* owner.host.closeWorkspace(workspaceId)
+      assert.equal((yield* owner.host.open(workspaceId)).writeEpoch, 0)
+      const oldRequest = {
+        epoch: 0,
+        room: { kind: 'doc', docId: 'staged-document' },
+        context: {
+          protocol: 'loro-streams-crdt-payload-protection',
+          version: 2,
+          kind: 'update_batch'
+        },
+        plaintext: new Uint8Array([4, 5]),
+        additionalData: new Uint8Array([3])
+      }
+      const retained = yield* owner.host.seal(workspaceId, oldRequest)
+      assert.deepEqual(
+        yield* owner.host.openContent(workspaceId, { ...oldRequest, ...retained }),
+        oldRequest.plaintext
+      )
+
       const genesis = Result.getOrThrow(
         Bytes.genesisHash(Buffer.from(prepared.genesisHashHex, 'hex'))
       )
@@ -1802,6 +1822,11 @@ void test('reopens without a candidate and installs committed staging originals 
         true
       )
       assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, false)
+      const afterFailure = yield* owner.host.seal(workspaceId, oldRequest)
+      assert.deepEqual(
+        yield* owner.host.openContent(workspaceId, { ...oldRequest, ...afterFailure }),
+        oldRequest.plaintext
+      )
       unavailable = false
       yield* owner.host.keyRound(workspaceId, () => mailbox, staging)
       assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, true)

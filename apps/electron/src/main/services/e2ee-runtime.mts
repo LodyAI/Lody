@@ -746,6 +746,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           return yield* provider.open(input)
         })
         let upgradeRequiredAt: number | undefined
+        let retainedWriteEpoch: number | undefined
         const status = Effect.fnUntraced(function* (): Effect.fn.Return<
           E2eeRuntimeStatus,
           unknown
@@ -764,7 +765,31 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             checked.failure.reason !== 'unauthorized'
           )
             return yield* checked.failure
+          let writeEpoch: number | null = Result.isSuccess(checked)
+            ? publicState.epoch.number
+            : null
+          if (
+            !continuityPending &&
+            Result.isFailure(checked) &&
+            checked.failure.reason === 'missing-key'
+          ) {
+            for (
+              let candidate = retainedWriteEpoch ?? publicState.epoch.number - 1;
+              candidate >= 0;
+              candidate -= 1
+            ) {
+              const older = yield* Effect.result(keys.check(candidate))
+              if (Result.isSuccess(older)) {
+                writeEpoch = candidate
+                break
+              }
+              if (older.failure.reason === 'unauthorized') break
+              if (older.failure.reason !== 'missing-key') return yield* older.failure
+            }
+          }
+          if (writeEpoch !== null) retainedWriteEpoch = writeEpoch
           return {
+            writeEpoch,
             workspaceId,
             genesisHash: creation.genesisHash,
             length: state.view.length,

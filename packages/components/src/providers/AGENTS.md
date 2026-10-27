@@ -77,8 +77,7 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   Meta/Flock cursors stay repo-owned; delete Meta progress via `repo.getReplicaCheckpointStore`.
 - Open E2EE locally before background sync. Keep native-only keys, a dedicated
   bucket, Loro history, waiting-key leases; no plaintext bypass.
-  Epoch changes retain edits; drain old SDK work, confirm keys, replace sessions
-  before resuming. Reject missing protection/plaintext rooms. Forward rejected
+  Keep old-epoch sends during reception; select confirmed keys per operation. Reject missing protection/plaintext rooms. Forward rejected
   tokens for exact eviction. See [M2 boundaries](../../../../.agents/notes/proposed/architecture/2026-10-22-e2ee-m2-product-integration.md)
   and [transport contract](../../../../specs/workspace-streams-content.md).
 - Select transport per room, never merge. Use `getReadinessTransportForRoom`;

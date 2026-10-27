@@ -22,10 +22,12 @@ export function createDesktopE2eeContent(input: {
 }) {
   if (!/^[0-9a-f]{64}$/.test(input.genesisHash)) throw new Error('e2ee_invalid_genesis');
   let bucketId: string | null = null;
+  const tokens = new Set<ReturnType<typeof createLoroStreamsTokenProviderLegacy>>();
   const transition = createWorkspaceEpochTransitionLegacy({
     epoch: input.epoch,
     rotationRequired: input.rotationRequired,
     onPhase: (phase) => {
+      if (phase === 'ready') for (const token of tokens) token.invalidate();
       input.onPhase?.(phase);
       if (phase !== 'ready' && phase !== 'closed') input.onKeyUpdateRequired?.();
     },
@@ -34,7 +36,10 @@ export function createDesktopE2eeContent(input: {
     epoch: number;
     rotationRequired: boolean;
     hasCurrentKey?: boolean;
-  }) => transition.observe({ ...status, hasCurrentKey: status.hasCurrentKey ?? false });
+  }) => {
+    transition.observe({ ...status, hasCurrentKey: status.hasCurrentKey ?? false });
+    if (transition.needsUpdate()) input.onKeyUpdateRequired?.();
+  };
   const content: WorkspaceStreamsContent = {
     mode: 'protected',
     namespace: encryptedWorkspaceNamespace(input.genesisHash),
@@ -65,11 +70,12 @@ export function createDesktopE2eeContent(input: {
     updateStatus,
     transition: transition.transition,
     phase: transition.phase,
+    needsUpdate: transition.needsUpdate,
     close: transition.close,
     e2ee: {
       bucketId: () => bucketId,
-      createTokenProvider: (signal: AbortSignal) =>
-        createLoroStreamsTokenProviderLegacy({
+      createTokenProvider: (signal: AbortSignal) => {
+        const token = createLoroStreamsTokenProviderLegacy({
           // All requests terminate in the native capability below. This URL is
           // just the existing token kernel's local route identity.
           endpoint: `https://e2ee.invalid/content-token/${transition.epoch()}`,
@@ -101,7 +107,16 @@ export function createDesktopE2eeContent(input: {
               headers: { 'content-type': 'application/json' },
             });
           },
-        }),
+        });
+        tokens.add(token);
+        return {
+          ...token,
+          close: async () => {
+            await token.close();
+            tokens.delete(token);
+          },
+        };
+      },
     },
   };
 }
