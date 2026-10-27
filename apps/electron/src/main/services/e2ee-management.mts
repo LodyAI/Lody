@@ -223,8 +223,8 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
       if (!current.inspectState().epoch.rotationRequired) return 'Committed'
       return yield* finishRotation(true)
     }
-    // A candidate alone has not entered LedgerSubmission/CAS. Keep its originals;
-    // staging failure cannot gate an independent revocation. Pending CAS above
+    // Without a pending submission, candidate recovery is independent. Retain
+    // its originals; staging failure cannot gate revocation. Pending CAS above
     // still reconciles the exact signed record before any new management signing.
     const target = yield* Effect.fromResult(
       Bytes.signingPublicKey(new Uint8Array(Buffer.from(command.target, 'hex')))

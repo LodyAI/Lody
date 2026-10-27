@@ -99,15 +99,15 @@ Read [M1](../../../../../.agents/notes/implemented/architecture/2026-10-21-e2ee-
 [join](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-personal-desktop-join.md)
 and [machine](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-machine-pairing-journal.md).
 Fence opens/late D03 registration by identity/generation; pin D03 before signing.
-Isolated workspace custody; bind resets to account/generation, recheck after lock/drain, archive.
+Workspace custody; reset binds account/generation; recheck after lock/drain before archive.
 No network under locks; drain before release.
-Ledger opens with bad keys; only core repairs.
-Verification/storage errors stay owner-local; malformed input keeps readers.
+Bad keys allow ledger open; core repairs.
+Isolate verification/storage errors; malformed input keeps readers.
 Originals precede feed/pin; compare overlaps, retain checkpoints, await history.
 Conflicts refuse fallback. Failed close retains its writer fence; report restart-required.
-Fixed cloud refs; authenticate/bound/abort; disposal fences late calls.
-Retain uncertain bytes; raw/SDK causes stay in main, never IPC/telemetry.
-Verified readback beats lost ACKs; cleanup retains admission.
+Fixed cloud refs; auth/bound/abort; fence late disposed calls.
+Keep uncertain bytes; raw/SDK causes stay in main, never IPC/telemetry.
+Verified reads beat lost ACKs; cleanup retains admission.
 `e2ee_staging_invalid` and `e2ee_staging_corrupt` are terminal.
 
 Consent pins exact verified proofs/session/record/requestId/keys/credentials/pins.
