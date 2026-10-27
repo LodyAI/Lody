@@ -54,6 +54,17 @@ export const runWithSessionCommandEnvironment = <T>(
 ): T => environments.run(environment, run);
 
 /**
+ * The daemon's current verdict on its own workspace, read from the access state
+ * it already maintains (remote subscription, else the cached bootstrap entry).
+ * `unknown` means the daemon has no verdict, so commands fall back to discovery.
+ */
+export type DaemonWorkspaceAccess =
+  | { status: 'authorized'; workspace: WorkspaceSummary }
+  | { status: 'revoked' }
+  | { status: 'unauthorized' }
+  | { status: 'unknown' };
+
+/**
  * The daemon's own workspace replica, lent to a command the daemon executes.
  * It changes only which replica a command uses; platform behavior is unchanged.
  * The daemon owns its lifecycle, so a borrowing command never cleans it up.
@@ -64,6 +75,7 @@ export interface DaemonWorkspace {
   machineId: MachineId;
   manager: LoroDocumentManager;
   readInvocation(sessionId: SessionId): SessionActiveInvocationContextResult;
+  readAccess?(): DaemonWorkspaceAccess;
 }
 
 const daemonWorkspaces = new AsyncLocalStorage<DaemonWorkspace>();

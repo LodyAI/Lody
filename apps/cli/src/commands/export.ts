@@ -6,6 +6,7 @@ import { listWorkspaceScheduleIds } from '@/lib/schedules/schedule-documents';
 import {
   getAuthContextOrThrow,
   listAliveSessionMetas,
+  listWorkspaceCandidates,
   resolveWorkspaceOrThrow,
   runOneShotCommand,
   syncDocForRead,
@@ -15,7 +16,7 @@ import {
 } from '@/lib/command-runtime';
 import { exportWorkspaceData } from '@/lib/session-export';
 import { mapWithConcurrency } from '@/lib/session-export/concurrency';
-import { listWorkspacesForToken, type WorkspaceSummary } from '@/lib/workspace';
+import type { WorkspaceSummary } from '@/lib/workspace';
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 
 type ExportOptions = Pick<CommonCommandOptions, 'workspace' | 'debug'> & {
@@ -81,9 +82,10 @@ export const exportCommand = new Command('export')
         throw new Error('Pass either --workspace or --all-workspace, not both.');
       }
 
+      const offline = { offline: options.offline };
       const requested = options.allWorkspace
-        ? await listWorkspacesForToken(auth.token)
-        : [await resolveWorkspaceOrThrow(auth, options.workspace)];
+        ? await listWorkspaceCandidates(auth, offline)
+        : [await resolveWorkspaceOrThrow(auth, options.workspace, offline)];
       // A plaintext export of an encrypted workspace is a restricted feature until its
       // E2EE milestone; never decrypt to disk here.
       const exportable = (workspace: WorkspaceSummary) =>

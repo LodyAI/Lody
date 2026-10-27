@@ -21,6 +21,7 @@ vi.mock('@/lib/command-runtime', async (importOriginal) => ({
   getAuthContextOrThrow: () => ({ userId: 'u', token: 't', machineId: 'm' }),
   runOneShotCommand: async (_name: string, _options: unknown, run: () => Promise<void>) => run(),
   resolveWorkspaceOrThrow: async () => seen.selected,
+  listWorkspaceCandidates: async () => [plaintext, encrypted],
   listAliveRoomIds: async () => [],
   listAliveDocMetas: async () => [],
   withWorkspaceManager: async (
