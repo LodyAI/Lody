@@ -25,6 +25,23 @@ export function isIpcInvokeChannel(channel: string): boolean {
   if (group === 'e2ee')
     return new Set([
       'account',
+      'promoteMember',
+      'createMemberInvitation',
+      'pendingMemberJoin',
+      'prepareMemberJoin',
+      'memberJoinRequests',
+      'approveMemberJoin',
+      'rejectMemberJoin',
+      'revokeMemberInvitation',
+      'claimMemberJoin',
+      'personalPairingOffer',
+      'pendingPersonalJoin',
+      'preparePersonalJoin',
+      'inspectPersonalJoin',
+      'approvePersonalJoin',
+      'claimPersonalJoin',
+      'cancelPersonalJoin',
+
       'prepareLocalAgent',
       'admitLocalAgent',
       'beginRemoteMachinePairing',

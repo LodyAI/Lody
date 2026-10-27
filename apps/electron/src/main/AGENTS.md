@@ -105,3 +105,9 @@ packaging result; native safeStorage assurance needs an isolated platform run.
 `e2ee.readIdentity` is an expected-account-bound local read of retained verified identity.
 It grants no renderer reader/status/content capability. Preserve existing readers;
 release a cold temporary host before replying. `status` still requires a window reader.
+
+Team-member joining uses `services/e2ee-member-join.mts`: retain exact KeyPackages
+and every signed admission before I/O. Unknown outcomes cannot replace them;
+verify competing ledger bytes or a terminal server reservation before retirement.
+New accounts replay genuine history from their independently retained genesis;
+server labels never establish native identity. [Decision](../../../../.agents/notes/proposed/feature/2026-10-28-e2ee-team-joining-native.md).

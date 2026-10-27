@@ -43,6 +43,7 @@ import {
 import { desktopE2eePorts, makeDesktopE2eeCustody } from '../e2ee-custody.mts'
 import { makeDesktopE2eeBootstrap } from './e2ee-bootstrap.mts'
 import { makeDesktopE2eeRuntimeHost } from './e2ee-runtime.mts'
+import { decodeMemberKeyPackage } from './e2ee-member-join.mts'
 // Authenticated synthetic OS storage; this suite does not exercise a user's keychain.
 const wrapping = Buffer.alloc(32, 86)
 const safeStorage = {
@@ -327,6 +328,237 @@ for (const damage of ['history', 'pin']) {
   })
 }
 
+void test('a different account retains its KeyPackage, joins as Member, exchanges encrypted content and reopens offline', async (t) => {
+  const directory = await fixture(t)
+  const memberDirectory = join(directory, 'member')
+  const openMember = Effect.fnUntraced(function* (folder = memberDirectory) {
+    const custody = yield* makeDesktopE2eeCustody({
+      directory: join(folder, 'custody'),
+      platform: 'linux',
+      safeStorage
+    })
+    const bootstrap = yield* makeDesktopE2eeBootstrap({
+      directory: folder,
+      accountId: 'other-account',
+      custody
+    })
+    yield* bootstrap.recordAccountIdentity({
+      accountId: 'other-account',
+      cryptoUserId: 'bb'.repeat(32)
+    })
+    const host = yield* makeDesktopE2eeRuntimeHost({ directory: folder, custody, bootstrap })
+    return { custody, bootstrap, host }
+  })
+  let offer, original, admission, prepared, encrypted
+  const room = { kind: 'meta' }
+  const context = {
+    protocol: 'loro-streams-crdt-payload-protection',
+    version: 2,
+    kind: 'update_batch'
+  }
+  const plaintext = new TextEncoder().encode('synthetic team collaboration')
+  const additionalData = new Uint8Array([1, 2, 3])
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory)
+      prepared = yield* bind(owner)
+      yield* owner.host.open(workspaceId)
+      offer = yield* owner.host.memberOffer(workspaceId, 'email', 9_000_000_000_000)
+      const member = yield* openMember()
+      original = yield* member.bootstrap.prepareMemberJoin(offer)
+      assert.deepEqual(yield* member.bootstrap.prepareMemberJoin(offer), original)
+      assert.equal(
+        hex(decodeMemberKeyPackage(original.keyPackageHex).request.userId.toBytes()),
+        'bb'.repeat(32)
+      )
+      assert.ok(Result.isFailure(yield* Effect.result(member.host.open(workspaceId))))
+      yield* owner.host.inspectMemberAdmission(workspaceId, original.keyPackageHex)
+      admission = yield* owner.host.prepareMemberAdmission(workspaceId, original.keyPackageHex)
+      assert.deepEqual(
+        yield* owner.host.prepareMemberAdmission(workspaceId, original.keyPackageHex),
+        admission
+      )
+      const changed = JSON.parse(Buffer.from(original.keyPackageHex, 'hex').toString())
+      changed.credentialHash = '00'.repeat(32)
+      assert.ok(
+        Result.isFailure(
+          yield* Effect.result(
+            owner.host.prepareMemberAdmission(
+              workspaceId,
+              Buffer.from(JSON.stringify(changed)).toString('hex')
+            )
+          )
+        )
+      )
+    })
+  )
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory)
+      const member = yield* openMember()
+      assert.deepEqual(yield* member.bootstrap.prepareMemberJoin(offer), original)
+      yield* owner.host.open(workspaceId)
+      assert.deepEqual(
+        yield* owner.host.prepareMemberAdmission(workspaceId, original.keyPackageHex),
+        admission
+      )
+      const records = [
+        Buffer.from(prepared.genesisRecordHex, 'hex'),
+        Buffer.from(admission.recordHex, 'hex')
+      ]
+      const pages = [page(records, offer.genesisHash, 0)]
+      const bad = [
+        { ...pages[0], checkpoint: { ...pages[0].checkpoint, headHash: '00'.repeat(32) } }
+      ]
+      assert.ok(
+        Result.isFailure(yield* Effect.result(member.bootstrap.acceptMemberJoin(workspaceId, bad)))
+      )
+      assert.ok(Result.isFailure(yield* Effect.result(member.host.open(workspaceId))))
+      yield* member.bootstrap.acceptMemberJoin(workspaceId, pages)
+      const joined = yield* member.host.open(workspaceId)
+      assert.equal(joined.length, 2)
+      assert.equal(joined.deviceKind, 'personal')
+      assert.equal(joined.hasCurrentKey, false)
+      yield* owner.host.ingestLedgerRecords(workspaceId, pages[0])
+      const genesis = Result.getOrThrow(Bytes.genesisHash(Buffer.from(offer.genesisHash, 'hex')))
+      let view = Result.getOrThrow(
+        verifyLedger({
+          anchor: genesis,
+          records,
+          checkpoint: { length: 2, head: hashRecordBytes(records[1]) }
+        })
+      )
+      const memberKey = decodeMemberKeyPackage(original.keyPackageHex).request.signingPublicKey
+      const memberState = view.inspectState().devices.get(hex(memberKey.toBytes()))
+      assert.equal(
+        view.inspectState().members.get(hex(memberState.membershipId.toBytes())).role,
+        'member'
+      )
+      const mailbox = yield* makeSqliteKeyMailbox({
+        path: join(directory, 'member-mailbox.sqlite'),
+        mode: 'create',
+        genesis,
+        ledger: () => Effect.succeed(view)
+      })
+      const ownerDevice = yield* owner.custody.openDevice(genesis)
+      const ownerPort = Context.get(
+        yield* Layer.build(referenceKeyMailbox(mailbox, ownerDevice.publicKey)),
+        KeyMailbox
+      )
+      const memberPort = Context.get(
+        yield* Layer.build(referenceKeyMailbox(mailbox, memberKey)),
+        KeyMailbox
+      )
+      yield* owner.host.keyRound(workspaceId, () => ownerPort)
+      yield* member.host.keyRound(workspaceId, () => memberPort)
+      assert.equal((yield* member.host.status(workspaceId)).hasCurrentKey, true)
+      encrypted = yield* owner.host.seal(workspaceId, {
+        epoch: 0,
+        room,
+        context,
+        plaintext,
+        additionalData
+      })
+      assert.deepEqual(
+        yield* member.host.openContent(workspaceId, {
+          room,
+          context,
+          ...encrypted,
+          additionalData
+        }),
+        plaintext
+      )
+      const reply = yield* member.host.seal(workspaceId, {
+        epoch: 0,
+        room,
+        context,
+        plaintext,
+        additionalData
+      })
+      assert.deepEqual(
+        yield* owner.host.openContent(workspaceId, { room, context, ...reply, additionalData }),
+        plaintext
+      )
+      const personalOffer = yield* member.host.personalPairingOffer(workspaceId)
+      const additional = yield* openMember(join(directory, 'member-additional'))
+      const personalRequest = yield* additional.bootstrap.preparePersonalJoin(personalOffer)
+      yield* member.host.previewPersonalAdmission(workspaceId, personalRequest.requestHex)
+      const personalAdmission = yield* member.host.preparePersonalAdmission(
+        workspaceId,
+        personalRequest.requestHex
+      )
+      const expanded = [...records, Buffer.from(personalAdmission.recordHex, 'hex')]
+      const expandedPage = page(expanded, offer.genesisHash, 0)
+      yield* additional.bootstrap.acceptPersonalHistory(workspaceId, [expandedPage])
+      assert.equal((yield* additional.host.open(workspaceId)).length, 3)
+      yield* member.host.ingestLedgerRecords(workspaceId, expandedPage)
+      assert.equal(
+        yield* member.host.personalInvitation(workspaceId, personalOffer.pairingSessionId),
+        null
+      )
+      view = Result.getOrThrow(
+        verifyLedger({
+          anchor: genesis,
+          records: expanded,
+          checkpoint: { length: 3, head: hashRecordBytes(expanded[2]) }
+        })
+      )
+      const additionalDevice = yield* additional.custody.openDevice(genesis)
+      const additionalPort = Context.get(
+        yield* Layer.build(referenceKeyMailbox(mailbox, additionalDevice.publicKey)),
+        KeyMailbox
+      )
+      yield* member.host.keyRound(workspaceId, () => memberPort)
+      yield* additional.host.keyRound(workspaceId, () => additionalPort)
+      assert.deepEqual(
+        yield* additional.host.openContent(workspaceId, {
+          room,
+          context,
+          ...encrypted,
+          additionalData
+        }),
+        plaintext
+      )
+      yield* owner.host.ingestLedgerRecords(workspaceId, expandedPage)
+      const membershipId = hex(memberState.membershipId.toBytes())
+      assert.ok(
+        Result.isFailure(
+          yield* Effect.result(member.host.prepareMemberPromotion(workspaceId, membershipId))
+        )
+      )
+      const promotion = yield* owner.host.prepareMemberPromotion(workspaceId, membershipId)
+      assert.deepEqual(
+        yield* owner.host.prepareMemberPromotion(workspaceId, membershipId),
+        promotion
+      )
+      const promotedPage = page(
+        [...expanded, Buffer.from(promotion.recordHex, 'hex')],
+        offer.genesisHash,
+        0
+      )
+      yield* owner.host.ingestLedgerRecords(workspaceId, promotedPage)
+      yield* member.host.ingestLedgerRecords(workspaceId, promotedPage)
+      assert.equal((yield* member.host.status(workspaceId)).memberRole, 'admin')
+      assert.equal(yield* owner.host.prepareMemberPromotion(workspaceId, membershipId), null)
+    })
+  )
+  await execute(
+    Effect.gen(function* () {
+      const member = yield* openMember()
+      assert.equal((yield* member.host.open(workspaceId)).hasCurrentKey, true)
+      assert.deepEqual(
+        yield* member.host.openContent(workspaceId, {
+          room,
+          context,
+          ...encrypted,
+          additionalData
+        }),
+        plaintext
+      )
+      assert.equal(yield* member.bootstrap.pendingMemberJoin(workspaceId), null)
+    })
+  )
+})
 void test('binding is immutable, retained reopen asks only for a suffix, and corrupted cache recovers locally', async (t) => {
   const directory = await fixture(t)
   let saved

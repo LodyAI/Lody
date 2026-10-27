@@ -186,6 +186,20 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
         ? {
             prepareCreation: (request) => native.prepareCreation(request),
             runtime: {
+              promoteMember: (workspaceId, membershipId) =>
+                native.promoteMember(workspaceId, membershipId),
+              createMemberInvitation: (input) => native.createMemberInvitation(input),
+              prepareMemberJoin: (offer) => native.prepareMemberJoin(offer),
+              pendingMemberJoin: (workspaceId) => native.pendingMemberJoin(workspaceId),
+              memberJoinRequests: (workspaceId) => native.memberJoinRequests(workspaceId),
+              approveMemberJoin: (workspaceId, requestId, mode) =>
+                native.approveMemberJoin(workspaceId, requestId, mode),
+              rejectMemberJoin: (workspaceId, requestId) =>
+                native.rejectMemberJoin(workspaceId, requestId),
+              revokeMemberInvitation: (workspaceId, token) =>
+                native.revokeMemberInvitation(workspaceId, token),
+              claimMemberJoin: (workspaceId, requestId) =>
+                native.claimMemberJoin(workspaceId, requestId),
               personalPairingOffer: (workspaceId) => native.personalPairingOffer(workspaceId),
               preparePersonalJoin: (offer) => native.preparePersonalJoin(offer),
               pendingPersonalJoin: (workspaceId) => native.pendingPersonalJoin(workspaceId),
@@ -221,8 +235,10 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
               resetIdentity: (request) => native.resetIdentity(request),
               resetLocalAgent: (request) => native.resetLocalAgent(request),
               recordCreated: (request) => native.recordCreated(request),
-              open: (workspaceId, observed) => native.open(workspaceId, observed),
-              close: (workspaceId) => native.close(workspaceId),
+              open: (workspaceId, observed, expectedAccountId) =>
+                native.open(workspaceId, observed, expectedAccountId),
+              close: (workspaceId, expectedAccountId, readerOwner) =>
+                native.close(workspaceId, expectedAccountId, readerOwner),
               readIdentity: (input) => native.readIdentity(input),
               status: (workspaceId) => native.status(workspaceId),
               ingestLedgerRecords: (workspaceId, page) =>

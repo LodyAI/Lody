@@ -8,6 +8,7 @@ import type {
   E2eeContentTokenRequest,
   E2eeDeviceAccess,
   E2eeJoinRequests,
+  E2eeMemberRequests,
   E2eeWorkspaceHistoryRequest
 } from '@lody/cloud-api'
 import {
@@ -25,6 +26,7 @@ import {
 } from '@lody/e2ee-core/host'
 import { Effect, Result } from 'effect'
 import { z } from 'zod'
+import { MemberOfferSchema } from './e2ee-member-join.mjs'
 
 const hash = z.string().regex(/^[0-9a-f]{64}$/)
 const nonnegative = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
@@ -78,6 +80,31 @@ const joinSession = z.object({
   credentialHash: hash,
   requestHex: bytesHex(8192),
   status: z.enum(['pending', 'cancelled', 'admitting', 'admitted', 'conflict', 'published'])
+})
+const seatPreview = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('not_billed'), reason: z.enum(['free', 'covered']) }),
+  z.object({
+    status: z.literal('billed'),
+    interval: z.enum(['month', 'year']),
+    unitAmount: z.number().nullable(),
+    proratedAmount: z.number().nullable(),
+    currentPeriodEnd: z.number().nullable(),
+    seatCount: z.number(),
+    nextSeatCount: z.number(),
+    nextRenewalAmount: z.number().nullable(),
+    currency: z.string().optional()
+  })
+])
+const memberRequest = z.object({
+  id: z.string().min(1),
+  workspaceId: z.string().min(1),
+  accountId: z.string().min(1),
+  keyPackageHex: bytesHex(4096),
+  signingPublicKey: hash,
+  requestId: z.string().regex(/^[0-9a-f]{32}$/),
+  source: z.enum(['email', 'link']),
+  state: z.enum(['pending', 'admitting', 'committed', 'rejected', 'cancelled']),
+  expiresAt: nonnegative
 })
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex')
 const raw = (value: string) => new Uint8Array(Buffer.from(value, 'hex'))
@@ -366,6 +393,61 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
         (client) => client.action(api.e2eeWorkspaces.accountIdentity, {}),
         z.object({ accountId: z.string().min(1), cryptoUserId: hash })
       ),
+    memberCreateInvitation: (args: E2eeMemberRequests['createInvitation']) => {
+      const original = { ...args, offer: { ...args.offer } }
+      return request(
+        (client) => client.mutation(api.e2eeMembers.createInvitation, original),
+        z.object({ offer: MemberOfferSchema })
+      )
+    },
+    memberSubmit: (args: E2eeMemberRequests['submit']) => {
+      const original = { ...args }
+      return request((client) => client.mutation(api.e2eeMembers.submit, original), memberRequest)
+    },
+    memberRetire: (args: E2eeMemberRequests['retire']) => {
+      const original = { ...args }
+      return request(
+        (client) => client.mutation(api.e2eeMembers.retire, original),
+        z.object({ state: memberRequest.shape.state })
+      )
+    },
+    memberPending: (args: E2eeMemberRequests['pending']) => {
+      const original = { ...args }
+      return request(
+        (client) => client.query(api.e2eeMembers.pending, original),
+        z.object({
+          invitations: z.array(MemberOfferSchema).max(100),
+          items: z
+            .array(memberRequest.extend({ applicantName: z.string(), applicantEmail: z.string() }))
+            .max(100),
+          hasMore: z.boolean(),
+          seatPreview
+        })
+      )
+    },
+    memberRead: (args: E2eeMemberRequests['read']) => {
+      const original = { ...args }
+      return request((client) => client.query(api.e2eeMembers.read, original), memberRequest)
+    },
+    memberReject: (args: E2eeMemberRequests['reject']) => {
+      const original = { ...args }
+      return request(
+        (client) => client.mutation(api.e2eeMembers.reject, original),
+        z.object({ state: z.literal('rejected') })
+      )
+    },
+    memberRevoke: (args: E2eeMemberRequests['revoke']) => {
+      const original = { ...args }
+      return request(
+        (client) => client.mutation(api.e2eeMembers.revoke, original),
+        z.object({ revoked: z.literal(true) })
+      )
+    },
+    memberClaim: (args: E2eeMemberRequests['claim']) => {
+      const original = { ...args }
+      return request((client) => client.query(api.e2eeMembers.claim, original), memberRequest)
+    },
+
     joinBegin: (requestInput: E2eeJoinRequests['begin']) => {
       const original = { ...requestInput }
       return request((client) => client.mutation(api.e2eeJoinMailbox.begin, original), joinSession)

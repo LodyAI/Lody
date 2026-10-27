@@ -7,6 +7,8 @@ import type {
   E2eeAppendRecordReply,
 } from './e2ee-device';
 import type { E2eeJoinRequests, E2eeJoinReplies } from './e2ee-join';
+import type { E2eeMemberRequests, E2eeMemberReplies } from './e2ee-members';
+export type * from './e2ee-members';
 export type * from './e2ee-join';
 export type * from './e2ee-device';
 import type { NotificationPresentation } from '@lody/shared/notifications';
@@ -385,7 +387,7 @@ type UpcomingInvoicePreview = {
  * workspaces and gift/enterprise entitlements that are not billed per seat;
  * `billed` quotes the prorated charge applied when the invitation is accepted.
  */
-type SeatInvitePreview =
+export type SeatInvitePreview =
   | { status: 'not_billed'; reason: 'free' | 'covered' }
   | {
       status: 'billed';
@@ -400,6 +402,20 @@ type SeatInvitePreview =
     };
 
 export type CloudApi = {
+  e2eeMembers: {
+    createInvitation: Mutation<
+      E2eeMemberRequests['createInvitation'],
+      E2eeMemberReplies['createInvitation']
+    >;
+    preview: Query<E2eeMemberRequests['preview'], E2eeMemberReplies['preview']>;
+    submit: Mutation<E2eeMemberRequests['submit'], E2eeMemberReplies['submit']>;
+    retire: Mutation<E2eeMemberRequests['retire'], E2eeMemberReplies['retire']>;
+    pending: Query<E2eeMemberRequests['pending'], E2eeMemberReplies['pending']>;
+    read: Query<E2eeMemberRequests['read'], E2eeMemberReplies['read']>;
+    reject: Mutation<E2eeMemberRequests['reject'], E2eeMemberReplies['reject']>;
+    revoke: Mutation<E2eeMemberRequests['revoke'], E2eeMemberReplies['revoke']>;
+    claim: Query<E2eeMemberRequests['claim'], E2eeMemberReplies['claim']>;
+  };
   /** Optional developer-only E2EE control plane; does not authorize content access. */
   e2eeContent: { contentStreamsToken: Action<E2eeContentTokenRequest, E2eeContentToken> };
   e2eeJoinMailbox: {

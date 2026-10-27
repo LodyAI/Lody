@@ -24,6 +24,7 @@ import { makeDesktopE2eeRuntimeHost } from './e2ee-runtime.mts'
 import { makeOfflineAuthIdentityCache } from '../auth-storage.ts'
 import * as electronIpc from '../../../../../packages/shared/src/electron-ipc.ts'
 import { isIpcInvokeChannel } from '../../preload/ipc-invoke-policy.ts'
+import * as memberJoining from './e2ee-member-join.mts'
 import { PersonalPairingOfferSchema } from './e2ee-personal-pairing.mts'
 import { desktopE2eeFailure } from './e2ee-diagnostics.mts'
 const require = createRequire(import.meta.url)
@@ -50,9 +51,11 @@ async function load(relative, dependencies, console = globalThis.console, env = 
       require: (id) =>
         Object.hasOwn(dependencies, id)
           ? dependencies[id]
-          : id === '../../services/e2ee-personal-pairing.mjs'
-            ? { PersonalPairingOfferSchema }
-            : require(id)
+          : id === '../../services/e2ee-member-join.mjs'
+            ? memberJoining
+            : id === '../../services/e2ee-personal-pairing.mjs'
+              ? { PersonalPairingOfferSchema }
+              : require(id)
     }
   )
   return exports
@@ -1955,4 +1958,158 @@ void test('remote commands use workspace custody and never create an account con
   assert.notEqual(first.signingPublicKey, second.signingPublicKey)
   const roots = await readdir(join(directory, 'e2ee-bootstrap'))
   assert.ok(!(await readdir(join(directory, 'e2ee-bootstrap', roots[0]))).includes('control'))
+})
+
+async function memberIpcFixture() {
+  const identity = { userId: 'A', generation: 1 }
+  const signed = [],
+    closed = []
+  const cloudEntered = deferredMember(),
+    cloudGate = deferredMember(),
+    keyEntered = deferredMember(),
+    keyGate = deferredMember()
+  let holdCloud = false
+  const makeOwner = (accountId, label) => ({
+    accountId,
+    label,
+    readers: new Map([['team', new Map([[1, 1]])]]),
+    bootstrap: {
+      deviceCredential: () => Effect.succeed('credential'),
+      acceptMemberJoin: () => Effect.void
+    },
+    host: {
+      prepareMemberPromotion: () =>
+        Effect.sync(() => {
+          signed.push(label)
+          return { workspaceId: 'team', requestId: 'promotion', recordHex: 'abcd' }
+        }),
+      memberPromotionRole: () => Effect.succeed('admin'),
+      open: () => Effect.succeed({ hasCurrentKey: true }),
+      ingestLedgerRecords: () => Effect.void,
+      status: () => Effect.succeed({ hasCurrentKey: true }),
+      keyRound: () =>
+        Effect.promise(async () => {
+          keyEntered.resolve()
+          await keyGate.promise
+        }),
+      beginCloseWorkspace: () =>
+        Effect.sync(() => {
+          closed.push(label)
+          return Effect.void
+        })
+    }
+  })
+  let current = makeOwner('A', 'original-A')
+  const sender = Object.assign(new EventEmitter(), { id: 1 })
+  const cloud = {
+    accountId: 'A',
+    client: {
+      memberClaim: () =>
+        Effect.succeed({
+          accountId: 'A',
+          workspaceId: 'team',
+          requestId: 'request',
+          state: 'committed'
+        }),
+      appendRecord: () => Effect.void
+    }
+  }
+  const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
+    effect: { Effect },
+    'electron-ipc-decorator': {
+      IpcService: class {},
+      IpcMethod: () => (_t, _n, d) => d,
+      getIpcContext: () => ({ event: { sender } })
+    },
+    '../../platform': { isLocalPlatform: () => false },
+    '../assert-sender': { assertProductWindowSender: () => {} },
+    '../ipc-service-deps': {
+      getIpcServiceDeps: () => ({
+        authService: { getCachedSessionIdentity: () => ({ ...identity }) }
+      })
+    },
+    '../../services/e2ee-bootstrap.mjs': {},
+    '../../services/e2ee-account-runtime': {
+      withDesktopE2eeAccount: async (work) => Effect.runPromise(work(current)),
+      desktopE2eeCloudClient: async () => {
+        cloudEntered.resolve()
+        if (holdCloud) await cloudGate.promise
+        return cloud
+      },
+      releaseDesktopE2eeReader: () => {},
+      runDesktopE2eeOperation: async (accountId, work) => {
+        if (identity.userId !== accountId) throw new Error('e2ee_account_mismatch')
+        const result = await Effect.runPromise(work)
+        if (identity.userId !== accountId) throw new Error('e2ee_account_mismatch')
+        return result
+      }
+    }
+  })
+  const ipc = new E2eeIpc()
+  ipc.permissionHistory = async () => []
+  ipc.refresh = async () => {}
+  return {
+    ipc,
+    identity,
+    signed,
+    closed,
+    cloudEntered,
+    cloudGate,
+    keyEntered,
+    keyGate,
+    makeOwner,
+    setOwner(owner) {
+      current = owner
+    },
+    holdCloud() {
+      holdCloud = true
+    }
+  }
+}
+function deferredMember() {
+  let resolve
+  const promise = new Promise((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+void test('member approval retains its original native namespace across a delayed cloud call', async () => {
+  const f = await memberIpcFixture()
+  f.holdCloud()
+  const operation = f.ipc.promoteMember('team', '11'.repeat(16))
+  const rejected = assert.rejects(operation, /e2ee_account_mismatch/)
+  await f.cloudEntered.promise
+  f.setOwner(f.makeOwner('A', 'replacement-A'))
+  f.cloudGate.resolve()
+  await rejected
+  assert.deepEqual(f.signed, [])
+})
+for (const sameAccount of [true, false])
+  void test(`late member installation cannot read or release a replacement namespace (same account: ${sameAccount})`, async () => {
+    const f = await memberIpcFixture()
+    const operation = f.ipc.claimMemberJoin('team', 'request')
+    const rejected = assert.rejects(operation, /e2ee_account_mismatch/)
+    await f.keyEntered.promise
+    if (!sameAccount) {
+      f.identity.userId = 'B'
+      f.identity.generation++
+    }
+    const replacement = f.makeOwner(f.identity.userId, 'replacement')
+    f.setOwner(replacement)
+    f.keyGate.resolve()
+    await rejected
+    assert.equal(replacement.readers.get('team').get(1), 1)
+    assert.deepEqual(f.closed, [])
+  })
+void test('a background reader closes only the namespace returned by its own open', async () => {
+  const f = await memberIpcFixture()
+  const opened = await f.ipc.open('team', undefined, 'A')
+  const replacement = f.makeOwner('A', 'replacement')
+  f.setOwner(replacement)
+  await f.ipc.close('team', 'A', opened.readerOwner)
+  assert.equal(replacement.readers.get('team').get(1), 1)
+  assert.deepEqual(f.closed, [])
+  f.identity.userId = 'B'
+  f.identity.generation++
+  await assert.rejects(f.ipc.open('team', undefined, 'A'), /e2ee_account_mismatch/)
 })

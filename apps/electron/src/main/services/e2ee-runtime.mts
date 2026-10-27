@@ -9,6 +9,7 @@ import { makeDesktopKeyMaintenance } from './e2ee-key-maintenance.mjs'
 import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
 import { randomUUID } from 'node:crypto'
 import { makeDesktopPersonalPairing } from './e2ee-personal-pairing.mjs'
+import { makeDesktopMemberApprovals } from './e2ee-member-join.mjs'
 import { makeDesktopLocalPairing } from './e2ee-local-pairing.mjs'
 import type { LocalE2eePrepareResponse } from '@lody/shared/e2ee-local-pairing'
 import { mkdir, unlink } from 'node:fs/promises'
@@ -196,6 +197,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         pairing: ReturnType<typeof makeDesktopLocalPairing>
         remotePairing: ReturnType<typeof makeDesktopRemotePairing>
         personalPairing: ReturnType<typeof makeDesktopPersonalPairing>
+        memberApprovals: ReturnType<typeof makeDesktopMemberApprovals>
         status: () => Effect.Effect<E2eeRuntimeStatus, unknown>
         ledgerView: () => Effect.Effect<E2eeRuntimeLedgerView, unknown>
         observe: (checkpoint: ObservedCheckpoint) => Effect.Effect<void, unknown>
@@ -265,6 +267,38 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             ) {
               connection.close()
               throw fail('local-evidence-conflict')
+            }
+            // Bootstrap verified these complete pages before retaining them. Reopening still
+            // replays their originals below; only exact overlaps can enter this database.
+            if ('historyPages' in creation && creation.historyPages) {
+              connection.exec('BEGIN IMMEDIATE')
+              try {
+                for (const page of creation.historyPages) {
+                  page.recordsHex.forEach((record, index) => {
+                    const position = page.startIndex + index
+                    const prior = connection
+                      .prepare('SELECT record FROM records WHERE position=?')
+                      .get(position)
+                    if (
+                      prior &&
+                      (!(prior.record instanceof Uint8Array) || hex(prior.record) !== record)
+                    )
+                      throw fail('local-evidence-conflict')
+                    connection
+                      .prepare('INSERT OR IGNORE INTO records(position,record) VALUES(?,?)')
+                      .run(position, unhex(record))
+                  })
+                  if (page.recordsHex.length)
+                    connection
+                      .prepare('UPDATE records SET locator=COALESCE(locator,?) WHERE position=?')
+                      .run(page.position, page.startIndex + page.recordsHex.length - 1)
+                }
+                connection.exec('COMMIT')
+              } catch (cause) {
+                connection.exec('ROLLBACK')
+                connection.close()
+                throw cause
+              }
             }
             connection
               .prepare('INSERT OR IGNORE INTO cache(id,name) VALUES(1,?)')
@@ -607,6 +641,16 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             offset: () => Effect.map(feed.current(), (state) => state.offset)
           })
         )
+        const memberApprovals = yield* sql(() =>
+          makeDesktopMemberApprovals({
+            db,
+            workspaceId,
+            genesis,
+            genesisRecord: creation.record,
+            signer: device,
+            current: () => verified.current()
+          })
+        )
         const keysLayer = InstalledEpochKeys.layer.pipe(
           Layer.provideMerge(Layer.succeed(InstalledKeyStore, installedStore)),
           Layer.provideMerge(Layer.succeed(VerifiedLedger, verified)),
@@ -900,6 +944,9 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             epoch: publicState.epoch.number,
             rotationRequired: publicState.epoch.rotationRequired,
             deviceKind: ownDevice?.kind ?? null,
+            memberRole: ownDevice
+              ? (publicState.members.get(hex(ownDevice.membershipId.toBytes()))?.role ?? null)
+              : null,
             hasCurrentKey: Result.isSuccess(checked),
             hasDeviceCredential: Result.isSuccess(
               yield* Effect.result(options.bootstrap.deviceCredential(workspaceId))
@@ -1164,6 +1211,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           pairing,
           remotePairing,
           personalPairing,
+          memberApprovals,
           status,
           ledgerView,
           ingest,
@@ -1315,6 +1363,36 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                   : 'management_retry'
             )
           })
+        ),
+      prepareMemberPromotion: (workspaceId: string, membershipId: string) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.memberApprovals.promote(membershipId)
+          )
+        ),
+      memberPromotionRole: (workspaceId: string, membershipId: string) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.memberApprovals.promotionRole(membershipId)
+          )
+        ),
+      memberOffer: (workspaceId: string, mode: 'email' | 'link', expiresAt: number) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.memberApprovals.offer(mode, expiresAt)
+          )
+        ),
+      prepareMemberAdmission: (workspaceId: string, keyPackageHex: string) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.memberApprovals.prepare(keyPackageHex)
+          )
+        ),
+      inspectMemberAdmission: (workspaceId: string, keyPackageHex: string) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.memberApprovals.inspect(keyPackageHex)
+          )
         ),
       personalPairingOffer: (workspaceId: string) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.personalPairing.offer())),
