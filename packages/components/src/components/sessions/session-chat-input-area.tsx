@@ -7,6 +7,7 @@ import type { AgentConfigMeta } from '@lody/shared';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
 import { useResolvedMachineMeta } from '@/hooks/use-resolved-machine-meta';
+import { useSessionPromptSuggestion } from '@/hooks/use-session-prompt-suggestion';
 import { snapshotAgentRole } from '@lody/shared';
 import { useSessionMentionSource } from '@/hooks/use-session-mention-source';
 import * as stylex from '@stylexjs/stylex';
@@ -652,6 +653,9 @@ export const SessionChatInputArea = memo(
     const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
     const postHog = usePostHog();
     const isArchived = session.isArchived === true;
+    // Scoped by this composer's session id; the hook resolves its machine and
+    // workspace and returns null when there is nothing displayable.
+    const promptSuggestion = useSessionPromptSuggestion(session.id);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     useLayoutEffect(() => {
       if (claimNavigationFocus?.() && !usesMobileKeyboardAction) {
@@ -2329,6 +2333,7 @@ export const SessionChatInputArea = memo(
         promptValue={submissionPending ? '' : userInput}
         onPromptChange={handleInputChange}
         onPromptKeyDown={handleKeyDown}
+        promptSuggestion={submissionPending || isArchived ? null : promptSuggestion}
         onPromptPaste={handlePaste}
         onImageDrop={!submissionPending && attachmentAddEnabled ? handleImageDrop : undefined}
         onDirectoryDrop={handleDirectoryDrop}

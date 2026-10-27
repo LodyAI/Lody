@@ -21,6 +21,7 @@ import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 import { getPastedTextCharacterCount, type PastedTextDraft } from '@/lib/pasted-text-draft';
 import { registerBuiltInCommands } from '@/lib/commands';
+import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 import { SettingsStoryProviders } from './settings-story-shell';
 
 // So session.focusInput has a binding — the desktop ⌘L focus hint reads it.
@@ -348,6 +349,47 @@ function DemoComposer({
     />
   );
 }
+
+function PromptSuggestionPreview({ mobile = false }: { mobile?: boolean }) {
+  const [prompt, setPrompt] = useState('');
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const composer = (
+    <ChatComposer
+      tone="light"
+      variant="session"
+      promptRef={promptRef}
+      promptValue={prompt}
+      onPromptChange={setPrompt}
+      promptSuggestion="Add a regression test for the reconnect path, then run the focused suite."
+      primaryAction={
+        <Button icon aria-label="Send">
+          <ArrowUp size={16} />
+        </Button>
+      }
+      autoResize
+      maxRows={11}
+    />
+  );
+  return (
+    <div className="flex min-h-screen flex-col justify-end bg-background px-4 pb-6">
+      <div className={cn('mx-auto w-full', mobile ? 'max-w-[390px]' : 'max-w-3xl')}>
+        {mobile ? (
+          <ForceMobileLayoutProvider force>{composer}</ForceMobileLayoutProvider>
+        ) : (
+          composer
+        )}
+      </div>
+    </div>
+  );
+}
+
+export const SessionPromptSuggestion: Story = {
+  render: () => <PromptSuggestionPreview />,
+};
+
+export const SessionPromptSuggestionMobile: Story = {
+  render: () => <PromptSuggestionPreview mobile />,
+};
 
 export const LandingDark: Story = {
   render: () => (
