@@ -81,3 +81,20 @@ Rollout order: deploy the backend exposing `e2eeWorkspaces.describe` before ship
 Creation and history use Convex actions; mode description remains a query. The private backend stores original signed ledger records in a separate Streams bucket and verifies complete core authorization before conditional append. No public DTO exposes a Streams address or credential. Clients continue verifying original records and retained checkpoints independently.
 
 Creation spans a database reservation and an external atomic genesis write/readback. A pending request retains its original bytes; only the backend attempt that owns the durable writer can dispatch. A settled failure before any write dispatch, or an explicit rejection of every write attempt, can release ownership for exact retry. An unknown append result is resolved by reading its position and, if empty, replaying the same signed bytes at the saved CAS offset, never by timeout or re-signing. An ambiguous genesis PUT keeps a permanent marker that blocks erasure and account-deletion completion: the current Streams service lets a late PUT recreate a deleted URL. Only the Streams permanent-delete tombstone ([loro-streams#428](https://github.com/loro-dev/loro-streams/issues/428)) plus a delayed-old-PUT integration test can lift that gate; no timeout, HEAD 404 or Convex row edit substitutes for it. This boundary does not enable the content runtime or provide a product ledger-editing UI.
+
+## Explicit native identity reset
+
+[Local identity recovery](../notes/implemented/feature/2026-10-27-e2ee-local-identity-reset.md)
+adds whole-directory archival and independent per-workspace custody. Pending creation
+owners move intact after server publication; exact retries follow retained request
+receipts. Permission/keyring errors offer repair and retry. Missing/corrupt originals
+offer explicit reset and fresh approved pairing; account archival is available for
+permanent OS protection loss. Confirmation binds account/auth generation and is rechecked
+after lock admission and native drain. SQLite image corruption keeps its originals
+and exposes this recovery. Cold identity reads open only the workspace directory.
+Local-history and trusted-pin failures offer explicit archival and fresh approval;
+a failed writer close instead requires restarting Lody and exposes no reset control.
+Renderer genesis pins, history checkpoints and mode
+evidence remain. Earlier shared developer custody is not imported; account archival
+preserves it. Archived unsent work is retained without replay and old remote devices
+are not revoked. Personal identities still require OS protection.

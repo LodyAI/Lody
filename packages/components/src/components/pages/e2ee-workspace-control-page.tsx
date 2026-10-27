@@ -193,6 +193,7 @@ const styles = stylex.create({
 });
 
 const failureMessage: Record<E2eeControlFailure['kind'], string> = {
+  'local-identity': 'e2ee.identity.localFailure',
   network: 'e2ee.control.failure.network',
   auth: 'e2ee.control.failure.auth',
   server: 'e2ee.control.failure.server',

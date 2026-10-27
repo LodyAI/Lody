@@ -12,7 +12,7 @@ PR: [#1976](https://github.com/LodyAI/Lody/pull/1976)
 
 ## 决策与归属
 
-现有工作区 host 持有维护服务、内存 cursor 和合并中的轮次。每次最多四轮 core 操作，合并的后续处理也最多四次；换 epoch 清空位置，整轮失败不推进位置。关闭只中止本工作区网络，等待已接纳操作结束后释放存储，不引入第二个 writer 或新的恢复寿命。现有 host 已使用原生 Effect，没有迁移台账边界变化。
+现有工作区 host 持有维护服务、内存 cursor 和合并中的轮次。[身份重置组合](../feature/2026-10-27-e2ee-local-identity-reset.zh.md) 将每个 host 放在各自工作区身份目录；冷读取身份不登记 reader，重置只等待选中的 owner 释放。恢复错误码保留对应的显式重置或重启 UI。每次最多四轮 core 操作，合并的后续处理也最多四次；换 epoch 清空位置，整轮失败不推进位置。关闭只中止本工作区网络，等待已接纳操作结束后释放存储，不引入第二个 writer 或新的恢复寿命。现有 host 已使用原生 Effect，没有迁移台账边界变化。
 
 打开仍验证历史与独立 pin；坏密钥返回 `hasCurrentKey: false`，只有检查成功的旧钥可进入 `writeEpoch`。reader 登记、账本显示和显式刷新因此可用。只有 core 验证同一已提交密钥后才能替换坏 blob，创建原件不变。这收窄 M1/M2 对密钥健康的前提，不降低账本权限或 custody 要求。
 

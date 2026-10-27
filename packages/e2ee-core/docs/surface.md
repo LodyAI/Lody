@@ -111,3 +111,9 @@ purpose/genesis/key AAD. A genuine credential for another key remains untouched;
 explicit preparation publishes a separate original for the new key. Corrupt data,
 unsafe permissions and unknown formats still fail closed. This changes the local
 filename only, with no blob conversion, migration or older-format import.
+
+Custody errors distinguish "permissions" (repair owner-only access and retry),
+"identity-lost" (missing originals/KEK), "corrupt" and unavailable OS protection.
+A missing KEK with surviving originals never creates a replacement. Explicit host
+recovery closes and archives the complete identity before opening independent
+custody; ordinary retry grants no replacement authority.

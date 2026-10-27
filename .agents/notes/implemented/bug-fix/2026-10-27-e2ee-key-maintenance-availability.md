@@ -12,7 +12,7 @@ Unreadable installed keys prevented opening the desktop ledger needed for repair
 
 ## Decision and ownership
 
-The existing workspace host owns maintenance, its in-memory queue cursors and coalescing. One pass performs at most four core rounds; coalesced follow-up is also bounded to four passes. Epoch changes reset cursors. Failed rounds never advance them. Close aborts this workspace's network, drains admitted work and then releases stores. No second writer or new recovery lifetime is introduced. This host already uses native Effect; no migration ledger boundary changes.
+The existing workspace host owns maintenance, its in-memory queue cursors and coalescing. The [identity-reset composition](../feature/2026-10-27-e2ee-local-identity-reset.md) keeps each host under its workspace identity directory; cold identity reads remain reader-free, and reset drains only the selected owner. Recovery codes retain their explicit reset or restart UI. One pass performs at most four core rounds; coalesced follow-up is also bounded to four passes. Epoch changes reset cursors. Failed rounds never advance them. Close aborts this workspace's network, drains admitted work and then releases stores. No second writer or new recovery lifetime is introduced. This host already uses native Effect; no migration ledger boundary changes.
 
 Ledger open still verifies history and independent pins. Unreadable key blobs give `hasCurrentKey: false`; only checked retained keys can populate `writeEpoch`. This preserves reader registration, ledger display and explicit refresh. Core alone replaces damaged blobs after authenticating the same committed key. Creation originals remain immutable. This narrows the M1/M2 key-health prerequisite, without weakening ledger authority or custody.
 
