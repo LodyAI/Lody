@@ -227,7 +227,6 @@ or `promptPrefix`; an empty string clears description/instructions. Neither acce
 credentials, MCP selections, ownership, visibility, or run configuration. The command
 prints the requestId and pending result; it does not claim the Role was saved.
 
-
 `role.json`:
 
 ```json
