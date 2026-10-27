@@ -47,7 +47,10 @@ context/message-flow.md "Upstream".
   and npx launch wrapper around the `packages/acp-extension-dsh` submodule. DSH uses
   a supported standalone Node from the final launch PATH; missing, unsupported or
   unexecutable Node fails before npx with installation guidance. All session, probe,
-  history and protocol-auth launches share this check. See the
+  history and protocol-auth launches share this check. `Session.createAgent` runs it
+  inside each startup attempt, after shell, credential and memory environment
+  merges; the checked environment goes to both executable resolution and sandbox
+  spawn. See the
   [system Node decision](../../../../.agents/notes/implemented/bug-fix/2026-10-27-dsh-system-node.md). It converts
   the adapter entry to a file URL for Cordis ESM imports, including Windows drive paths,
   while preset and session directories remain filesystem paths. Its Windows bootstrap

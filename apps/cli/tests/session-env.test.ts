@@ -1,4 +1,9 @@
-import { delimiter } from 'node:path';
+import { delimiter, join } from 'node:path';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import * as processOptions from '../src/platform/process-options';
+import { FakeProcessTable } from '@lody/shared/node/process-testing';
+import * as harnessRuntime from '../src/agent/deepseek-harness-runtime';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId, WorkspaceId } from '@lody/shared';
@@ -12,6 +17,12 @@ vi.mock('@/agent/login-shell-env', () => ({
   getCachedLoginShellEnvSyncLegacy: () => loginShellOverlay.value,
   getLoginShellEnvLegacy: async () => resolvedLoginShellOverlay.value,
 }));
+
+const controlledHome = vi.hoisted(() => ({ value: undefined as string | undefined }));
+vi.mock('node:os', async (importOriginal) => {
+  const original = await importOriginal<typeof import('node:os')>();
+  return { ...original, homedir: () => controlledHome.value ?? original.homedir() };
+});
 
 import { Session } from '../src/session/session';
 import type { CreateAgentConfig } from '../src/session/session-manager';
@@ -262,4 +273,185 @@ describe('Session buildShellEnv', () => {
       );
     }
   );
+});
+
+describe('Session.createAgent DeepSeek Node prerequisites', () => {
+  const roots: string[] = [];
+  const originalPlatformLayer = processOptions.platformLayer;
+  const originalSpawnResolver = harnessRuntime.resolveDeepSeekHarnessSpawn;
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    controlledHome.value = undefined;
+    loginShellOverlay.value = {};
+    resolvedLoginShellOverlay.value = {};
+    await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  });
+
+  async function fixture() {
+    const root = await mkdtemp(join(tmpdir(), 'lody-session-dsh-node-'));
+    roots.push(root);
+    controlledHome.value = root;
+    const bin = join(root, 'Node with spaces');
+    await mkdir(bin);
+    const node = join(bin, process.platform === 'win32' ? 'node.exe' : 'node');
+    const table = new FakeProcessTable('linux');
+    const probePids: number[] = [];
+    let holdProbe = false;
+    let announceProbe: () => void = () => {};
+    const probeStarted = new Promise<void>((onStarted) => {
+      announceProbe = onStarted;
+    });
+    vi.spyOn(processOptions, 'platformLayer').mockImplementation((options) =>
+      originalPlatformLayer({
+        ...options,
+        nodeProcess: {
+          ...table.api,
+          spawn: (...args: Parameters<typeof table.api.spawn>) => {
+            const child = table.api.spawn(...args);
+            probePids.push(child.pid ?? -1);
+            announceProbe();
+            if (!holdProbe)
+              queueMicrotask(() => {
+                child.stdout?.write(JSON.stringify({ node: '24.22.1', napi: '10' }));
+                table.exitOnItsOwn(child.pid ?? -1);
+              });
+            return child;
+          },
+        },
+      })
+    );
+    const launch = await harnessRuntime.resolveDeepSeekHarnessProcessLaunch({
+      rootDir: root,
+      adapterPath: join(root, 'deepseek-acp.js'),
+    });
+    const captured: Array<{ command: string; args: string[]; env: NodeJS.ProcessEnv }> = [];
+    const reachedSandbox = new Error('reached ACP sandbox boundary');
+    let failFirstAttempt = false;
+    const sandbox: SessionSandbox = {
+      enabled: false,
+      description: 'synthetic ACP sandbox',
+      applyLimits: async () => {},
+      readResourceAccounting: async () => ({ kind: 'unavailable', reason: 'test' }),
+      spawn: async (command, args, options) => {
+        captured.push({ command, args, env: options.env ?? {} });
+        if (failFirstAttempt && captured.length === 1) {
+          await rm(node);
+          throw new Error('npm code ETARGET: No matching version found for synthetic package');
+        }
+        throw reachedSandbox;
+      },
+      terminate: async () => {},
+      cleanup: async () => {},
+    };
+    resolvedLoginShellOverlay.value = { PATH: bin, SYNTHETIC_LOGIN_ENV: 'preserved' };
+    const session = new Session(
+      createConfig({
+        agentType: 'deepseek',
+        memory: { providerId: 'nowledge-mem', memoryId: 'synthetic-memory' },
+      }),
+      createSilentLogger(),
+      root,
+      sandbox
+    );
+    const callbacks = {
+      cliType: 'builtin',
+      agentType: 'deepseek',
+      ...launch,
+      env: { ...launch.env, PATH: bin, SYNTHETIC_PROVIDER_ENV: 'preserved' },
+    } as CreateAgentConfig;
+    return {
+      root,
+      bin,
+      node,
+      table,
+      captured,
+      session,
+      callbacks,
+      reachedSandbox,
+      probeStarted,
+      probePids,
+      holdProbe: () => {
+        holdProbe = true;
+      },
+      failFirstAttempt: () => {
+        failFirstAttempt = true;
+      },
+      installNode: () => writeFile(node, 'synthetic Node executable', { mode: 0o700 }),
+    };
+  }
+
+  it('reports missing Node before npx and recovers on the same Session after installation', async () => {
+    const f = await fixture();
+    await expect(f.session.createAgent(f.callbacks)).rejects.toThrow('[DSH_NODE_NOT_FOUND]');
+    expect(f.captured).toEqual([]);
+    expect(f.table.spawned).toEqual([]);
+    await f.installNode();
+    await expect(f.session.createAgent(f.callbacks)).rejects.toBe(f.reachedSandbox);
+    expect(f.captured[0]?.env.LODY_DSH_NODE_EXECUTABLE).toBe(f.node);
+    expect(f.captured[0]?.env.ELECTRON_RUN_AS_NODE).toBeUndefined();
+    expect(f.captured[0]?.env.NMEM_AGENT_ID).toBe('synthetic-memory');
+    expect(f.captured[0]?.env.SYNTHETIC_LOGIN_ENV).toBe('preserved');
+    expect(f.captured[0]?.env.SYNTHETIC_PROVIDER_ENV).toBe('preserved');
+    expect(f.table.spawned[0]?.options.env?.NMEM_AGENT_ID).toBe('synthetic-memory');
+  });
+
+  it('passes the validated Node into the Windows npm JS dispatch branch', async () => {
+    const f = await fixture();
+    await f.installNode();
+    const npmDir = join(f.bin, 'node_modules', 'npm', 'bin');
+    await mkdir(npmDir, { recursive: true });
+    await writeFile(join(f.bin, 'npx.cmd'), '@exit /b 99\r\n');
+    const npmEntry = join(npmDir, 'npx-cli.js');
+    await writeFile(npmEntry, '// synthetic npm entry');
+    // Run the real Windows resolver with the host-independent Windows PATH spelling.
+    // The prerequisite probe and every other Session step remain real implementations.
+    vi.spyOn(harnessRuntime, 'resolveDeepSeekHarnessSpawn').mockImplementation((options) =>
+      originalSpawnResolver({
+        ...options,
+        platform: 'win32',
+        env: { ...options.env, PATH: (options.env.PATH ?? '').split(delimiter).join(';') },
+      })
+    );
+    await expect(f.session.createAgent(f.callbacks)).rejects.toBe(f.reachedSandbox);
+    expect(f.captured[0]?.command).toBe(f.node);
+    expect(f.captured[0]?.args.slice(0, 3)).toEqual([
+      '--import',
+      expect.stringContaining('data:text/javascript;base64,'),
+      await realpath(npmEntry),
+    ]);
+    expect(f.captured[0]?.args.slice(3)).toEqual(f.callbacks.args);
+    expect(f.captured[0]?.env.LODY_DSH_NODE_EXECUTABLE).toBe(f.node);
+  });
+
+  it('cancels the in-flight prerequisite probe without spawning npx or leaving its process alive', async () => {
+    const f = await fixture();
+    await f.installNode();
+    f.holdProbe();
+    const controller = new AbortController();
+    const startup = f.session.createAgent({ ...f.callbacks, abortSignal: controller.signal });
+    const rejected = expect(startup).rejects.toBeDefined();
+    await f.probeStarted;
+    controller.abort();
+    await rejected;
+    expect(f.captured).toEqual([]);
+    expect(f.probePids.map((pid) => f.table.isAlive(pid))).toEqual([false]);
+  });
+
+  it('rechecks Node on each npm recovery attempt instead of reusing a stale executable', async () => {
+    const f = await fixture();
+    await f.installNode();
+    const secondBin = join(f.root, 'replacement-node');
+    await mkdir(secondBin);
+    const secondNode = join(secondBin, process.platform === 'win32' ? 'node.exe' : 'node');
+    await writeFile(secondNode, 'replacement Node executable', { mode: 0o700 });
+    resolvedLoginShellOverlay.value = { PATH: [f.bin, secondBin].join(delimiter) };
+    f.failFirstAttempt();
+    await expect(f.session.createAgent(f.callbacks)).rejects.toBe(f.reachedSandbox);
+    expect(f.captured.map((entry) => entry.env.LODY_DSH_NODE_EXECUTABLE)).toEqual([
+      f.node,
+      secondNode,
+    ]);
+    expect(f.probePids.map((pid) => f.table.isAlive(pid))).toEqual([false, false]);
+  });
 });

@@ -19,7 +19,9 @@ DeepSeek Harness 0.2.1-rc.2 在 Electron 44.9.3 下尚未完成 ACP 初始化就
 
 从登录 shell 与 Provider 环境合并后的最终 PATH 中，按顺序选择绝对目录里的第一个 Node。忽略空项和相对目录，避免会话工作目录隐式提供执行程序。首个候选无法执行时明确失败，不静默改用其他安装。检查仓库现有 Node 安全版本下限及 Node-API 10，并拒绝 Electron 程序。仅在 DSH 子进程环境移除 `ELECTRON_RUN_AS_NODE`。保留 PATH 顺序，包括首位的 GitHub shim。Windows npm JS 与 DSH 转发器使用同一个选中的 Node，保留无窗口启动和进程树管理。
 
-会话与能力探测、历史读取、协议认证入口均在环境合并后执行检查。稳定的 `DSH_NODE_NOT_FOUND`、`DSH_NODE_UNSUPPORTED`、`DSH_NODE_EXEC_FAILED` 标识沿现有错误消息传递；前端常开错误提示展示本地化解决方法和 Node.js 下载按钮。原始错误保留检测版本或执行失败原因，仍可完整复制。更新能力来源版本，确保升级后重新探测。
+普通会话在 `Session.createAgent` 的每次启动 attempt 中执行检查，位置在 shell/cache、凭据和记忆环境合并之后。返回的同一份环境用于可执行程序解析和 `sandbox.spawn`。能力与配额探测、历史读取、协议认证入口在各自环境合并后使用同一检查。稳定的 `DSH_NODE_NOT_FOUND`、`DSH_NODE_UNSUPPORTED`、`DSH_NODE_EXEC_FAILED` 标识沿现有错误消息传递；前端常开错误提示展示本地化解决方法和 Node.js 下载按钮。原始错误保留检测版本或执行失败原因，仍可完整复制。更新能力来源版本，确保升级后重新探测。
+
+初版 `44ff47f2c` 从启动 overlay 移除了 `LODY_DSH_NODE_EXECUTABLE`，却漏接普通 `Session.createAgent`，导致所有普通 DSH 会话缺少转发器要求的变量，Windows 也跳过 npm JS 分支。**更正此前验证结论：**原隔离 ACP 检查执行的是生成的 bootstrap，没有经过普通 Session 主链。当前用 Session 专属检查与行为测试验证此边界，不能用能力探测成功替代。
 
 ## 所有权与故障范围
 
@@ -27,9 +29,11 @@ DeepSeek Harness 0.2.1-rc.2 在 Electron 44.9.3 下尚未完成 ACP 初始化就
 
 ## 验证与限制
 
-六组 CLI 测试共 163 项通过，覆盖 PATH 顺序与空格路径、Windows npx 转发、Node 缺失或不支持或无法执行、安装后重试、生成的真实启动代码，以及取消进行中的检查并确认子进程终止。两组前端测试共 21 项通过；现有错误提示 Storybook 增加缺失 Node 和下载操作状态。CLI 与 components 类型检查、改动代码 Oxlint、进程与公共边界检查、根目录格式化和文档检查通过。
+九组 CLI 测试共 192 项通过，包含 Session 环境、资源限制、终止，以及 Harness 启动、运行时检查、runner、认证、历史和 Agent 设置。新增 `Session.createAgent` 用例验证缺 Node 时不进入 sandbox spawn、安装后恢复、Windows npm JS 分支、最终记忆/Provider/shell 环境、取消后确认检查进程终止，以及 npm 恢复重试时重新检查 Node。临时撤掉 Session 接入后，缺 Node 和 Windows 分支两个回归测试均失败。此前两组前端测试 21 项覆盖的 UI 未改变。CLI 类型检查、改动代码 type-aware Oxlint、进程与公共边界、根目录格式化和文档检查通过。
 
-真实本地 ACP 检查使用本次启动代码、此前打包的适配器、缓存的 0.2.1-rc.2 依赖及临时目录。独立 Node 24.22.1 和 Electron 44.9.3 宿主均能选择 PATH Node，完成 `initialize` 与 `session/new`，返回模式、预设、模型和推理选项。没有发送模型请求或使用真实凭据。检查复用已有适配器和缓存，跳过 npx 安装，不等于新安装包或 npm 冷下载验证。
+真实隔离检查现在直接调用 **`Session.createAgent`**，经过普通环境构造、sandbox 和 ACP client。独立 Node 24.22.1 与 Electron 44.9.3 宿主均完成 `initialize` 和 `session/new`，得到 Session client 与模型能力后正常终止。检查复用此前打包的适配器、缓存 0.2.1-rc.2 依赖和仅使用缓存的 npx shim，不发送模型请求，不使用真实凭据或内置 MCP server；不验证 npm 冷安装、新安装包或原生 Windows/Linux。
+
+一次 Electron 宿主经 VitePlus Node shim 的检查触发原有五秒前置期限；不改配置的下一次相同检查成功，直接使用 Node 24.22.1 的 PATH 对照也成功。这证明该次超时后可以重试恢复，不代表冷启动或慢速 Node 管理器路径已经验收。
 
 根目录 `pnpm check` 停在未改动的 Codex 适配器构建：复用依赖中的 ACP SDK 版本较旧，缺少新要求的 `@agentclientprotocol/sdk/unstable` 与 `experimental/v2/unstable` 导出。Effect lint 也因缺少 `@effect/tsgo` 无法执行，不能称为全仓检查通过。Magpie 启动测试改用临时 DSH 目录，避免写入用户目录。
 
