@@ -34,11 +34,12 @@
   Preserve the file-global clock floor across workspaces/restarts and readable completed
   evidence. No floor reset, deadline extension or new time source/recovery generation.
   See [integration proposal](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-realtime-journal.md).
-- `prepareCliE2eeMachineLegacy` uses core's fixed v1 helper to bind the retained credential
-  hash to the exact desktop-generated 16-byte session. Prepare/activate use only the
-  OS-user control socket. Fleet first checks its account and discovered encrypted
-  workspace/genesis. Activation refreshes ledger/mailbox; acknowledge only an installed
-  current key. Temporary failure leaves the same pairing retryable.
+- `prepareCliE2eeMachineLegacy` binds the retained credential hash to the exact
+  desktop-generated 16-byte pairing session using core's fixed v1 helper.
+  Pairing preparation and activation run only on the OS-user control socket;
+  Fleet checks its own account and discovered encrypted workspace/genesis first.
+  Activation refreshes the verified ledger and mailbox and acknowledges only an
+  installed current key; temporary failure leaves the same pairing retryable.
 
 - Pin M2 write epoch; epoch change/rotation-required latches sends off, retaining local
   state. M3 owns resumption.
