@@ -919,7 +919,6 @@ describe('host-only E2EE realtime journal', () => {
   it.each([
     ['old version', 'PRAGMA user_version = 1'],
     ['unknown version', 'PRAGMA user_version = 99'],
-    ['missing request table', 'ALTER TABLE realtime_requests RENAME TO retained_requests'],
     [
       'missing request field',
       'ALTER TABLE realtime_requests RENAME COLUMN digest TO retained_digest',
@@ -979,6 +978,81 @@ describe('host-only E2EE realtime journal', () => {
     expect(reset.archivePath).toBe(archived);
     expect(new RealtimeJournal(filename, () => now).read(request)).toBeNull();
     expect(snapshotDatabase(archived)).toEqual(beforeDatabase);
+  });
+
+  it.each(['direct reset', 'archive before reset'])(
+    'fences every current request when response schema is incomplete: %s',
+    (route) => {
+      journal.receive(request);
+      journal.finish(takePermit(journal), outcome);
+      const uncertain = { ...request, requestId: 'uncertain-before-incomplete-reset' };
+      const pending = { ...request, requestId: 'received-before-incomplete-reset' };
+      journal.receive(uncertain);
+      takePermit(journal, uncertain);
+      journal.receive(pending);
+      const editor = new Database(filename);
+      editor.exec('ALTER TABLE realtime_responses RENAME COLUMN digest TO retained_digest');
+      editor.close();
+      const before = snapshotDatabase(filename);
+      const resetter = new RealtimeJournal(filename, () => now);
+      if (route === 'archive before reset') {
+        const failure = expectCode(() => resetter.read(request), 'unsupported_schema');
+        const control = new Database(`${filename}.control.sqlite`, { readonly: true });
+        try {
+          expect(control.prepare('SELECT COUNT(*) AS count FROM retired_requests').get()).toEqual({
+            count: 3,
+          });
+        } finally {
+          control.close();
+        }
+        expect(snapshotDatabase(failure.archivePath as string)).toEqual(before);
+      }
+      const { archivePath } = resetter.reset();
+      expect(snapshotDatabase(archivePath)).toEqual(before);
+      const reopened = new RealtimeJournal(filename, () => now);
+      for (const original of [request, uncertain, pending]) {
+        expectCode(() => reopened.receive(original), 'archived_request');
+        expectCode(() => reopened.claim(original), 'missing');
+      }
+      const independent = { ...request, requestId: 'independent-after-incomplete-reset' };
+      reopened.receive(independent);
+      expect(reopened.claim(independent).state).toBe('claimed');
+    }
+  );
+
+  it.each([
+    [
+      'ALTER TABLE realtime_requests RENAME TO retained_requests',
+      'ALTER TABLE retained_requests RENAME TO realtime_requests',
+    ],
+    [
+      'ALTER TABLE realtime_requests RENAME COLUMN request_id TO retained_id',
+      'ALTER TABLE realtime_requests RENAME COLUMN retained_id TO request_id',
+    ],
+  ])('refuses reset when current request keys cannot be read: %s', (damage, repair) => {
+    journal.receive(request);
+    journal.finish(takePermit(journal), outcome);
+    const editor = new Database(filename);
+    editor.exec(damage);
+    editor.close();
+    const before = snapshotFiles(directory);
+    const resetter = new RealtimeJournal(filename, () => now);
+    expectCode(() => resetter.read(request), 'request_keys_unreadable');
+    expect(snapshotFiles(directory)).toEqual(before);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const failure = expectCode(() => resetter.reset(), 'request_keys_unreadable');
+      expect(failure.message).toContain('Cannot safely reset');
+      expect(snapshotFiles(directory)).toEqual(before);
+    }
+    const restored = new Database(filename);
+    restored.exec(repair);
+    restored.close();
+    expect(new RealtimeJournal(filename, () => now).read(request)).toMatchObject({
+      state: 'completed',
+      outcome,
+    });
+    resetter.reset();
+    expectCode(() => new RealtimeJournal(filename, () => now).receive(request), 'archived_request');
   });
 
   it('initializes an interrupted empty original without losing a later request', () => {

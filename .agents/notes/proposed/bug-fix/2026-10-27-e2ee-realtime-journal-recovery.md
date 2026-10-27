@@ -69,8 +69,16 @@ are execution fences, not copied runnable rows. Resetting again retains earlier
 fences. A resend of a retired ID returns `archived_request`; a previously used owner
 or permit cannot operate on a fresh journal identity (`journal_reset`). Archives
 are never scanned for work, decoded as legacy formats, or imported automatically.
-An unknown format cannot contribute decoded retired keys; it remains evidence,
-and its rows are never submitted to execution by this module.
+Format version and complete schema usability are separate checks. A schema-3 store
+must retire every readable request key before archival, even when response, clock,
+or other request columns are incomplete. Reading these current-format keys does
+not depend on the damaged tables or grant authority to execute their rows. If the
+request-key table, a key column, or any key value cannot be read and validated,
+`request_keys_unreadable` refuses archival/reset and keeps the original for repair.
+The control transaction rolls back partial retirement and publishes no reset intent;
+repeating reset remains safe, and repairing the key evidence permits normal retry.
+Older/unknown versions are never decoded; their archived rows are never submitted
+to execution by this module.
 
 Reset uses a durable intent before rename because SQLite cannot atomically commit
 an OS rename with SQL. Other calls observe `reset_required` while intent remains.
@@ -81,8 +89,8 @@ replacement is created merely because an archive exists or a file is missing.
 
 SQLite normal recovery precedes inspection. Only version zero with no schema
 objects is treated as interrupted first initialization. Unknown versions and missing
-required schema are archived, with a typed error and evidence path; explicit reset
-is needed to proceed. Raw corruption remains a storage failure. Before rename,
+required schema are archived with a typed error and evidence path, provided current
+request keys can be retired; explicit reset is needed to proceed. Raw corruption remains a storage failure. Before rename,
 SQLite switches to DELETE mode, consolidates WAL, and obtains an exclusive database
 transaction. Busy native readers/writers refuse that operation; no sidecar is copied
 or removed by application code. Committed logical evidence and schema are preserved,
@@ -105,7 +113,8 @@ or process termination bounds the retained lifetime; there is no background retr
 | Clock skew | Only the new claim fails; no floor write, key access, or workspace teardown. Calibrate or explicitly reset; completed evidence stays readable. |
 | No reference plus bad maximum | Only the matching genesis/workspace rejects; explicit reset provides a finite operator recovery path. |
 | Empty first creation | Initialize atomically after native recovery proves no committed schema; independent opens serialize. |
-| Unknown schema | Retain archive, report path, require explicit reset; do not rewrite or decode the original. |
+| Incomplete current schema | Retire readable keys before archive despite unrelated schema damage; unreadable current keys refuse reset and preserve the original for repair. |
+| Unknown version | Retain archive, report path, require explicit reset; no old-version decoder. |
 | Reset interruption | Stable pending intent blocks claims; operator retry completes the same replacement. |
 | Failed close | Original owner retains main plus shared mutex; other owners can continue ordinary work, but rename waits. Bounded diagnostic and explicit cleanup retry. |
 | Crash after start | `state: uncertain`, `outcomeStatus: unknown`; only the original live permit can settle. A new request ID in that workspace remains independent. |
@@ -119,7 +128,13 @@ checkpoint, COMMIT BUSY, exact response/result originals, immutable identity and
 competing claim coverage. New cases cover ten-minute boundary/reference rejection,
 cross-workspace clocks, empty initialization, archive evidence, repeated reset,
 retired IDs, old permits, interrupted replacement, cleanup/rename exclusion and
-CLI reset receipts. No sleeps or network are used in these tests.
+CLI reset receipts. The incomplete-current-store regression first fails on the
+reviewed implementation: a completed original can be claimed again after reset,
+and archive-first reset retains zero retired IDs. Both direct and archive-first
+routes now cover completed, uncertain and received identities, while independent
+new IDs remain usable. Missing request tables/key columns refuse repeated reset
+without changing evidence; repair restores normal use and safe reset. All four
+new cases were confirmed RED before the fix. No sleeps or network are used.
 
 Run only affected tests and static checks locally; exact commands/results belong
 in the PR. Remaining gaps: authenticated-time plumbing, sender freshness and query

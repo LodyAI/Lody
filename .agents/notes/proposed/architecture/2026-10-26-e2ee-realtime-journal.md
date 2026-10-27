@@ -56,7 +56,9 @@ the file exclusively. Short transactions use the
 without catching mutation failures inside a transaction. Reopen accepts schema 3
 only. After native recovery, version zero with no schema objects may complete first
 initialization; other unsupported/incomplete schemas are renamed and reported,
-without decoding or upgrading them. Replacement requires explicit local reset.
+without decoding or upgrading old formats. Current-format request keys must be
+retired before archival even if other tables are incomplete; unreadable current
+keys refuse reset and preserve the original for repair. Replacement requires explicit local reset.
 The stable adjacent control database coordinates shared opens against exclusive reset and retains retired
 current-format request IDs and interrupted-reset intent. See the
 [recovery decision](../bug-fix/2026-10-27-e2ee-realtime-journal-recovery.md) for its

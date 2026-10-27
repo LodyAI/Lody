@@ -66,6 +66,7 @@ export class RealtimeJournalError extends Error {
       | 'reset_required'
       | 'journal_reset'
       | 'archived_request'
+      | 'request_keys_unreadable'
       | 'identity_conflict'
       | 'missing'
       | 'permit'
@@ -78,7 +79,9 @@ export class RealtimeJournalError extends Error {
     super(
       code === 'clock_skew'
         ? 'E2EE realtime journal: local clock or retained clock floor is more than 10 minutes ahead of trusted time. Correct your system clock; if already correct, reset the local execution log.'
-        : `E2EE realtime journal: ${code}${archivePath !== undefined ? `; evidence: ${archivePath}; run lody e2ee journal reset --file <journal>` : ''}`,
+        : code === 'request_keys_unreadable'
+          ? 'E2EE realtime journal: Cannot safely reset: current request identities cannot be read. Preserve the original journal and restore its request-key evidence before retrying.'
+          : `E2EE realtime journal: ${code}${archivePath !== undefined ? `; evidence: ${archivePath}; run lody e2ee journal reset --file <journal>` : ''}`,
       { cause }
     );
     this.name = 'RealtimeJournalError';
@@ -280,37 +283,13 @@ export class RealtimeJournal {
           }
           if (!unsupported) throw new RealtimeJournalError('journal_reset');
         }
-        if (reason === 'reset') {
-          this.ensureSchema(db);
-          // No old-schema decoder. Retain only current request identities, not
-          // runnable rows, when the operator explicitly resets this format.
+        if (reason === 'reset') this.ensureSchema(db);
+        // Schema usability and request-key evidence are independent. Even an
+        // incomplete current store must retire its IDs before it can be archived.
+        if (db.pragma('user_version', { simple: true }) === 3) {
           const retire = control.prepare('INSERT OR IGNORE INTO retired_requests VALUES (?)');
-          for (const row of db
-            .prepare(
-              'SELECT genesis, workspace_id, target_machine_id, request_id FROM realtime_requests'
-            )
-            .iterate()) {
-            const key = z
-              .object({
-                genesis: z.string(),
-                workspace_id: z.string(),
-                target_machine_id: z.string(),
-                request_id: z.string(),
-              })
-              .parse(row);
-            retire.run(
-              digest(
-                Buffer.from(
-                  JSON.stringify([
-                    key.genesis,
-                    key.workspace_id,
-                    key.target_machine_id,
-                    key.request_id,
-                  ])
-                )
-              )
-            );
-          }
+          for (const key of this.readCurrentRequestKeys(db))
+            retire.run(digest(Buffer.from(JSON.stringify(keyValues(key)))));
         }
         const replacementId = randomUUID();
         control
@@ -318,6 +297,18 @@ export class RealtimeJournal {
           .run(`${this.filename}.archive-${randomUUID()}`, replacementId, reason);
       });
     });
+  }
+
+  private *readCurrentRequestKeys(db: Database.Database): Generator<RealtimeRequestKey> {
+    try {
+      for (const row of db
+        .prepare(`SELECT genesis, workspace_id AS workspaceId,
+        target_machine_id AS targetMachineId, request_id AS requestId FROM realtime_requests`)
+        .iterate())
+        yield keySchema.parse(row);
+    } catch (cause) {
+      throw new RealtimeJournalError('request_keys_unreadable', cause);
+    }
   }
 
   private completeReset(createReplacement: boolean): { archivePath: string } {

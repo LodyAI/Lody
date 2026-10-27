@@ -32,7 +32,9 @@ A clock error asks you to calibrate the system clock. Without trusted reference 
 a bad observation can still reject new claims in its workspace until explicit reset;
 other workspaces and completed evidence remain available. Empty interrupted first
 creation initializes automatically. An unknown schema is archived and reported,
-then waits for explicit reset. No legacy data is imported.
+then waits for explicit reset. An incomplete current-format store still retires all
+readable request keys before archival; unreadable current request keys refuse reset
+and preserve the original for repair. No legacy data is imported.
 
 This maintenance command is available by its explicit name and hidden from general
 CLI help. The journal has no product dispatch caller yet, so there is no default

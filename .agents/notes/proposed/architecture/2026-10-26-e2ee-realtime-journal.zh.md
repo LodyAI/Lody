@@ -45,7 +45,8 @@ Translation: current
 [上游同步事务契约](https://github.com/WiseLibs/better-sqlite3/blob/v13.0.3/docs/api.md#transactionfunction---function)，
 不在事务内部捕获并继续处理修改失败。重开只接受 schema 3。原生恢复后，版本为零且没有
 任何 schema 对象的库可以完成首次初始化；其他不支持或不完整的 schema 改名归档并提示，
-不解码或升级。只有显式本机重置才新建日志。相邻的稳定 control SQLite 用共享锁协调普通打开、排他锁协调重置，
+不解码或升级旧格式。当前格式的请求键必须先隔离，即使其他表不完整；当前请求键不可读时
+拒绝重置，保留原件待修复。只有显式本机重置才新建日志。相邻的稳定 control SQLite 用共享锁协调普通打开、排他锁协调重置，
 保留当前格式旧请求 ID 的执行隔离与中断重置意图。其所有权、崩溃边界与限制见
 [恢复决定](../bug-fix/2026-10-27-e2ee-realtime-journal-recovery.zh.md)。损坏仍阻断依赖操作。
 

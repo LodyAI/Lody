@@ -25,20 +25,16 @@
   first. Retired cache cleanup cannot fail local open.
 - No plaintext RPC, presence, attachments or scheduled automation on encrypted workspaces
   while their encrypted channels remain unimplemented.
-- `realtime-journal.ts`: current schema 3 storage only; no migration/legacy decoder.
-  Native recovery first; only version-zero with no schema objects may initialize.
-  Archive unknown schemas intact, report path; replacement requires explicit reset.
-  Exact requests/responses/first outcomes; no expiry GC or uncertain takeover.
-  Uncertain exposes outcome unknown; other request IDs remain independent.
-  Floors key genesis/workspace. Before floor writes reject local >10 minutes ahead
-  of a current authenticated reference; frame time is never a reference.
-  No reference: keep the scoped maximum, recover via explicit local reset.
-  Reset archives the old file, creates a fresh identity, keeps control SQLite,
-  retired-ID fences and reset intent; no archive replay/import. Shared control locks
-  for ordinary calls, exclusive for reset; retain through unresolved main close.
-  Stop execution owners first. Bound permits/cleanup; persist replies before send,
-  retry exact bytes. Integration fences execution AND Meta/history; no storage authority.
-  See [recovery decision](../../../../../.agents/notes/proposed/bug-fix/2026-10-27-e2ee-realtime-journal-recovery.md).
+- `realtime-journal.ts`: schema 3 only; no migration. Recover SQLite first;
+  Init only v0/no objects. Archive intact after retiring readable current
+  keys despite damage; unreadable keys refuse reset. No auto-replace/GC/archive replay/import.
+  Exact originals/first outcome; uncertain=unknown/no takeover; independent IDs.
+  Floors: genesis/workspace; before writes reject local >10min ahead of authenticated
+  current time, never frame time. No reference: scoped max; reset.
+  Reset: stop owners, archive, fresh ID; keep control/retired IDs/intent. Shared call
+  locks, exclusive reset; retain through failed main close. Bound permits/cleanup;
+  reply before send, exact retries; fence execution AND Meta/history. No authority.
+  [Recovery](../../../README.md#local-encrypted-execution-log-recovery).
 - `prepareCliE2eeMachineLegacy` binds the retained credential hash to the exact
   desktop-generated 16-byte pairing session using core's fixed v1 helper. Machine
   possession additionally binds the strict UTF-8 machineId; activation compares it
