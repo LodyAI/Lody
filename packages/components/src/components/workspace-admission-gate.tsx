@@ -71,9 +71,12 @@ export function WorkspaceAdmissionGate({
   const encrypted = Boolean(
     mode?.descriptor && 'contentMode' in mode.descriptor && mode.descriptor.contentMode === 'e2ee'
   );
-  const e2eeAccountId = useE2eeAccountId(encrypted);
-  const accountId = user?.id ?? (encrypted ? e2eeAccountId : null);
   const failure = useAtomValue(workspaceRuntimeInitFailureAtom);
+  const needsNativeIdentity =
+    encrypted ||
+    Boolean(failure?.workspaceSlug === workspaceName && failure.modeAdmission?.knownEncrypted);
+  const e2eeAccountId = useE2eeAccountId(needsNativeIdentity);
+  const accountId = user?.id ?? e2eeAccountId;
   const retryAdmission = useSetAtom(workspaceModeAdmissionRetryAtom);
   const encryptedCreationEnabled = useAtomValue(e2eeWorkspaceCreationFeatureEnabledAtom);
   const { t } = useTranslation();
@@ -122,18 +125,19 @@ export function WorkspaceAdmissionGate({
           const isCurrent = () => currentScope.current === recoveryScope;
           void (async () => {
             try {
-              if (identityFailure && user?.id) {
+              if (identityFailure && accountId) {
                 // Optional cache repair cannot remove sticky identity evidence.
-                repairUnreadableE2eeCaches(localStorage, user.id);
+                repairUnreadableE2eeCaches(localStorage, accountId);
                 if (native && workspaceId)
                   await recoverE2eeWorkspaceIdentity({
                     storage: localStorage,
-                    accountId: user.id,
+                    accountId,
                     workspaceId,
                     runtime: native,
                     isCurrent,
                   });
-                else if (workspaceId) readWorkspaceModeEvidence(localStorage, user.id, workspaceId);
+                else if (workspaceId)
+                  readWorkspaceModeEvidence(localStorage, accountId, workspaceId);
               }
               if (isCurrent()) retryAdmission((value) => value + 1);
             } catch {

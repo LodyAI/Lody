@@ -58,6 +58,7 @@ import type { WorkspaceAdmissionDescriptor } from '@lody/cloud-api';
 import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspace-mark';
 import {
   E2eeLocalEvidenceCorruptError,
+  E2eeLocalEvidenceConflictError,
   hasEncryptedEvidenceForAnyAccount,
   hasPendingE2eeCreationForSlug,
   isWorkspaceModeStorageKey,
@@ -455,7 +456,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       modeAdmission: {
         knownEncrypted: knownEncryptedRef.current ||
           (error instanceof E2eeLocalEvidenceCorruptError &&
-            ['Invalid genesis pin', 'Invalid encrypted evidence'].includes(error.message)),
+            ['Invalid genesis pin', 'Invalid encrypted evidence'].includes(error.message)) ||
+          (error instanceof E2eeLocalEvidenceConflictError &&
+            error.message === 'Workspace mode conflicts with encrypted evidence'),
         ...((effectiveWorkspaceId ?? recoveryWorkspaceIdRef.current)
           ? { workspaceId: (effectiveWorkspaceId ?? recoveryWorkspaceIdRef.current)! } : {}),
       },

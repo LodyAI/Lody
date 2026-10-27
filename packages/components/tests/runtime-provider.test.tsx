@@ -600,6 +600,22 @@ describe('RuntimeProvider warm workspace preparation', () => {
     }
   );
 
+  it('retains an encrypted identity failure and its workspace ID when the listing has no encryption hint', async () => {
+    ordinaryCloud();
+    retainWorkspaceModeProof(localStorage, 'local:user', 'local', {
+      workspaceId: 'local:workspace',
+      contentMode: 'plaintext',
+      contentModeVersion: 1,
+    });
+    localStorage.setItem('lody-e2ee-known-mode:local%3Auser:local%3Aworkspace', '11'.repeat(32));
+    await render();
+    expect(store.get(workspaceRuntimeInitFailureAtom)).toMatchObject({
+      errorType: 'E2eeLocalEvidenceConflictError',
+      modeAdmission: { knownEncrypted: true, workspaceId: 'local:workspace' },
+    });
+    expect(store.get(runtimeAtom)).toBeNull();
+  });
+
   it('waits for the same account to authenticate, then preserves the runtime through auth refresh', async () => {
     ordinaryCloud();
     listEncrypted();

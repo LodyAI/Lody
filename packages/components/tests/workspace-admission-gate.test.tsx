@@ -11,6 +11,7 @@ import type {
   PlatformProvider,
 } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
+import { createStaticStore } from '@lody/platform';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { WorkspaceAdmissionGate } from '../src/components/workspace-admission-gate';
@@ -63,6 +64,7 @@ describe('WorkspaceAdmissionGate', () => {
     await initI18n('en');
     localStorage.clear();
     Object.assign(platform.e2eeWorkspaces!, { runtime: undefined });
+    Object.assign(platform, { identity: TEST_CLOUD_PLATFORM.identity });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -169,6 +171,23 @@ describe('WorkspaceAdmissionGate', () => {
         { key: known, raw: 'broken marker' },
       ])
     );
+  });
+
+  it('recovers with native offline identity after the renderer account snapshot expires', async () => {
+    store.set(userAtom, null);
+    Object.assign(platform, {
+      identity: { ...platform.identity, session: createStaticStore({ status: 'loading' }) },
+    });
+    Object.assign(platform.e2eeWorkspaces!, { runtime: native() });
+    localStorage.setItem(pin, 'broken pin');
+    fail({
+      errorType: 'E2eeLocalEvidenceCorruptError',
+      modeAdmission: { knownEncrypted: true, workspaceId: 'encrypted' },
+    });
+    await render();
+    await retry();
+    expect(localStorage.getItem(pin)).toBe(hash);
+    expect(store.get(workspaceModeAdmissionRetryAtom)).toBe(1);
   });
 
   it.each(['missing-native', 'conflict'])(
