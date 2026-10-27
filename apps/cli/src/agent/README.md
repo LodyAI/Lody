@@ -146,15 +146,27 @@ through `dsh --profile lody-acp`. Its profile composes `@deepseek-ai/dsh-base`, 
 content-addressed Lody bundle, the user-owned `cordis.patch.yml`, and a final host guard.
 Startup reconciles only the base/host bundle entries, preserving user dependencies,
 other package-manager fields and user bundle order. User `pnpm-workspace.yaml`,
-lockfiles and patches survive startup and upgrades. Saved Provider details expose
-registry-package install/list/remove through `dshPlugins: 1` on the owning machine.
-Remote workspace RPC permits listing only and rejects all plugin mutations because it
-cannot authenticate machine-owner consent. Updates remain supported
-by RPC, but the update button is hidden until version availability is surfaced. The daemon runs
-the pinned DSH CLI with a pinned pnpm, without Provider API credentials. Startup and
-UI package operations share a Provider-home file lock. Ordinary failures restore
-manifest/lockfile metadata, but a partially changed dependency tree may need repair;
-inspect `.plugin-manager/logs` under the profile. Reconnect sessions after changes.
+lockfiles and patches survive startup and upgrades.
+
+Manage plugins from the local terminal:
+
+```sh
+lody dsh plugin add <package-or-path> --agent-config <provider-id>
+lody dsh plugin remove <package-name> --agent-config <provider-id>
+```
+
+Omit `--agent-config` to choose a local builtin DSH Provider interactively; scripts
+must supply the id. Lody must be running so the command can read Provider ids/names
+from its local daemon, across active workspaces, without cloud catalog requests.
+The command invokes the pinned native `dsh plugin --profile lody-acp …` with that
+Provider's `DSH_HOME` and pinned pnpm. It forwards native arguments, terminal I/O,
+caller cwd and environment; saved Provider API credentials are not loaded.
+Local paths and GitHub/Git specs follow the native DSH/package-manager support.
+The selected profile cannot be overridden. Startup and CLI package operations share
+a Provider-home file lock; Ctrl-C cancels the child before releasing that lock.
+Native DSH owns installation state and error recovery; Lody does not roll back
+selected files after a partial package-manager failure. Reconnect sessions after
+changes. The UI does not list or manage plugins, and no remote plugin RPC exists.
 Stop Lody before running external `dsh plugin` commands against that same profile.
 See the [plugin management decision](../../../../.agents/notes/implemented/feature/2026-10-26-dsh-plugin-management.md).
 Only missing user patches are created. DSH itself recreates the empty `cordis.yml`

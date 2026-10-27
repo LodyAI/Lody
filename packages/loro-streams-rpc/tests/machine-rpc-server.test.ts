@@ -852,68 +852,6 @@ describe('LoroStreamsMachineRpcServer', () => {
     }
   );
 
-  it.each(['list', 'install', 'update', 'remove'] as const)(
-    'allows only read-only DSH plugin requests over workspace streams: %s',
-    async (action) => {
-      const fake = createFakeStreamClient();
-      const original = [{ name: 'synthetic-plugin', version: '1.0.0', active: true }];
-      let installed = original;
-      const server = new LoroStreamsMachineRpcServer({
-        logger: createSilentLogger(),
-        workspaceId: 'workspace-1' as WorkspaceId,
-        machineId: 'machine-1' as MachineId,
-        streamClient: fake.streamClient,
-        getMachineStatus: vi.fn(),
-        refreshMachineAcpCapabilities: vi.fn(),
-        manageDshPlugins: async (request) => {
-          if (request.configId !== 'dsh-config') return { success: false, error: 'Wrong Provider' };
-          if (request.action !== 'list') installed = [];
-          return { success: true, plugins: installed };
-        },
-      });
-      fake.pushBatch({
-        messages: [
-          {
-            jsonrpc: '2.0',
-            id: 'dsh-request',
-            method: 'machine/dsh-plugins',
-            rpcVersion: '1',
-            machineId: 'machine-1',
-            workspaceId: 'workspace-1',
-            replyTo: 'workspace-1:rpc:res:client-1',
-            sentAt: 1,
-            expiresAt: Number.MAX_SAFE_INTEGER,
-            params: {
-              configId: 'dsh-config',
-              action,
-              ...(action === 'list' ? {} : { package: 'synthetic-plugin' }),
-            },
-          },
-        ],
-        nextOffset: '1',
-        upToDate: true,
-      });
-      await server.start();
-      try {
-        await fake.waitForAppendedCount(1);
-        expect(fake.appended[0]?.value).toMatchObject({
-          id: 'dsh-request',
-          method: 'machine/dsh-plugins',
-          result:
-            action === 'list'
-              ? { success: true, plugins: original }
-              : {
-                  success: false,
-                  error: expect.stringContaining('machine that owns this Provider'),
-                },
-        });
-        expect(installed).toEqual(original);
-      } finally {
-        server.stop();
-      }
-    }
-  );
-
   it('returns Pi discovery from the saved config through the machine RPC', async () => {
     const fake = createFakeStreamClient();
     const result = {

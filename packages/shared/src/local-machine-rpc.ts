@@ -1,4 +1,3 @@
-import { DshPluginsRequestSchema, DshPluginsResponseSchema } from './dsh-plugins';
 import { SessionFileRootIdSchema } from './project-path';
 import { ProjectLocalMemberProbeSchema } from './workspace-project';
 import { MemoryProviderRequestSchema, MemoryProviderResponseSchema } from './memory-provider';
@@ -347,10 +346,6 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
     params: MemoryProviderRequestSchema,
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
-    method: z.literal('machine/dsh-plugins'),
-    params: DshPluginsRequestSchema,
-  }).strict(),
-  BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('machine/pi-extensions'),
     params: z
       .object({
@@ -403,7 +398,6 @@ export const LocalMachineRpcResultSchema = z.union([
   SessionGoalResponseSchema,
   SessionTerminateResponseSchema,
   MachinePiExtensionsResponseSchema,
-  DshPluginsResponseSchema,
 ]);
 export type LocalMachineRpcResult = z.infer<typeof LocalMachineRpcResultSchema>;
 

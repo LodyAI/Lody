@@ -1,4 +1,3 @@
-import { DshPluginsField } from '@/components/settings/dsh-plugins-field';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import {
@@ -650,44 +649,4 @@ export const MobileGlmPreset: Story = {
   parameters: {
     viewport: { defaultViewport: 'mobile1' },
   },
-};
-
-export const DshPluginManagement: Story = {
-  render: () => (
-    <DshPluginsField
-      configId="synthetic-provider"
-      allowMutations
-      supported
-      onRequest={async (request) =>
-        request.action === 'update'
-          ? { success: false, error: 'Synthetic registry unavailable' }
-          : {
-              success: true,
-              plugins:
-                request.action === 'remove'
-                  ? []
-                  : [
-                      { name: 'example-plugin', version: '1.0.0', active: true },
-                      { name: 'example-library', version: '2.0.0', active: false },
-                    ],
-            }
-      }
-    />
-  ),
-};
-export const DshPluginsUnsupported: Story = {
-  render: () => <DshPluginsField configId="synthetic-provider" supported={false} />,
-};
-
-export const DshPluginsRemote: Story = {
-  render: () => (
-    <DshPluginsField
-      configId="synthetic-provider"
-      supported
-      onRequest={async () => ({
-        success: true,
-        plugins: [{ name: 'example-plugin', version: '1.0.0', active: true }],
-      })}
-    />
-  ),
 };

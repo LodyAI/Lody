@@ -560,10 +560,6 @@ export type WorkspaceRuntime = {
     machineId: MachineId,
     request: MemoryProviderRequest
   ) => Promise<MemoryProviderResponse>;
-  requestDshPlugins: (
-    machineId: MachineId,
-    request: import('@lody/shared').DshPluginsRequest
-  ) => Promise<import('@lody/shared').DshPluginsResponse>;
   requestMachinePiExtensions: (
     machineId: MachineId,
     options?: { configId?: AgentConfigId }

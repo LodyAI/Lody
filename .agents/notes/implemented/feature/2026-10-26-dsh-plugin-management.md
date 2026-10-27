@@ -7,72 +7,59 @@ Translation: current
 
 ## Abstract
 
-Lody previously replaced the DSH profile manifest and package-manager configuration on
-startup, losing plugin registrations installed by the native CLI. Startup now reconciles
-only Lody's base and generated host bundle, preserving user dependencies, bundle order,
-package-manager fields, lockfile, workspace configuration and YAML patch. Saved DSH
-Providers expose registry-package installation, listing, updates and removal through a
-capability-gated Machine RPC. Settings expose installation, listing and removal; the
-update button is temporarily hidden at the user's request because available updates
-are not detected. The RPC update operation remains supported. Skills are outside this change.
+Lody previously replaced the DSH profile manifest on startup, losing dependencies
+installed by the native CLI and allowing later package operations to prune them.
+Startup now preserves user dependencies and configuration. Plugin management is a
+local terminal command, `lody dsh plugin … --agent-config <id>`, which binds the
+Provider home and native profile. There is no plugin inventory or management UI,
+and package installation is never exposed through workspace RPC.
 
-## Ownership and execution
+## Decision and boundaries
 
-The persisted Provider must belong to the execution machine and use builtin DeepSeek.
-Requests contain its ID and a bounded registry package spec, never launch arguments,
-paths, environment or a replacement home. Runtime packages and Lody host bundles cannot
-be changed through this API. Local settings use local Machine RPC for mutations; remote settings reuse
-the existing workspace transport for listing only. Workspace streams cannot authenticate
-a machine-owner identity, so their server rejects install/update/remove before invoking
-the Provider service. The client also rejects remote mutations and the UI explains that
-installation/removal must be performed in Lody on the owning machine. Package syntax
-validation and an installer environment without secrets cannot authorize future plugin
-execution with Provider credentials. `dshPlugins: 1` gates both routes and the UI. New
-Providers must be saved first; offline machines do not expose enabled operations.
+The final scope of [PR #1932](https://github.com/LodyAI/Lody/pull/1932) replaces its
+unmerged UI/RPC implementation with a thin native CLI wrapper. The user chose native
+package-manager behavior over a separate Lody package catalog. Skills are outside scope.
 
-The existing pinned npx/Node launcher runs `dsh plugin --profile lody-acp`; plugin
-operations additionally provision pnpm 10.20.0 in that closure. The native package manager
-owns bundle discovery, compatibility checks and activation. Plain packages remain visible
-as installed but not enabled bundles. Launch reuses the login-shell PATH and then allowlists the environment; Provider API
-credentials are not passed to package installation. The UI sends only explicit actions and advises reconnection after changes;
-no active ACP connection is replaced or automatically refreshed.
+- The local daemon returns only ids/names of builtin DeepSeek Providers on its machine,
+  deduplicated across active workspaces. Selection does not query a cloud catalog or
+  return saved Provider environment values. A missing id always prompts on a TTY;
+  noninteractive invocation requires `--agent-config`. Unknown/nonlocal ids fail.
+- The CLI runs the pinned DSH closure plus pinned pnpm with the selected Provider's
+  `DSH_HOME` and `plugin --profile lody-acp`. Native arguments, caller cwd and terminal
+  I/O are preserved. Registry, local-path and Git sources remain DSH/package-manager
+  responsibilities. The wrapper rejects profile overrides.
+- The child inherits the invoking terminal's environment, including package registry
+  and Git authentication configuration, but never reads stored Provider credentials.
+  This is explicit local execution, not a remotely callable installation service.
+- Startup reconciles only generated base/host bundles and startup patch loading.
+  User dependencies, unknown manifest fields, user bundles, pnpm workspace settings,
+  lockfile and YAML patch survive. The host guard still enforces ACP, history roots
+  and disabled telemetry.
 
-Startup and package operations share a cross-process file lock keyed by Provider home.
-The lock encloses generated bundle publication and manifest reconciliation, or the entire
-package operation and resulting inventory. Independent Providers remain independent.
-Malformed manifests fail without resetting user content. The host guard remains the final
-layer preserving ACP, history and disabled product telemetry.
+## Ownership and failure recovery
 
-The new package-operation workflow composes native Effect with the existing FileLocks
-and process services. SessionExecutionService executes it through the established Legacy
-file-lock boundary; Promise-based launch preparation remains outside this native unit.
-This is not a migration of the existing launcher or session execution owner. Process work
-has a 240-second deadline and bounded output; process cleanup precedes typed failure
-recovery and lock release. UI dismissal does not cancel an accepted operation. RPC waits
-are bounded separately; after an ambiguous transport outcome the user refreshes before
-retrying. Native process release defects are preserved, not reported as successful cleanup.
+The command owns the installer process through the shared Effect process Scope.
+It holds the same Provider-home file lock as startup until child completion or
+confirmed cancellation cleanup. SIGINT/SIGTERM abort the owned operation; normal
+completion returns the native exit code. Different Provider homes remain independent.
+The existing Promise launcher and file-lock Legacy application boundary are retained;
+this change does not claim migration of daemon/session orchestration.
 
-On ordinary process failure, restore the pre-operation manifest and lockfile under the
-same lock. This preserves configuration, not a transactional copy of node_modules: a
-partially completed package operation may require retry/repair. Installation diagnostics
-stay on the owning machine under the profile's `.plugin-manager/logs`; the response does
-not retain raw npm output. Direct external `dsh plugin` commands use upstream's separate
-lock, so stop Lody before managing this profile outside its UI.
+DSH owns package failure recovery. Lody does not restore only manifest/lockfile after
+an unsuccessful install while leaving changed `node_modules`, which would manufacture
+an inconsistent package state. Native logs and exit status remain visible. Existing
+sessions need reconnecting to load changed plugins; the UI neither scans nor displays
+installed plugins. External bare `dsh plugin` commands do not take Lody's lock and
+should run while Lody is stopped.
 
-## Evidence and limits
+## Verification scope
 
-Behavioral tests cover manifest/workspace/lockfile preservation across concurrent starts
-and adapter upgrades, malformed configuration, serialization with package writes,
-installation/update/removal inventories, failed-writer restoration, strict RPC inputs,
-remote read-only dispatch, rejected remote mutations with unchanged inventory, and UI success/failure states. Existing provider and Machine RPC suites
-remain the owning coverage. A macOS smoke with pinned DSH 0.2.1-rc.2 verified native installation, automatic bundle
-registration and removal of an isolated synthetic plugin while retaining the host layer.
-It used no API credentials or model requests and is not a network-dependent unit test.
-Windows and packaged Electron installation require platform smoke verification.
+Behavioral coverage includes command argument forwarding and Provider selection,
+local transport validators, machine/type filtering and credential-free discovery,
+native subprocess cwd/home/environment and exit status, and startup preservation.
+No test downloads or executes a third-party plugin. Packaged Windows installation
+and live registry/Git authentication remain outside this verification scope.
 
-After merging main and restricting remote operations, `pnpm check` passed type/lint
-stages and all 617 component test files. CLI validation passed 334 files, skipped one,
-and failed the native Git recursive-submodule fixture with `context_unreadable`;
-that transport is outside this change. Full green validation is not claimed.
-The focused component suites pass 98 tests; RPC suites pass 161 with 3 skipped.
-Formatting, static boundary checks and documentation checks pass.
+Full repository validation is not green: the unchanged recursive SSH submodule
+fixture in `github-git-transport.test.ts` fails with the local Git shim's
+`context_unreadable`; CLI and component type checks pass.

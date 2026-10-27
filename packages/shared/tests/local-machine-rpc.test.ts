@@ -58,44 +58,6 @@ describe('local Machine RPC', () => {
       }).success
     ).toBe(false);
   });
-  it('accepts DSH plugin commands only for a saved Provider and registry package', () => {
-    const envelope = { machineId: 'm', workspaceId: 'w', method: 'machine/dsh-plugins' };
-    for (const params of [
-      { configId: 'dsh', action: 'list' },
-      { configId: 'dsh', action: 'install', package: '@example/plugin@1.2.3' },
-      { configId: 'dsh', action: 'update', package: '@example/plugin' },
-      { configId: 'dsh', action: 'remove', package: 'my-plugin' },
-    ])
-      expect(LocalMachineRpcRequestSchema.parse({ ...envelope, params })).toEqual({
-        ...envelope,
-        params,
-      });
-    for (const value of [
-      '--ignore-scripts',
-      'file:../plugin',
-      'https://example.com/plugin',
-      'a;echo hi',
-      '../plugin',
-      'pkg@npm:other',
-    ]) {
-      expect(
-        LocalMachineRpcRequestSchema.safeParse({
-          ...envelope,
-          params: { configId: 'dsh', action: 'install', package: value },
-        }).success
-      ).toBe(false);
-    }
-    expect(
-      LocalMachineRpcRequestSchema.safeParse({ ...envelope, params: { action: 'list' } }).success
-    ).toBe(false);
-    expect(
-      LocalMachineRpcRequestSchema.safeParse({
-        ...envelope,
-        params: { configId: 'dsh', action: 'list', env: { DSH_HOME: '/elsewhere' } },
-      }).success
-    ).toBe(false);
-  });
-
   it('allows Pi discovery by saved config reference but never caller launch inputs', () => {
     const request = {
       machineId: 'machine-1',

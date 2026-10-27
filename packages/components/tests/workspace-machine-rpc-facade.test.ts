@@ -456,100 +456,6 @@ describe('createWorkspaceMachineRpcFacade', () => {
     expect(mintPreviewControlProof).not.toHaveBeenCalled();
   });
 
-  it('gates DSH plugin management and keeps local results on the local route', async () => {
-    let supported = false;
-    let failed = false;
-    vi.stubGlobal('window', {
-      __LODY_ELECTRON__: true,
-      ipc: {
-        invoke: async () =>
-          failed
-            ? { ok: false, error: 'Local installation failed' }
-            : {
-                ok: true,
-                result: {
-                  success: true,
-                  plugins: [{ name: 'synthetic-plugin', version: '1.0.0', active: true }],
-                },
-              },
-      },
-    });
-    const facade = createWorkspaceMachineRpcFacade({
-      workspaceId,
-      targetRouter: {
-        getPlaneForMachine: () => 'local',
-        resolvePlaneForMachine: async () => 'local',
-      },
-      getMachineProtocolCapabilities: async () => (supported ? { dshPlugins: 1 } : {}),
-      getMachineRpcClient: async () => {
-        throw new Error('Local plugins must not use cloud');
-      },
-    });
-    const request = { configId: 'dsh', action: 'list' as const };
-    expect(await facade.requestDshPlugins(localMachineId, request)).toMatchObject({
-      success: false,
-      error: expect.stringContaining('Update the agent'),
-    });
-    supported = true;
-    expect(await facade.requestDshPlugins(localMachineId, request)).toEqual({
-      success: true,
-      plugins: [{ name: 'synthetic-plugin', version: '1.0.0', active: true }],
-    });
-    expect(
-      await facade.requestDshPlugins(localMachineId, {
-        configId: 'dsh',
-        action: 'install',
-        package: 'synthetic-plugin',
-      })
-    ).toEqual({
-      success: true,
-      plugins: [{ name: 'synthetic-plugin', version: '1.0.0', active: true }],
-    });
-    failed = true;
-    expect(await facade.requestDshPlugins(localMachineId, request)).toEqual({
-      success: false,
-      error: 'Local installation failed',
-    });
-  });
-
-  it('keeps remote DSH inventory readable and rejects every remote mutation', async () => {
-    const inventory = {
-      success: true as const,
-      plugins: [{ name: 'synthetic-plugin', version: '1.0.0', active: true }],
-    };
-    let remoteInventory = inventory;
-    const facade = createWorkspaceMachineRpcFacade({
-      workspaceId,
-      targetRouter: {
-        getPlaneForMachine: () => 'cloud',
-        resolvePlaneForMachine: async () => 'cloud',
-      },
-      getMachineProtocolCapabilities: async () => ({ dshPlugins: 1 }),
-      getMachineRpcClient: async () =>
-        ({
-          requestDshPlugins: async (request: { action: string }) => {
-            if (request.action !== 'list') remoteInventory = { success: true, plugins: [] };
-            return remoteInventory;
-          },
-        }) as any,
-    });
-    for (const action of ['install', 'update', 'remove'] as const) {
-      expect(
-        await facade.requestDshPlugins(remoteMachineId, {
-          configId: 'dsh',
-          action,
-          package: 'synthetic-plugin',
-        })
-      ).toMatchObject({
-        success: false,
-        error: expect.stringContaining('machine that owns this Provider'),
-      });
-    }
-    expect(
-      await facade.requestDshPlugins(remoteMachineId, { configId: 'dsh', action: 'list' })
-    ).toEqual(inventory);
-  });
-
   it('keeps Pi discovery success and failure on the local machine route', async () => {
     const discovery = { version: 1, agentDir: '/fixture/pi', extensions: [], warnings: [] };
     let failed = false;
@@ -935,38 +841,20 @@ describe('createWorkspaceMachineRpcFacade', () => {
     let delivered: unknown;
     const invoke = async (_channel: string, request: unknown) => {
       delivered = request;
-      return bridgeAvailable
-        ? { ok: true, result: { type: 'session/cancel_response', sessionId, success: true } }
-        : undefined;
+      return bridgeAvailable ? {ok:true,result:{type:'session/cancel_response',sessionId,success:true}} : undefined;
     };
-    vi.stubGlobal('window', { __LODY_ELECTRON__: true, ipc: { invoke } });
+    vi.stubGlobal('window',{__LODY_ELECTRON__:true,ipc:{invoke}});
     let networkUsed = false;
     const facade = createWorkspaceMachineRpcFacade({
-      workspaceId,
-      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
-      targetRouter: {
-        getPlaneForMachine: () => 'cloud',
-        resolvePlaneForMachine: async () => 'cloud',
-      },
-      isLocalControlMachine: (machine) => machine === localMachineId,
-      getMachineRpcClient: async () => {
-        networkUsed = true;
-        throw new Error('cloud RPC unavailable');
-      },
+      workspaceId, getMachineProtocolCapabilities:async()=>CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter:{getPlaneForMachine:()=> 'cloud',resolvePlaneForMachine:async()=> 'cloud'},
+      isLocalControlMachine: machine => machine === localMachineId,
+      getMachineRpcClient:async()=>{networkUsed=true;throw new Error('cloud RPC unavailable');},
     });
-    expect(await facade.requestSessionCancel(localMachineId, sessionId, 'turn-1')).toMatchObject({
-      success: true,
-    });
-    expect(delivered).toMatchObject({
-      workspaceId,
-      machineId: localMachineId,
-      method: 'session/cancel',
-    });
-    bridgeAvailable = false;
-    expect(await facade.requestSessionCancel(localMachineId, sessionId, 'turn-1')).toMatchObject({
-      success: false,
-      error: 'Local machine RPC is unavailable.',
-    });
+    expect(await facade.requestSessionCancel(localMachineId,sessionId,'turn-1')).toMatchObject({success:true});
+    expect(delivered).toMatchObject({workspaceId,machineId:localMachineId,method:'session/cancel'});
+    bridgeAvailable=false;
+    expect(await facade.requestSessionCancel(localMachineId,sessionId,'turn-1')).toMatchObject({success:false,error:'Local machine RPC is unavailable.'});
     expect(networkUsed).toBe(false);
   });
   it('uses the cloud Machine RPC client for a remote machine', async () => {

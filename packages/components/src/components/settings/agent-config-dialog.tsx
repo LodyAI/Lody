@@ -1,5 +1,3 @@
-import { DshPluginsField } from './dsh-plugins-field';
-import type { DshPluginsRequest, DshPluginsResponse } from '@lody/shared';
 import { useMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 import {
   useCallback,
@@ -1226,9 +1224,6 @@ export type AgentConfigDialogProps = {
   machine: MachineViewMeta;
   onSubmit: (payload: AgentConfigSubmitPayload) => Promise<void>;
   onRefreshCapabilities: (args: RefreshArgs) => Promise<MachineAcpCapabilitiesRefreshResponse>;
-  onDshPlugins?: (machineId: MachineId, request: DshPluginsRequest) => Promise<DshPluginsResponse>;
-  dshPluginsAvailable?: boolean;
-  dshPluginMutationsAllowed?: boolean;
   onScanPiExtensions?: (args: {
     machineId: MachineId;
     configId?: AgentConfigId;
@@ -1529,9 +1524,6 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     onSubmit,
     onRefreshCapabilities,
     onScanPiExtensions,
-    onDshPlugins,
-    dshPluginsAvailable,
-    dshPluginMutationsAllowed,
     onCheckBinaryStatus,
     onInstallBinary,
     onManagedRuntimeSelected,
@@ -2938,20 +2930,6 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 </Field>
               ) : null}
             </Field>
-          ) : null}
-
-          {isDeepSeekBuiltin && mode.kind === 'edit' ? (
-            <DshPluginsField
-              key={`${machine.id}:${agentConfigId}`}
-              configId={agentConfigId}
-              supported={machineSupportsProtocolCapability(
-                machine,
-                MACHINE_PROTOCOL_CAPABILITIES.dshPlugins
-              )}
-              available={dshPluginsAvailable}
-              allowMutations={dshPluginMutationsAllowed}
-              onRequest={onDshPlugins ? (request) => onDshPlugins(machine.id, request) : undefined}
-            />
           ) : null}
 
           {dshConfigPath ? (

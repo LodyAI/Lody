@@ -1261,13 +1261,6 @@ export function MachineAgentSettings({
         machine={dialogMachine}
         onSubmit={handleDialogSubmit}
         onRefreshCapabilities={refreshCapabilities}
-        onDshPlugins={
-          runtime
-            ? (machineId, request) => runtime.requestDshPlugins(machineId, request)
-            : undefined
-        }
-        dshPluginsAvailable={onlineMachineIds.has(dialogMachine.id)}
-        dshPluginMutationsAllowed={dialogMachine.id === localMachineId}
         onScanPiExtensions={
           runtime
             ? ({ machineId, configId }) =>

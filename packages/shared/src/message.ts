@@ -905,7 +905,16 @@ export interface SessionHistoryWriteResponse {
 }
 
 // Local CLI control (Electron -> local CLI) message subsets
+export type DshProvidersRequest = { type: 'machine/dsh-providers'; machineId: MachineId };
+export type DshProvidersResponse = {
+  type: 'machine/dsh-providers_response';
+  success: boolean;
+  providers: Array<{ id: string; name: string }>;
+  error?: string;
+};
+
 export type LocalSessionControlRequest =
+  | DshProvidersRequest
   | SessionCreateRequest
   | SessionChatRequest
   | SessionCancelRequest
@@ -931,6 +940,7 @@ export type LocalSessionControlRequest =
   | SessionPreviewStatusRequest;
 
 export type LocalSessionControlResponse =
+  | DshProvidersResponse
   | SessionCreateAck
   | SessionCreateResponse
   | SessionChatAck

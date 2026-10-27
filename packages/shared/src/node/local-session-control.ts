@@ -521,6 +521,13 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
     );
   }
 
+  if (value.type === 'machine/dsh-providers') {
+    return (
+      typeof value.machineId === 'string' &&
+      Object.keys(value).every((key) => ['type', 'machineId'].includes(key))
+    );
+  }
+
   if (value.type === 'machine/status') {
     return typeof value.machineId === 'string' && typeof value.workspaceId === 'string';
   }
@@ -825,6 +832,18 @@ export function isLocalSessionControlResponse(
     return (
       typeof value.sessionId === 'string' &&
       typeof value.success === 'boolean' &&
+      isOptionalString(value.error)
+    );
+  }
+
+  if (value.type === 'machine/dsh-providers_response') {
+    return (
+      typeof value.success === 'boolean' &&
+      Array.isArray(value.providers) &&
+      value.providers.every(
+        (item) =>
+          isObjectRecord(item) && typeof item.id === 'string' && typeof item.name === 'string'
+      ) &&
       isOptionalString(value.error)
     );
   }

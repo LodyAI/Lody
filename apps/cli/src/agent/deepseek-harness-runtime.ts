@@ -284,7 +284,7 @@ export async function resolveDeepSeekHarnessSessionCompression(
   return rawArtifact ? 'none' : DEEPSEEK_HARNESS_DEFAULT_SESSION_COMPRESSION;
 }
 
-export async function publishFileAtomically(filePath: string, contents: string): Promise<void> {
+async function publishFileAtomically(filePath: string, contents: string): Promise<void> {
   const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(temporaryPath, contents, { mode: 0o600 });
   try {
@@ -312,7 +312,7 @@ export function dshProfileLockName(rootDir: string): string {
   return `dsh-profile-${createHash('sha256').update(resolve(rootDir)).digest('hex')}`;
 }
 
-export async function readDshProfileManifest(profileDir: string) {
+async function readDshProfileManifest(profileDir: string) {
   return DshProfileManifestSchema.parse(
     JSON.parse(await readFile(join(profileDir, 'package.json'), 'utf8'))
   );

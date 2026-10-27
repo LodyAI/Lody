@@ -1,5 +1,3 @@
-import { DshPluginsField } from '../src/components/settings/dsh-plugins-field';
-import type { DshPlugin } from '@lody/shared';
 // @vitest-environment jsdom
 
 import { act, type ComponentProps } from 'react';
@@ -243,96 +241,6 @@ describe('AgentConfigDialog', () => {
       );
     });
   };
-
-  it('manages DSH plugins and preserves the displayed list when an operation fails', async () => {
-    let installed: DshPlugin[] = [];
-    let removalFails = true;
-    await act(async () => {
-      root?.render(
-        <DshPluginsField
-          configId="dsh-provider"
-          allowMutations
-          supported
-          onRequest={async (request) => {
-            if (request.configId !== 'dsh-provider') throw new Error('Wrong provider');
-            if (request.action === 'install')
-              installed = [{ name: 'synthetic-plugin', version: '1.0.0', active: true }];
-            if (request.action === 'remove' && removalFails)
-              return { success: false, error: 'Synthetic registry unavailable' };
-            if (request.action === 'remove') installed = [];
-            return { success: true, plugins: installed };
-          }}
-        />
-      );
-    });
-    const button = (text: string) => {
-      const node = Array.from(document.querySelectorAll('button')).find(
-        (candidate) => candidate.textContent === text
-      );
-      if (!node) throw new Error(`Button missing: ${text}`);
-      return node;
-    };
-    await act(async () => {
-      button('DSH plugins').click();
-    });
-    await act(async () => {
-      button('Refresh list').click();
-    });
-    expect(container?.textContent).toContain('No user plugins installed');
-    const input = document.querySelector<HTMLInputElement>('[aria-label="Plugin package"]');
-    if (!input) throw new Error('Package input missing');
-    await act(async () => {
-      setNativeInputValue(input, 'synthetic-plugin@1.0.0');
-    });
-    await act(async () => {
-      button('Install').click();
-    });
-    expect(container?.textContent).toContain('synthetic-plugin');
-    expect(container?.textContent).toContain('1.0.0');
-    expect(container?.textContent).toContain('Reconnect the DSH session');
-    expect(
-      Array.from(document.querySelectorAll('button')).some((node) => node.textContent === 'Update')
-    ).toBe(false);
-    await act(async () => {
-      button('Uninstall').click();
-    });
-    expect(container?.textContent).toContain('Synthetic registry unavailable');
-    expect(container?.textContent).toContain('1.0.0');
-    removalFails = false;
-    await act(async () => {
-      button('Uninstall').click();
-    });
-    expect(container?.textContent).toContain('No user plugins installed');
-    expect(container?.textContent).not.toContain('synthetic-plugin');
-  });
-
-  it('shows remote DSH inventory without enabling plugin mutations', async () => {
-    await act(async () => {
-      root?.render(
-        <DshPluginsField
-          configId="remote-dsh"
-          supported
-          onRequest={async () => ({
-            success: true,
-            plugins: [{ name: 'remote-plugin', version: '1.0.0', active: true }],
-          })}
-        />
-      );
-    });
-    const button = (text: string) =>
-      Array.from(document.querySelectorAll('button')).find((node) => node.textContent === text)!;
-    await act(async () => {
-      button('DSH plugins').click();
-    });
-    await act(async () => {
-      button('Refresh list').click();
-    });
-    expect(container?.textContent).toContain('remote-plugin');
-    expect(container?.textContent).toContain('Remote access can only refresh the list');
-    expect(button('Install').disabled).toBe(true);
-    expect(button('Uninstall').disabled).toBe(true);
-    expect(button('Refresh list').disabled).toBe(false);
-  });
 
   it('preserves managed Codex identity and disables editing on a downgraded machine', async () => {
     const saved: AgentConfigSubmitPayload[] = [];
