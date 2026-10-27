@@ -49,7 +49,10 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
   dismissing new chat. Pending sends preserve the focused textarea, blocking edits
   without disabling it. The destination claims an existing new-chat focus in its
   layout effect before source removal; native iOS also checks the keyboard-height
-  signal so manual dismissal is respected. Entry/completion never open a keyboard.
+  signal so manual dismissal is respected. Accepted sends dismiss the keyboard
+  after the message surface paints; rejection or resumed editing keeps it open.
+  Keyboard inset and safe-area padding share a transition. Entry/completion never
+  open a keyboard.
   Entrance suppression persists through delayed portal mounts
   and same-entry URL replacements; later visits and Back retain their animation. The existing
   project and agent selection handlers retain draft and scope semantics. The

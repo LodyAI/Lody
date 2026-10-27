@@ -1,8 +1,9 @@
 import { useCallback, useLayoutEffect, useState, type RefObject } from 'react';
+import { dismissComposerKeyboardAfterPaint } from './composer-keyboard-dismissal';
 
 interface Submission {
   isCurrent: () => boolean;
-  finish: () => void;
+  finish: (options?: { dismissKeyboard?: boolean }) => void;
   dispose: () => void;
 }
 
@@ -25,6 +26,7 @@ export function useComposerSubmission(
     scope: typeof scope;
     pending: boolean;
     restoreFocus: () => void;
+    dismissKeyboard?: boolean;
   } | null>(null);
 
   useLayoutEffect(() => {
@@ -39,7 +41,9 @@ export function useComposerSubmission(
     state.restoreFocus();
     scope.submission?.dispose();
     scope.submission = null;
-  }, [scope, state]);
+    if (state.dismissKeyboard && inputRef.current)
+      return dismissComposerKeyboardAfterPaint(inputRef.current);
+  }, [scope, state, inputRef]);
 
   const beginSubmission = useCallback(
     ({ restoreFocusOnComplete }: { restoreFocusOnComplete: boolean }): Submission | null => {
@@ -71,7 +75,7 @@ export function useComposerSubmission(
       const submission: Submission = {
         isCurrent: () => scope.submission === submission,
         dispose,
-        finish: () => {
+        finish: ({ dismissKeyboard = false } = {}) => {
           if (!submission.isCurrent()) return;
           // A new state object makes completion observable even if React batches
           // pending and settled into one commit (including immediate rejection).
@@ -79,6 +83,7 @@ export function useComposerSubmission(
             scope,
             pending: false,
             restoreFocus,
+            dismissKeyboard,
           });
         },
       };

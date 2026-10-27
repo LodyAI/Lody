@@ -60,6 +60,7 @@ import type { CombinedMentionTextareaHandle } from '@/components/mentions/combin
 import type { AttachmentAddMenuMcp } from '@/components/chat/attachment-add-menu';
 import { useComposerSubmission } from '@/components/chat/submission/use-composer-submission';
 import { focusComposerAfterNavigation } from '@/components/chat/submission/use-composer-navigation-focus';
+import { dismissComposerKeyboardAfterPaint } from '@/components/chat/submission/composer-keyboard-dismissal';
 import { MobileSessionRunConfig } from '@/components/mobile/mobile-session-run-config';
 import { useRunConfigFace } from '@/components/mobile/mobile-run-config-button';
 import {
@@ -630,9 +631,18 @@ export const SessionChatInputArea = memo(
     const postHog = usePostHog();
     const isArchived = session.isArchived === true;
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const cancelNavigationDismissal = useRef<(() => void) | undefined>(undefined);
+    useLayoutEffect(() => () => cancelNavigationDismissal.current?.(), [session.id]);
     useLayoutEffect(() => {
-      if (claimNavigationFocus?.())
-        focusComposerAfterNavigation(textareaRef.current, usesMobileKeyboardAction);
+      if (
+        claimNavigationFocus?.() &&
+        focusComposerAfterNavigation(textareaRef.current, usesMobileKeyboardAction) &&
+        usesMobileKeyboardAction &&
+        textareaRef.current
+      ) {
+        cancelNavigationDismissal.current?.();
+        cancelNavigationDismissal.current = dismissComposerKeyboardAfterPaint(textareaRef.current);
+      }
     }, [claimNavigationFocus, usesMobileKeyboardAction]);
     const agentRoleTurnSelectionRef = useRef<SessionTurnAgentRoleSelection>(undefined);
     const selectedAgentRoleRef = useRef<AgentRole | undefined>(undefined);
@@ -1738,6 +1748,7 @@ export const SessionChatInputArea = memo(
         };
         const submission = beginSubmission({ restoreFocusOnComplete: !usesMobileKeyboardAction });
         if (!submission) return;
+        let accepted = false;
         try {
           const images = pendingImages;
           const files = pendingFiles;
@@ -1759,7 +1770,7 @@ export const SessionChatInputArea = memo(
           // Use the committed callback and Role after waiting: routing and run
           // config must come from the same current composer state.
           const role = agentRoleTurnSelectionRef.current;
-          const accepted = scheduled.at
+          accepted = scheduled.at
             ? await scheduledSaveRef.current({
                 inputBlocks,
                 attachments,
@@ -1823,7 +1834,7 @@ export const SessionChatInputArea = memo(
             }
           }
         } finally {
-          submission.finish();
+          submission.finish({ dismissKeyboard: accepted && usesMobileKeyboardAction });
         }
       },
       [

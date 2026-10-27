@@ -1126,7 +1126,7 @@ test('mobile send retains its page through delayed presentation and later URL co
 });
 
 for (const dismiss of ['none', 'blur', 'native-hide'] as const) {
-  test(`mobile first send transfers an open keyboard without reopening a dismissed one (dismiss=${dismiss})`, async ({
+  test(`mobile first send dismisses the keyboard after presentation without reopening it (dismiss=${dismiss})`, async ({
     page,
   }) => {
     await page.setViewportSize({ width: 390, height: 844 });
@@ -1167,15 +1167,82 @@ for (const dismiss of ['none', 'blur', 'native-hide'] as const) {
     await page.evaluate(() => window.dispatchEvent(new Event('storybook:session-ready')));
     const destination = page.locator('textarea[data-lody-composer-input]');
     await expect(destination).toHaveCount(1);
-    if (dismiss !== 'none') await expect(destination).not.toBeFocused();
-    else await expect(destination).toBeFocused();
-    await expect(page.locator('html')).toHaveCSS(
-      '--native-keyboard-height',
-      dismiss !== 'none' ? '0px' : '300px'
-    );
-    if (dismiss === 'none') {
-      await page.keyboard.type('Continue without reopening the keyboard');
-      await expect(destination).toHaveValue('Continue without reopening the keyboard');
-    }
+    await expect(destination).not.toBeFocused();
+    await expect(page.locator('html')).toHaveCSS('--native-keyboard-height', '0px');
   });
 }
+
+test('mobile composer animates keyboard inset and safe-area padding together', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(
+    '/iframe.html?id=mobile-mobilenewchatsheet--inline-page-review-story&viewMode=story'
+  );
+  await page.getByRole('button', { name: 'Send', exact: true }).waitFor();
+  const samples = await page.evaluate(() => {
+    const input = document.querySelector('textarea')!;
+    let shell: HTMLElement | null = input.parentElement;
+    while (shell && !getComputedStyle(shell).transitionProperty.includes('margin-bottom'))
+      shell = shell.parentElement;
+    if (!shell) throw new Error('Missing keyboard-aware composer shell');
+    document.documentElement.style.setProperty('--safe-area-bottom', '34px');
+    document.documentElement.style.setProperty('--native-keyboard-height', '300px');
+    shell.getBoundingClientRect();
+    for (const animation of shell.getAnimations()) animation.finish();
+    shell.getBoundingClientRect();
+    document.documentElement.style.setProperty('--native-keyboard-height', '0px');
+    shell.getBoundingClientRect();
+    const animations = shell.getAnimations();
+    for (const animation of animations) animation.pause();
+    const box = input.closest('[class~="@container/composer-box"]')!;
+    return [0, 0.5, 1].map((progress) => {
+      for (const animation of animations)
+        animation.currentTime = Number(animation.effect!.getTiming().duration) * progress;
+      return {
+        y: box.getBoundingClientRect().y,
+        padding: parseFloat(getComputedStyle(shell!).paddingBottom),
+      };
+    });
+  });
+  expect(samples[0].padding).toBeCloseTo(8);
+  expect(samples[1].padding).toBeGreaterThan(8);
+  expect(samples[1].padding).toBeLessThan(42);
+  expect(samples[2].padding).toBeCloseTo(42);
+  expect(samples[1].y).toBeGreaterThan(samples[0].y);
+  expect(samples[1].y).toBeLessThan(samples[2].y);
+});
+
+test('mobile first send keeps the keyboard if the user starts the next draft before dismissal', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(
+    '/iframe.html?id=mobile-newchattransition--deferred-send-in-place&viewMode=story'
+  );
+  const source = page.locator('#chat-prompt-mobile-sheet');
+  await source.focus();
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty('--native-keyboard-height', '300px');
+    document.addEventListener('focusin', (event) => {
+      const input = event.target;
+      if (input instanceof HTMLTextAreaElement && input.id !== 'chat-prompt-mobile-sheet')
+        queueMicrotask(() =>
+          input.dispatchEvent(
+            new InputEvent('beforeinput', { bubbles: true, inputType: 'insertText', data: 'a' })
+          )
+        );
+    });
+  });
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event('storybook:session-ready')));
+  const destination = page.locator('textarea[data-lody-composer-input]');
+  await expect(destination).toHaveCount(1);
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  );
+  await expect(destination).toBeFocused();
+  await page.keyboard.type('A new draft');
+  await expect(destination).toHaveValue('A new draft');
+});

@@ -1169,6 +1169,15 @@ describe('SessionChatInputArea submission feedback', () => {
 
   for (const mobilePlatform of ['mobile-browser', 'wide-native'] as const) {
     function setMobilePlatform() {
+      let id = 0;
+      const frames = new Map<number, FrameRequestCallback>();
+      vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+        frames.set(++id, callback);
+        return id;
+      });
+      vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((frame) => {
+        frames.delete(frame);
+      });
       if (mobilePlatform === 'wide-native') {
         Object.defineProperty(window, '__LODY_NATIVE__', { configurable: true, value: true });
       } else {
@@ -1181,11 +1190,17 @@ describe('SessionChatInputArea submission feedback', () => {
         });
         Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
       }
+      return async () =>
+        act(async () => {
+          const pending = [...frames.values()];
+          frames.clear();
+          for (const callback of pending) callback(0);
+        });
     }
     it.each(['keyboard', 'button'] as const)(
       `preserves the focused ${mobilePlatform} input during %s submission`,
       async (source) => {
-        setMobilePlatform();
+        const paint = setMobilePlatform();
         for (const accepted of [false, true]) {
           const acceptance = deferredBoolean();
           const textarea = await renderComposer({ onSendMessage: () => acceptance.promise });
@@ -1198,9 +1213,44 @@ describe('SessionChatInputArea submission feedback', () => {
           expect(textarea.disabled).toBe(false);
           expect(textarea.value).toBe(accepted ? '' : 'focus regression draft');
           expect(document.activeElement).toBe(textarea);
+          await paint();
+          expect(document.activeElement).toBe(textarea);
+          await paint();
+          expect(document.activeElement === textarea).toBe(!accepted);
         }
       }
     );
+    it(`keeps ${mobilePlatform} open if the user resumes editing before dismissal`, async () => {
+      const paint = setMobilePlatform();
+      const acceptance = deferredBoolean();
+      const textarea = await renderComposer({ onSendMessage: () => acceptance.promise });
+      textarea.focus();
+      await submit('keyboard');
+      await act(async () => acceptance.resolve(true));
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+      await paint();
+      await paint();
+      expect(document.activeElement).toBe(textarea);
+    });
+    it(`does not dismiss a new ${mobilePlatform} session from an old accepted send`, async () => {
+      const paint = setMobilePlatform();
+      const acceptance = deferredBoolean();
+      const textarea = await renderComposer({
+        sessionId: 'dismiss-old',
+        onSendMessage: () => acceptance.promise,
+      });
+      textarea.focus();
+      await submit('keyboard');
+      await act(async () => acceptance.resolve(true));
+      const next = await renderComposer({
+        sessionId: 'dismiss-new',
+        onSendMessage: async () => true,
+      });
+      next.focus();
+      await paint();
+      await paint();
+      expect(document.activeElement).toBe(next);
+    });
     it(`does not reclaim ${mobilePlatform} focus after an explicit keyboard dismissal`, async () => {
       setMobilePlatform();
       const acceptance = deferredBoolean();

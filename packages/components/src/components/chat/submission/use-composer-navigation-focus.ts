@@ -9,9 +9,9 @@ export function focusComposerAfterNavigation(
   input: HTMLTextAreaElement | null,
   usesMobileKeyboard: boolean
 ) {
-  if (!input) return;
+  if (!input) return false;
   if (usesMobileKeyboard && input.ownerDocument.activeElement?.id !== MOBILE_NEW_CHAT_PROMPT_ID)
-    return;
+    return false;
   // iOS can dismiss its keyboard without changing document.activeElement.
   // Honor its native signal rather than treating DOM focus as visibility.
   if (
@@ -25,8 +25,9 @@ export function focusComposerAfterNavigation(
       ) > 0
     )
   )
-    return;
+    return false;
   input.focus({ preventScroll: true });
+  return true;
 }
 
 declare module '@tanstack/react-router' {

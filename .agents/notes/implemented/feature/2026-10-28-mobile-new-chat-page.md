@@ -59,7 +59,7 @@ expires after its first frame, so content and overlay explicitly suppress their
 entrance animation. Drag, closing, Back and later ordinary visits retain their
 existing transitions.
 
-## Keyboard focus continuity
+## Keyboard dismissal after presentation
 
 A device recording exposed a gap in the constant-height browser checks: sending
 explicitly blurred the new-chat field and then disabled it, allowing the native
@@ -70,12 +70,21 @@ CPU profile establishes the source of all rendering cost.
 The shared `ChatComposer` now keeps a transiently pending mobile textarea enabled
 and blocks its input, key and paste events while the controlled draft is hidden.
 Send-pointer events retain input focus. Existing-session sends also keep the same
-input node without blur or post-completion refocus; archived inputs remain disabled.
+input node while pending; archived inputs remain disabled.
 For first send, a one-shot navigation request lets the mounted destination take
 an existing new-chat focus before the source is removed. Native iOS additionally
 requires its keyboard-height signal, since hiding a keyboard can retain DOM focus.
 If the user has dismissed it, the request is consumed without focusing. Claiming
 focus and presentation clears both history markers in one replacement.
+
+The adopted behavior automatically closes the keyboard after a successful send.
+For a new conversation, its destination first takes the existing focus, then a
+bounded pair of animation frames lets the committed message surface paint before
+blurring. Ongoing sends use the same operation after accepted submission commits.
+Rejection keeps editing available. Any new key/input/composition, pointer, focus,
+window/visibility change or scope teardown cancels pending dismissal, so it cannot
+interrupt the next draft or another session. The shared shell animates safe-area
+padding along with keyboard margin to avoid a separate bottom-inset jump.
 
 This preserves the shared renderer and current page ownership instead of adding
 a second editor host or moving focused DOM between containers. The destination
@@ -84,12 +93,12 @@ still mounts its session UI; native smoothness needs a new device pass.
 ## Verification and limits
 
 - Focused project/target/workspace/config/submission and desktop comparator suites:
-  112 passing tests, including the existing avatar cache, project filtering and
+  116 passing tests, including the existing avatar cache, project filtering and
   comparator boundaries.
-- Eleven Chromium scenarios cover both themes, 320–430px phone widths, a fixed
+- Thirteen Chromium scenarios cover both themes, 320–430px phone widths, a fixed
   simulated 300px keyboard, delayed presentation, later URL correction and
-  GitHub avatar pending/success/error states; three WebKit cases cover focus
-  transfer and dismissal. First-send cases observe 45 frames
+  GitHub avatar pending/success/error states; five WebKit cases cover automatic dismissal,
+  resumed input and safe-area interpolation. First-send cases observe 45 frames
   with identical composer bounds, model text/weight and no entrance movement.
 - Package typecheck, changed-file formatting/lint and artboard layout checks pass.
   Root documentation validation is limited by links into uninitialized ACP
@@ -97,7 +106,7 @@ still mounts its session UI; native smoothness needs a new device pass.
 - Stories explicitly force the mobile layout family and use real components
   with synthetic workspace/acceptance data. The gallery includes project types,
   opened pickers, shared run-config Sheet, attachments, long text and short phones.
-- iOS Debug `0.107.2 (20261028.4)` was built, signed, installed and launched on
+- iOS Debug `0.107.2 (20261028.5)` was built, signed, installed and launched on
   the physical test device. The isolated build retains the previous device build
   dependency baseline; all five product files edited in this follow-up match
   the working tree byte-for-byte. Installation and simulated geometry do not establish

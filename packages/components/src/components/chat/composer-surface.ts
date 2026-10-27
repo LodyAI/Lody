@@ -25,9 +25,9 @@ const styles = stylex.create({
     paddingTop: 0,
     marginBottom: 'var(--native-keyboard-height, 0px)',
     paddingBottom:
-      'calc(0.5rem + max(0px, env(safe-area-inset-bottom, 0px) - var(--native-keyboard-height, 0px)))',
+      'calc(0.5rem + max(0px, var(--safe-area-bottom, env(safe-area-inset-bottom, 0px)) - var(--native-keyboard-height, 0px)))',
     backgroundColor: colors.background,
-    transitionProperty: 'margin-bottom',
+    transitionProperty: 'margin-bottom, padding-bottom',
     transitionDuration: '250ms',
     transitionTimingFunction: 'var(--ease-out, cubic-bezier(0, 0, 0.2, 1))',
   },
