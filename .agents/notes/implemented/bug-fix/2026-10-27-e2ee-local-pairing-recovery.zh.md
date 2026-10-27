@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1945](https://github.com/LodyAI/Lody/pull/1945)
 
 [English](2026-10-27-e2ee-local-pairing-recovery.md)
 
