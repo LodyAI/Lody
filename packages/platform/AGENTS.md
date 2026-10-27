@@ -66,3 +66,7 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
 - Optional `memberProfiles` is a display directory scoped to the live account and
   workspace. Resolve its crypto user IDs through verified ledger members; it cannot
   grant permissions, pin keys, identify the creator, or block ledger availability.
+
+- Optional `runtime.readIdentity` returns only workspace ID/genesis from the expected
+  account's retained verified ledger, releasing its temporary read before replying.
+  Missing capability fails closed; never fall back to unleased `status`.

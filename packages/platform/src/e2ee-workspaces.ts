@@ -153,6 +153,13 @@ export interface E2eeWorkspaceRuntime {
     observed?: { genesisHash: string; headHash: string; length: number }
   ): Promise<E2eeRuntimeStatus>;
   close(workspaceId: string): Promise<void>;
+  /** Read retained verified identity without granting this window a reader.
+   * The host binds the expected account and releases its temporary read before
+   * returning. Missing on older hosts; callers must not fall back to status. */
+  readIdentity?(input: { accountId: string; workspaceId: string }): Promise<{
+    workspaceId: string;
+    genesisHash: string;
+  }>;
   status(workspaceId: string): Promise<E2eeRuntimeStatus>;
   ingestLedgerRecords(
     workspaceId: string,

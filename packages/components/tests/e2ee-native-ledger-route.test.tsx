@@ -175,6 +175,7 @@ it.each([false, true])(
         close: async (id) => {
           leases.delete(id);
         },
+        readIdentity: async () => ({ workspaceId, genesisHash }),
         status: async () => local.status,
         ledgerView: async () => local,
         ingestLedgerRecords: async () => local.status,

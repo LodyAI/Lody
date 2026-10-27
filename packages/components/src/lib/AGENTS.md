@@ -20,8 +20,8 @@ Rules bind callers too. [Background](../../../../.agents/docs/components-package
 
 ## Crash recovery and diagnostics
 
-- Restore damaged E2EE markers from native verified identity only; archive originals.
-  Keep valid conflicts and isolate bad creation intents.
+- E2EE repair archives originals and uses account-bound native reads; keep conflicts.
+  Readable evidence skips native work. Isolate bad intents.
 
 - `ErrorBoundary`'s fallback shows the real error and one-click full-report copy on every
   build, details visible (`showErrorDetails` opts out); `error-boundary-report.ts` builds it.

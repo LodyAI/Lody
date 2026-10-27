@@ -755,6 +755,34 @@ export class E2eeIpc extends IpcService {
       throw new Error('e2ee_cleanup_failed')
     })
   }
+  /** Account-bound local identity read; never grants renderer status/content access. */
+  @IpcMethod()
+  async readIdentity(input: { accountId: string; workspaceId: string }) {
+    sender()
+    if (!input || typeof input.accountId !== 'string' || typeof input.workspaceId !== 'string')
+      throw new Error('e2ee_invalid-input')
+    const { accountId, workspaceId } = input
+    const captured = await withDesktopE2eeAccount((owner) =>
+      Effect.gen(function* () {
+        if (owner.accountId !== accountId)
+          return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+        const status = yield* owner.host.open(workspaceId)
+        // The account lock protects this temporary read. Existing window readers
+        // keep their host; otherwise detach here and drain outside that lock.
+        const cleanup = owner.readers.get(workspaceId)?.size
+          ? Effect.void
+          : yield* owner.host.beginCloseWorkspace(workspaceId)
+        return {
+          identity: { workspaceId: status.workspaceId, genesisHash: status.genesisHash },
+          cleanup
+        }
+      })
+    )
+    await Effect.runPromise(captured.cleanup).catch(() => {
+      throw new Error('e2ee_cleanup_failed')
+    })
+    return captured.identity
+  }
   @IpcMethod()
   async status(workspaceId: string) {
     const id = sender()

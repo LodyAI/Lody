@@ -100,7 +100,6 @@ function WorkspaceControlRoute() {
           try {
             readWorkspaceModeEvidence(localStorage, accountId, workspaceId);
           } catch {
-            repairUnreadableE2eeCaches(localStorage, accountId);
             await recoverE2eeWorkspaceIdentity({
               storage: localStorage,
               accountId,

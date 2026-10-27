@@ -587,22 +587,37 @@ export function resetObservedLedgerProgress(
 
 /** Rebuild unreadable renderer identity markers only from the host's independently
  * retained, verified ledger. Readable conflicting evidence is never replaced.
- * The host owns/reuses its status reader; this does not create or re-pair identity.
+ * Readable evidence needs no native access. The host's narrow read owns temporary
+ * lifetime and never grants status/content access or creates a new identity.
  */
 export async function recoverE2eeWorkspaceIdentity(input: {
   storage: Storage;
   accountId: string;
   workspaceId: string;
-  runtime: Pick<import('@lody/platform').E2eeWorkspaceRuntime, 'account' | 'status'>;
+  runtime?: Pick<import('@lody/platform').E2eeWorkspaceRuntime, 'account' | 'readIdentity'>;
   isCurrent: () => boolean;
 }): Promise<void> {
   const { storage, accountId, workspaceId, runtime, isCurrent } = input;
   if (!isCurrent()) throw conflict('Workspace identity must be checked again');
-  let status: Awaited<ReturnType<typeof runtime.status>>;
+  repairUnreadableE2eeCaches(storage, accountId);
+  try {
+    readWorkspaceModeEvidence(storage, accountId, workspaceId);
+    return;
+  } catch (error) {
+    // Only unreadable sticky markers need the native identity. Readable conflicts
+    // and storage/optional-cache errors remain failures, never pin replacement.
+    if (
+      !(error instanceof E2eeLocalEvidenceCorruptError) ||
+      !['Invalid genesis pin', 'Invalid encrypted evidence'].includes(error.message)
+    )
+      throw error;
+  }
+  if (!runtime?.readIdentity) throw conflict('Workspace identity must be checked again');
+  let status: { workspaceId: string; genesisHash: string };
   try {
     if ((await runtime.account())?.userId !== accountId)
       throw conflict('Workspace identity must be checked again');
-    status = await runtime.status(workspaceId);
+    status = await runtime.readIdentity({ accountId, workspaceId });
     if ((await runtime.account())?.userId !== accountId)
       throw conflict('Workspace identity must be checked again');
   } catch (cause) {

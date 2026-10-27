@@ -133,13 +133,43 @@ describe('WorkspaceAdmissionGate', () => {
     await act(async () => retry?.click());
     expect(store.get(workspaceModeAdmissionRetryAtom)).toBe(1);
   });
+  it('retries an ordinary workspace after deleting its unreadable optional proof without native access', async () => {
+    const key = 'lody-workspace-mode-proof:account:ordinary';
+    localStorage.setItem(key, '{broken proof');
+    Object.assign(platform.e2eeWorkspaces!, {
+      runtime: {
+        account: async () => {
+          throw new Error('ordinary retry must not query native identity');
+        },
+        status: async () => {
+          throw new Error('e2ee_not_open');
+        },
+      },
+    });
+    fail({
+      errorType: 'E2eeLocalEvidenceCorruptError',
+      modeAdmission: { knownEncrypted: false, workspaceId: 'ordinary' },
+    });
+    await render();
+    const retry = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Retry'
+    );
+    await act(async () => retry?.click());
+    expect(localStorage.getItem(key)).toBeNull();
+    expect(store.get(workspaceModeAdmissionRetryAtom)).toBe(1);
+    expect(text()).not.toMatch(/encrypt|mode|pair/i);
+  });
+
   const hash = 'ab'.repeat(32);
   const pin = 'lody-e2ee-genesis-pin:account:encrypted';
   const known = 'lody-e2ee-known-mode:account:encrypted';
   const native = (status = { workspaceId: 'encrypted', genesisHash: hash } as E2eeRuntimeStatus) =>
     ({
       account: async () => ({ userId: 'account', source: 'offline' }),
-      status: async () => status,
+      readIdentity: async () => ({
+        workspaceId: status.workspaceId,
+        genesisHash: status.genesisHash,
+      }),
     }) as E2eeWorkspaceRuntime;
   const retry = () =>
     act(async () => {
@@ -236,7 +266,7 @@ describe('WorkspaceAdmissionGate', () => {
       recover({
         ...native(),
         account: async () => ({ userId: accountId, source: 'offline' }),
-        status: async () => {
+        readIdentity: async () => {
           accountId = 'other';
           return { workspaceId: 'encrypted', genesisHash: hash } as E2eeRuntimeStatus;
         },
@@ -255,7 +285,7 @@ describe('WorkspaceAdmissionGate', () => {
         workspaceId: 'encrypted',
         runtime: {
           ...native(),
-          status: async () => {
+          readIdentity: async () => {
             throw cause;
           },
         },

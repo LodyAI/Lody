@@ -23,7 +23,6 @@ import {
   E2eeLocalEvidenceCorruptError,
   repairUnreadableE2eeCaches,
   recoverE2eeWorkspaceIdentity,
-  readWorkspaceModeEvidence,
 } from '@/lib/e2ee-workspace-storage';
 
 function admissionFailureHelp(errorType: string): string {
@@ -126,9 +125,7 @@ export function WorkspaceAdmissionGate({
           void (async () => {
             try {
               if (identityFailure && accountId) {
-                // Optional cache repair cannot remove sticky identity evidence.
-                repairUnreadableE2eeCaches(localStorage, accountId);
-                if (native && workspaceId)
+                if (workspaceId)
                   await recoverE2eeWorkspaceIdentity({
                     storage: localStorage,
                     accountId,
@@ -136,8 +133,7 @@ export function WorkspaceAdmissionGate({
                     runtime: native,
                     isCurrent,
                   });
-                else if (workspaceId)
-                  readWorkspaceModeEvidence(localStorage, accountId, workspaceId);
+                else repairUnreadableE2eeCaches(localStorage, accountId);
               }
               if (isCurrent()) retryAdmission((value) => value + 1);
             } catch {
