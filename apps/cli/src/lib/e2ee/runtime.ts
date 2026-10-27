@@ -15,6 +15,7 @@ import {
 import {
   Bytes,
   hashRecordBytes,
+  getCommittedEpochStagingKey,
   hasVerifiedCheckpoint,
   restoreVerifiedState,
   verifyLedgerEffect,
@@ -26,6 +27,7 @@ import {
   InstalledKeyStore,
   KeyProtector,
   KeyMailbox,
+  EpochStagingStore,
   LedgerFeedStore,
   LedgerPinStore,
   LocalStoreError,
@@ -102,6 +104,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
   device: NodeE2eeDevice;
   genesisRecord: Uint8Array;
   mailbox?: KeyMailbox['Service'];
+  staging?: Pick<EpochStagingStore['Service'], 'readGroup'>;
 }) {
   const genesisRecord = new Uint8Array(options.genesisRecord);
   const genesis = yield* Effect.fromResult(
@@ -488,6 +491,22 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
       receiver
         ? Effect.gen(function* () {
             yield* guard();
+            const view = yield* verified.current();
+            const epoch = view.inspectState().epoch.number;
+            const checked = yield* Effect.result(installed.check(epoch));
+            if (options.staging && epoch > 0 && Result.isFailure(checked)) {
+              if (checked.failure.reason !== 'missing-key') return yield* checked.failure;
+              const located = getCommittedEpochStagingKey(view, epoch);
+              if (Result.isSuccess(located)) {
+                const group = yield* options.staging.readGroup(located.success);
+                if (
+                  group?.envelopes.some(
+                    (row) => row.recipient === hex(options.device.publicKey.toBytes())
+                  )
+                )
+                  yield* receiver.receiveStagedGroup(group);
+              } else if (view.verification !== 'endorsed-snapshot') return yield* located.failure;
+            }
             if (repair) yield* repair.flush();
             yield* receiver.resume();
             for (let cursor: string | null = null; ;) {
@@ -510,6 +529,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
               cursor = page.next;
             }
             yield* receiver.flushReports();
+            return undefined;
           })
         : Effect.fail(failure('invalid-input')),
     credential: () => options.custody.deviceCredential(genesis, options.device.publicKey),

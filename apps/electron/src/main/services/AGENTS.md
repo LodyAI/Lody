@@ -107,7 +107,7 @@ release. Verification/storage errors stay owner-local; malformed input keeps rea
 Originals precede feed/pin; compare overlaps, keep renderer checkpoints, await history.
 Evidence conflicts never fall back; availability may use pinned renderer reads.
 
-Fixed cloud refs; per-request auth/abort/deadlines; disposal fences late calls.
+Fixed cloud refs; request auth/abort/deadlines; disposal fences late calls.
 Keep exact uncertain bytes; raw/SDK causes stay in main, not IPC/telemetry.
 Verified readback beats lost ACKs; cleanup never undoes admission.
 `e2ee_staging_invalid` and `e2ee_staging_corrupt` are terminal.
@@ -119,5 +119,5 @@ pin-only+relay request; same-request unknown/admitting stays fenced. Keep instal
 other sessions and primary/cleanup causes. Superseded retirement needs exact
 socket receipt and atomic all-null local match; fresh sessions need consent.
 Snapshots verify pinned endorsement/self-admission before binding/pin/cursor;
-sparse positions are valid. Old keys use mailbox + verified history, never staging.
+sparse positions are valid. Old keys use mailbox/history; only current committed epochs use staging.
 Show file protection; socket deadline means pending. Await CLI current-key install.

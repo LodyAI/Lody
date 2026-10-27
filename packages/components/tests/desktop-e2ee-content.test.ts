@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import { LoroDoc } from 'loro-crdt';
 import { createDesktopE2eeContent } from '../src/providers/desktop-e2ee-content';
@@ -10,6 +10,53 @@ const context = {
 } as const;
 
 describe('desktop E2EE content epoch safety', () => {
+  it('does not hydrate a previous epoch token when a retired provider left a cache row', async () => {
+    const entries = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => entries.get(key) ?? null,
+      setItem: (key: string, value: string) => entries.set(key, value),
+      removeItem: (key: string) => entries.delete(key),
+    });
+    let issued = 0;
+    const runtime = {
+      contentStreamsToken: async () => ({
+        token: `epoch-token-${++issued}`,
+        bucketId: 'encrypted-content',
+        gatewayBaseUrl: 'https://streams.example.com',
+        expiresIn: 900,
+        expiresAt: 1_900_000_000_000,
+      }),
+    } as unknown as E2eeWorkspaceRuntime;
+    const access = createDesktopE2eeContent({
+      runtime,
+      workspaceId: 'token-epoch-workspace',
+      genesisHash: '11'.repeat(32),
+      epoch: 0,
+      authToken: () => 'account-token',
+    });
+    const first = access.e2ee.createTokenProvider(new AbortController().signal);
+    let successor: typeof first | undefined;
+    try {
+      expect(await first.getToken()).toBe('epoch-token-1');
+      expect(entries.size).toBeGreaterThan(0);
+      access.updateStatus({ epoch: 1, rotationRequired: false, hasCurrentKey: true });
+      await access.transition({
+        // Even a cache row that could not be removed cannot select the next token.
+        drain: () => first.close(),
+        install: async () => ({ epoch: 1, rotationRequired: false, hasCurrentKey: true }),
+        restart: async () => {
+          successor = access.e2ee.createTokenProvider(new AbortController().signal);
+        },
+      });
+      expect(await successor?.getToken()).toBe('epoch-token-2');
+      expect(access.e2ee.bucketId()).toBe('encrypted-content');
+    } finally {
+      await first.close();
+      await successor?.close();
+      await access.close();
+      vi.unstubAllGlobals();
+    }
+  });
   it('replaces a gateway-rejected cached token through the native token capability', async () => {
     let cached = 'cached-token';
     const rejected: Array<string | undefined> = [];

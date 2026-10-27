@@ -130,7 +130,8 @@ export interface E2eeWorkspaceRuntime {
     workspaceId: string,
     pairingSessionId: string
   ): Promise<{ admitted: true; ready: boolean }>;
-  refresh(workspaceId: string): Promise<E2eeRuntimeStatus>;
+  /** Ledger-only refresh lets content owners drain old room sessions before installing a new key. */
+  refresh(workspaceId: string, options?: { installKeys?: boolean }): Promise<E2eeRuntimeStatus>;
   contentStreamsToken(
     workspaceId: string,
     rejectedToken?: string

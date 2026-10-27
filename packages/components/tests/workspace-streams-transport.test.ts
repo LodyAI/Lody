@@ -154,8 +154,7 @@ async function settle<T>(operation: Promise<T>, timeout = 5_000): Promise<T> {
 }
 
 afterEach(async () => {
-  for (const transport of openTransports)
-    await settle(transport.close(), 10_000);
+  for (const transport of openTransports) await settle(transport.close(), 10_000);
   openTransports.clear();
   for (const tab of openTabs) await settle(tab.repo.destroy(), 10_000);
   openTabs.clear();
@@ -205,7 +204,6 @@ function transportFor(
   cursorStore?: RemoteCursorStore
 ) {
   const transport = createWorkspaceStreamsTransport({
-
     repo: tab.repo,
     workspaceId: tab.workspaceId,
     documentRemoteCursorStore:
@@ -391,6 +389,75 @@ class FailingStorage extends IndexedDBStorageAdaptor {
 }
 
 describe('workspace Streams content boundary', () => {
+  it.each(['upload', 'cursor', 'provision'] as const)(
+    'retires protected %s work before replacement while another workspace sends',
+    async (operation) => {
+      createByteServer();
+      const fetch = globalThis.fetch;
+      const tab = await openTab(`epoch-drain-${++sequence}` as WorkspaceId);
+      const independent = await openTab(`independent-${++sequence}` as WorkspaceId);
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const cursor = createResilientRemoteCursorStore({ dbName: tab.cursorDbName });
+      const transport = transportFor(tab, protectedContent(), {
+        load: (url) => cursor.load(url),
+        delete: (url) => cursor.delete?.(url) ?? Promise.resolve(),
+        save: async (value) => {
+          if (operation === 'cursor') {
+            entered.resolve();
+            await release.promise;
+          }
+          await cursor.save(value);
+        },
+      });
+      vi.stubGlobal('fetch', async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        const url = input instanceof Request ? input.url : String(input);
+        const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
+        if (
+          new URL(url).pathname === new URL(docUrl(tab.workspaceId, 'doc-a')).pathname &&
+          ((operation === 'upload' && method === 'POST') ||
+            (operation === 'provision' && method === 'PUT'))
+        ) {
+          entered.resolve();
+          await release.promise;
+        }
+        return fetch(input, init);
+      });
+      const doc = (await tab.repo.openPersistedDoc('doc-a')).doc;
+      doc.getText('draft').insert(0, 'retained through rotation');
+      doc.commit();
+      const work =
+        operation === 'provision'
+          ? transport.ensureRoom({ kind: 'doc', docId: 'doc-a' })
+          : transport.syncDoc('doc-a', doc);
+      let close: Promise<void> | undefined;
+      let stopped = false;
+      try {
+        await entered.promise;
+        close = transport.close().then(() => {
+          stopped = true;
+        });
+        // This real independent sync crosses IndexedDB persistence. It must
+        // finish while the other workspace's raw operation remains held.
+        const other = (await independent.repo.openPersistedDoc('other')).doc;
+        other.getText('draft').insert(0, 'independent send');
+        other.commit();
+        expect((await transportFor(independent).syncDoc('other', other)).ok).toBe(true);
+        expect(stopped).toBe(false);
+        release.resolve();
+        await work;
+        await close;
+        expect(stopped).toBe(true);
+        expect(doc.getText('draft').toString()).toBe('retained through rotation');
+        expect((await transportFor(tab, protectedContent()).syncDoc('doc-a', doc)).ok).toBe(true);
+      } finally {
+        release.resolve();
+        await work;
+        await close;
+      }
+    }
+  );
+
   it.each([
     null,
     { mode: 'unknown' },
@@ -1186,14 +1253,16 @@ describe('P10 public crypto and published SDK preparation', () => {
           },
         },
       });
-      const result = await settle(transportFor(reader, readerContent, {
-        load: (key) => cursor.load(key),
-        async save(value) {
-          const disk = await openTab(readerId);
-          expect((await disk.repo.openPersistedDoc('doc-a')).doc.toJSON()).toEqual(doc.toJSON());
-          await cursor.save(value);
-        },
-      }).syncDoc('doc-a', restored));
+      const result = await settle(
+        transportFor(reader, readerContent, {
+          load: (key) => cursor.load(key),
+          async save(value) {
+            const disk = await openTab(readerId);
+            expect((await disk.repo.openPersistedDoc('doc-a')).doc.toJSON()).toEqual(doc.toJSON());
+            await cursor.save(value);
+          },
+        }).syncDoc('doc-a', restored)
+      );
       expect(result.ok).toBe(fault === 'valid');
       if (fault === 'valid') {
         expect(decompressed).toHaveLength(1);

@@ -34,6 +34,7 @@
   "e2ee.localAgent.preparationPending": "Local agent setup is not confirmed yet. Try again to check its status.",
   "e2ee.localAgent.approvedRetry": "You approved this machine. Completion is not confirmed yet. Try again to check its status.",
   "e2ee.localAgent.retryHelp": "The local agent is temporarily unavailable. Try again.",
+  "e2ee.content.retryKeyUpdate": "Retry key update",
   "e2ee.content.keyUpdateRequired": "Key update required. Your edits are saved on this device.",
   "sessions.fileLinks.chooseTitle": "Choose a file",
   "sessions.fileLinks.chooseDescription": "This link matches files in more than one worktree. Choose the version to open.",

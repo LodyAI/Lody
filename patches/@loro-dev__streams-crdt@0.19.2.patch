@@ -1,0 +1,181 @@
+diff --git a/dist/ephemeral-effect-DVM7kO9I.d.ts b/dist/ephemeral-effect-DVM7kO9I.d.ts
+index db300ce07001c51440db9663e6f2a74515eb6079..76a0d2a9d1ab7f8227355f1e9b0993ab5e22e999 100644
+--- a/dist/ephemeral-effect-DVM7kO9I.d.ts
++++ b/dist/ephemeral-effect-DVM7kO9I.d.ts
+@@ -916,6 +916,8 @@ interface EphemeralStreamCrdtOptions {
+  * Each instance is bound to exactly one stream URL and one local CRDT adapter.
+  */
+ interface StreamsCrdtOptions<TVersion extends JsonObject> {
++  /** Opt-in terminal room retirement: stop admission and join raw startup/read/queued I/O. Snapshots must be disabled. Defaults to false. */
++  readonly drainOnClose?: boolean;
+   /**
+    * Full, opaque Durable Streams URL used for HTTP requests and cursor keys.
+    * Payload-protection providers own any separate application/room identity
+diff --git a/dist/shared-BqGeEa7c.d.ts b/dist/shared-BqGeEa7c.d.ts
+index d6fbb7c55fc56307cebd0e27a449b09866788a6d..d903964aa7728d879a25b62d5ff8d164ff10a835 100644
+--- a/dist/shared-BqGeEa7c.d.ts
++++ b/dist/shared-BqGeEa7c.d.ts
+@@ -10,6 +10,8 @@ import { Cause } from "effect";
+ declare class StreamsCrdt<TVersion extends JsonObject> implements StreamsCrdtLike<TVersion> {
+   /** Capability version for consumers that must reject silently ignored options. */
+   static readonly uploadTransportVersion: 1;
++  /** Capability for opt-in raw room-operation settlement. */
++  static readonly roomDrainVersion: 1;
+   readonly streamUrl: string;
+   readonly adapter: CrdtAdapter<TVersion>;
+   readonly remoteCursorStore: RemoteCursorStore<TVersion>;
+diff --git a/dist/stream-id-CkYX5Gw_.js b/dist/stream-id-CkYX5Gw_.js
+index 6768860ab31b380e6e058a564439b779f6bfef89..040f0194fdfabe1861032aad532eeb95cd2aaebd 100644
+--- a/dist/stream-id-CkYX5Gw_.js
++++ b/dist/stream-id-CkYX5Gw_.js
+@@ -1069,6 +1069,7 @@ function fastSseCloseDelay(startedAtMs) {
+ var StreamsCrdt = class StreamsCrdt {
+ 	/** Capability version for consumers that must reject silently ignored options. */
+ 	static uploadTransportVersion = 1;
++	static roomDrainVersion = 1;
+ 	streamUrl;
+ 	adapter;
+ 	remoteCursorStore;
+@@ -1113,6 +1114,9 @@ var StreamsCrdt = class StreamsCrdt {
+ 	writeOnlyDisabledReason;
+ 	joinState;
+ 	opQueue = Promise.resolve();
++	drainOnClose = false;
++	draining = false;
++	activeRoomOperations = new Set();
+ 	/** Wall-clock ms of the last durably committed local append, if any. */
+ 	lastLocalAppendAtMs;
+ 	/**
+@@ -1126,6 +1130,7 @@ var StreamsCrdt = class StreamsCrdt {
+ 	constructor(options) {
+ 		this.streamUrl = options.streamUrl;
+ 		this.adapter = options.adapter;
++		this.drainOnClose = options.drainOnClose === true;
+ 		const authProvider = normalizeAuthProvider(options.auth);
+ 		this.createStreamIfMissing = options.createStreamIfMissing ?? false;
+ 		const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
+@@ -1196,9 +1201,32 @@ var StreamsCrdt = class StreamsCrdt {
+ 	* Stops any active live join and releases transport-owned state.
+ 	*/
+ 	async close() {
+-		this.disableWriteOnlyMode("transport closed");
+-		const state = this.joinState;
+-		if (state != null) await this.disposeJoinState(state);
++		if (this.drainOnClose) this.draining = true;
++		try {
++			this.disableWriteOnlyMode("transport closed");
++			const state = this.joinState;
++			if (state != null) await this.disposeJoinState(state);
++		} finally {
++			if (this.drainOnClose) {
++				// A closed join is not a receipt for its raw read/upload/cursor work.
++				for (;;) {
++					const tail = this.opQueue;
++					await Promise.allSettled([tail, ...this.activeRoomOperations]);
++					if (this.activeRoomOperations.size === 0 && tail === this.opQueue) break;
++				}
++				// Abort may finish the read waiter before its retained SSE release.
++				// A release timeout fails close; the owner remains retryable.
++				await this.client.waitForSseSettlement();
++			}
++		}
++	}
++	trackRoomOperation(work) {
++		if (!this.drainOnClose) return work();
++		if (this.draining) return Promise.reject(new Error("room transport retired"));
++		const raw = work();
++		this.activeRoomOperations.add(raw);
++		raw.then(() => this.activeRoomOperations.delete(raw), () => this.activeRoomOperations.delete(raw));
++		return raw;
+ 	}
+ 	/**
+ 	* Resets the retry counter and immediately attempts to reconnect.
+@@ -1281,7 +1309,10 @@ var StreamsCrdt = class StreamsCrdt {
+ 	/**
+ 	* Reads the latest remote snapshot offset, if the server exposes one.
+ 	*/
+-	async getSnapshotOffset() {
++	getSnapshotOffset() {
++		return this.trackRoomOperation(() => this.getSnapshotOffsetOwned());
++	}
++	async getSnapshotOffsetOwned() {
+ 		try {
+ 			return {
+ 				ok: true,
+@@ -1300,7 +1331,10 @@ var StreamsCrdt = class StreamsCrdt {
+ 	* @internal Intended for end-to-end tests that must deterministically create
+ 	* a remote snapshot without waiting for the best-effort join() debounce.
+ 	*/
+-	async uploadSnapshotForTesting() {
++	uploadSnapshotForTesting() {
++		return this.trackRoomOperation(() => this.uploadSnapshotForTestingOwned());
++	}
++	async uploadSnapshotForTestingOwned() {
+ 		try {
+ 			await atErrorBoundary({
+ 				source: "crdt",
+@@ -1333,7 +1367,10 @@ var StreamsCrdt = class StreamsCrdt {
+ 	/**
+ 	* Explicitly creates the target stream.
+ 	*/
+-	async createStream() {
++	createStream() {
++		return this.trackRoomOperation(() => this.createStreamOwned());
++	}
++	async createStreamOwned() {
+ 		try {
+ 			return {
+ 				ok: true,
+@@ -1401,7 +1438,10 @@ var StreamsCrdt = class StreamsCrdt {
+ 	* terminal live reads perform one immediate non-SSE offset read and then
+ 	* nudge the room to reconnect.
+ 	*/
+-	async catchup(params = {}) {
++	catchup(params = {}) {
++		return this.trackRoomOperation(() => this.catchupOwned(params));
++	}
++	async catchupOwned(params = {}) {
+ 		try {
+ 			this.disableWriteOnlyMode("appendWriteOnly cannot be used after catchup() on the same transport");
+ 			const state = this.joinState;
+@@ -1642,7 +1682,7 @@ var StreamsCrdt = class StreamsCrdt {
+ 			}, hardTimeoutMs);
+ 		});
+ 		try {
+-			const taskPromise = task(signal);
++			const taskPromise = this.trackRoomOperation(() => task(signal));
+ 			return hardTimeoutPromise == null ? await taskPromise : await Promise.race([taskPromise, hardTimeoutPromise]);
+ 		} catch (error) {
+ 			if (hardTimeoutError != null) throw hardTimeoutError;
+@@ -1652,7 +1692,10 @@ var StreamsCrdt = class StreamsCrdt {
+ 			if (hardTimer != null) clearTimeout(hardTimer);
+ 		}
+ 	}
+-	async startJoin(state) {
++	startJoin(state) {
++		return this.trackRoomOperation(() => this.startJoinOwned(state));
++	}
++	async startJoinOwned(state) {
+ 		try {
+ 			state.requestController ??= new AbortController();
+ 			let joined;
+@@ -2363,7 +2406,10 @@ var StreamsCrdt = class StreamsCrdt {
+ 		this.noteReadProgress(state);
+ 		this.noteInitialTailReached(state);
+ 	}
+-	async runReadLoop(state) {
++	runReadLoop(state) {
++		return this.trackRoomOperation(() => this.runReadLoopOwned(state));
++	}
++	async runReadLoopOwned(state) {
+ 		if (state.readLoopRunning) return;
+ 		state.readLoopRunning = true;
+ 		this.clearReadRestartTimer(state);
+@@ -3117,6 +3163,7 @@ var StreamsCrdt = class StreamsCrdt {
+ 		return "joined";
+ 	}
+ 	enqueueExclusive(task) {
++		if (this.draining) return Promise.reject(new Error("room transport retired"));
+ 		const run = this.opQueue.then(task, task);
+ 		this.opQueue = run.then(() => void 0, () => void 0);
+ 		return run;

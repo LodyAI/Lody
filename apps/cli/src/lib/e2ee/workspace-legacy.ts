@@ -7,11 +7,13 @@ import { z } from 'zod';
 import type { PayloadProtectionProvider } from '@loro-dev/streams-crdt';
 import type { CloudE2eePort, CloudStreamsTokenPort } from '@lody/platform';
 import { BackendError, KeyMailbox } from '@lody/e2ee-core/services';
+import { decodeEpochStagedGroup } from '@lody/e2ee-core/host';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import {
   encryptedWorkspaceNamespace,
   encryptedWorkspaceResolver,
   encryptedWorkspaceRoom,
+  createWorkspaceEpochTransitionLegacy,
   type WorkspaceStreamsContent,
 } from '@lody/shared/workspace-streams-content';
 import { makeCliE2eeCustody, type MachineKeyring } from './custody';
@@ -371,6 +373,7 @@ async function openWorkspace(
       if (activation && activation.signingPublicKey !== hex(device.publicKey.toBytes()))
         throw new Error('e2ee_binding_conflict');
       const credential = yield* custody.deviceCredential(genesis, device.publicKey);
+      const readEpochGroup = options.cloud.readEpochGroup?.bind(options.cloud);
       const runtime = yield* makeCliE2eeRuntime({
         directory: join(directory, 'runtime', hex(device.publicKey.toBytes())),
         workspaceId: options.workspaceId,
@@ -378,6 +381,30 @@ async function openWorkspace(
         device,
         genesisRecord: bytes(binding.genesisRecordHex),
         mailbox: mailbox(options.cloud, options.workspaceId, credential),
+        staging: readEpochGroup
+          ? {
+              readGroup: (key) =>
+                Effect.tryPromise({
+                  try: () => readEpochGroup({ workspaceId: options.workspaceId, credential, key }),
+                  catch: () =>
+                    new BackendError({ service: 'EpochStagingStore', reason: 'unavailable' }),
+                }).pipe(
+                  Effect.flatMap((group) =>
+                    group === null
+                      ? Effect.succeed(null)
+                      : Effect.fromResult(decodeEpochStagedGroup(group)).pipe(
+                          Effect.mapError(
+                            () =>
+                              new BackendError({
+                                service: 'EpochStagingStore',
+                                reason: 'invalid-response',
+                              })
+                          )
+                        )
+                  )
+                ),
+            }
+          : undefined,
       });
       return { runtime, credential };
     })
@@ -386,9 +413,8 @@ async function openWorkspace(
     throw error;
   });
   const initialStatus = await run(opened.runtime.status());
-  const writeEpoch = initialStatus.epoch;
-  let latestEpoch = writeEpoch;
-  let keyUpdateRequired = initialStatus.rotationRequired;
+  const epochTransition = createWorkspaceEpochTransitionLegacy(initialStatus);
+  let epochTransport: { drain(): Promise<void>; restart(): Promise<void> } | undefined;
   let ledgerBlocked = false;
   let pairingConfirmed = false;
   let pairingFailure: unknown;
@@ -408,34 +434,35 @@ async function openWorkspace(
     snapshotUpload: { canUpload: async () => false },
     resolve: encryptedWorkspaceResolver(options.workspaceId, (room) => {
       const descriptor = encryptedWorkspaceRoom(options.workspaceId, room);
-      const get = () => {
-        if (closed) return Promise.reject(new Error('e2ee_closed'));
-        let existing = bindings.get(descriptor.resource);
-        if (!existing) {
-          existing = run(opened.runtime.binding(descriptor.resource, descriptor.model, writeEpoch));
-          bindings.set(descriptor.resource, existing);
-          existing.catch(() => {
-            if (bindings.get(descriptor.resource) === existing)
-              bindings.delete(descriptor.resource);
-          });
-        }
-        return existing;
-      };
+      const protectedProvider = epochTransition.provider((writeEpoch) => {
+        const getForEpoch = () => {
+          const key = `${descriptor.resource}:${writeEpoch}`;
+          let value = bindings.get(key);
+          if (!value) {
+            value = run(opened.runtime.binding(descriptor.resource, descriptor.model, writeEpoch));
+            bindings.set(key, value);
+            value.catch(() => {
+              if (bindings.get(key) === value) bindings.delete(key);
+            });
+          }
+          return value;
+        };
+        return {
+          maxSealOverheadBytes: 4096,
+          seal: async (input) => run((await getForEpoch()).seal(input)),
+          open: async (input) => run((await getForEpoch()).open(input)),
+        } satisfies PayloadProtectionProvider;
+      });
       return {
-        maxSealOverheadBytes: 4096,
+        ...protectedProvider,
         seal: async (input) => {
-          // Streams retries failed writes without reconnecting its healthy read
-          // stream. A temporary local storage failure must therefore use that
-          // next write attempt to refresh the ledger again. Security/validation
-          // failures remain fenced until an explicit normal refresh succeeds.
+          // Recovery may itself start an epoch barrier. It precedes admission,
+          // so that barrier never waits on a seal waiting for its own refresh.
           if (ledgerBlocked && retryLedgerOnSeal) await refreshInBackground();
           if (ledgerBlocked) throw new Error('e2ee_invalid_ledger');
-          if (keyUpdateRequired || latestEpoch !== writeEpoch)
-            throw new Error('e2ee_key_update_required');
-          return run((await get()).seal(input));
+          return protectedProvider.seal(input);
         },
-        open: async (input) => run((await get()).open(input)),
-      } satisfies PayloadProtectionProvider;
+      };
     }),
   };
   const tokens: CloudStreamsTokenPort = {
@@ -522,8 +549,7 @@ async function openWorkspace(
           });
           ledgerBlocked = false;
           retryLedgerOnSeal = false;
-          latestEpoch = status.epoch;
-          keyUpdateRequired ||= status.rotationRequired || latestEpoch !== writeEpoch;
+          epochTransition.observe(status);
           cursor = page.nextCursor ?? undefined;
         } while (cursor && !isClosed());
         if (!closed) {
@@ -531,7 +557,22 @@ async function openWorkspace(
             await confirmPairing(pairing);
             pairingConfirmed = true;
           }
-          if (requireActivation || pairing) await run(opened.runtime.receiveKeys());
+          const transport = epochTransport;
+          if (epochTransition.phase() !== 'ready' && transport) {
+            await epochTransition.transition({
+              drain: transport.drain,
+              install: async () => {
+                await run(opened.runtime.receiveKeys());
+                return run(opened.runtime.status());
+              },
+              restart: async () => {
+                bindings.clear();
+                await transport.restart();
+              },
+            });
+          } else if (epochTransition.phase() === 'ready' && (requireActivation || pairing)) {
+            await run(opened.runtime.receiveKeys());
+          }
         }
       }
     })()
@@ -557,14 +598,23 @@ async function openWorkspace(
     },
     confirmPairing,
     content,
+    setEpochTransport: (ports: { drain(): Promise<void>; restart(): Promise<void> }) => {
+      epochTransport = ports;
+    },
     tokens,
     bucketId: () => bucket?.(),
     status: () =>
-      closed ? Promise.reject(new Error('e2ee_closed')) : run(opened.runtime.status()),
+      closed
+        ? Promise.reject(new Error('e2ee_closed'))
+        : run(opened.runtime.status()).then((status) => ({
+            ...status,
+            epochPhase: epochTransition.phase(),
+          })),
     refresh: refreshInBackground,
     close: () => {
       closed = true;
       return (closeReceipt ??= (async () => {
+        await epochTransition.close();
         await refresh;
         await Effect.runPromise(Scope.close(scope, Exit.void));
       })());

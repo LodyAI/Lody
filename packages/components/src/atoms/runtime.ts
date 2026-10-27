@@ -240,6 +240,8 @@ export type WorkspaceRuntime = {
     sourceId: string,
     sessionIds: readonly SessionId[] | null
   ) => void;
+  suspendEncryptedContent(): Promise<void>;
+  resumeEncryptedContent(): Promise<void>;
   setAuthToken: (token: string | null) => Promise<void>;
   subscribeMachineMonitor: (
     machineId: MachineId,

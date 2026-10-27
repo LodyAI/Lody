@@ -700,6 +700,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   // recovery). An attach belongs to the generation it started in; once that
   // generation is torn down it must not publish provider, transport or state.
   let webAttachGeneration = 0;
+  let encryptedEpochPaused = false;
+  let retiredEpochAdapter: ReturnType<LoroRepo['getTransportAdapter']>;
   const pendingWebAttaches = new Set<Promise<void>>();
   const pendingCloudRejoins = new Set<Promise<void>>();
   // loro-repo registers a transport synchronously when addTransport starts and
@@ -2942,6 +2944,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       machineRpcStreamsClientReady = null;
       transportStreamsBaseUrl = null;
     }
+    // A failed epoch drain may already have removed its adapter from the Repo.
+    // Terminal cleanup still owns that retained close receipt.
+    if (retiredEpochAdapter) {
+      await retiredEpochAdapter.close();
+      retiredEpochAdapter = undefined;
+    }
     if (invalidateTokenProvider) {
       streamsTokenAbort?.abort();
       streamsTokenAbort = null;
@@ -3714,6 +3722,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       return;
     }
     const nextAuthToken = token && token !== '' ? token : null;
+    if (protectedContent && encryptedEpochPaused && nextAuthToken !== null) {
+      authToken = nextAuthToken;
+      return;
+    }
     const previousAuthToken = authToken;
     if (previousAuthToken === nextAuthToken) {
       console.debug('createWorkspaceRuntime: auth token unchanged', {
@@ -5505,6 +5517,42 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     setLocalMachineId,
     setEagerSyncVisibleSessionIds,
     setAuthToken,
+    /** Epoch handoff keeps all local owners and retires only the cloud sessions. */
+    suspendEncryptedContent: async () => {
+      if (!protectedContent || disposePromise) throw new Error('e2ee_transport_unavailable');
+      encryptedEpochPaused = true;
+      webAttachGeneration += 1;
+      webTransportAttachPending = null;
+      webAttachReconnectLoop?.stop();
+      localReconnectLoop?.stop();
+      cloudReconnectLoop?.stop();
+      await Promise.allSettled([...pendingWebAttaches, ...pendingCloudRejoins]);
+      if (disposePromise) throw new Error('Runtime disposed');
+      retiredEpochAdapter ??= repo.getTransportAdapter('cloud');
+      await repo.removeTransport('cloud', { close: false });
+      transportAttached = false;
+      await retiredEpochAdapter?.close();
+      retiredEpochAdapter = undefined;
+      streamsTokenAbort?.abort();
+      if (streamsTokenProvider) {
+        await streamsTokenProvider.retryCleanup();
+        streamsTokenProvider.invalidate();
+        await streamsTokenProvider.close();
+        streamsTokenProvider = null;
+      }
+      streamsTokenAbort = null;
+      eagerSyncAuthCallback = null;
+    },
+    resumeEncryptedContent: async () => {
+      if (!protectedContent || disposePromise || !authToken)
+        throw new Error('e2ee_transport_unavailable');
+      if (retiredEpochAdapter) throw new Error('e2ee_transport_cleanup_pending');
+      // The gate remains closed until the new adapter has resolved room configs.
+      await attachWebDurableTransport({ startPresence: false });
+      if (disposePromise) throw new Error('Runtime disposed');
+      encryptedEpochPaused = false;
+      localReconnectLoop?.update();
+    },
     subscribeMachineMonitor: (machineId, listener) =>
       targetMachineMonitor.subscribeMachine(machineId, listener),
     forceMachineMonitorSample: (machineId) => targetMachineMonitor.forceSample(machineId),
