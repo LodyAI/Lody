@@ -198,7 +198,6 @@ export const SETTINGS_TAB_CONFIGS: SettingsTabConfig[] = [
     labelKey: 'settings.tabs.aiUsage',
     descriptionKey: 'settings.categories.aiUsage.description',
     icon: ChartNoAxesCombined,
-    capability: 'usageAnalytics',
     path: '/$workspaceName/settings/ai-usage',
   },
   {

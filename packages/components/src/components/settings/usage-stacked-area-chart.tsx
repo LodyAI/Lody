@@ -94,7 +94,7 @@ const darkTheme =
 
 const styles = stylex.create({
   card: {
-    borderWidth: '1px',
+    borderWidth: '0.5px',
     borderStyle: 'solid',
     borderColor: 'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
     borderRadius: 'var(--radius-lg)',
@@ -109,7 +109,7 @@ const styles = stylex.create({
     minHeight: '40px',
     paddingInline: space[3],
     paddingBlock: space[1.5],
-    borderBottomWidth: '1px',
+    borderBottomWidth: '0.5px',
     borderBottomStyle: 'solid',
     borderBottomColor: 'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
     backgroundColor: {
@@ -136,7 +136,7 @@ const styles = stylex.create({
     maxWidth: '260px',
     paddingInline: space[3],
     paddingBlock: space[2],
-    borderWidth: '1px',
+    borderWidth: '0.5px',
     borderStyle: 'solid',
     borderColor: 'color-mix(in oklab, hsl(var(--border)) 80%, transparent)',
     borderRadius: 'var(--radius-md)',
@@ -185,7 +185,7 @@ const styles = stylex.create({
     justifyContent: 'space-between',
   },
   legendFrame: {
-    borderTopWidth: '1px',
+    borderTopWidth: '0.5px',
     borderTopStyle: 'solid',
     borderTopColor: 'color-mix(in oklab, hsl(var(--border)) 60%, transparent)',
     paddingInline: space[4],

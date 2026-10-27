@@ -58,6 +58,8 @@ export type StatsSettingsViewProps = {
    * an action it cannot perform nor pulls the capture pipeline into its bundle.
    */
   shareCard?: boolean;
+  /** Hide the two breakdown charts when another surface already shows them. */
+  showBreakdown?: boolean;
 };
 
 const RANGE_ORDER: SettingsUsageRange[] = ['day', 'week', 'month', 'total'];
@@ -327,6 +329,7 @@ export function StatsSettingsView({
   tintMemberSeriesLabel,
   costFractionDigits = 2,
   shareCard = false,
+  showBreakdown = true,
 }: StatsSettingsViewProps) {
   const { t, i18n } = useTranslation();
   const [shareOpen, setShareOpen] = useState(false);
@@ -434,28 +437,32 @@ export function StatsSettingsView({
         <UsageCalendarSkeleton range={range} />
       ) : null}
 
-      <UsageStackedAreaChart
-        title={t('workspace.usage.byModel')}
-        buckets={byModelBuckets}
-        emptyText={t('workspace.usage.empty', 'No usage data in this range')}
-        valueFormatter={tokensCompact}
-        tooltipValueFormatter={tokensCompact}
-        renderSeriesMarker={renderModelSeriesMarker}
-        tintSeriesLabel={tintModelSeriesLabel}
-        loading={loading}
-        loadingText={t('workspace.usage.loading', 'Loading usage data...')}
-      />
-      <UsageStackedAreaChart
-        title={t('workspace.usage.byUser')}
-        buckets={byMemberBuckets}
-        emptyText={t('workspace.usage.empty', 'No usage data in this range')}
-        valueFormatter={tokensCompact}
-        tooltipValueFormatter={tokensCompact}
-        renderSeriesMarker={renderMemberSeriesMarker}
-        tintSeriesLabel={tintMemberSeriesLabel}
-        loading={loading}
-        loadingText={t('workspace.usage.loading', 'Loading usage data...')}
-      />
+      {showBreakdown ? (
+        <>
+          <UsageStackedAreaChart
+            title={t('workspace.usage.byModel')}
+            buckets={byModelBuckets}
+            emptyText={t('workspace.usage.empty', 'No usage data in this range')}
+            valueFormatter={tokensCompact}
+            tooltipValueFormatter={tokensCompact}
+            renderSeriesMarker={renderModelSeriesMarker}
+            tintSeriesLabel={tintModelSeriesLabel}
+            loading={loading}
+            loadingText={t('workspace.usage.loading', 'Loading usage data...')}
+          />
+          <UsageStackedAreaChart
+            title={t('workspace.usage.byUser')}
+            buckets={byMemberBuckets}
+            emptyText={t('workspace.usage.empty', 'No usage data in this range')}
+            valueFormatter={tokensCompact}
+            tooltipValueFormatter={tokensCompact}
+            renderSeriesMarker={renderMemberSeriesMarker}
+            tintSeriesLabel={tintMemberSeriesLabel}
+            loading={loading}
+            loadingText={t('workspace.usage.loading', 'Loading usage data...')}
+          />
+        </>
+      ) : null}
 
       {!workspaceId && (
         <div {...stylex.props(styles.workspaceRequired)}>

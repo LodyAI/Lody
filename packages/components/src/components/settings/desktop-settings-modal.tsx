@@ -36,7 +36,7 @@ import { GeneralSettingsComponent } from './general-setting';
 import { AppearanceSettingsComponent } from './appearance-setting';
 import { AccountSettingsComponent } from './account-setting';
 import { BillingSettingsComponent } from './billing-setting';
-import { StatsSettingsComponent } from './stats-setting';
+import { AiUsageSettingsComponent } from './ai-usage-setting';
 import { ProjectSettingsComponent } from './project-settings';
 import { MachineAgentSettings } from './machine-agent-settings';
 import { IntegrationsSettingsComponent } from './integrations-setting';
@@ -564,7 +564,7 @@ function SettingsTabContent({ tabId }: { tabId: SettingsTabId }) {
     case 'billing':
       return <BillingSettingsComponent />;
     case 'ai-usage':
-      return <StatsSettingsComponent />;
+      return <AiUsageSettingsComponent />;
     case 'projects':
       return <ProjectSettingsComponent />;
     case 'agents':

@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { StatsSettingsComponent } from '@/components/settings/stats-setting';
+import { AiUsageSettingsComponent } from '@/components/settings/ai-usage-setting';
 
 export const Route = createFileRoute('/$workspaceName/_auth/settings/ai-usage')({
-  component: StatsSettingsComponent,
+  component: AiUsageSettingsComponent,
 });

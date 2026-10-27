@@ -178,12 +178,15 @@ function buildTimelineData(
   };
 }
 
-function Harness({
+export function StatsSettingsFixture({
   empty = false,
   loading = false,
   noWorkspace = false,
   initialRange = 'day',
   latencyMs = 0,
+  inline = false,
+  shareCard = false,
+  showBreakdown = true,
 }: {
   empty?: boolean;
   loading?: boolean;
@@ -191,6 +194,10 @@ function Harness({
   initialRange?: SettingsUsageRange;
   /** Simulates a slow query: data stays absent for this long, then arrives. */
   latencyMs?: number;
+  /** Drop the story width wrapper so the page can compose with another surface. */
+  inline?: boolean;
+  shareCard?: boolean;
+  showBreakdown?: boolean;
 }) {
   const [range, setRange] = useState<SettingsUsageRange>(initialRange);
   const [settled, setSettled] = useState(latencyMs === 0);
@@ -210,33 +217,36 @@ function Harness({
   const loadingNow = loading || !settled;
   const resolved = !loadingNow && !noWorkspace;
 
-  return (
-    <div className="mx-auto max-w-4xl">
-      <StatsSettingsView
-        workspaceName="Acme Robotics"
-        range={range}
-        onRangeChange={setRange}
-        ready={resolved}
-        totals={resolved ? (empty ? { tokens: 0, costUSD: 0 } : data.totals) : null}
-        byModelBuckets={resolved && !empty ? data.byModelBuckets : []}
-        byMemberBuckets={resolved && !empty ? data.byMemberBuckets : []}
-        usageCalendar={resolved ? calendar : undefined}
-        usageTimeline={resolved ? timeline : undefined}
-        workspaceId={noWorkspace ? null : 'ws_1'}
-        loading={loadingNow}
-      />
-    </div>
+  const view = (
+    <StatsSettingsView
+      workspaceName="Acme Robotics"
+      range={range}
+      onRangeChange={setRange}
+      ready={resolved}
+      totals={resolved ? (empty ? { tokens: 0, costUSD: 0 } : data.totals) : null}
+      byModelBuckets={resolved && !empty ? data.byModelBuckets : []}
+      byMemberBuckets={resolved && !empty ? data.byMemberBuckets : []}
+      usageCalendar={resolved ? calendar : undefined}
+      usageTimeline={resolved ? timeline : undefined}
+      workspaceId={noWorkspace ? null : 'ws_1'}
+      loading={loadingNow}
+      shareCard={shareCard}
+      showBreakdown={showBreakdown}
+    />
   );
+  return inline ? view : <div className="mx-auto max-w-4xl">{view}</div>;
 }
 
-const meta: Meta<typeof Harness> = {
+const Harness = StatsSettingsFixture;
+
+const meta: Meta<typeof StatsSettingsFixture> = {
   title: 'Settings/StatsSettings',
-  component: Harness,
+  component: StatsSettingsFixture,
   parameters: { layout: 'padded' },
 };
 export default meta;
 
-type Story = StoryObj<typeof Harness>;
+type Story = StoryObj<typeof StatsSettingsFixture>;
 
 export const Default: Story = { args: {} };
 export const LongRange: Story = { args: { initialRange: 'total' } };
