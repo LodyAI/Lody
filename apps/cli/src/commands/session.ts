@@ -1265,12 +1265,15 @@ async function resolveWorkspaceForSessionOrThrow(
   options?: ResolveWorkspaceForSessionOptions
 ): Promise<WorkspaceSummary> {
   const offline = typeof options === 'object' && options.offline === true;
-  const workspaces = await listWorkspaceCandidates(auth, { offline });
   const selector = typeof options === 'string' ? options : options?.workspace;
   const shouldSync = !offline;
   const syncReason = typeof options === 'object' ? options.reason : undefined;
   const effectiveSelector =
     normalizeCliValue(selector) ?? normalizeCliValue(process.env.LODY_WORKSPACE_ID);
+  const workspaces = await listWorkspaceCandidates(auth, {
+    offline,
+    selector: effectiveSelector,
+  });
   const sessionExistsInWorkspace = async (workspace: WorkspaceSummary): Promise<boolean> =>
     await withWorkspaceManager(auth, workspace, async (manager) => {
       if (shouldSync) {

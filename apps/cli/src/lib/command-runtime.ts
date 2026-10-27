@@ -262,14 +262,28 @@ export type ResolveWorkspaceOptions = {
  */
 export async function listWorkspaceCandidates(
   auth: AuthContext,
-  options: ResolveWorkspaceOptions = {}
+  options: ResolveWorkspaceOptions & { selector?: string } = {}
 ): Promise<WorkspaceSummary[]> {
   if (options.offline !== true) return await listWorkspacesForToken(auth.token);
   const snapshot = await Effect.runPromise((options.catalog ?? makeLocalWorkspaceCatalog()).read());
-  const workspaces =
+  let workspaces =
     snapshot.identity?.userId === auth.userId
       ? snapshot.workspaces.filter((workspace) => workspace.state === 'active')
       : [];
+  // A degraded catalog omits encrypted rows. Only an exact id or slug of a
+  // readable row stays decidable; a name or default choice could be wrong.
+  if (snapshot.encryptedCatalogUnavailable || snapshot.encryptedCatalogError) {
+    const selector = normalizeCliValue(options.selector);
+    const matches = workspaces.filter(
+      (workspace) => selector && (workspace.workspaceId === selector || workspace.slug === selector)
+    );
+    if (matches.length !== 1)
+      throw new Error(
+        'Encrypted workspace cache is unavailable; pass --workspace with a non-encrypted workspace id or slug, or run without --offline.',
+        { cause: snapshot.encryptedCatalogError }
+      );
+    workspaces = matches;
+  }
   if (workspaces.length === 0)
     throw new Error(
       'No workspaces are cached locally for the current CLI login; run without --offline.'
@@ -316,7 +330,10 @@ export async function resolveWorkspaceOrThrow(
       throw new Error('Daemon command workspace mismatch');
     return access.workspace;
   }
-  return selectWorkspaceSummary(await listWorkspaceCandidates(auth, options), effectiveSelector);
+  return selectWorkspaceSummary(
+    await listWorkspaceCandidates(auth, { ...options, selector: effectiveSelector }),
+    effectiveSelector
+  );
 }
 
 export async function withMachineRpcClient<T>(

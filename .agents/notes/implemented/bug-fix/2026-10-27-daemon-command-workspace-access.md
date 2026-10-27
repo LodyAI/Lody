@@ -51,7 +51,10 @@ blocking. `session.ts` had a separate resolver that queried the same list even f
 - Standalone CLI keeps online discovery for unknown, ambiguous and all-workspace
   selection. `--offline` reads active catalog entries only when the catalog
   identity matches the login. A different login or no entries gives an explicit
-  error, never an empty list.
+  error, never an empty list. While the encrypted catalog is unreadable its rows
+  are missing, so only an exact id or slug of a readable workspace resolves.
+  A default, name or all-workspace choice fails with the cache error instead of
+  silently picking the remaining plaintext workspace or omitting encrypted ones.
 
 ## Alternatives rejected
 
@@ -79,7 +82,7 @@ blocking. `session.ts` had a separate resolver that queried the same list even f
 A Fleet test feeds the real subscription callbacks in this order: bootstrap, an
 authorized snapshot, a subscription error, removal, restoration, then token
 rejection. `command-runtime.test.ts` covers online ambiguity and error propagation,
-plus offline catalog identity and `remote_missing` handling. No live MCP run
+plus offline catalog identity, `remote_missing` and a damaged encrypted catalog. No live MCP run
 against production was performed. While the subscription is disconnected, a
 revocation is enforced once the subscription reconnects. Standalone `--offline` E2EE
 opening and other standalone commands still need their own network paths.

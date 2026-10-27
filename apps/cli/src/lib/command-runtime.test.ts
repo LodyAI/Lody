@@ -20,6 +20,7 @@ import {
   listAliveDocMetas,
   listAliveRoomIds,
   listAliveSessionMetas,
+  listWorkspaceCandidates,
   resolveWorkspaceOrThrow,
   selectWorkspaceSummary,
   syncWorkspaceMetaForRead,
@@ -30,7 +31,11 @@ import { makeWorkspaceCommandManagers } from './workspace-command-manager';
 import { Effect } from 'effect';
 import type { MachineId } from '@lody/shared';
 import * as workspaceApi from './workspace';
-import type { LocalWorkspaceCatalogSnapshot } from './local-workspace-catalog';
+import {
+  makeLocalWorkspaceCatalog,
+  type LocalWorkspaceCatalogSnapshot,
+} from './local-workspace-catalog';
+import { fileLocksLegacy } from '@/utils/file-lock';
 
 const createControlRequest = (): LocalSessionControlRequest => ({
   type: 'session/create',
@@ -535,6 +540,60 @@ describe('command runtime helpers', () => {
       })
     ).rejects.toThrow('No workspaces are cached locally for the current CLI login');
     expect(list).not.toHaveBeenCalled();
+  });
+
+  it('never resolves an offline selection from a partial cache, but serves explicit ordinary workspaces', async () => {
+    vi.stubEnv('LODY_WORKSPACE_ID', '');
+    onTestFinished(() => vi.unstubAllEnvs());
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-offline-catalog-'));
+    tempDirs.push(directory);
+    const filePath = path.join(directory, 'workspace-catalog.json');
+    const catalog = makeLocalWorkspaceCatalog({
+      filePath,
+      lockName: `offline-${path.basename(directory)}`,
+      cacheTtlMs: 0,
+    });
+    const ordinary = { id: 'ws-plain', name: 'Plain', slug: 'plain', role: 'owner' };
+    const encrypted = {
+      id: 'ws-e2ee',
+      name: 'Sealed',
+      slug: 'sealed',
+      role: 'member',
+      contentMode: 'e2ee',
+      genesisHash: 'ab'.repeat(32),
+    };
+    await fileLocksLegacy.runPromise(
+      catalog.cacheRemoteWorkspaces({
+        identity: { userId: 'user-1' },
+        machine: { machineId: 'machine-1', machineName: 'host' },
+        workspaces: [ordinary, encrypted],
+      })
+    );
+    const auth = {
+      token: 'synthetic-token',
+      userId: 'user-1',
+      userName: 'User',
+      userEmail: 'user@example.test',
+      machineId: 'machine-1' as MachineId,
+      machineName: 'host',
+    };
+    const offline = { offline: true, catalog };
+    await expect(resolveWorkspaceOrThrow(auth, undefined, offline)).rejects.toThrow(
+      'Multiple workspaces are available'
+    );
+    fs.writeFileSync(`${filePath}.e2ee`, '{synthetic damaged encrypted cache');
+    offline.catalog = makeLocalWorkspaceCatalog({ filePath, cacheTtlMs: 0 });
+
+    // The unreadable encrypted half must not shrink the choice to the plain workspace.
+    for (const selector of [undefined, 'sealed', 'Plain'])
+      await expect(resolveWorkspaceOrThrow(auth, selector, offline)).rejects.toThrow(
+        'Encrypted workspace cache is unavailable'
+      );
+    await expect(listWorkspaceCandidates(auth, offline)).rejects.toThrow(
+      'Encrypted workspace cache is unavailable'
+    );
+    // An explicit plaintext workspace remains readable offline.
+    await expect(resolveWorkspaceOrThrow(auth, 'plain', offline)).resolves.toEqual(ordinary);
   });
 
   it('rejects ambiguous workspace names and shows stable selectors', () => {
