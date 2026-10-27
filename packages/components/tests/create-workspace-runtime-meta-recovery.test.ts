@@ -2444,6 +2444,13 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     const runtime = await createWorkspaceRuntime({
       content,
       e2ee: { bucketId: () => 'synthetic-encrypted-content', createTokenProvider: provider },
+      accountId: 'synthetic-account',
+      e2eeLocalIdentity: {
+        accountId: 'synthetic-account',
+        workspaceId: 'workspace-1',
+        genesisHash: '11'.repeat(32),
+        signingPublicKey: '22'.repeat(32),
+      },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',

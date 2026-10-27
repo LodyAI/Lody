@@ -1,5 +1,6 @@
 import { E2eeIdentityRecovery } from '@/components/pages/e2ee-identity-recovery';
 import { desktopWindowId } from '@/lib/desktop-window';
+import { readEncryptedLocalIdentity, type E2eeLocalDataScope } from '@/lib/e2ee-local-data';
 import {
   isE2eeMemberRemoved,
   retainEncryptedWorkspaceCleanup,
@@ -83,6 +84,7 @@ function WorkspaceControlRoute() {
   useEffect(() => {
     let disposed = false;
     let hostOpened = false;
+    let cleanup: E2eeLocalDataScope | null = null;
     let nativeFailure: E2eeControlFailure | null = null;
     const closeHost = () => {
       if (hostOpened && port?.runtime) {
@@ -107,11 +109,8 @@ function WorkspaceControlRoute() {
     readOwner.current = owner;
     void (async () => {
       try {
-        await resumeEncryptedWorkspaceCleanup({
-          accountId,
-          workspaceId,
-          windowId: desktopWindowId(),
-        });
+        const retained = readEncryptedLocalIdentity(accountId, workspaceId);
+        if (retained) cleanup = { ...retained, windowId: desktopWindowId() };
         if (port.runtime) {
           const runtime = port.runtime;
           try {
@@ -261,14 +260,13 @@ function WorkspaceControlRoute() {
         });
       } catch (error) {
         if (!disposed && isE2eeMemberRemoved(error)) {
-          const cleanup = { accountId, workspaceId, windowId: desktopWindowId() };
           try {
-            retainEncryptedWorkspaceCleanup(cleanup);
+            if (cleanup) retainEncryptedWorkspaceCleanup(cleanup);
           } catch {
             /* Native receipt still retries local cleanup on the next open. */
           }
           closeHost();
-          await resumeEncryptedWorkspaceCleanup(cleanup, true).catch(() => undefined);
+          if (cleanup) await resumeEncryptedWorkspaceCleanup(cleanup, true).catch(() => undefined);
           if (!disposed)
             setState((previous) =>
               previous.scope === scope

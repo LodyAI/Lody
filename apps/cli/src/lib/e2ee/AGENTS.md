@@ -112,6 +112,7 @@
 - Reset: same-user socket; drain, exclusive sibling lease, archive whole dir;
   fresh approval/KEK. OS/unknown stays OS.
 
-Member removal: bind the original device, stop/drain execution and sync, retain
-its receipt, then erase managed data under exclusive identity lease/pairing mutex.
-Retry busy cleanup before open; preserve projects. Rejoin with fresh member/keys.
+Member removal: verify identity and persist its receipt before close releases custody.
+Stop/drain execution and sync; erase only account/genesis/device content under its
+identity lease/pairing mutex. Retry busy cleanup before open; preserve projects.
+Rejoin with fresh member/keys.

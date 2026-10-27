@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { HistoryEntryWriteSchema, SessionInputBlockSchema, parseHistoryWrite } from '@lody/shared';
+import { encryptedLocalInstance, type E2eeLocalDataIdentity } from './e2ee-local-data';
 import type { PendingSessionSend } from './session-pending-sends';
 
 /** User data: a pending input can be the only copy and is not a recoverable cache. */
@@ -82,8 +83,14 @@ const request = <T>(req: IDBRequest<T>) =>
 export function createSessionInputStorage(
   accountId: string,
   workspaceId: string,
-  factory?: IDBFactory
+  factory?: IDBFactory,
+  identity?: E2eeLocalDataIdentity
 ) {
+  if (identity && (identity.accountId !== accountId || identity.workspaceId !== workspaceId))
+    throw new Error('e2ee_local_identity_mismatch');
+  const database = identity
+    ? `${SESSION_INPUT_DATABASE}:${encryptedLocalInstance(identity)}`
+    : SESSION_INPUT_DATABASE;
   const scope = [accountId, workspaceId];
   let opening: Promise<IDBDatabase> | undefined;
   let closed = false;
@@ -93,7 +100,7 @@ export function createSessionInputStorage(
         reject(new Error('Input storage is closed'));
         return;
       }
-      const req = (factory ?? indexedDB).open(SESSION_INPUT_DATABASE, 1);
+      const req = (factory ?? indexedDB).open(database, 1);
       req.onupgradeneeded = () => {
         const rows = req.result.createObjectStore(INPUTS, {
           keyPath: ['accountId', 'workspaceId', 'id'],

@@ -1,5 +1,10 @@
 import { createSessionInputStorage } from './session-input-storage';
 import { removeEagerSyncHighWaterNamespace } from './eager-sync-high-water-cache';
+import {
+  encryptedLocalNamespace,
+  parseEncryptedLocalScope,
+  type E2eeLocalDataScope,
+} from './e2ee-local-data';
 
 /** Only the native, authenticated member-removal result triggers terminal cleanup. */
 export const isE2eeMemberRemoved = (error: unknown): boolean =>
@@ -10,12 +15,8 @@ export const isE2eeMemberRemoved = (error: unknown): boolean =>
 
 /** Call after this window's workspace runtime closes. Each other window retires
  * its own namespace on the same authenticated removal; never delete global stores. */
-export async function removeEncryptedWorkspaceLocalData(input: {
-  accountId: string;
-  workspaceId: string;
-  windowId: string;
-}): Promise<void> {
-  const namespace = input.windowId ? `${input.workspaceId}:${input.windowId}` : input.workspaceId;
+export async function removeEncryptedWorkspaceLocalData(input: E2eeLocalDataScope): Promise<void> {
+  const namespace = encryptedLocalNamespace(input);
   const remove = (name: string) =>
     new Promise<void>((resolve, reject) => {
       const request = indexedDB.deleteDatabase(name);
@@ -24,7 +25,7 @@ export async function removeEncryptedWorkspaceLocalData(input: {
       request.onblocked = () => reject(new Error('e2ee_local_cleanup_pending'));
     });
   const removeInputs = async () => {
-    const pending = createSessionInputStorage(input.accountId, input.workspaceId);
+    const pending = createSessionInputStorage(input.accountId, input.workspaceId, undefined, input);
     try {
       await pending.removeWorkspace();
     } finally {
@@ -41,48 +42,70 @@ export async function removeEncryptedWorkspaceLocalData(input: {
   if (failed?.status === 'rejected') throw failed.reason;
 }
 
-const cleanupKey = (accountId: string, workspaceId: string, windowId: string) =>
-  `lody-e2ee-member-cleanup:${encodeURIComponent(accountId)}:${encodeURIComponent(workspaceId)}:${encodeURIComponent(windowId)}`;
-
-type CleanupScope = { accountId: string; workspaceId: string; windowId: string };
-// Repo/cursor databases are shared by this window's physical workspace namespace.
-// Only their successor waits; unrelated workspaces never inherit deletion failure.
+const receiptPrefix = 'lody-e2ee-member-cleanup-v2:';
+const cleanupKey = (input: E2eeLocalDataScope) => receiptPrefix + encryptedLocalNamespace(input);
 const cleanupFlights = new Map<string, Promise<void>>();
-const pendingCleanup = new Map<string, CleanupScope>();
-const physicalScope = (input: CleanupScope) => JSON.stringify([input.workspaceId, input.windowId]);
+const pendingCleanup = new Map<string, E2eeLocalDataScope>();
 
-/** Native removal is already authenticated and scoped when this marker is saved. */
-export function retainEncryptedWorkspaceCleanup(input: CleanupScope): void {
-  pendingCleanup.set(physicalScope(input), input);
-  localStorage.setItem(cleanupKey(input.accountId, input.workspaceId, input.windowId), '1');
+/** Persist the exact retired instance; no workspace-wide deletion fallback exists. */
+export function retainEncryptedWorkspaceCleanup(input: E2eeLocalDataScope): void {
+  const scope = parseEncryptedLocalScope(input);
+  pendingCleanup.set(encryptedLocalNamespace(scope), scope);
+  localStorage.setItem(cleanupKey(scope), JSON.stringify(scope));
 }
 
-/** Join only this physical workspace's erasure before reusing its databases. */
+/** A successor only waits for deletion of its exact account/device/window namespace. */
 export async function resumeEncryptedWorkspaceCleanup(
-  input: CleanupScope,
+  input: E2eeLocalDataScope,
   force = false
 ): Promise<void> {
-  const physical = physicalScope(input);
-  const running = cleanupFlights.get(physical);
+  const scope = parseEncryptedLocalScope(input);
+  const namespace = encryptedLocalNamespace(scope);
+  const running = cleanupFlights.get(namespace);
   if (running) return running;
-  const retained = pendingCleanup.get(physical);
-  if (
-    !force &&
-    !retained &&
-    localStorage.getItem(cleanupKey(input.accountId, input.workspaceId, input.windowId)) !== '1'
-  )
-    return;
-  const target = retained ?? input;
-  pendingCleanup.set(physical, target);
+  const key = cleanupKey(scope);
+  if (!force && !pendingCleanup.has(namespace) && localStorage.getItem(key) === null) return;
+  pendingCleanup.set(namespace, scope);
   const flight = (async () => {
-    await removeEncryptedWorkspaceLocalData(target);
-    localStorage.removeItem(cleanupKey(target.accountId, target.workspaceId, target.windowId));
-    pendingCleanup.delete(physical);
+    await removeEncryptedWorkspaceLocalData(scope);
+    localStorage.removeItem(key);
+    pendingCleanup.delete(namespace);
   })();
-  cleanupFlights.set(physical, flight);
+  cleanupFlights.set(namespace, flight);
   try {
     await flight;
   } finally {
-    if (cleanupFlights.get(physical) === flight) cleanupFlights.delete(physical);
+    if (cleanupFlights.get(namespace) === flight) cleanupFlights.delete(namespace);
   }
+}
+
+/** Retry old receipts independently after reopening a different identity. All locators
+ * are public local originals, and every deletion still names its original instance. */
+export async function retryRetiredEncryptedWorkspaceCleanup(
+  current: E2eeLocalDataScope
+): Promise<void> {
+  const scopes = new Map(pendingCleanup);
+  for (let index = 0; index < localStorage.length; index++) {
+    const key = localStorage.key(index);
+    if (!key?.startsWith(receiptPrefix)) continue;
+    const stored = localStorage.getItem(key);
+    if (stored === null) continue;
+    const scope = parseEncryptedLocalScope(JSON.parse(stored));
+    if (cleanupKey(scope) !== key) throw new Error('e2ee_invalid_local_cleanup');
+    scopes.set(encryptedLocalNamespace(scope), scope);
+  }
+  const namespace = encryptedLocalNamespace(current);
+  const results = await Promise.allSettled(
+    [...scopes]
+      .filter(
+        ([key, scope]) =>
+          key !== namespace &&
+          scope.accountId === current.accountId &&
+          scope.workspaceId === current.workspaceId &&
+          scope.windowId === current.windowId
+      )
+      .map(([, scope]) => resumeEncryptedWorkspaceCleanup(scope))
+  );
+  if (results.some((result) => result.status === 'rejected'))
+    throw new Error('e2ee_local_cleanup_pending');
 }

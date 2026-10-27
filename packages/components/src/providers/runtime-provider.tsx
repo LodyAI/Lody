@@ -5,7 +5,14 @@ import {
   isE2eeMemberRemoved,
   retainEncryptedWorkspaceCleanup,
   resumeEncryptedWorkspaceCleanup,
+  retryRetiredEncryptedWorkspaceCleanup,
 } from '@/lib/e2ee-member-removal';
+import {
+  readEncryptedLocalIdentity,
+  retainEncryptedLocalIdentity,
+  type E2eeLocalDataIdentity,
+  type E2eeLocalDataScope,
+} from '@/lib/e2ee-local-data';
 import { createDesktopE2eeContent } from './desktop-e2ee-content';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { SessionPendingSendsHost } from '../components/chat/session-pending-sends-host';
@@ -560,16 +567,13 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     // Set when background verification closes a provisionally opened runtime.
     let retired = false;
     let removed = false;
-    const removalScope = {
-      accountId: accountId!,
-      workspaceId: effectiveWorkspaceId,
-      windowId: desktopWindowId(),
-    };
+    let removalScope: E2eeLocalDataScope | null = null;
+    let localIdentity: E2eeLocalDataIdentity | undefined;
     const handleMemberRemoval = () => {
       if (disposed || retired) return;
       removed = true;
       try {
-        retainEncryptedWorkspaceCleanup(removalScope);
+        if (removalScope) retainEncryptedWorkspaceCleanup(removalScope);
       } catch (error) {
         logRuntimeOperationError('retain removal cleanup', error);
       }
@@ -662,7 +666,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             await platform.e2eeWorkspaces?.runtime?.close(leased).catch(() => {});
           }
         }
-        if (removed)
+        if (removed && removalScope)
           void resumeEncryptedWorkspaceCleanup(removalScope, true).catch((error) => {
             logRuntimeOperationError('removed workspace cleanup', error);
           });
@@ -762,7 +766,6 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       let admitting = false;
       try {
         await previousShutdown.current;
-        await resumeEncryptedWorkspaceCleanup(removalScope);
         if (disposed) return;
         if (modeCloud && requiresAdmission) {
           // Neither a cached organization nor a developer preference authorizes
@@ -790,12 +793,31 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               clearPresenceStates();
               return;
             }
+            // A cold removal cannot export a native identity. Only a public locator
+            // saved before this host's earlier content open may select old databases.
+            const retained = readEncryptedLocalIdentity(accountId!, effectiveWorkspaceId);
+            if (retained?.genesisHash === descriptor.genesisHash)
+              removalScope = { ...retained, windowId: desktopWindowId() };
             const status = await native.open(effectiveWorkspaceId);
             nativeLease = effectiveWorkspaceId;
             nativeHasKey = status.hasCurrentKey;
-            refreshNative();
             if (status.genesisHash !== descriptor.genesisHash)
               throw new WorkspaceModeMismatchError();
+            localIdentity = {
+              accountId: accountId!,
+              workspaceId: effectiveWorkspaceId,
+              genesisHash: status.genesisHash,
+              signingPublicKey: status.signingPublicKey ?? '',
+            };
+            // Missing identity or failed durable locator storage stops before any
+            // encrypted content opens. Never fall back to a workspace-only cache.
+            retainEncryptedLocalIdentity(localIdentity);
+            removalScope = { ...localIdentity, windowId: desktopWindowId() };
+            await resumeEncryptedWorkspaceCleanup(removalScope);
+            void retryRetiredEncryptedWorkspaceCleanup(removalScope).catch((error) => {
+              logRuntimeOperationError('retired encrypted workspace cleanup', error);
+            });
+            refreshNative();
             if (!status.hasCurrentKey && status.writeEpoch == null) {
               setRuntime(null);
               setRuntimeInitializing(false);
@@ -845,7 +867,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         });
         workspaceRuntime = await createWorkspaceRuntime({
           content: encryptedAccess?.content ?? { mode: 'plaintext' },
-          ...(encryptedAccess ? { e2ee: encryptedAccess.e2ee } : {}),
+          ...(encryptedAccess
+            ? { e2ee: encryptedAccess.e2ee, e2eeLocalIdentity: localIdentity }
+            : {}),
           signal: initializationAbort.signal,
           accountId,
           workspaceSlug,

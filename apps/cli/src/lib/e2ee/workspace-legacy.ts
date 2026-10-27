@@ -43,6 +43,11 @@ export const cliE2eeIdentityDirectory = (accountId: string, workspaceId: string)
   );
 };
 
+// This repo belongs to the same account/workspace lease as custody, and to
+// this exact retained device. Removal never touches a workspace-global repo.
+const repositoryDirectory = (directory: string, genesisHash: string, signingPublicKey: string) =>
+  join(directory, 'content', genesisHash, signingPublicKey);
+
 const Removed = z
   .object({
     genesisHash: z.string().regex(/^[0-9a-f]{64}$/),
@@ -117,10 +122,13 @@ async function eraseRemovedWorkspace(
           yield* Effect.promise(async () => {
             for (const name of ['custody', 'runtime', 'binding.json', 'activation.json'])
               await rm(join(directory, name), { recursive: true, force: true });
-            await rm(join(getLodyDataDir(), 'loro-repo', options.workspaceId), {
-              recursive: true,
-              force: true,
-            });
+            await rm(
+              repositoryDirectory(directory, removal.genesisHash, removal.signingPublicKey),
+              {
+                recursive: true,
+                force: true,
+              }
+            );
           });
           yield* journal.eraseRemovedMember();
           return true;
@@ -729,6 +737,7 @@ async function openWorkspaceOwned(
   };
   let memberRemoved = false;
   let removalReceipt: Promise<void> | undefined;
+  let removalRecorded: Promise<void> | undefined;
   const isClosed = () => closed;
   const confirmPairing = async (intent: {
     pairingSessionId: string;
@@ -780,7 +789,7 @@ async function openWorkspaceOwned(
     closed = true;
     ledgerBlocked = true;
     clearLedgerRetry();
-    removalReceipt = (async () => {
+    removalRecorded = (async () => {
       const removedStatus = await run(opened.runtime.status());
       await Effect.runPromise(
         Effect.scoped(
@@ -818,9 +827,28 @@ async function openWorkspaceOwned(
             });
           })
         )
-      ).catch(() => options.onUnavailable());
-      await options.onRemoved?.();
-      await close();
+      );
+    })();
+    removalReceipt = (async () => {
+      const failures: unknown[] = [];
+      try {
+        await removalRecorded;
+      } catch (cause) {
+        failures.push(cause);
+      }
+      try {
+        // Even a local persistence failure must stop the execution owner.
+        await options.onRemoved?.();
+      } catch (cause) {
+        if (!failures.includes(cause)) failures.push(cause);
+      }
+      try {
+        await close();
+      } catch (cause) {
+        if (!failures.includes(cause)) failures.push(cause);
+      }
+      if (failures.length === 1) throw failures[0];
+      if (failures.length > 1) throw new AggregateError(failures, 'e2ee_removal_failed');
       await eraseRemovedWorkspace({
         ...options,
         expectedSigningPublicKey: opened.signingPublicKey,
@@ -926,12 +954,32 @@ async function openWorkspaceOwned(
       await epochTransition.close();
       await refresh;
       await Promise.allSettled([...snapshotFlights]);
-      await Effect.runPromise(Scope.close(scope, Exit.void));
+      // History/snapshot diagnosis may start while close drains those flights.
+      // Keep custody alive through identity verification and the durable receipt,
+      // never await the parent drain/full erasure that calls back into close.
+      const failures: unknown[] = [];
+      try {
+        await removalRecorded;
+      } catch (cause) {
+        failures.push(cause);
+      }
+      try {
+        await Effect.runPromise(Scope.close(scope, Exit.void));
+      } catch (cause) {
+        failures.push(cause);
+      }
+      if (failures.length === 1) throw failures[0];
+      if (failures.length > 1) throw new AggregateError(failures, 'e2ee_close_failed');
     })());
   };
   // Startup is one of the three refresh triggers; no network request is awaited by open.
   void refreshInBackground();
   return {
+    repositoryDirectory: repositoryDirectory(
+      directory,
+      binding.genesisHash,
+      opened.signingPublicKey
+    ),
     assertPairingConfirmed: () => {
       if (!pairing || !pairingConfirmed)
         throw new Error('e2ee_pairing_unconfirmed', { cause: pairingFailure });
