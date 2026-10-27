@@ -101,20 +101,23 @@ Read [M1](../../../../../.agents/notes/implemented/architecture/2026-10-21-e2ee-
 [M2](../../../../../.agents/notes/proposed/architecture/2026-10-22-e2ee-m2-product-integration.md),
 [join](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-personal-desktop-join.md)
 and [machine](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-machine-pairing-journal.md).
-Custody is lazy; cached identity/generation fences opens/late D03 registration. Pin D03 before new signatures. No network under custody
-locks; await native work before release. Verification/storage failures are owner-local; malformed input keeps readers. Preserve originals before
-feed/pin, compare overlaps, keep renderer checkpoints; await missing history.
+Cached identity/generation fence opens and late D03 registration. Pin D03 before
+new signatures. Lazy custody; no network under its locks. Await native work before
+release. Verification/storage errors stay owner-local; malformed input keeps readers.
+Originals precede feed/pin; compare overlaps, keep renderer checkpoints, await history.
 Evidence conflicts never fall back; availability may use pinned renderer reads.
 
-Fixed cloud refs; per-request auth/abort/deadlines; disposal fences late calls. Unknown outcomes retain exact bytes. Raw causes/SDK diagnostics stay in main,
-not IPC/telemetry. Verified readback beats lost ACKs; cleanup cannot undo admission.
+Fixed cloud refs; per-request auth/abort/deadlines; disposal fences late calls.
+Keep exact uncertain bytes; raw/SDK causes stay in main, not IPC/telemetry.
+Verified readback beats lost ACKs; cleanup never undoes admission.
+`e2ee_staging_invalid` and `e2ee_staging_corrupt` are terminal.
 
-Consent follows fixed verified proofs; retries retain session/record/requestId,
-keys/credentials/pins. Missing credentials block approval, never export them.
-Failed begin stays discoverable; archive terminal/foreign attempts, including
-pin-only + relay request. Same-request unknown/admitting stays fenced. Preserve installed origins,
-other sessions and primary/cleanup causes. Retire superseded only on exact socket
-receipt, atomically matching all-null local attempts; fresh sessions need consent.
+Consent needs fixed verified proofs; retry exact session/record/requestId,
+keys/credentials/pins. Missing credentials block approval; never export them.
+Failed begin stays discoverable. Archive terminal/foreign attempts, including
+pin-only+relay request; same-request unknown/admitting stays fenced. Keep installed origins,
+other sessions and primary/cleanup causes. Superseded retirement needs exact
+socket receipt and atomic all-null local match; fresh sessions need consent.
 Snapshots verify pinned endorsement/self-admission before binding/pin/cursor;
 sparse positions are valid. Old keys use mailbox + verified history, never staging.
-Disclose file protection; socket deadline means pending. Await CLI current-key install.
+Show file protection; socket deadline means pending. Await CLI current-key install.

@@ -7,8 +7,14 @@ import type {
   E2eeJoinRequests,
   E2eeWorkspaceHistoryRequest
 } from '@lody/cloud-api'
-import { BackendError, KeyMailbox } from '@lody/e2ee-core/services'
-import { Effect } from 'effect'
+import { BackendError, EpochStagingStore, KeyMailbox } from '@lody/e2ee-core/services'
+import {
+  decodeEpochStagedGroup,
+  encodeEpochStagedGroup,
+  ownEpochStagedGroup,
+  ownEpochStagedGroupKey
+} from '@lody/e2ee-core/host'
+import { Effect, Result } from 'effect'
 import { z } from 'zod'
 
 const hash = z.string().regex(/^[0-9a-f]{64}$/)
@@ -73,11 +79,14 @@ function requestFailure(error: unknown): BackendError {
   // Never retain the SDK's raw error, server logs, request body, or token.
   const result = z.object({ data: z.object({ code: z.string() }) }).safeParse(error)
   const code = result.success ? result.data.data.code : ''
-  const reason = code.endsWith('_conflict')
-    ? 'conflict'
-    : /(?:unauthorized|credential|device_revoked|account_mismatch|not_authenticated)/.test(code)
-      ? 'unauthorized'
-      : 'unavailable'
+  const reason =
+    code === 'e2ee_staging_invalid' || code === 'e2ee_staging_corrupt'
+      ? 'invalid-response'
+      : code.endsWith('_conflict')
+        ? 'conflict'
+        : /(?:unauthorized|credential|device_revoked|account_mismatch|not_authenticated)/.test(code)
+          ? 'unauthorized'
+          : 'unavailable'
   return new BackendError({ service: 'E2eeCloud', reason })
 }
 
@@ -145,6 +154,87 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
     }).pipe(Effect.timeoutOrElse({ duration: '30 seconds', orElse: unavailable }))
   }
 
+  const staging = (
+    access: E2eeDeviceAccess,
+    signal?: AbortSignal
+  ): EpochStagingStore['Service'] => {
+    const device = { ...access }
+    const invalid = () =>
+      new BackendError({ service: 'EpochStagingStore', reason: 'invalid-response' })
+    return EpochStagingStore.of({
+      stageGroup: (source) => {
+        // Own and encode before yielding: re-running this Effect resends the
+        // original group even if its caller later mutates its buffers.
+        const original = Result.map(ownEpochStagedGroup(source), encodeEpochStagedGroup)
+        return Effect.fromResult(Result.mapError(original, invalid)).pipe(
+          Effect.flatMap((group) =>
+            request(
+              (client) => client.mutation(api.e2eeEpochStaging.stageGroup, { ...device, group }),
+              z.object({ ok: z.literal(true) }),
+              signal
+            )
+          ),
+          Effect.asVoid
+        )
+      },
+      readGroup: (sourceKey) => {
+        const original = ownEpochStagedGroupKey(sourceKey)
+        return Effect.fromResult(Result.mapError(original, invalid)).pipe(
+          Effect.flatMap((key) =>
+            request(
+              (client) => client.query(api.e2eeEpochStaging.readGroup, { ...device, key }),
+              z.unknown(),
+              signal
+            ).pipe(
+              Effect.flatMap((value) => {
+                if (value === null) return Effect.succeed(null)
+                return Effect.fromResult(
+                  Result.mapError(decodeEpochStagedGroup(value), invalid)
+                ).pipe(
+                  Effect.flatMap((group) =>
+                    group.genesis === key.genesis &&
+                    group.epoch === key.epoch &&
+                    group.commitment === key.commitment &&
+                    group.recordHash === key.recordHash
+                      ? Effect.succeed(group)
+                      : Effect.fail(invalid())
+                  )
+                )
+              })
+            )
+          )
+        )
+      },
+      deleteGroup: (sourceKey, occupied) => {
+        const original = ownEpochStagedGroupKey(sourceKey)
+        const occupiedSlot = { ...occupied }
+        return Effect.fromResult(Result.mapError(original, invalid)).pipe(
+          Effect.flatMap((key) => {
+            if (
+              occupiedSlot.epoch !== key.epoch ||
+              !/^[0-9a-f]{64}$/.test(occupiedSlot.commitment) ||
+              occupiedSlot.commitment === key.commitment
+            )
+              return Effect.fail(invalid())
+            // One physical cleanup page only. The caller retains its original
+            // and explicitly retries until the server confirms completion.
+            return request(
+              (client) =>
+                client.mutation(api.e2eeEpochStaging.deleteGroup, {
+                  ...device,
+                  key,
+                  occupied: occupiedSlot
+                }),
+              z.object({ ok: z.literal(true), done: z.boolean() }),
+              signal
+            ).pipe(
+              Effect.flatMap((value) => (value.done ? Effect.void : Effect.fail(unavailable())))
+            )
+          })
+        )
+      }
+    })
+  }
   const mailbox = (access: E2eeDeviceAccess, signal?: AbortSignal): KeyMailbox['Service'] => {
     function boundRequest<T>(
       work: (client: ConvexHttpClient) => Promise<unknown>,
@@ -277,7 +367,8 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
         ...(requestInput.checkpoint ? { checkpoint: { ...requestInput.checkpoint } } : {})
       }
       return request((client) => client.action(api.e2eeWorkspaces.history, original), historyPage)
-    }
+    },
+    staging
   })
 })
 export type E2eeCloudClient = Effect.Success<ReturnType<typeof makeE2eeCloudClient>>

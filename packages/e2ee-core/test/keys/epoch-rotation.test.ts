@@ -32,6 +32,7 @@ import {
   ownEpochStagedGroup,
   type EpochStagedGroup,
 } from '../../src/internal/keys/staging';
+import { checkEpochStageRequest } from '../../src/host/staging';
 import { makeSqliteEpochRotation, type EpochStagingPort } from './harness';
 import {
   commitEpochKey,
@@ -282,6 +283,75 @@ const failureCode = (exit: Exit.Exit<unknown, unknown>, code: string) => {
   if (Exit.isFailure(exit)) expect(JSON.stringify(exit.cause)).toContain(code);
 };
 describe('durable local epoch rotation', () => {
+  it('checks real staging signatures and contexts without granting current-epoch permission', async () => {
+    const f = fixture();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { rotation } = yield* f.open();
+          const result = yield* rotation.publish();
+          const group = (yield* f.staging.readGroup(ok(getCommittedEpochStagingKey(f.view(), 1))))!;
+          const check = (
+            input: EpochStagedGroup,
+            principal = f.owner.publicKey,
+            genesis = f.context.genesis
+          ) => checkEpochStageRequest({ genesis, principal, group: input });
+          expect(Result.isSuccess(check(group))).toBe(true);
+          expect(Result.isFailure(check(group, f.phone.publicKey))).toBe(true);
+          expect(
+            Result.isFailure(
+              check(group, f.owner.publicKey, ok(Bytes.genesisHash(new Uint8Array(32).fill(99))))
+            )
+          ).toBe(true);
+          const record = new Uint8Array(group.record);
+          record[record.length - 1] = record[record.length - 1]! ^ 1;
+          expect(
+            Result.isFailure(
+              check({
+                ...group,
+                record,
+                recordHash: Buffer.from(hashRecordBytes(record).toBytes()).toString('hex'),
+              })
+            )
+          ).toBe(true);
+          expect(Result.isFailure(check({ ...group, recordHash: '00'.repeat(32) }))).toBe(true);
+          const frame = new Uint8Array(group.envelopes[0]!.frame);
+          frame[frame.length - 1] = frame[frame.length - 1]! ^ 1;
+          expect(
+            Result.isFailure(
+              check({
+                ...group,
+                envelopes: [{ ...group.envelopes[0]!, frame }, ...group.envelopes.slice(1)],
+              })
+            )
+          ).toBe(true);
+          expect(
+            Result.isFailure(
+              check({
+                ...group,
+                envelopes: [
+                  { ...group.envelopes[0]!, recipient: '00'.repeat(32) },
+                  ...group.envelopes.slice(1),
+                ],
+              })
+            )
+          ).toBe(true);
+          expect(
+            Result.isFailure(
+              check({ ...group, envelopes: [...group.envelopes, group.envelopes[0]!] })
+            )
+          ).toBe(true);
+          // A genuine historical outer signature remains valid after the current
+          // slot advances. The helper cannot replace device/epoch authorization.
+          yield* rotation.acknowledge(result!);
+          f.requestRotation();
+          expect((yield* rotation.publish())?.epoch).toBe(2);
+          expect(f.view().inspectState().epoch.number).toBe(2);
+          expect(Result.isSuccess(check(group))).toBe(true);
+        })
+      )
+    );
+  });
   it('refuses remote CAS until a complete staged group has exact readback and retries only persisted originals', async () => {
     const f = fixture();
     await Effect.runPromise(
