@@ -107,6 +107,7 @@ import {
   cancelSessionTurn,
   createSessionResult,
   MachineFlockReadUnavailableError,
+  MachineOfflineError,
   readLocalProjectGitStateOnMachine,
   readSessionLiveStatusesMany,
   readSessionMachineAccess,
@@ -1074,7 +1075,8 @@ const normalizeMcpError = (error: unknown) => {
   }
   if (
     error instanceof WorkspaceSyncUnavailableError ||
-    error instanceof MachineFlockReadUnavailableError
+    error instanceof MachineFlockReadUnavailableError ||
+    error instanceof MachineOfflineError
   ) {
     return error.toLodyError();
   }
@@ -1866,6 +1868,7 @@ const buildSessionList = async (input: SessionListToolInput): Promise<unknown> =
         auth,
         workspaceId: workspace.id as WorkspaceId,
         sessions: chunk,
+        manager,
       });
       const entries = await mapWithConcurrency(chunk, 5, async (session) => {
         const live = resolveSessionLiveWorkingFromSignals(session, {
@@ -1940,6 +1943,7 @@ const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promis
     const liveStatuses = await readSessionLiveStatusesMany({
       auth,
       workspaceId: workspace.id as WorkspaceId,
+      manager,
       sessions: targets
         .map(({ session }) => session)
         .filter((session): session is SessionMeta => session !== undefined),
@@ -2971,7 +2975,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
         delegatedRequester: toDelegatedSessionRequester(invoking.identity),
       });
     } catch (error) {
-      if (error instanceof WorkspaceSyncUnavailableError) {
+      if (error instanceof WorkspaceSyncUnavailableError || error instanceof MachineOfflineError) {
         throw error;
       }
       const machineAccessError = toMachineAccessMcpError(error);
@@ -3061,22 +3065,33 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
       throw new Error('Single chat Operation is missing its active target item.');
     }
     if (!pendingItem.inputDurable && accepted.claimedItemIndexes.includes(0)) {
-      const result = await sendSessionChatResult(
-        auth,
-        workspace,
-        manager,
-        pendingItem.target.sessionId,
-        args.prompt,
-        targetDispatchConfig,
-        undefined,
-        undefined,
-        {
-          userTurnId: pendingItem.target.userTurnId,
-          chainDepth: invoking.chainDepth + 1,
-        },
-        toDelegatedSessionRequester(invoking.identity),
-        { attachments: accepted.operation.targetInputAttachments?.[0] }
-      );
+      let result;
+      try {
+        result = await sendSessionChatResult(
+          auth,
+          workspace,
+          manager,
+          pendingItem.target.sessionId,
+          args.prompt,
+          targetDispatchConfig,
+          undefined,
+          undefined,
+          {
+            userTurnId: pendingItem.target.userTurnId,
+            chainDepth: invoking.chainDepth + 1,
+          },
+          toDelegatedSessionRequester(invoking.identity),
+          { attachments: accepted.operation.targetInputAttachments?.[0] }
+        );
+      } catch (error) {
+        if (!(error instanceof MachineOfflineError)) throw error;
+        // Like create: the accepted Operation owns the fixed target, so a
+        // Machine that went offline after acceptance is left for daemon replay.
+        getLogger('mcp').warn(
+          `[mcp] Chat ${args.operationId} left active for replay: ${error.message}`
+        );
+        return snapshotOperation(ctx.sessionId as SessionId, args.operationId!);
+      }
       if (result.userTurnId !== pendingItem.target.userTurnId) {
         throw new Error('Chat result did not preserve the preallocated target turn id.');
       }
@@ -3643,6 +3658,10 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
         } catch (error) {
           if (error instanceof WorkspaceSyncUnavailableError) {
             throw error;
+          }
+          if (error instanceof MachineOfflineError) {
+            const offline = error.toLodyError();
+            return batchFailure(offline.code, offline.message, offline.retryable, item.label);
           }
           const machineAccessError = toMachineAccessMcpError(error);
           if (machineAccessError) {

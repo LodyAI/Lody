@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   validateSessionChatTarget: vi.fn(),
   validateSessionCreateOptions: vi.fn(),
   readTurn: vi.fn(),
+  onlineMachineIds: vi.fn(),
 }));
 
 vi.mock('@/lib/command-runtime', async (importOriginal) => {
@@ -47,7 +48,7 @@ vi.mock('@/lib/command-runtime', async (importOriginal) => {
       ) =>
         await fn({
           repo: { getDocMeta: mocks.getDocMeta },
-          getOnlineMachineIds: vi.fn(async () => new Set(['machine-id'])),
+          getOnlineMachineIds: mocks.onlineMachineIds,
           syncDocOrThrow: async () => undefined,
           getOrCreateSessionDoc: vi.fn(async () => ({ getMetaState: async () => ({}) })),
         })
@@ -120,6 +121,7 @@ import {
 
 import {
   MachineFlockReadUnavailableError,
+  MachineOfflineError,
   resolveEffectiveSessionCreateDispatchConfig,
 } from '@/commands/session';
 import { LoroRepo, RepoTransportError } from 'loro-repo';
@@ -196,6 +198,7 @@ beforeEach(() => {
     inputConfig: {},
   });
   mocks.findMatchingRetry.mockReturnValue(undefined);
+  mocks.onlineMachineIds.mockResolvedValue(new Set(['machine-id']));
   mocks.readTurn.mockImplementation(async (id: string) => ({
     state: 'ready',
     turn: {
@@ -750,6 +753,172 @@ describe('Machine catalog retry guidance and accepted chat recovery', () => {
       throw new Error('an accepted retry must not append another prompt');
     });
     expect(await startSessionChatOperation(args)).toEqual(accepted);
+  });
+});
+
+describe('chat Machine availability comes from presence', () => {
+  const remoteSession = {
+    ...targetSession,
+    id: 'remote-session-id',
+    machineId: 'remote-machine-id',
+  };
+  const offline = {
+    code: 'MACHINE_OFFLINE',
+    message: 'Target Machine is offline: remote-machine-id',
+    retryable: true,
+  };
+  let stored: { state: string; items: LodyOperationItemResult[] } | undefined;
+  let delivered: string[];
+
+  const errorOf = (result: ReturnType<typeof mcpErrorResult>) => {
+    const content = result.content[0];
+    if (!content || content.type !== 'text') throw new Error('expected text result');
+    return (JSON.parse(content.text) as { error: unknown }).error;
+  };
+
+  beforeEach(() => {
+    stored = undefined;
+    delivered = [];
+    mocks.getDocMeta.mockImplementation(async (roomId: string) => {
+      const session = [requesterSession, remoteSession].find(
+        (candidate) => getSessionRoomId(candidate.id as SessionId) === roomId
+      );
+      return session ? { meta: session } : undefined;
+    });
+    mocks.onlineMachineIds.mockResolvedValue(new Set(['machine-id', 'remote-machine-id']));
+    mocks.validateSessionChatTarget.mockResolvedValue(remoteSession);
+    mocks.accept.mockImplementation((input: { items: LodyOperationItemResult[] }) => {
+      stored = { state: 'active', items: input.items };
+      return {
+        operation: stored,
+        claimedItemIndexes: input.items.flatMap((item, index) =>
+          item.status === 'active' ? [index] : []
+        ),
+      };
+    });
+    mocks.sendSessionChatResult.mockImplementation(
+      async (
+        _auth: unknown,
+        _workspace: unknown,
+        _manager: unknown,
+        sessionId: string,
+        prompt: string,
+        _config: unknown,
+        _output: unknown,
+        _requester: unknown,
+        orchestration: { userTurnId: string }
+      ) => {
+        delivered.push(`${sessionId}:${prompt}`);
+        return { sessionId, userTurnId: orchestration.userTurnId };
+      }
+    );
+    mocks.get.mockImplementation(() => stored);
+    mocks.snapshot.mockImplementation((operation) => operation);
+  });
+
+  it('keeps an accepted chat active for replay when its Machine goes offline before delivery', async () => {
+    mocks.sendSessionChatResult.mockRejectedValue(
+      new MachineOfflineError({ machineId: 'remote-machine-id' })
+    );
+
+    const result = await startSessionChatOperation({
+      operationId: 'offline-before-materialization',
+      sessionId: remoteSession.id,
+      prompt: 'continue',
+    });
+
+    expect(result).toEqual({
+      state: 'active',
+      items: [expect.objectContaining({ status: 'active', inputDurable: false })],
+    });
+  });
+
+  it('still rejects a presence-offline Machine before accepting anything', async () => {
+    mocks.onlineMachineIds.mockResolvedValue(new Set(['machine-id']));
+
+    const single = await callAndMapMcpError(() =>
+      startSessionChatOperation({
+        operationId: 'offline-chat',
+        sessionId: remoteSession.id,
+        prompt: 'continue',
+      })
+    );
+    expect(errorOf(single)).toEqual(offline);
+    expect(stored).toBeUndefined();
+
+    await startSessionChatManyOperation({
+      operationId: 'offline-batch',
+      items: [{ sessionId: remoteSession.id, prompt: 'continue' }],
+    });
+    expect(stored?.items).toEqual([expect.objectContaining({ status: 'failed', error: offline })]);
+    expect(delivered).toEqual([]);
+  });
+
+  it('keeps the validator offline verdict retryable instead of COMMAND_REJECTED', async () => {
+    mocks.validateSessionChatTarget.mockRejectedValue(
+      new MachineOfflineError({ machineId: 'remote-machine-id' })
+    );
+
+    const single = await callAndMapMcpError(() =>
+      startSessionChatOperation({
+        operationId: 'went-offline-chat',
+        sessionId: remoteSession.id,
+        prompt: 'continue',
+      })
+    );
+    expect(errorOf(single)).toEqual(offline);
+
+    await startSessionChatManyOperation({
+      operationId: 'went-offline-batch',
+      items: [{ sessionId: remoteSession.id, prompt: 'continue' }],
+    });
+    expect(stored?.items).toEqual([expect.objectContaining({ status: 'failed', error: offline })]);
+    expect(delivered).toEqual([]);
+  });
+
+  it('keeps access and archive rejections as their original errors', async () => {
+    const accessError = new MachineAccessVerificationError(false, 1, new Error('Unauthorized'));
+    mocks.validateSessionChatTarget.mockRejectedValue(accessError);
+    const access = await callAndMapMcpError(() =>
+      startSessionChatOperation({
+        operationId: 'denied-chat',
+        sessionId: remoteSession.id,
+        prompt: 'continue',
+      })
+    );
+    expect(errorOf(access)).toEqual({
+      code: 'MACHINE_ACCESS_CHECK_FAILED',
+      message: accessError.message,
+      retryable: false,
+    });
+
+    const archived = `Session ${remoteSession.id} is archived. Restore it before chatting.`;
+    mocks.validateSessionChatTarget.mockRejectedValue(new Error(archived));
+    const single = await callAndMapMcpError(() =>
+      startSessionChatOperation({
+        operationId: 'archived-chat',
+        sessionId: remoteSession.id,
+        prompt: 'continue',
+      })
+    );
+    expect(errorOf(single)).toEqual({
+      code: 'COMMAND_REJECTED',
+      message: archived,
+      retryable: false,
+    });
+    expect(stored).toBeUndefined();
+
+    await startSessionChatManyOperation({
+      operationId: 'archived-batch',
+      items: [{ sessionId: remoteSession.id, prompt: 'continue' }],
+    });
+    expect(stored?.items).toEqual([
+      expect.objectContaining({
+        status: 'failed',
+        error: { code: 'INVALID_ITEM', message: archived, retryable: false },
+      }),
+    ]);
+    expect(delivered).toEqual([]);
   });
 });
 
