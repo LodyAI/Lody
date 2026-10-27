@@ -22,7 +22,9 @@ remains local-only; channel identity must not enable cloud behavior in that buil
   When the launch carries a channel-neutral `session`, `chat/new` or `provider/import`
   destination and the running owner accepts a handoff, the losing app hands that
   normalized resource link to it over the same lease and exits instead of showing the
-  conflict. Authentication and other cloud callbacks never cross that lease.
+  conflict. Authentication and other cloud callbacks never cross that lease. Lease
+  ownership alone is not acceptance: the owner acknowledges only after its launch
+  handler is bound, and a startup that will refuse rejects the handoff explicitly.
 - All pre-ready Electron configuration and early launch-event subscriptions precede
   asynchronous ownership acquisition. Accepted early callbacks survive that gate.
 - Per-app second-instance delivery remains distinct from cross-channel conflicts.

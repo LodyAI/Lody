@@ -10,6 +10,7 @@ import {
   handOffDesktopDeepLink
 } from './services/desktop-exclusion'
 import { createDesktopLaunchBuffer } from './services/desktop-launch-buffer'
+import { createDesktopLaunchAdmission } from './services/desktop-launch-admission'
 import {
   acquireLocalCliHostLease,
   getLocalCliHostEndpoint
@@ -23,6 +24,7 @@ import {
 
 const isolatedE2E = !app.isPackaged && process.env.LODY_E2E === '1'
 const launches = createDesktopLaunchBuffer()
+const launchAdmission = createDesktopLaunchAdmission((url) => launches.push({ url }))
 
 // Listen synchronously, before ready or asynchronous ownership work. These
 // handlers must not import a credential store or start an execution host.
@@ -53,6 +55,7 @@ async function start(): Promise<void> {
   // Same-app launches deliver their URL to the primary; they must not be
   // mistaken for a conflict with the other distribution.
   if (!isolatedE2E && !app.requestSingleInstanceLock()) {
+    launchAdmission.markRejected()
     const url = extractDeepLinkFromArgv(process.argv)
     if (process.platform === 'win32' && url) publishDeepLinkToPrimary(url)
     app.quit()
@@ -65,9 +68,10 @@ async function start(): Promise<void> {
   }
   if (!isolatedE2E && !isLocalPlatform()) {
     const lease = await acquireDesktopLease(CLOUD_DESKTOP_LOCK, {
-      onDeepLink: (url) => launches.push({ url })
+      onDeepLink: launchAdmission.accept
     })
     if (!lease) {
+      launchAdmission.markRejected()
       await app.whenReady()
       // Opening lody:// may start this channel while another one owns the
       // desktop lease. Hand a portable destination to that installation, then
@@ -99,6 +103,7 @@ async function start(): Promise<void> {
       mode: 'electron'
     })
     if (result.status === 'occupied') {
+      launchAdmission.markRejected()
       await app.whenReady()
       await dialog.showMessageBox({
         type: 'info',
@@ -115,9 +120,11 @@ async function start(): Promise<void> {
   const application = await import('./application')
   application.startApplication(executionHost)
   launches.bind(application.handleDesktopLaunch)
+  launchAdmission.markReady()
 }
 
 void start().catch(async (error: unknown) => {
+  launchAdmission.markRejected()
   console.error('[Electron] Desktop startup failed', error)
   await app.whenReady()
   dialog.showErrorBox(

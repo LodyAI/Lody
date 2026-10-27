@@ -8,7 +8,12 @@ import {
 // Independent of appId/userData and the CLI Host lease (17788). All cloud
 // desktop channels participate, including control-only windows.
 export const CLOUD_DESKTOP_LOCK = { host: '127.0.0.1', port: 17790 } as const
-const HANDOFF_REQUEST_TIMEOUT_MS = 800
+// Read the request promptly, then let startup admission finish within a
+// separate bound. The client waits past the owner deadline so a refusal is
+// observable instead of racing an in-flight application import.
+const HANDOFF_READ_TIMEOUT_MS = 800
+const HANDOFF_ADMISSION_TIMEOUT_MS = 5_000
+const HANDOFF_CLIENT_TIMEOUT_MS = 6_000
 const MAX_HANDOFF_RESPONSE_BYTES = 1024
 
 export type DesktopLeaseEndpoint = { host: string; port: number }
@@ -16,9 +21,35 @@ export type DesktopLeaseEndpoint = { host: string; port: number }
 export type DesktopLease = { port: number; close: () => Promise<void> }
 
 export type DesktopLeaseOptions = {
-  /** Accepts a channel-neutral resource link from a losing channel's launch. */
-  onDeepLink?: (url: string) => void
+  /**
+   * Accepts a channel-neutral resource link. Returning true means the link was
+   * handed to a consumer that will process it, not merely buffered.
+   */
+  onDeepLink?: (url: string) => boolean | Promise<boolean>
   requestTimeoutMs?: number
+  admissionTimeoutMs?: number
+}
+
+async function respondToHandoff(
+  socket: Socket,
+  url: string,
+  onDeepLink: NonNullable<DesktopLeaseOptions['onDeepLink']>,
+  timeoutMs: number
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const accepted = await Promise.race([
+      Promise.resolve(onDeepLink(url)),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), timeoutMs)
+      })
+    ])
+    if (!socket.destroyed) socket.end(`${JSON.stringify({ ok: accepted })}\n`)
+  } catch {
+    if (!socket.destroyed) socket.end(`${JSON.stringify({ ok: false, error: 'rejected' })}\n`)
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 /** OS ownership, without a PID file or stale-file removal race. */
@@ -31,9 +62,7 @@ export async function acquireDesktopLease(
     sockets.add(socket)
     socket.once('close', () => sockets.delete(socket))
     socket.on('error', () => socket.destroy())
-    socket.setTimeout(options.requestTimeoutMs ?? HANDOFF_REQUEST_TIMEOUT_MS, () =>
-      socket.destroy()
-    )
+    socket.setTimeout(options.requestTimeoutMs ?? HANDOFF_READ_TIMEOUT_MS, () => socket.destroy())
 
     let buffer = ''
     let handled = false
@@ -48,17 +77,20 @@ export async function acquireDesktopLease(
       const newline = buffer.indexOf('\n')
       if (newline < 0) return
       handled = true
+      // The request is complete. Admission, not a quiet connection, owns the
+      // next deadline.
+      socket.setTimeout(0)
       const url = parseDesktopHandoffLine(buffer.slice(0, newline))
       if (!url || !options.onDeepLink) {
         socket.end(`${JSON.stringify({ ok: false, error: 'unsupported' })}\n`)
         return
       }
-      try {
-        options.onDeepLink(url)
-        socket.end(`${JSON.stringify({ ok: true })}\n`)
-      } catch {
-        socket.end(`${JSON.stringify({ ok: false, error: 'rejected' })}\n`)
-      }
+      void respondToHandoff(
+        socket,
+        url,
+        options.onDeepLink,
+        options.admissionTimeoutMs ?? HANDOFF_ADMISSION_TIMEOUT_MS
+      )
     })
   })
   const listening = await new Promise<boolean>((resolve, reject) => {
@@ -94,7 +126,7 @@ export async function acquireDesktopLease(
 export async function handOffDesktopDeepLink(
   url: string,
   endpoint: DesktopLeaseEndpoint = CLOUD_DESKTOP_LOCK,
-  timeoutMs = HANDOFF_REQUEST_TIMEOUT_MS
+  timeoutMs = HANDOFF_CLIENT_TIMEOUT_MS
 ): Promise<boolean> {
   const line = formatDesktopHandoffLine(url)
   if (!line) return false

@@ -79,7 +79,10 @@ channel-neutral `session`, `chat/new` or `provider/import` destination to the co
 resource scheme, sends it to the running owner, and exits only after the owner
 accepts. Authentication, invite, checkout and other cloud routes never cross the
 lease; an older or unavailable owner keeps the existing conflict prompt. The owner
-validates the bounded message and replays it through the existing launch buffer.
+validates the bounded message and replays it through the existing launch buffer only
+after its launch handler is bound; a refused startup rejects the handoff instead of
+acknowledging an unconsumed buffer. See the
+[startup admission decision](../../implemented/bug-fix/2026-10-28-desktop-handoff-startup-admission.md).
 
 The intended contract is [desktop channel execution](../../../../specs/desktop-channel-execution.md).
 
@@ -115,11 +118,13 @@ inspection remains required.
 Behavioral coverage is in `desktop-channel.test.mjs` and the existing
 `auth-callback-transaction.test.mjs`. Type checks and real packaged login remain
 required. `desktop-exclusion.test.mjs` covers competing owners, crash recovery,
-startup buffering, failed-quit retry, accepted/rejected handoffs and portable URL
-normalization. `desktop-startup.test.mjs` builds the real main bundle and verifies that
-conflict never loads business/credential modules, while success replays the early
-callback. It also verifies that a portable launch reaches the running owner without a
-conflict dialog, while an auth callback does not cross the lease. Real Host endpoints
+startup buffering, failed-quit retry, slow and rejected startup admission,
+accepted/rejected handoffs and portable URL normalization. `desktop-startup.test.mjs`
+builds the real main bundle and verifies that conflict never loads
+business/credential modules, while success replays the early callback. It also
+verifies that a slow-starting or normal owner accepts a portable launch, a
+Host-conflicted startup rejects handoffs until a fresh owner starts, and an auth
+callback does not cross the lease. Real Host endpoints
 cover existing owners, invalid records, and startup after the old owner stops. A real bundled
 Supervisor verifies that stop/restart does not release the borrowed Host. It substitutes Electron UI and application
 execution, so it does not prove packaged installation or OS callback routing.

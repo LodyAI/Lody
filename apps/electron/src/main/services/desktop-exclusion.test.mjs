@@ -6,6 +6,7 @@ import { once } from 'node:events'
 import test from 'node:test'
 import { acquireDesktopLease, handOffDesktopDeepLink } from './desktop-exclusion.ts'
 import { toPortableDesktopDeepLink } from './desktop-deep-link-handoff.ts'
+import { createDesktopLaunchAdmission } from './desktop-launch-admission.ts'
 import { createDesktopLaunchBuffer } from './desktop-launch-buffer.ts'
 import { createDesktopQuitBarrier } from './desktop-shutdown.ts'
 
@@ -68,7 +69,10 @@ void test('lease setup errors fail rather than admitting an unprotected desktop'
 void test('a losing channel hands a portable link to the desktop that owns the lease', async (t) => {
   const received = Promise.withResolvers()
   const owner = await acquireDesktopLease(loopback, {
-    onDeepLink: (url) => received.resolve(url)
+    onDeepLink: (url) => {
+      received.resolve(url)
+      return true
+    }
   })
   assert.ok(owner)
   t.after(() => owner.close())
@@ -81,11 +85,54 @@ void test('a losing channel hands a portable link to the desktop that owns the l
   assert.equal(await received.promise, 'lody://session/session-1?workspace=workspace-1')
 })
 
+void test('handoff waits for asynchronous startup admission before reporting success', async (t) => {
+  const started = Promise.withResolvers()
+  const decision = Promise.withResolvers()
+  let received
+  const owner = await acquireDesktopLease(loopback, {
+    onDeepLink: async (url) => {
+      received = url
+      started.resolve()
+      return await decision.promise
+    }
+  })
+  assert.ok(owner)
+  t.after(() => owner.close())
+  const endpoint = { host: '127.0.0.1', port: owner.port }
+
+  const accepted = handOffDesktopDeepLink('lody://session/slow-startup', endpoint)
+  await started.promise
+  assert.equal(received, 'lody://session/slow-startup')
+  decision.resolve(true)
+  assert.equal(await accepted, true)
+})
+
+void test('a rejected startup makes its pending handoff fail explicitly', async (t) => {
+  const started = Promise.withResolvers()
+  const decision = Promise.withResolvers()
+  const owner = await acquireDesktopLease(loopback, {
+    onDeepLink: async (url) => {
+      assert.equal(url, 'lody://session/rejected-startup')
+      started.resolve()
+      return await decision.promise
+    }
+  })
+  assert.ok(owner)
+  t.after(() => owner.close())
+  const endpoint = { host: '127.0.0.1', port: owner.port }
+
+  const accepted = handOffDesktopDeepLink('lody://session/rejected-startup', endpoint)
+  await started.promise
+  decision.resolve(false)
+  assert.equal(await accepted, false)
+})
+
 void test('a lease never accepts cloud callbacks or unsupported routes', async (t) => {
   let received
   const owner = await acquireDesktopLease(loopback, {
     onDeepLink: (url) => {
       received = url
+      return true
     }
   })
   assert.ok(owner)
@@ -110,6 +157,34 @@ void test('a lease never accepts cloud callbacks or unsupported routes', async (
     true
   )
   assert.equal(received, 'lody://chat/new?machine=machine-1&project=project-1')
+})
+
+void test('slow startup holds handoffs until the launch handler is ready', async () => {
+  const delivered = []
+  const admission = createDesktopLaunchAdmission((url) => delivered.push(url))
+  const accepted = admission.accept('lody://session/slow-startup')
+  let settled = false
+  void accepted.then(() => {
+    settled = true
+  })
+  await Promise.resolve()
+  assert.equal(settled, false)
+  assert.deepEqual(delivered, [])
+
+  admission.markReady()
+  assert.equal(await accepted, true)
+  assert.deepEqual(delivered, ['lody://session/slow-startup'])
+})
+
+void test('rejected startup refuses pending and later handoffs without delivery', async () => {
+  const delivered = []
+  const admission = createDesktopLaunchAdmission((url) => delivered.push(url))
+  const pending = admission.accept('lody://session/pending')
+  admission.markRejected()
+
+  assert.equal(await pending, false)
+  assert.equal(await admission.accept('lody://session/later'), false)
+  assert.deepEqual(delivered, [])
 })
 
 void test('portable destinations use the common resource scheme', () => {

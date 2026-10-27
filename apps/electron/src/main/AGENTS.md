@@ -37,8 +37,10 @@ Provider settings from a URL. Contract: [Magpie import](../../../../specs/magpie
 
 On a cross-channel desktop-lease conflict, hand a channel-neutral `session`,
 `chat/new` or `provider/import` destination to the running owner over the bounded
-lease before quitting. Never hand off auth/cloud callbacks, and keep credentials
-and business modules unloaded.
+lease before quitting. The owner acknowledges only after its launch handler is
+bound; a refused startup rejects the handoff instead of acknowledging an unconsumed
+buffer. Never hand off auth/cloud callbacks, and keep credentials and business
+modules unloaded.
 
 Main-process `console` output, lifecycle, and embedded-CLI supervision reach the
 CLI daily log through `desktop-log.ts`; write synchronously, never persist
