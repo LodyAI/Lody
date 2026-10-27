@@ -83,3 +83,7 @@ maintenance commands here.
 Keep tests deterministic and side-effect-contained. Temporary files must use a
 dedicated temporary directory and cleanup must never target the repository root
 or a user data directory.
+
+`security-undici-probe.mjs` runs a synthetic loopback response in an isolated
+client process; its root script tests must observe natural child exit after a
+caught fetch rejection. Do not mask uncaught errors or force successful exit.

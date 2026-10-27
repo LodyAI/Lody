@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { MessageContent, SessionHistoryParsed, SessionId } from '@lody/shared';
 
 import { buildChatVirtualRows } from '../src/components/ai-gui/view';
+import { collectSubagentTasks } from '../src/components/ai-gui/subagent-task-panel';
 
 /**
  * End of the wiring, not just the layout helper: `buildChatVirtualRows` is what
@@ -34,6 +35,37 @@ const planTurnItems: MessageContent[] = [
   { type: 'text', text: 'Done, changed 1 file.' } as MessageContent,
 ];
 
+const task = (
+  taskId: string,
+  status: 'pending' | 'in_progress' | 'completed' | 'failed'
+): MessageContent =>
+  ({
+    type: 'subagent_task',
+    taskId,
+    taskKind: 'background',
+    actor: 'Bash',
+    status,
+    description: `Synthetic ${taskId}`,
+    isBackgrounded: true,
+  }) as MessageContent;
+const normalizedTask = (
+  taskId: string,
+  state: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown'
+): MessageContent =>
+  ({
+    ...(task(taskId, 'completed') as Extract<MessageContent, { type: 'subagent_task' }>),
+    run: {
+      sessionId: `run-${taskId}`,
+      snapshot: {
+        state,
+        support: { stream: [], progress: false, outputRead: 'none', cancel: false },
+      },
+      items: [],
+    },
+  }) as MessageContent;
+const answerText = (value: string): MessageContent =>
+  ({ type: 'text', text: value }) as MessageContent;
+
 const assistantMessage = (items: MessageContent[], finished: boolean): SessionHistoryParsed =>
   ({
     id: 'assistant-1',
@@ -55,6 +87,15 @@ const buildRows = (items: MessageContent[], finished: boolean) =>
     lastAssistantMessageId: 'assistant-1',
     expansionVersion: 0,
   });
+
+const taskIdsInVisibleRow = (rows: ReturnType<typeof buildRows>) => {
+  const row = rows.find(
+    (candidate) => candidate.type === 'assistant' && candidate.content.kind === 'subagent_tasks'
+  );
+  return row?.type === 'assistant'
+    ? collectSubagentTasks(row.item.message.items).map(({ taskId }) => taskId)
+    : [];
+};
 
 const workedHeaders = (rows: ReturnType<typeof buildRows>) =>
   rows.flatMap((row) =>
@@ -174,5 +215,85 @@ describe('approved plan renders its own region', () => {
 
     expect(workedHeaders(rows)).toHaveLength(1);
     expect(visibleContentKinds(rows)).toEqual(['worked_group_header', 'content:tool_call']);
+  });
+});
+
+describe('finished turns with background tasks', () => {
+  it('keeps the task panel after the answer while any task is running', () => {
+    const items = [
+      tool('build', 'execute'),
+      answerText('The answer is ready.'),
+      task('task-a', 'in_progress'),
+      task('task-b', 'completed'),
+      task('task-c', 'pending'),
+      normalizedTask('task-d', 'running'),
+    ];
+    const rows = buildRows(items, true);
+    const visible = rows.filter(
+      (row) => row.type === 'assistant' && row.content.kind !== 'footer' && !row.isWorkedDetail
+    );
+    const taskRowIndex = visible.findIndex(
+      (row) => row.type === 'assistant' && row.content.kind === 'subagent_tasks'
+    );
+    const answerRowIndex = visible.findIndex(
+      (row) =>
+        row.type === 'assistant' &&
+        row.content.kind === 'content' &&
+        row.content.block.kind === 'content' &&
+        row.content.block.entry.content.type === 'text'
+    );
+
+    expect(taskRowIndex).toBeGreaterThan(answerRowIndex);
+    expect(visible.map((row) => (row.type === 'assistant' ? row.content.kind : row.type))).toEqual([
+      'worked_group_header',
+      'content',
+      'subagent_tasks',
+    ]);
+    expect(taskIdsInVisibleRow(rows)).toEqual(['task-a', 'task-b', 'task-c', 'task-d']);
+  });
+
+  it('keeps terminal tasks folded into worked details by default', () => {
+    const rows = buildRows(
+      [
+        tool('build', 'execute'),
+        answerText('The answer is ready.'),
+        task('task-a', 'completed'),
+        task('task-b', 'failed'),
+        normalizedTask('task-c', 'cancelled'),
+        normalizedTask('task-d', 'unknown'),
+      ],
+      true
+    );
+
+    expect(visibleContentKinds(rows)).toEqual(['worked_group_header', 'content:text']);
+  });
+
+  it('rebuilds the same visible task row and task order from reloaded history', () => {
+    const createHistory = () =>
+      assistantMessage(
+        [
+          tool('build', 'execute'),
+          answerText('The answer is ready.'),
+          task('task-a', 'in_progress'),
+          task('task-b', 'in_progress'),
+        ],
+        true
+      );
+    const buildHistoryRows = (message: SessionHistoryParsed) =>
+      buildChatVirtualRows({
+        items: [{ type: 'message', sessionId: 'session-1' as SessionId, message }],
+        lastAssistantMessageId: 'assistant-1',
+        expansionVersion: 0,
+      });
+    const firstRows = buildHistoryRows(createHistory());
+    const loadedRows = buildHistoryRows(createHistory());
+    const taskRow = (rows: ReturnType<typeof buildRows>) =>
+      rows.find((row) => row.type === 'assistant' && row.content.kind === 'subagent_tasks');
+
+    expect(taskRow(firstRows)?.key).toBe('assistant:assistant-1:subagent-tasks');
+    expect(taskRow(loadedRows)?.key).toBe(taskRow(firstRows)?.key);
+    expect(taskIdsInVisibleRow(firstRows)).toEqual(['task-a', 'task-b']);
+    expect(taskIdsInVisibleRow(loadedRows)).toEqual(taskIdsInVisibleRow(firstRows));
+    expect(visibleContentKinds(firstRows)).toEqual(visibleContentKinds(loadedRows));
   });
 });

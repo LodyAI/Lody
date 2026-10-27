@@ -1,6 +1,8 @@
 import {
   deduplicateProjectMembers,
   type MachineId,
+  type LocalProjectId,
+  type ProjectLocalMemberProbe,
   isSafeProjectPath,
   normalizeWorkspaceProject,
   resolveProjectMemberPaths,
@@ -26,6 +28,13 @@ import {
  */
 
 export type ProjectGroupMemberDraft = {
+  directory?: {
+    machineId: MachineId;
+    localProjectId: LocalProjectId;
+    name: string;
+    rootPath: string;
+    inspection: ProjectLocalMemberProbe;
+  };
   id: ProjectMemberId;
   source: ProjectMemberSource;
   placement: ProjectMemberPlacement;
@@ -48,7 +57,10 @@ export const EMPTY_PROJECT_GROUP_FORM_VALUE: ProjectGroupFormValue = {
   members: [],
 };
 
-export type ProjectGroupFormError = 'name_required' | 'members_required';
+export type ProjectGroupFormError = 'name_required' | 'name_taken' | 'members_required';
+
+/** How two project names are compared: one project per name, ignoring case and edges. */
+export const normalizeProjectGroupName = (name: string): string => name.trim().toLocaleLowerCase();
 
 export type ProjectGroupMemberError =
   | 'dir_invalid'
@@ -143,6 +155,35 @@ export function addProjectGroupMember(
   return { ...value, members: [...value.members, member] };
 }
 
+/** Attach a prepared folder to the draft only; paths never enter Project sources. */
+export function addProjectGroupDirectory(
+  value: ProjectGroupFormValue,
+  directory: NonNullable<ProjectGroupMemberDraft['directory']>
+): ProjectGroupFormValue {
+  const source: ProjectMemberSource = directory.inspection.repoFullName
+    ? { kind: 'github', repoFullName: directory.inspection.repoFullName, preferLocal: true }
+    : { kind: 'local', machineId: directory.machineId, localProjectId: directory.localProjectId };
+  const next = addProjectGroupMember(value, source, directory.name);
+  if (next === value) {
+    const existing = value.members.find(
+      (member) => getProjectMemberSourceKey(member.source) === getProjectMemberSourceKey(source)
+    );
+    if (!existing || existing.directory) return value;
+    return {
+      ...value,
+      members: value.members.map((member) =>
+        member === existing ? { ...member, directory } : member
+      ),
+    };
+  }
+  return {
+    ...next,
+    members: next.members.map((member, index) =>
+      index === next.members.length - 1 ? { ...member, directory } : member
+    ),
+  };
+}
+
 /**
  * Remove a member. Its submodule children become top-level again rather than
  * disappearing: the user removed one repository, not its dependents.
@@ -174,46 +215,96 @@ export function removeProjectGroupMember(
 }
 
 /**
- * Apply a multi-select change: sources newly ticked are added, sources
- * unticked are removed (their submodules become top-level). Members whose
- * project is no longer listed are not in the picker, so they are untouched.
+ * Where a new project's conversations run, chosen before any member: on one
+ * machine, which may then contribute its folders, or anywhere, which admits
+ * only GitHub repositories.
  */
-export function applySourceSelection(
+export type ProjectGroupScope = { kind: 'machine'; machineId: MachineId } | { kind: 'github' };
+
+/**
+ * Drops the members a scope cannot hold: folders bound to another machine, and
+ * for a GitHub-only project every folder, including a picked folder that only
+ * a GitHub remote made portable. Repository members stay. Returns the same
+ * value when nothing goes.
+ */
+export function retainProjectGroupScope(
   value: ProjectGroupFormValue,
-  previous: readonly { key: string }[],
-  next: readonly { key: string; source: ProjectMemberSource; label: string }[],
-  labelOf: (member: ProjectGroupMemberDraft) => string,
-  createId: () => ProjectMemberId = createProjectMemberId
+  scope: ProjectGroupScope,
+  labelOf: (member: ProjectGroupMemberDraft) => string
 ): ProjectGroupFormValue {
-  const nextKeys = new Set(next.map((option) => option.key));
-  const previousKeys = new Set(previous.map((option) => option.key));
+  const outside = (member: ProjectGroupMemberDraft) => {
+    const machineId =
+      member.directory?.machineId ??
+      (member.source.kind === 'local' ? member.source.machineId : undefined);
+    if (machineId === undefined) return false;
+    return scope.kind === 'github' || machineId !== scope.machineId;
+  };
   let result = value;
-  for (const option of previous) {
-    if (nextKeys.has(option.key)) continue;
-    const member = result.members.find(
-      (candidate) => getProjectMemberSourceKey(candidate.source) === option.key
-    );
-    if (member) result = removeProjectGroupMember(result, member.id, labelOf);
+  for (const member of value.members) {
+    if (outside(member)) result = removeProjectGroupMember(result, member.id, labelOf);
   }
-  for (const option of next) {
-    if (!previousKeys.has(option.key)) {
-      result = addProjectGroupMember(result, option.source, option.label, createId);
-    }
-  }
-  return result;
+  if (scope.kind !== 'github') return result;
+  // GitHub only means a clone per conversation, never a machine's copy.
+  const members = result.members.map((member) =>
+    member.source.kind === 'github' && member.source.preferLocal
+      ? { ...member, source: withoutLocalCopy(member.source) }
+      : member
+  );
+  return members.some((member, index) => member !== result.members[index])
+    ? { ...result, members }
+    : result;
 }
 
-export function updateProjectGroupMemberPlacement(
+/** The same repository, cloned for each conversation instead of using a machine's copy. */
+function withoutLocalCopy(
+  source: Extract<ProjectMemberSource, { kind: 'github' }>
+): Extract<ProjectMemberSource, { kind: 'github' }> {
+  const { preferLocal: _preferLocal, ...rest } = source;
+  return rest;
+}
+
+/**
+ * Binds a project to the machine whose folders it was built from: a
+ * repository member that would use a local copy becomes that machine's folder
+ * (picked folders included), so the project runs there only. Members cloned
+ * from GitHub, and repositories without a copy there, are left as they are.
+ */
+export function bindProjectGroupToMachine(
   value: ProjectGroupFormValue,
-  memberId: ProjectMemberId,
-  placement: ProjectMemberPlacement
+  machineId: MachineId,
+  copyOf: (repoFullName: string) => LocalProjectId | undefined
 ): ProjectGroupFormValue {
-  return {
-    ...value,
-    members: value.members.map((member) =>
-      member.id === memberId ? { ...member, placement, placementOrigin: 'user' } : member
-    ),
-  };
+  let changed = false;
+  const members = value.members.map((member) => {
+    if (member.source.kind !== 'github' || !member.source.preferLocal) return member;
+    const localProjectId =
+      member.directory?.machineId === machineId
+        ? member.directory.localProjectId
+        : member.directory
+          ? undefined
+          : copyOf(member.source.repoFullName);
+    if (!localProjectId) return member;
+    changed = true;
+    return { ...member, source: { kind: 'local', machineId, localProjectId } as const };
+  });
+  return changed ? { ...value, members } : value;
+}
+
+/** A name for a new project from its first member, unless one was typed. */
+export function suggestProjectGroupName(
+  value: ProjectGroupFormValue,
+  labelOf: (member: ProjectGroupMemberDraft) => string,
+  takenNames: ReadonlySet<string> = new Set()
+): string {
+  if (value.name.trim()) return value.name;
+  const first = value.members[0];
+  if (!first) return value.name;
+  const base = labelOf(first).split('/').filter(Boolean).pop() ?? value.name;
+  if (!takenNames.has(normalizeProjectGroupName(base))) return base;
+  for (let index = 2; ; index++) {
+    const candidate = `${base} ${index}`;
+    if (!takenNames.has(normalizeProjectGroupName(candidate))) return candidate;
+  }
 }
 
 /** One submodule a member's repository declares, with the repository it points at. */
@@ -303,10 +394,13 @@ const toProjectMember = (member: ProjectGroupMemberDraft): ProjectMember => ({
 
 export function validateProjectGroupForm(
   value: ProjectGroupFormValue,
-  resolveLocal?: ResolveLocalMemberRepository
+  resolveLocal?: ResolveLocalMemberRepository,
+  /** Other projects' names, normalized; this one's own name is not among them. */
+  takenNames?: ReadonlySet<string>
 ): ProjectGroupFormValidation {
   const errors: ProjectGroupFormError[] = [];
   if (!value.name.trim()) errors.push('name_required');
+  else if (takenNames?.has(normalizeProjectGroupName(value.name))) errors.push('name_taken');
   if (value.members.length === 0) errors.push('members_required');
 
   const memberErrors = new Map<ProjectMemberId, ProjectGroupMemberError>();
@@ -378,41 +472,6 @@ export function buildProjectGroupFormValue(project: WorkspaceProject): ProjectGr
       placementOrigin: 'user',
     })),
   };
-}
-
-/**
- * Turns local members whose machine now publishes a GitHub remote into
- * repository Members, keeping each member's id, directory, submodule
- * placement and base branch, so a group saved before repository Members runs
- * on any machine once it is saved again. A member whose repository is already
- * in the group stays as it is; validation reports the duplicate. Returns the
- * same value when nothing changes.
- */
-export function upgradeProjectGroupRepositoryMembers(
-  value: ProjectGroupFormValue,
-  remoteOf: (source: Extract<ProjectMemberSource, { kind: 'local' }>) => string | undefined
-): ProjectGroupFormValue {
-  const taken = new Set(
-    value.members.flatMap((member) =>
-      member.source.kind === 'github' ? [member.source.repoFullName.toLowerCase()] : []
-    )
-  );
-  let changed = false;
-  const members = value.members.map((member) => {
-    if (member.source.kind !== 'local') return member;
-    const repoFullName = remoteOf(member.source);
-    if (!repoFullName || taken.has(repoFullName.toLowerCase())) return member;
-    taken.add(repoFullName.toLowerCase());
-    changed = true;
-    const source: ProjectMemberSource = {
-      kind: 'github',
-      repoFullName,
-      preferLocal: true,
-      ...(member.source.baseBranch ? { baseBranch: member.source.baseBranch } : {}),
-    };
-    return { ...member, source };
-  });
-  return changed ? { ...value, members } : value;
 }
 
 const sameContent = (left: WorkspaceProject, right: WorkspaceProject): boolean =>

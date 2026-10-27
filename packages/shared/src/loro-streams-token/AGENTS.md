@@ -14,6 +14,8 @@
   replacement and close abort and await actual producer I/O. Bounded failed release
   retains the provider/raw owners and complete Cause; require `retryCleanup` before
   handoff. Never overwrite unresolved work with a new credential generation.
+- Track reader completion with a fiber observer registered after admission; a
+  pre-start interruption never enters the reader Effect's finalizer.
 - Injected native ports must preserve cancellation and bounded real cleanup.
   Raw port cleanup bounds must not exceed the provider cleanup base; producer/read
   observers allow 2×/3× that base to preserve inner release Causes.

@@ -1,4 +1,4 @@
-import { SessionProjectRunSchema } from './workspace-project';
+import { ProjectLocalMemberProbeSchema, SessionProjectRunSchema } from './workspace-project';
 import { automationOriginSchema } from './automations/contracts';
 import { AgentRoleProposalMetaSchema } from './agent-role-proposal';
 import { isMagpieGatewayUrl } from './magpie-import';
@@ -2394,6 +2394,7 @@ export const LocalProjectPrepareAddRequestSchema = z
     machineId: MachineIdSchema,
     workspaceId: WorkspaceIdSchema,
     rootPath: z.string().trim().min(1),
+    inspect: z.boolean().optional(),
   })
   .strict();
 
@@ -2948,6 +2949,7 @@ export const LocalProjectControlResponseSchema = z.union([
           name: z.string(),
           rootPath: z.string(),
           alreadyRegistered: z.boolean(),
+          inspection: ProjectLocalMemberProbeSchema.optional(),
         })
         .strict(),
     })

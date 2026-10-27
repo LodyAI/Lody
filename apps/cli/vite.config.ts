@@ -40,7 +40,37 @@ const explicitlyExternal = new Set([
   'quickjs-emscripten',
 ]);
 
-export default defineConfig({
+// Packaging builds these process entry graphs sequentially so the CLI and ACP
+// adapters do not retain all transformed sources and maps in one Node heap.
+// Other modes (including build:watch) preserve the existing combined graph.
+const runtimeEntries = {
+  'automation-program-worker': path.resolve(__dirname, 'src/automations/programs/worker.ts'),
+  index: path.resolve(__dirname, 'src/index.ts'),
+  'cloudflared-worker': path.resolve(__dirname, 'src/preview/cloudflared-worker.ts'),
+  'baguette-worker': path.resolve(__dirname, 'src/ios-simulator/baguette-worker.ts'),
+  'diff-worker': path.resolve(__dirname, 'src/lib/code-collab/diff-worker.ts'),
+  'file-index-scan-worker': path.resolve(
+    __dirname,
+    'src/lib/code-collab/file-index-scan-worker.ts'
+  ),
+  'turn-diff-store-worker': path.resolve(
+    __dirname,
+    'src/lib/code-collab/turn-diff-store-worker.ts'
+  ),
+  'code-collab-watch-worker': path.resolve(
+    __dirname,
+    'src/lib/code-collab/workspace-watch-worker.ts'
+  ),
+};
+const adapterEntries = {
+  'codex-acp': path.resolve(__dirname, 'src/codex-acp-entry.ts'),
+  'claude-acp': path.resolve(__dirname, 'src/claude-acp-entry.ts'),
+  'deepseek-acp': path.resolve(__dirname, 'src/deepseek-acp-entry.ts'),
+  'devin-acp': path.resolve(__dirname, 'src/devin-acp-entry.ts'),
+  'grok-acp': path.resolve(__dirname, 'src/grok-acp-entry.ts'),
+};
+
+export default defineConfig(({ mode }) => ({
   // Node 22 supports native top-level await, including wasm initialization.
   // The browser compatibility transform reparses every emitted chunk into an
   // additional SWC AST and exhausts the 2 GB packaging heap on this bundle.
@@ -66,7 +96,8 @@ export default defineConfig({
   build: {
     target: 'node22',
     outDir: './dist',
-    emptyOutDir: true,
+    // The second packaging pass adds flat adapter entries and hashed chunks.
+    emptyOutDir: mode !== 'acp-adapters',
     sourcemap: true,
     minify: false,
     ssr: true,
@@ -76,38 +107,19 @@ export default defineConfig({
       // bundles emitted as siblings so each pool can resolve it next to index.js.
       // turn-diff-store-worker bundles the TypeScript workspace package while keeping
       // better-sqlite3 external, just like the main CLI entry.
-      input: {
-        index: path.resolve(__dirname, 'src/index.ts'),
-        'cloudflared-worker': path.resolve(__dirname, 'src/preview/cloudflared-worker.ts'),
-        'baguette-worker': path.resolve(__dirname, 'src/ios-simulator/baguette-worker.ts'),
-        'codex-acp': path.resolve(__dirname, 'src/codex-acp-entry.ts'),
-        'claude-acp': path.resolve(__dirname, 'src/claude-acp-entry.ts'),
-        'deepseek-acp': path.resolve(__dirname, 'src/deepseek-acp-entry.ts'),
-        'devin-acp': path.resolve(__dirname, 'src/devin-acp-entry.ts'),
-        'grok-acp': path.resolve(__dirname, 'src/grok-acp-entry.ts'),
-        'automation-program-worker': path.resolve(__dirname, 'src/automations/programs/worker.ts'),
-        'diff-worker': path.resolve(__dirname, 'src/lib/code-collab/diff-worker.ts'),
-        'file-index-scan-worker': path.resolve(
-          __dirname,
-          'src/lib/code-collab/file-index-scan-worker.ts'
-        ),
-        'turn-diff-store-worker': path.resolve(
-          __dirname,
-          'src/lib/code-collab/turn-diff-store-worker.ts'
-        ),
-        'code-collab-watch-worker': path.resolve(
-          __dirname,
-          'src/lib/code-collab/workspace-watch-worker.ts'
-        ),
-      },
+      input:
+        mode === 'cli-runtime'
+          ? runtimeEntries
+          : mode === 'acp-adapters'
+            ? adapterEntries
+            : { ...runtimeEntries, ...adapterEntries },
       external: (id) =>
         id.endsWith('.node') ||
         bundledNodeBuiltins.has(id) ||
         explicitlyExternal.has(id) ||
         id.includes('/node_modules/@loro-dev/roost-node/'),
       output: {
-        // Keep dependency sourcemaps out of the large CLI entry so the build
-        // fits the 2 GiB heap. Keep packages separate from application workers.
+        // Keep dependency sourcemaps out of the large CLI entry.
         manualChunks(id) {
           if (id === '\0commonjsHelpers.js') return 'commonjs-helpers';
           const dependency = id.split('/node_modules/').at(-1);
@@ -123,4 +135,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

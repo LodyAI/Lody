@@ -538,7 +538,12 @@ function ScheduleListRow({
 }) {
   const { t, i18n } = useTranslation();
   const zone = triggerTimeZone(row.trigger, context?.timeZone);
-  const status = describeStatus(t, row.enabled, runtime?.queueState);
+  const status = describeStatus(
+    t,
+    row.enabled,
+    runtime?.queueState,
+    row.scheduledMessage ? (runtime?.messageState ?? 'pending') : undefined
+  );
   const next = row.enabled ? runtime?.nextScheduledAt : undefined;
   // A run that is appended to a chat has that chat's workspace, so the
   // destination is the more useful fact than a project it does not have.
@@ -548,8 +553,8 @@ function ScheduleListRow({
       : (context?.project ?? (row.projectKey || null) ?? t('schedules.chatOnly', 'Chat only'));
   const manual = row.trigger.kind === 'manual';
   const offline = context ? context.presence !== 'online' : false;
-  const canToggle = !!onToggle && context?.canToggle !== false;
-  const canRun = !!onRun && context?.canRun !== false;
+  const canToggle = !row.scheduledMessage && !!onToggle && context?.canToggle !== false;
+  const canRun = !row.scheduledMessage && !!onRun && context?.canRun !== false;
   const canDelete = !!onDelete && context?.canDelete !== false;
   const lastSessionId = runtime?.lastDispatch?.sessionId;
   const toggleLabel = row.enabled ? t('schedules.pause', 'Pause') : t('schedules.resume', 'Resume');

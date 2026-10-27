@@ -1,11 +1,22 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSetAtom } from 'jotai';
+import { useTranslation } from 'react-i18next';
 import { usePlatform, usePlatformSession } from '@lody/platform/react';
 import type { WorkspaceModeDescriptor } from '@lody/cloud-api';
 import { setWorkspaceContextAtom } from '@/atoms';
-import { E2eeWorkspaceControlPage } from '@/components/pages/e2ee-workspace-control-page';
-import { appendLedgerHistory, hostLedgerHistory, type VerifiedLedgerHistory } from '@/lib/e2ee-ledger-history';
+import { useE2eeAccountId } from '@/lib/e2ee-account';
+import { E2eePersonalPairing } from '@/components/pages/e2ee-personal-pairing';
+import { E2eeLedgerAudit } from '@/components/pages/e2ee-ledger-audit';
+import {
+  E2eeWorkspaceControlPage,
+  type E2eeMemberProfile,
+} from '@/components/pages/e2ee-workspace-control-page';
+import {
+  appendLedgerHistory,
+  hostLedgerHistory,
+  type VerifiedLedgerHistory,
+} from '@/lib/e2ee-ledger-history';
 import {
   readE2eeGenesisPin,
   repairUnreadableE2eeCaches,
@@ -27,19 +38,9 @@ export const Route = createFileRoute('/workspace/e2ee/$workspaceId')({
 function WorkspaceControlRoute() {
   const { workspaceId } = Route.useParams();
   const platform = usePlatform();
+  const { t } = useTranslation();
   const session = usePlatformSession();
-  const accountId = session.status === 'authenticated' ? session.user.id : null;
-  const user = session.status === 'authenticated' ? session.user : null;
-  const you = useMemo(
-    () =>
-      user
-        ? {
-            name: [user.name, user.email].find((value) => value != null && value !== '') ?? user.id,
-            image: user.image ?? null,
-          }
-        : undefined,
-    [user]
-  );
+  const accountId = useE2eeAccountId();
   const port = platform.e2eeWorkspaces;
   const navigate = useNavigate();
   const clearWorkspace = useSetAtom(setWorkspaceContextAtom);
@@ -47,6 +48,11 @@ function WorkspaceControlRoute() {
     clearWorkspace({ slug: null, workspaceId: null });
   }, [clearWorkspace]);
   const [generation, setGeneration] = useState(0);
+  useEffect(() => {
+    const reconnect = () => setGeneration((value) => value + 1);
+    window.addEventListener('online', reconnect);
+    return () => window.removeEventListener('online', reconnect);
+  }, []);
   const identity = JSON.stringify([accountId, workspaceId]);
   const scope = JSON.stringify([accountId, workspaceId, generation]);
   const scopeRef = useRef(scope);
@@ -59,11 +65,17 @@ function WorkspaceControlRoute() {
     history: VerifiedLedgerHistory | null;
     loading: boolean;
     failure: E2eeControlFailure | null;
+    offline?: boolean;
   }>({ scope, identity, descriptor: null, history: null, loading: true, failure: null });
   useEffect(() => {
     let disposed = false;
     let hostOpened = false;
-    const closeHost = () => { if (hostOpened && port?.runtime) { hostOpened = false; void port.runtime.close(workspaceId).catch(() => undefined); } };
+    const closeHost = () => {
+      if (hostOpened && port?.runtime) {
+        hostOpened = false;
+        void port.runtime.close(workspaceId).catch(() => undefined);
+      }
+    };
     setState((previous) =>
       previous.identity === identity
         ? { ...previous, scope, loading: Boolean(port && accountId), failure: null }
@@ -87,38 +99,81 @@ function WorkspaceControlRoute() {
           let status;
           try {
             if (pin) await runtime.recordCreated({ workspaceId, genesisHash: pin });
-            status = await runtime.open(workspaceId, readObservedLedgerCheckpoint(localStorage, accountId, workspaceId) ?? undefined);
+            status = await runtime.open(
+              workspaceId,
+              readObservedLedgerCheckpoint(localStorage, accountId, workspaceId) ?? undefined
+            );
           } catch (error) {
             // Availability failures retain the original read-only verification path,
             // including its genesis pin and observed-checkpoint checks.
-            if (!(error instanceof Error) || !/\be2ee_(?:missing-binding|custody_unavailable|account_unavailable|closed)\b/.test(error.message)) throw error;
+            if (
+              !(error instanceof Error) ||
+              !/\be2ee_(?:missing-binding|custody_unavailable|account_unavailable|closed)\b/.test(
+                error.message
+              )
+            )
+              throw error;
           }
           if (status) {
-          hostOpened = true;
-          if (disposed) { closeHost(); return; }
-          const descriptor = { workspaceId, contentMode: 'e2ee' as const, contentModeVersion: 1 as const, activation: 'control-only' as const, genesisHash: status.genesisHash, cryptoOrgId: status.genesisHash };
-          const publish = async () => {
-            const history = hostLedgerHistory(await runtime.ledgerView(workspaceId));
-            if (!history.continuityPending) retainObservedLedgerCheckpoint(localStorage, accountId, workspaceId, history);
-            if (!disposed) setState({ scope, identity, descriptor, history, loading: false, failure: null });
-          };
-          await publish();
-          // A saved local view is visible before the first network request.
-          const remote = await port.describe({ workspaceId });
-          if (disposed) return;
-          if (!('contentMode' in remote) || remote.contentMode !== 'e2ee' || remote.genesisHash !== status.genesisHash) throw new Error('e2ee_genesis_conflict');
-          retainEncryptedWorkspaceMode(localStorage, accountId, remote);
-          let page = await port.history({ workspaceId, ...(status.position ? { after: status.position } : {}) });
-          for (;;) {
-            if (disposed) break;
-            status = await runtime.ingestLedgerRecords(workspaceId, page);
-            if (page.nextCursor === null || status.upgradeRequiredAt !== undefined) {
-              await publish();
-              break;
+            hostOpened = true;
+            if (disposed) {
+              closeHost();
+              return;
             }
-            page = await port.history({ workspaceId, cursor: page.nextCursor, checkpoint: page.checkpoint });
-          }
-          return;
+            const descriptor = {
+              workspaceId,
+              contentMode: 'e2ee' as const,
+              contentModeVersion: 1 as const,
+              activation: 'control-only' as const,
+              genesisHash: status.genesisHash,
+              cryptoOrgId: status.genesisHash,
+            };
+            const publish = async () => {
+              const history = hostLedgerHistory(await runtime.ledgerView(workspaceId));
+              if (!history.continuityPending)
+                retainObservedLedgerCheckpoint(localStorage, accountId, workspaceId, history);
+              if (!disposed)
+                setState({ scope, identity, descriptor, history, loading: false, failure: null });
+            };
+            await publish();
+            // A saved local view is visible before the first network request.
+            try {
+              const remote = await port.describe({ workspaceId });
+              if (disposed) return;
+              if (
+                !('contentMode' in remote) ||
+                remote.contentMode !== 'e2ee' ||
+                remote.genesisHash !== status.genesisHash
+              )
+                throw new Error('e2ee_genesis_conflict');
+              retainEncryptedWorkspaceMode(localStorage, accountId, remote);
+              let page = await port.history({
+                workspaceId,
+                ...(status.position ? { after: status.position } : {}),
+              });
+              for (;;) {
+                if (disposed) break;
+                status = await runtime.ingestLedgerRecords(workspaceId, page);
+                if (page.nextCursor === null || status.upgradeRequiredAt !== undefined) {
+                  await publish();
+                  break;
+                }
+                page = await port.history({
+                  workspaceId,
+                  cursor: page.nextCursor,
+                  checkpoint: page.checkpoint,
+                });
+              }
+            } catch (error) {
+              if (classifyE2eeControlFailure(error).kind !== 'network') throw error;
+              // A disconnected refresh does not invalidate a verified local view.
+              // Reconnection or the existing Refresh action retries the same suffix.
+              if (!disposed)
+                setState((previous) =>
+                  previous.scope === scope ? { ...previous, offline: true } : previous
+                );
+            }
+            return;
           }
         }
         const descriptor = await port.describe({ workspaceId });
@@ -161,6 +216,34 @@ function WorkspaceControlRoute() {
       if (readOwner.current === owner) readOwner.current = null;
     };
   }, [scope, identity, port, workspaceId, accountId]);
+  // Directory availability never delays or invalidates verified ledger history.
+  const [directory, setDirectory] = useState<{
+    scope: string;
+    profiles: ReadonlyMap<string, E2eeMemberProfile>;
+  } | null>(null);
+  const authenticated = session.status === 'authenticated' && session.user.id === accountId;
+  useEffect(() => {
+    let disposed = false;
+    setDirectory(null);
+    if (!authenticated || !port?.memberProfiles) return undefined;
+    void port.memberProfiles({ workspaceId }).then(
+      (result) => {
+        if (disposed || result.workspaceId !== workspaceId) return;
+        const profiles = new Map<string, E2eeMemberProfile>();
+        for (const profile of result.profiles) {
+          if (typeof profile.name === 'string' && profile.name.trim() !== '')
+            profiles.set(profile.cryptoUserId, { name: profile.name, image: profile.image });
+        }
+        setDirectory({ scope, profiles });
+      },
+      () => {
+        // Labels are optional. Failed directory reads leave verified IDs/ordinals visible.
+      }
+    );
+    return () => {
+      disposed = true;
+    };
+  }, [scope, authenticated, port, workspaceId]);
   const current = state.identity === identity ? state : null;
   const loadMore = async () => {
     const owner = readOwner.current;
@@ -229,32 +312,59 @@ function WorkspaceControlRoute() {
     });
   };
   return (
-    <E2eeWorkspaceControlPage
-      workspaceId={workspaceId}
-      genesisHash={current?.descriptor?.genesisHash}
-      history={current?.history ?? null}
-      loading={!current || current.loading || current.scope !== scope}
-      failure={current?.failure ?? null}
-      unavailable={!port || !accountId}
-      you={you}
-      diagnostics={diagnostics}
-      onRepairLocal={() => {
-        if (!accountId) return;
-        repairUnreadableE2eeCaches(localStorage, accountId);
-        refresh();
-      }}
-      onResetProgress={() => {
-        if (!accountId) return;
-        resetObservedLedgerProgress(localStorage, accountId, workspaceId);
-        refresh();
-      }}
-      onLoadMore={() => {
-        void loadMore();
-      }}
-      onRefresh={refresh}
-      onBack={() => {
-        void navigate({ to: '/workspace/create', search: { allowExisting: true } });
-      }}
-    />
+    <>
+      {current?.offline && (
+        <p role="status" className="px-4 py-2 text-sm text-muted-foreground">
+          {t('sessions.offline')}
+        </p>
+      )}
+      <E2eeWorkspaceControlPage
+        workspaceId={workspaceId}
+        genesisHash={current?.descriptor?.genesisHash}
+        history={current?.history ?? null}
+        loading={!current || current.loading || current.scope !== scope}
+        failure={current?.failure ?? null}
+        unavailable={!port || !accountId}
+        memberProfiles={
+          authenticated && directory?.scope === scope ? directory.profiles : undefined
+        }
+        diagnostics={diagnostics}
+        onRepairLocal={() => {
+          if (!accountId) return;
+          repairUnreadableE2eeCaches(localStorage, accountId);
+          refresh();
+        }}
+        onResetProgress={() => {
+          if (!accountId) return;
+          resetObservedLedgerProgress(localStorage, accountId, workspaceId);
+          refresh();
+        }}
+        onLoadMore={() => {
+          void loadMore();
+        }}
+        onRefresh={refresh}
+        onBack={() => {
+          void navigate({ to: '/workspace/create', search: { allowExisting: true } });
+        }}
+      >
+        {port?.runtime && accountId && (
+          <E2eePersonalPairing
+            key={identity}
+            workspaceId={workspaceId}
+            runtime={port.runtime}
+            canApprove={Boolean(current?.history?.locallyPinned)}
+            onJoined={refresh}
+          />
+        )}
+        {port && current?.history?.locallyPinned && (
+          <E2eeLedgerAudit
+            key={identity + ':audit'}
+            workspaceId={workspaceId}
+            history={current.history}
+            read={port.history}
+          />
+        )}
+      </E2eeWorkspaceControlPage>
+    </>
   );
 }

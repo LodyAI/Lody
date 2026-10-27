@@ -1,7 +1,12 @@
+import { ScheduledMessageInfoBar } from '../src/components/schedules/scheduled-message-info-bar';
 // @vitest-environment jsdom
+import { LoroDoc } from 'loro-crdt';
+import { ScheduleRepository, type MachineMeta, type ScheduleRepositoryPort } from '@lody/shared';
+import { userAtom } from '../src/atoms';
 
 import {
   act,
+  Fragment,
   cloneElement,
   createElement,
   createRef,
@@ -31,6 +36,11 @@ import type {
   SessionInputBlock,
   WorkspaceMcpServerMeta,
 } from '@lody/shared';
+
+const scheduleMachine = vi.hoisted(() => ({ value: null as MachineMeta | null }));
+vi.mock('../src/hooks/use-resolved-machine-meta', () => ({
+  useResolvedMachineMeta: () => ({ machine: scheduleMachine.value, machineFlockRows: {} }),
+}));
 
 const sessionAgentRoleState = vi.hoisted(() => ({
   control: {
@@ -180,6 +190,7 @@ describe('SessionChatInputArea submission feedback', () => {
   let container: HTMLDivElement | null = null;
 
   beforeEach(async () => {
+    scheduleMachine.value = null;
     resources = createSessionSendResources({
       acquire: async () => {
         throw new Error('Unexpected store borrow');
@@ -462,6 +473,7 @@ describe('SessionChatInputArea submission feedback', () => {
     isVisible = true,
     overrides = {},
     retireOnCommit = false,
+    withScheduleInfoBar = false,
   }: {
     sessionId?: string;
     onSendMessage: SessionChatInputAreaProps['onSendMessage'];
@@ -469,6 +481,7 @@ describe('SessionChatInputArea submission feedback', () => {
     isVisible?: boolean;
     overrides?: Partial<SessionChatInputAreaProps>;
     retireOnCommit?: boolean;
+    withScheduleInfoBar?: boolean;
     composerRef?: RefObject<SessionChatInputAreaHandle | null>;
     claimNavigationFocus?: () => boolean;
   }) {
@@ -479,40 +492,51 @@ describe('SessionChatInputArea submission feedback', () => {
     }
     await act(async () => {
       root!.render(
-        createElement(ScopeSwitchOnCommit, {
-          retire: retireOnCommit,
-          child: createElement(SessionChatInputArea, {
-            ref: composerRef,
-            isVisible,
-            claimNavigationFocus,
-            session: {
-              id: sessionId,
-              userId: 'user-1',
-              machineId: 'machine-1',
-              cliType: 'builtin',
-              agentType: 'codex',
-              status: { type: 'idle' },
-              isArchived,
-              createdAt: '2026-09-05T00:00:00.000Z',
-            } as SessionMeta,
-            sessionLocalProjectRootPath: null,
-            isMachineRemoved: false,
-            isAgentBusy: false,
-            isDark: false,
-            isEmptyConversation: false,
-            selectedModeId: null,
-            selectedModelId: null,
-            modeOptions: [],
-            modelOptions: [],
-            onModeChange: () => undefined,
-            onModelChange: () => undefined,
-            onSendMessage,
-            onStop: () => undefined,
-            onRemoveQueueItem: async () => undefined,
-            initialInputText: 'focus regression draft',
-            ...overrides,
-          }),
-        })
+        createElement(
+          Fragment,
+          null,
+          withScheduleInfoBar && overrides.session
+            ? createElement(ScheduledMessageInfoBar, {
+                session: overrides.session,
+                machineMeta: scheduleMachine.value,
+                status: null,
+              })
+            : null,
+          createElement(ScopeSwitchOnCommit, {
+            retire: retireOnCommit,
+            child: createElement(SessionChatInputArea, {
+              ref: composerRef,
+              isVisible,
+              claimNavigationFocus,
+              session: {
+                id: sessionId,
+                userId: 'user-1',
+                machineId: 'machine-1',
+                cliType: 'builtin',
+                agentType: 'codex',
+                status: { type: 'idle' },
+                isArchived,
+                createdAt: '2026-09-05T00:00:00.000Z',
+              } as SessionMeta,
+              sessionLocalProjectRootPath: null,
+              isMachineRemoved: false,
+              isAgentBusy: false,
+              isDark: false,
+              isEmptyConversation: false,
+              selectedModeId: null,
+              selectedModelId: null,
+              modeOptions: [],
+              modelOptions: [],
+              onModeChange: () => undefined,
+              onModelChange: () => undefined,
+              onSendMessage,
+              onStop: () => undefined,
+              onRemoveQueueItem: async () => undefined,
+              initialInputText: 'focus regression draft',
+              ...overrides,
+            }),
+          })
+        )
       );
     });
     return container!.querySelector('textarea')!;
@@ -531,6 +555,214 @@ describe('SessionChatInputArea submission feedback', () => {
       }
     });
   }
+
+  async function scheduledComposer(fail: boolean) {
+    const store = getDefaultStore();
+    store.set(userAtom, { id: 'user-1' } as never);
+    store.set(currentWorkspaceIdAtom, 'workspace-upload' as never);
+    scheduleMachine.value = {
+      id: 'machine-1',
+      ownerUserId: 'user-1',
+      timeZone: 'Asia/Shanghai',
+      protocolCapabilities: { schedules: 3 },
+    } as MachineMeta;
+    const docs = new Map<string, LoroDoc>();
+    const rows = new Map<string, unknown>();
+    const port: ScheduleRepositoryPort = {
+      openPersistedDoc: async (id) => {
+        if (!docs.has(id)) docs.set(id, new LoroDoc());
+        return { doc: docs.get(id)! };
+      },
+      openFlockDoc: async () => ({
+        flock: {
+          scan: () => [...rows].map(([key, value]) => ({ key: JSON.parse(key), value })),
+          get: (key) => rows.get(JSON.stringify(key)),
+          set: (key, value) => rows.set(JSON.stringify(key), value),
+        },
+      }),
+      flush: async () => {
+        if (fail) throw new Error('Synthetic durable write failure');
+      },
+    };
+    store.set(runtimeAtom, {
+      workspaceId: 'workspace-upload',
+      repo: port,
+      sendResources: resources,
+      withScheduleStore: async (_id: string, write: () => Promise<unknown>) => write(),
+    } as never);
+    const sessionId = `scheduled-${++nextSession}`;
+    localStorage.setItem(
+      `lody:scheduledMessageDraft:user-1:workspace-upload:${sessionId}`,
+      JSON.stringify({
+        at: '2099-01-01T00:00:00.000Z',
+        scheduleId: 'scheduled-test',
+        activationId: 'activation',
+        activityId: 'create',
+      })
+    );
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    const ordinary: SessionInputBlock[][] = [];
+    await renderComposer({
+      withScheduleInfoBar: true,
+      sessionId,
+      composerRef,
+      onSendMessage: async (blocks) => {
+        ordinary.push(blocks);
+        return true;
+      },
+      overrides: {
+        session: {
+          id: sessionId,
+          userId: 'user-1',
+          machineId: 'machine-1',
+          agentConfigId: 'agent-1',
+          cliType: 'builtin',
+          agentType: 'codex',
+          createdAt: '2026-01-01T00:00:00Z',
+        } as SessionMeta,
+      },
+    });
+    return {
+      composerRef,
+      ordinary,
+      repository: new ScheduleRepository(port, 'workspace-upload' as never),
+    };
+  }
+
+  it('schedules complete content without sending now and clears only after durable acceptance', async () => {
+    const h = await scheduledComposer(false);
+    await act(async () => {
+      h.composerRef.current!.addCommentReference({
+        source: 'lody',
+        path: 'notes.ts',
+        lineNumber: 1,
+        side: 'additions',
+        commentBody: 'Review this',
+        authorName: 'Reviewer',
+      });
+    });
+    await act(async () => {
+      container!.querySelector<HTMLButtonElement>('button[aria-label="Schedule send"]')!.click();
+    });
+    const saved = await h.repository.read('scheduled-test');
+    expect(
+      saved?.message?.inputBlocks.some(
+        (block) => block.type === 'text' && block.text === 'focus regression draft'
+      )
+    ).toBe(true);
+    expect(saved?.message?.inputBlocks.some((block) => block.type === 'comment_reference')).toBe(
+      true
+    );
+    expect(h.ordinary).toEqual([]);
+    expect((await h.repository.list())[0]?.destination).toEqual({
+      kind: 'existing_session',
+      sessionId:
+        saved?.definition.destination.kind === 'existing_session'
+          ? saved.definition.destination.sessionId
+          : '',
+    });
+    expect(container!.querySelector('textarea')?.value).toBe('');
+    expect(container!.querySelector('button[aria-label="Send"]')).not.toBeNull();
+  });
+
+  it('persists prepared image references in the reservation before releasing the original draft', async () => {
+    const h = await scheduledComposer(false);
+    getDefaultStore().set(authTokenAtom, 'synthetic-token');
+    vi.mocked(uploadSessionImage).mockImplementation(async () => ({
+      imageId: 'scheduled-image',
+      mimeType: 'image/png',
+      fileName: 'sample.png',
+      sizeBytes: 15,
+      width: 1,
+      height: 1,
+    }));
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: () => 'blob:scheduled-image',
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: () => undefined });
+    await act(async () => {
+      h.composerRef.current!.handleImageDrop([
+        new File(['synthetic-image'], 'sample.png', { type: 'image/png' }),
+      ]);
+    });
+    expect(container!.querySelector('img[alt="sample.png"]')).not.toBeNull();
+    await act(async () => {
+      container!.querySelector<HTMLButtonElement>('button[aria-label="Schedule send"]')!.click();
+    });
+    const saved = await h.repository.read('scheduled-test');
+    expect(saved?.message?.inputBlocks).toContainEqual(
+      expect.objectContaining({ type: 'image', imageId: 'scheduled-image' })
+    );
+    expect(h.ordinary).toEqual([]);
+    expect(container!.querySelector('img[alt="sample.png"]')).toBeNull();
+  });
+
+  it('keeps the original text and time after a schedule write fails', async () => {
+    const h = await scheduledComposer(true);
+    await act(async () => {
+      container!.querySelector<HTMLButtonElement>('button[aria-label="Schedule send"]')!.click();
+    });
+    expect(h.ordinary).toEqual([]);
+    expect(await h.repository.list()).toEqual([]);
+    expect(container!.querySelector('textarea')?.value).toBe('focus regression draft');
+    expect(container!.querySelector('button[aria-label="Schedule send"]')).not.toBeNull();
+  });
+
+  const clickText = async (text: string) => {
+    await act(async () => {
+      const button = [...document.querySelectorAll('button')].find(
+        (node) => node.textContent === text
+      )!;
+      button.click();
+    });
+  };
+  const openScheduleEdit = async () => {
+    await act(async () =>
+      document.querySelector<HTMLButtonElement>('button[aria-label="Scheduled message"]')!.click()
+    );
+    await clickText('Edit');
+  };
+
+  it('edits the info-bar schedule and sends using the shared updated time', async () => {
+    const options = new Intl.DateTimeFormat().resolvedOptions();
+    vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({
+      ...options,
+      timeZone: 'Asia/Shanghai',
+    });
+    const h = await scheduledComposer(false);
+    expect(
+      container!.querySelector('[data-info-bar-surface] button[aria-label="Scheduled message"]')
+    ).not.toBeNull();
+    expect(container!.textContent).not.toContain('Scheduled message will be sent');
+    await openScheduleEdit();
+    const field = document.querySelector<HTMLInputElement>('input[type=datetime-local]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+        field,
+        '2099-01-02T09:30'
+      );
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await clickText('Apply');
+    await act(async () =>
+      container!.querySelector<HTMLButtonElement>('button[aria-label="Schedule send"]')!.click()
+    );
+    expect((await h.repository.read('scheduled-test'))?.definition.trigger).toEqual({
+      kind: 'once',
+      at: '2099-01-02T01:30:00.000Z',
+    });
+    expect(container!.querySelector('button[aria-label="Scheduled message"]')).toBeNull();
+  });
+
+  it('cancels scheduling from the info bar while retaining the message draft', async () => {
+    await scheduledComposer(false);
+    await openScheduleEdit();
+    await clickText('Remove time');
+    expect(container!.querySelector('textarea')?.value).toBe('focus regression draft');
+    expect(container!.querySelector('button[aria-label="Send"]')).not.toBeNull();
+    expect(container!.querySelector('button[aria-label="Scheduled message"]')).toBeNull();
+  });
 
   async function attachDrafts(composerRef: RefObject<SessionChatInputAreaHandle | null>) {
     Object.defineProperty(URL, 'createObjectURL', {

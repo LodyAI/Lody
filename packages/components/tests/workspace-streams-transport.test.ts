@@ -213,6 +213,7 @@ function transportFor(
     auth: async () => 'streams-jwt',
     streamsBaseUrl,
     shardHostSuffix: undefined,
+    bucketId: LORO_STREAMS_BUCKET_ID,
     content: content === undefined ? { mode: 'plaintext' } : content,
   });
   openTransports.add(transport);

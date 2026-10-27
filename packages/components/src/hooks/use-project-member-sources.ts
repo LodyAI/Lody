@@ -34,7 +34,7 @@ export function useProjectMemberSources(): ProjectMemberSources {
   const githubAvailable = useAppCapability('githubIntegration');
   const cachedRepositories = useAtomValue(workspaceReposCacheAtomFamily(workspaceId));
   const onlineMachineIds = useAtomValue(onlineMachineIdsAtom);
-  const { projects } = useVisibleLocalProjects();
+  const { projects } = useVisibleLocalProjects({ includeMemberOnly: true });
   const machineIds = useMemo(
     () => [...new Set([...projects.values()].map((entry) => entry.machineId))],
     [projects]

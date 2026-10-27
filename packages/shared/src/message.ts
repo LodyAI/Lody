@@ -1,4 +1,4 @@
-import type { SessionProjectRun } from './workspace-project';
+import type { ProjectLocalMemberProbe, SessionProjectRun } from './workspace-project';
 import type {
   MachineId,
   ACPSessionConfig,
@@ -1103,6 +1103,7 @@ export type LocalProjectControlRequest =
       machineId: MachineId;
       workspaceId: WorkspaceId;
       rootPath: string;
+      inspect?: boolean;
     }
   | {
       type: 'local-project/list-roots';
@@ -1311,6 +1312,7 @@ export type LocalProjectControlResponse =
         name: string;
         rootPath: string;
         alreadyRegistered: boolean;
+        inspection?: ProjectLocalMemberProbe;
       }
     >
   | LocalProjectControlOkResponse<'local-project/list-roots', LocalProjectBrowseRootsResult>

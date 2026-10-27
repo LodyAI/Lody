@@ -160,3 +160,13 @@ retained 起点包含本调用方导出的完整 v2 状态，以及紧接其后�
 
 `InstalledEpochKeys.check(epoch)` 检查已安装密钥的当前资格和承诺，随后释放临时
 密钥材料；状态读取方无需领取秘密。
+
+## 设备访问凭证绑定
+
+`deviceCredentialBindingBytes`、`signDeviceCredentialBinding` 和
+`verifyDeviceCredentialBinding` 把新设备的访问凭证哈希绑定到审批端正在处理的配对会话。
+签名字节依次为 UTF-8 `lody-e2ee/device-credential-binding/v1`、一个零字节、
+已钉住的 genesis（32 字节）、配对会话 ID（16）、新设备 Ed25519 公钥（32）、
+原始凭证的 SHA-256（32）。调用方必须传入可信的会话和 genesis；签名有效不代表设备已入账，
+也不能代替持钥证明。验证沿用严格 Ed25519 规则。创建者的第一台设备不需要这份证明。
+`test/foundation.test.ts` 保存固定签名向量，并检查所有上下文字段被替换时都拒绝。

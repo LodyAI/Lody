@@ -1,11 +1,51 @@
 import path from 'node:path';
-import { Effect } from 'effect';
+import { Cause, Effect, Option } from 'effect';
 import { isSafeProjectPath, projectRepositoryUrlIdentity } from '@lody/shared';
-import { WorktreeGit, WorktreeGitExecutionFailed } from './git-execution';
+import { WorktreeGit, WorktreeGitCommandFailed, WorktreeGitExecutionFailed } from './git-execution';
 import {
   getAllocatedSessionBranchName,
   resolveAvailableBranchName,
 } from './branch-name-allocation';
+
+/** Git alternates require complete objects; they do not inherit a promisor's lazy fetching. */
+const canReferenceProjectRepository = Effect.fn('canReferenceProjectRepository')(function* (
+  repositoryPath: string,
+  env?: NodeJS.ProcessEnv
+) {
+  const git = yield* WorktreeGit;
+  const run = (args: readonly string[]) => git.run({ args, cwd: repositoryPath, env });
+  const [gitDir, commonDir, shallow] = (yield* run([
+    'rev-parse',
+    '--path-format=absolute',
+    '--git-dir',
+    '--git-common-dir',
+    '--is-shallow-repository',
+  ])).split('\n');
+  // Git rejects linked worktrees and shallow repositories as clone references.
+  if (gitDir !== commonDir || shallow !== 'false') return false;
+  const partialCloneConfig = yield* run([
+    'config',
+    '--get-regexp',
+    '^(remote\\..*\\.promisor|extensions\\.partialclone)$',
+  ]).pipe(
+    Effect.catchCause((cause) => {
+      const error = Cause.findErrorOption(cause);
+      // Exit 1 with no output means no matching config, not a failed inspection.
+      if (
+        cause.reasons.length === 1 &&
+        Option.isSome(error) &&
+        error.value instanceof WorktreeGitCommandFailed &&
+        error.value.code === 1 &&
+        error.value.signal === null &&
+        !error.value.stdout &&
+        !error.value.stderr
+      )
+        return Effect.succeed('');
+      return Effect.failCause(cause);
+    })
+  );
+  return partialCloneConfig === '';
+});
 
 /** Validates a configured Member against the parent's actual gitlink before any checkout. */
 export const inspectProjectSubmodule = Effect.fn('inspectProjectSubmodule')(function* (options: {
@@ -80,6 +120,10 @@ export const checkoutProjectSubmodule = Effect.fn('checkoutProjectSubmodule')(fu
       })
     );
   const inspected = yield* inspectProjectSubmodule(options);
+  const reference =
+    options.local &&
+    !options.restore &&
+    (yield* canReferenceProjectRepository(options.repositoryPath, options.env));
   yield* git.run({
     // Restore unpublished gitlinks from the durable local store before contacting the remote.
     // Nested selected members are restored separately before recursive initialization.
@@ -100,7 +144,7 @@ export const checkoutProjectSubmodule = Effect.fn('checkoutProjectSubmodule')(fu
           'update',
           '--init',
           // Borrow objects only for this member, then sever the GC dependency.
-          ...(options.local ? ['--reference', options.repositoryPath, '--dissociate'] : []),
+          ...(reference ? ['--reference', options.repositoryPath, '--dissociate'] : []),
           '--',
           options.submodulePath,
         ],

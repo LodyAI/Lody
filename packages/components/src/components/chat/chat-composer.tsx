@@ -1,3 +1,4 @@
+import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import {
   useEffect,
   useLayoutEffect,
@@ -150,6 +151,8 @@ export interface ChatComposerProps {
   imageItems?: ChatComposerImageItem[];
   attachmentAddDisabled?: boolean;
   onAttachmentAddClick?: () => void;
+  onScheduleSend?: () => void;
+  scheduleDisabledReason?: string;
   imageDropDisabled?: boolean;
   onImageDrop?: (files: File[]) => void;
   /**
@@ -268,6 +271,8 @@ export function ChatComposer({
   imageItems = [],
   attachmentAddDisabled = false,
   onAttachmentAddClick,
+  onScheduleSend,
+  scheduleDisabledReason,
   imageDropDisabled = attachmentAddDisabled,
   onImageDrop,
   onDirectoryDrop,
@@ -298,7 +303,8 @@ export function ChatComposer({
   focusOnContainerClick = false,
 }: ChatComposerProps) {
   const { t, i18n } = useTranslation();
-  const shortcutsEnabled = variant !== 'dialog';
+  const shortcutsAllowed = useWorkspaceFeature('shortcuts');
+  const shortcutsEnabled = variant !== 'dialog' && shortcutsAllowed;
   const intlLocale = useMemo(
     () => toIntlLocale(i18n.resolvedLanguage ?? i18n.language),
     [i18n.language, i18n.resolvedLanguage]
@@ -1064,6 +1070,8 @@ export function ChatComposer({
                   onAddAttachment={onAttachmentAddClick}
                   attachmentDisabled={attachmentAddDisabled}
                   mcp={mcp}
+                  onScheduleSend={onScheduleSend}
+                  scheduleDisabledReason={scheduleDisabledReason}
                 />
 
                 {/* Single row only: long model names must shrink/truncate inside

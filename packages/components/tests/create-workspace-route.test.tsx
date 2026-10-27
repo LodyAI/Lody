@@ -200,6 +200,21 @@ describe('create workspace route with a saved encrypted request', () => {
     expect(fixture.create).toHaveBeenCalledTimes(1);
   });
 
+  it('removes an unreserved old identity intent and shows requestRemoved without locking the form', async () => {
+    savePendingE2eeWorkspace(localStorage, pending);
+    fixture.create = async () => {
+      throw Object.assign(new Error('old account identity'), {
+        data: { code: 'e2ee_account_identity_conflict' },
+      });
+    };
+    await render();
+    await click('e2ee.create.resume');
+    expect(container!.textContent).toContain('e2ee.create.requestRemoved');
+    expect(listPendingE2eeWorkspaces(localStorage, 'account')).toEqual([]);
+    expect(input('workspace-name').disabled).toBe(false);
+    expect(button('e2ee.create.resume')).toBeUndefined();
+  });
+
   it('keeps an unknown outcome saved and locked for an exact retry', async () => {
     savePendingE2eeWorkspace(localStorage, pending);
     fixture.create = vi.fn(async () => {

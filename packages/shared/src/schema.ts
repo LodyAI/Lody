@@ -1157,7 +1157,12 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
   externalHistory?: ExternalAcpHistorySyncMeta;
   /** Monotonic-ish signal used to wake the owning CLI when the CRDT message queue changes. */
   messageQueueUpdatedAt?: number;
-  /** Last queue update signal the owning CLI checked when no dispatchable turn was found. */
+  /** Control-document causal frontier captured after the queue mutation named by updatedAt. */
+  messageQueueUpdateVersion?: {
+    updatedAt: number;
+    frontiers: { peer: `${number}`; counter: number }[];
+  };
+  /** Last queue signal whose control mutation was observed and whose queue was drained. */
   messageQueueCheckedAt?: number;
   /**
    * When the session started waiting on a human answer, cleared when the request

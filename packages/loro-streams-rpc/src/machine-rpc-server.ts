@@ -1,3 +1,8 @@
+import {
+  FileDownloadRequestSchema,
+  type FileDownloadRequest,
+  type FileDownloadResponse,
+} from '@lody/shared';
 import type { ProjectProbeLocalMemberResult } from '@lody/shared';
 import type {
   BugReportClientLog,
@@ -490,6 +495,7 @@ type RpcServerDeps = {
   resolveCodeCollabOwnerSessionId?: (sessionId: SessionId) => Promise<SessionId>;
   /** File Preview v3 — a plain read; must not activate Code Collab. */
   previewFile?: (args: FilePreviewV3Request) => Promise<FilePreviewV3Response>;
+  downloadFileChunk?: (args: FileDownloadRequest) => Promise<FileDownloadResponse>;
   refreshCodeCollabText?: (
     args: CodeCollabV2RefreshTextRequest
   ) => Promise<CodeCollabV2RefreshTextResponse>;
@@ -1834,6 +1840,19 @@ export class LoroStreamsMachineRpcServer {
           });
           return;
         }
+        case 'file/download-chunk': {
+          const decoded = await this.decryptCodeCollabV2RequestParams(request.params);
+          codeCollabOwnerSessionId = decoded.ownerSessionId;
+          const params = FileDownloadRequestSchema.parse(decoded.payload);
+          await this.verifyCodeCollabV2OwnerSession(decoded.ownerSessionId, params.sessionId);
+          const response: FileDownloadResponse = this.deps.downloadFileChunk
+            ? await this.deps.downloadFileChunk(params)
+            : { status: 'error', code: 'unsupported_protocol' };
+          await this.appendResultResponse(request.replyTo, request.id, request.method, response, {
+            codeCollabOwnerSessionId: decoded.ownerSessionId,
+          });
+          return;
+        }
         case 'file/preview': {
           const decoded = await this.decryptCodeCollabV2RequestParams(request.params);
           codeCollabOwnerSessionId = decoded.ownerSessionId;
@@ -2026,7 +2045,7 @@ export class LoroStreamsMachineRpcServer {
       }
       const codeCollabError = request.method.startsWith('code-collab/')
         ? toCodeCollabRpcError(failure)
-        : request.method === 'file/preview'
+        : request.method === 'file/preview' || request.method === 'file/download-chunk'
           ? toFilePreviewRpcError(failure, message)
           : null;
       await this.appendErrorResponse(
@@ -2168,6 +2187,7 @@ export class LoroStreamsMachineRpcServer {
       | CodeCollabV2InitDirectoryOk
       | CodeCollabV2LspUnsupported
       | FilePreviewV3Response
+      | FileDownloadResponse
       | SessionPreviewCreateResponse
       | SessionPreviewRevokeResponse
       | SessionPreviewStatusResponse

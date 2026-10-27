@@ -126,7 +126,14 @@ them in Effect is not a completed migration. Private launch snapshots and creden
 fingerprints do not enter queue history or tool-visible activities. Local automations
 make no authenticated product-cloud requests.
 
+Encrypted workspaces withhold Automations through the shared workspace content policy,
+including startup, explicit control and background retries, until an encrypted automation
+channel is implemented. Existing encrypted PR-poller isolation remains intact.
+
 ## Native policies
+
+Failure finalization evidence for quota recovery is distinct from successful history
+finalization; it cannot authorize unread-success publication.
 
 Settings default off and affect future observations. Disabling revokes new submissions;
 cancellation addresses an accepted input. Policy dispatch is internal Lody code.

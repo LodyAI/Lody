@@ -24,6 +24,13 @@ export function isIpcInvokeChannel(channel: string): boolean {
   const group = match?.[1]
   if (group === 'e2ee')
     return new Set([
+      'account',
+      'prepareLocalAgent',
+      'admitLocalAgent',
+      'seal',
+      'openContent',
+      'contentStreamsToken',
+      'refresh',
       'prepareCreation',
       'recordCreated',
       'open',

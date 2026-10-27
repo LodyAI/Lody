@@ -12,6 +12,18 @@ cookie, preserve the fallback's error/result. A network failure or 5xx must neve
 be replaced by the earlier 401: shared session verification would interpret two
 such results as confirmed sign-out. Cached identity remains scoped to the auth
 generation and is cleared by explicit sign-out or definitive session rejection.
+The 5-second session timeout bounds the caller, not the request: a late resolved
+answer seeds the cached session only if no answer, including a definitive
+rejection, was committed after its request started (same generation).
+`getSessionToken` treats an unreachable verification as no verdict and uses the
+durable cookie (else the supplied bearer); it never starts a second check.
+For local E2EE directory selection, `auth-storage.ts` also retains a token-hash/user-ID
+binding in the existing auth config, with no time expiry. `getCachedSessionIdentity`
+uses it only when the device cookie or supplied bearer matches; it never grants cloud
+access or ledger authority. A matching supplied bearer can seed the in-memory token
+for subsequent E2EE calls. Identity observers run only after confirmed auth changes;
+transport uncertainty neither clears the binding nor publishes sign-out. Ordinary
+renderer bootstrap snapshots retain their existing seven-day lifetime.
 
 ## Diagnostics
 
@@ -50,9 +62,9 @@ The [window Spec](../../../../specs/desktop-windows.md) owns the behavior contra
 `e2ee-custody.mts` selects Electron OS protection for core node-custody, which owns an explicit Scope, a wrapped KEK and
 XChaCha20-Poly1305 protected blobs. It never joins the renderer IPC registry or
 starts from application bootstrap. The explicit E2EE IPC methods create
-or reopen an account-bound local pending request and workspace runtime; they expose public state and signed genesis bytes only, with no arbitrary signing or key export. It rejects local composition
+or reopen an account-bound local pending request and workspace runtime; they expose public state and room-bound content seal/open; device access credentials stay in main, with no arbitrary signing or content-key export. It rejects local composition
 before authentication/native access and checks the main-process account session.
-Content synchronization remains closed until its separate encrypted adapter exists.
+The encrypted adapter enables only Meta, Loro session documents and the owning workspace/machine Flocks; unsupported rooms and plaintext side channels stay closed.
 `e2ee-custody-electron.ts` is the readiness-gated native composition factory.
 Reject unavailable native encryption and Linux `basic_text`/unknown backends;
 never reuse auth cookie plaintext overrides or fall back to plaintext files.

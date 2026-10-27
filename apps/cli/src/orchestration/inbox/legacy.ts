@@ -24,6 +24,7 @@ export const operationInboxLegacy = (options: {
   report(cause: unknown): void;
   quiesce?(): void;
   openRecoveryRepository?(): { sql: InboxSqlite; close(): void };
+  recoveryProbe?: Layer.Layer<InboxRecoveryProbe>;
 }) => {
   const queries = makeInboxQueries(options.sql);
   const dependencies = Layer.merge(
@@ -60,7 +61,7 @@ export const operationInboxLegacy = (options: {
             catch: (cause) => cause,
           });
       }
-    }).pipe(Effect.provide(inboxRecoveryProbeLayer))
+    }).pipe(Effect.provide(options.recoveryProbe ?? inboxRecoveryProbeLayer))
   );
   void recovery.catch(options.report);
   const closeOwner = Effect.runSync(
@@ -120,6 +121,10 @@ export const operationInboxLegacy = (options: {
         Effect.flatMap(OperationInbox, (inbox) => inbox.abandon(w, s, id, unlessActive))
       ),
     openExecution: async (input: InboxInput, id: string, batch?: InboxBatch) => {
+      // Startup proof of a dead previous boot's resources must settle before
+      // admission reads the block; otherwise the first post-restart dispatch
+      // reports a block that this probe clears moments later.
+      await recovery.catch(() => undefined);
       const owner = await runtime.runPromise(
         makeExecutionOwner(input, id, batch).pipe(
           Effect.catch((cause) => {

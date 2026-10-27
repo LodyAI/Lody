@@ -11,3 +11,8 @@
   in-flight operations, then release stores and wipe owned buffers. No timers/PID lock takeover.
 - No arbitrary signing or secret export in IPC. Expose only purpose-limited product operations.
   Missing/corrupt originals are not permission to replace a device or key.
+
+Device access credentials are independent 32-byte random values, protected with the
+existing KEK under `lody-e2ee/local-device-credential/v1\0` plus genesis and device
+public key. `prepareDeviceCredential` publishes once; `deviceCredential` only reopens
+an existing original. Neither changes device/epoch formats or exports a content key.

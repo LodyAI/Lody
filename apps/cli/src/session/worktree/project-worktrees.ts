@@ -267,8 +267,13 @@ export async function materializeProjectGroup(
             // Before ACP initialization, register the directory without a link.
             // The negotiated startup callback selects/reconciles the final access mode.
             const additional = options.supportsAdditionalDirectories !== false;
-            await reconcileProjectMemberLink(root, member.placement.dir, target.url, additional);
-            member.access = additional ? 'additional' : 'link';
+            const linked = await reconcileProjectMemberLink(
+              root,
+              member.placement.dir,
+              target.url,
+              additional
+            );
+            member.access = linked ? 'link' : 'additional';
             delete member.branch;
             delete member.repoFullName;
             delete member.dirty;

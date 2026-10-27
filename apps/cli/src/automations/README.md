@@ -18,6 +18,9 @@ replace the Session as the continuation target.
 | Composition         | [workspace](workspace-legacy.ts)                                                                                                                    | Fleet lifetime, local control and existing source owners                                      |
 | Execution authority | [Session authority](../session/session-automation-authority.ts)                                                                                     | Admission barriers, release proof, group settlement and exact-input cancellation              |
 
+Automations currently run in plaintext workspaces. Encrypted workspaces remain unsupported
+under the shared workspace content policy; Fleet creates no automation runtime there.
+
 ## Register a condition
 
 The bundled [Automations skill](../mcp/skills/lody-automations/SKILL.md) documents

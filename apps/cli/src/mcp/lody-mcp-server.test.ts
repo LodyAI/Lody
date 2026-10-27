@@ -540,8 +540,7 @@ describe('session MCP input schemas', () => {
         type: 'object',
         properties: {
           useCurrentSessionAsParent: {
-            description:
-              'Create a child of the current Session that reuses the exact same workspace directory; cannot be combined with workContext.',
+            type: 'boolean',
           },
           workContext: workContextSchema,
         },
@@ -553,8 +552,7 @@ describe('session MCP input schemas', () => {
             type: 'object',
             properties: {
               useCurrentSessionAsParent: {
-                description:
-                  'Create a child of the current Session that reuses the exact same workspace directory; cannot be combined with workContext.',
+                type: 'boolean',
               },
               workContext: workContextSchema,
             },
@@ -565,8 +563,7 @@ describe('session MCP input schemas', () => {
               type: 'object',
               properties: {
                 useCurrentSessionAsParent: {
-                  description:
-                    'Create a child of the current Session that reuses the exact same workspace directory; cannot be combined with workContext.',
+                  type: 'boolean',
                 },
                 workContext: workContextSchema,
               },

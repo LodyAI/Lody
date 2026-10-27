@@ -42,3 +42,7 @@ The queue disclosure is local display state, initially expanded. Keep its editin
 rows mounted while folded; focusing the disclosure must not commit or discard a
 row draft. Folded summaries retain pending/failed-send awareness. Intent:
 [queue presentation](../../../../../../specs/message-queue.md).
+
+When scheduled display rows are supplied, keep them after ordinary and local-pending
+rows, ordered by send time. Exclude them from drag sources/targets and move-to-top;
+time edits re-sort the view. This projection does not put reservations into `mq`.

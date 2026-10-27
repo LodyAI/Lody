@@ -1,3 +1,4 @@
+import { E2eeLocalAgentApproval } from '../e2ee-local-agent-approval';
 import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
 import { bindAgentRoleTarget, snapshotAgentRole } from '@lody/shared';
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
@@ -56,7 +57,7 @@ import {
   type WorkspaceId,
   deriveDraftSessionTitle,
 } from '@lody/shared';
-import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
+import { useCloudMutation, useCloudQuery, usePlatform } from '@lody/platform/react';
 import { usePostHog } from '@posthog/react';
 import {
   ArrowUp,
@@ -95,7 +96,12 @@ import {
   workspaceReposCacheAtomFamily,
 } from '@/atoms';
 import { docMetaCacheReadyAtom, sessionMetaCountAtom } from '@/atoms/doc-meta';
-import { localProbeAttemptedAtom, localProbeResultAtom } from '@/atoms/local-probe';
+import { projectEditorRequestAtom } from '@/atoms/project-editor';
+import {
+  localAgentEnabledAtom,
+  localProbeAttemptedAtom,
+  localProbeResultAtom,
+} from '@/atoms/local-probe';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
 import { buildAgentPrompt } from '@/lib';
 import { getAppCurrentPathWithSearch } from '@/lib/app-location';
@@ -607,11 +613,15 @@ function WorkspaceChatLanding({
   const navigate = useNavigate();
   const { openSettings } = useOpenSettings();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const localAgentEnabled = useAtomValue(localAgentEnabledAtom);
+  const nativeE2ee = usePlatform().e2eeWorkspaces?.runtime;
   const workspaceRuntime = useAtomValue(runtimeAtom);
   const postHog = usePostHog();
   const multiWorkspaceAvailable = useAppCapability('multiWorkspace');
   const currentUser = useAtomValue(userAtom);
-  const userId = currentUser?.id;
+  const userId =
+    currentUser?.id ??
+    (runtime?.contentMode === 'e2ee' ? (runtime.accountId ?? undefined) : undefined);
   const { activeOrganization, organizations, switchOrganization } = useOrganization({
     targetSlug: workspaceSlug,
   });
@@ -1088,8 +1098,8 @@ function WorkspaceChatLanding({
   // ── Project group availability on the selected machine ──
   // Which machines hold a copy of each repository, as their daemons publish it.
   const projectRepositoryCopies = useMemo(
-    () => buildProjectRepositoryCopyIndex(visibleLocalProjectMap.values()),
-    [visibleLocalProjectMap]
+    () => buildProjectRepositoryCopyIndex(visibleLocalProjects.registeredProjects.values()),
+    [visibleLocalProjects.registeredProjects]
   );
   // Without GitHub integration (local-only) a repository Member the machine
   // has no copy of cannot be cloned. A conversation always gets the whole
@@ -2981,6 +2991,12 @@ function WorkspaceChatLanding({
     openAddProjectDialog();
   }, [openAddProjectDialog]);
 
+  const requestProjectEditor = useSetAtom(projectEditorRequestAtom);
+  const handleCreateProject = useCallback(
+    () => requestProjectEditor({ kind: 'create' }),
+    [requestProjectEditor]
+  );
+
   const handleLocalProjectAdded = useCallback(
     (info: { machineId: MachineId; localProjectId: LocalProjectId }) => {
       handleSelectedLocalProjectChange({
@@ -3102,7 +3118,7 @@ function WorkspaceChatLanding({
       setComposerError(t('chat.validation.missingMachine'));
       return;
     }
-    if (!currentUser || !userId || !workspaceId) {
+    if ((!currentUser && runtime?.contentMode !== 'e2ee') || !userId || !workspaceId) {
       captureSessionInputBlocked('missing_context');
       setComposerError(t('chat.validation.missingContext'));
       return;
@@ -3751,6 +3767,7 @@ function WorkspaceChatLanding({
             projectId: project.id,
             name: project.name,
             memberCount: project.members.length,
+            lastUsedAt: mobileSheetRecency.byGroup.get(project.id),
             ...(missing > 0 && canCloneProjectRepositories
               ? {
                   availability: t('chat.projectGroup.missingClone', '{{count}} cloned on start', {
@@ -3774,7 +3791,14 @@ function WorkspaceChatLanding({
           },
         ];
       }),
-    [canCloneProjectRepositories, projectRepositoryCopies, selectedMachineId, t, workspaceProjects]
+    [
+      canCloneProjectRepositories,
+      mobileSheetRecency.byGroup,
+      projectRepositoryCopies,
+      selectedMachineId,
+      t,
+      workspaceProjects,
+    ]
   );
   const desktopAgentMachineIds = useMemo(
     () => (scopedMachineId ? [scopedMachineId] : []),
@@ -4040,6 +4064,7 @@ function WorkspaceChatLanding({
           latestMessageAtByRepo={mobileSheetRecency.byRepo}
           onConnectGitRepo={handleConnectGitRepo}
           onAddLocalProject={handleAddLocalProject}
+          onCreateProject={handleCreateProject}
           onShareLocalProjectWithTeam={
             showProjectSharing ? handleShareLocalProjectWithTeam : undefined
           }
@@ -6302,8 +6327,17 @@ function WorkspaceChatLanding({
       setPiMigrationBusy(false);
     }
   };
+  const e2eeLocalAgentNode =
+    runtime?.contentMode === 'e2ee' && localAgentEnabled && isElectron ? (
+      <E2eeLocalAgentApproval
+        key={`${runtime.accountId}:${runtime.workspaceId}`}
+        workspaceId={runtime.workspaceId}
+        runtime={nativeE2ee}
+        enabled
+      />
+    ) : null;
   const composerNoticeNode =
-    sharingReviewNoticeNode || sessionLimitNoticeNode || canMigratePi ? (
+    e2eeLocalAgentNode || sharingReviewNoticeNode || sessionLimitNoticeNode || canMigratePi ? (
       <>
         <PiProviderMigrationCard
           count={migratablePiProviders.length}
@@ -6312,6 +6346,7 @@ function WorkspaceChatLanding({
           canMigrate={canMigratePi}
           onConfirm={() => void confirmPiMigration()}
         />
+        {e2eeLocalAgentNode}
         {sharingReviewNoticeNode}
         {sessionLimitNoticeNode}
       </>

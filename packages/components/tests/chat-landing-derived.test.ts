@@ -227,6 +227,22 @@ describe('getChatLandingProjectRecency', () => {
     expect(recency.byProject.get('machine-2:project-1')).toBe(300);
   });
 
+  it('ranks a multi-member project by its newest conversation', () => {
+    const recency = getChatLandingProjectRecency([
+      { machineId: 'machine-1', projectRun: { id: 'shop' }, lastMessageAt: 400 },
+      { machineId: 'machine-2', projectRun: { id: 'shop' }, lastMessageAt: 500 },
+      {
+        machineId: 'machine-1',
+        project: { kind: 'local', localProjectId: 'project-1' },
+        lastMessageAt: 450,
+      },
+    ]);
+
+    expect(recency.byGroup.get('shop')).toBe(500);
+    // A group conversation is not counted against an unrelated local project.
+    expect(recency.byProject.get('machine-1:project-1')).toBe(450);
+  });
+
   it('ignores missing and non-finite lastMessageAt values', () => {
     const recency = getChatLandingProjectRecency([
       {

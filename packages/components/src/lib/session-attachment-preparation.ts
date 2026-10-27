@@ -1,3 +1,4 @@
+import type { WorkspaceStreamsMode } from '@lody/shared/workspace-streams-content';
 import {
   inputBlocksToHistoryItems,
   normalizeSessionInputBlocks,
@@ -50,6 +51,7 @@ export function finalizePreparedSend(record: DraftAttachmentSend): PreparedSend 
  * retry only transfers what failed.
  */
 export async function prepareDraftAttachments(args: {
+  content: WorkspaceStreamsMode;
   record: DraftAttachmentSend;
   resources: SessionSendResources;
   signal: AbortSignal;
@@ -79,6 +81,7 @@ export async function prepareDraftAttachments(args: {
           const image = await args.resources.run(
             (signal) =>
               uploadSessionImage({
+                content: args.content,
                 workspaceId: args.record.workspaceId as WorkspaceId,
                 sessionId: args.record.sessionId,
                 token,
@@ -132,6 +135,7 @@ export async function prepareDraftAttachments(args: {
       } else {
         const machineId = args.record.targetMachineId ?? null;
         const fileResult = await prepareSessionFile(args.resources, {
+          content: args.content,
           workspaceId: args.record.workspaceId as WorkspaceId,
           sessionId: args.record.sessionId as SessionId,
           token: args.token(),

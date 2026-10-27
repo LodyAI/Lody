@@ -12,6 +12,12 @@ import {
   type MachineFlockFreshness,
 } from './session-catalog-read';
 export { MachineFlockReadUnavailableError } from './session-catalog-read';
+import {
+  MachineOfflineError,
+  readMachinePresence,
+  type MachinePresence,
+} from './session-machine-presence';
+export { MachineOfflineError } from './session-machine-presence';
 import { normalizeSessionTurnInputConfig } from '@lody/shared';
 import { prepareSessionInputAttachments } from '@/lib/session-input-attachments';
 import { buildCommandInputBlocks, type SessionInputAttachment } from '@/lib/session-input-content';
@@ -118,8 +124,10 @@ import {
   listAliveRoomIds,
   LocalDaemonAvailabilityError,
   normalizeCliValue,
+  listWorkspaceCandidates,
   printJson,
   resolveStructuredOutputMode as resolveOutputMode,
+  resolveWorkspaceOrThrow,
   selectWorkspaceSummary,
   syncDocForRead,
   syncCommandTime,
@@ -152,6 +160,7 @@ import { parseEnvAssignments } from './agent-config';
 import { formatErrorMessage } from '@/utils/format-error';
 import {
   SessionTurnWaitError,
+  sessionHistoryActivityAt,
   type SessionTurnOutputEvent,
   type StructuredSessionOutputMode,
   waitForTurnCompletion,
@@ -1256,27 +1265,21 @@ export function filterAuthorizedLocalProjectCandidates<T extends LocalProjectSel
   return localProjects.filter((project) => authorizedLocalProjectIds.has(project.id));
 }
 
-async function resolveWorkspaceOrThrow(
-  auth: AuthContext,
-  selector?: string
-): Promise<WorkspaceSummary> {
-  const workspaces = await listWorkspacesForToken(auth.token);
-  const effectiveSelector =
-    normalizeCliValue(selector) ?? normalizeCliValue(process.env.LODY_WORKSPACE_ID);
-  return selectWorkspaceSummary(workspaces, effectiveSelector);
-}
-
 async function resolveWorkspaceForSessionOrThrow(
   auth: AuthContext,
   sessionId: SessionId,
   options?: ResolveWorkspaceForSessionOptions
 ): Promise<WorkspaceSummary> {
-  const workspaces = await listWorkspacesForToken(auth.token);
+  const offline = typeof options === 'object' && options.offline === true;
   const selector = typeof options === 'string' ? options : options?.workspace;
-  const shouldSync = typeof options === 'object' && options.offline !== true;
+  const shouldSync = !offline;
   const syncReason = typeof options === 'object' ? options.reason : undefined;
   const effectiveSelector =
     normalizeCliValue(selector) ?? normalizeCliValue(process.env.LODY_WORKSPACE_ID);
+  const workspaces = await listWorkspaceCandidates(auth, {
+    offline,
+    selector: effectiveSelector,
+  });
   const sessionExistsInWorkspace = async (workspace: WorkspaceSummary): Promise<boolean> =>
     await withWorkspaceManager(auth, workspace, async (manager) => {
       if (shouldSync) {
@@ -2373,11 +2376,18 @@ async function ensureLocalRuntimeAvailable(
   }
 }
 
-async function ensureTargetMachineOnline(args: {
+/**
+ * Rejects only a target that presence reports definitively offline. Delivery
+ * runs through the synced Session document, so no one-shot RPC probe gates it:
+ * an unanswered probe during a transport slowdown is not evidence of offline.
+ * Resolves to the presence that admitted the target (`online` or `unknown`).
+ */
+export async function ensureTargetMachineNotOffline(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   machineId: MachineId;
-}): Promise<void> {
+  manager: Pick<LoroDocumentManager, 'getOnlineMachineIds'>;
+}): Promise<MachinePresence> {
   const environment = getSessionCommandEnvironment();
   if (environment) {
     if (
@@ -2385,41 +2395,15 @@ async function ensureTargetMachineOnline(args: {
       args.machineId !== environment.auth.machineId
     )
       throw new Error('Target machine is unavailable in this workspace');
-    return;
+    return 'online';
   }
   if (args.machineId === args.auth.machineId) {
     await ensureLocalRuntimeAvailable(args.machineId, args.workspaceId);
-    return;
+    return 'online';
   }
-
-  const status = await withMachineRpcClient(
-    args,
-    async (client) => await client.requestMachineStatus({ timeoutMs: 10_000 })
-  ).catch((error: unknown) => {
-    throw new Error(
-      `Machine ${args.machineId} is offline or unreachable: ${formatErrorMessage(error)}`
-    );
-  });
-  if (!status?.success) {
-    throw new Error(
-      `Machine ${args.machineId} is offline or unavailable${
-        status?.error ? `: ${status.error}` : '.'
-      }`
-    );
-  }
-}
-
-async function getMachineOnlineState(args: {
-  auth: AuthContext;
-  workspaceId: WorkspaceId;
-  machineId: MachineId;
-}): Promise<{ online: boolean; message?: string }> {
-  try {
-    await ensureTargetMachineOnline(args);
-    return { online: true };
-  } catch (error) {
-    return { online: false, message: formatErrorMessage(error) };
-  }
+  const presence = await readMachinePresence(args.manager, args.machineId);
+  if (presence === 'offline') throw new MachineOfflineError({ machineId: args.machineId });
+  return presence;
 }
 
 export async function readSessionMachineAccess(args: {
@@ -3290,10 +3274,11 @@ async function resolveCreateContext(args: {
     requester: args.requester,
   });
   if (args.skipMachineAvailabilityCheck !== true) {
-    await ensureTargetMachineOnline({
+    await ensureTargetMachineNotOffline({
       auth: args.auth,
       workspaceId,
       machineId: targetMachine.id,
+      manager: args.manager,
     });
   }
   const agentConfig = await resolveAgentConfigForCreate({
@@ -3995,10 +3980,11 @@ async function validateSessionChatTargetForRequester(args: {
     requester: args.requester,
     localProjectId: session.project?.kind === 'local' ? session.project.localProjectId : undefined,
   });
-  await ensureTargetMachineOnline({
+  await ensureTargetMachineNotOffline({
     auth: args.auth,
     workspaceId: args.workspace.id as WorkspaceId,
     machineId: session.machineId,
+    manager: args.manager,
   });
   return session;
 }
@@ -4229,7 +4215,7 @@ async function buildSessionShowResult(
     workspace,
     session,
     historyCount: directory.length,
-    latestHistoryAt: directory[directory.length - 1]?.scalars?.timestamp,
+    latestHistoryAt: sessionHistoryActivityAt(directory[directory.length - 1]?.scalars),
     messageQueueCount: queue.length,
   };
 }
@@ -4265,18 +4251,23 @@ async function readSessionLiveStatus(args: {
   workspaceId: WorkspaceId;
   machineId: MachineId;
   sessionId: SessionId;
+  manager: Pick<LoroDocumentManager, 'getOnlineMachineIds'>;
 }): Promise<{
   machineOnline: boolean;
   liveStatus: SessionStatusResult['liveStatus'];
 }> {
-  const machineOnline = await getMachineOnlineState(args);
-  if (!machineOnline.online) {
+  let presence: MachinePresence;
+  try {
+    presence = await ensureTargetMachineNotOffline(args);
+  } catch (error) {
     return {
       machineOnline: false,
-      liveStatus: deriveSessionLiveStatus(machineOnline),
+      liveStatus: deriveSessionLiveStatus({ online: false, message: formatErrorMessage(error) }),
     };
   }
-
+  // Presence owns online/offline; the live-status RPC only adds freshness. With
+  // unknown presence, an answered RPC is the only online evidence.
+  const unknownPresence = presence === 'unknown';
   try {
     const response = await withMachineRpcClient(
       args,
@@ -4285,7 +4276,7 @@ async function readSessionLiveStatus(args: {
     );
     if (!response?.success) {
       return {
-        machineOnline: true,
+        machineOnline: !unknownPresence || response !== null,
         liveStatus: deriveSessionLiveStatus({
           online: true,
           message: response?.error ?? 'Target machine did not answer the live status request.',
@@ -4302,7 +4293,7 @@ async function readSessionLiveStatus(args: {
     };
   } catch (error) {
     return {
-      machineOnline: true,
+      machineOnline: !unknownPresence,
       liveStatus: deriveSessionLiveStatus({
         online: true,
         message: formatErrorMessage(error),
@@ -4325,6 +4316,7 @@ export async function readSessionLiveStatusesMany(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   sessions: ReadonlyArray<Pick<SessionMeta, 'id' | 'machineId'>>;
+  manager: Pick<LoroDocumentManager, 'getOnlineMachineIds'>;
 }): Promise<Map<SessionId, SessionLiveStatusBatchItem>> {
   const environment = getSessionCommandEnvironment();
   if (environment) {
@@ -4353,22 +4345,22 @@ export async function readSessionLiveStatusesMany(args: {
   const output = new Map<SessionId, SessionLiveStatusBatchItem>();
   await Promise.all(
     [...groups].map(async ([machineId, sessions]) => {
-      const online = await getMachineOnlineState({
-        auth: args.auth,
-        workspaceId: args.workspaceId,
-        machineId,
-      });
-      if (!online.online) {
+      let presence: MachinePresence;
+      try {
+        presence = await ensureTargetMachineNotOffline({ ...args, machineId });
+      } catch (error) {
+        const reason = formatErrorMessage(error);
         for (const session of sessions) {
           output.set(session.id, {
             sessionId: session.id,
             machineOnline: false,
             fresh: false,
-            ...(online.message ? { reason: online.message } : {}),
+            reason,
           });
         }
         return;
       }
+      const unknownPresence = presence === 'unknown';
       try {
         const responses = await withMachineRpcClient(
           { auth: args.auth, workspaceId: args.workspaceId, machineId },
@@ -4386,7 +4378,7 @@ export async function readSessionLiveStatusesMany(args: {
         for (const { session, response } of responses) {
           output.set(session.id, {
             sessionId: session.id,
-            machineOnline: true,
+            machineOnline: !unknownPresence || response !== null,
             fresh: response?.success === true,
             ...(response?.state ? { state: response.state } : {}),
             ...(response?.success === true && typeof response.observedAtMs === 'number'
@@ -4400,7 +4392,7 @@ export async function readSessionLiveStatusesMany(args: {
         for (const session of sessions) {
           output.set(session.id, {
             sessionId: session.id,
-            machineOnline: true,
+            machineOnline: !unknownPresence,
             fresh: false,
             reason,
           });
@@ -4427,6 +4419,7 @@ async function buildSessionStatusResult(
     workspaceId: workspace.id as WorkspaceId,
     machineId: session.machineId,
     sessionId,
+    manager,
   });
 
   return {
@@ -5006,7 +4999,12 @@ export async function cancelSessionTurn(args: {
       activeTurnId: turnId,
     };
 
-  await ensureTargetMachineOnline({ auth, workspaceId, machineId: session.machineId });
+  await ensureTargetMachineNotOffline({
+    auth,
+    workspaceId,
+    machineId: session.machineId,
+    manager,
+  });
 
   const machine = await manager.repo.getDocMeta(getMachineRoomId(session.machineId));
   const inboxCancel = getSessionCancelProtocolFields(
@@ -5115,7 +5113,9 @@ const sessionListCommand = new Command('list')
   .action(async (options: ListOptions) => {
     await runSessionCommand(options, async () => {
       const auth = getAuthContextOrThrow();
-      const workspace = await resolveWorkspaceOrThrow(auth, options.workspace);
+      const workspace = await resolveWorkspaceOrThrow(auth, options.workspace, {
+        offline: options.offline,
+      });
       if (options.openedBy && options.openedByCurrent === true) {
         throw new Error('Pass either --opened-by or --opened-by-current, not both.');
       }

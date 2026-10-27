@@ -6,6 +6,7 @@ import { SimulatorIceServersSchema } from '@/ios-simulator/webrtc-protocol';
 import { ConvexClient, ConvexHttpClient } from 'convex/browser';
 import { z } from 'zod';
 import { api } from '@lody/cloud-api';
+import { e2eeHistoryPageSchema, e2eeMailboxReplySchemas } from './cloud-e2ee-replies';
 import { ShareDeliveryEnvelopeSchema } from '@lody/shared/session-share-delivery';
 import {
   buildLoroStreamsTokenEndpoint,
@@ -20,6 +21,7 @@ import {
 } from '@lody/shared';
 import {
   resolveRuntimeArtifactsBaseUrl,
+  type CloudE2eePort,
   type CloudAccessSnapshot,
   type CloudBillingPort,
   type CloudPort,
@@ -174,6 +176,134 @@ export function createCloudStreamsTokenPort(options: {
   };
 }
 
+/** Device routes are lazy: constructing the ordinary cloud port never opens
+ * custody, obtains a device token, or touches the operating system keyring. */
+export function createCloudE2eePort(
+  options: Pick<CloudCliPortOptions, 'token' | 'authBaseUrl' | 'logger'>
+): CloudE2eePort {
+  const authBaseUrl = normalizeBaseUrl(options.authBaseUrl);
+  const fetchImpl = getCliHttpFetch({ logger: options.logger });
+  const client = (signal: AbortSignal) =>
+    new ConvexHttpClient(authBaseUrl, {
+      logger: false,
+      fetch: (input, init) => fetchImpl(input, { ...init, signal }),
+    });
+  const tokenSchema = z.object({
+    token: z.string().min(1),
+    bucketId: z.string().min(1),
+    gatewayBaseUrl: z.string().url(),
+    expiresIn: z.number().int().positive().max(900),
+    expiresAt: z.number().int().positive(),
+  });
+  const getContentToken = async (
+    input: Parameters<CloudE2eePort['getContentToken']>[0],
+    signal: AbortSignal
+  ) =>
+    tokenSchema.parse(
+      await client(signal).action(api.e2eeContent.contentStreamsToken, {
+        ...input,
+        cliToken: options.token,
+      })
+    );
+  return {
+    getHistory: async (input) =>
+      e2eeHistoryPageSchema.parse(
+        await client(AbortSignal.timeout(30_000)).action(api.e2eeWorkspaces.history, {
+          ...input,
+          cliToken: options.token,
+        })
+      ),
+    getContentToken: (input) => getContentToken(input, AbortSignal.timeout(30_000)),
+    mailboxCall: async (method, input) => {
+      const connection = client(AbortSignal.timeout(30_000));
+      const common = z.object({ workspaceId: z.string(), credential: z.string() });
+      const slot = z.object({
+        genesis: z.string(),
+        epoch: z.number().int().nonnegative(),
+        recipient: z.string(),
+      });
+      let reply: unknown;
+      switch (method) {
+        case 'put':
+          reply = await connection.mutation(api.e2eeMailbox.put, {
+            ...common.extend({ id: z.string(), frameHex: z.string() }).parse(input),
+            cliToken: options.token,
+          });
+          break;
+        case 'report':
+          reply = await connection.mutation(api.e2eeMailbox.report, {
+            ...common
+              .extend({ reportHex: z.string(), publicationHex: z.string().optional() })
+              .parse(input),
+            cliToken: options.token,
+          });
+          break;
+        case 'repair':
+          reply = await connection.mutation(api.e2eeMailbox.repair, {
+            ...common
+              .extend({ slot, id: z.string(), rejectedDigest: z.string().optional() })
+              .parse(input),
+            cliToken: options.token,
+          });
+          break;
+        case 'read':
+          reply = await connection.query(api.e2eeMailbox.read, {
+            ...common.extend({ id: z.string() }).parse(input),
+            cliToken: options.token,
+          });
+          break;
+        case 'fetch':
+          reply = await connection.query(api.e2eeMailbox.fetch, {
+            ...common
+              .extend({
+                epoch: z.number().int().nonnegative(),
+                cursor: z.string().nullable(),
+                limit: z.number().int().min(1).max(100),
+              })
+              .parse(input),
+            cliToken: options.token,
+          });
+          break;
+        case 'status':
+          reply = await connection.query(api.e2eeMailbox.status, {
+            ...common.extend({ slot }).parse(input),
+            cliToken: options.token,
+          });
+          break;
+        default:
+          throw new Error('e2ee_unknown_method');
+      }
+      return e2eeMailboxReplySchemas[method].parse(reply);
+    },
+    createContentTokenProvider: (input) =>
+      Effect.gen(function* () {
+        let bucketId: string | undefined;
+        const ports = makeLoroStreamsTokenWebPorts({
+          credential: Effect.succeed(input.credential),
+          fetchImpl: async (_endpoint, init) => {
+            const request = z
+              .object({ workspaceId: z.string(), rejectedToken: z.string().optional() })
+              .strict()
+              .parse(JSON.parse(String(init?.body)));
+            if (request.workspaceId !== input.workspaceId)
+              throw new Error('e2ee_content_context_mismatch');
+            const token = await getContentToken(
+              { ...input, rejectedToken: request.rejectedToken },
+              init?.signal ?? AbortSignal.timeout(30_000)
+            );
+            bucketId = token.bucketId;
+            return Response.json(token);
+          },
+        });
+        const provider = yield* makeLoroStreamsTokenProvider({
+          endpoint: authBaseUrl,
+          workspaceId: input.workspaceId,
+        }).pipe(Effect.provideService(LoroStreamsTokenPorts, ports));
+        return { ...provider, getBucketId: () => bucketId };
+      }),
+  };
+}
+
 /** Official-build assembly point. No cloud client may be constructed by Fleet. */
 export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
   const authBaseUrl = normalizeBaseUrl(options.authBaseUrl);
@@ -211,13 +341,14 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
 
   return {
     kind: 'cloud',
+    e2ee: createCloudE2eePort(options),
     sessionSharing: createCloudSessionSharingPort(options),
     identity: options.identity,
     access: {
       watchWorkspaceAccess: (listener, onError) =>
         subscriptionClient.onUpdate(
           api.deviceAuth.listMyWorkspacesForCliToken,
-          { token: options.token },
+          { token: options.token, includeEncrypted: true },
           (result: WorkspaceListResult) => {
             const snapshot: CloudAccessSnapshot = result.valid
               ? {

@@ -1,4 +1,13 @@
 import {
+  LOCAL_E2EE_PAIRING_PATH,
+  LocalE2eePrepareReplySchema,
+  LocalE2eeActivateResponseSchema,
+  type LocalE2eePrepareRequest,
+  type LocalE2eeActivateRequest,
+  type LocalE2eePrepareReply,
+  type LocalE2eeActivateResponse,
+} from '../e2ee-local-pairing';
+import {
   LOCAL_SCHEDULE_CONTROL_PATH,
   ScheduleControlResponseSchema,
   type ScheduleControlRequest,
@@ -182,6 +191,14 @@ export type LocalControlClientService = {
     message: AutomationControlRequest,
     options?: LocalIpcRequestOptions
   ) => Effect.Effect<AutomationControlResponse, IpcError>;
+  e2eePrepare: (
+    message: LocalE2eePrepareRequest,
+    options?: LocalIpcRequestOptions
+  ) => Effect.Effect<LocalE2eePrepareReply, IpcError>;
+  e2eeActivate: (
+    message: LocalE2eeActivateRequest,
+    options?: LocalIpcRequestOptions
+  ) => Effect.Effect<LocalE2eeActivateResponse, IpcError>;
   scheduleControl: (
     message: ScheduleControlRequest,
     options?: LocalIpcRequestOptions
@@ -943,6 +960,32 @@ function makeControlClient(
   postSessionControl?: PostSessionControlFn
 ): LocalControlClientService {
   return {
+    e2eePrepare: (message, options) =>
+      Effect.flatMap(
+        post(
+          LOCAL_E2EE_PAIRING_PATH,
+          message,
+          options?.timeoutMs ?? DEFAULT_LOCAL_CONTROL_TIMEOUT_MS
+        ),
+        ({ response, payload }) =>
+          parseJsonBody<LocalE2eePrepareReply>(
+            LocalE2eePrepareReplySchema,
+            () => 'e2ee_pairing_unavailable'
+          )(response, payload)
+      ),
+    e2eeActivate: (message, options) =>
+      Effect.flatMap(
+        post(
+          LOCAL_E2EE_PAIRING_PATH,
+          message,
+          options?.timeoutMs ?? DEFAULT_LOCAL_CONTROL_TIMEOUT_MS
+        ),
+        ({ response, payload }) =>
+          parseJsonBody<LocalE2eeActivateResponse>(
+            LocalE2eeActivateResponseSchema,
+            () => 'e2ee_pairing_unavailable'
+          )(response, payload)
+      ),
     sessionControl: (message, requestOptions) =>
       postSessionControl
         ? postSessionControl(message, requestOptions ?? {})

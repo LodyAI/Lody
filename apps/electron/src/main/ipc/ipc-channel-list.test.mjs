@@ -21,7 +21,7 @@ void test('invoke policy allows methods only within renderer-facing service grou
     'ledgerView'
   ])
     assert.equal(isIpcInvokeChannel(`e2ee.${method}`), true)
-  for (const method of ['sign', 'exportKey', 'createDevice', 'unknown'])
+  for (const method of ['sign', 'exportKey', 'createDevice', 'deviceCredential', 'unknown'])
     assert.equal(isIpcInvokeChannel(`e2ee.${method}`), false)
   assert.equal(isIpcInvokeChannel('cli.methodAddedWithoutASecondAllowlist'), true)
   assert.equal(isIpcInvokeChannel('lodyAuth:getSession'), false)

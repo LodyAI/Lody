@@ -1,16 +1,15 @@
 # CLI library
 
-`CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only. File index:
+`CLAUDE.md` aliases this file. Index:
 [README.md](README.md). Scoped rules: [acp](acp/AGENTS.md),
 [code-collab](code-collab/AGENTS.md), [file-preview](file-preview/AGENTS.md),
 [loro](loro/AGENTS.md), [pr-poller](pr-poller/AGENTS.md).
 
-**Before dispatch/sync changes, read context/message-flow.md.** The WS/DO control-plane path is DEPRECATED; do not add to it.
+**Before dispatch/sync read context/message-flow.md; before catalog/Fleet changes read [E2EE rules](e2ee/AGENTS.md).** WS/DO is deprecated; do not extend it.
 
 ## Composition and transports
 
 - Daemon commands borrow its replica; command cleanup failures never fence.
-
 - GitHub auth: conversation-owner personal → matching-owner machine → repo App,
   once per source. Failures advance without a policy RPC; local context grants
   machine eligibility. Never persist managed tokens or replay uncertain writes.
@@ -100,15 +99,14 @@ never pushed to renderers as local room health.
   lists its source; never replace a binding or merge another account's native ID.
   Refresh loads through the import's own binding. Every import write records the
   load-reported selection on the last imported user turn via `applyAcpRuntimeConfigPatch`.
-- Removing a local project archives every unarchived Session for that machine/project
-  before deleting the project row, found through the existence and metadata indexes
-  rather than by opening every Session document; a failed archive keeps the delete
-  command queued for a later scan. Worktree cleanup covers only Lody-created Session
-  worktrees of that project: inspect every worktree before submission and again
-  immediately before deletion, never force-delete or backup-commit a dirty worktree, and
-  record per-worktree deleted/kept/failed results. The original project directory is
-  never a deletion target, and cleanup failures must complete the command with a visible
-  result rather than leave removal pending.
+- Local-project deletion retains registrations referenced by Projects or group runs;
+  disable standalone display without archiving their Sessions. Catalog read/sync
+  failure keeps the command queued. Otherwise archive all unarchived machine/project
+  Sessions via existence/metadata indexes before removing the row; archive failure
+  retains the command. Explicit cleanup covers only Lody-created Session worktrees:
+  inspect before submission and deletion, never force-delete or backup-commit dirty
+  worktrees, record deleted/kept/failed results, and complete with visible results
+  even on cleanup failure. Never delete the original project directory.
 - Before changing `provider-setup-manager.ts`, read its
   [rules](../../../../.agents/docs/cli-lib-provider-setup.md): row ownership and the
   single publish commit, cancellation, when the queue may start in cloud versus OSS

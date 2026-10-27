@@ -58,6 +58,11 @@ const CatalogWorkspaceSchema = z.object({
   name: z.string(),
   slug: z.string().nullable(),
   role: z.string(),
+  contentMode: z.enum(['e2ee', 'plaintext']).optional(),
+  genesisHash: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
   state: z.enum(['active', 'remote_missing']),
   cachedAt: z.number(),
   remoteMissingAt: z.number().optional(),
@@ -91,7 +96,12 @@ export type LocalCatalogAccessSnapshot = z.infer<typeof CatalogAccessSnapshotSch
 export type LocalCatalogMemberAccessSnapshot = z.infer<typeof CatalogMemberAccessSnapshotSchema>;
 export type LocalCatalogWorkspace = z.infer<typeof CatalogWorkspaceSchema>;
 export type LocalCatalogSession = z.infer<typeof CatalogSessionSchema>;
-export type LocalWorkspaceCatalogSnapshot = z.infer<typeof CatalogSnapshotSchema>;
+export type LocalWorkspaceCatalogSnapshot = z.infer<typeof CatalogSnapshotSchema> & {
+  /** Derived from the new-owned invalid marker, never an old-writer field. */
+  encryptedCatalogUnavailable?: true;
+  /** In-memory recovery evidence, never serialized or included in diagnostics. */
+  encryptedCatalogError?: LocalWorkspaceCatalogError;
+};
 
 export class CatalogMissingError extends Data.TaggedError('CatalogMissingError')<{
   path: string;
@@ -121,6 +131,8 @@ export type CacheRemoteWorkspacesInput = {
     name: string;
     slug: string | null;
     role: string;
+    contentMode?: string;
+    genesisHash?: string;
   }>;
 };
 
@@ -155,7 +167,11 @@ export type LocalWorkspaceCatalogService = {
   listActiveWorkspaces: () => Effect.Effect<LocalCatalogWorkspace[], LocalWorkspaceCatalogError>;
   cacheRemoteWorkspaces: (
     input: CacheRemoteWorkspacesInput
-  ) => Effect.Effect<void, LocalWorkspaceCatalogError, FileLocks>;
+  ) => Effect.Effect<
+    void | { encryptedCatalogError: LocalWorkspaceCatalogError },
+    LocalWorkspaceCatalogError,
+    FileLocks
+  >;
   recordWorkspaceAccessSnapshot: (
     input: RecordWorkspaceAccessSnapshotInput
   ) => Effect.Effect<void, LocalWorkspaceCatalogError, FileLocks>;
@@ -205,7 +221,7 @@ async function ensureCatalogDir(filePath: string): Promise<void> {
   }
 }
 
-async function readCatalogFile(filePath: string): Promise<LocalWorkspaceCatalogSnapshot> {
+async function readCatalogSnapshot(filePath: string): Promise<LocalWorkspaceCatalogSnapshot> {
   let raw: string;
   try {
     raw = await fs.readFile(filePath, 'utf8');
@@ -227,7 +243,66 @@ async function readCatalogFile(filePath: string): Promise<LocalWorkspaceCatalogS
   return parsed.data;
 }
 
-async function writeCatalogFile(
+// Released CLIs strip unknown fields from v1 workspace rows. An encrypted row
+// must never enter their workspaces array: they would bootstrap it as plaintext.
+// A sibling file also survives an older CLI rewriting its ordinary catalog.
+const encryptedCatalogPath = (filePath: string) => `${filePath}.e2ee`;
+const encryptedInvalidPath = (filePath: string) => `${filePath}.e2ee-invalid`;
+async function readCatalogFile(filePath: string): Promise<LocalWorkspaceCatalogSnapshot> {
+  const ordinary = await readCatalogSnapshot(filePath);
+  try {
+    const invalid = await readCatalogSnapshot(encryptedInvalidPath(filePath));
+    if (
+      invalid.identity?.userId === ordinary.identity?.userId &&
+      invalid.machine?.machineId === ordinary.machine?.machineId
+    )
+      ordinary.encryptedCatalogUnavailable = true;
+  } catch (error) {
+    if (!(error instanceof CatalogMissingError))
+      return {
+        ...ordinary,
+        encryptedCatalogUnavailable: true,
+        encryptedCatalogError: toCatalogError(encryptedInvalidPath(filePath), error),
+      };
+  }
+  let encrypted: LocalWorkspaceCatalogSnapshot;
+  try {
+    encrypted = await readCatalogSnapshot(encryptedCatalogPath(filePath));
+  } catch (error) {
+    if (error instanceof CatalogMissingError) return ordinary;
+    // The encrypted index owns its failure. Keep the original for recovery and
+    // leave its bytes untouched, while ordinary offline work remains usable.
+    return {
+      ...ordinary,
+      encryptedCatalogUnavailable: true,
+      encryptedCatalogError: toCatalogError(encryptedCatalogPath(filePath), error),
+    };
+  }
+  if (
+    ordinary.encryptedCatalogUnavailable ||
+    !ordinary.identity ||
+    ordinary.identity.userId !== encrypted.identity?.userId ||
+    ordinary.machine?.machineId !== encrypted.machine?.machineId
+  )
+    return ordinary;
+  const encryptedWorkspaces = encrypted.workspaces.filter(
+    (workspace) => workspace.contentMode === 'e2ee'
+  );
+  const ids = new Set(encryptedWorkspaces.map((workspace) => workspace.workspaceId));
+  return {
+    ...ordinary,
+    workspaces: [
+      ...ordinary.workspaces.filter((workspace) => !ids.has(workspace.workspaceId)),
+      ...encryptedWorkspaces,
+    ],
+    sessions: [
+      ...ordinary.sessions.filter((session) => !ids.has(session.workspaceId)),
+      ...encrypted.sessions.filter((session) => ids.has(session.workspaceId)),
+    ],
+  };
+}
+
+async function writeCatalogSnapshot(
   filePath: string,
   snapshot: LocalWorkspaceCatalogSnapshot
 ): Promise<void> {
@@ -242,6 +317,118 @@ async function writeCatalogFile(
   if (process.platform !== 'win32') {
     await fs.chmod(filePath, 0o600);
   }
+}
+
+async function writeCatalogFile(
+  filePath: string,
+  snapshot: LocalWorkspaceCatalogSnapshot,
+  previous?: LocalWorkspaceCatalogSnapshot,
+  allowDegradedEncryptedCache = false
+): Promise<LocalWorkspaceCatalogSnapshot> {
+  const ids = new Set(
+    snapshot.workspaces
+      .filter((workspace) => workspace.contentMode === 'e2ee')
+      .map((workspace) => workspace.workspaceId)
+  );
+  const encryptedPath = encryptedCatalogPath(filePath);
+  const invalidPath = encryptedInvalidPath(filePath);
+  const encryptedSnapshot = {
+    ...snapshot,
+    workspaces: snapshot.workspaces.filter((workspace) => ids.has(workspace.workspaceId)),
+    sessions: snapshot.sessions.filter((session) => ids.has(session.workspaceId)),
+  };
+  const priorEncryptedIds = new Set(
+    previous?.workspaces
+      .filter((workspace) => workspace.contentMode === 'e2ee')
+      .map((workspace) => workspace.workspaceId)
+  );
+  const encryptedChanged = previous
+    ? JSON.stringify({
+        identity: snapshot.identity,
+        machine: snapshot.machine,
+        workspaces: encryptedSnapshot.workspaces,
+        sessions: encryptedSnapshot.sessions,
+      }) !==
+      JSON.stringify({
+        identity: previous.identity,
+        machine: previous.machine,
+        workspaces: previous.workspaces.filter((workspace) =>
+          priorEncryptedIds.has(workspace.workspaceId)
+        ),
+        sessions: previous.sessions.filter((session) => priorEncryptedIds.has(session.workspaceId)),
+      })
+    : ids.size > 0;
+  // Persist encrypted discovery first, then remove those rows from the legacy
+  // file. Both writes remain under the existing catalog lock. A partial write
+  // reports failure; an identity mismatch never adopts the other account's rows.
+  let encryptedError = snapshot.encryptedCatalogError;
+  const refreshEncrypted =
+    (encryptedChanged && (ids.size || priorEncryptedIds.size)) ||
+    (allowDegradedEncryptedCache && snapshot.encryptedCatalogUnavailable);
+  let invalidMarkerPublished = false;
+  // The fence belongs to new clients, outside the v1 file an old CLI rewrites.
+  // Publish before changing the encrypted slice: a failed update or crash must
+  // never make old active rows authoritative again on an offline reopen.
+  if (refreshEncrypted || encryptedError) {
+    try {
+      await writeCatalogSnapshot(invalidPath, {
+        version: CATALOG_VERSION,
+        identity: snapshot.identity,
+        machine: snapshot.machine,
+        workspaces: [],
+        sessions: [],
+      });
+      invalidMarkerPublished = true;
+    } catch (error) {
+      if (!allowDegradedEncryptedCache && refreshEncrypted) throw error;
+      encryptedError = toCatalogError(
+        invalidPath,
+        encryptedError
+          ? new AggregateError(
+              [encryptedError, error],
+              'Encrypted cache fence could not be published'
+            )
+          : error
+      );
+    }
+  }
+  if (refreshEncrypted && invalidMarkerPublished) {
+    // Never replace originals that could not be read. Ordinary mutations do
+    // not touch the encrypted slice, so they remain independently writable.
+    try {
+      if (encryptedError) throw encryptedError;
+      await writeCatalogSnapshot(encryptedPath, encryptedSnapshot);
+    } catch (error) {
+      if (!allowDegradedEncryptedCache) throw error;
+      encryptedError = toCatalogError(encryptedPath, error);
+    }
+  }
+  const ordinarySnapshot: LocalWorkspaceCatalogSnapshot = {
+    ...snapshot,
+    workspaces: snapshot.workspaces.filter((workspace) => !ids.has(workspace.workspaceId)),
+    sessions: snapshot.sessions.filter((session) => !ids.has(session.workspaceId)),
+    encryptedCatalogUnavailable: encryptedError
+      ? true
+      : allowDegradedEncryptedCache
+        ? undefined
+        : snapshot.encryptedCatalogUnavailable,
+  };
+  await writeCatalogSnapshot(filePath, ordinarySnapshot);
+  if (invalidMarkerPublished && !encryptedError) {
+    try {
+      await fs.unlink(invalidPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        // Both cache results are durable. Keep the fence and report only its
+        // unresolved cleanup; the next reconciliation owns that retry.
+        encryptedError = toCatalogError(invalidPath, error);
+        ordinarySnapshot.encryptedCatalogUnavailable = true;
+      }
+    }
+  }
+  return encryptedError
+    ? { ...ordinarySnapshot, encryptedCatalogError: encryptedError }
+    : { ...snapshot, encryptedCatalogUnavailable: ordinarySnapshot.encryptedCatalogUnavailable };
 }
 
 async function backupCorruptCatalog(filePath: string): Promise<void> {
@@ -274,16 +461,18 @@ export function makeLocalWorkspaceCatalog(
       catch: (error) => toCatalogError(filePath, error),
     }).pipe(
       Effect.catchTag('CatalogMissingError', () => Effect.succeed(emptyCatalog())),
-      Effect.catchTag('CatalogCorruptError', () =>
-        Effect.tryPromise({
-          try: async () => {
-            await backupCorruptCatalog(filePath);
-            const snapshot = emptyCatalog();
-            await writeCatalogFile(filePath, snapshot);
-            return snapshot;
-          },
-          catch: (error) => mapReadError(filePath, error),
-        })
+      Effect.catchTag('CatalogCorruptError', (corruptError) =>
+        corruptError.path !== filePath
+          ? Effect.fail(corruptError)
+          : Effect.tryPromise({
+              try: async () => {
+                await backupCorruptCatalog(filePath);
+                const snapshot = emptyCatalog();
+                await writeCatalogFile(filePath, snapshot);
+                return snapshot;
+              },
+              catch: (error) => mapReadError(filePath, error),
+            })
       )
     );
 
@@ -323,23 +512,28 @@ export function makeLocalWorkspaceCatalog(
     });
 
   const mutate = (
-    fn: (snapshot: LocalWorkspaceCatalogSnapshot) => LocalWorkspaceCatalogSnapshot
-  ): Effect.Effect<void, LocalWorkspaceCatalogError, FileLocks> =>
+    fn: (snapshot: LocalWorkspaceCatalogSnapshot) => LocalWorkspaceCatalogSnapshot,
+    allowDegradedEncryptedCache = false
+  ): Effect.Effect<LocalWorkspaceCatalogSnapshot, LocalWorkspaceCatalogError, FileLocks> =>
     withFileLock(
       lockName,
       Effect.uninterruptible(
         Effect.gen(function* () {
           const snapshot = yield* readRecoveringFromDisk();
           const updated = fn(snapshot);
-          yield* Effect.tryPromise({
-            try: () => writeCatalogFile(filePath, updated),
+          const persisted = yield* Effect.tryPromise({
+            try: () => writeCatalogFile(filePath, updated, snapshot, allowDegradedEncryptedCache),
             catch: (error) => toCatalogError(filePath, error),
           });
           cacheRevision += 1;
-          cachedRead = { snapshot: updated, cachedAtMs: clock() };
+          cachedRead = { snapshot: persisted, cachedAtMs: clock() };
+          return persisted;
         })
       )
     ).pipe(Effect.mapError((error) => toCatalogError(filePath, error)));
+  const mutateUnit = (
+    fn: (snapshot: LocalWorkspaceCatalogSnapshot) => LocalWorkspaceCatalogSnapshot
+  ) => mutate(fn).pipe(Effect.asVoid);
 
   return {
     read: readCached,
@@ -360,13 +554,24 @@ export function makeLocalWorkspaceCatalog(
         const previousById = new Map(
           snapshot.workspaces.map((workspace) => [workspace.workspaceId, workspace])
         );
-        const active = input.workspaces.map((workspace): LocalCatalogWorkspace => {
+        // A mode this client does not implement is never cached: a row without
+        // `contentMode` means plaintext, so an offline restart would fail open.
+        const supported = input.workspaces.filter(
+          (workspace) =>
+            workspace.contentMode === undefined ||
+            workspace.contentMode === 'plaintext' ||
+            workspace.contentMode === 'e2ee'
+        );
+        const active = supported.map((workspace): LocalCatalogWorkspace => {
           const previous = previousById.get(workspace.id);
           return {
             workspaceId: workspace.id,
             name: workspace.name,
             slug: workspace.slug,
             role: workspace.role,
+            ...(workspace.contentMode === 'e2ee'
+              ? { contentMode: 'e2ee' as const, genesisHash: workspace.genesisHash }
+              : {}),
             state: 'active',
             cachedAt: now,
             machine: {
@@ -392,9 +597,15 @@ export function makeLocalWorkspaceCatalog(
           machine: input.machine,
           workspaces: [...active, ...remoteMissing],
         };
-      }),
+      }, true).pipe(
+        Effect.map((snapshot) =>
+          snapshot.encryptedCatalogError
+            ? { encryptedCatalogError: snapshot.encryptedCatalogError }
+            : undefined
+        )
+      ),
     recordWorkspaceAccessSnapshot: (input) =>
-      mutate((snapshot) => ({
+      mutateUnit((snapshot) => ({
         ...snapshot,
         workspaces: snapshot.workspaces.map((workspace) => {
           if (workspace.workspaceId !== input.workspaceId) {
@@ -408,7 +619,7 @@ export function makeLocalWorkspaceCatalog(
         }),
       })),
     recordMemberAccessSnapshot: (input) =>
-      mutate((snapshot) => {
+      mutateUnit((snapshot) => {
         const nowMs = clock();
         return {
           ...snapshot,
@@ -441,7 +652,7 @@ export function makeLocalWorkspaceCatalog(
         };
       }),
     upsertSession: (session) =>
-      mutate((snapshot) => {
+      mutateUnit((snapshot) => {
         const now = getServerNow();
         const nextSession: LocalCatalogSession = { ...session, cachedAt: now };
         return {
@@ -460,11 +671,16 @@ export function localCatalogWorkspaceToWorkspaceListItem(workspace: LocalCatalog
   name: string;
   slug: string | null;
   role: string;
+  contentMode?: string;
+  genesisHash?: string;
 } {
   return {
     id: workspace.workspaceId,
     name: workspace.name,
     slug: workspace.slug,
     role: workspace.role,
+    ...(workspace.contentMode
+      ? { contentMode: workspace.contentMode, genesisHash: workspace.genesisHash }
+      : {}),
   };
 }

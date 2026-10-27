@@ -13,7 +13,7 @@ import {
   type AgentRoleId,
   type MachineId,
 } from '@lody/shared';
-import { userAtom } from '@/atoms';
+import { useWorkspaceLocalAccountId } from '@/lib/e2ee-account';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { machineFlockRowsByWorkspaceAtom } from '@/atoms/machine-flock';
 import { onlineMachineIdsAtom } from '@/atoms/presence';
@@ -40,7 +40,7 @@ export type WorkspaceAgentRolesSnapshot = {
  */
 export function useWorkspaceAgentRoles(): WorkspaceAgentRolesSnapshot {
   const { roles, synced } = useWorkspaceCatalog();
-  const currentUserId = useAtomValue(userAtom)?.id ?? null;
+  const currentUserId = useWorkspaceLocalAccountId();
   return useMemo(
     () => ({ roles: listAccessibleAgentRoles(roles, currentUserId), synced }),
     [currentUserId, roles, synced]

@@ -169,6 +169,9 @@ export class ElectronHarness {
       ...(this.hostPipe ? { LODY_E2E_LOCAL_CLI_HOST_PIPE: this.hostPipe } : {}),
       LODY_ELECTRON_DISABLE_SHELL_ENV: '1',
       LODY_ELECTRON_DISABLE_SYSTEM_PROXY_ENV: '1',
+      // Each run owns a disposable profile. A newly downloaded Electron binary
+      // must not wait on a shared macOS Keychain approval dialog during smoke.
+      LODY_ELECTRON_PLAINTEXT_AUTH_STORAGE: '1',
       ...(options.forceOnboarding === false || options.reuseRoot
         ? {}
         : { LODY_ELECTRON_FORCE_ONBOARDING: '1' }),

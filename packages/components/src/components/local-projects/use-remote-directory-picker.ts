@@ -46,12 +46,14 @@ export interface RemoteDirectoryPickerMachine {
   ownerName: string | null;
   canAddProjects: boolean;
   supportsCreateDirectory?: boolean;
+  supportsProjectFolderSelection?: boolean;
 }
 
 export type RemoteDirectoryPickerPhase = 'machine' | 'browse';
 export type RemoteDirectoryBrowseStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 export interface RemoteDirectoryPickerArgs {
+  selectionOnly?: boolean;
   machines: RemoteDirectoryPickerMachine[];
   machinesLoading?: boolean;
   initialMachineId?: MachineId | null;

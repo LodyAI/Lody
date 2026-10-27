@@ -45,10 +45,11 @@ repository's tests and the Lab, with no compatibility promise.
 | Group | Exports |
 | --- | --- |
 | Bytes and encoding | `Bytes`, `encodeCbor`, `decodeCbor`, `CborValue`, `ValidationError`, `ValidationErrorCode`, `ContentError` |
-| Signatures | `verifySignature`, `verifyContentSignature`, `signVerified`, `nativeDeviceSigner`, `DeviceSigner`, `ed25519WasmActive` |
+| Signatures | `deviceCredentialBindingBytes`, `signDeviceCredentialBinding`, `verifyDeviceCredentialBinding`, `DeviceCredentialBinding`, `verifySignature`, `verifyContentSignature`, `signVerified`, `nativeDeviceSigner`, `DeviceSigner`, `ed25519WasmActive` |
 | Content format | `encodeDocumentContext`, `encodeContentContext`, `encodeContentHeader`, `contentKeyInfo`, `contentHkdfSalt`, `contentAad`, `contentSigningBytes`, `inspectContentFrame`, `DocumentScope`, `ContentScope`, `ContentPurpose`, `ContentHeader`, `ContentMetadata` |
 | Documents | `sealDocument`, `openDocument`, `authenticateDocument`, `admitDocument`, `deriveDocumentKey`, `scopedDocumentKey`, `importDocumentKey`, `exportDocumentKey`, `disposeDocumentKey`, `DocumentKey` |
 | Content crypto | `deriveContentKey`, `disposeContentKey`, `sealContentAead`, `openContentAead`, `ContentKey`, `SealedContentAead` |
+| Realtime content primitives | `sealPresenceContent`, `openPresenceContent`, `sealRpcRequestContent`, `openRpcRequestContent`, `sealRpcResponseContent`, `openRpcResponseContent` |
 | Epoch HPKE | `epochHpkeAad`, `sealEpochKeyHpke`, `openEpochKeyHpke`, `HpkePrimitiveError`, `EpochHpkeContext`, `SealedEpochHpke` |
 | Records | `decodeRecord`, `hashRecordBytes`, `recordSigningBytes`, `joinRequestSigningBytes`, `possessionSigningBytes`, `DecodedRecord`, `RecordBody`, `Operation`, `JoinRequest`, `Role`, `DeviceKind`, `LedgerError`, `LedgerErrorCode` |
 | Replay and views | `verifyLedger`, `verifyLedgerEffect`, `extendLedger`, `extendLedgerEffect`, `requireLedgerContinuation`, `hasVerifiedRecordHash`, `hasVerifiedCheckpoint`, `contentPermissions`, `epochHistoryPacket`, `epochPublicationRecord`, `LedgerView`, `LedgerCheckpoint`, `LedgerState`, `Member`, `Device`, `ContentPermissions`, `EpochHistoryPacket`, `HistoricalContentAuthor` |
@@ -101,3 +102,5 @@ repository's tests and the Lab, with no compatibility promise.
 
 Node-only custody with an explicit owning Scope. The host qualifies its KEK wrapper;
 file protection admits machine identities only. Personal identities require OS protection.
+
+`NodeE2eeCustody.prepareDeviceCredential(genesis, signingPublicKey)` publishes an independent 32-byte device access credential once and returns its lowercase hex value plus SHA-256 of the raw bytes. `NodeE2eeCustody.deviceCredential` only reopens it; missing or corrupt originals never regenerate. Credential blobs use a distinct KEK-protected purpose bound to genesis and public key, without changing device or epoch formats. These are access credentials, never content keys.

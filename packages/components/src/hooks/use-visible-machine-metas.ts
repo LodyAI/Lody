@@ -8,7 +8,7 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import { getMachineMetaMapAtom } from '@/atoms/machines';
-import { userAtom } from '@/atoms';
+import { useWorkspaceLocalAccountId } from '@/lib/e2ee-account';
 import { onlineMachineIdsAtom } from '@/atoms/presence';
 import { useMachineFlockRowsByMachineIdsState } from '@/hooks/use-machine-flock-rows';
 import {
@@ -60,7 +60,7 @@ export function useVisibleMachineMetas(
   const canQuery = enabled && canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
   const rawMachines = useAtomValue(getMachineMetaMapAtom);
   const onlineMachineIds = useAtomValue(onlineMachineIdsAtom);
-  const currentUserId = useAtomValue(userAtom)?.id ?? null;
+  const currentUserId = useWorkspaceLocalAccountId();
   const queriedAccessRows = useCloudQuery(
     cloudOperations.machines.listVisibleMachines,
     enabled && workspaceId ? { workspaceId } : 'skip'

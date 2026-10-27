@@ -267,6 +267,8 @@ export interface UnifiedProjectSelectorViewProps extends Omit<
    * available source, while search still evaluates the complete option list.
    */
   renderLimit?: number;
+  /** Opens the project creator; omitted by surfaces that cannot start multi-repository work. */
+  onCreateProject?: () => void;
 }
 
 function ProjectAccessStatus({
@@ -412,6 +414,7 @@ export function UnifiedProjectSelectorView({
   contentClassName,
   contentStyle,
   renderLimit,
+  onCreateProject,
 }: UnifiedProjectSelectorViewProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -656,14 +659,12 @@ export function UnifiedProjectSelectorView({
                 }}
               >
                 {filteredOptions.map((option) => {
-                  // Local projects show only the name; the path lives in a hover
-                  // tooltip. GitHub repos keep their inline description line.
+                  // Local and GitHub projects show only the name; local paths
+                  // live in a hover tooltip. Groups keep their member summary.
                   const localPath =
                     option.selection.kind === 'local' ? option.description : undefined;
                   const inlineDescription =
-                    option.selection.kind === 'github' || option.selection.kind === 'group'
-                      ? option.description
-                      : undefined;
+                    option.selection.kind === 'group' ? option.description : undefined;
                   const labelNode = (
                     <span
                       className={cn('truncate', option.value === selectedValue && 'font-medium')}
@@ -720,6 +721,11 @@ export function UnifiedProjectSelectorView({
           <Menu.Item icon={CircleSlash2} onClick={() => onChange({ kind: 'none' })}>
             {clearLabel}
           </Menu.Item>
+          {onCreateProject ? (
+            <Menu.Item icon={Folders} onClick={onCreateProject}>
+              {t('chat.projectPicker.createProject', 'Create project')}
+            </Menu.Item>
+          ) : null}
           <Menu.Item icon={FolderPlus} onClick={onAddLocalProject}>
             {t('chat.contextSwitch.addProject', 'Add a folder')}
           </Menu.Item>

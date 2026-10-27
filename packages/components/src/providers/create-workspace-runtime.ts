@@ -215,8 +215,13 @@ export function resolveWorkspaceRuntimeCacheIdentity(
   };
 }
 
+export type WorkspaceE2eeTransport = {
+  createTokenProvider(signal: AbortSignal): ReturnType<typeof createLoroStreamsTokenProviderLegacy>;
+  bucketId(): string | null;
+};
 type RuntimeDeps = {
   content: WorkspaceStreamsContent;
+  e2ee?: WorkspaceE2eeTransport;
   /** Cancels an initialization retired by the provider before publication. */
   signal?: AbortSignal;
   accountId?: string | null;
@@ -465,6 +470,8 @@ function createPendingResponseRegistry<T>(defaultTimeoutMs: number) {
 
 export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<WorkspaceRuntime> {
   deps.signal?.throwIfAborted();
+  const protectedContent = deps.content.mode === 'protected';
+  if (protectedContent && !deps.e2ee) throw new Error('e2ee_transport_unavailable');
   const cacheIdentity = resolveWorkspaceRuntimeCacheIdentity(deps.workspaceId, desktopWindowId());
   const createDeferred = <T>() => {
     let resolve: ((value: T | PromiseLike<T>) => void) | undefined;
@@ -521,8 +528,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const transportReady = createDeferred<void>();
   // Runtime dispose intentionally rejects this deferred; swallow that expected rejection.
   void transportReady.promise.catch(() => {});
-  const syncMode: PlatformSyncMode =
-    deps.syncMode ?? (isElectronLocalDataPlaneEnabled() ? 'dual' : 'cloud');
+  const syncMode: PlatformSyncMode = protectedContent
+    ? 'cloud'
+    : (deps.syncMode ?? (isElectronLocalDataPlaneEnabled() ? 'dual' : 'cloud'));
   // Historical name: true whenever a local plane exists (dual OR local).
   const electronLocalDataPlane = syncMode !== 'cloud';
   // False only on the local-only platform: no Streams member, no token
@@ -792,8 +800,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     provider: LoroStreamsTokenProviderLegacy | null
   ): string | undefined => provider?.getShardHostSuffix();
 
-  const getMetaStreamUrl = (baseUrl: string): string =>
-    getWorkspaceMetaStreamUrl(workspaceId, baseUrl);
+  const getMetaStreamUrl = (baseUrl: string): string => {
+    const bucketId = protectedContent ? deps.e2ee?.bucketId() : undefined;
+    if (protectedContent && !bucketId) throw new Error('e2ee_content_configuration');
+    return getWorkspaceMetaStreamUrl(workspaceId, baseUrl, bucketId ?? undefined);
+  };
 
   // The Meta checkpoint was captured with this window's hydrated meta Flock
   // when the repo was created; deleting it makes the next Meta session bootstrap.
@@ -1698,19 +1709,21 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     if (!streamsTokenProvider) {
       const controller = new AbortController();
       streamsTokenAbort = controller;
-      streamsTokenProvider = createLoroStreamsTokenProviderLegacy({
-        endpoint: buildLoroStreamsTokenEndpoint(import.meta.env.VITE_CONVEX_SITE_URL),
-        workspaceId,
-        authToken: () => authToken,
-        fetchImpl: (input, init) =>
-          fetch(input, {
-            ...init,
-            signal: init?.signal
-              ? AbortSignal.any([controller.signal, init.signal])
-              : controller.signal,
-          }),
-        onEvent: logTokenProviderEvent,
-      });
+      streamsTokenProvider = deps.e2ee
+        ? deps.e2ee.createTokenProvider(controller.signal)
+        : createLoroStreamsTokenProviderLegacy({
+            endpoint: buildLoroStreamsTokenEndpoint(import.meta.env.VITE_CONVEX_SITE_URL),
+            workspaceId,
+            authToken: () => authToken,
+            fetchImpl: (input, init) =>
+              fetch(input, {
+                ...init,
+                signal: init?.signal
+                  ? AbortSignal.any([controller.signal, init.signal])
+                  : controller.signal,
+              }),
+            onEvent: logTokenProviderEvent,
+          });
       eagerSyncAuthCallback = streamsTokenProvider.createAuthCallback();
     }
     return streamsTokenProvider;
@@ -1740,6 +1753,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     provider: LoroStreamsTokenProviderLegacy,
     streamsBaseUrl: string
   ): LoroStreamsJsonStreamClient => {
+    if (protectedContent) throw new Error('e2ee_rpc_unavailable');
     if (!jsonStreamClient) {
       jsonStreamClient = createLoroStreamsJsonStreamClient({
         bucketId: LORO_STREAMS_BUCKET_ID,
@@ -1806,6 +1820,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const getMachineRpcClient = async (
     machineId: MachineId
   ): Promise<LoroStreamsMachineRpcClient> => {
+    if (protectedContent) throw new Error('e2ee_rpc_unavailable');
     const streamClient = await waitForMachineRpcTransportReady();
     const responseDispatcher = getMachineRpcResponseDispatcher(streamClient);
 
@@ -1866,6 +1881,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestSessionHistoryRead,
     requestSessionHistoryWrite,
     requestFilePreview,
+    requestFileDownloadChunk,
     requestLocalCodeCollabFileIndex,
     requestCodeCollabOpenText,
     requestCodeCollabRefreshText,
@@ -1891,6 +1907,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestMachinePiExtensions,
   } = createWorkspaceMachineRpcFacade({
     getSessionToken: () => authToken,
+    ...(protectedContent
+      ? { isLocalControlMachine: (machineId: MachineId) => machineId === sendLocalMachineId }
+      : {}),
     getMachineProtocolCapabilities,
     workspaceId,
     targetRouter,
@@ -3002,6 +3021,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   };
 
   const startPresenceTransport = () => {
+    if (protectedContent) return;
     if (!streamsTokenProvider) {
       console.warn(
         'createWorkspaceRuntime: cannot start presence transport without token provider',
@@ -3107,6 +3127,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   ): StreamsTransportAdapter =>
     createWorkspaceStreamsTransport({
       content: deps.content,
+      ...(protectedContent ? { bucketId: deps.e2ee?.bucketId() ?? undefined } : {}),
       repo,
       workspaceId,
       documentRemoteCursorStore: remoteCursorStore,
@@ -3173,7 +3194,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         startPresenceTransport();
       }
 
-      createMachineRpcJsonStreamClient(activeStreamsTokenProvider, streamsBaseUrl);
+      if (!protectedContent)
+        createMachineRpcJsonStreamClient(activeStreamsTokenProvider, streamsBaseUrl);
 
       if (isMetaRemoteCursorBypassActive()) {
         await dropSuspectMetaCheckpointBeforeAttach(streamsBaseUrl);
@@ -3317,7 +3339,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         return;
       }
       startPresenceTransport();
-      createMachineRpcJsonStreamClient(provider, streamsBaseUrl);
+      if (!protectedContent) createMachineRpcJsonStreamClient(provider, streamsBaseUrl);
       cloudAttachDroppedSuspectCheckpoint = false;
       try {
         // addTransport joins routed rooms but does not await their catch-up
@@ -4079,6 +4101,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   }
 
   const ensureDocStream = async (roomId: string): Promise<void> => {
+    // The protected Repo creates the stream from its encrypted room session in
+    // the background. Local session acceptance never needs network or an empty
+    // standalone document writer.
+    if (protectedContent) return;
     requirePlaintextWorkspaceStreamsContent(deps.content);
     if (electronLocalDataPlane) {
       const plane = await targetRouter.prepareDocTarget(roomId);
@@ -4153,42 +4179,45 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
    */
   const eagerSyncScope = workspaceId;
   const materializedSessionIds = new Set<SessionId>();
-  eagerSyncWorkerClient = createEagerSyncWorkerClient({
-    content: { mode: deps.content.mode },
-    workspaceId,
-    scope: eagerSyncScope,
-    localConnection: createLocalLoroDataPlaneConnection,
-    resolveTransport: async (roomId) => {
-      await targetRouter.prepareDocTarget(roomId);
-      const plane = targetRouter.getReadinessTransportForRoom({ kind: 'doc', id: roomId });
-      if (plane === 'local') return { plane: 'local' };
-      if (!cloudPlaneEnabled || !streamsTokenProvider) {
-        throw new Error('Eager-sync cloud transport unavailable');
-      }
-      // Prime endpoint-derived routing before handing the transport to the worker.
-      await streamsTokenProvider.getToken();
-      // Match the mounted foreground transport. `transportStreamsBaseUrl`
-      // records the endpoint selected when that transport was attached.
-      const baseUrl = transportStreamsBaseUrl ?? getStreamsBaseUrlForProvider(streamsTokenProvider);
-      return {
-        plane: 'cloud',
-        streamId: getLoroStreamIdForDocId(workspaceId, roomId),
-        options: {
-          bucketId: LORO_STREAMS_BUCKET_ID,
-          metaStreamId: getLoroMetaStreamId(workspaceId),
-          baseUrl,
-          shardUrls: getLoroStreamsShardUrls(
-            baseUrl,
-            getStreamsShardHostSuffixForProvider(streamsTokenProvider)
-          ),
+  eagerSyncWorkerClient = protectedContent
+    ? null
+    : createEagerSyncWorkerClient({
+        content: { mode: deps.content.mode },
+        workspaceId,
+        scope: eagerSyncScope,
+        localConnection: createLocalLoroDataPlaneConnection,
+        resolveTransport: async (roomId) => {
+          await targetRouter.prepareDocTarget(roomId);
+          const plane = targetRouter.getReadinessTransportForRoom({ kind: 'doc', id: roomId });
+          if (plane === 'local') return { plane: 'local' };
+          if (!cloudPlaneEnabled || !streamsTokenProvider) {
+            throw new Error('Eager-sync cloud transport unavailable');
+          }
+          // Prime endpoint-derived routing before handing the transport to the worker.
+          await streamsTokenProvider.getToken();
+          // Match the mounted foreground transport. `transportStreamsBaseUrl`
+          // records the endpoint selected when that transport was attached.
+          const baseUrl =
+            transportStreamsBaseUrl ?? getStreamsBaseUrlForProvider(streamsTokenProvider);
+          return {
+            plane: 'cloud',
+            streamId: getLoroStreamIdForDocId(workspaceId, roomId),
+            options: {
+              bucketId: LORO_STREAMS_BUCKET_ID,
+              metaStreamId: getLoroMetaStreamId(workspaceId),
+              baseUrl,
+              shardUrls: getLoroStreamsShardUrls(
+                baseUrl,
+                getStreamsShardHostSuffixForProvider(streamsTokenProvider)
+              ),
+            },
+          };
         },
-      };
-    },
-    auth: async (context) => {
-      if (!cloudPlaneEnabled || !eagerSyncAuthCallback) return undefined;
-      return eagerSyncAuthCallback(context);
-    },
-  });
+        auth: async (context) => {
+          if (!cloudPlaneEnabled || !eagerSyncAuthCallback) return undefined;
+          return eagerSyncAuthCallback(context);
+        },
+      });
 
   const awaitSessionReaderMetadata = (
     roomId: string,
@@ -4712,6 +4741,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const createPreviewVisualCommentStore = async (
     sessionId: SessionId
   ): Promise<PreviewVisualCommentDocStore> => {
+    if (protectedContent) throw new Error('e2ee_feature_unavailable');
     const roomId = getPreviewCommentRoomId(sessionId);
     const persistedDoc = await repo.openPersistedDoc(roomId);
 
@@ -4805,6 +4835,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     releaseDelayMs: STORE_RELEASE_DELAY_MS,
     unload: (id) => repo.unloadDoc(getScheduleRoomId(id)),
     create: async (id) => {
+      if (protectedContent) throw new Error('e2ee_feature_unavailable');
       const roomId = getScheduleRoomId(id);
       const handle = await repo.openPersistedDoc(roomId);
       const mirror = new Mirror({
@@ -5100,6 +5131,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   };
 
   startBackgroundSyncCoordinator = () => {
+    if (protectedContent) return;
     if (
       backgroundSyncCoordinator ||
       backgroundSyncCoordinatorStartPromise ||
@@ -5351,7 +5383,14 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   }, RECONNECT_BACKSTOP_INTERVAL_MS);
 
   window.repo = repo;
-  const codeCollabFileIndexCache = createCodeCollabFileIndexCache(repo);
+  const codeCollabFileIndexCache = protectedContent
+    ? {
+        acquire: async () => {
+          throw new Error('e2ee_feature_unavailable');
+        },
+        dispose: async () => {},
+      }
+    : createCodeCollabFileIndexCache(repo);
   const sendResources = createSessionSendResources({
     acquire: sessionStoreCache.acquire,
     releaseRef: sessionStoreCache.releaseRef,
@@ -5372,6 +5411,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       sendResources,
       requestSessionDispatchTurn,
       requestSessionSteer,
+      contentMode: protectedContent ? 'e2ee' : 'plaintext',
       isMachineRpcUnreachable,
     },
     token: () => authToken,
@@ -5384,7 +5424,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       });
   };
   if (initialMetaSyncCompleted) resumePendingInputs();
-  if (deps.accountId) {
+  if (deps.accountId && !protectedContent) {
     const accountId = deps.accountId;
     let migrationStarted = false;
     startLegacySendMigration = () => {
@@ -5399,6 +5439,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           sendResources,
           requestSessionDispatchTurn,
           requestSessionSteer,
+          contentMode: protectedContent ? 'e2ee' : 'plaintext',
         },
       }).catch((error: unknown) => {
         console.warn('Legacy pending messages could not be migrated', error);
@@ -5437,6 +5478,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   return {
     workspaceSlug: deps.workspaceSlug,
     workspaceId,
+    contentMode: protectedContent ? 'e2ee' : 'plaintext',
     repo,
     accountId: deps.accountId ?? null,
     pendingSends,
@@ -5467,7 +5509,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       targetMachineMonitor.subscribeMachine(machineId, listener),
     forceMachineMonitorSample: (machineId) => targetMachineMonitor.forceSample(machineId),
     publishSessionViewing: (args: { sessionId: SessionId; userId: string } | null) =>
-      presenceTransport.publishSessionViewing(args),
+      protectedContent ? undefined : presenceTransport.publishSessionViewing(args),
     ensureDocStream,
     // Every store access must be ref-counted so eviction cannot dispose+unload
     // a doc mid-use. releaseRef only starts the warm-release timer, so this
@@ -5532,6 +5574,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestSessionEditAndResend,
     requestSessionDispatchTurn,
     requestFilePreview,
+    requestFileDownloadChunk,
     requestLocalCodeCollabFileIndex,
     requestCodeCollabOpenText,
     requestCodeCollabRefreshText,

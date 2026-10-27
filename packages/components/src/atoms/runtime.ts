@@ -1,3 +1,4 @@
+import type { FileDownloadRequest, FileDownloadResponse } from '@lody/shared';
 import type {
   MemoryProviderRequest,
   MemoryProviderResponse,
@@ -201,6 +202,8 @@ export type WorkspaceRuntime = {
    * The workspace id used for IndexedDB/WebSocket connections.
    */
   readonly workspaceId: WorkspaceId;
+  /** Missing only on older ordinary test/embedded ports; encrypted runtimes set it explicitly. */
+  readonly contentMode?: 'plaintext' | 'e2ee';
   readonly sendResources: SessionSendResources;
   /** In-memory sends whose attachments are still preparing; lost with the page. */
   readonly pendingSends: PendingSessionSends | null;
@@ -431,6 +434,11 @@ export type WorkspaceRuntime = {
    * File Preview v3: read one file from the machine. Never activates Code Collab
    * there, and always resolves (transport failures come back as `status: 'error'`).
    */
+  requestFileDownloadChunk: (
+    machineId: MachineId,
+    request: FileDownloadRequest,
+    ownerSessionId?: string
+  ) => Promise<FileDownloadResponse>;
   requestFilePreview: (
     machineId: MachineId,
     request: Omit<FilePreviewV3Request, 'v'>,

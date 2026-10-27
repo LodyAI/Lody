@@ -1,0 +1,71 @@
+import { z } from 'zod';
+
+/** This route is served exclusively on the same-user local control socket, never a network listener. */
+export const LOCAL_E2EE_PAIRING_PATH = '/e2ee/pairing';
+const identifier = z.string().min(1).max(128);
+const hex32 = z.string().regex(/^[0-9a-f]{64}$/);
+const hex16 = z.string().regex(/^[0-9a-f]{32}$/);
+const common = {
+  machineId: identifier,
+  accountId: identifier,
+  workspaceId: identifier,
+  genesisHash: hex32,
+  frontendSigningPublicKey: hex32,
+};
+export const LocalE2eePrepareRequestSchema = z
+  .object({
+    ...common,
+    type: z.literal('prepare'),
+    genesisRecordHex: z.string().regex(/^(?:[0-9a-f]{2}){1,8192}$/),
+    membershipId: hex16,
+    pairingSessionId: hex16,
+  })
+  .strict();
+export const LocalE2eeActivateRequestSchema = z
+  .object({
+    ...common,
+    type: z.literal('activate'),
+    pairingSessionId: hex16,
+    signingPublicKey: hex32,
+  })
+  .strict();
+export const LocalE2eePairingRequestSchema = z.discriminatedUnion('type', [
+  LocalE2eePrepareRequestSchema,
+  LocalE2eeActivateRequestSchema,
+]);
+export const LocalE2eePrepareResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    type: z.literal('prepare'),
+    machineId: identifier,
+    pairingSessionId: hex16,
+    signingPublicKey: hex32,
+    encryptionPublicKey: hex32,
+    possessionSignature: z.string().regex(/^[0-9a-f]{128}$/),
+    credentialHash: hex32,
+    bindingSignature: z.string().regex(/^[0-9a-f]{128}$/),
+    protection: z.enum(['os-keystore', 'file']),
+  })
+  .strict();
+/** Exact same-user receipt: this request's unpublished generation was superseded. */
+export const LocalE2eePrepareSupersededResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    type: z.literal('prepare-superseded'),
+    machineId: identifier,
+    pairingSessionId: hex16,
+  })
+  .strict();
+export const LocalE2eePrepareReplySchema = z.union([
+  LocalE2eePrepareResponseSchema,
+  LocalE2eePrepareSupersededResponseSchema,
+]);
+export type LocalE2eePrepareReply = z.infer<typeof LocalE2eePrepareReplySchema>;
+export const LocalE2eeActivateResponseSchema = z
+  .object({ ok: z.literal(true), type: z.literal('activate') })
+  .strict();
+export type LocalE2eePrepareRequest = z.infer<typeof LocalE2eePrepareRequestSchema>;
+export type LocalE2eeActivateRequest = z.infer<typeof LocalE2eeActivateRequestSchema>;
+export type LocalE2eePairingRequest = z.infer<typeof LocalE2eePairingRequestSchema>;
+export type LocalE2eePrepareResponse = z.infer<typeof LocalE2eePrepareResponseSchema>;
+export type LocalE2eeActivateResponse = z.infer<typeof LocalE2eeActivateResponseSchema>;

@@ -1,10 +1,16 @@
 import { MemoryBindingSchema } from './memory-provider';
 import { z } from 'zod';
 
-import { AcpConfigOptionValueSchema, ProjectRefSchema } from './message-schemas';
+import {
+  AcpConfigOptionValueSchema,
+  ProjectRefSchema,
+  SessionInputBlocksSchema,
+  ACPTurnConfigSchema,
+} from './message-schemas';
 import type { ProjectRef } from './project';
 import { classifyPermissionModeFace, type AcpConfigOptionSummary } from './ai';
 import { isSensitiveAcpConfigOptionId } from './acp-config-option-sensitivity';
+import { isAcpFastModeConfigId } from './acp-run-config';
 
 export const SCHEDULE_PROMPT_MAX_BYTES = 32 * 1024;
 export { SCHEDULES_PROTOCOL_VERSION as SCHEDULE_PROTOCOL_VERSION } from './machine-protocol-capabilities';
@@ -92,8 +98,9 @@ export const ScheduleAgentSchema = z
   .strict();
 
 /**
- * Older Schedule writers stringified ACP booleans. Interpret only exact boolean
- * literals for options the target declares boolean; select strings stay strings.
+ * Older Schedule writers stringified ACP booleans. Interpret exact boolean
+ * literals for declared booleans and for absent semantic Fast ids; explicit
+ * selects and all other strings retain their type.
  * This is an execution/display projection, never a persisted-definition migration:
  * the Registry fingerprint and frozen run definition must remain unchanged.
  */
@@ -102,16 +109,19 @@ export function normalizeLegacyScheduleAgent(
   options: readonly Pick<AcpConfigOptionSummary, 'id' | 'type'>[] = []
 ): z.infer<typeof ScheduleAgentSchema> {
   if (!agent.configOptionValues) return agent;
-  const booleans = new Set(
-    options.filter((option) => option.type === 'boolean').map((option) => option.id)
-  );
+  const optionsById = new Map(options.map((option) => [option.id, option]));
   return {
     ...agent,
     configOptionValues: Object.fromEntries(
-      Object.entries(agent.configOptionValues).map(([id, value]) => [
-        id,
-        booleans.has(id) && (value === 'true' || value === 'false') ? value === 'true' : value,
-      ])
+      Object.entries(agent.configOptionValues).map(([id, value]) => {
+        const option = optionsById.get(id);
+        const isBoolean =
+          option?.type === 'boolean' || (option === undefined && isAcpFastModeConfigId(id));
+        return [
+          id,
+          isBoolean && (value === 'true' || value === 'false') ? value === 'true' : value,
+        ];
+      })
     ),
   };
 }
@@ -119,6 +129,7 @@ export function normalizeLegacyScheduleAgent(
 export const ScheduleDefinitionSchema = z
   .object({
     scheduleId: identifier,
+    messageVersion: z.literal(1).optional(),
     title: z.string().trim().min(1).max(200),
     ownerId: z.string().min(1),
     // Pin execution to the machine that the human authorized. Moving an Agent
@@ -159,9 +170,35 @@ export const ScheduleActivitySchema = z
   .strict();
 export type ScheduleActivity = z.infer<typeof ScheduleActivitySchema>;
 
+/** Frozen human-authored message; absent on legacy prompt-only tasks. */
+export const ScheduledMessageSchema = ACPTurnConfigSchema.pick({
+  mcpServerIds: true,
+  agentRoleId: true,
+  agentRoleRevision: true,
+  agentRoleSnapshot: true,
+})
+  .extend({
+    inputBlocks: SessionInputBlocksSchema.min(1).refine(
+      (blocks) => blocks.some((block) => block.type !== 'text' || block.text.trim().length > 0),
+      'Message must contain content'
+    ),
+    rolePromptPrefix: z.string().max(32768).optional(),
+  })
+  .strict();
+export type ScheduledMessage = z.infer<typeof ScheduledMessageSchema>;
+
+/** The prompt projection of a complete message; writers and readers must agree byte for byte. */
+export function scheduledMessagePrompt(message: Pick<ScheduledMessage, 'inputBlocks'>): string {
+  return message.inputBlocks
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text)
+    .join('\n');
+}
+
 export type ScheduleDocument = {
   definition: ScheduleDefinition;
   prompt: string;
+  message?: ScheduledMessage;
   timeline: ScheduleActivity[];
 };
 
@@ -179,6 +216,7 @@ export const ScheduleRegistryRowSchema = ScheduleDefinitionSchema.pick({
   updatedAt: true,
 }).extend({
   elevatedPermissions: z.boolean().default(false),
+  scheduledMessage: z.literal(true).optional(),
   definitionFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
   agentConfigId: z.string().min(1),
   projectKind: z.enum(['local', 'github']).optional(),
@@ -194,6 +232,7 @@ export const ScheduleRuntimeRowSchema = z.object({
   nextScheduledAt: timestamp.optional(),
   queueState: z.enum(['due', 'waiting_for_agent', 'retrying', 'blocked']).optional(),
   blockedCode: z.string().max(100).optional(),
+  messageState: z.enum(['pending', 'sent', 'cancelled', 'failed']).optional(),
   lastDispatch: z
     .object({ scheduledFor: timestamp, dispatchedAt: timestamp, sessionId: z.string() })
     .optional(),

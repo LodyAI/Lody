@@ -153,6 +153,12 @@ this page is the full text of the rules summarised there.
     must stay separate actions. Gated on `useWorkspaceMembers().isMultiMember`:
     a solo workspace has nobody to hand the session to, so no owner UI renders.
     Any member may transfer, mirroring task owner assignment.
+- Rename from the mobile menu, desktop toolbar and command uses
+  `handleRenameCurrentSession` and its shared `canRenameCurrentSession` check.
+  Metadata must match `activeTabSessionId` and be unarchived; mobile replacement
+  viewers suppress Rename while desktop side viewers do not. The ID match also
+  rejects a draft or pending child's display fallback to the parent. Opening the
+  existing dialog snapshots its target; saving does not re-read the active tab.
 - **The `?tab` search value is the single source of truth for the active
   conversation tab.** `session-detail.tsx` DERIVES the active tab from the
   route search (`resolveActiveSessionTab` in `lib/session-tab-url.ts`; drafts

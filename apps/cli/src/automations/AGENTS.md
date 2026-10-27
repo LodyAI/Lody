@@ -28,3 +28,5 @@
   including terminal PRs, under existing quota/fairness gates. Actions denial cools
   only Actions reads. Source data belongs in this ledger, not poller scheduling state.
   Revalidate owner metadata before publishing.
+- Fleet uses the shared workspace content policy to withhold Automations from encrypted
+  workspaces until their automation channel is implemented, including control and retry paths.

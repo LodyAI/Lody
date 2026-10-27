@@ -1,3 +1,4 @@
+import { LOCAL_E2EE_PAIRING_PATH } from '@lody/shared/e2ee-local-pairing';
 import type * as http from 'http';
 import { AUTOMATION_CONTROL_PATH } from '@lody/shared/automations';
 import { LOCAL_MACHINE_RPC_PATH, LOCAL_SCHEDULE_CONTROL_PATH } from '@lody/shared';
@@ -100,6 +101,7 @@ export function createLocalSessionControlRequestHandler(
       requestPath !== AUTOMATION_CONTROL_PATH &&
       requestPath !== LOCAL_SESSION_CONTROL_PATH &&
       requestPath !== LOCAL_MACHINE_RPC_PATH &&
+      requestPath !== LOCAL_E2EE_PAIRING_PATH &&
       requestPath !== LOCAL_PROJECT_CONTROL_PATH
     ) {
       config.logger.debug(

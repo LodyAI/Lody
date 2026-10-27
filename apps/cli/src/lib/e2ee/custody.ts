@@ -90,7 +90,7 @@ const native = <A>(work: () => Promise<A>) =>
   );
 // Windows mode bits do not restrict a DACL. Protect a newly created directory
 // before publishing secrets; verify existing ACLs without silently repairing them.
-function windowsAcl(path: string, create = false) {
+function windowsAcl(path: string, create = false, nodeProcess?: NodeProcessApi) {
   if (process.platform !== 'win32') return Effect.void;
   const encoded = Buffer.from(path, 'utf8').toString('base64');
   const script = `
@@ -130,7 +130,11 @@ foreach ($r in $a.GetAccessRules($true, $true, [Security.Principal.SecurityIdent
     ],
     maxOutputBytes: 1024,
     timeout: 15_000,
-  }).pipe(Effect.provide(platformLayer({})), Effect.asVoid, Effect.catchCause(processFailure));
+  }).pipe(
+    Effect.provide(platformLayer({ nodeProcess })),
+    Effect.asVoid,
+    Effect.catchCause(processFailure)
+  );
 }
 async function exists(path: string) {
   try {
@@ -188,16 +192,26 @@ export const makeCliE2eeCustody = Effect.fn('CliE2eeCustody.open')(function* (op
   readonly directory: string;
   readonly keyring?: MachineKeyring;
   readonly nodeProcess?: NodeProcessApi;
+  /** Native DACL boundary; tests can model interrupted initialization on any OS. */
+  readonly directoryAcl?: (
+    directory: string,
+    initialize: boolean
+  ) => Effect.Effect<void, NodeE2eeCustodyError>;
 }) {
   const directory = options.directory;
   if (!isAbsolute(directory)) return yield* failure('invalid-input');
-  const createdDirectory = yield* native(async () => {
+  const initializeDirectory = yield* native(async () => {
     const created = !(await exists(directory));
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await privatePath(directory, true);
-    return created;
+    // An interruption before the first ACL publication leaves an empty directory.
+    // It has no originals to expose or reinterpret, so the next open can finish
+    // initialization. Once anything exists, ACL changes must never repair access.
+    return created || (await readdir(directory)).length === 0;
   });
-  yield* windowsAcl(directory, createdDirectory);
+  yield* options.directoryAcl
+    ? options.directoryAcl(directory, initializeDirectory)
+    : windowsAcl(directory, initializeDirectory, options.nodeProcess);
   const lockPath = join(directory, 'selection.sqlite');
   const mutex = yield* Effect.acquireRelease(
     Effect.gen(function* () {
@@ -364,6 +378,8 @@ export const makeCliE2eeCustody = Effect.fn('CliE2eeCustody.open')(function* (op
       custody.createDevice(genesis, 'machine'),
     openDevice: (genesis: Parameters<typeof custody.openDevice>[0]) =>
       custody.openDevice(genesis, 'machine'),
+    prepareDeviceCredential: custody.prepareDeviceCredential,
+    deviceCredential: custody.deviceCredential,
     installed: custody.installed,
     candidate: custody.candidate,
     stop: custody.stop,

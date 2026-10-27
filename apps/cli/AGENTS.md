@@ -7,10 +7,9 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
 
 ## Build and packaging
 
-- CLI SSR uses native Node 22 TLA, never browser TLA transforms.
-  Validate at `NODE_OPTIONS=--max-old-space-size=2048`, not a raised heap.
-  Use per-package chunks, transitive assignment and CJS helper chunks.
-  Keep maps and no app code in vendor chunks.
+- Node 22 native TLA only; fixed 2048 MiB. Build CLI/workers then ACP in separate
+  Vite processes; ACP preserves dist. Keep maps, flat entries, transitive package
+  and CJS chunks; no app in vendor chunks.
 
 - The public CLI defaults to the local platform, discovers no deployment dotenv files, and must
   never initialize telemetry in local mode even if PostHog env vars are set.

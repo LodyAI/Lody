@@ -237,7 +237,7 @@ import { UserAvatar } from '@/components/user-avatar';
 import { RenameSessionDialog, type RenameSessionDialogTarget } from './rename-session-dialog';
 import { useResolvedTheme } from '../../theme-provider';
 import { PullRequestBadge } from './pull-request-badge';
-import { SessionInfoBar } from './session-info-bar';
+import { ScheduledMessageInfoBar } from '../schedules/scheduled-message-info-bar';
 import { SessionPreviewPreload } from './session-preview-preload';
 import { CurrentSessionRelationsChip, useHasSessionRelations } from './session-relations-chip';
 import { SessionProjectMembersChip } from './session-project-members-chip';
@@ -3632,7 +3632,10 @@ export const SessionChatInterface = memo(
         // records where each mention landed so the transcript paints the user's
         // own wording back over it — identical to a fresh send.
         const nextText = submission.text;
-        const requesterUserId = currentUser?.id ?? session.userId;
+        const requesterUserId =
+          (runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
+          currentUser?.id ??
+          session.userId;
         if (
           !runtime ||
           !requesterUserId ||
@@ -4162,8 +4165,6 @@ export const SessionChatInterface = memo(
       peekStore: peekSessionStore,
     });
     const canStopAgent = canStopAgentEnabled({
-      isContextCompacting,
-      isSessionActive,
       activeAssistantTurnId: activeAssistantTurnId ?? null,
       isGoalActive,
       canPauseGoal,
@@ -4386,7 +4387,10 @@ export const SessionChatInterface = memo(
           const turnModelId =
             options?.modelIdOverride !== undefined ? options.modelIdOverride : selectedModelId;
           const turnConfigOptionValues = options?.configOptionValuesOverride ?? configOptionValues;
-          const derivedUserId = currentUser?.id ?? session.userId;
+          const derivedUserId =
+            (runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
+            currentUser?.id ??
+            session.userId;
           const prompt = extractPromptPreviewFromInputBlocks(inputBlocks);
           const issuePRMentions = prompt
             ? extractIssuePRMentionsFromText(prompt, knownIssuePrItems, repoFullName)
@@ -4498,6 +4502,8 @@ export const SessionChatInterface = memo(
         }
       },
       [
+        runtime?.accountId,
+        runtime?.contentMode,
         addSessionHistory,
         captureRunConfigForSend,
         captureSessionEvent,
@@ -4545,7 +4551,10 @@ export const SessionChatInterface = memo(
           const turnModelId =
             options?.modelIdOverride !== undefined ? options.modelIdOverride : selectedModelId;
           const turnConfigOptionValues = options?.configOptionValuesOverride ?? configOptionValues;
-          const derivedUserId = currentUser?.id ?? session.userId;
+          const derivedUserId =
+            (runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
+            currentUser?.id ??
+            session.userId;
           const prompt = extractPromptPreviewFromInputBlocks(inputBlocks);
           const issuePRMentions = prompt
             ? extractIssuePRMentionsFromText(prompt, knownIssuePrItems, repoFullName)
@@ -4618,6 +4627,8 @@ export const SessionChatInterface = memo(
         }
       },
       [
+        runtime?.accountId,
+        runtime?.contentMode,
         captureRunConfigForSend,
         captureSessionEvent,
         configOptionValues,
@@ -5004,7 +5015,10 @@ export const SessionChatInterface = memo(
 
         try {
           const response = await requestSessionGoal(session.id, command, {
-            userId: currentUser?.id ?? session.userId,
+            userId:
+              (runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
+              currentUser?.id ??
+              session.userId,
             machineId: session.machineId,
           });
           if (!response?.accepted) {
@@ -5037,6 +5051,8 @@ export const SessionChatInterface = memo(
         }
       },
       [
+        runtime?.accountId,
+        runtime?.contentMode,
         captureSessionEvent,
         currentUser?.id,
         goalCommands,
@@ -7052,7 +7068,9 @@ export const SessionChatInterface = memo(
                       and work context, glued to the composer shell. It
                       replaced the mobile status strip / goal banner /
                       in-composer scheduled panel. */}
-                    <SessionInfoBar
+                    <ScheduledMessageInfoBar
+                      session={session}
+                      machineMeta={sessionMachine}
                       status={statusStripState}
                       machine={
                         sessionMachine

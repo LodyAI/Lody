@@ -390,6 +390,42 @@ describe('local project control response schema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('preserves opt-in inspection and rejects malformed directory inspection', () => {
+    const request = {
+      type: 'local-project/prepare-add',
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1',
+      rootPath: '/tmp/project',
+      inspect: true,
+    };
+    expect(safeParseLocalProjectControlRequest(JSON.stringify(request))).toMatchObject({
+      success: true,
+      data: request,
+    });
+    expect(
+      safeParseLocalProjectControlRequest(JSON.stringify({ ...request, inspect: 'yes' })).success
+    ).toBe(false);
+    const result = {
+      localProjectId: 'project-1',
+      name: 'project',
+      rootPath: '/tmp/project',
+      alreadyRegistered: false,
+      inspection: { isGit: false, submodules: [] },
+    };
+    const response = { ok: true, type: 'local-project/prepare-add', result };
+    expect(LocalProjectControlResponseSchema.safeParse(response)).toMatchObject({
+      success: true,
+      data: response,
+    });
+    expect(isLocalProjectControlResponse(response)).toBe(true);
+    const malformed = {
+      ...response,
+      result: { ...result, inspection: { isGit: 'yes', submodules: [] } },
+    };
+    expect(isLocalProjectControlResponse(malformed)).toBe(false);
+    expect(LocalProjectControlResponseSchema.safeParse(malformed).success).toBe(false);
+  });
+
   it('accepts prepare-add success response', () => {
     const response = {
       ok: true,

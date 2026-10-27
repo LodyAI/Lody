@@ -142,6 +142,38 @@ function createRepo(flock: FakeMachineFlock) {
 }
 
 describe('local project root path publishing', () => {
+  it('preserves display state during catalog refresh and promotes only on explicit add', async () => {
+    const { repo } = createRepo(new FakeMachineFlock());
+    const sync = { markMachineFlockDocDirty() {} };
+    const read = async () =>
+      (await readMachineLocalProjects(repo, workspaceId, machineId))[projectMeta.id];
+    await upsertMachineLocalProject(
+      repo,
+      workspaceId,
+      machineId,
+      { ...projectMeta, standaloneVisible: false },
+      1,
+      { sync }
+    );
+    await upsertMachineLocalProject(repo, workspaceId, machineId, projectMeta, 2, { sync });
+    expect((await read())?.standaloneVisible).toBe(false);
+    await upsertMachineLocalProject(repo, workspaceId, machineId, projectMeta, 3, {
+      sync,
+      standaloneVisible: true,
+    });
+    expect((await read())?.standaloneVisible).toBe(true);
+    // A stale history/catalog writer must not undo the explicit addition.
+    await upsertMachineLocalProject(
+      repo,
+      workspaceId,
+      machineId,
+      { ...projectMeta, standaloneVisible: false },
+      4,
+      { sync }
+    );
+    expect((await read())?.standaloneVisible).toBe(true);
+  });
+
   it('publishes, refreshes and removes GitHub identity without losing it on other row writes', async () => {
     const rootPath = mkdtempSync(join(tmpdir(), 'local-remote-'));
     const git = (args: string[]) =>

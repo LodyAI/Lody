@@ -29,6 +29,13 @@ export {
   type DeviceSigner,
 } from '../internal/foundation/signing';
 
+export {
+  deviceCredentialBindingBytes,
+  signDeviceCredentialBinding,
+  verifyDeviceCredentialBinding,
+  type DeviceCredentialBinding,
+} from '../internal/foundation/device-credential-binding';
+
 // Content format and primitives
 export {
   encodeDocumentContext,
@@ -61,6 +68,16 @@ export {
   type EpochHpkeContext,
   type SealedEpochHpke,
 } from '../internal/crypto/hpke';
+
+// Purpose-specific opaque content primitives; no realtime authority or body profile.
+export {
+  sealPresenceContent,
+  openPresenceContent,
+  sealRpcRequestContent,
+  openRpcRequestContent,
+  sealRpcResponseContent,
+  openRpcResponseContent,
+} from '../internal/content/realtime';
 
 // Documents
 export {
