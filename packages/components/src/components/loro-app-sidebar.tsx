@@ -1,3 +1,4 @@
+import { E2eeSettingsIcon } from './settings/e2ee/security-state';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { buildSessionLink } from '@lody/shared/session-link';
 import { jsonValueEqual } from '@/lib/json-value-equal';
@@ -3836,6 +3837,7 @@ export function LoroAppSidebar({
         onFeedbackClicked={handleFeedbackClicked}
         onBugReportClicked={handleBugReportClicked}
         onSettingsClicked={handleSettingsClicked}
+        settingsIcon={<E2eeSettingsIcon />}
         onInviteClicked={handleInviteClicked}
         onLinkRepoClicked={handleLinkRepoClicked}
         overlay={overlay}

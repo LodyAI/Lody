@@ -25,16 +25,16 @@
   first. Retired cache cleanup cannot fail local open.
 - No plaintext RPC, presence, attachments or scheduled automation on encrypted workspaces
   while their encrypted channels remain unimplemented.
-- `realtime-journal.ts` is storage only; exclusive `create` provisions schema 2.
-  Never upgrade/repair/replace schema or originals. Reject unknown committed schema
-  before app settings/chmod/writes; native SQLite recovery may precede validation.
-  Immutable requests/responses/first outcomes; no expiry GC/replay. Bound owners retaining
-  permits/failed cleanup. Persist replies before send; indexes select no wire profile.
-  Failed responses retain one original/permit for exact retry and preserve results.
-  Fence execution AND Meta/history.
-  Preserve the file-global clock floor across workspaces/restarts and readable completed
-  evidence. No floor reset, deadline extension or new time source/recovery generation.
-  See [integration proposal](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-realtime-journal.md).
+- `realtime-journal.ts`: schema 3 only; no migration. Recover SQLite first;
+  Init only v0/no objects. Archive intact after retiring readable current
+  keys despite damage; unreadable keys refuse reset. No auto-replace/GC/archive replay/import.
+  Exact originals/first outcome; uncertain=unknown/no takeover; independent IDs.
+  Floors: genesis/workspace; before writes reject local >10min ahead of authenticated
+  current time, never frame time. No reference: scoped max; reset.
+  Reset: stop owners, archive, fresh ID; keep control/retired IDs/intent. Shared call
+  locks, exclusive reset; retain through failed main close. Bound permits/cleanup;
+  reply before send, exact retries; fence execution AND Meta/history. No authority.
+  [Recovery](../../../README.md#local-encrypted-execution-log-recovery).
 - `prepareCliE2eeMachineLegacy` binds the retained credential hash to the exact
   desktop-generated 16-byte pairing session using core's fixed v1 helper. Machine
   possession additionally binds the strict UTF-8 machineId; activation compares it

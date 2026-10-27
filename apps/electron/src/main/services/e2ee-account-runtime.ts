@@ -521,6 +521,10 @@ function publicE2eeFailure(error: unknown): Error {
     'invalid-input',
     'storage',
     'invalid-ledger',
+    'rotation_candidate_unavailable',
+    'management_unauthorized',
+    'management_operator_required',
+    'management_retry',
     'restart-required',
     'local-history-recovery-required',
     'trusted-pin-unavailable'

@@ -1442,6 +1442,25 @@ void test('a snapshot-joined approver cancels another recipient without retiring
   )
 })
 
+void test('management diagnostics preserve safe recovery actions without exposing native causes', async () => {
+  const { api } = await account()
+  for (const code of [
+    'rotation_candidate_unavailable',
+    'management_unauthorized',
+    'management_retry'
+  ]) {
+    await assert.rejects(
+      api.runDesktopE2eeOperation('account', Effect.fail({ code, cause: 'synthetic-secret' })),
+      (error) => {
+        assert.equal(error.message, `e2ee_${code}`)
+        assert.equal(error.cause, undefined)
+        assert.equal(JSON.stringify(error).includes('synthetic-secret'), false)
+        return true
+      }
+    )
+  }
+})
+
 async function nativeAccountFixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'desktop-identity-reset-'))
   let locked = false
@@ -1666,6 +1685,7 @@ for (const phase of ['queued', 'draining'])
 void test('workspace-scoped cold identity IPC composes with isolated custody without granting a reader', async (t) => {
   const { api, directory } = await nativeAccountFixture(t)
   const first = await createAccountWorkspace(api, 'workspace')
+  const sibling = await createAccountWorkspace(api, 'sibling')
   await api.closeDesktopE2eeAccount()
   const sender = Object.assign(new EventEmitter(), { id: 17 })
   const { E2eeIpc } = await load('../ipc/services/e2ee-ipc.ts', {
@@ -1677,7 +1697,41 @@ void test('workspace-scoped cold identity IPC composes with isolated custody wit
     },
     '../../platform': { isLocalPlatform: () => false },
     '../../services/e2ee-bootstrap.mjs': {},
-    '../../services/e2ee-account-runtime': api,
+    '../../services/e2ee-account-runtime': {
+      ...api,
+      desktopE2eeCloudClient: async () => ({
+        accountId: 'account',
+        client: {
+          history: () =>
+            Effect.succeed({
+              workspaceId: 'workspace',
+              genesisHash: first.creation.genesisHashHex,
+              startIndex: 0,
+              recordsHex: [first.creation.genesisRecordHex],
+              checkpoint: {
+                length: 1,
+                headHash: Buffer.from(
+                  hashRecordBytes(Buffer.from(first.creation.genesisRecordHex, 'hex')).toBytes()
+                ).toString('hex')
+              },
+              nextCursor: null,
+              position: 'p1:workspace:1:fixture'
+            }),
+          ledgerLog: () => ({
+            read: () => Effect.die('no submission needed'),
+            appendCas: () => Effect.die('no new signature')
+          }),
+          staging: () => ({
+            stageGroup: () => Effect.die('no rotation requested'),
+            readGroup: () => Effect.succeed(null),
+            deleteGroup: () => Effect.void
+          }),
+          mailbox: () => {
+            throw new Error('current key already installed')
+          }
+        }
+      })
+    },
     '../assert-sender': { assertProductWindowSender: () => {} }
   })
   const ipc = new E2eeIpc()
@@ -1705,6 +1759,12 @@ void test('workspace-scoped cold identity IPC composes with isolated custody wit
   assert.ok(!(await readdir(join(directory, 'e2ee-bootstrap', roots[0]))).includes('control'))
   await ipc.open('workspace')
   assert.equal((await ipc.status('workspace')).genesisHash, first.creation.genesisHashHex)
+  const management = await ipc.managementState('workspace')
+  assert.equal(management.epoch, 0)
+  assert.equal(management.mayRotate, true)
+  assert.equal(management.devices.find((entry) => entry.self).key, first.signingPublicKey)
+  await ipc.updateKeys('workspace')
+  await ipc.revokeDevice('workspace', sibling.signingPublicKey)
   await ipc.readIdentity({ accountId: 'account', workspaceId: 'workspace' })
   assert.equal((await ipc.status('workspace')).genesisHash, first.creation.genesisHashHex)
   await ipc.close('workspace')

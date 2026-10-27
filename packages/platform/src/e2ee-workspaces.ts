@@ -85,8 +85,26 @@ export interface E2eeRuntimeLedgerView {
   /** Absolute ledger positions; a snapshot-origin host need not hold the prefix. */
   readonly recordPositions?: readonly number[];
 }
+/** Facts from the host's current verified ledger, never cloud projections. */
+export interface E2eeManagementState {
+  readonly epoch: number;
+  readonly rotationRequired: boolean;
+  readonly mayRotate: boolean;
+  readonly updatePending: boolean;
+  readonly recoveryIssue?: 'candidate-unavailable';
+  readonly devices: readonly {
+    key: string;
+    kind: 'personal' | 'machine' | 'recovery';
+    machineId: string | null;
+    self: boolean;
+    mayRevoke: boolean;
+  }[];
+}
 /** Desktop-only purpose-limited IPC; opening an existing workspace never creates an identity. */
 export interface E2eeWorkspaceRuntime {
+  managementState?(workspaceId: string): Promise<E2eeManagementState>;
+  updateKeys?(workspaceId: string): Promise<void>;
+  revokeDevice?(workspaceId: string, signingPublicKey: string): Promise<void>;
   personalPairingOffer?(workspaceId: string): Promise<E2eePersonalPairingOffer>;
   preparePersonalJoin?(
     offer: E2eePersonalPairingOffer

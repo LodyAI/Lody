@@ -1,4 +1,10 @@
 import { makeDesktopRemotePairing } from './e2ee-remote-pairing.mjs'
+import { EpochCandidateStore, SubmissionJournal } from '@lody/e2ee-core/services'
+import {
+  desktopManagementStores,
+  makeDesktopE2eeManagement,
+  type DesktopE2eeManagementRemote
+} from './e2ee-management.mjs'
 import { makeDesktopKeyMaintenance } from './e2ee-key-maintenance.mjs'
 import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
 import { randomUUID } from 'node:crypto'
@@ -25,6 +31,7 @@ import {
   decodeRecord,
   exportVerifiedState,
   hashRecordBytes,
+  prepareLedgerCommand,
   hasVerifiedCheckpoint,
   restoreVerifiedState,
   getCommittedEpochStagingKey,
@@ -72,6 +79,10 @@ export class DesktopE2eeRuntimeError extends Data.TaggedError('DesktopE2eeRuntim
     | 'corrupt'
     | 'local-evidence-conflict'
     | 'storage'
+    | 'rotation_candidate_unavailable'
+    | 'management_unauthorized'
+    | 'management_operator_required'
+    | 'management_retry'
     | 'invalid-ledger'
     | 'missing-binding'
     | 'conflict'
@@ -176,6 +187,11 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
     const entries = new Map<
       string,
       {
+        manage: (
+          command: { type: 'rotate' } | { type: 'revoke'; target: string },
+          ports: (signal: AbortSignal) => DesktopE2eeManagementRemote
+        ) => Effect.Effect<unknown, unknown>
+        managementState: () => Effect.Effect<import('@lody/platform').E2eeManagementState, unknown>
         scope: Scope.Closeable
         pairing: ReturnType<typeof makeDesktopLocalPairing>
         remotePairing: ReturnType<typeof makeDesktopRemotePairing>
@@ -613,6 +629,17 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         let maintenance: Context.Context<KeyDistributor | KeyReceiver | KeyRepair> | undefined
         let maintainKeys: Effect.Success<ReturnType<typeof makeDesktopKeyMaintenance>> | undefined
         let round: Deferred.Deferred<void, unknown> | undefined
+        let managing: Deferred.Deferred<void, unknown> | undefined
+        let managementStores: Context.Context<EpochCandidateStore | SubmissionJournal> | undefined
+        const localManagement = Effect.fnUntraced(function* () {
+          if (!managementStores)
+            managementStores = yield* Layer.buildWithScope(
+              desktopManagementStores(directory, device).pipe(Layer.provide(base)),
+              scope
+            )
+          return managementStores
+        })
+        let manager: Effect.Success<ReturnType<typeof makeDesktopE2eeManagement>> | undefined
         let roundAgain = false
         let closing = false
         const networkAbort = new AbortController()
@@ -631,6 +658,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           return Effect.uninterruptible(
             Effect.gen(function* () {
               if (round) yield* Effect.exit(Deferred.await(round))
+              if (managing) yield* Effect.exit(Deferred.await(managing))
               const result = yield* Effect.exit(Scope.close(scope, Exit.void))
               if (Exit.isFailure(result)) {
                 closeFailed = true
@@ -1015,7 +1043,123 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           }
           return yield* status()
         })
+        const managementState = Effect.fnUntraced(function* () {
+          const view = yield* verified.current()
+          const state = view.inspectState(),
+            ownKey = hex(device.publicKey.toBytes())
+          const self = state.devices.get(ownKey),
+            member = self && state.members.get(hex(self.membershipId.toBytes()))
+          const continuation = yield* Effect.result(
+            Effect.gen(function* () {
+              const local = yield* localManagement()
+              const active = yield* Context.get(local, EpochCandidateStore).active()
+              const pendingSubmission = yield* Context.get(local, SubmissionJournal).load(genesis)
+              return !!active || !!pendingSubmission.record
+            })
+          )
+          const mayRotate =
+            self?.kind === 'personal' && (member?.role === 'owner' || member?.role === 'admin')
+          return {
+            epoch: state.epoch.number,
+            rotationRequired: state.epoch.rotationRequired,
+            updatePending: Result.isFailure(continuation) || continuation.success,
+            ...(Result.isFailure(continuation)
+              ? { recoveryIssue: 'candidate-unavailable' as const }
+              : {}),
+            mayRotate,
+            devices: [...state.devices].map(([key, entry]) => ({
+              key,
+              kind: entry.kind,
+              machineId: entry.machineId ?? null,
+              self: key === ownKey,
+              mayRevoke: Result.isSuccess(
+                prepareLedgerCommand(view, device.publicKey, {
+                  _tag: 'RevokeDevice',
+                  target: Result.getOrThrow(Bytes.signingPublicKey(unhex(key)))
+                })
+              )
+            }))
+          }
+        })
+        const manage = Effect.fnUntraced(function* (
+          command: { type: 'rotate' } | { type: 'revoke'; target: string },
+          remote: (signal: AbortSignal) => DesktopE2eeManagementRemote
+        ) {
+          if (closing) return yield* fail('closed')
+          if (managing) return yield* Effect.fail(new Error('e2ee_management_pending'))
+          const done = Deferred.makeUnsafe<void, unknown>()
+          managing = done
+          const result = yield* Effect.exit(
+            Effect.uninterruptible(
+              Effect.gen(function* () {
+                if (!manager)
+                  manager = yield* makeDesktopE2eeManagement({
+                    directory,
+                    stores: yield* localManagement(),
+                    db,
+                    genesis,
+                    device,
+                    custody: options.custody,
+                    verified,
+                    installed: keys,
+                    current: () => feed.current(),
+                    ports: (() => {
+                      const upstream = remote(networkAbort.signal)
+                      return {
+                        ...upstream,
+                        // Admitted work never re-enters the account lock. Local ingest
+                        // failures retain this owner instead of awaiting its own close.
+                        refresh: () =>
+                          Effect.gen(function* () {
+                            const after = (yield* status()).position ?? undefined
+                            let cursor: string | undefined
+                            let checkpoint: E2eeWorkspaceHistoryPage['checkpoint'] | undefined
+                            for (let pageNumber = 0; pageNumber < 256; pageNumber++) {
+                              if (closing) return yield* fail('closed')
+                              const page = yield* upstream.history({
+                                workspaceId,
+                                ...(cursor ? { cursor, checkpoint } : after ? { after } : {})
+                              })
+                              checkpoint ??= page.checkpoint
+                              yield* serial.withPermit(
+                                Effect.suspend(() =>
+                                  closing ? Effect.fail(fail('closed')) : ingest(page)
+                                )
+                              )
+                              if (!page.nextCursor) return undefined
+                              cursor = page.nextCursor
+                            }
+                            return yield* fail('invalid-ledger')
+                          }),
+                        receive: () =>
+                          Effect.gen(function* () {
+                            const latest = (yield* verified.current()).inspectState().epoch.number
+                            const installedCurrent = yield* Effect.result(keys.check(latest))
+                            if (Result.isFailure(installedCurrent))
+                              yield* keyRound(
+                                () => upstream.mailbox(),
+                                () => upstream.staging()
+                              )
+                            // A later installed epoch can restore an older pending publication key.
+                            yield* Context.get(historyContext, InstalledEpochHistory).recover()
+                          }).pipe(Effect.asVoid)
+                      }
+                    })()
+                  }).pipe(Scope.provide(scope))
+                return yield* manager(command)
+              })
+            )
+          )
+          managing = undefined
+          yield* Deferred.done(
+            done,
+            Exit.isSuccess(result) ? Exit.succeed(undefined) : Exit.failCause(result.cause)
+          )
+          return yield* result
+        })
         return {
+          manage,
+          managementState,
           scope,
           pairing,
           remotePairing,
@@ -1139,6 +1283,38 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           Effect.flatMap(openWorkspace(workspaceId), (entry) =>
             entry.remotePairing.retire(session, noAdmissionReserved)
           )
+        ),
+      managementState: (workspaceId: string) =>
+        run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.managementState())),
+      manage: (
+        workspaceId: string,
+        command: { type: 'rotate' } | { type: 'revoke'; target: string },
+        ports: (signal: AbortSignal) => DesktopE2eeManagementRemote
+      ) =>
+        Effect.flatMap(run(openWorkspace(workspaceId)), (entry) =>
+          entry.manage(command, ports)
+        ).pipe(
+          Effect.mapError((error) => {
+            rememberDesktopE2eeFailure('workspace-management', error)
+            if (error instanceof DesktopE2eeRuntimeError) return error
+            const cause = (error as { cause?: unknown })?.cause ?? error
+            const code = (cause as { code?: string })?.code
+            if (
+              typeof code === 'string' &&
+              /e2ee_(?:staging_configuration|projection_corrupt|workspace_rebuild_required|ledger_budget_exceeded|ledger_configuration)/.test(
+                code
+              )
+            )
+              return fail('management_operator_required')
+            const reason = (error as { reason?: string })?.reason
+            return fail(
+              reason === 'candidate-missing' || reason === 'corrupt' || reason === 'native-failed'
+                ? 'rotation_candidate_unavailable'
+                : reason === 'unauthorized'
+                  ? 'management_unauthorized'
+                  : 'management_retry'
+            )
+          })
         ),
       personalPairingOffer: (workspaceId: string) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.personalPairing.offer())),

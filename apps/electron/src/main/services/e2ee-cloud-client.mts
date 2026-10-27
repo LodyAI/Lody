@@ -1,5 +1,6 @@
 import { RemoteMachineStatusSchema } from '@lody/shared/e2ee-remote-pairing'
 import type { E2eeMachinePairingRequests } from '@lody/cloud-api'
+import { Bytes, decodeRecord, hashRecordBytes } from '@lody/e2ee-core/protocol'
 import { ConvexHttpClient } from 'convex/browser'
 import { api } from '@lody/cloud-api'
 import type {
@@ -9,7 +10,13 @@ import type {
   E2eeJoinRequests,
   E2eeWorkspaceHistoryRequest
 } from '@lody/cloud-api'
-import { BackendError, EpochStagingStore, KeyMailbox } from '@lody/e2ee-core/services'
+import {
+  LedgerLog,
+  LedgerLogError,
+  BackendError,
+  EpochStagingStore,
+  KeyMailbox
+} from '@lody/e2ee-core/services'
 import {
   decodeEpochStagedGroup,
   encodeEpochStagedGroup,
@@ -76,11 +83,47 @@ const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex')
 const raw = (value: string) => new Uint8Array(Buffer.from(value, 'hex'))
 const unavailable = () => new BackendError({ service: 'E2eeCloud', reason: 'unavailable' })
 
+/** Safe server capacity receipt; never contains request data or credentials. */
+export class E2eeStagingCapacityError extends BackendError {
+  readonly code = 'e2ee_staging_capacity_exceeded'
+  constructor(
+    readonly round: string,
+    readonly limit: number
+  ) {
+    super({ service: 'EpochStagingStore', reason: 'unavailable' })
+  }
+}
+
+const operatorCodes = new Set([
+  'e2ee_staging_configuration',
+  'e2ee_projection_corrupt',
+  'e2ee_workspace_rebuild_required',
+  'e2ee_ledger_budget_exceeded',
+  'e2ee_ledger_configuration'
+])
+export class E2eeCloudDiagnosticError extends BackendError {
+  constructor(readonly code: string) {
+    super({ service: 'E2eeCloud', reason: 'unavailable' })
+  }
+}
 function requestFailure(error: unknown): BackendError {
   if (error instanceof BackendError) return error
   // Never retain the SDK's raw error, server logs, request body, or token.
+  const capacity = z
+    .object({
+      data: z.object({
+        code: z.literal('e2ee_staging_capacity_exceeded'),
+        round: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
+        limit: z.number().int().min(1).max(256),
+        canStartNewRound: z.literal(true)
+      })
+    })
+    .safeParse(error)
+  if (capacity.success)
+    return new E2eeStagingCapacityError(capacity.data.data.round, capacity.data.data.limit)
   const result = z.object({ data: z.object({ code: z.string() }) }).safeParse(error)
   const code = result.success ? result.data.data.code : ''
+  if (operatorCodes.has(code)) return new E2eeCloudDiagnosticError(code)
   const reason =
     code === 'e2ee_staging_invalid' || code === 'e2ee_staging_corrupt'
       ? 'invalid-response'
@@ -158,7 +201,8 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
 
   const staging = (
     access: E2eeDeviceAccess,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    round?: string
   ): EpochStagingStore['Service'] => {
     const device = { ...access }
     const invalid = () =>
@@ -167,11 +211,18 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
       stageGroup: (source) => {
         // Own and encode before yielding: re-running this Effect resends the
         // original group even if its caller later mutates its buffers.
+        if (round !== undefined && !/^[A-Za-z0-9_-]{1,64}$/.test(round))
+          return Effect.fail(invalid())
         const original = Result.map(ownEpochStagedGroup(source), encodeEpochStagedGroup)
         return Effect.fromResult(Result.mapError(original, invalid)).pipe(
           Effect.flatMap((group) =>
             request(
-              (client) => client.mutation(api.e2eeEpochStaging.stageGroup, { ...device, group }),
+              (client) =>
+                client.mutation(api.e2eeEpochStaging.stageGroup, {
+                  ...device,
+                  group,
+                  ...(round ? { round } : {})
+                }),
               z.object({ ok: z.literal(true) }),
               signal
             )
@@ -374,6 +425,92 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
         (client) => client.mutation(api.e2eeMachinePairing.cancel, requestInput),
         RemoteMachineStatusSchema
       ),
+    ledgerLog: (workspaceId: string, signal?: AbortSignal): LedgerLog['Service'] => {
+      let observed: { head: string; length: number } | undefined
+      return LedgerLog.of({
+        read: (anchor) =>
+          Effect.gen(function* () {
+            const records: Uint8Array[] = []
+            let cursor: string | undefined,
+              fixed: { length: number; headHash: string } | undefined,
+              bytes = 0
+            for (let pageNumber = 0; pageNumber < 256; pageNumber++) {
+              const page = yield* request(
+                (client) =>
+                  client.action(api.e2eeWorkspaces.history, {
+                    workspaceId,
+                    ...(cursor ? { cursor, checkpoint: fixed } : {})
+                  }),
+                historyPage,
+                signal
+              )
+              fixed ??= page.checkpoint
+              if (
+                page.workspaceId !== workspaceId ||
+                page.genesisHash !== hex(anchor.toBytes()) ||
+                page.startIndex !== records.length ||
+                page.checkpoint.length !== fixed.length ||
+                page.checkpoint.headHash !== fixed.headHash
+              )
+                return yield* unavailable()
+              for (const record of page.recordsHex) {
+                const original = raw(record)
+                bytes += original.length
+                if (bytes > 33554432) return yield* unavailable()
+                records.push(original)
+              }
+              if (!page.nextCursor)
+                return {
+                  records,
+                  checkpoint: {
+                    length: fixed.length,
+                    head: Result.getOrThrow(Bytes.recordHash(raw(fixed.headHash)))
+                  }
+                }
+              cursor = page.nextCursor
+            }
+            return yield* unavailable()
+          }).pipe(
+            Effect.tap((value) =>
+              Effect.sync(() => {
+                observed = {
+                  head: hex(value.checkpoint.head.toBytes()),
+                  length: value.checkpoint.length
+                }
+              })
+            ),
+            Effect.mapError((cause) => new LedgerLogError({ cause }))
+          ),
+        appendCas: (_anchor, point, source) => {
+          const expected = { ...point },
+            record = new Uint8Array(source)
+          return Effect.gen(function* () {
+            const parsed = yield* Effect.fromResult(decodeRecord(record))
+            if (
+              parsed.body.type !== 'ordinary' ||
+              !parsed.body.previousHash.equals(expected.head) ||
+              observed?.head !== hex(expected.head.toBytes()) ||
+              observed.length !== expected.length
+            )
+              return yield* unavailable()
+            const recordHash = hex(hashRecordBytes(record).toBytes())
+            const reply = yield* request(
+              (client) =>
+                client.action(api.e2eeWorkspaces.appendRecord, {
+                  workspaceId,
+                  requestId: recordHash,
+                  recordHex: hex(record)
+                }),
+              appended,
+              signal
+            )
+            if (reply.recordHash !== recordHash || reply.status !== 'committed')
+              return yield* unavailable()
+            return undefined
+          }).pipe(Effect.mapError((cause) => new LedgerLogError({ cause })))
+        }
+      })
+    },
     appendRecord: (requestInput: E2eeAppendRecordRequest) => {
       const original = { ...requestInput }
       return request((client) => client.action(api.e2eeWorkspaces.appendRecord, original), appended)
@@ -383,12 +520,16 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
         (client) => client.action(api.e2eeContent.contentStreamsToken, { ...access }),
         contentToken
       ),
-    history: (requestInput: E2eeWorkspaceHistoryRequest) => {
+    history: (requestInput: E2eeWorkspaceHistoryRequest, signal?: AbortSignal) => {
       const original = {
         ...requestInput,
         ...(requestInput.checkpoint ? { checkpoint: { ...requestInput.checkpoint } } : {})
       }
-      return request((client) => client.action(api.e2eeWorkspaces.history, original), historyPage)
+      return request(
+        (client) => client.action(api.e2eeWorkspaces.history, original),
+        historyPage,
+        signal
+      )
     },
     staging
   })

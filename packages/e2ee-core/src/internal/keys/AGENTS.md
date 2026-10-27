@@ -40,7 +40,10 @@ Behavior: [workflows](../../../docs/workflows.md). Ports: [services](../../../do
   protection, and authenticate purpose/context/original record/envelope digest.
   Persist and open the candidate, stage the complete post-transition group and
   compare exact readback before submission. Retry exact records; install only
-  genuinely committed epochs; Conflict discards the candidate key. Delete staged
+  genuinely committed epochs; Conflict discards the candidate key. Retained submission
+  recovery requires genuine checkpoint/key proof before ACK; damaged candidate keys
+  require independent committed-key receipt. Never bypass CandidateProtector for
+  unpublished keys or re-sign an uncertain record. Delete staged
   groups only for a genuine different commitment at the same epoch, by the group's
   signing device. Storage never supplies ledger authority.
 - `InstalledEpochHistory` recovers from the installed latest key only, verifies the
