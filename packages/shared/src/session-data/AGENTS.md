@@ -69,7 +69,8 @@
   Derive paths before filtering; preserve omitted vs explicitly cleared lists and
   monotonic status. Keep only displayed switch-mode plans and scheduling raw fields,
   not generic raw or provider metadata copies. Permission enrichment preserves stored
-  content; malformed new retained values reach writer validation. CLI edit evidence
+  content except unanswered switch-mode reviews, whose supplied review content replaces
+  streamed argument previews; malformed new retained values reach writer validation. CLI edit evidence
   consumes enriched notifications with the original owning turn, not stored diff bodies.
 
 - Submissions append on the live doc as local commits; transports upload only
