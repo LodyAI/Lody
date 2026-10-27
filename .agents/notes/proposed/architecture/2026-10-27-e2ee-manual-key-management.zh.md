@@ -2,6 +2,7 @@
 
 Status: proposed
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1980
 
 [English](2026-10-27-e2ee-manual-key-management.md)
 
