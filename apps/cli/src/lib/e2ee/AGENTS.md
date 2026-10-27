@@ -38,7 +38,10 @@
   readable; no floor reset, deadline extension or new time source/recovery generation.
   See [integration proposal](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-realtime-journal.md).
 - `prepareCliE2eeMachineLegacy` binds the retained credential hash to the exact
-  desktop-generated 16-byte pairing session using core's fixed v1 helper.
+  desktop-generated 16-byte pairing session using core's fixed v1 helper. Machine
+  possession additionally binds the strict UTF-8 machineId; activation compares it
+  with both the verified current device and the retained signed admission. Session
+  IDs stay outside possession and ledger records; old developer formats need recreation.
   Pairing preparation and activation run only on the OS-user control socket;
   Fleet checks its own account and discovered encrypted workspace/genesis first.
   Activation refreshes the verified ledger and mailbox and acknowledges only an

@@ -48,7 +48,7 @@ extends exactly like the exported one; the next record must name its head. It
 keeps every device's historical author but reports original epoch publication
 records as unavailable. Never restore another party's bytes;
 that is what endorsed snapshots are for. Retained bytes are current-format only
-(envelope version 2); any other version fails with `unknown-version`, and the
+(envelope version 3); any other version fails with `unknown-version`, and the
 caller rebuilds them by one full replay.
 
 Preserved candidate v1 arrays/domains: genesis, admit Member, set role, admit own
@@ -117,9 +117,9 @@ and [source/destination fingerprints](https://github.com/LodyAI/Lody/blob/5f9759
 
 ## Authenticated permission snapshots
 
-The snapshot functions use snapshot body version 2
+The snapshot functions use snapshot body version 3
 (the compact state; any other version is `unknown-version`) and the snapshot/v1,
-head-attest/v1 and snapshot-digest/v2 domains. Caller-pinned
+head-attest/v1 and snapshot-digest/v3 domains. Caller-pinned
 external qualification must include genesis, exact head/count, endorser key,
 membership, Owner/Admin role and personal kind. Missing role facts never default
 from signed self-claims or journal data. These are externally confirmed facts; the

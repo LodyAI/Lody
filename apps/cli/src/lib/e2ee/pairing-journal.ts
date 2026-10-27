@@ -173,6 +173,7 @@ export const openMachinePairingJournal = Effect.fnUntraced(function* (directory:
           Bytes.encryptionPublicKey(raw(material.encryptionPublicKey))
         ),
         kind: 'machine',
+        machineId: expected.machineId,
       })
     );
     if (
@@ -349,6 +350,7 @@ export const openMachinePairingJournal = Effect.fnUntraced(function* (directory:
           membershipId: Result.getOrThrow(Bytes.membershipId(raw(expected.membershipId))),
           encryptionPublicKey: device.enc,
           kind: 'machine',
+          machineId: expected.machineId,
           signer: device,
         });
         const binding = yield* signDeviceCredentialBinding({
@@ -461,6 +463,7 @@ export const openMachinePairingJournal = Effect.fnUntraced(function* (directory:
         if (
           !own ||
           own.kind !== 'machine' ||
+          own.machineId !== expected.machineId ||
           hex(own.membershipId.toBytes()) !== expected.membershipId ||
           hex(own.encryptionPublicKey.toBytes()) !== material.encryptionPublicKey ||
           !state.members.has(expected.membershipId)
@@ -481,6 +484,7 @@ export const openMachinePairingJournal = Effect.fnUntraced(function* (directory:
             body.type === 'ordinary' &&
             body.operation.type === 'admitDevice' &&
             body.operation.kind === 'machine' &&
+            body.operation.machineId === expected.machineId &&
             hex(body.operation.signingPublicKey.toBytes()) === material.signingPublicKey &&
             hex(body.operation.encryptionPublicKey.toBytes()) === material.encryptionPublicKey &&
             hex(body.operation.possessionSignature.toBytes()) === material.possessionSignature &&

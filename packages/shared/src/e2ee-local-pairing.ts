@@ -3,10 +3,21 @@ import { z } from 'zod';
 /** This route is served exclusively on the same-user local control socket, never a network listener. */
 export const LOCAL_E2EE_PAIRING_PATH = '/e2ee/pairing';
 const identifier = z.string().min(1).max(128);
+const machineId = z
+  .string()
+  .min(1)
+  .max(256)
+  .refine((value) => {
+    const bytes = new TextEncoder().encode(value);
+    return (
+      bytes.length <= 256 &&
+      new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) === value
+    );
+  });
 const hex32 = z.string().regex(/^[0-9a-f]{64}$/);
 const hex16 = z.string().regex(/^[0-9a-f]{32}$/);
 const common = {
-  machineId: identifier,
+  machineId,
   accountId: identifier,
   workspaceId: identifier,
   genesisHash: hex32,
@@ -37,7 +48,7 @@ export const LocalE2eePrepareResponseSchema = z
   .object({
     ok: z.literal(true),
     type: z.literal('prepare'),
-    machineId: identifier,
+    machineId,
     pairingSessionId: hex16,
     signingPublicKey: hex32,
     encryptionPublicKey: hex32,
@@ -52,7 +63,7 @@ export const LocalE2eePrepareSupersededResponseSchema = z
   .object({
     ok: z.literal(true),
     type: z.literal('prepare-superseded'),
-    machineId: identifier,
+    machineId,
     pairingSessionId: hex16,
   })
   .strict();

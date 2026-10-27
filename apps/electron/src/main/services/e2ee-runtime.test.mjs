@@ -714,6 +714,7 @@ void test('local machine approval retains its exact signed original across resta
         ),
         encryptionPublicKey: machine.enc,
         kind: 'machine',
+        machineId: 'synthetic-local-machine',
         signer: machine
       })
       const signature = yield* signDeviceCredentialBinding({
@@ -750,6 +751,28 @@ void test('local machine approval retains its exact signed original across resta
         })
       )
       assert.ok(Result.isFailure(alteredHash))
+      const foreignBinding = yield* signDeviceCredentialBinding({
+        genesis,
+        pairingSessionId: new Uint8Array(16).fill(0xfe),
+        signingPublicKey: machine.publicKey,
+        credentialHash,
+        signer: machine
+      })
+      const replayedSession = yield* Effect.result(
+        owner.host.stageLocalPairing(workspaceId, {
+          ...material,
+          bindingSignature: hex(foreignBinding.toBytes())
+        })
+      )
+      assert.ok(Result.isFailure(replayedSession))
+      const changedMachine = yield* Effect.result(
+        owner.host.stageLocalPairing(workspaceId, {
+          ...material,
+          machineId: 'another-machine'
+        })
+      )
+      assert.ok(Result.isFailure(changedMachine))
+      assert.equal((yield* owner.host.status(workspaceId)).length, 1)
       const staged = yield* owner.host.stageLocalPairing(workspaceId, material)
       assert.deepEqual(staged, {
         pairingSessionId: context.pairingSessionId,
@@ -851,6 +874,7 @@ for (const outcome of ['unsigned', 'uncertain', 'committed', 'competing']) {
           ),
           encryptionPublicKey: machine.enc,
           kind: 'machine',
+          machineId: 'synthetic-machine',
           signer: machine
         })
         const signature = yield* signDeviceCredentialBinding({
@@ -938,6 +962,7 @@ for (const outcome of ['unsigned', 'uncertain', 'committed', 'competing']) {
             ),
             encryptionPublicKey: replacement.enc,
             kind: 'machine',
+            machineId: original.material.machineId,
             signer: replacement
           })
           const signature = yield* signDeviceCredentialBinding({
