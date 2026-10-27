@@ -135,17 +135,17 @@ export function makeDesktopLocalPairing(input: {
       // A real admission settles unsigned staging even if the device was later
       // revoked. Bind the retained proof to this member before consulting history;
       // a used key or another member's admission alone cannot settle this session.
-      const proof = Result.getOrThrow(
-        possessionSigningBytes({
-          genesis: input.genesis,
-          targetMembershipId: ownMembership,
-          signingPublicKey: publicKey,
-          encryptionPublicKey: Result.getOrThrow(
-            Bytes.encryptionPublicKey(raw(value.encryptionPublicKey))
-          ),
-          kind: 'machine'
-        })
-      )
+      const proofInput = {
+        genesis: input.genesis,
+        targetMembershipId: ownMembership,
+        signingPublicKey: publicKey,
+        encryptionPublicKey: Result.getOrThrow(
+          Bytes.encryptionPublicKey(raw(value.encryptionPublicKey))
+        ),
+        kind: 'machine' as const,
+        machineId: value.machineId
+      }
+      const proof = Result.getOrThrow(possessionSigningBytes(proofInput))
       if (
         Result.isFailure(
           verifySignature(publicKey.toBytes(), proof, raw(value.possessionSignature))

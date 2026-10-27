@@ -899,6 +899,7 @@ for (const outcome of ['unsigned', 'uncertain', 'committed', 'competing', 'admit
               prepareLedgerCommand(view, signer.publicKey, {
                 _tag: 'AdmitDevice',
                 kind: 'machine',
+                machineId: material.machineId,
                 signingPublicKey: machine.publicKey,
                 encryptionPublicKey: machine.enc,
                 possessionSignature: possession.possessionSignature
