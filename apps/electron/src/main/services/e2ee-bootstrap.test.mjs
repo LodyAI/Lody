@@ -429,7 +429,13 @@ void test('device credentials reopen exactly, stay encrypted, and missing origin
     assert.equal(bytes.includes(Buffer.from(credential, 'hex')), false)
     assert.equal(bytes.includes(Buffer.from(credential)), false)
   }
-  await unlink(join(directory, 'custody', `device-credential-${prepared.genesisHashHex}.sealed`))
+  await unlink(
+    join(
+      directory,
+      'custody',
+      `device-credential-${prepared.genesisHashHex}-${Buffer.from(Result.getOrThrow(decodeRecord(Buffer.from(prepared.genesisRecordHex, 'hex'))).body.signer.toBytes()).toString('hex')}.sealed`
+    )
+  )
   await assert.rejects(() =>
     execute(
       Effect.gen(function* () {

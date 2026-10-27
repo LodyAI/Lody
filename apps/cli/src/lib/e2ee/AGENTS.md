@@ -4,8 +4,7 @@
 
 - This module is lazy and machine-only. Ordinary CLI startup must not probe the keyring.
 - First creation probes a temporary Secret Service / Keychain / Credential Manager entry
-  by write/read, then permanently selects os-keystore or file protection. Reopen never probes
-  or changes that selection. Missing selector or KEK with existing originals is a failure.
+  by write/read, then permanently selects os-keystore or file protection. Reopen never probes or changes selection. Existing originals require their selector and KEK.
 - File protection requires owner-only directories/files, no symlinks; Windows uses actual
   owner/DACL checks through the official process Layer, not Unix mode bits.
 - Keep common blob formats in core's node-custody adapter; no personal management operations,
@@ -63,11 +62,10 @@
   encrypted branch. Keep native custody/core off the ordinary entry graph; the
   CLI build and its source maps must still fit the fixed 2 GiB build heap.
 
-- Runtime key journals are signing-key-scoped; custody loss cannot reuse old KEK
-  blobs. Retain old evidence. A same-genesis hint follows a replacement only after
-  verified admission/installation. Pairing waits raise no startup issue/timer or global
-  offline state. Activation binds the approved key, drains other identities and retains
-  its cleanup retry owner.
+- Runtime journals are signing-key-scoped: retain old evidence; never reuse old KEK blobs.
+  Hints follow replacements only after verified admission/install. Pairing waits raise
+  no startup issue/timer/global offline state. Activation binds the approved key,
+  drains other identities and retains its cleanup retry owner.
 - Only activation/binding/device-original ENOENT means pairing wait. Check the
   original before custody init; stale hints cannot trigger keyring probes. Preserve
   other file errors/Fleet retry; never cache transient storage as missing pairing.
@@ -81,14 +79,14 @@
   before key receipt. Verify full original history and current same-member personal
   authority. New sessions need explicit consent; preserve the original signer, keys and
   credential. Latest-session preflight precedes Fleet ownership changes; late sessions fail.
-- Publish preparation ownership before replacement originals, then publish material and
-  current identity atomically. A same-scope fresh session can take an unpublished
-  creating generation atomically: old creating=-1, new creating=1, no original-byte
-  edits. Account/machine/workspace/genesis/member must match; superseded sessions
-  cannot publish or retake. Reuse custody originals; surviving old credentials
-  forbid device replacement. Ledger-only owners cannot receive keys.
-  Same-identity retries keep healthy owners; only identical intents share a flight.
-  Local cancellation never guesses remote settlement.
+- Publish ownership before replacement originals; publish material/current identity atomically.
+  Same-scope takeover atomically changes old creating=-1/new creating=1, retaining bytes.
+  Match account/machine/workspace/genesis/member; superseded sessions cannot publish/retake.
+  Reuse originals. Unpublished generations with retained credentials cannot replace missing
+  devices; fresh explicit sessions may replace lost published identities with distinct
+  signing-key-scoped credentials. Ledger-only owners cannot receive keys. Same-identity
+  retries keep healthy owners; only identical intents share flights. Cancellation never
+  guesses remote settlement. See [recovery rationale](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-local-pairing-recovery.md).
 - Trusted OS-user socket only; partial upgrades fail closed. No remote authentication is implied. See the
   [pairing note](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-machine-pairing-journal.md).
 

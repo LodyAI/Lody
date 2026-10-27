@@ -3,6 +3,7 @@ import {
   mkdtempSync,
   rmSync,
   readFileSync,
+  writeFileSync,
   statSync,
   chmodSync,
   renameSync,
@@ -61,6 +62,142 @@ describe('machine E2EE custody', () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it('keeps credentials per identity and only reads an exact current-format original at the old location', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'machine-credential-identities-'));
+    const keyring: MachineKeyring = async () => {
+      throw new Error('synthetic unavailable');
+    };
+    const genesisHex = Buffer.from(genesis.toBytes()).toString('hex');
+    const oldPath = join(directory, `device-credential-${genesisHex}.sealed`);
+    const pathFor = (key: string) =>
+      join(directory, `device-credential-${genesisHex}-${key}.sealed`);
+    try {
+      const first = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const custody = yield* makeCliE2eeCustody({ directory, keyring });
+            const device = yield* custody.createDevice(genesis);
+            return {
+              key: device.publicKey,
+              credential: yield* custody.prepareDeviceCredential(genesis, device.publicKey),
+            };
+          })
+        )
+      );
+      const firstHex = Buffer.from(first.key.toBytes()).toString('hex');
+      renameSync(pathFor(firstHex), oldPath);
+      const original = readFileSync(oldPath);
+      // This is the same v1 AEAD blob, not an import/conversion of an old format.
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const custody = yield* makeCliE2eeCustody({ directory, keyring });
+            expect(yield* custody.deviceCredential(genesis, first.key)).toBe(
+              first.credential.credential
+            );
+            expect(yield* custody.prepareDeviceCredential(genesis, first.key)).toEqual(
+              first.credential
+            );
+          })
+        )
+      );
+      expect(existsSync(pathFor(firstHex))).toBe(false);
+      unlinkSync(join(directory, `${genesisHex}.machine.device`));
+      const second = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const custody = yield* makeCliE2eeCustody({ directory, keyring });
+            const device = yield* custody.createDevice(genesis);
+            expect(
+              Result.isFailure(
+                yield* Effect.result(custody.deviceCredential(genesis, device.publicKey))
+              )
+            ).toBe(true);
+            const credential = yield* custody.prepareDeviceCredential(genesis, device.publicKey);
+            expect(yield* custody.deviceCredential(genesis, first.key)).toBe(
+              first.credential.credential
+            );
+            return { key: device.publicKey, credential };
+          })
+        )
+      );
+      const secondHex = Buffer.from(second.key.toBytes()).toString('hex');
+      expect(secondHex).not.toBe(firstHex);
+      expect(second.credential).not.toEqual(first.credential);
+      expect(readFileSync(oldPath)).toEqual(original);
+      expect(existsSync(pathFor(secondHex))).toBe(true);
+      // A corrupt keyed file cannot fall back to a valid same-key old file.
+      renameSync(oldPath, pathFor(firstHex));
+      const bad = Buffer.from(original);
+      bad.writeUInt8(bad.readUInt8(bad.length - 1) ^ 1, bad.length - 1);
+      writeFileSync(oldPath, original, { mode: 0o600 });
+      writeFileSync(pathFor(firstHex), bad, { mode: 0o600 });
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const custody = yield* makeCliE2eeCustody({ directory, keyring });
+            const found = yield* Effect.result(custody.deviceCredential(genesis, first.key));
+            expect(found).toMatchObject({ _tag: 'Failure', failure: { code: 'corrupt' } });
+            const prepared = yield* Effect.result(
+              custody.prepareDeviceCredential(genesis, first.key)
+            );
+            expect(prepared).toMatchObject({ _tag: 'Failure', failure: { code: 'corrupt' } });
+          })
+        )
+      );
+      expect(readFileSync(oldPath)).toEqual(original);
+      expect(readFileSync(pathFor(firstHex))).toEqual(bad);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['kek.safe-storage', 'protection'])(
+    'retains a surviving credential when device and %s are missing without recreating protection',
+    async (missing) => {
+      const directory = mkdtempSync(join(tmpdir(), 'machine-credential-protection-loss-'));
+      const keyring: MachineKeyring = async () => {
+        throw new Error('synthetic unavailable');
+      };
+      try {
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const custody = yield* makeCliE2eeCustody({ directory, keyring });
+              const device = yield* custody.createDevice(genesis);
+              yield* custody.prepareDeviceCredential(genesis, device.publicKey);
+            })
+          )
+        );
+        unlinkSync(
+          join(directory, `${Buffer.from(genesis.toBytes()).toString('hex')}.machine.device`)
+        );
+        unlinkSync(join(directory, missing));
+        const originals = new Map(
+          readdirSync(directory).map((name) => [name, readFileSync(join(directory, name))])
+        );
+        const result = await Effect.runPromise(
+          Effect.scoped(
+            Effect.result(
+              makeCliE2eeCustody({
+                directory,
+                keyring: async () => {
+                  throw new Error('must not probe or reselect protection');
+                },
+              })
+            )
+          )
+        );
+        expect(result).toMatchObject({ _tag: 'Failure', failure: { code: 'corrupt' } });
+        expect(existsSync(join(directory, missing))).toBe(false);
+        for (const [name, bytes] of originals)
+          expect(readFileSync(join(directory, name))).toEqual(bytes);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+  );
 
   it('finishes ACL initialization for an interrupted empty directory, but never repairs originals', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'machine-acl-interrupted-'));
