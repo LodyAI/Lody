@@ -12,6 +12,6 @@ The owner explicitly replaced mandatory rotation blocking with availability-firs
 
 ## Scope and evidence
 
-Only the derived content permission changes. Ledger originals, retained state, snapshots, commitments, domains and wire formats do not change. The existing real replay test covers pending and completed rotation plus the revoked device; real Streams crypto/admission verifies usable new frames while pending. Both changed behaviors fail on the prior implementation. Current membership and signing-time rechecks are retained.
+Only the derived content permission changes. Ledger originals, retained state, snapshots, commitments, domains and wire formats do not change. The existing real replay test covers pending and completed rotation plus the revoked device; real Streams crypto/admission verifies usable new frames while pending. Both changed behaviors fail on the prior implementation. Current membership and signing-time rechecks are retained. Native CLI and real HTTP Lab consumer tests also verify usable pending-rotation seals, with revoked writers still refused.
 
 The document binding's fixed epoch handoff is a separate PR20-C responsibility. No automatic signing, device revocation UI, settings badge or release is added here. Real gateway expiry and installed-device acceptance remain unverified. This owner decision supersedes the blocking interpretation in earlier E2EE design documents; it does not roll back a saved format.
