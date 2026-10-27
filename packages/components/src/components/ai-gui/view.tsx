@@ -3113,15 +3113,18 @@ const DashedNoticeRule = () => (
 );
 
 const noticeStyles = stylex.create({
-  // Copy shares the title row unless retry already occupies its trailing edge.
-  row: {
+  // One header row: glyph, label, and at most one trailing owner (retry or
+  // copy). `alignItems: center` keeps the 14px glyph on the label's optical
+  // line instead of relying on a hand-tuned top margin.
+  header: {
     display: 'flex',
-    flexWrap: 'wrap',
     alignItems: 'center',
     columnGap: space[2],
-    rowGap: space[1.5],
     paddingInline: space[3],
     paddingTop: space[2],
+    paddingBottom: space[1],
+  },
+  headerOnly: {
     paddingBottom: space[3],
   },
   label: {
@@ -3129,59 +3132,51 @@ const noticeStyles = stylex.create({
     flexShrink: 1,
     flexBasis: 0,
     minWidth: 0,
-    fontSize: textScale.footnoteSize,
-    lineHeight: textScale.footnoteLeading,
+    fontSize: textScale.subheadlineSize,
+    lineHeight: textScale.subheadlineLeading,
     fontWeight: 500,
   },
-  action: { flexShrink: 0 },
-  detail: {
-    order: 4,
-    width: '100%',
-    minWidth: 0,
+  trailing: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: space[1],
   },
-  /** Applied only when copy is the sole trailing control. */
-  detailAfterFooter: {
-    order: 5,
+  detail: {
+    minWidth: 0,
+    paddingInline: space[3],
+    paddingBottom: space[3],
   },
   detailText: {
     display: 'block',
     minWidth: 0,
     whiteSpace: 'pre-wrap',
     overflowWrap: 'anywhere',
-    fontSize: textScale.footnoteSize,
+    fontSize: textScale.subheadlineSize,
     lineHeight: textScale.bodyLeading,
     color: 'hsl(var(--muted-foreground))',
   },
   footer: {
-    order: 5,
-    width: '100%',
-    flexShrink: 0,
-  },
-  /** Applied only when copy is the sole trailing control. */
-  footerInHeader: {
-    order: 4,
-    width: 'auto',
-    maxWidth: '100%',
+    paddingInline: space[3],
+    paddingBottom: space[3],
   },
 });
 
 /**
- * Renders a single system notice as a divider with tooltip
- */
-/**
  * The one banner an agent notice takes, whatever its tone.
  *
- * Shaped like a fenced code block — the conversation already embeds those, so a
- * filled, hairline-ringed block reads as part of the prose rather than as chrome
- * dropped on top of it.
+ * A soft well, not an outlined alert: every other surface in the conversation
+ * is a fill without a border, and a hairline ring made the notice read as
+ * chrome dropped on top of the prose. The body starts at the well's leading
+ * edge, under the glyph, so agent text is not pushed into a narrower column.
  *
  * Always open and the full width of the column. A notice is a short aside, so
  * hiding it behind a disclosure asked for a click to read two lines, and a
  * fit-content card left a ragged right edge against the column's otherwise
  * straight rail.
  *
- * Tone is carried by the glyph and the leading sentence: amber is warning and
- * red is failure, by convention, over a ~6% fill that stays out of the way.
+ * Tone is carried by the glyph and the label: amber is warning and red is
+ * failure, by convention, over a ~4.5% fill that stays out of the way.
  */
 const AgentNoticeBanner = ({
   tone,
@@ -3210,53 +3205,39 @@ const AgentNoticeBanner = ({
         ? 'text-amber-600 dark:text-amber-400'
         : 'text-muted-foreground';
 
-  // The surface keeps the tone but at a fraction of its saturation: the colour
-  // is mixed toward the neutral border rather than merely faded, so the card
-  // still reads as "warning" or "failure" at a glance without a vivid slab
-  // competing with the answer it comments on.
+  // The tone only tints the well. There is no ring: a notice sits in the
+  // conversation as a block of the same material as a user bubble or code
+  // block, not as a bordered component.
   const toneColor =
     tone === 'error'
       ? 'hsl(var(--destructive))'
       : tone === 'warning'
         ? 'rgb(245 158 11)'
         : 'hsl(var(--muted-foreground))';
-  // A hairline: Chromium rounds a 0.5px BORDER up to 1px at any DPR, so every
-  // `border-[0.5px]` in the app actually paints 1px. `ui/AGENTS.md` settled on
-  // this same shadow ring for menus.
-  const ringColor = `color-mix(in srgb, ${toneColor} 14%, hsl(var(--border)))`;
-  const fillColor = `color-mix(in srgb, ${toneColor} 3.5%, transparent)`;
+  const fillColor = `color-mix(in srgb, ${toneColor} 4.5%, transparent)`;
   // Only lift copy into the header when it would be the sole trailing control.
   // A capacity retry action already owns that edge, and moving copy beside it
   // wraps a short title into a tall column on phones.
   const copyRidesHeader = !action;
+  const headerTrailing = action ?? (copyRidesHeader ? footer : undefined);
+  const bodyFooter = copyRidesHeader ? null : footer;
+  const hasBody = Boolean(detail || bodyFooter);
 
   return (
-    <div
-      style={{ boxShadow: `0 0 0 0.5px ${ringColor}`, background: fillColor }}
-      className="w-full overflow-hidden rounded-lg"
-    >
-      <div {...stylex.props(noticeStyles.row)}>
+    <div style={{ background: fillColor }} className="w-full overflow-hidden rounded-lg">
+      <div {...stylex.props(noticeStyles.header, !hasBody && noticeStyles.headerOnly)}>
         <Icon className={cn('h-3.5 w-3.5 shrink-0', accentClass)} aria-hidden="true" />
         <span {...withClassName(stylex.props(noticeStyles.label), accentClass)}>{label}</span>
-        {action ? <div {...stylex.props(noticeStyles.action)}>{action}</div> : null}
-        {detail ? (
-          <div
-            {...stylex.props(
-              noticeStyles.detail,
-              copyRidesHeader && noticeStyles.detailAfterFooter
-            )}
-          >
-            <span {...stylex.props(noticeStyles.detailText)}>{detail}</span>
-          </div>
-        ) : null}
-        {footer ? (
-          <div
-            {...stylex.props(noticeStyles.footer, copyRidesHeader && noticeStyles.footerInHeader)}
-          >
-            {footer}
-          </div>
+        {headerTrailing ? (
+          <div {...stylex.props(noticeStyles.trailing)}>{headerTrailing}</div>
         ) : null}
       </div>
+      {detail ? (
+        <div {...stylex.props(noticeStyles.detail)}>
+          <span {...stylex.props(noticeStyles.detailText)}>{detail}</span>
+        </div>
+      ) : null}
+      {bodyFooter ? <div {...stylex.props(noticeStyles.footer)}>{bodyFooter}</div> : null}
     </div>
   );
 };
