@@ -756,6 +756,72 @@ export class E2eeIpc extends IpcService {
     })
   }
   @IpcMethod()
+  async managementState(workspaceId: string) {
+    const id = sender()
+    return withDesktopE2eeAccount((owner) =>
+      owner.readers.get(workspaceId)?.has(id)
+        ? owner.host.managementState(workspaceId)
+        : Effect.fail(new Error('e2ee_not_open'))
+    )
+  }
+  private async manageKeys(
+    workspaceId: string,
+    command: { type: 'rotate' } | { type: 'revoke'; target: string }
+  ) {
+    const id = sender()
+    const access = await withDesktopE2eeAccount((owner) =>
+      Effect.gen(function* () {
+        if (!owner.readers.get(workspaceId)?.has(id))
+          return yield* Effect.fail(new Error('e2ee_not_open'))
+        return {
+          accountId: owner.accountId,
+          credential: yield* owner.bootstrap.deviceCredential(workspaceId)
+        }
+      })
+    )
+    const cloud = await desktopE2eeCloudClient()
+    if (cloud.accountId !== access.accountId) throw new Error('e2ee_account_mismatch')
+    const work = await withDesktopE2eeAccount((owner) =>
+      owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
+        ? Effect.succeed(
+            owner.host.manage(workspaceId, command, (signal) => ({
+              log: cloud.client.ledgerLog(workspaceId, signal),
+              staging: (round) =>
+                cloud.client.staging({ workspaceId, credential: access.credential }, signal, round),
+              refresh: () =>
+                Effect.tryPromise({
+                  try: () =>
+                    this.refresh(workspaceId, { installKeys: false }).then(() => undefined),
+                  catch: (error) => error
+                }),
+              receive: () =>
+                Effect.tryPromise({
+                  try: () => this.refresh(workspaceId).then(() => undefined),
+                  catch: (error) => error
+                })
+            }))
+          )
+        : Effect.fail(new Error('e2ee_not_open'))
+    )
+    try {
+      const outcome = await runDesktopE2eeOperation(access.accountId, work)
+      if (outcome === 'Conflict') throw new Error('e2ee_management_conflict')
+    } catch (error) {
+      this.pairingFailure = error
+      throw error
+    }
+  }
+  @IpcMethod()
+  async updateKeys(workspaceId: string) {
+    await this.manageKeys(workspaceId, { type: 'rotate' })
+  }
+  @IpcMethod()
+  async revokeDevice(workspaceId: string, signingPublicKey: string) {
+    if (typeof signingPublicKey !== 'string' || !/^[0-9a-f]{64}$/.test(signingPublicKey))
+      throw new Error('e2ee_invalid-input')
+    await this.manageKeys(workspaceId, { type: 'revoke', target: signingPublicKey })
+  }
+  @IpcMethod()
   async status(workspaceId: string) {
     const id = sender()
     return withDesktopE2eeAccount((owner) =>

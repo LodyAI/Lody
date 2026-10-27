@@ -266,7 +266,11 @@ function publicE2eeFailure(error: unknown): Error {
     'corrupt',
     'invalid-input',
     'storage',
-    'invalid-ledger'
+    'invalid-ledger',
+    'rotation_candidate_unavailable',
+    'management_unauthorized',
+    'management_operator_required',
+    'management_retry'
   ])
   return new Error(
     typeof code === 'string' && allowed.has(code) ? `e2ee_${code}` : 'e2ee_host_operation_failed'

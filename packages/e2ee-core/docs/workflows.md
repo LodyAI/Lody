@@ -160,7 +160,11 @@ generate key → seal history packet → sign record → envelope per device
 → Committed: install via InstalledEpochKeys | Conflict: discard candidate key
 ```
 
-`resume` finishes the same candidate after a crash, without signing again.
+`resume` finishes the same candidate after a crash, without signing again. A missing
+candidate may reconcile its exact retained submission only after genuine commitment or
+conflict proof; it cannot authorize CAS at an unchanged parent. Normal receiver paths
+install committed keys independently. Existing installed keys permit terminal acknowledgement
+without reopening the candidate blob. Unpublished keys never bypass CandidateProtector.
 `cleanupStaged` deletes this device's group once a different commitment
 occupies its epoch. `acknowledge` releases the finished result. Only owner or
 admin personal devices may rotate. A manager who bypasses staging and appends

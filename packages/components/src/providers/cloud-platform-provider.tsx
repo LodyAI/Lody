@@ -200,7 +200,11 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
               prepareLocalAgent: (workspaceId) => native.prepareLocalAgent(workspaceId),
               admitLocalAgent: (workspaceId, pairingSessionId) =>
                 native.admitLocalAgent(workspaceId, pairingSessionId),
-              refresh: (workspaceId) => native.refresh(workspaceId),
+              managementState: (workspaceId) => native.managementState(workspaceId),
+              updateKeys: (workspaceId) => native.updateKeys(workspaceId),
+              revokeDevice: (workspaceId, signingPublicKey) =>
+                native.revokeDevice(workspaceId, signingPublicKey),
+              refresh: (workspaceId, options) => native.refresh(workspaceId, options),
               contentStreamsToken: (workspaceId, rejectedToken) =>
                 native.contentStreamsToken(workspaceId, rejectedToken),
               seal: (workspaceId, input) => native.seal(workspaceId, input),

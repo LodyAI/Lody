@@ -1,3 +1,4 @@
+import { subscribeE2eeLedgerChanges } from './e2ee-runtime-notifications';
 import { useTranslation } from 'react-i18next';
 import { createDesktopE2eeContent } from './desktop-e2ee-content';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
@@ -542,6 +543,22 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     let nativeHasKey = false;
     let nativeRefresh: Promise<void> | null = null;
     let nativeRefreshAgain = false;
+    const acceptStatus = async (status: import('@lody/platform').E2eeRuntimeStatus) => {
+      const native = platform.e2eeWorkspaces?.runtime;
+      if (!native || !nativeLease || disposed || retired) return;
+      const leased = nativeLease;
+
+      encryptedAccess?.updateStatus(status);
+      if (encryptedAccess && workspaceRuntime && encryptedAccess.needsUpdate()) {
+        await encryptedAccess.transition({
+          install: () => (status.hasCurrentKey ? native.status(leased) : native.refresh(leased)),
+        });
+        if (disposed || retired) return;
+        if (encryptedAccess.phase() === 'ready') setKeyUpdateWorkspace(null);
+      }
+      if (!nativeHasKey && workspaceRuntime === null && status.hasCurrentKey)
+        retryAdmission((value) => value + 1);
+    };
     const refreshNative = (): void => {
       if (disposed || !nativeLease) return;
       if (nativeRefresh) {
@@ -551,19 +568,6 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       const native = platform.e2eeWorkspaces?.runtime;
       if (!native) return;
       const leased = nativeLease;
-      const acceptStatus = async (status: Awaited<ReturnType<typeof native.status>>) => {
-        if (disposed || retired) return;
-        encryptedAccess?.updateStatus(status);
-        if (encryptedAccess && workspaceRuntime && encryptedAccess.needsUpdate()) {
-          await encryptedAccess.transition({
-            install: () => native.refresh(leased),
-          });
-          if (disposed || retired) return;
-          if (encryptedAccess.phase() === 'ready') setKeyUpdateWorkspace(null);
-        }
-        if (!nativeHasKey && workspaceRuntime === null && status.hasCurrentKey)
-          retryAdmission((value) => value + 1);
-      };
       const pending = native
         .refresh(leased, { installKeys: !nativeHasKey && workspaceRuntime === null })
         .then(acceptStatus)
@@ -588,6 +592,18 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     };
     retryKeyUpdateRef.current = refreshNative;
     window.addEventListener('online', refreshNative);
+    const unsubscribeLedgerChange = accountId
+      ? subscribeE2eeLedgerChanges(accountId, effectiveWorkspaceId, () => {
+          const native = platform.e2eeWorkspaces?.runtime;
+          if (disposed || retired || !native || !nativeLease) return;
+          void native
+            .status(nativeLease)
+            .then(acceptStatus)
+            .catch(() => {
+              if (!disposed && !retired) setKeyUpdateWorkspace(effectiveWorkspaceId);
+            });
+        })
+      : () => {};
     let encryptedAccess: ReturnType<typeof createDesktopE2eeContent> | null = null;
     const disposeRuntime = () =>
       (disposal ??= (async () => {
@@ -874,6 +890,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       });
       disposed = true;
       window.removeEventListener('online', refreshNative);
+      unsubscribeLedgerChange();
       initializationAbort.abort();
       setRuntime(null);
       setControlConnectionState('idle');

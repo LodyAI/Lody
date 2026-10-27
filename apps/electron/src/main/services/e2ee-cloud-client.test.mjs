@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createPrivateKey, createPublicKey, sign } from 'node:crypto'
-import { encodeCbor, hashRecordBytes, recordSigningBytes } from '@lody/e2ee-core/protocol'
+import { Bytes, encodeCbor, hashRecordBytes, recordSigningBytes } from '@lody/e2ee-core/protocol'
 import { encodeEpochStagedGroup } from '@lody/e2ee-core/host'
 import { Effect, Fiber, Result, Scope, Exit } from 'effect'
 import { TestClock } from 'effect/testing'
@@ -691,3 +691,105 @@ void test('D03 narrow registration accepts no client-selected identity and valid
     )
   )
 })
+
+void test('staging sends the persisted round and exposes bounded capacity continuation separately', async () => {
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* build(async (_url, init) => {
+          const {
+            path,
+            args: [args]
+          } = JSON.parse(init.body)
+          assert.equal(path, 'e2eeEpochStaging:stageGroup')
+          assert.equal(args.round, 'persisted-round')
+          return Response.json({
+            status: 'error',
+            errorMessage: 'capacity',
+            errorData: {
+              code: 'e2ee_staging_capacity_exceeded',
+              round: args.round,
+              limit: 1,
+              canStartNewRound: true
+            }
+          })
+        })
+        const result = yield* Effect.result(
+          client.staging(access, undefined, 'persisted-round').stageGroup(stagedGroup())
+        )
+        assert.equal(Result.isFailure(result), true)
+        assert.equal(result.failure.code, 'e2ee_staging_capacity_exceeded')
+        assert.equal(result.failure.round, 'persisted-round')
+        assert.equal(result.failure.limit, 1)
+      })
+    )
+  )
+})
+
+void test('management ledger transport preserves the original record and refuses a mismatched observed CAS checkpoint', async () => {
+  const group = stagedGroup(),
+    original = Buffer.from(group.record).toString('hex')
+  let stored = null
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* build(async (_url, init) => {
+          const {
+            path,
+            args: [args]
+          } = JSON.parse(init.body)
+          if (path === 'e2eeWorkspaces:history')
+            return response({
+              workspaceId: access.workspaceId,
+              genesisHash: group.genesis,
+              checkpoint: { length: 1, headHash: '02'.repeat(32) },
+              startIndex: 0,
+              recordsHex: ['01'],
+              position: 'synthetic-source-position',
+              nextCursor: null
+            })
+          assert.equal(path, 'e2eeWorkspaces:appendRecord')
+          assert.equal(args.recordHex, original)
+          assert.equal(args.requestId, group.recordHash)
+          stored = args.recordHex
+          return response({ status: 'committed', recordHash: group.recordHash })
+        })
+        const anchor = Result.getOrThrow(Bytes.genesisHash(Buffer.from(group.genesis, 'hex')))
+        const log = client.ledgerLog(access.workspaceId)
+        const read = yield* log.read(anchor)
+        const refused = yield* Effect.result(
+          log.appendCas(anchor, { ...read.checkpoint, length: 2 }, group.record)
+        )
+        assert.equal(Result.isFailure(refused), true)
+        assert.equal(stored, null)
+        const mutable = group.record.slice()
+        const append = log.appendCas(anchor, read.checkpoint, mutable)
+        mutable.fill(0)
+        yield* append
+        assert.equal(stored, original)
+      })
+    )
+  )
+})
+
+for (const code of ['e2ee_staging_configuration', 'e2ee_projection_corrupt'])
+  void test(`management preserves the safe operator diagnosis ${code}`, async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(async () =>
+            Response.json({
+              status: 'error',
+              errorMessage: 'synthetic-secret',
+              errorData: { code }
+            })
+          )
+          const result = yield* Effect.result(
+            client.staging(access, undefined, 'saved-round').stageGroup(stagedGroup())
+          )
+          assert.equal(result.failure.code, code)
+          assert.equal(JSON.stringify(result.failure).includes('synthetic-secret'), false)
+        })
+      )
+    )
+  })

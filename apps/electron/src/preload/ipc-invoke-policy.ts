@@ -37,7 +37,10 @@ export function isIpcInvokeChannel(channel: string): boolean {
       'close',
       'status',
       'ingestLedgerRecords',
-      'ledgerView'
+      'ledgerView',
+      'managementState',
+      'updateKeys',
+      'revokeDevice'
     ]).has(match![2]!)
   return group !== undefined && INVOKE_SERVICE_GROUP_VALUES.has(group)
 }
