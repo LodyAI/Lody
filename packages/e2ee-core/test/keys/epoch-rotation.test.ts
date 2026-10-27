@@ -668,6 +668,7 @@ describe('durable local epoch rotation', () => {
                 membershipId: target,
                 encryptionPublicKey: device.encryptionPublicKey,
                 kind: kind as 'machine' | 'recovery',
+                ...(kind === 'machine' ? { machineId: 'removed-member-machine' } : {}),
                 signer: device.signer,
               });
             f.append(

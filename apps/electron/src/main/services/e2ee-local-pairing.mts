@@ -99,6 +99,7 @@ export function makeDesktopLocalPairing(input: {
     if (admitted) {
       if (
         admitted.kind !== 'machine' ||
+        admitted.machineId !== value.machineId ||
         !admitted.membershipId.equals(ownMembership) ||
         hex(admitted.encryptionPublicKey.toBytes()) !== value.encryptionPublicKey
       )
@@ -108,6 +109,13 @@ export function makeDesktopLocalPairing(input: {
     const command = {
       _tag: 'AdmitDevice' as const,
       kind: 'machine' as const,
+      machineId: value.machineId,
+      replaces: (() => {
+        const previous = [...view.inspectState().devices].find(
+          ([, device]) => device.kind === 'machine' && device.machineId === value.machineId
+        )?.[0]
+        return previous ? Result.getOrThrow(Bytes.signingPublicKey(raw(previous))) : null
+      })(),
       signingPublicKey: publicKey,
       encryptionPublicKey: Result.getOrThrow(
         Bytes.encryptionPublicKey(raw(value.encryptionPublicKey))

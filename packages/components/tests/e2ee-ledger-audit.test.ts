@@ -10,16 +10,16 @@ const vector = JSON.parse(
   readFileSync(join(import.meta.dirname, '../../e2ee-core/test/ledger-v1-vector.json'), 'utf8')
 ) as { anchor: string; records: { hex: string }[] };
 const checkpoint = {
-  headHash: 'e7fe1ef3dfaa4e1001fd1a4df3a1af79f6c5d6cbc72b11502372b6030b813668',
-  length: 9,
+  headHash: '2d479a23a222cdb7c843845aa83ee36c9a6a773638db6db7bb0b57ac182628a3',
+  length: 11,
 };
 const page: E2eeWorkspaceHistoryPage = {
   workspaceId: 'w',
   genesisHash: vector.anchor,
   checkpoint,
   startIndex: 0,
-  recordsHex: vector.records.slice(0, 9).map((record) => record.hex),
-  position: 'p9',
+  recordsHex: vector.records.slice(0, 11).map((record) => record.hex),
+  position: 'p11',
   nextCursor: null,
 };
 const trusted = appendLedgerHistory(null, page, {
@@ -48,8 +48,8 @@ describe('explicit ledger audit', () => {
           : { ...page, recordsHex: page.recordsHex.slice(0, 4), position: 'p4', nextCursor: 'c4' };
       },
     });
-    expect(result).toEqual({ length: 9, stateDigest: expected.stateDigest });
-    expect(progress).toEqual([4, 9]);
+    expect(result).toEqual({ length: 11, stateDigest: expected.stateDigest });
+    expect(progress).toEqual([4, 11]);
     expect(ledgerVerificationCode(trusted).stateDigest).toBe(expected.stateDigest);
   });
 
@@ -67,7 +67,7 @@ describe('explicit ledger audit', () => {
             ...page,
             recordsHex: records,
             ...(fault === 'gap' ? { startIndex: 1 } : {}),
-            ...(fault === 'endpoint' ? { checkpoint: { ...checkpoint, length: 10 } } : {}),
+            ...(fault === 'endpoint' ? { checkpoint: { ...checkpoint, length: 12 } } : {}),
           }),
         })
       ).rejects.toThrow();
@@ -92,6 +92,6 @@ describe('explicit ledger audit', () => {
     ).rejects.toThrow();
     await expect(
       auditLedgerHistory({ ...base, progress: () => undefined, read: async () => page })
-    ).resolves.toEqual({ length: 9, stateDigest: expected.stateDigest });
+    ).resolves.toEqual({ length: 11, stateDigest: expected.stateDigest });
   });
 });
