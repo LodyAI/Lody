@@ -116,6 +116,8 @@ _需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`InstalledEpoch
 
 `resume` 在崩溃后完成同一个候选，不再签名。`cleanupStaged` 在该纪元被不同承诺占用后删除本设备的暂存组。`acknowledge` 释放已完成的结果。只有 owner 或 admin 的个人设备可以换代。绕过暂存直接追加的管理者可以扣留密钥：这是已知的可用性限制，不破坏机密性。
 
+MVP 独立移除在 capability 1 的 `DeclareCapabilities` 命令入账后，使用 `WorkspaceControl.execute({ _tag: "RemoveMember", membershipId })`。它撤销全部设备，保留 epoch 并提示手动换代；`EpochPublisher.publishRemoving` 仍保留独立的 tag8 原子契约。
+
 ## WorkspaceControl 与密钥轮次
 
 `WorkspaceControl`（_需要 `DeviceIdentity`、`LedgerSubmission`、`LedgerSync`_）在刚刷新的视图上签名普通命令（接纳成员或设备、设置角色、吊销、转移 owner），每条只提交一次。存在待处理或未确认的提交时禁止新的签名；只有本地 feed 已包含提交时观察到的检查点，结果才会被确认。

@@ -167,6 +167,8 @@ admin personal devices may rotate. A manager who bypasses staging and appends
 directly can withhold the key. That is a known availability limitation, not a
 confidentiality break.
 
+Independent MVP member removal uses `WorkspaceControl.execute({ _tag: "RemoveMember", membershipId })` after an authorized `DeclareCapabilities` command for code 1 has committed. It revokes every device, preserves the epoch and advises manual rotation. `EpochPublisher.publishRemoving` retains its separate atomic tag8 contract.
+
 ## WorkspaceControl and the key round
 
 `WorkspaceControl` (_requires `DeviceIdentity`, `LedgerSubmission`,

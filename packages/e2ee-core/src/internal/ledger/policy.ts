@@ -22,6 +22,8 @@ export interface Device {
 export interface LedgerState {
   readonly genesis: Bytes.GenesisHash;
   readonly owner: Bytes.MembershipId;
+  /** Monotonic supported protocol extensions declared by prior authorized records. */
+  readonly capabilities: readonly number[];
   readonly members: ReadonlyMap<string, Member>;
   readonly devices: ReadonlyMap<string, Device>;
   readonly epoch: {
@@ -57,6 +59,7 @@ export interface InternalState {
   historyPackets: HashMap.HashMap<number, EpochHistoryPacket>;
   genesis: Bytes.GenesisHash;
   owner: Bytes.MembershipId;
+  capabilities: HashSet.HashSet<number>;
   members: HashMap.HashMap<string, Member>;
   devices: HashMap.HashMap<string, Device>;
   /** Derived index of active machine bindings; never an independent authority. */
@@ -80,7 +83,7 @@ export interface InternalState {
 }
 const id = (value: { toBytes(): Uint8Array }) => keyId(value.toBytes());
 /** Capability codes this verifier implements. Adding one also adds its state and snapshot field. */
-const SUPPORTED_CAPABILITIES: ReadonlySet<number> = new Set();
+export const SUPPORTED_CAPABILITIES: ReadonlySet<number> = new Set([1]);
 export function genesisState(
   body: Extract<RecordBody, { type: 'genesis' }>,
   genesis: Bytes.GenesisHash,
@@ -92,6 +95,7 @@ export function genesisState(
     ]),
     genesis,
     owner: body.membershipId,
+    capabilities: HashSet.empty(),
     members: HashMap.fromIterable([
       [id(body.membershipId), Object.freeze({ userId: body.userId, role: 'owner' })],
     ]),
@@ -145,6 +149,7 @@ export function inspectState(s: InternalState): LedgerState {
   return Object.freeze({
     genesis: s.genesis,
     owner: s.owner,
+    capabilities: Object.freeze([...s.capabilities].sort((a, b) => a - b)),
     members: new Map(s.members),
     devices: new Map(s.devices),
     epoch: s.epoch,
@@ -330,10 +335,19 @@ export function applyOperation(
       }
       case 'declareCapabilities': {
         if (!manage) return yield* fail('unauthorized');
-        // Ledger v1 supports no capability yet. A genuine declaration is a valid
-        // future record, so stop at it as an upgrade, never as corruption.
+        // An unknown genuine declaration requires an upgrade, never prefix skipping.
         if (op.capabilities.some((code) => !SUPPORTED_CAPABILITIES.has(code)))
           return yield* fail('upgrade-required');
+        s.capabilities = HashSet.union(s.capabilities, HashSet.fromIterable(op.capabilities));
+        break;
+      }
+      case 'removeMember': {
+        if (!HashSet.has(s.capabilities, 1)) return yield* fail('invalid-operation');
+        const target = stateGet(s.members, id(op.membershipId));
+        if (!manage || !target || target.role === 'owner' || (!owner && target.role === 'admin'))
+          return yield* fail('unauthorized');
+        removeMembership(s, op.membershipId);
+        s.epoch = Object.freeze({ ...s.epoch, rotationRequired: true });
         break;
       }
       case 'publishEpoch':
@@ -349,17 +363,7 @@ export function applyOperation(
         if (op.epoch !== s.epoch.number + 1) return yield* fail('invalid-operation');
         if (HashSet.has(s.usedCommitments, id(op.commitment))) return yield* fail('replay');
         if (op.type === 'removeMemberAndPublishEpoch') {
-          const removed = stateGet(s.members, id(op.membershipId))!;
-          s.memberUsers = HashSet.remove(s.memberUsers, id(removed.userId));
-          s.members = HashMap.remove(s.members, id(op.membershipId));
-          // The history tables keep this membership and its devices, so authorship
-          // and replay facts survive; only the current views drop them.
-          for (const [key, device] of s.devices) {
-            if (!device.membershipId.equals(op.membershipId)) continue;
-            s.devices = HashMap.remove(s.devices, key);
-            if (device.kind === 'machine' && device.machineId !== undefined)
-              s.machineDevices = HashMap.remove(s.machineDevices, device.machineId);
-          }
+          removeMembership(s, op.membershipId);
         }
         s.usedCommitments = HashSet.add(s.usedCommitments, id(op.commitment));
         s.historyPackets = HashMap.set(
@@ -381,4 +385,17 @@ export function applyOperation(
     }
     return undefined;
   });
+}
+
+/** Drop current access only; history and retired identities remain replay facts. */
+function removeMembership(s: InternalState, membershipId: Bytes.MembershipId) {
+  const removed = stateGet(s.members, id(membershipId))!;
+  s.memberUsers = HashSet.remove(s.memberUsers, id(removed.userId));
+  s.members = HashMap.remove(s.members, id(membershipId));
+  for (const [key, device] of s.devices) {
+    if (!device.membershipId.equals(membershipId)) continue;
+    s.devices = HashMap.remove(s.devices, key);
+    if (device.kind === 'machine' && device.machineId !== undefined)
+      s.machineDevices = HashMap.remove(s.machineDevices, device.machineId);
+  }
 }

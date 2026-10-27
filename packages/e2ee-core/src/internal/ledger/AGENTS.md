@@ -9,8 +9,9 @@ Follow the package [boundary](../../../AGENTS.md) and [record/replay contract](R
   not account identity or admission. Producer genesis bytes do not prove publication,
   endpoint freshness, key durability or recovery backup.
 - Preserve nullable join expiry; no new strict deadline claim or ordinary tolerance
-  change. Reject obsolete RemoveMember/tag2; current tag8 removes a non-Owner member
-  and activates its next epoch atomically under Owner personal authority.
+  change. Reject obsolete RemoveMember/tag2; tag8 retains Owner-personal atomic removal/rotation. Capability 1 declares tag10
+  removal: Owner removes non-Owner; Admin removes only Member/Guest. Preserve epoch,
+  advise rotation, drop all current devices and retain retired identities.
 - Creation borrows already retained key/identity, never generates or stores secrets.
   Capture public fields/capabilities before async work. Do not add secret byte export
   or protection callbacks without the explicitly discussed host trust boundary.
@@ -34,7 +35,7 @@ Follow the package [boundary](../../../AGENTS.md) and [record/replay contract](R
   historical replay and rollback protection remain mandatory.
 
 - I/O owners use cooperative fixed-native verification; the same pure replay owns
-  authority. Persisted suffix bytes are reverified on open; a caller-owned retained v3 origin restores without replay. SQL is not authority;
+  authority. Persisted suffix bytes are reverified on open; a caller-owned retained v4 origin restores without replay. SQL is not authority;
   compare the verified head/count pin and current metadata point without scanning
   old rows or SQLite schema/write counters on every operation. Local OS/database
   tampering is outside the whitepaper threat model. Shared SQLite helpers own file
@@ -64,4 +65,4 @@ covered records atomically. Verification provenance is never upgraded.
   Only a same-member personal device can atomically replace its exact active machine;
   retain old keys/history. rotationRequired advises key updates; it must not block sends.
   Current-only, no legacy
-  machine record reader. Snapshot/retained/digest v3 preserve every historical binding.
+  machine record reader. Snapshot/retained/digest v4 preserve every historical binding.

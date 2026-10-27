@@ -1,4 +1,4 @@
-# Atomic member removal and staged epoch publication
+# Member removal and staged epoch publication
 
 Status: draft
 Translation: current
@@ -7,19 +7,39 @@ Translation: current
 
 ## Ledger transition
 
-An active Owner/Admin personal device observing `rotationRequired = true` may
-produce tag 7. Tag 8 is `[8, targetMembershipId, nextEpoch, commitment,
-previousEpochKey]` in the existing ordinary record, with exact arity and unchanged
-`lody-e2ee/sig/v1\0` and `lody-e2ee/rec/v1\0` domains. Only the current Owner's
-personal device may produce tag 8; its target must exist and cannot be Owner.
-The next epoch is exactly current + 1; overflow and reused commitments fail.
-Tag 2 remains unsupported. There is one current prelaunch format, no dual reader.
+The MVP removal action is tag 10 `[10, targetMembershipId]` in the existing
+ordinary record with unchanged signature/hash domains. A prior authorized tag 9
+declaration of capability 1 is required. Owner personal devices may remove any
+non-Owner member; Admin personal devices may remove Member/Guest only. Owner
+cannot be removed. Owner alone may promote or demote Admin through tag 3.
 
-One tag 8 transition removes the membership and all its personal, machine and
-Recovery devices, retains historical authors and retired identities, stores the
-new commitment and existing 72-byte history packet, and clears rotationRequired.
-The publisher opens the packet and checks the old commitment. Replay verifies
-signature, shape and pre-state authority; ciphertext shape cannot prove its key.
+Removal immediately drops the membership and all its personal, machine and
+Recovery devices from current authority, retaining historical authors, member
+instances, join requests and retired keys. It preserves the epoch and commitment
+and sets `rotationRequired = true` as an advisory reminder. Remaining writers
+continue sealing with the published epoch. Administrators explicitly finish the
+key update in settings; failed publication leaves the old epoch usable. A former
+member retaining the old key can decrypt any ciphertext it obtains until a new
+key is used; server access revocation is therefore essential.
+
+Snapshots, retained state and state digests use current-only version 4 and preserve
+the monotonic declared capability set. Unknown supported-shape declarations
+require an upgrade; older state formats are rejected, not migrated. Ledger v1 is
+not yet production-frozen; its independent vector is updated with capability 1,
+tag 10 and an unknown capability stop. Tag 2 remains rejected. Existing tag 8
+`[8, targetMembershipId, nextEpoch, commitment, previousEpochKey]` keeps its
+Owner-personal atomic removal/next-epoch semantics, but is not the MVP removal UI.
+An active Owner/Admin personal device may separately publish tag 7. Epoch overflow
+and reused commitments fail; publication clears the rotation reminder.
+
+Server acceptance must invalidate every device projection, credential and renewal
+permission in the same acceptance transaction. Auxiliary cleanup and rotation do
+not gate removal. MVP relies on the existing 15-minute content-token expiry; it
+does not actively disconnect issued tokens or long-lived connections. Honest
+clients stop sync/remote execution and delete this encrypted workspace's local
+data when removal is learned on the next open. This does not erase maliciously
+retained copies. Readmission requires a new invitation, membership instance and
+device keys; retired credentials never revive.
 
 ## Stage first, commit once
 
