@@ -2384,50 +2384,30 @@ async function ensureLocalRuntimeAvailable(
  * Rejects only a target that presence reports definitively offline. Delivery
  * runs through the synced Session document, so no one-shot RPC probe gates it:
  * an unanswered probe during a transport slowdown is not evidence of offline.
+ * Resolves to the presence that admitted the target (`online` or `unknown`).
  */
 export async function ensureTargetMachineNotOffline(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   machineId: MachineId;
   manager: Pick<LoroDocumentManager, 'getOnlineMachineIds'>;
-}): Promise<void> {
-  const state = await readTargetMachinePresence(args);
-  if (state.presence === 'offline') {
-    if (state.error) throw state.error;
-    throw new MachineOfflineError({ machineId: args.machineId });
-  }
-}
-
-async function readTargetMachinePresence(args: {
-  auth: AuthContext;
-  workspaceId: WorkspaceId;
-  machineId: MachineId;
-  manager: Pick<LoroDocumentManager, 'getOnlineMachineIds'>;
-}): Promise<{ presence: MachinePresence; error?: Error }> {
+}): Promise<MachinePresence> {
   const environment = getSessionCommandEnvironment();
   if (environment) {
     if (
       args.workspaceId !== environment.workspace.id ||
       args.machineId !== environment.auth.machineId
     )
-      return {
-        presence: 'offline',
-        error: new Error('Target machine is unavailable in this workspace'),
-      };
-    return { presence: 'online' };
+      throw new Error('Target machine is unavailable in this workspace');
+    return 'online';
   }
   if (args.machineId === args.auth.machineId) {
-    try {
-      await ensureLocalRuntimeAvailable(args.machineId, args.workspaceId);
-      return { presence: 'online' };
-    } catch (error) {
-      return {
-        presence: 'offline',
-        error: error instanceof Error ? error : new Error(formatErrorMessage(error)),
-      };
-    }
+    await ensureLocalRuntimeAvailable(args.machineId, args.workspaceId);
+    return 'online';
   }
-  return { presence: await readMachinePresence(args.manager, args.machineId) };
+  const presence = await readMachinePresence(args.manager, args.machineId);
+  if (presence === 'offline') throw new MachineOfflineError({ machineId: args.machineId });
+  return presence;
 }
 
 export async function readSessionMachineAccess(args: {
@@ -4280,19 +4260,18 @@ async function readSessionLiveStatus(args: {
   machineOnline: boolean;
   liveStatus: SessionStatusResult['liveStatus'];
 }> {
-  const machine = await readTargetMachinePresence(args);
-  if (machine.presence === 'offline') {
+  let presence: MachinePresence;
+  try {
+    presence = await ensureTargetMachineNotOffline(args);
+  } catch (error) {
     return {
       machineOnline: false,
-      liveStatus: deriveSessionLiveStatus({
-        online: false,
-        message: machine.error?.message ?? `Target Machine is offline: ${args.machineId}`,
-      }),
+      liveStatus: deriveSessionLiveStatus({ online: false, message: formatErrorMessage(error) }),
     };
   }
   // Presence owns online/offline; the live-status RPC only adds freshness. With
   // unknown presence, an answered RPC is the only online evidence.
-  const unknownPresence = machine.presence === 'unknown';
+  const unknownPresence = presence === 'unknown';
   try {
     const response = await withMachineRpcClient(
       args,
@@ -4370,14 +4349,11 @@ export async function readSessionLiveStatusesMany(args: {
   const output = new Map<SessionId, SessionLiveStatusBatchItem>();
   await Promise.all(
     [...groups].map(async ([machineId, sessions]) => {
-      const machine = await readTargetMachinePresence({
-        auth: args.auth,
-        workspaceId: args.workspaceId,
-        machineId,
-        manager: args.manager,
-      });
-      if (machine.presence === 'offline') {
-        const reason = machine.error?.message ?? `Target Machine is offline: ${machineId}`;
+      let presence: MachinePresence;
+      try {
+        presence = await ensureTargetMachineNotOffline({ ...args, machineId });
+      } catch (error) {
+        const reason = formatErrorMessage(error);
         for (const session of sessions) {
           output.set(session.id, {
             sessionId: session.id,
@@ -4388,7 +4364,7 @@ export async function readSessionLiveStatusesMany(args: {
         }
         return;
       }
-      const unknownPresence = machine.presence === 'unknown';
+      const unknownPresence = presence === 'unknown';
       try {
         const responses = await withMachineRpcClient(
           { auth: args.auth, workspaceId: args.workspaceId, machineId },

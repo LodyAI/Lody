@@ -123,6 +123,7 @@ import {
   type SessionLiveStatusBatchItem,
   type DelegatedSessionRequester,
 } from '@/commands/session';
+import { classifyMachinePresence, type MachinePresence } from '@/commands/session-machine-presence';
 import type {
   SessionTurnOutputEvent,
   StructuredSessionOutputMode,
@@ -2317,23 +2318,17 @@ const resolveInvokingTurnContext = async (
  * reconnect backoff is enough. Only a positive absence from a joined presence room
  * may block work; `commands/agent-config.ts` takes the same position.
  */
-type McpMachineLiveness = 'online' | 'offline' | 'unknown';
-
 const makeMachineLivenessLookupForMcp = (
   manager: LoroDocumentManager,
   ctx: ReturnType<typeof getSessionContext>
-): ((machineId: MachineId) => Promise<McpMachineLiveness>) => {
+): ((machineId: MachineId) => Promise<MachinePresence>) => {
   let onlineMachineIds: ReturnType<LoroDocumentManager['getOnlineMachineIds']> | undefined;
   return async (machineId) => {
     if (machineId === (ctx.machineId as MachineId)) {
       return 'online';
     }
     onlineMachineIds ??= manager.getOnlineMachineIds();
-    const resolved = await onlineMachineIds;
-    if (resolved === null) {
-      return 'unknown';
-    }
-    return resolved.has(machineId) ? 'online' : 'offline';
+    return classifyMachinePresence(await onlineMachineIds, machineId);
   };
 };
 
@@ -2348,11 +2343,7 @@ const assertMachineNotOfflineForSingleCommand = async (
   ctx: ReturnType<typeof getSessionContext>
 ): Promise<void> => {
   if ((await makeMachineLivenessLookupForMcp(manager, ctx)(machineId)) === 'offline') {
-    throw new LodyOperationStoreError(
-      'MACHINE_OFFLINE',
-      `Target Machine is offline: ${machineId}`,
-      true
-    );
+    throw new MachineOfflineError({ machineId });
   }
 };
 
@@ -2566,7 +2557,7 @@ const buildSessionCreateOptions = async (
     // Machine; see makeMachineLivenessLookupForMcp. Treating that as offline used to
     // drop healthy Machines out of the candidate list with no warning at all.
     const onlineMachineIds = await manager.getOnlineMachineIds();
-    const machineLivenessOf = (machineId: MachineId): McpMachineLiveness => {
+    const machineLivenessOf = (machineId: MachineId): MachinePresence => {
       if (machineId === auth.machineId) return 'online';
       if (onlineMachineIds === null) return 'unknown';
       return onlineMachineIds.has(machineId) ? 'online' : 'offline';
@@ -2965,7 +2956,6 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
       );
     }
     assertDifferentMcpSession(currentSession, targetSession);
-    await assertMachineNotOfflineForSingleCommand(manager, targetSession.machineId, ctx);
     try {
       await validateSessionChatTarget({
         auth,
@@ -3385,13 +3375,9 @@ const startSessionCreateManyOperation = async (
         }
         const targetMachineId = (resolved.input.machineId ?? requester.machineId) as MachineId;
         if ((await machineLiveness(targetMachineId)) === 'offline') {
+          const offline = new MachineOfflineError({ machineId: targetMachineId }).toLodyError();
           return {
-            operationItem: batchFailure(
-              'MACHINE_OFFLINE',
-              `Target Machine is offline: ${targetMachineId}`,
-              true,
-              label
-            ),
+            operationItem: batchFailure(offline.code, offline.message, offline.retryable, label),
             dispatchConfig: null,
           };
         }
@@ -3605,7 +3591,6 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
     if (senderSessionId && expanded.every((item) => item.sessionId === senderSessionId)) {
       throw reverseChatError();
     }
-    const machineLiveness = makeMachineLivenessLookupForMcp(manager, ctx);
     const initialItems = await mapWithConcurrency(
       expanded,
       5,
@@ -3636,14 +3621,6 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
             'INVALID_ITEM',
             'An MCP agent cannot chat its own active Session.',
             false,
-            item.label
-          );
-        }
-        if ((await machineLiveness(target.machineId)) === 'offline') {
-          return batchFailure(
-            'MACHINE_OFFLINE',
-            `Target Machine is offline: ${target.machineId}`,
-            true,
             item.label
           );
         }

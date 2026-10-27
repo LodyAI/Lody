@@ -5,13 +5,19 @@ import type { LoroDocumentManager } from '@/lib/loro/doc';
 export type MachinePresence = 'online' | 'offline' | 'unknown';
 
 /** Three-state presence: `null` from the presence room means unknown, never offline. */
+export function classifyMachinePresence(
+  onlineMachineIds: ReadonlySet<MachineId> | null,
+  machineId: MachineId
+): MachinePresence {
+  if (onlineMachineIds === null) return 'unknown';
+  return onlineMachineIds.has(machineId) ? 'online' : 'offline';
+}
+
 export async function readMachinePresence(
   manager: Pick<LoroDocumentManager, 'getOnlineMachineIds'>,
   machineId: MachineId
 ): Promise<MachinePresence> {
-  const online = await manager.getOnlineMachineIds();
-  if (online === null) return 'unknown';
-  return online.has(machineId) ? 'online' : 'offline';
+  return classifyMachinePresence(await manager.getOnlineMachineIds(), machineId);
 }
 
 /** Presence definitively reports the target Machine offline. */

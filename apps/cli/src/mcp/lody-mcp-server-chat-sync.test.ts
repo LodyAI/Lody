@@ -29,7 +29,6 @@ const mocks = vi.hoisted(() => ({
   validateSessionChatTarget: vi.fn(),
   validateSessionCreateOptions: vi.fn(),
   readTurn: vi.fn(),
-  onlineMachineIds: vi.fn(),
 }));
 
 vi.mock('@/lib/command-runtime', async (importOriginal) => {
@@ -48,7 +47,7 @@ vi.mock('@/lib/command-runtime', async (importOriginal) => {
       ) =>
         await fn({
           repo: { getDocMeta: mocks.getDocMeta },
-          getOnlineMachineIds: mocks.onlineMachineIds,
+          getOnlineMachineIds: vi.fn(async () => new Set(['machine-id'])),
           syncDocOrThrow: async () => undefined,
           getOrCreateSessionDoc: vi.fn(async () => ({ getMetaState: async () => ({}) })),
         })
@@ -198,7 +197,6 @@ beforeEach(() => {
     inputConfig: {},
   });
   mocks.findMatchingRetry.mockReturnValue(undefined);
-  mocks.onlineMachineIds.mockResolvedValue(new Set(['machine-id']));
   mocks.readTurn.mockImplementation(async (id: string) => ({
     state: 'ready',
     turn: {
@@ -756,7 +754,7 @@ describe('Machine catalog retry guidance and accepted chat recovery', () => {
   });
 });
 
-describe('chat Machine availability comes from presence', () => {
+describe('chat Machine offline verdicts', () => {
   const remoteSession = {
     ...targetSession,
     id: 'remote-session-id',
@@ -785,7 +783,6 @@ describe('chat Machine availability comes from presence', () => {
       );
       return session ? { meta: session } : undefined;
     });
-    mocks.onlineMachineIds.mockResolvedValue(new Set(['machine-id', 'remote-machine-id']));
     mocks.validateSessionChatTarget.mockResolvedValue(remoteSession);
     mocks.accept.mockImplementation((input: { items: LodyOperationItemResult[] }) => {
       stored = { state: 'active', items: input.items };
@@ -833,27 +830,6 @@ describe('chat Machine availability comes from presence', () => {
     });
   });
 
-  it('still rejects a presence-offline Machine before accepting anything', async () => {
-    mocks.onlineMachineIds.mockResolvedValue(new Set(['machine-id']));
-
-    const single = await callAndMapMcpError(() =>
-      startSessionChatOperation({
-        operationId: 'offline-chat',
-        sessionId: remoteSession.id,
-        prompt: 'continue',
-      })
-    );
-    expect(errorOf(single)).toEqual(offline);
-    expect(stored).toBeUndefined();
-
-    await startSessionChatManyOperation({
-      operationId: 'offline-batch',
-      items: [{ sessionId: remoteSession.id, prompt: 'continue' }],
-    });
-    expect(stored?.items).toEqual([expect.objectContaining({ status: 'failed', error: offline })]);
-    expect(delivered).toEqual([]);
-  });
-
   it('keeps the validator offline verdict retryable instead of COMMAND_REJECTED', async () => {
     mocks.validateSessionChatTarget.mockRejectedValue(
       new MachineOfflineError({ machineId: 'remote-machine-id' })
@@ -867,6 +843,7 @@ describe('chat Machine availability comes from presence', () => {
       })
     );
     expect(errorOf(single)).toEqual(offline);
+    expect(stored).toBeUndefined();
 
     await startSessionChatManyOperation({
       operationId: 'went-offline-batch',

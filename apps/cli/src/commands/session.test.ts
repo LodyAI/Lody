@@ -2490,10 +2490,10 @@ describe('target Machine availability from presence', () => {
     rpcTimesOut();
     await expect(
       ensureTargetMachineNotOffline({ ...target, manager: presence([target.machineId]) })
-    ).resolves.toBeUndefined();
+    ).resolves.toBe('online');
     await expect(
       ensureTargetMachineNotOffline({ ...target, manager: presence(null) })
-    ).resolves.toBeUndefined();
+    ).resolves.toBe('unknown');
   });
 
   it('rejects only definite presence offline, as retryable MACHINE_OFFLINE', async () => {
