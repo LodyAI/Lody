@@ -256,29 +256,11 @@ export function retainProjectGroupScope(
 }
 
 /** The same repository, cloned for each conversation instead of using a machine's copy. */
-export function withoutLocalCopy(
+function withoutLocalCopy(
   source: Extract<ProjectMemberSource, { kind: 'github' }>
 ): Extract<ProjectMemberSource, { kind: 'github' }> {
   const { preferLocal: _preferLocal, ...rest } = source;
   return rest;
-}
-
-/** Replace one member's source, keeping its id and placement; a picked folder can be dropped. */
-export function setProjectGroupMemberSource(
-  value: ProjectGroupFormValue,
-  memberId: ProjectMemberId,
-  source: ProjectMemberSource,
-  options: { dropDirectory?: boolean } = {}
-): ProjectGroupFormValue {
-  return {
-    ...value,
-    members: value.members.map((member) => {
-      if (member.id !== memberId) return member;
-      if (!options.dropDirectory) return { ...member, source };
-      const { directory: _directory, ...rest } = member;
-      return { ...rest, source };
-    }),
-  };
 }
 
 /**
@@ -323,49 +305,6 @@ export function suggestProjectGroupName(
     const candidate = `${base} ${index}`;
     if (!takenNames.has(normalizeProjectGroupName(candidate))) return candidate;
   }
-}
-
-/**
- * Apply a multi-select change: sources newly ticked are added, sources
- * unticked are removed (their submodules become top-level). Members whose
- * project is no longer listed are not in the picker, so they are untouched.
- */
-export function applySourceSelection(
-  value: ProjectGroupFormValue,
-  previous: readonly { key: string }[],
-  next: readonly { key: string; source: ProjectMemberSource; label: string }[],
-  labelOf: (member: ProjectGroupMemberDraft) => string,
-  createId: () => ProjectMemberId = createProjectMemberId
-): ProjectGroupFormValue {
-  const nextKeys = new Set(next.map((option) => option.key));
-  const previousKeys = new Set(previous.map((option) => option.key));
-  let result = value;
-  for (const option of previous) {
-    if (nextKeys.has(option.key)) continue;
-    const member = result.members.find(
-      (candidate) => getProjectMemberSourceKey(candidate.source) === option.key
-    );
-    if (member) result = removeProjectGroupMember(result, member.id, labelOf);
-  }
-  for (const option of next) {
-    if (!previousKeys.has(option.key)) {
-      result = addProjectGroupMember(result, option.source, option.label, createId);
-    }
-  }
-  return result;
-}
-
-export function updateProjectGroupMemberPlacement(
-  value: ProjectGroupFormValue,
-  memberId: ProjectMemberId,
-  placement: ProjectMemberPlacement
-): ProjectGroupFormValue {
-  return {
-    ...value,
-    members: value.members.map((member) =>
-      member.id === memberId ? { ...member, placement, placementOrigin: 'user' } : member
-    ),
-  };
 }
 
 /** One submodule a member's repository declares, with the repository it points at. */

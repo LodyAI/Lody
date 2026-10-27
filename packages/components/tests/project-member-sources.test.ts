@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 import {
   buildProjectMemberSourceOptions,
-  groupProjectMemberSourceOptions,
   type ProjectMemberSourceOption,
 } from '@/lib/project-member-sources';
 
@@ -84,85 +83,5 @@ describe('project member sources', () => {
       kind: 'github',
       repoFullName: 'acme/api',
     });
-  });
-
-  it('keeps GitHub-only repositories out of view until searched or selected', () => {
-    const layout = (query: string, selected: string[] = []) =>
-      groupProjectMemberSourceOptions({
-        options,
-        selectedKeys: new Set(selected),
-        query,
-        filter: { kind: 'all' },
-        currentMachineId: here,
-        boundMachineId: null,
-      });
-    const idle = layout('');
-    expect(idle.groups.map((group) => [group.kind, keys(group.items)])).toEqual([
-      ['repositories', ['github:acme/web']],
-      ['here', [`local:${here}:notes`]],
-      ['elsewhere', [`local:${studio}:ios`]],
-    ]);
-    expect(idle.hiddenRepositoryCount).toBe(2);
-    expect(idle.disabledKeys.size).toBe(0);
-    expect(idle.machineIds).toEqual([here, studio]);
-    expect(keys(layout('', ['github:acme/api']).groups[0]!.items)).toEqual([
-      'github:acme/web',
-      'github:acme/api',
-    ]);
-    expect(layout('pro').hiddenRepositoryCount).toBe(0);
-    expect(keys(layout('pro').groups[0]!.items)).toHaveLength(3);
-  });
-
-  it('disables folders on other machines once the group is bound, and says so once', () => {
-    const layout = groupProjectMemberSourceOptions({
-      options,
-      selectedKeys: new Set([`local:${here}:notes`]),
-      query: '',
-      filter: { kind: 'all' },
-      currentMachineId: here,
-      boundMachineId: here,
-    });
-    expect([...layout.disabledKeys]).toEqual([`local:${studio}:ios`]);
-    expect(layout.groups.find((group) => group.kind === 'elsewhere')?.blockedBy).toBe(here);
-    expect(layout.groups.find((group) => group.kind === 'here')?.blockedBy).toBeUndefined();
-  });
-
-  it('narrows to one machine, and lists every folder apart when this device runs none', () => {
-    const studioOnly = groupProjectMemberSourceOptions({
-      options,
-      selectedKeys: new Set(),
-      query: '',
-      filter: { kind: 'machine', machineId: studio },
-      currentMachineId: here,
-      boundMachineId: null,
-    });
-    expect(studioOnly.groups.map((group) => [group.kind, keys(group.items)])).toEqual([
-      ['repositories', ['github:acme/web']],
-      ['machine', [`local:${studio}:ios`]],
-    ]);
-    expect(studioOnly.hiddenRepositoryCount).toBe(0);
-
-    const web = groupProjectMemberSourceOptions({
-      options,
-      selectedKeys: new Set(),
-      query: '',
-      filter: { kind: 'repositories' },
-      currentMachineId: null,
-      boundMachineId: null,
-    });
-    expect(web.groups.map((group) => group.kind)).toEqual(['repositories']);
-
-    const browser = groupProjectMemberSourceOptions({
-      options,
-      selectedKeys: new Set(),
-      query: '',
-      filter: { kind: 'all' },
-      currentMachineId: null,
-      boundMachineId: null,
-    });
-    expect(browser.groups.map((group) => [group.kind, group.items.length])).toEqual([
-      ['repositories', 1],
-      ['elsewhere', 2],
-    ]);
   });
 });

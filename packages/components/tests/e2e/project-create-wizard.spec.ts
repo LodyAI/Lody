@@ -145,3 +145,24 @@ test("a project name must not repeat another project's", async ({ page }) => {
   await expect(page.getByText('Another project already has this name.')).toHaveCount(0);
   await expect(create).toBeEnabled();
 });
+
+test('browsing drafts picked folders once each, without registering them', async ({ page }) => {
+  await story(page, 'local-sources');
+  await expect(page.getByText('4 selected')).toBeVisible();
+  for (const name of ['backend', 'backend', 'design-notes']) {
+    await page.getByRole('button', { name: 'Browse…', exact: true }).click();
+    await page.getByRole('button', { name, exact: true }).click();
+    await page.getByRole('button', { name: 'Select this folder', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Select this folder' })).toHaveCount(0);
+  }
+  // Picking the same folder twice keeps one member.
+  await expect(page.getByRole('checkbox', { name: 'backend', exact: true })).toHaveCount(1);
+  await expect(page.getByRole('checkbox', { name: 'backend', exact: true })).toBeChecked();
+  await expect(page.getByText('/Users/demo/Projects/backend', { exact: true })).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: 'design-notes', exact: true })).toBeChecked();
+  await expect(page.getByText('6 selected')).toBeVisible();
+  // Unticking a picked folder drops it from the draft.
+  await page.getByRole('checkbox', { name: 'backend', exact: true }).click();
+  await expect(page.getByRole('checkbox', { name: 'backend', exact: true })).toHaveCount(0);
+  await expect(page.getByText('5 selected')).toBeVisible();
+});

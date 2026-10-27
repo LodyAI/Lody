@@ -279,7 +279,7 @@ function scopeOf(
  * then its name and instructions. Answering moves on; Back revisits a
  * question, and an answer that changes drops what no longer fits.
  *
- * Presentational, like `ProjectGroupForm`: the dialog passes sources and
+ * Presentational: the dialog passes sources and
  * detection in and owns saving and the folder browser.
  */
 export function ProjectCreateWizard({

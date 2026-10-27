@@ -7,7 +7,6 @@ import {
   type MachineId,
   type ProjectId,
   type ProjectMemberSource,
-  type ProjectMemberId,
   type WorkspaceProject,
 } from '@lody/shared';
 import { userAtom } from '@/atoms';
@@ -48,8 +47,8 @@ import {
 } from '../local-projects/add-local-project-dialog';
 import { useAddLocalProjectController } from '../local-projects/add-local-project-dialog-container';
 import { ProjectCreateWizard } from './project-create-wizard';
-import { ProjectGroupForm, type ProjectGroupMemberStatus } from './project-group-form';
-import { useProjectMemberSourceNames } from './project-group-source-picker';
+import { ProjectGroupView } from './project-group-form';
+import { useProjectMemberSourceNames } from './project-member-source-names';
 import { useSettingsPane } from './settings-page-header';
 import { SETTINGS_EDITOR_DIALOG_LAYOUT, SETTINGS_EDITOR_DIALOG_WIDTH } from './surface';
 
@@ -356,11 +355,6 @@ export function ProjectGroupEditorDialog({
       ),
     [detection.repositories, takenNames, value]
   );
-  const statusOf = useCallback(
-    (memberId: ProjectMemberId): ProjectGroupMemberStatus =>
-      detection.pending.has(memberId) ? 'pending' : undefined,
-    [detection.pending]
-  );
 
   const close = () => {
     if (submitting) return;
@@ -499,23 +493,11 @@ export function ProjectGroupEditorDialog({
                   {t('settings.projectGroups.readOnlyDescription')}
                 </Dialog.Description>
               </Dialog.Header>
-              <ProjectGroupForm
+              <ProjectGroupView
                 value={value}
-                onChange={() => undefined}
-                sources={options}
                 labelOf={labelOf}
                 detailOf={detailOf}
-                statusOf={statusOf}
-                isNonGit={(memberId) =>
-                  value.members.find((member) => member.id === memberId)?.directory?.inspection
-                    .isGit === false || detection.nonGit.has(memberId)
-                }
-                currentMachineId={currentMachineId}
-                validation={validation}
-                readOnly
-                isEditing
-                onSubmit={() => undefined}
-                onCancel={close}
+                onClose={close}
               />
             </>
           ) : null}

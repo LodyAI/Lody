@@ -10,7 +10,6 @@ import {
   addProjectGroupMember,
   bindProjectGroupToMachine,
   addProjectGroupDirectory,
-  applySourceSelection,
   applyDetectedProjectSubmodules,
   buildProjectGroupFormValue,
   buildWorkspaceProjectFromForm,
@@ -21,7 +20,6 @@ import {
   normalizeProjectGroupName,
   suggestProjectGroupName,
   suggestProjectMemberDir,
-  updateProjectGroupMemberPlacement,
   validateProjectGroupForm,
   type ProjectGroupFormValue,
   type ProjectGroupMemberDraft,
@@ -44,6 +42,18 @@ const labelOf = (member: ProjectGroupMemberDraft) =>
   member.source.kind === 'github' ? member.source.repoFullName : member.source.localProjectId;
 const repoOf = (member: ProjectGroupMemberDraft) =>
   member.source.kind === 'github' ? member.source.repoFullName : undefined;
+
+/** A placement set by hand, as a saved project's are. */
+const place = (
+  value: ProjectGroupFormValue,
+  memberId: ProjectMemberId,
+  placement: ProjectGroupMemberDraft['placement']
+): ProjectGroupFormValue => ({
+  ...value,
+  members: value.members.map((member) =>
+    member.id === memberId ? { ...member, placement, placementOrigin: 'user' as const } : member
+  ),
+});
 
 function threeRepos(): ProjectGroupFormValue {
   const createId = ids();
@@ -88,10 +98,13 @@ describe('project group form', () => {
       placementOrigin: 'detected',
     });
 
-    const userFlat = updateProjectGroupMemberPlacement(value, proto!.id, {
-      kind: 'root',
-      dir: 'proto',
-    });
+    // A saved placement is the user's (`buildProjectGroupFormValue`).
+    const userFlat = {
+      ...value,
+      members: value.members.map((member) =>
+        member.id === proto!.id ? { ...member, placementOrigin: 'user' as const } : member
+      ),
+    };
     expect(applyDetectedProjectSubmodules(userFlat, detected, repoOf, labelOf)).toBe(userFlat);
     expect(web!.placement).toEqual({ kind: 'root', dir: 'web' });
   });
@@ -130,7 +143,7 @@ describe('project group form', () => {
     const value = threeRepos();
     const api = value.members[1]!;
     const proto = value.members[2]!;
-    const nested = updateProjectGroupMemberPlacement(value, proto.id, {
+    const nested = place(value, proto.id, {
       kind: 'submodule',
       parent: api.id,
       path: 'proto',
@@ -145,8 +158,8 @@ describe('project group form', () => {
   it('reports per-member errors for duplicate and invalid directories', () => {
     const value = threeRepos();
     const [web, api, proto] = value.members;
-    let edited = updateProjectGroupMemberPlacement(value, api!.id, { kind: 'root', dir: 'WEB' });
-    edited = updateProjectGroupMemberPlacement(edited, proto!.id, { kind: 'root', dir: 'a/b' });
+    let edited = place(value, api!.id, { kind: 'root', dir: 'WEB' });
+    edited = place(edited, proto!.id, { kind: 'root', dir: 'a/b' });
     const result = validateProjectGroupForm({ ...edited, name: ' ' });
     expect(result.valid).toBe(false);
     expect(result.errors).toEqual(['name_required']);
@@ -212,37 +225,6 @@ describe('project group form', () => {
       'b',
       'c',
     ]);
-  });
-
-  it('adds ticked sources and removes unticked ones from one multi-select change', () => {
-    const value = threeRepos();
-    const option = (repo: string) => ({
-      key: `github:${repo}`,
-      source: github(repo),
-      label: repo,
-    });
-    const previous = ['acme/web', 'acme/api', 'acme/proto'].map(option);
-    const api = value.members[1]!;
-    const proto = value.members[2]!;
-    const nested = updateProjectGroupMemberPlacement(value, proto.id, {
-      kind: 'submodule',
-      parent: api.id,
-      path: 'proto',
-    });
-    const next = applySourceSelection(
-      nested,
-      previous,
-      [option('acme/web'), option('acme/proto'), option('acme/docs')],
-      labelOf,
-      ids()
-    );
-    expect(next.members.map((member) => labelOf(member))).toEqual([
-      'acme/web',
-      'acme/proto',
-      'acme/docs',
-    ]);
-    // Its parent left, so the submodule becomes a top-level directory.
-    expect(next.members[1]!.placement).toEqual({ kind: 'root', dir: 'proto' });
   });
 
   it('rejects local members on a machine other than the first local member', () => {

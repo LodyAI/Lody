@@ -8,6 +8,10 @@ import {
   type ProjectCreateWizardStep,
 } from '@/components/settings/project-create-wizard';
 import { SETTINGS_EDITOR_DIALOG_WIDTH } from '@/components/settings/surface';
+import {
+  AddLocalProjectDialog,
+  type RemoteDirectoryOps,
+} from '@/components/local-projects/add-local-project-dialog';
 import { buildProjectMemberSourceOptions } from '@/lib/project-member-sources';
 import {
   addProjectGroupDirectory,
@@ -119,6 +123,54 @@ const picked = addProjectGroupDirectory(localDraft, {
   inspection: { isGit: false, submodules: [] },
 });
 
+/**
+ * The real folder browser over a synthetic filesystem; no host folders are
+ * touched. Picking a folder drafts it into the project, as the dialog does.
+ */
+function browseOps(
+  onPicked: (update: (value: ProjectGroupFormValue) => ProjectGroupFormValue) => void
+): RemoteDirectoryOps {
+  const home = '/Users/demo/Projects';
+  const folders = ['backend', 'frontend', 'design-notes'];
+  return {
+    listRoots: async () => ({
+      ok: true,
+      value: { platform: 'darwin', pathSeparator: '/', homeDir: home },
+    }),
+    browseDir: async (_machineId, { absolutePath = home }) => ({
+      ok: true,
+      value: {
+        path: absolutePath,
+        parentPath: absolutePath === home ? null : home,
+        truncated: false,
+        entries:
+          absolutePath === home
+            ? folders.map((name) => ({
+                name,
+                absolutePath: `${home}/${name}`,
+                isSymlink: false,
+                hidden: false,
+                hints: { git: name !== 'design-notes' },
+              }))
+            : [],
+      },
+    }),
+    createDirectory: async () => ({ ok: false, message: 'Not available in this preview' }),
+    addProject: async (machineId, { rootPath }) => {
+      const name = rootPath.split('/').pop()!;
+      const directory = {
+        machineId,
+        name,
+        rootPath,
+        localProjectId: `local-${name}` as LocalProjectId,
+        inspection: { isGit: name !== 'design-notes', submodules: [] },
+      };
+      onPicked((value) => addProjectGroupDirectory(value, directory));
+      return { ok: true, value: { ...directory, status: 'added' } };
+    },
+  };
+}
+
 /** The dialog owns the value and saving in the product; the story owns the value. */
 function WizardInDialog({
   value: initial,
@@ -135,6 +187,8 @@ function WizardInDialog({
   const [value, setValue] = useState(initial);
   const [created, setCreated] = useState(false);
   const [single, setSingle] = useState<string | null>(null);
+  const [browsing, setBrowsing] = useState(false);
+  const ops = useMemo(() => browseOps(setValue), []);
   const taken = useMemo(() => new Set(takenNames), [takenNames]);
   const validation = useMemo(
     () => validateProjectGroupForm(value, undefined, taken),
@@ -160,7 +214,7 @@ function WizardInDialog({
             detailOf={detailOf}
             validation={validation}
             canBrowseFolders={(machineId) => machineId !== mini}
-            onBrowseFolders={() => undefined}
+            onBrowseFolders={() => setBrowsing(true)}
             initialStep={initialStep}
             mode={mode}
             onSubmit={() => setCreated(true)}
@@ -170,6 +224,17 @@ function WizardInDialog({
           />
         </Dialog.Content>
       </Dialog.Root>
+      <AddLocalProjectDialog
+        selectionOnly
+        open={browsing}
+        onOpenChange={setBrowsing}
+        initialMachineId={here}
+        machines={[
+          { id: here, name: 'This Mac', online: true, canAddProjects: true, ownerName: 'Demo' },
+        ]}
+        ops={ops}
+        onAdded={() => undefined}
+      />
     </>
   );
 }

@@ -39,7 +39,7 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   never surface `machine_rpc_unavailable` as an editor error. The GitHub source
   row must paint from `lody:githubReposCache` on first frame; do not wait on
   `listWorkspaceReposWithStatus` to decide whether GitHub exists.
-- Project create/edit: `project-create-wizard.tsx`, scope first; read-only: `ProjectGroupForm`.
+- Project create/edit: `project-create-wizard.tsx`, scope first; read-only: `ProjectGroupView`.
 - Settings rows (`compact-layout.tsx`) give labels remaining width and controls their
   content width. Never size columns from viewport breakpoints: the panel
   clips controls. Desktop Settings nav follows panel width; keep categories/drafts,

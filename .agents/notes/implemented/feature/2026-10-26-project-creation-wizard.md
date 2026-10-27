@@ -26,7 +26,15 @@ picker to offer creation beside Settings and the sidebar menu.
   detection, direct folder preparation and saving, and renders the wizard for
   creating and for editing by the owner, so save, registration and automatic
   submodule detection are unchanged. Someone who may not change a project still
-  sees it read-only in `ProjectGroupForm`.
+  sees it read-only in `ProjectGroupView` (`project-group-form.tsx`).
+- Cleanup by ablation: with every edit going through the wizard, the old editor's
+  editing paths were unreachable, so they were removed one at a time, each kept only
+  when typecheck and the behavioral suites still passed and no product caller
+  remained: the source picker and its grouping helpers, multi-select and placement
+  helpers, the old form's folder selection (its Playwright coverage was ported to the
+  wizard first), detection states nothing reads, and 30 unused strings. Tests that
+  covered only removed code went with it; tests of live behavior keep a local setup
+  helper instead.
 - Editing starts at the first question. The scope a saved project implies (a
   folder's machine, or the machine holding a used copy, this machine first) is
   preselected, and every earlier answer and member carries a "Previously selected"
