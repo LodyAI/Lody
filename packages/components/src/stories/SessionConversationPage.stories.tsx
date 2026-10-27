@@ -1591,6 +1591,8 @@ function StoryInfoBar({
       onEditSave={fn()}
       onSteer={fn()}
       showSteerAction
+      roomy={mobile}
+      footerPosition={mobile ? 'inline' : 'below'}
     />
   ) : undefined;
   if (withoutBar) return <SessionInfoBar status={null} queue={queue} />;
@@ -2683,6 +2685,12 @@ export const DesktopQueuedMessages: Story = {
   args: { state: 'working', queued: 'with-info-bar' },
   globals: { theme: 'light' },
   decorators: [withDesktopViewport],
+};
+
+export const MobileQueuedMessages: Story = {
+  args: { frame: 'mobile', state: 'working', queued: 'with-info-bar' },
+  globals: { theme: 'light' },
+  decorators: [withMobileViewport],
 };
 
 /** With nothing for the info bar to show, the queue sits on the composer. */

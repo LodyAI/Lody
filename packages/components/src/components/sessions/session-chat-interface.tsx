@@ -7251,6 +7251,8 @@ export const SessionChatInterface = memo(
                               !isExternalHistoryRefreshing
                             }
                             nativeSteerAvailable={nativeSteerAvailable}
+                            roomy={isMobile}
+                            footerPosition={isMobile ? 'inline' : 'below'}
                           />
                         ) : undefined
                       }
