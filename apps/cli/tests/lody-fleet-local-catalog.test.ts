@@ -1,5 +1,7 @@
 import { createLocalCloudPort, type CloudPort } from '@lody/platform';
 import {
+  machineFlockKeys,
+  type AgentConfigId,
   type LocalSessionControlRequest,
   type LocalSessionControlResponse,
   type MachineId,
@@ -1115,4 +1117,77 @@ it('joins background project observation before closing its workspace document',
   await closing;
   expect(steps).toEqual(['schedules', 'document', 'poller']);
   expect(fleet.runtimes.has('observing')).toBe(false);
+});
+
+describe('local DSH Provider discovery', () => {
+  it('returns only local builtin DSH ids/names across workspaces, without credentials', async () => {
+    const { fleet: raw } = createFleetHarness(
+      createCatalogStub(() => Effect.succeed(catalogSnapshot({})))
+    );
+    const fleet = raw as unknown as {
+      runtimes: Map<string, unknown>;
+      dispatchLocalSessionControl: (
+        request: LocalSessionControlRequest
+      ) => Promise<LocalSessionControlResponse[]>;
+    };
+    const configs = [
+      {
+        id: 'local-dsh',
+        name: 'DSH',
+        cliType: 'builtin',
+        agentType: 'deepseek',
+        machineId: 'machine-1',
+        env: { DEEPSEEK_API_KEY: 'synthetic-secret' },
+      },
+      {
+        id: 'remote',
+        name: 'Remote',
+        cliType: 'builtin',
+        agentType: 'deepseek',
+        machineId: 'machine-2',
+        env: {},
+      },
+      {
+        id: 'codex',
+        name: 'Codex',
+        cliType: 'builtin',
+        agentType: 'codex',
+        machineId: 'machine-1',
+        env: {},
+      },
+      {
+        id: 'registry',
+        name: 'Registry',
+        cliType: 'registry',
+        agentType: 'deepseek',
+        machineId: 'machine-1',
+        env: {},
+      },
+    ];
+    const repo = {
+      getMeta: () => ({ scan: async () => [] }),
+      openFlockDoc: async () => ({
+        flock: {
+          scan: () =>
+            configs.map((config) => ({
+              key: machineFlockKeys.agentConfig(config.id as AgentConfigId),
+              value: config,
+            })),
+        },
+      }),
+    };
+    for (const id of ['workspace-1', 'workspace-2'])
+      fleet.runtimes.set(id, { workspace: { id }, lody: { documentManager: { repo } } });
+    expect(
+      await fleet.dispatchLocalSessionControl({
+        type: 'machine/dsh-providers',
+        machineId: 'machine-1' as MachineId,
+      })
+    ).toEqual([
+      {
+        type: 'machine/dsh-providers_response',
+        providers: [{ id: 'local-dsh', name: 'DSH' }],
+      },
+    ]);
+  });
 });

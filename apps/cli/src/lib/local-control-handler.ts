@@ -176,7 +176,7 @@ async function handleSessionControlRequest(
     }
 
     config.logger.debug(
-      `[local-control:${requestId}] session request completed: type=${message.type} workspaceId=${message.workspaceId} responses=${responses.length} duration=${Date.now() - startedAtMs}ms`
+      `[local-control:${requestId}] session request completed: type=${message.type} workspaceId=${'workspaceId' in message ? message.workspaceId : '-'} responses=${responses.length} duration=${Date.now() - startedAtMs}ms`
     );
     return handlerResponse(200, { ok: true, responses });
   } catch (error) {
