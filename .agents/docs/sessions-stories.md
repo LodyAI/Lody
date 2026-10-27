@@ -11,6 +11,16 @@ this page is the full text of the rules summarised there.
   attachment-rich list case is `SessionChatStream` → `HumanAndAgentAttachments`;
   shared full-page session conversation coverage is `SessionConversationPage.stories.tsx`
   using `session-conversation-page.tsx`.
+- `SessionConversationPage` → `DesktopReadingReview` combines synthetic thinking,
+  tool calls and results, inline diffs, edited-file summaries, comment references,
+  visual annotation references, and Markdown in the real conversation renderers.
+  It uses a builtin DeepSeek session because that provider exposes thought prose.
+  Light, wide, working, permission and question variants share this history; mobile
+  variants cover the same reading, working, permission and question states. A file
+  click opens the real desktop diff panel or mobile diff drawer using a fake file
+  provider. `DesktopReadingReviewAnnotations` opens the real managed-preview surface
+  with an inert page and in-memory annotation: its comment can be collapsed or
+  resolved, but the fixture does not exercise a live inspector or transport.
 - `ConversationDiffPanel` uses a synthetic 200-file provider with the real diff panel.
   `OpenFromChanges` starts without a mounted diff; its Changes button mounts the panel
   inside the real `DesktopSessionDetailLayout`, including its sidebar transition.
