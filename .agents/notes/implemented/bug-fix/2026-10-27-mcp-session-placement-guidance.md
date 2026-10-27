@@ -22,6 +22,7 @@ available through `workContext` for independent sessions.
 
 The [MCP README](../../../../apps/cli/src/mcp/README.md#session-placement-guidance)
 records the behavior, consistent with [session relations](../../../../specs/session-relations.md).
-No dispatch, schema acceptance, or runtime default changed. Verification checks
-formatting and documentation; agent adherence requires real usage and is not
-claimed as a measured outcome.
+No dispatch, schema acceptance, or runtime default changed. The MCP transport test
+checks the published boolean field in single-create, batch defaults, and batch items,
+alongside work-context alternatives, instead of freezing the description wording.
+Agent adherence requires real usage and is not claimed as a measured outcome.

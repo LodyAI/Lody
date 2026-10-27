@@ -20,5 +20,6 @@ Role 创建在省略此字段和 `workContext` 时可能推断为 `true`。批�
 
 [MCP README](../../../../apps/cli/src/mcp/README.md#session-placement-guidance)
 记录此行为，与[会话关系](../../../../specs/session-relations.md)一致。
-未修改分发、参数接受范围或运行时默认值。验证覆盖格式和文档；agent 实际遵循情况
+未修改分发、参数接受范围或运行时默认值。MCP 传输测试验证单个创建、批量默认值和
+批量单项发布的布尔字段及工作上下文分支，不再锁定描述措辞。agent 实际遵循情况
 需要真实使用观察，不宣称已测得效果。
