@@ -191,3 +191,21 @@ followed by a stale activation edit and an engine restart. The info-bar test fix
 the device time zone explicitly and runs under UTC and Asia/Shanghai. No lifecycle
 or transport ownership changes are needed; a native Effect migration is deferred
 because the fixes stay within the existing ledger and pure read normalization.
+
+## Admission isolation
+
+Complete messages do not reserve or restore per-Agent-config execution slots. Those
+slots continue to serialize generic scheduled tasks; a message waits only for its
+own destination chat and for earlier work of the same Schedule. Consequently a
+long-running message or generic task in another chat cannot delay it until dispatch
+expiry. Existing ownership, fingerprint, activation, per-message ledger consumption
+and SESSION_BUSY checks remain in place. Ledger completion still follows the target
+turn's lifecycle; it owns no Agent slot. Release calls remain safe owner-keyed no-ops
+for messages and cannot release another task's slot.
+
+Four behavioral regressions fail before the change and pass after it: message to
+message, generic task to message, message to generic task across worker restart,
+and target-chat busy then idle while an unrelated generic slot remains occupied.
+Existing generic-task waiting coverage remains unchanged. The expiry budget for a
+message whose own target stays busy is unchanged; this change removes cross-chat
+blocking rather than changing retry policy or adding a new concurrency owner.

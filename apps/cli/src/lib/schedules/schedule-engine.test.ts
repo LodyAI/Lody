@@ -344,6 +344,76 @@ describe('One-time complete messages', () => {
     d.message = { inputBlocks: [{ type: 'text', text: 'Frozen message' }], mcpServerIds: [] };
     return d;
   }
+  it.each([
+    ['message', 'message'],
+    ['task', 'message'],
+    ['message', 'task'],
+  ] as const)(
+    'does not couple a running %s to an unrelated %s on the same agent',
+    async (firstKind, nextKind) => {
+      const first = firstKind === 'message' ? message() : document();
+      const next = nextKind === 'message' ? message() : document();
+      next.definition.scheduleId = 'other-schedule';
+      next.definition.destination = { kind: 'existing_session', sessionId: 'other-chat' };
+      const documents = [first];
+      const h = harness(first);
+      h.ports.list = async () => documents.map(buildScheduleRegistryRow);
+      h.ports.read = async (id) =>
+        documents.find((entry) => entry.definition.scheduleId === id) ?? null;
+      h.ports.prepare = async (run) => ({ prompt: run.scheduleId });
+      const sent: string[] = [];
+      h.ports.dispatch = async (prepared) => {
+        sent.push(prepared.prompt);
+      };
+      h.ports.isDispatched = async (prepared) => sent.includes(prepared.prompt);
+      await h.engine.evaluate();
+      expect(sent).toEqual(['schedule']);
+      expect(h.store.history('workspace', 'schedule')[0]?.state).toBe('dispatched');
+      // Restart while the first conversation is still running. Its delivery must
+      // neither repeat nor occupy another conversation's message admission.
+      h.ports.slots = new AgentExecutionSlots();
+      const restarted = new ScheduleEngine(h.ports);
+      restarted.restoreOccupancy();
+      expect(h.ports.slots.isBusy('agent')).toBe(firstKind === 'task');
+      documents.push(next);
+      h.time(60_001);
+      await restarted.evaluate();
+      expect(sent).toEqual(['schedule', 'other-schedule']);
+      expect(h.store.history('workspace', 'other-schedule')[0]?.state).toBe('dispatched');
+      expect(h.store.history('workspace', 'schedule')[0]?.state).toBe('dispatched');
+      await restarted.evaluate();
+      expect(sent).toEqual(['schedule', 'other-schedule']);
+    }
+  );
+
+  it('waits for its own busy chat and sends once after it becomes idle, regardless of another agent slot', async () => {
+    const h = harness(message());
+    h.slots.reserve('agent', 'unrelated-task');
+    let busy = true;
+    const sent: string[] = [];
+    h.ports.validateTarget = async () => {
+      if (busy) throw new ScheduleConfigurationError('SESSION_BUSY');
+    };
+    h.ports.dispatch = async (prepared) => {
+      sent.push(prepared.prompt);
+      h.accepted();
+    };
+    await h.engine.evaluate();
+    expect(sent).toEqual([]);
+    expect(h.store.history('workspace', 'schedule')[0]).toMatchObject({
+      state: 'retry_wait',
+      errorCode: 'SESSION_BUSY',
+      attempts: 0,
+    });
+    busy = false;
+    h.time(90_000);
+    await h.engine.evaluate();
+    await h.engine.evaluate();
+    expect(sent).toEqual(['Frozen message']);
+    expect(h.store.history('workspace', 'schedule')[0]?.state).toBe('dispatched');
+    expect(h.slots.isBusy('agent')).toBe(true);
+  });
+
   it('retains frozen blocks in the ledger and restores sent status without sending again', async () => {
     const h = harness(message());
     h.time(600_000); // Offline at the due time: one catch-up.

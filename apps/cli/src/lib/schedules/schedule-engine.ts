@@ -54,7 +54,10 @@ export class ScheduleEngine<Prepared> {
 
   restoreOccupancy(): void {
     for (const run of this.ports.store.unfinished(this.ports.workspaceId)) {
-      if (run.state === 'claimed' || run.state === 'session_prepared' || run.state === 'dispatched')
+      if (
+        !run.message &&
+        (run.state === 'claimed' || run.state === 'session_prepared' || run.state === 'dispatched')
+      )
         this.ports.slots.restore(run.agentConfigId, run.runKey);
     }
   }
@@ -199,11 +202,16 @@ export class ScheduleEngine<Prepared> {
             !other.manual &&
             other.state !== 'pending'
         );
-      if (!run.manual && (others || !p.slots.reserve(run.agentConfigId, run.runKey))) {
+      // Full messages use the destination chat's busy gate. Agent-wide slots
+      // belong to generic tasks and must not serialize unrelated conversations.
+      if (
+        !run.manual &&
+        (others || (!run.message && !p.slots.reserve(run.agentConfigId, run.runKey)))
+      ) {
         await this.project(row, { queueState: 'waiting_for_agent' });
         continue;
       }
-      if (run.manual) p.slots.restore(run.agentConfigId, run.runKey);
+      if (run.manual && !run.message) p.slots.restore(run.agentConfigId, run.runKey);
       try {
         let current = p.store.transition(run.runKey, [run.state], {
           state: 'claimed',
