@@ -1,0 +1,162 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844,
+      "device": "iPhone 13"
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 720,
+      "device": "iPhone SE"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "ids": [
+    "sessions-messagequeuedisplay--owned-default",
+    "sessions-messagequeuedisplay--owned-root-variables",
+    "sessions-messagequeuedisplay--owned-subtree-variables",
+    "sessions-messagequeuedisplay--owned-utility-caller",
+    "sessions-messagequeuedisplay--owned-opaque-caller"
+  ],
+  "ready": {
+    "sessions-messagequeuedisplay--owned-default": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-queue-result]"
+      }
+    ],
+    "sessions-messagequeuedisplay--owned-root-variables": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-queue-result]"
+      }
+    ],
+    "sessions-messagequeuedisplay--owned-subtree-variables": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-queue-result]"
+      }
+    ],
+    "sessions-messagequeuedisplay--owned-utility-caller": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-queue-result]"
+      }
+    ],
+    "sessions-messagequeuedisplay--owned-opaque-caller": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-queue-result]"
+      }
+    ]
+  },
+  "states": {
+    "sessions-messagequeuedisplay--owned-default": [
+      {
+        "name": "folded",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-message-queue-toggle]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"[data-message-queue-toggle]\")?.getAttribute(\"aria-expanded\") === \"false\""
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-message-queue-toggle]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"[data-message-queue-toggle]\")?.getAttribute(\"aria-expanded\") === \"false\""
+          },
+          {
+            "action": "press",
+            "selector": "[data-message-queue-toggle]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"[data-message-queue-toggle]\")?.getAttribute(\"aria-expanded\") === \"true\""
+          }
+        ]
+      }
+    ],
+    "sessions-messagequeuedisplay--owned-root-variables": [
+      {
+        "name": "folded",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-message-queue-toggle]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"[data-message-queue-toggle]\")?.getAttribute(\"aria-expanded\") === \"false\""
+          }
+        ]
+      }
+    ],
+    "sessions-messagequeuedisplay--owned-subtree-variables": [
+      {
+        "name": "folded",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-message-queue-toggle]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"[data-message-queue-toggle]\")?.getAttribute(\"aria-expanded\") === \"false\""
+          }
+        ]
+      }
+    ],
+    "sessions-messagequeuedisplay--owned-utility-caller": [
+      {
+        "name": "folded",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-message-queue-toggle]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"[data-message-queue-toggle]\")?.getAttribute(\"aria-expanded\") === \"false\""
+          }
+        ]
+      }
+    ],
+    "sessions-messagequeuedisplay--owned-opaque-caller": [
+      {
+        "name": "folded",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-message-queue-toggle]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"[data-message-queue-toggle]\")?.getAttribute(\"aria-expanded\") === \"false\""
+          }
+        ]
+      }
+    ]
+  }
+}

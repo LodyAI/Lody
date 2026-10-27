@@ -30,10 +30,8 @@ const SHAPES = {
  * dynamic style resolves to an inline value, which nothing has to win against.
  */
 const dyn = stylex.create({
-  size: (width: string | number | undefined, height: string | number | undefined) => ({
-    width,
-    height,
-  }),
+  width: (width: string | number) => ({ width }),
+  height: (height: string | number) => ({ height }),
 });
 
 /**
@@ -57,7 +55,8 @@ export const Skeleton = forwardRef<HTMLDivElement, SkeletonProps>(function Skele
   const sx = stylex.props(
     surface.skeleton,
     SHAPES[shape],
-    (width != null || height != null) && dyn.size(width, height)
+    width != null && dyn.width(width),
+    height != null && dyn.height(height)
   );
   return (
     <div

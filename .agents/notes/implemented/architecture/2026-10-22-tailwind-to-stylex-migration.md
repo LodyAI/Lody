@@ -222,6 +222,28 @@ selectors to the earlier StyleX layer would let that caller win instead. The two
 migrated scrollbar utilities preserve that existing contract; no extra specificity,
 control API, DOM, event, geometry engine or lifecycle change is introduced.
 
+The connection/queue continuation removes another 14 occurrences:
+`acp-session-select.tsx` 43→36, `stuck-connection-banner.tsx` 14→10 and
+`message-queue-display.tsx` 12→9. ACP moves seven owned icon/chevron utilities,
+using the exact element-local spacing expression. The stuck banner moves one
+Spinner ink expression and removes three redundant shrink classes already owned
+by Button/Spinner; negative Button margin and primitive appearance stay intact.
+Queue moves only three internal scroll-region utilities, preserving the local
+border-style variable and exact 30% border mix. Its nine public root utilities
+remain: the original utilities layer beats opaque StyleX callers, while `cn`
+resolves utility callers differently. Moving those root declarations would
+change the exported composition contract. DOM, events, hooks, inline geometry
+and recovery/queue ownership remain unchanged.
+
+The shared Skeleton warning repair is a separate primitive correction. Compose
+independent dynamic width and height blocks only when that axis is provided
+(`!= null`), preserving explicit zero and the unsupplied shape dimension. A
+candidate that substituted null passed the unit test but cleared the line
+shape's default height, changing a real width-only line from 20px to 0px. That
+candidate and its failing browser evidence remain preserved. The final split
+keeps both provided axes in one StyleX composition and removes stale inline
+sizes when props change; no shape/default/caller API is redesigned.
+
 ## Reproducible evidence
 
 The [visual harness](../../../../packages/components/tests/visual/visual-regression.mjs)
@@ -932,6 +954,70 @@ pass. The rebuilt actual Electron smoke at `2026-10-27T12:22:33.898Z` passes fou
 views with real after-only screenshots. It supplies application smoke evidence,
 not paired regression coverage or closure of historical application differences.
 
+### Connection selectors, recovery hints and queue scrolling
+
+Verified native ACP coverage contains 44 PNG-byte-exact pairs and 7,108 paired
+nodes; all 10,450,646 recorded leaf values match. The queue's corrected native
+matrix has 54 exact pairs, and six additional runtime-root probes bring its
+native/control coverage to 60 exact pairs across 13,380 nodes, with no recorded
+field differences. Stuck banner's 36 primary PNG pairs and 920 recorded nodes
+are exact. Its 12 additional CSS observations cover 256 nodes and 400,768 CSS
+properties with zero field differences and do not add screenshot pairs.
+
+Root-theme intent is distinguished from observed input. ThemeProvider overwrote
+the original queue and stuck-banner story root variables at commit; those story
+frames do not prove custom-root coverage. Explicit runtime controls apply the
+variables after actual theme completion and assert their values before capture.
+Queue's six root controls verify all six inputs; the stuck probe verifies root
+and subtree ink. ACP's root 650-weight/21px inputs are actually observed. A
+five-error fixture type correction retains identical emitted JavaScript
+(`7008b53e…9528194`); original failed type checking remains evidence rather than
+a change to the compiled baseline's behavior.
+
+The initial queue native matrix retains three scrolled-image differences:
+21,670 raw and 19,234 threshold pixels despite matching recorded fields. Final
+capture waits for real `scrollend` after every swipe, verifies the bottom row's
+position and hit chain, and requires exact pre/post screenshot CSS, geometry and
+input observations. Both sources are recaptured through all 54 states. Two
+unchanged-Before states also change between the old and stronger-readiness
+captures, supporting a readiness explanation without identifying a particular
+browser scheduling bug. The three original exceptions remain **OPEN**: their
+precise paint trigger was not independently proved. No source patch, mask,
+subset replacement or threshold change hides them. Initial ACP nested-Escape /
+JSON-size failures and the stuck profile's strict locator failure (zero captures,
+20 reported failures) remain separate; the corrected ACP path observes the first
+Escape close only the tooltip and the second close the menu.
+
+Shared Skeleton acceptance compares 40 sizing states / 360 nodes, including raw
+inline styles and 480 computed CSS properties, with zero rendering-field
+differences; 176 original warnings become zero. One animation diagnostic remains:
+light/320px/reduced-motion state 1 records no Before animation but a finished,
+single-iteration native CSS transition at currentTime 0.01ms After. This raw
+observation stays in `leaves4-sizing-comparison.json`; the record as a whole is
+not called identical. Four normal-motion pulse screenshot pairs pause the real
+animation at 400ms and are PNG-byte-exact. The unchanged UsageCalendarSkeleton
+is also checked across 14 overlapping states:
+5,592 nodes and 8,759,306 CSS property observations match, while its original
+5,948 warnings become zero. These computed-only states do not add screenshots.
+The initial null candidate is not included in final acceptance. Historical OPEN
+reports and unchanged clipping limitations remain intact.
+
+Component tests pass 620 files / 6,207 cases, and UI tests pass 25 files / 299
+cases. The stateful Skeleton sizing case replaces two shallow class/markup
+checks, reducing that suite by one case while adding observable rerender coverage.
+Root types, typed lint, Effect lint and scripts pass; typed lint records 20,506
+warnings and zero errors. CLI records 4,868 passes and the existing Git-identity
+failure, so the aggregate is not a root-check pass. Independent final boundaries
+pass. `leaves4-acceptance.html` contains 330 formal pairs (226 primary and 104
+native) across 59,406 paired nodes, all PNG-byte-exact; supplemental pulse and
+initial/rejected evidence stay outside those counters. Direct-file browser QA
+verifies all 457 unique PNG payloads, 660 formal origins and 20 supplemental
+source references, distinguishing original images from derived masks. Search,
+filtering, original-image pointer/keyboard access, close cleanup and 1280/390px
+layouts pass with zero page errors or external requests. Actual
+Electron smoke at `2026-10-27T13:31:23.380Z` passes four views with after-only
+images; it supplies no paired application pixel claim.
+
 ## Remaining work
 
 Compiler-backed [usage inventory](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -988,9 +1074,12 @@ After reconciling main, the same-method snapshot was 2,102 occurrences
 (components 1,610, `src/ui` 487, routes 5) across 186 files with 760 unresolved
 expressions. That change includes upstream additions and retired UI rather than
 another claimed migration removal. The owned Skeleton/InfoBar/Outline Rail batch
-then removes 13 on the same method, leaving **2,089 occurrences** (components
+then removes 13 on the same method, leaving 2,089 occurrences (components
 1,597, `src/ui` 487, routes 5) across 185 files and 759 unresolved expressions.
-These are measured lower bounds, not a completion percentage.
+The ACP/stuck-banner/queue-scroll continuation removes another 14 on that method,
+leaving **2,075 occurrences** (components 1,583, `src/ui` 487, routes 5), with the
+same 185 files and 759 unresolved expressions. These are measured lower bounds,
+not a completion percentage.
 
 WebWorkspaceLayout remains deferred until its actual sidebar/runtime/router
 graph has a bounded production-component fixture.

@@ -164,6 +164,21 @@ Outline Rail 保留三个祖先状态颜色 group、`@[928px]:flex` 边界及预
 移到更早的 StyleX 层，调用方反而开始获胜。本次只迁移两个滚动条工具类，保留原合同，
 不提高 specificity，也不修改控件 API、DOM、事件、几何引擎或生命周期。
 
+连接／队列续迁再减少 14 处：`acp-session-select.tsx` 43→36、
+`stuck-connection-banner.tsx` 14→10、`message-queue-display.tsx` 12→9。ACP 迁移
+七处自有图标／chevron 工具类，保留精确元素局部 spacing 表达式。连接提示迁移一处
+Spinner 颜色，删除三处 Button／Spinner 已提供的重复 shrink 类；Button 负 margin 及
+primitive 外观继续保留。Queue 仅迁移内部滚动区三个工具类，保留局部 border-style
+变量和准确的 30% border mix。公开根节点九个工具类不变：原 utilities 层覆盖 opaque
+StyleX 调用方，而 `cn` 对 utility 调用方另有冲突解析；迁移根声明会改变公开组合合同。
+DOM、事件、hooks、内联几何及 recovery／queue 所有权不变。
+
+共享 Skeleton 警告修复是独立的 primitive 修正。只有某轴已提供（`!= null`）时才组合
+对应的独立动态 width／height 样式，保留显式零值和另一轴的 shape 默认尺寸。曾用 null
+替代缺省轴的候选通过单元测试，却清掉真实 line 默认高度，使 width-only line 从 20px
+变成 0px；候选及失败浏览器证据保留。最终拆分仍在一次 StyleX 组合中处理两个已提供的轴，
+props 改变时清理旧内联尺寸，不重设计 shape、默认值或调用方 API。
+
 ## 可复现证据
 
 [视觉工具](../../../../packages/components/tests/visual/visual-regression.mjs)在 Chromium
@@ -657,6 +672,49 @@ commit signing 环境问题，另一个是既有 Git 身份断言。仅以命令
 `2026-10-27T12:22:33.898Z` 通过四个界面并保留真实 after-only 截图；它只证明应用
 冒烟，不构成配对回归，也不关闭历史应用差异。
 
+### 连接选择、恢复提示与队列滚动
+
+有效 ACP native 覆盖 44 对字节一致 PNG、7,108 个配对节点，全部 10,450,646 项记录
+leaf value 相同。Queue 修正后的 native 矩阵 54 对全一致，另六对运行时根变量控制使
+其 native／control 覆盖为 60 对、13,380 个节点，记录字段无差异。连接提示 36 对主要
+PNG 和 920 个记录节点一致；另 12 组 CSS 观测覆盖 256 个节点、400,768 项 CSS 属性，
+字段差异为零，不另计截图。
+
+根主题意图与实际输入分别记录。ThemeProvider 在 commit 时覆盖原 Queue 和连接提示
+故事的根变量，因此原故事帧不能证明自定义根变量覆盖；额外运行时控制在主题实际完成后
+设置变量并在截图前断言值。Queue 六对根控制核实全部六个输入，连接提示探针核实根／
+子树 ink。ACP 的根 650 字重／21px 输入实际生效。修复五项夹具类型错误后，发出的
+JavaScript 哈希仍为 `7008b53e…9528194`；原始类型失败保留，不改变已编译基线行为。
+
+最初 Queue native 矩阵保留三个滚动截图差异：21,670 个 raw 像素、19,234 个阈值像素，
+虽记录字段相同。最终采集在每次 swipe 后等待真实 `scrollend`，核实末行位置及 hit chain，
+并要求截图前后 CSS、几何和输入观察完全一致，双方重新采完全部 54 个状态。未改 Before
+源码的两个状态在旧／强 readiness 采集中也变化，支持就绪条件解释，但未定位某个具体
+浏览器调度 bug。原三个例外仍 **OPEN**，精确绘制触发未独立证明；不以产品补丁、mask、
+子集替换或阈值变化隐藏。ACP 初始嵌套 Escape／JSON 体积失败，以及连接提示定位器
+strict 失败（零截图、20 条失败记录）均单独保留。修正后的 ACP 路径实际观察到第一次
+Escape 只关闭 tooltip，第二次才关闭 menu。
+
+共享 Skeleton 最终比较 40 个尺寸状态／360 个节点，包括原始内联样式和 480 项计算
+CSS 属性，渲染字段差异为零，176 条原始警告变为零。另有一项动画诊断差异：
+light／320px／reduced-motion 的 state 1，Before 无动画，After 记录一个已 finished、
+单次迭代、currentTime 为 0.01ms 的原生 CSS transition。原记录保留在
+`leaves4-sizing-comparison.json`，不把全部观测称为相同。四对正常动效 pulse 截图将真实
+动画暂停到 400ms，PNG 全部字节一致。不变的 UsageCalendarSkeleton 另检查 14 组重合状态：
+5,592 个节点和 8,759,306 项 CSS 属性相同，原 5,948 条警告变为零。computed-only 状态
+不增加截图，初始 null 候选不计最终通过。历史 OPEN 报告和原有裁切限制继续保留。
+
+组件测试 620 文件／6,207 用例通过，UI 测试 25 文件／299 用例通过。Skeleton 的有状态
+尺寸用例替代两个浅层 class／markup 检查，数量净少一个，但增加可观察的 rerender 覆盖。
+根类型、typed lint、Effect lint 和脚本检查通过；typed lint 记录 20,506 项 warning、
+零错误。CLI 为 4,868 通过及既有 Git 身份失败，不能称根检查通过。最终独立边界检查通过。
+`leaves4-acceptance.html` 包含 330 对正式截图（226 primary、104 native），59,406 个
+配对节点，PNG 全部字节一致；补充 pulse、初始和被拒证据不计入这些指标。直接文件
+浏览器 QA 核实全部 457 个唯一 PNG、660 个正式来源和 20 个补充原图引用，区分原图与
+派生 mask；搜索、过滤、原图指针/键盘访问、关闭清理及 1280/390px 布局通过，页面错误
+和外部请求为零。真实 Electron 于
+`2026-10-27T13:31:23.380Z` 通过四个界面，图片仅为 after-only，不构成应用配对像素结论。
+
 ## 后续工作
 
 基于编译器的[用量统计](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -696,9 +754,11 @@ Markdown 基础类，并解析了一个旧表达式：修正后的基线为 2,13
 
 同步 main 后，同口径快照为 2,102 处（components 1,610、`src/ui` 487、routes 5），
 186 个文件及 760 个未解析表达式；该变化包含上游新增和退役 UI，不另计作迁移移除。
-Skeleton／InfoBar／Outline Rail 批次随后以同一方法实际减少 13 处，留下 **2,089 处**
+Skeleton／InfoBar／Outline Rail 批次随后以同一方法实际减少 13 处，留下 2,089 处
 （components 1,597、`src/ui` 487、routes 5），185 个文件及 759 个未解析表达式。
-这些数值是实测下界，不是迁移完成百分比。
+ACP／连接提示／队列滚动续迁按同一方法再减少 14 处，留下 **2,075 处**（components
+1,583、`src/ui` 487、routes 5），仍为 185 个文件及 759 个未解析表达式。这些数值是
+实测下界，不是迁移完成百分比。
 
 WebWorkspaceLayout 仍延期，等待真实 sidebar/runtime/router 组合的
 适度生产组件夹具，避免以替身 UI 声称验收。

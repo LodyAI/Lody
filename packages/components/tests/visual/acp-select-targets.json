@@ -1,0 +1,225 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 800
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844,
+      "device": "iPhone 13"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "shared-ownedacpselectmigration--variants",
+    "shared-ownedacpselectmigration--restricted",
+    "shared-ownedacpselectmigration--long-labels",
+    "shared-ownedacpselectmigration--caller-overrides",
+    "shared-ownedacpselectmigration--root-variables",
+    "shared-ownedacpselectmigration--subtree-variables"
+  ],
+  "ready": {
+    "shared-ownedacpselectmigration--variants": [
+      {
+        "action": "visible",
+        "selector": "[data-acp-select-fixture][data-fixture-ready=\"true\"]"
+      }
+    ],
+    "shared-ownedacpselectmigration--restricted": [
+      {
+        "action": "visible",
+        "selector": "[data-acp-select-fixture][data-fixture-ready=\"true\"]"
+      }
+    ],
+    "shared-ownedacpselectmigration--long-labels": [
+      {
+        "action": "visible",
+        "selector": "[data-acp-select-fixture][data-fixture-ready=\"true\"]"
+      }
+    ],
+    "shared-ownedacpselectmigration--caller-overrides": [
+      {
+        "action": "visible",
+        "selector": "[data-acp-select-fixture][data-fixture-ready=\"true\"]"
+      }
+    ],
+    "shared-ownedacpselectmigration--root-variables": [
+      {
+        "action": "visible",
+        "selector": "[data-acp-select-fixture][data-fixture-ready=\"true\"]"
+      }
+    ],
+    "shared-ownedacpselectmigration--subtree-variables": [
+      {
+        "action": "visible",
+        "selector": "[data-acp-select-fixture][data-fixture-ready=\"true\"]"
+      }
+    ]
+  },
+  "states": {
+    "shared-ownedacpselectmigration--variants": [
+      {
+        "name": "open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-select-case=\"compact\"] button"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"menu\"]"
+          }
+        ]
+      },
+      {
+        "name": "selected",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[role=\"menuitemradio\"]:has-text(\"Agent\")"
+          },
+          {
+            "action": "hidden",
+            "selector": "[role=\"menu\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "document.querySelector('[data-select-case=\"compact\"]')?.dataset.selectedValue === \"agent\""
+          }
+        ]
+      }
+    ],
+    "shared-ownedacpselectmigration--long-labels": [
+      {
+        "name": "open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-select-case=\"long-compact\"] button"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"menu\"]"
+          }
+        ]
+      },
+      {
+        "name": "selected",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[role=\"menuitemradio\"]:has-text(\"Agent\")"
+          },
+          {
+            "action": "hidden",
+            "selector": "[role=\"menu\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "document.querySelector('[data-select-case=\"long-compact\"]')?.dataset.selectedValue === \"agent\""
+          }
+        ]
+      }
+    ],
+    "shared-ownedacpselectmigration--caller-overrides": [
+      {
+        "name": "open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-select-case=\"caller-small-last\"] button"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"menu\"]"
+          }
+        ]
+      },
+      {
+        "name": "selected",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[role=\"menuitemradio\"]:has-text(\"Agent\")"
+          },
+          {
+            "action": "hidden",
+            "selector": "[role=\"menu\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "document.querySelector('[data-select-case=\"caller-small-last\"]')?.dataset.selectedValue === \"agent\""
+          }
+        ]
+      }
+    ],
+    "shared-ownedacpselectmigration--root-variables": [
+      {
+        "name": "open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-select-case=\"compact\"] button"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"menu\"]"
+          }
+        ]
+      },
+      {
+        "name": "selected",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[role=\"menuitemradio\"]:has-text(\"Agent\")"
+          },
+          {
+            "action": "hidden",
+            "selector": "[role=\"menu\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "document.querySelector('[data-select-case=\"compact\"]')?.dataset.selectedValue === \"agent\""
+          }
+        ]
+      }
+    ],
+    "shared-ownedacpselectmigration--subtree-variables": [
+      {
+        "name": "open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-select-case=\"compact\"] button"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"menu\"]"
+          }
+        ]
+      },
+      {
+        "name": "selected",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[role=\"menuitemradio\"]:has-text(\"Agent\")"
+          },
+          {
+            "action": "hidden",
+            "selector": "[role=\"menu\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "document.querySelector('[data-select-case=\"compact\"]')?.dataset.selectedValue === \"agent\""
+          }
+        ]
+      }
+    ]
+  }
+}

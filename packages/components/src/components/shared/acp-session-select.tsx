@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 
 import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
@@ -33,6 +34,16 @@ export type AcpSessionSelectProps = {
   /** Show description as tooltip in dropdown items (default: true) */
   showDescription?: boolean;
 };
+
+const styles = stylex.create({
+  icon: { display: 'flex', flexShrink: 0, alignItems: 'center' },
+  chevron: {
+    height: 'calc(var(--spacing) * 3.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    opacity: 0.7,
+  },
+});
 
 const compactClassName = (_isDark: boolean, iconOnly: boolean) =>
   cn(
@@ -87,11 +98,9 @@ export function AcpSessionSelect({
       disabled={disabled}
       title={withSelectedLabel(triggerTitle) ?? label}
     >
-      {icon ? <span className="flex shrink-0 items-center">{icon}</span> : null}
+      {icon ? <span {...stylex.props(styles.icon)}>{icon}</span> : null}
       {!iconOnly ? <span className="font-medium">{label}</span> : null}
-      {isMenuEnabled && !iconOnly ? (
-        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
-      ) : null}
+      {isMenuEnabled && !iconOnly ? <ChevronDown {...stylex.props(styles.chevron)} /> : null}
     </Button>
   );
 

@@ -1,0 +1,128 @@
+{
+  "viewports": [
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 720
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "workspace-stuckconnectionbanner--default",
+    "workspace-stuckconnectionbanner--chinese",
+    "workspace-stuckconnectionbanner--observed-actions",
+    "workspace-stuckconnectionbanner--root-ink",
+    "workspace-stuckconnectionbanner--subtree-ink"
+  ],
+  "ready": {
+    "workspace-stuckconnectionbanner--default": [
+      {
+        "action": "visible",
+        "selector": "[role=status] button[aria-label]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const status=document.querySelector('[role=status]'); const card=status?.firstElementChild; const host=document.querySelector('[data-stuck-banner-observed]'); return !!card && getComputedStyle(card).opacity==='1' && (!host || host.dataset.stuckBannerReady==='true'); }"
+      }
+    ],
+    "workspace-stuckconnectionbanner--chinese": [
+      {
+        "action": "visible",
+        "selector": "[role=status] button[aria-label]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const status=document.querySelector('[role=status]'); const card=status?.firstElementChild; const host=document.querySelector('[data-stuck-banner-observed]'); return !!card && getComputedStyle(card).opacity==='1' && (!host || host.dataset.stuckBannerReady==='true'); }"
+      }
+    ],
+    "workspace-stuckconnectionbanner--observed-actions": [
+      {
+        "action": "visible",
+        "selector": "[role=status] button[aria-label]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const status=document.querySelector('[role=status]'); const card=status?.firstElementChild; const host=document.querySelector('[data-stuck-banner-observed]'); return !!card && getComputedStyle(card).opacity==='1' && (!host || host.dataset.stuckBannerReady==='true'); }"
+      }
+    ],
+    "workspace-stuckconnectionbanner--root-ink": [
+      {
+        "action": "visible",
+        "selector": "[role=status] button[aria-label]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const status=document.querySelector('[role=status]'); const card=status?.firstElementChild; const host=document.querySelector('[data-stuck-banner-observed]'); return !!card && getComputedStyle(card).opacity==='1' && (!host || host.dataset.stuckBannerReady==='true'); }"
+      }
+    ],
+    "workspace-stuckconnectionbanner--subtree-ink": [
+      {
+        "action": "visible",
+        "selector": "[role=status] button[aria-label]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const status=document.querySelector('[role=status]'); const card=status?.firstElementChild; const host=document.querySelector('[data-stuck-banner-observed]'); return !!card && getComputedStyle(card).opacity==='1' && (!host || host.dataset.stuckBannerReady==='true'); }"
+      }
+    ]
+  },
+  "states": {
+    "workspace-stuckconnectionbanner--observed-actions": [
+      {
+        "name": "dismiss-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Dismiss"
+          }
+        ]
+      },
+      {
+        "name": "recover-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Recover\u2026"
+          }
+        ]
+      },
+      {
+        "name": "recover-callback",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Recover\u2026"
+          },
+          {
+            "action": "visible",
+            "text": "Recovery callback requested"
+          }
+        ]
+      },
+      {
+        "name": "dismiss-callback",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Dismiss"
+          },
+          {
+            "action": "visible",
+            "text": "Dismiss callback requested"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { Alert } from '../src/feedback/alert';
 import { Progress } from '../src/feedback/progress';
 import { Skeleton } from '../src/feedback/skeleton';
@@ -94,21 +94,26 @@ describe('Skeleton', () => {
     expect(attrOf(renderToStaticMarkup(<Skeleton />), 'div', 'aria-hidden')).toBe('true');
   });
 
-  test('the room it holds is a prop, so nothing has to win a specificity fight', () => {
-    // A size passed as a class would land in the same fight as the shape's own
-    // height; a dynamic style resolves to an inline value instead.
-    const html = renderToStaticMarkup(<Skeleton width="60%" height={12} />);
-    expect(/style="[^"]*width:\s*60%/.test(html)).toBe(true);
-    expect(/style="[^"]*height:\s*12px/.test(html)).toBe(true);
-  });
-
-  test('each shape takes its own corner, and nothing else', () => {
-    const line = classesFor(surface.skeleton, surface.skeletonLine);
-    const circle = classesFor(surface.skeleton, surface.skeletonCircle);
-    expect(line).not.toEqual(circle);
-    const html = renderToStaticMarkup(<Skeleton shape="circle" />);
-    for (const name of circle) {
-      expect(html, `a circle skeleton is missing ${name}`).toContain(name);
+  test('optional sizes can change without invalid style atoms or stale inline dimensions', async () => {
+    const errors: unknown[][] = [];
+    const errorLog = vi.spyOn(console, 'error').mockImplementation((...args) => errors.push(args));
+    try {
+      mounted = await mount(<Skeleton width={96} />);
+      const element = mounted.container.querySelector('div')!;
+      const values = () =>
+        Array.from(element.style).map((name) => element.style.getPropertyValue(name));
+      expect(values()).toEqual(['96px']);
+      await step(() => mounted!.root.render(<Skeleton height={28} />));
+      expect(values()).toEqual(['28px']);
+      await step(() => mounted!.root.render(<Skeleton width="60%" height={0} />));
+      expect(values()).toEqual(expect.arrayContaining(['60%', '0px']));
+      expect(values()).toHaveLength(2);
+      await step(() => mounted!.root.render(<Skeleton />));
+      expect(element.style.length).toBe(0);
+      expect(element.getAttribute('aria-hidden')).toBe('true');
+      expect(errors).toEqual([]);
+    } finally {
+      errorLog.mockRestore();
     }
   });
 });

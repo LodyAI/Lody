@@ -126,6 +126,10 @@ It applies the same predicate after view changes on both immutable builds.
 | `usage-skeleton-targets.json`, `usage-skeleton-narrow-targets.json` | Actual day/week/year placeholders, root/subtree spacing, 671/672/673px heatmap containers and 320px layouts.                |
 | `leaves3-info-bar-targets.json`                                     | Actual privacy/preview actions, compact and empty states, palette scopes and nested light/dark exclusions.                  |
 | `outline-rail-targets.json`                                         | Actual rail, overflow, portal and caller precedence at 927/928/929px container widths.                                      |
+| `skeleton-sizing-targets.json`                                      | Optional width/height, explicit zero and actual sizing changes on the shared Skeleton primitive.                            |
+| `acp-select-targets.json`                                           | Actual ACP selection variants, disabled/empty options, menus, caller overrides and local scale variables.                   |
+| `leaves4-stuck-banner-targets.json`                                 | Recovery/dismiss callbacks, long translated copy and narrow connection banners.                                             |
+| `leaves4-queue-display-targets.json`                                | Real queue disclosure, utility/opaque callers, folding and root/subtree theme observations.                                 |
 | `legacy-task-targets.json`                                          | Actual legacy TaskList rows, caller/root/subtree variable overrides, loading/empty/overflow and desktop pointer states.     |
 | `legacy-updated-task-targets.json`                                  | Actual legacy flat Updated list, status/anchor rows, rename, archive, show all/less and scoped variables.                   |
 | `owned-session-list-targets.json`                                   | Active SessionList project groups, selection, caller/root/subtree overrides, menus, folding and empty/loading states.       |
@@ -164,6 +168,13 @@ descendant ink must retain its original priority relative to named hover/focus
 variants. Native frames are separate executions; overlapping states do not imply
 additional distinct UI coverage. Full-field observations supplement the report's
 smaller layout view without replacing the original screenshots.
+
+Theme initialization can replace a story's early root palette override. Record
+the actual element variables after initialization; a story's name is not scope
+coverage. Runtime root probes apply and assert their values after that boundary.
+Native queue scroll captures wait for real `scrollend`, verify the visible last
+row and hit chain, and compare layout/CSS/input state before and after each shot.
+Keep earlier scroll paints and their unresolved causes alongside recaptures.
 
 `legacy-task-native.mjs` and `legacy-updated-task-native.mjs` take the same phase
 and immutable URL arguments. TaskList writes `proof.json`: matching primary

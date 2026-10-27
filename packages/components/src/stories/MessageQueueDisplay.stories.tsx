@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from 'react';
+import { useLayoutEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { userEvent, within } from 'storybook/test';
 import { Provider, createStore } from 'jotai';
@@ -316,4 +317,114 @@ export const CollapsedWithUploads: Story = {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByRole('button', { name: /Up next/ }));
   },
+};
+
+const ownedScopeVariables = {
+  '--composer': '210 35% 88%',
+  '--foreground': '270 55% 31%',
+  '--input': '32 58% 72%',
+  '--input-border': '315 60% 38%',
+  '--border': '155 56% 33%',
+  '--radius-lg': '17px',
+} as const;
+
+const callerStyles = stylex.create({
+  sheet: {
+    backgroundColor: 'rgb(230, 205, 180)',
+    borderColor: 'rgb(115, 45, 85)',
+    borderWidth: '3px',
+    borderRadius: '21px',
+    overflow: 'visible',
+  },
+});
+
+function OwnedQueueFixture({
+  scope = 'default',
+  caller = 'none',
+}: {
+  scope?: 'default' | 'root' | 'subtree';
+  caller?: 'none' | 'utilities' | 'opaque';
+}) {
+  const [items, setItems] = useState(() => makeItems(10));
+  const [result, setResult] = useState('Ready');
+  useLayoutEffect(() => {
+    if (scope !== 'root') return undefined;
+    const previous = Object.keys(ownedScopeVariables).map((key) => [
+      key,
+      document.documentElement.style.getPropertyValue(key),
+      document.documentElement.style.getPropertyPriority(key),
+    ]);
+    for (const [key, value] of Object.entries(ownedScopeVariables)) {
+      document.documentElement.style.setProperty(key, value);
+    }
+    return () => {
+      for (const [key, value, priority] of previous) {
+        if (key && value) document.documentElement.style.setProperty(key, value, priority);
+        else if (key) document.documentElement.style.removeProperty(key);
+      }
+    };
+  }, [scope]);
+  return (
+    <div
+      data-owned-queue-fixture=""
+      style={scope === 'subtree' ? (ownedScopeVariables as CSSProperties) : undefined}
+    >
+      <MessageQueueDisplay
+        {...commonArgs}
+        items={items}
+        className={
+          caller === 'utilities'
+            ? 'overflow-visible rounded-t-xl rounded-b-md border-2 border-red-500 bg-blue-100 ring-2 ring-green-600 shadow-lg'
+            : caller === 'opaque'
+              ? stylex.props(callerStyles.sheet).className
+              : undefined
+        }
+        onRemove={(cid) => {
+          setItems((rows) => rows.filter((row) => row.$cid !== cid));
+          setResult(`Removed ${cid}`);
+        }}
+        onEditStart={(item) => {
+          setItems((rows) => rows.map((row) => ({ ...row, isEditing: row.$cid === item.$cid })));
+          setResult(`Editing ${item.$cid}`);
+        }}
+        onEditCancel={(item) => {
+          setItems((rows) => rows.map((row) => ({ ...row, isEditing: false })));
+          setResult(`Cancelled ${item.$cid}`);
+        }}
+        onEditSave={(item, task) => {
+          setItems((rows) =>
+            rows.map((row) => (row.$cid === item.$cid ? { ...row, task, isEditing: false } : row))
+          );
+          setResult(`Saved ${task}`);
+        }}
+        onReorder={(activeCid, overCid) => setResult(`Reordered ${activeCid} ${overCid}`)}
+        onSteer={(item) => setResult(`Steered ${item.$cid}`)}
+      />
+      <output data-owned-queue-result="">{result}</output>
+    </div>
+  );
+}
+
+type OwnedQueueStory = StoryObj<typeof OwnedQueueFixture>;
+
+const ownedParameters = { containerWidth: 'w-[min(420px,calc(100vw-48px))]' };
+export const OwnedDefault: OwnedQueueStory = {
+  parameters: ownedParameters,
+  render: () => <OwnedQueueFixture />,
+};
+export const OwnedRootVariables: OwnedQueueStory = {
+  parameters: ownedParameters,
+  render: () => <OwnedQueueFixture scope="root" />,
+};
+export const OwnedSubtreeVariables: OwnedQueueStory = {
+  parameters: ownedParameters,
+  render: () => <OwnedQueueFixture scope="subtree" />,
+};
+export const OwnedUtilityCaller: OwnedQueueStory = {
+  parameters: ownedParameters,
+  render: () => <OwnedQueueFixture caller="utilities" />,
+};
+export const OwnedOpaqueCaller: OwnedQueueStory = {
+  parameters: ownedParameters,
+  render: () => <OwnedQueueFixture caller="opaque" />,
 };

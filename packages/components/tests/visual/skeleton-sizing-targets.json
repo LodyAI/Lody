@@ -1,0 +1,77 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "ids": ["ui-skeletonsizing--optional-dimensions"],
+  "reducedMotion": "reduce",
+  "states": {
+    "ui-skeletonsizing--optional-dimensions": [
+      {
+        "name": "size-state-1",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Next sizing state"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sizing-step=\"1\"]"
+          }
+        ]
+      },
+      {
+        "name": "size-state-2",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Next sizing state"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sizing-step=\"2\"]"
+          }
+        ]
+      },
+      {
+        "name": "size-state-3",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Next sizing state"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sizing-step=\"3\"]"
+          }
+        ]
+      },
+      {
+        "name": "size-state-4",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Next sizing state"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sizing-step=\"4\"]"
+          }
+        ]
+      }
+    ]
+  }
+}

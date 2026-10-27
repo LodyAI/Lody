@@ -97,6 +97,12 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
   failed: { color: colors.destructive },
+  scrollRegion: {
+    overflowY: 'auto',
+    borderTopStyle: 'var(--tw-border-style, solid)',
+    borderTopWidth: '1px',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 30%, transparent)',
+  },
 });
 
 export function MessageQueueDisplay({
@@ -291,7 +297,7 @@ export function MessageQueueDisplay({
         <Collapsible.Panel keepMounted>
           <div
             ref={scrollRef}
-            className="overflow-y-auto border-t border-border/30"
+            {...stylex.props(styles.scrollRegion)}
             style={{
               maxHeight: 'min(25vh, 240px)',
               maskImage: fadeMask,

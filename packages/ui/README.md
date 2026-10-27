@@ -574,6 +574,12 @@ tone, and one that measures rather than progresses takes `neutral`:
 A `Skeleton` takes a gray, which is what the rules reserve them for — a thing
 with no role yet — and it takes its room as props rather than classes, because a
 size passed as a class lands in a specificity fight with the shape's own height.
+`width` and `height` are independently optional: numbers are pixels and strings
+are CSS lengths. An omitted dimension keeps the shape's default sizing, so a
+width-only line keeps its text-line height; an explicit `0` is applied. Updating
+either prop replaces that dimension; removing it clears the previous size and
+restores the shape's default sizing.
+
 A `Spinner` is drawn in `currentColor`, so the one inside a ghost button takes
 the button's ink; it is called a spinner rather than a loading, because it is the
 mark and not the state, and where it goes is the surface's decision.

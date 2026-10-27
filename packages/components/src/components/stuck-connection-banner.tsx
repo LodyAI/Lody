@@ -10,6 +10,7 @@ import * as stylex from '@stylexjs/stylex';
 import { useStuckConnectionHint } from '@/hooks/use-stuck-connection';
 import { useWorkspaceDataScopeState } from '@/hooks/use-workspace-data-scope-state';
 import { RecoveryPage, reportRecoveryShown } from './blocking-wait-placeholder';
+import { withClassName } from '@/lib/stylex';
 import { themeColors } from '../style/theme-colors.stylex';
 import {
   themeFontSize,
@@ -21,6 +22,7 @@ import {
 } from '../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  connectionSpinner: { color: 'hsl(var(--muted-foreground) / 1)' },
   /** The sheet's place: pinned above the mobile dock, letting the pointer through. */
   sheet: {
     pointerEvents: 'none',
@@ -146,12 +148,15 @@ export function StuckConnectionBanner({
         {...stylex.props(styles.card)}
       >
         <div {...stylex.props(styles.row)}>
-          <Spinner className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <Spinner
+            {...withClassName(stylex.props(styles.connectionSpinner), 'h-4 w-4')}
+            aria-hidden="true"
+          />
           <p {...stylex.props(styles.title)}>{labels.title}</p>
           <Button
             variant="ghost"
             icon
-            className="-mr-1 h-6 w-6 shrink-0 text-muted-foreground"
+            className="-mr-1 h-6 w-6 text-muted-foreground"
             onClick={onDismiss}
             aria-label={labels.dismissAriaLabel}
           >
@@ -162,11 +167,7 @@ export function StuckConnectionBanner({
             left a wide empty gutter. */}
         <div {...stylex.props(styles.reasonRow)}>
           <p {...stylex.props(styles.reason)}>{labels.description}</p>
-          <Button
-            size="small"
-            className="h-7 shrink-0 rounded-full px-3 text-xs"
-            onClick={onRecover}
-          >
+          <Button size="small" className="h-7 rounded-full px-3 text-xs" onClick={onRecover}>
             {labels.recover}
           </Button>
         </div>
