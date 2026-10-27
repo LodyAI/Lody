@@ -107,12 +107,6 @@ component details.
 
 ## Workspace ownership
 
-- MCP authentication uses only the supported local-daemon RPC. Server definitions keep
-  workspace ownership; private values never enter catalog writes. Save configuration
-  before authorization; only an explicit authorization action opens the browser.
-  Cancel owned attempts on editor disposal and fence late replies. Do not display a
-  scope helper line. See [authorization decision](../../../../../.agents/notes/implemented/architecture/2026-10-26-mcp-oauth-local-credentials.md).
-
 - Ownership transfer is an owner-only danger-zone slot shared by desktop and mobile.
   `workspace-ownership-transfer.tsx` collects an existing member and exact workspace
   name, then calls the cloud mutation through `account-setting.tsx`. Refresh session

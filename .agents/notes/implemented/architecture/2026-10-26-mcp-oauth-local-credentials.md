@@ -92,15 +92,22 @@ The isolated checkout reuses installed dependencies and pinned metadata for unin
 ACP submodules. Required context/local-agent-ownership.md and context/message-flow.md
 are absent in this revision; current scoped contracts and identity/peer-uid code supplied
 the available evidence. Remote callback management, OS acceptance, provider revocation
-and credential sharing remain outside this implementation. No PR has been created.
+and credential sharing remain outside this implementation. Draft PR: [#1938](https://github.com/LodyAI/Lody/pull/1938).
 
 The independent authorization view was rendered with a minimal Storybook wrapper;
 required, unsaved, waiting and authorized states were checked in-browser. The full
 shared Storybook shell hit an existing Loro WASM initialization error in this
 symlinked dependency checkout; this is not a full Electron smoke test.
 
-Final scoped verification: 84 CLI, 38 component and 35 shared tests passed (157 total);
-CLI/components/shared type checks, scoped lint, i18n and public/platform/process/import
-guards passed. Scoped formatting and diff whitespace checks passed. The documentation
-check retains the same six missing Kimi/Pi submodule links as the initial baseline,
-with no new errors or protected topics. Full root `pnpm check` was not run.
+On the latest-main PR base, 40 CLI authentication/discovery/configuration/selection,
+81 component and 46 shared tests passed (167 total). Shared typecheck, scoped lint,
+`pnpm format`, i18n and all eight boundary guards passed. Documentation check retains
+six missing Kimi/Pi submodule links, with no new errors or protected topics.
+
+Full `pnpm check` and CLI/components typechecks were attempted but remain blocked by
+reused dependencies: missing newer E2EE/Streams packages and stale Roost/ACP APIs.
+After loading current pinned ACP sources, three Session suites still fail during
+module initialization because cached Claude SDK metadata is older than the runtime
+manifest. Effect patch lint cannot load missing `@effect/tsgo`. Local Node 24.14.0 is
+below latest main's runtime floor. Before rebasing, all three package typechecks and
+157 focused tests passed; those results do not validate the newer dependency graph.

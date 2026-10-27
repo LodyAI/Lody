@@ -11,3 +11,8 @@ Parent contracts apply. Before changing MCP catalog serialization, also read
   into another user's vault or claiming to erase CRDT history.
 - Keep local authentication DTOs separate from workspace catalog DTOs. Never add a
   workspace/remote RPC fallback for authentication configuration or tokens.
+
+- MCP settings consumers save definitions before authorization and use only supported
+  local-daemon authentication RPC. Private values never enter catalog writes; only an
+  explicit authorization action opens the browser. Cancel owned attempts on editor
+  disposal, fence late replies, and omit the scope helper line.

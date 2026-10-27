@@ -68,12 +68,18 @@ Cloudflare 403。本次没有真实账户同意、Slim 认证调用或生产 tok
 独立检出复用现有依赖及未初始化 ACP 子模块的锁定元数据。当前修订缺少要求阅读的
 context/local-agent-ownership.md 和 context/message-flow.md，因此以现有作用域契约、身份和
 peer uid 代码为可用依据。远程回调管理、系统验收、服务方撤销和凭证分享不在本次实现内。
-尚未创建 PR。
+草稿 PR：[#1938](https://github.com/LodyAI/Lody/pull/1938)。
 
 独立授权视图已在精简 Storybook 包装中渲染，浏览器验证了需要授权、未保存、等待及已授权
 状态。复用依赖的检出中，完整共享 Storybook 外壳遇到已有的 Loro WASM 初始化错误；
 本次浏览器验证不等同于完整 Electron 冒烟测试。
 
-最终范围内验证：CLI 84 项、组件 38 项、共享包 35 项测试通过，共 157 项；三个包的类型检查、
-范围内 lint、i18n 及公共/平台/进程/导入边界检查通过，格式化和差异空白检查通过。文档检查
-仍为起始基线的 6 处 Kimi/Pi 子模块缺失链接，没有新增错误或受保护主题。未运行全仓 `pnpm check`。
+在最新 main 的 PR 基线上，CLI 授权/发现/配置/选择 40 项、组件 81 项、共享包 46 项测试
+通过，共 167 项。共享包类型检查、范围内 lint、`pnpm format`、i18n 和全部八项边界检查
+通过。文档检查仍有 6 处 Kimi/Pi 子模块缺失链接，没有新增错误或受保护主题。
+
+已尝试全仓 `pnpm check` 及 CLI/组件类型检查，但复用依赖缺少较新的 E2EE/Streams 包，
+Roost/ACP API 也落后于当前代码。加载当前锁定的 ACP 源码后，三个 Session 测试文件仍因
+缓存的 Claude SDK 元数据落后于运行时清单，在模块初始化时失败。Effect patch lint 缺少
+`@effect/tsgo`，本机 Node 24.14.0 也低于最新 main 的运行时下限。变基前三个包的类型检查
+和 157 项相关测试通过；这些结果不代表新的依赖图已经验证。

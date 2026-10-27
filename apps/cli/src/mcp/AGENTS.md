@@ -109,5 +109,5 @@ Parent instructions apply. Background: [README.md](README.md).
   before acceptance; retries use stored references. Legacy wait and batch schemas reject
   attachment arguments. See [input Spec](../../../../specs/cli-session-attachments.md).
 
-- Inherited user-owned `collaborationStopped` rejects delegation and fences setup/prompt
-  dispatch. Agents and completion callbacks must never clear it.
+- The user-owned inherited `collaborationStopped` barrier rejects delegation. Agents and
+  completion callbacks must never clear it; execution also fences setup and prompt dispatch.
