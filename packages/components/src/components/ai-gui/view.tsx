@@ -4980,16 +4980,19 @@ function ActivityProcessStep({
   icon,
   children,
   className,
+  flush = false,
 }: {
   icon?: ReactNode;
   children: ReactNode;
   className?: string;
+  flush?: boolean;
 }) {
   return (
     <div
       className={cn(
         /* Keep the leading icon on the same inset as tool steps and prose. */
-        stylex.props(conversationSurface.processStep).className,
+        stylex.props(conversationSurface.processStep, flush && conversationSurface.thoughtStep)
+          .className,
         ACTIVITY_PROCESS_TEXT_CLASS,
         className
       )}
@@ -5233,22 +5236,23 @@ const AssistantThoughtVirtualRow = memo(function AssistantThoughtVirtualRow({
   fontSize: ConversationFontSize;
 }) {
   const { t } = useTranslation();
-  /* Only builtin DSH exposes these thought rows. Reuse answer typography,
+  /* Only builtin DSH exposes these thought rows. Reuse answer sizing,
      preserving thought search identity and the separate disclosure label.
      The thought is prose on the rail, with no glyph: it is the agent's own
      words, and an icon beside every paragraph of it read as a list of
      objects. The group header already says "Thought". */
   return (
-    <ActivityProcessStep>
+    <ActivityProcessStep flush>
       <span className="sr-only">
         {isThinking
           ? t('sessions.toolActivity.thinking', 'Thinking…')
           : t('sessions.toolActivity.thought', 'Thought')}
       </span>
-      <MarkdownBlock
+      <MarkdownRenderer
         text={text}
         size={fontSize}
         isStreaming={isStreaming}
+        muted
         searchBlockId={getThoughtSearchBlockId(messageId, itemIndex)}
       />
     </ActivityProcessStep>
