@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#1970](https://github.com/LodyAI/Lody/pull/1970)
+
 [English](2026-10-27-e2ee-local-identity-reset.md)
 
 ## 摘要
