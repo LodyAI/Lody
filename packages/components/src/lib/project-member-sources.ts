@@ -13,6 +13,7 @@ export type ProjectMemberLocalCopy = {
   machineName: string;
   localProjectId: LocalProjectId;
   online: boolean;
+  rootPath?: string;
 };
 
 /**
@@ -30,6 +31,12 @@ export type ProjectMemberSourceOption = {
   label: string;
   /** The GitHub description of a repository, when known. */
   description?: string;
+  /**
+   * Repository rows: the workspace's GitHub integration can reach it. A
+   * repository known only from a folder's remote cannot be cloned for a
+   * conversation, so it is offered only as that folder.
+   */
+  onGithub?: boolean;
   /** Repository rows: every machine holding a copy. Directory rows: its one machine. */
   copies: readonly ProjectMemberLocalCopy[];
   /**
@@ -46,7 +53,7 @@ export type ProjectMemberLocalProjectInput = {
   project: Pick<
     LocalProjectMeta,
     'id' | 'name' | 'githubRepoFullName' | 'createdAtMs' | 'lastOpenedAtMs'
-  >;
+  > & { rootPath?: string };
 };
 
 /**
@@ -66,7 +73,12 @@ export function buildProjectMemberSourceOptions(input: {
 }): ProjectMemberSourceOption[] {
   const repositories = new Map<
     string,
-    { label: string; description?: string; copies: ProjectMemberLocalProjectInput[] }
+    {
+      label: string;
+      description?: string;
+      copies: ProjectMemberLocalProjectInput[];
+      onGithub?: boolean;
+    }
   >();
   const directories: ProjectMemberSourceOption[] = [];
   for (const entry of input.localProjects) {
@@ -99,11 +111,13 @@ export function buildProjectMemberSourceOptions(input: {
     if (row) {
       row.label = repo.fullName;
       row.description = repo.description ?? undefined;
+      row.onGithub = true;
     } else {
       repositories.set(key, {
         label: repo.fullName,
         description: repo.description ?? undefined,
         copies: [],
+        onGithub: true,
       });
     }
   }
@@ -122,6 +136,7 @@ export function buildProjectMemberSourceOptions(input: {
       source,
       label: row.label,
       ...(row.description ? { description: row.description } : {}),
+      ...(row.onGithub ? { onGithub: true } : {}),
       copies: ordered.map(toCopy),
       localKeys: row.copies.map((copy) =>
         getProjectMemberSourceKey({
@@ -144,6 +159,7 @@ function toCopy(entry: ProjectMemberLocalProjectInput): ProjectMemberLocalCopy {
     machineName: entry.machineName,
     localProjectId: entry.project.id,
     online: entry.online,
+    rootPath: entry.project.rootPath,
   };
 }
 
@@ -181,128 +197,4 @@ export function getProjectMemberLocalCopy(
 ): ProjectMemberLocalCopy | undefined {
   if (option?.kind !== 'repository') return undefined;
   return option.copies.find((copy) => copy.machineId === machineId);
-}
-
-/** Which part of the picker is showing: everything, repositories only, or one machine. */
-export type ProjectMemberSourceFilter =
-  | { kind: 'all' }
-  | { kind: 'repositories' }
-  | { kind: 'machine'; machineId: MachineId };
-
-export type ProjectMemberSourceGroup = {
-  key: string;
-  /**
-   * `repositories`: run on any machine. `here`: folders on this machine.
-   * `elsewhere`: folders on other machines (or every folder when this device
-   * runs no machine). `machine`: folders on the filtered machine.
-   */
-  kind: 'repositories' | 'here' | 'elsewhere' | 'machine';
-  items: ProjectMemberSourceOption[];
-  /** Folders here cannot join: the group is bound to another machine. */
-  blockedBy?: MachineId;
-};
-
-export type ProjectMemberSourceGroups = {
-  groups: ProjectMemberSourceGroup[];
-  /** Rows that cannot be ticked now: folders on a machine the group is not bound to. */
-  disabledKeys: ReadonlySet<string>;
-  /** GitHub-only repositories left out until the user searches. */
-  hiddenRepositoryCount: number;
-  /** Every machine with something to offer, for the filter row. */
-  machineIds: MachineId[];
-};
-
-/**
- * Lays the picker out.
- *
- * Repositories come first, then folders on this machine, then folders on
- * other machines. Repositories that exist only on GitHub are not listed until
- * the user types — a workspace can have hundreds, and they would push every
- * local row out of view — unless already selected. Once the group has a
- * machine-bound member, folders on other machines are disabled; the reason is
- * the group's, said once, never per row.
- */
-export function groupProjectMemberSourceOptions(input: {
-  options: readonly ProjectMemberSourceOption[];
-  selectedKeys: ReadonlySet<string>;
-  query: string;
-  filter: ProjectMemberSourceFilter;
-  /** The machine this device runs, if any. */
-  currentMachineId: MachineId | null;
-  /** The machine the group's machine-bound members already pin, if any. */
-  boundMachineId: MachineId | null;
-}): ProjectMemberSourceGroups {
-  const { options, selectedKeys, filter, currentMachineId, boundMachineId } = input;
-  const searching = input.query.trim().length > 0;
-  const machineIds = new Set<MachineId>();
-  for (const option of options) for (const copy of option.copies) machineIds.add(copy.machineId);
-
-  const repositories: ProjectMemberSourceOption[] = [];
-  let hiddenRepositoryCount = 0;
-  for (const option of options) {
-    if (option.kind !== 'repository') continue;
-    if (filter.kind === 'machine') {
-      if (option.copies.some((copy) => copy.machineId === filter.machineId)) {
-        repositories.push(option);
-      }
-      continue;
-    }
-    if (option.copies.length === 0 && !searching && !selectedKeys.has(option.key)) {
-      hiddenRepositoryCount += 1;
-      continue;
-    }
-    repositories.push(option);
-  }
-
-  const disabledKeys = new Set<string>();
-  const directoriesOn = (keep: (machineId: MachineId) => boolean) =>
-    filter.kind === 'repositories'
-      ? []
-      : options.filter(
-          (option) => option.kind === 'directory' && keep(option.copies[0]!.machineId)
-        );
-  const block = (items: readonly ProjectMemberSourceOption[]) => {
-    let blocked = false;
-    for (const option of items) {
-      const machineId = option.copies[0]!.machineId;
-      if (boundMachineId && machineId !== boundMachineId && !selectedKeys.has(option.key)) {
-        disabledKeys.add(option.key);
-        blocked = true;
-      }
-    }
-    return blocked && boundMachineId ? { blockedBy: boundMachineId } : {};
-  };
-
-  const groups: ProjectMemberSourceGroup[] = [];
-  if (repositories.length > 0)
-    groups.push({ key: 'repositories', kind: 'repositories', items: repositories });
-  if (filter.kind === 'machine') {
-    const items = directoriesOn((machineId) => machineId === filter.machineId);
-    if (items.length > 0) {
-      groups.push({
-        key: `machine:${filter.machineId}`,
-        kind: filter.machineId === currentMachineId ? 'here' : 'machine',
-        items,
-        ...block(items),
-      });
-    }
-  } else {
-    const here = currentMachineId
-      ? directoriesOn((machineId) => machineId === currentMachineId)
-      : [];
-    const elsewhere = directoriesOn((machineId) => machineId !== currentMachineId);
-    if (here.length > 0) groups.push({ key: 'here', kind: 'here', items: here, ...block(here) });
-    if (elsewhere.length > 0) {
-      groups.push({ key: 'elsewhere', kind: 'elsewhere', items: elsewhere, ...block(elsewhere) });
-    }
-  }
-
-  return {
-    groups,
-    disabledKeys,
-    hiddenRepositoryCount: filter.kind === 'machine' ? 0 : hiddenRepositoryCount,
-    machineIds: [...machineIds].sort((left, right) =>
-      left === currentMachineId ? -1 : right === currentMachineId ? 1 : left.localeCompare(right)
-    ),
-  };
 }

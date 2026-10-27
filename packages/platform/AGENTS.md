@@ -62,3 +62,7 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
 - Control-only encrypted workspaces must not acquire ordinary content/execution
   transports. Before changing creation, mode admission, cache cleanup or ledger UI,
   read the [bootstrap guide](../../.agents/docs/e2ee-workspace-bootstrap.md).
+
+- Optional `memberProfiles` is a display directory scoped to the live account and
+  workspace. Resolve its crypto user IDs through verified ledger members; it cannot
+  grant permissions, pin keys, identify the creator, or block ledger availability.

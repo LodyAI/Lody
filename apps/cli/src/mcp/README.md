@@ -110,6 +110,8 @@ selects none. Creation without ids resolves target-project defaults, or workspac
 defaults when the project has no preference; continuation without ids inherits the
 target conversation's selection. Acceptance records ids in the existing per-target
 Operation configuration, so materialization/recovery does not reread edited defaults.
+Batch item values override batch defaults, including an explicit empty selection;
+omitted values preserve the existing target-default behavior.
 Role pins do not override an explicit MCP selection. CLI create/chat expose the same
 choice as `--mcp-server-ids '<JSON array>'`. See the
 [project default Spec](../../../../specs/project-default-mcp.md).

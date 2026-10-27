@@ -13,7 +13,8 @@ be replaced by the earlier 401: shared session verification would interpret two
 such results as confirmed sign-out. Cached identity remains scoped to the auth
 generation and is cleared by explicit sign-out or definitive session rejection.
 The 5-second session timeout bounds the caller, not the request: a late resolved
-answer seeds the cached session only when none exists in the same generation.
+answer seeds the cached session only if no answer, including a definitive
+rejection, was committed after its request started (same generation).
 `getSessionToken` treats an unreachable verification as no verdict and uses the
 durable cookie (else the supplied bearer); it never starts a second check.
 For local E2EE directory selection, `auth-storage.ts` also retains a token-hash/user-ID

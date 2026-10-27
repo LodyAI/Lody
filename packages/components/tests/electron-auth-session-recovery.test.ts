@@ -193,6 +193,25 @@ describe('desktop session recovery with a stale renderer bearer', () => {
     await expect(service.getSession()).rejects.toBe(offline);
   });
 
+  it('discards a late session that resolves after a definitive rejection', async () => {
+    vi.useFakeTimers();
+    const service = new AuthService();
+    const slow = deferredSession();
+    client.getSession.mockReturnValueOnce(slow.promise);
+    const timedOut = expect(service.getSession()).rejects.toThrow('timed out');
+    await vi.advanceTimersByTimeAsync(5_000);
+    await timedOut;
+
+    // Both the renderer bearer and the durable cookie are definitively rejected.
+    client.getSession.mockResolvedValueOnce(unauthorized).mockResolvedValueOnce(unauthorized);
+    expect(await service.getSession(staleBearer)).toEqual(unauthorized);
+    slow.resolve(session);
+    await vi.advanceTimersByTimeAsync(0);
+    const offline = new Error('synthetic offline');
+    client.getSession.mockRejectedValueOnce(offline);
+    await expect(service.getSession()).rejects.toBe(offline);
+  });
+
   it('authorizes requests with the durable cookie when session verification is unreachable', async () => {
     const service = new AuthService();
     client.getSession.mockRejectedValueOnce(new Error('synthetic offline'));

@@ -143,18 +143,38 @@ describe('encrypted workspace control page reading', () => {
 
   it('names the genesis member after this account only when this device holds the pin', () => {
     const you = { name: 'Alex Chen' };
-    const profiles = new Map([['0c'.repeat(16), { name: 'Jordan Lee' }]]);
-    render({ history: history(vector.anchor), you, memberProfiles: profiles });
+    const profiles = new Map([['03'.repeat(32), { name: 'Jordan Lee' }]]);
+    render({ history: history(vector.anchor), you });
     let text = container!.textContent!;
     expect(text).toContain('Alex Chen');
     expect(text).toContain('e2ee.control.you');
     expect(text).toContain('"actor":"Alex Chen"');
-    expect(text).toContain('Jordan Lee');
     act(() => root?.unmount());
     render({ history: history(null), you, memberProfiles: profiles });
     text = container!.textContent!;
     expect(text).not.toContain('Alex Chen');
     expect(text).toContain('Jordan Lee');
+  });
+
+  it('maps profiles through verified crypto users without changing roles, members or verification', () => {
+    const verified = history(vector.anchor);
+    const before = ledgerVerificationCode(verified).stateDigest;
+    const forged = { name: 'Display owner', role: 'guest', signingPublicKey: 'forged' };
+    const profiles = new Map([
+      ['03'.repeat(32), forged],
+      ['ff'.repeat(32), { name: 'Not a ledger member' }],
+    ]);
+    render({ history: verified, memberProfiles: profiles, you: { name: 'Wrong creator' } });
+    const members = container!.querySelector('section[aria-label="e2ee.control.members"]')!;
+    expect(members.querySelectorAll('li')).toHaveLength(2);
+    expect(members.textContent).toContain('Display owner');
+    expect(members.querySelector('li')!.textContent).toContain('e2ee.values.owner');
+    expect(container!.textContent).not.toContain('Not a ledger member');
+    expect(container!.textContent).not.toContain('Wrong creator');
+    expect(container!.querySelector('[aria-label="e2ee.verify.codeLabel"]')!.textContent).toBe(
+      before
+    );
+    expect(ledgerVerificationCode(verified).stateDigest).toBe(before);
   });
 
   it('shows no verdict about the genesis pin, only the ledger', () => {

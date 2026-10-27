@@ -190,11 +190,19 @@ describe('local encrypted agent approval', () => {
     expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
     expect(admitted).toBe(false);
   });
-  it('reuses an already admitted machine without a second approval dialog', async () => {
+  it('requires explicit consent for a new session even when the machine was admitted by another frontend', async () => {
     admitted = true;
     await render();
+    let activationRequested = false;
+    runtime.admitLocalAgent = async () => {
+      activationRequested = true;
+      return { admitted: true, ready: true };
+    };
     await click('e2ee.localAgent.enable');
+    expect(activationRequested).toBe(false);
+    expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+    await click('e2ee.localAgent.allow');
+    expect(activationRequested).toBe(true);
     expect(container.textContent).toBe('');
-    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
   });
 });

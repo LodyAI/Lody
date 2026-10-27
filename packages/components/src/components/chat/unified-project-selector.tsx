@@ -267,6 +267,8 @@ export interface UnifiedProjectSelectorViewProps extends Omit<
    * available source, while search still evaluates the complete option list.
    */
   renderLimit?: number;
+  /** Opens the project creator; omitted by surfaces that cannot start multi-repository work. */
+  onCreateProject?: () => void;
 }
 
 function ProjectAccessStatus({
@@ -412,6 +414,7 @@ export function UnifiedProjectSelectorView({
   contentClassName,
   contentStyle,
   renderLimit,
+  onCreateProject,
 }: UnifiedProjectSelectorViewProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -718,6 +721,11 @@ export function UnifiedProjectSelectorView({
           <Menu.Item icon={CircleSlash2} onClick={() => onChange({ kind: 'none' })}>
             {clearLabel}
           </Menu.Item>
+          {onCreateProject ? (
+            <Menu.Item icon={Folders} onClick={onCreateProject}>
+              {t('chat.projectPicker.createProject', 'Create project')}
+            </Menu.Item>
+          ) : null}
           <Menu.Item icon={FolderPlus} onClick={onAddLocalProject}>
             {t('chat.contextSwitch.addProject', 'Add a folder')}
           </Menu.Item>

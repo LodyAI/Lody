@@ -55,6 +55,7 @@ export function useSessionSharing(options: UseSessionSharingOptions = {}) {
     enabled,
   });
   const projectIndex = useVisibleLocalProjects({
+    includeMemberOnly: true,
     includeMachineFlock: options.includeLocalProjectDetails ?? false,
     syncMachineFlock: false,
     workspaceId,

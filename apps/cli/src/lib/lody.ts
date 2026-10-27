@@ -438,6 +438,19 @@ export class Lody {
   }
 
   /** Local pairing completion wakes ledger verification and key installation, never trusts a remote admission hint. */
+  async confirmEncryptedWorkspacePairing(intent: {
+    pairingSessionId: string;
+    frontendSigningPublicKey: string;
+    signingPublicKey: string;
+  }): Promise<boolean> {
+    if (!this.encryptedWorkspace) throw new Error('e2ee_workspace_unavailable');
+    if ((await this.encryptedWorkspace.status()).devicePublicKey !== intent.signingPublicKey)
+      return false;
+    await this.encryptedWorkspace.confirmPairing(intent);
+    await this.refreshEncryptedWorkspace(intent.signingPublicKey);
+    return true;
+  }
+
   async refreshEncryptedWorkspace(expectedSigningPublicKey: string): Promise<boolean> {
     if (!this.encryptedWorkspace) throw new Error('e2ee_workspace_unavailable');
     if ((await this.encryptedWorkspace.status()).devicePublicKey !== expectedSigningPublicKey)

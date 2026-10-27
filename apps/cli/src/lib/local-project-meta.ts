@@ -12,6 +12,7 @@ import {
   type MachineId,
   type SessionMeta,
   type WorkspaceId,
+  type WorkspaceProject,
   writeMachineFlockRowToFlock,
 } from '@lody/shared';
 import type { MachineLegacyMetaFields } from '@lody/shared';
@@ -115,7 +116,12 @@ export async function upsertMachineLocalProject(
   machineId: MachineId,
   project: LocalProjectMeta,
   nowMs = getServerNow(),
-  options: { sync?: MachineFlockSyncScheduler; reason?: string; refreshGitHubRemote?: boolean } = {}
+  options: {
+    sync?: MachineFlockSyncScheduler;
+    reason?: string;
+    refreshGitHubRemote?: boolean;
+    standaloneVisible?: boolean;
+  } = {}
 ): Promise<void> {
   const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
   const rootPath = canonicalLocalProjectRootPath(project.rootPath);
@@ -130,6 +136,8 @@ export async function upsertMachineLocalProject(
   const canonicalProject = {
     ...project,
     rootPath,
+    standaloneVisible:
+      options.standaloneVisible ?? current?.standaloneVisible ?? project.standaloneVisible,
     githubRepoFullName:
       observed !== undefined
         ? (observed ?? undefined)
@@ -373,4 +381,34 @@ export async function resolveWorkspaceLocalProjectRootPathWithRetry(
     }
     await sleep(retryDelayMs);
   }
+}
+
+/** Catalog members and existing group runs can both retain a local registration. */
+export function isLocalProjectReferenced(
+  project: LocalProjectMeta,
+  machineId: MachineId,
+  projects: readonly WorkspaceProject[],
+  sessions: readonly SessionMeta[]
+): boolean {
+  const matches = (source: WorkspaceProject['members'][number]['source']) =>
+    source.kind === 'local'
+      ? source.machineId === machineId && source.localProjectId === project.id
+      : source.preferLocal === true &&
+        !!project.githubRepoFullName &&
+        source.repoFullName.toLowerCase() === project.githubRepoFullName.toLowerCase();
+  return (
+    projects.some((group) => group.members.some((member) => matches(member.source))) ||
+    sessions.some(
+      (session) =>
+        session.machineId === machineId &&
+        session.projectRun &&
+        Object.values(session.projectRun.members).some((member) =>
+          member.repositoryCheckout
+            ? member.repositoryCheckout.kind === 'local' &&
+              member.repositoryCheckout.machineId === machineId &&
+              member.repositoryCheckout.localProjectId === project.id
+            : matches(member.src)
+        )
+    )
+  );
 }

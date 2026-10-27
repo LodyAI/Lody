@@ -220,6 +220,8 @@ function FoldedGroupsSidebar({ folded, heading }: { folded: boolean; heading?: s
                   projectId: 'shop',
                   name: 'Shop',
                   collapsed: groupsFolded['projectGroup:shop'] ?? false,
+                  // Created by this user; Docs site was created by a teammate.
+                  canDelete: true,
                 },
                 { projectId: 'docs', name: 'Docs site', collapsed: false },
               ]}
@@ -228,6 +230,7 @@ function FoldedGroupsSidebar({ folded, heading }: { folded: boolean; heading?: s
               }
               onNewInProjectGroup={() => undefined}
               onOpenProjectGroupSettings={() => undefined}
+              onDeleteProjectGroup={() => undefined}
               onArchiveProjectGroupChats={() => undefined}
               onMoveProjectGroup={() => undefined}
             />

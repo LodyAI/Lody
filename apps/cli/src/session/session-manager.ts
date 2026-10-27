@@ -681,13 +681,14 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
                 if (member.access !== 'additional' && member.access !== 'link') continue;
                 const target = roots.find((root) => root.id === `member:${id}`)!;
                 if (member.placement.kind !== 'root') throw new Error('Invalid directory member');
-                await reconcileProjectMemberLink(
+                // A sibling tab's link stays; the snapshot says what exists.
+                const linked = await reconcileProjectMemberLink(
                   roots[0]!.absolutePath,
                   member.placement.dir,
                   target.absolutePath,
                   supported
                 );
-                member.access = supported ? 'additional' : 'link';
+                member.access = linked ? 'link' : 'additional';
               }
               config.projectRun = snapshot;
               directories = supported ? roots.slice(1).map((root) => root.absolutePath) : [];

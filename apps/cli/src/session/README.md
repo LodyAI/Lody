@@ -15,6 +15,22 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 | Execution        | [Execution service](session-execution-service.ts) | Owns turns, steer results, cancellation, and raw-request drain.                      |
 | Process lifetime | [Session](session.ts)                             | Owns ACP resources, confirmed termination, and bounded Codex refresh-start recovery. |
 
+## ACP command exit
+
+`terminal-manager.ts` records the direct process's `exit` status immediately.
+`terminal/wait_for_exit` drains stdout/stderr until `close` or 100 ms after exit,
+then runs the existing resource-limit inspection before completing waiters.
+`terminal/output` can expose the status during drain; new waiters still join the
+same drain. Output remains readable, with the existing byte cap, until release.
+A background descendant holding inherited pipes cannot extend the drain budget.
+
+Release settles pending waiters, clears the timer and detaches subscriptions.
+Kill/release do not terminate a tree once its direct command has exited. Active
+commands retain sandbox termination semantics; session sandbox shutdown still owns
+its processes. Resource inspection and its callback retain their existing async
+contract and can delay completion independently of stdio. See the
+[exit/drain decision](../../../../.agents/notes/proposed/bug-fix/2026-10-26-acp-terminal-exit-drain.md).
+
 ## Terminal notification facts
 
 Execution publishes typed terminal facts using the frozen invocation requester and

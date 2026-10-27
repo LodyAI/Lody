@@ -188,6 +188,7 @@ describe('MessageHandler machine registration', () => {
       multiRepoProject: 1,
       projectFileRoots: 1,
       projectRepositoryMembers: 1,
+      projectFolderSelection: 1,
       operationInbox: 2,
       providerRateLimitsRefresh: 1,
       codeCollabAllChangesScope: 1,

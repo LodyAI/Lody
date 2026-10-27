@@ -55,6 +55,18 @@ composition remain separate migration owners. Canonical epoch history and ordina
 ledger signing now have their own public subentries. Presence/RPC machine-operation scope requires its
 own decision. This module does not enable product E2EE or publish a package.
 
+`realtime.ts` composes the existing v0 cryptography with fixed purpose 7/8/9
+entrypoints. It is a primitive beside the ledger-bound document workflow, not a
+machine-operation authorization workflow. It accepts an independently supplied
+resource and expected signer, with opaque application bytes; it selects no RPC
+body encoding, room/target prefix, new limit or clock policy. Seal inputs are
+captured at Effect execution before signing, derived leaves and plaintext scratch
+are released on every exit, and borrowed epoch/signer capabilities stay with their
+owner. Open verifies the exact expected signer and context before deriving a key
+or decrypting. A successful open returns caller-owned plaintext, not permission.
+The caller must still check body semantics, target binding, request correlation,
+TTL/freshness, membership, epoch/rotation pause and journal requirements.
+
 Run package `typecheck` and `test`. The owning crypto suite uses fixed synthetic
 Node/native WebCrypto signatures, real HKDF/AEAD and explicit Deferred/native
 interruption signals. Crypto completion gating is a stated test boundary; no

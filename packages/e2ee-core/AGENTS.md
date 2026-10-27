@@ -68,6 +68,11 @@ whitepaper, Specs, decisions and this package's docs. Contract:
   genuine current writer, submitting signer, resource/model/epoch and the complete
   original before forwarding. Snapshot publication keeps exact signer/offset/digest
   identities; uncertain native outcomes stay Pending; one owner serializes writes.
+- Realtime content primitives compose only existing v0 purposes 7/8/9. Their
+  resource and expected signer come from independently trusted caller context;
+  opaque payload authentication grants no membership, freshness or execution
+  authority. Keep application body codecs, target binding and send/rotation gates
+  in the authorized integration; never expand `sealDocument` for these purposes.
 - Durable workflows persist exact originals before any network step, retry
   those bytes, never re-sign, and keep results until explicit acknowledgement.
   Remote hints never end a task; only genuine ledger changes do.

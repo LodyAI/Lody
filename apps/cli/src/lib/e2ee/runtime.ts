@@ -365,6 +365,20 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
   );
   return {
     status: () => serial.withPermit(status()),
+    pairingEvidence: () =>
+      serial.withPermit(
+        Effect.gen(function* () {
+          yield* guard();
+          const view = yield* verified.current();
+          const records = yield* sql(() =>
+            db
+              .prepare('SELECT record FROM records WHERE position < ? ORDER BY position')
+              .all(view.length)
+              .map((row) => new Uint8Array(row.record as Uint8Array))
+          );
+          return { view, records };
+        })
+      ),
     /** The caller supplies raw, bounded cloud DTO pages. Every suffix is verified locally. */
     ingest: (page: {
       startIndex: number;

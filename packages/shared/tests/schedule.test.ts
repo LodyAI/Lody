@@ -579,6 +579,58 @@ describe('legacy Schedule ACP value compatibility', () => {
     expect(agent.configOptionValues.plan_mode).toBe('false');
     expect(scheduleDefinitionFingerprint(document)).toBe(fingerprint);
   });
+  it('projects legacy Fast literals by semantic id only when the probe does not declare a select', () => {
+    const agent = {
+      agentConfigId: 'agent',
+      configOptionValues: {
+        fast: 'false',
+        'fast-mode': 'true',
+        fast_select: 'false',
+      },
+    };
+
+    expect(
+      normalizeLegacyScheduleAgent(agent, [
+        {
+          id: 'fast',
+          name: 'Custom Fast choice',
+          type: 'select',
+          currentValue: 'false',
+          options: [{ value: 'false', name: 'False' }],
+        },
+        {
+          id: 'fast_select',
+          name: 'Fast selection',
+          type: 'select',
+          currentValue: 'false',
+          options: [{ value: 'false', name: 'False' }],
+        },
+      ]).configOptionValues
+    ).toEqual({
+      fast: 'false',
+      'fast-mode': true,
+      fast_select: 'false',
+    });
+
+    expect(normalizeLegacyScheduleAgent(agent).configOptionValues).toEqual({
+      fast: false,
+      'fast-mode': true,
+      fast_select: 'false',
+    });
+  });
+  it('converts Fast aliases advertised as booleans', () => {
+    const agent = {
+      agentConfigId: 'agent',
+      configOptionValues: { fast: 'false', 'fast-mode': 'true' },
+    };
+
+    expect(
+      normalizeLegacyScheduleAgent(agent, [
+        { id: 'fast', name: 'Fast', type: 'boolean', currentValue: true, options: [] },
+        { id: 'fast-mode', name: 'Fast mode', type: 'boolean', currentValue: false, options: [] },
+      ]).configOptionValues
+    ).toEqual({ fast: false, 'fast-mode': true });
+  });
   it.each([42, null, {}, [], 'x'.repeat(1025)])('rejects invalid option values', (value) => {
     expect(
       ScheduleAgentSchema.safeParse({

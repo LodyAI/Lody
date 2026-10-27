@@ -1,7 +1,18 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { appendLedgerHistory } from '../src/lib/e2ee-ledger-history';
+import { Effect, Result } from 'effect';
+import {
+  signLedgerSnapshot,
+  snapshotTrustFromView,
+  verifyLedgerSnapshot,
+  exportVerifiedState,
+  extendLedger,
+  hashRecordBytes,
+} from '@lody/e2ee-core/protocol';
+import { envelopeFixture } from '../../e2ee-core/test/keys/fixture';
+import { ledgerOverview } from '../src/lib/e2ee-ledger-overview';
+import { appendLedgerHistory, hostLedgerHistory, bytesToHex } from '../src/lib/e2ee-ledger-history';
 import {
   compareVerificationCode,
   groupHash,
@@ -92,4 +103,71 @@ describe('ledger verification code', () => {
       version: 12,
     });
   });
+});
+
+it('displays genuine snapshot state with sparse absolute records without inventing a prefix or losing its safety code', async () => {
+  const fixture = envelopeFixture(),
+    origin = fixture.view();
+  const signed = await Effect.runPromise(
+    signLedgerSnapshot({ signer: fixture.owner.signer, ledger: () => Effect.succeed(origin) })
+  );
+  const trust = Result.getOrThrow(
+    snapshotTrustFromView(origin, fixture.owner.publicKey, signed.headSignature)
+  );
+  const snapshot = Result.getOrThrow(verifyLedgerSnapshot({ snapshot: signed.snapshot, trust }));
+  fixture.append([5, fixture.phone.raw]);
+  const suffix = fixture.records()[2]!;
+  const view = Result.getOrThrow(
+    extendLedger(snapshot, [suffix], { head: hashRecordBytes(suffix), length: 3 })
+  );
+  const retained = Result.getOrThrow(exportVerifiedState(view));
+  const state = view.inspectState();
+  const received = {
+    status: {
+      workspaceId: 'synthetic',
+      genesisHash: bytesToHex(view.genesis.toBytes()),
+      length: view.length,
+      headHash: bytesToHex(view.head.toBytes()),
+      stateDigest: bytesToHex(retained.stateDigest.toBytes()),
+      position: 'opaque-suffix',
+      epoch: state.epoch.number,
+      rotationRequired: state.epoch.rotationRequired,
+      deviceKind: 'personal' as const,
+      hasCurrentKey: true,
+      continuityPending: false,
+    },
+    stateHex: bytesToHex(retained.bytes),
+    recordsHex: [bytesToHex(fixture.genesisRecord), bytesToHex(suffix)],
+    recordPositions: [0, 2],
+  };
+  const loaded = hostLedgerHistory(received);
+  expect(loaded.records.map((record) => record.index)).toEqual([0, 2]);
+  const comparison = ledgerVerificationCode(loaded);
+  expect(comparison.headHash).toBe(bytesToHex(view.head.toBytes()));
+  expect(compareVerificationCode(loaded, comparison)).toEqual({ kind: 'match', version: 3 });
+  expect(
+    compareVerificationCode(loaded, {
+      version: 2,
+      headHash: bytesToHex(origin.head.toBytes()),
+      stateDigest: '00'.repeat(32),
+    })
+  ).toEqual({ kind: 'theirs-older', version: 2, prefixConfirmed: false });
+  expect(
+    compareVerificationCode(loaded, {
+      version: 1,
+      headHash: bytesToHex(view.genesis.toBytes()),
+      stateDigest: '00'.repeat(32),
+    })
+  ).toEqual({ kind: 'theirs-older', version: 1, prefixConfirmed: true });
+  expect(ledgerOverview(loaded).events[1]).toMatchObject({
+    type: 'revokeDevice',
+    actor: { membershipId: '0a'.repeat(16) },
+    owner: { membershipId: '0a'.repeat(16) },
+  });
+  expect(() => hostLedgerHistory({ ...received, recordPositions: [0, 0] })).toThrow(
+    'incomplete-local'
+  );
+  expect(() => hostLedgerHistory({ ...received, recordPositions: undefined })).toThrow(
+    'incomplete-local'
+  );
 });
