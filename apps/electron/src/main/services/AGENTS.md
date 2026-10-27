@@ -97,27 +97,24 @@ replacement before release. See the
 
 ## E2EE runtime
 
-Read [M1 boundaries](../../../../../.agents/notes/implemented/architecture/2026-10-21-e2ee-m1-runtime-boundaries.md),
-[M2 boundaries](../../../../../.agents/notes/proposed/architecture/2026-10-22-e2ee-m2-product-integration.md),
-and [personal desktop joining](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-personal-desktop-join.md).
-Custody is lazy; account locks never wait for network. Await native work before
-release. Verification/storage failures close only their owner; malformed input
-leaves shared readers available. Preserve originals before feed/pin and compare
-overlapping records. Genuine evidence conflicts never fall back.
+Read [M1](../../../../../.agents/notes/implemented/architecture/2026-10-21-e2ee-m1-runtime-boundaries.md),
+[M2](../../../../../.agents/notes/proposed/architecture/2026-10-22-e2ee-m2-product-integration.md),
+[join](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-personal-desktop-join.md)
+and [machine](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-machine-pairing-journal.md).
+Custody is lazy; cached identity/generation fences opens/late D03 registration. Pin D03 before new signatures. No network under custody
+locks; await native work before release. Verification/storage failures are owner-local; malformed input keeps readers. Preserve originals before
+feed/pin, compare overlaps, keep renderer checkpoints; await missing history.
+Evidence conflicts never fall back; availability may use pinned renderer reads.
 
-Cloud E2EE calls use fixed references and per-request auth/abort/deadlines outside
-custody locks. Pin D03 identity before new signatures; auth generation fences late
-registration. Retain requests on unknown outcomes. Keep raw/SDK diagnostics in
-main, outside IPC/telemetry (`e2ee-diagnostics.mts`). Verified readback wins over
-lost acknowledgements; auxiliary failures never undo verified admission.
+Fixed cloud refs; per-request auth/abort/deadlines; disposal fences late calls. Unknown outcomes retain exact bytes. Raw causes/SDK diagnostics stay in main,
+not IPC/telemetry. Verified readback beats lost ACKs; cleanup cannot undo admission.
 
-Explicit consent follows locally verified, durably fixed pairing evidence.
-Retries retain session/record/requestId and keys, credentials and pins. Failed begin
-stays discoverable. Archive terminal or foreign immutable recipient attempts (pin-only + relay request is foreign);
-same-request admitting/unknown stays fenced. Cleanup preserves installed origins,
-other sessions and both primary/cleanup causes; see join note.
-Personal snapshot origins verify pinned endorsement and
-self admission before any binding/pin/cursor; old epoch keys use mailbox plus the
-verified history chain, never staging. Ledger record positions may be sparse.
-Machine approval still discloses file protection; socket timeout means pending,
-not approval. Await CLI current-key installation before content sync.
+Consent follows fixed verified proofs; retries retain session/record/requestId,
+keys/credentials/pins. Missing credentials block approval, never export them.
+Failed begin stays discoverable; archive terminal/foreign attempts, including
+pin-only + relay request. Same-request unknown/admitting stays fenced. Preserve installed origins,
+other sessions and primary/cleanup causes. Retire superseded only on exact socket
+receipt, atomically matching all-null local attempts; fresh sessions need consent.
+Snapshots verify pinned endorsement/self-admission before binding/pin/cursor;
+sparse positions are valid. Old keys use mailbox + verified history, never staging.
+Disclose file protection; socket deadline means pending. Await CLI current-key install.

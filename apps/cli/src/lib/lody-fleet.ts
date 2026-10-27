@@ -1,6 +1,6 @@
 import type {
   LocalE2eePairingRequest,
-  LocalE2eePrepareResponse,
+  LocalE2eePrepareReply,
   LocalE2eeActivateResponse,
 } from '@lody/shared/e2ee-local-pairing';
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
@@ -163,7 +163,10 @@ export class LodyFleet {
 
   private readonly runtimes = new Map<string, WorkspaceRuntimeState>();
   private readonly startInFlight = new Map<string, Promise<void>>();
-  private readonly e2eeActivationInFlight = new Map<string, Promise<void>>();
+  private readonly e2eeActivationInFlight = new Map<
+    string,
+    { intent: string; completion: Promise<void> }
+  >();
   private readonly retryTimers = new Map<string, NodeJS.Timeout>();
   private readonly desiredWorkspaces = new Map<string, WorkspaceListItem>();
   private readonly waitingForPairing = new Set<string>();
@@ -678,7 +681,9 @@ export class LodyFleet {
     // Pairing uses native stores outside a started workspace. Join those owners
     // before retiring the account's cloud port; cancelled socket waiters do not
     // mean their ledger/key operations have settled.
-    await Promise.allSettled([...this.e2eeActivationInFlight.values()]);
+    await Promise.allSettled(
+      [...this.e2eeActivationInFlight.values()].map((flight) => flight.completion)
+    );
     await this.workspaceWatchCoordinator.dispose();
     await this.cloudPort.dispose();
 
@@ -1772,7 +1777,7 @@ export class LodyFleet {
 
   private async dispatchLocalE2eePairing(
     message: LocalE2eePairingRequest
-  ): Promise<LocalE2eePrepareResponse | LocalE2eeActivateResponse> {
+  ): Promise<LocalE2eePrepareReply | LocalE2eeActivateResponse> {
     if (
       this.stopped ||
       this.localPlatform ||
@@ -1780,6 +1785,7 @@ export class LodyFleet {
       !this.cloudPort.e2ee
     )
       throw new Error('e2ee_account_unavailable');
+    const e2eeCloud = this.cloudPort.e2ee;
     const workspace = this.desiredWorkspaces.get(message.workspaceId);
     if (
       !workspace ||
@@ -1787,40 +1793,63 @@ export class LodyFleet {
       workspace.genesisHash !== message.genesisHash
     )
       throw new Error('e2ee_binding_conflict');
-    const { activateCliE2eeWorkspaceLegacy, prepareCliE2eeMachineLegacy } =
-      await import('./e2ee/workspace-legacy');
+    const {
+      activateCliE2eeWorkspaceLegacy,
+      prepareCliE2eeMachineLegacy,
+      validateCliE2eePairingIntentLegacy,
+    } = await import('./e2ee/workspace-legacy');
     if (message.type === 'prepare') {
       const material = await prepareCliE2eeMachineLegacy({ ...message });
+      if ('superseded' in material)
+        return {
+          ok: true,
+          type: 'prepare-superseded',
+          machineId: this.machineId,
+          pairingSessionId: material.pairingSessionId,
+        };
       return { ok: true, type: 'prepare', machineId: this.machineId, ...material };
     }
-    await this.startInFlight.get(workspace.id);
-    if (this.cleanupOwners.has(workspace.id) || this.startupCleanupOwners.has(workspace.id))
-      await this.retryWorkspaceCleanup(workspace.id);
-    const running = this.runtimes.get(workspace.id);
-    if (running && (await running.lody.refreshEncryptedWorkspace(message.signingPublicKey))) {
-      return { ok: true, type: 'activate' };
-    } else {
-      // A newly approved identity must not reuse an old live in-memory device.
-      if (running) await this.stopWorkspace(workspace.id);
-      let activation = this.e2eeActivationInFlight.get(workspace.id);
-      if (!activation) {
-        activation = activateCliE2eeWorkspaceLegacy({
-          accountId: this.userId,
-          workspaceId: workspace.id,
-          genesisHash: message.genesisHash,
-          expectedSigningPublicKey: message.signingPublicKey,
-          cloud: this.cloudPort.e2ee,
+    const captured = {
+      accountId: this.userId,
+      machineId: this.machineId,
+      workspaceId: workspace.id,
+      genesisHash: message.genesisHash,
+      pairingSessionId: message.pairingSessionId,
+      frontendSigningPublicKey: message.frontendSigningPublicKey,
+      signingPublicKey: message.signingPublicKey,
+    };
+    const intent = JSON.stringify(captured);
+    let flight = this.e2eeActivationInFlight.get(workspace.id);
+    if (flight && flight.intent !== intent) throw new Error('e2ee_binding_conflict');
+    if (!flight) {
+      const completion = (async () => {
+        await validateCliE2eePairingIntentLegacy(captured);
+        await this.startInFlight.get(workspace.id);
+        if (this.cleanupOwners.has(workspace.id) || this.startupCleanupOwners.has(workspace.id))
+          await this.retryWorkspaceCleanup(workspace.id);
+        const running = this.runtimes.get(workspace.id);
+        if (running && (await running.lody.confirmEncryptedWorkspacePairing(captured))) return;
+        if (running) await this.stopWorkspace(workspace.id);
+        await activateCliE2eeWorkspaceLegacy({
+          accountId: captured.accountId,
+          workspaceId: captured.workspaceId,
+          genesisHash: captured.genesisHash,
+          expectedSigningPublicKey: captured.signingPublicKey,
+          pairingSessionId: captured.pairingSessionId,
+          frontendSigningPublicKey: captured.frontendSigningPublicKey,
+          cloud: e2eeCloud,
           onUnavailable: () => this.logger.debug('e2ee_background_unavailable'),
-        }).finally(() => {
-          this.e2eeActivationInFlight.delete(workspace.id);
         });
-        this.e2eeActivationInFlight.set(workspace.id, activation);
-      }
-      await activation;
-      this.waitingForPairing.delete(workspace.id);
-      await this.startWorkspace(workspace);
-      await this.resolveWorkspaceRuntime(workspace.id as WorkspaceId);
+        this.waitingForPairing.delete(workspace.id);
+        await this.startWorkspace(workspace);
+        await this.resolveWorkspaceRuntime(workspace.id as WorkspaceId);
+      })().finally(() => {
+        this.e2eeActivationInFlight.delete(workspace.id);
+      });
+      flight = { intent, completion };
+      this.e2eeActivationInFlight.set(workspace.id, flight);
     }
+    await flight.completion;
     return { ok: true, type: 'activate' };
   }
 

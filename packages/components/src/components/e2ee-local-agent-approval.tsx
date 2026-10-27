@@ -22,7 +22,7 @@ const styles = stylex.create({
   message: { margin: 0 },
 });
 
-/** Approval stays explicit; an admitted machine can retry key delivery without reapproval. */
+/** Each new local pairing session requires consent, including an already admitted machine. */
 export function E2eeLocalAgentApproval({
   workspaceId,
   runtime,
@@ -107,10 +107,7 @@ export function E2eeLocalAgentApproval({
       if (!active.current) return;
       setPairing(material);
       setAdmitted(material.admitted);
-      if (
-        material.admitted ||
-        (approved.current && pairing?.pairingSessionId === material.pairingSessionId)
-      )
+      if (approved.current && pairing?.pairingSessionId === material.pairingSessionId)
         await admit(material);
       else {
         approved.current = false;

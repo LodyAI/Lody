@@ -765,7 +765,13 @@ void test('local machine approval retains its exact signed original across resta
       )
       assert.equal(request.credentialHash, material.credentialHash)
       assert.equal((yield* owner.host.status(workspaceId)).length, 1)
-      return { request, session: context.pairingSessionId, prepared, material }
+      return {
+        request,
+        session: context.pairingSessionId,
+        frontendSigningPublicKey: context.frontendSigningPublicKey,
+        prepared,
+        material
+      }
     })
   )
   await execute(
@@ -790,6 +796,8 @@ void test('local machine approval retains its exact signed original across resta
       )
       assert.deepEqual(yield* owner.host.confirmLocalPairing(workspaceId, original.session), {
         machineId: original.material.machineId,
+        pairingSessionId: original.session,
+        frontendSigningPublicKey: original.frontendSigningPublicKey,
         genesisHash: original.prepared.genesisHashHex,
         signingPublicKey: original.material.signingPublicKey
       })
@@ -1599,4 +1607,60 @@ void test('D03 unknown identity companion blocks only new signatures; existing w
     })
   )
   assert.deepEqual(await readFile(join(directory, 'account-identity.json')), protectedBytes)
+})
+
+void test('superseded unsigned retirement retains its native cause in main before host sanitization and recovers', async (t) => {
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory)
+      yield* bind(owner)
+      yield* owner.host.open(workspaceId)
+      const context = yield* owner.host.localPairingContext(workspaceId)
+      const db = new DatabaseSync(join(directory, 'workspaces', workspaceId, 'history.sqlite'))
+      try {
+        db.exec(
+          "CREATE TRIGGER fail_unsigned_retirement BEFORE INSERT ON retired_local_pairings BEGIN SELECT RAISE(ABORT,'synthetic retirement write failure'); END"
+        )
+        let original
+        const failed = yield* Effect.result(
+          owner.host.retireSupersededLocalPairing(
+            workspaceId,
+            context.pairingSessionId,
+            (error) => {
+              original = error
+            }
+          )
+        )
+        assert.equal(failed._tag, 'Failure')
+        assert.equal(failed.failure.code, 'storage')
+        assert.equal(failed.failure.cause, undefined)
+        assert.equal(original.code, 'storage')
+        assert.match(original.cause.message, /synthetic retirement write failure/)
+        assert.equal(original.cause.errcode, 1811)
+        assert.equal(
+          (yield* owner.host.localPairingContext(workspaceId)).pairingSessionId,
+          context.pairingSessionId
+        )
+        db.exec('DROP TRIGGER fail_unsigned_retirement')
+        yield* owner.host.retireSupersededLocalPairing(
+          workspaceId,
+          context.pairingSessionId,
+          () => {
+            throw new Error('successful retry must not report failure')
+          }
+        )
+        assert.notEqual(
+          (yield* owner.host.localPairingContext(workspaceId)).pairingSessionId,
+          context.pairingSessionId
+        )
+        assert.equal(
+          db.prepare('SELECT session FROM retired_local_pairings').get().session,
+          context.pairingSessionId
+        )
+      } finally {
+        db.close()
+      }
+    })
+  )
 })

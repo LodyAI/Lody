@@ -1,5 +1,8 @@
 import * as encryptedWorkspace from '../src/lib/e2ee/workspace-legacy';
-import type { LocalE2eePairingRequest } from '@lody/shared/e2ee-local-pairing';
+import {
+  LOCAL_E2EE_PAIRING_PATH,
+  type LocalE2eePairingRequest,
+} from '@lody/shared/e2ee-local-pairing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -226,6 +229,8 @@ describe.each(['machine RPC', 'local daemon'] as const)(
 describe('local E2EE pairing authority', () => {
   const request: LocalE2eePairingRequest = {
     type: 'activate',
+    frontendSigningPublicKey: '34'.repeat(32),
+    pairingSessionId: '78'.repeat(16),
     accountId: 'account',
     machineId: 'machine',
     workspaceId: 'workspace',
@@ -236,6 +241,7 @@ describe('local E2EE pairing authority', () => {
   const target = (overrides: Record<string, unknown> = {}) =>
     Object.assign(Object.create(LodyFleet.prototype), {
       stopped: false,
+      machineId: 'machine',
       localPlatform: false,
       userId: 'account',
       cloudPort: { e2ee: {} },
@@ -251,6 +257,38 @@ describe('local E2EE pairing authority', () => {
       }),
       ...overrides,
     }) as { dispatchLocalE2eePairing: (input: LocalE2eePairingRequest) => Promise<unknown> };
+  it('rejects partial-upgrade activation before dispatch and accepts the complete pinned context', async () => {
+    let accepted = false;
+    const handler = new LocalControlHandler({
+      machineId: 'machine',
+      logger,
+      dispatchSession: async () => [],
+      dispatchProject: async () => ({ ok: false, error: 'unused' }),
+      dispatchE2eePairing: async () => {
+        accepted = true;
+        return { ok: true, type: 'activate' };
+      },
+    });
+    for (const missing of ['frontendSigningPublicKey', 'pairingSessionId']) {
+      const partial = { ...request } as Record<string, unknown>;
+      delete partial[missing];
+      const result = await handler.handle({
+        path: LOCAL_E2EE_PAIRING_PATH,
+        rawBody: JSON.stringify(partial),
+        requestId: 1,
+      });
+      expect(result).toEqual({ status: 400, payload: { ok: false, error: 'e2ee_invalid_input' } });
+      expect(accepted).toBe(false);
+    }
+    expect(
+      await handler.handle({
+        path: LOCAL_E2EE_PAIRING_PATH,
+        rawBody: JSON.stringify(request),
+        requestId: 2,
+      })
+    ).toEqual({ status: 200, payload: { ok: true, type: 'activate' } });
+    expect(accepted).toBe(true);
+  });
   it('refuses another account, ordinary workspace, foreign genesis and OSS mode before starting anything', async () => {
     for (const instance of [
       target({ userId: 'other' }),
@@ -269,6 +307,9 @@ describe('local E2EE pairing authority', () => {
   });
   it('releases a running old device before installing and starting its replacement', async () => {
     const events: string[] = [];
+    const preflight = vi
+      .spyOn(encryptedWorkspace, 'validateCliE2eePairingIntentLegacy')
+      .mockResolvedValue();
     const activation = vi
       .spyOn(encryptedWorkspace, 'activateCliE2eeWorkspaceLegacy')
       .mockImplementation(async (options) => {
@@ -280,7 +321,7 @@ describe('local E2EE pairing authority', () => {
       logger: { debug: () => {} },
       waitingForPairing: new Set(['workspace']),
       runtimes: new Map([
-        ['workspace', { lody: { refreshEncryptedWorkspace: async () => false } }],
+        ['workspace', { lody: { confirmEncryptedWorkspacePairing: async () => false } }],
       ]),
       stopWorkspace: async () => {
         events.push('released old owner');
@@ -301,13 +342,17 @@ describe('local E2EE pairing authority', () => {
       ]);
     } finally {
       activation.mockRestore();
+      preflight.mockRestore();
     }
   });
   it('retries retained cleanup before replacing a device after a transient release failure', async () => {
     const events: string[] = [];
+    const preflight = vi
+      .spyOn(encryptedWorkspace, 'validateCliE2eePairingIntentLegacy')
+      .mockResolvedValue();
     const cleanupOwners = new Map();
     const runtimes = new Map([
-      ['workspace', { lody: { refreshEncryptedWorkspace: async () => false } }],
+      ['workspace', { lody: { confirmEncryptedWorkspacePairing: async () => false } }],
     ]);
     const activation = vi
       .spyOn(encryptedWorkspace, 'activateCliE2eeWorkspaceLegacy')
@@ -346,17 +391,21 @@ describe('local E2EE pairing authority', () => {
       ]);
     } finally {
       activation.mockRestore();
+      preflight.mockRestore();
     }
   });
   it('keeps a temporary mailbox failure retryable and acknowledges only a later verified refresh', async () => {
     let ready = false;
+    const preflight = vi
+      .spyOn(encryptedWorkspace, 'validateCliE2eePairingIntentLegacy')
+      .mockResolvedValue();
     const instance = target({
       runtimes: new Map([
         [
           'workspace',
           {
             lody: {
-              refreshEncryptedWorkspace: async () => {
+              confirmEncryptedWorkspacePairing: async () => {
                 if (!ready) throw new Error('e2ee_waiting_for_key');
                 return true;
               },
@@ -373,5 +422,94 @@ describe('local E2EE pairing authority', () => {
       ok: true,
       type: 'activate',
     });
+    preflight.mockRestore();
+  });
+  it('joins only the exact activation intent and recovers after a different intent is rejected', async () => {
+    const entered = Promise.withResolvers<void>(),
+      release = Promise.withResolvers<void>();
+    const preflight = vi
+      .spyOn(encryptedWorkspace, 'validateCliE2eePairingIntentLegacy')
+      .mockResolvedValue();
+    const activation = vi
+      .spyOn(encryptedWorkspace, 'activateCliE2eeWorkspaceLegacy')
+      .mockImplementation(async () => {
+        entered.resolve();
+        await release.promise;
+      });
+    const runtimes = new Map();
+    const instance = target({
+      logger: { debug: () => {} },
+      runtimes,
+      waitingForPairing: new Set(['workspace']),
+    });
+    try {
+      const first = instance.dispatchLocalE2eePairing(request);
+      await entered.promise;
+      const duplicate = instance.dispatchLocalE2eePairing({ ...request });
+      await expect(
+        instance.dispatchLocalE2eePairing({
+          ...request,
+          pairingSessionId: '89'.repeat(16),
+          frontendSigningPublicKey: '67'.repeat(32),
+        })
+      ).rejects.toThrow('e2ee_binding_conflict');
+      release.resolve();
+      await expect(first).resolves.toEqual({ ok: true, type: 'activate' });
+      await expect(duplicate).resolves.toEqual({ ok: true, type: 'activate' });
+      await expect(instance.dispatchLocalE2eePairing({ ...request })).resolves.toEqual({
+        ok: true,
+        type: 'activate',
+      });
+    } finally {
+      release.resolve();
+      activation.mockRestore();
+      preflight.mockRestore();
+    }
+  });
+  it('invalid or failed same-device activation leaves its healthy existing owner available', async () => {
+    const healthy: { lody: { confirmEncryptedWorkspacePairing: () => Promise<boolean> } } = {
+      lody: {
+        confirmEncryptedWorkspacePairing: async () => {
+          throw new Error('synthetic getHistory unavailable');
+        },
+      },
+    };
+    const runtimes = new Map([['workspace', healthy]]),
+      events: string[] = [];
+    const preflight = vi
+      .spyOn(encryptedWorkspace, 'validateCliE2eePairingIntentLegacy')
+      .mockRejectedValueOnce(new Error('e2ee_binding_conflict'))
+      .mockResolvedValue();
+    const instance = target({
+      logger: { debug: () => {} },
+      runtimes,
+      waitingForPairing: new Set(),
+      stopWorkspace: async () => {
+        runtimes.delete('workspace');
+        events.push('stopped');
+      },
+      startWorkspace: async () => {
+        events.push('started');
+      },
+    });
+    try {
+      await expect(instance.dispatchLocalE2eePairing(request)).rejects.toThrow(
+        'e2ee_binding_conflict'
+      );
+      expect(runtimes.get('workspace')).toBe(healthy);
+      await expect(instance.dispatchLocalE2eePairing(request)).rejects.toThrow(
+        'synthetic getHistory unavailable'
+      );
+      expect(runtimes.get('workspace')).toBe(healthy);
+      expect(events).toEqual([]);
+      healthy.lody.confirmEncryptedWorkspacePairing = async () => true;
+      await expect(instance.dispatchLocalE2eePairing(request)).resolves.toEqual({
+        ok: true,
+        type: 'activate',
+      });
+      expect(runtimes.get('workspace')).toBe(healthy);
+    } finally {
+      preflight.mockRestore();
+    }
   });
 });

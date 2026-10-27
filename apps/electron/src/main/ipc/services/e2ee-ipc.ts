@@ -540,6 +540,33 @@ export class E2eeIpc extends IpcService {
     }
     if (material.machineId !== machineId || material.pairingSessionId !== context.pairingSessionId)
       throw new Error('e2ee_conflict')
+    if (material.type === 'prepare-superseded') {
+      let retirementFailure: unknown
+      try {
+        await withDesktopE2eeAccount((owner) =>
+          owner.accountId === context.accountId && owner.readers.get(workspaceId)?.has(id)
+            ? owner.host.retireSupersededLocalPairing(
+                workspaceId,
+                context.pairingSessionId,
+                (error) => {
+                  retirementFailure = error
+                }
+              )
+            : Effect.fail(new Error('e2ee_account_mismatch'))
+        )
+      } catch (error) {
+        const superseded = new Error('e2ee_pairing_superseded')
+        this.pairingFailure = new AggregateError(
+          [superseded, ...(retirementFailure === undefined ? [] : [retirementFailure]), error],
+          'e2ee_pairing_retirement_failed',
+          { cause: superseded }
+        )
+        // Original receipt and retirement failure stay in main.
+        // eslint-disable-next-line preserve-caught-error
+        throw new Error('e2ee_local_agent_unavailable')
+      }
+      throw new Error('e2ee_local_agent_pending')
+    }
     return withDesktopE2eeAccount((owner) =>
       owner.accountId === context.accountId && owner.readers.get(workspaceId)?.has(id)
         ? owner.host.stageLocalPairing(workspaceId, material)

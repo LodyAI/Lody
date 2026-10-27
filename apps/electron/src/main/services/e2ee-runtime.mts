@@ -1018,6 +1018,16 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         ),
       localPairingContext: (workspaceId: string) =>
         withPairing(workspaceId, (pairing) => pairing.context()),
+      retireSupersededLocalPairing: (
+        workspaceId: string,
+        session: string,
+        retainFailure: (error: unknown) => void
+      ) =>
+        withPairing(workspaceId, (pairing) =>
+          pairing
+            .retireSuperseded(session)
+            .pipe(Effect.tapError((error) => Effect.sync(() => retainFailure(error))))
+        ),
       stageLocalPairing: (workspaceId: string, material: LocalE2eePrepareResponse) =>
         withPairing(workspaceId, (pairing) => pairing.stage(material)),
       approveLocalPairing: (workspaceId: string, session: string) =>
