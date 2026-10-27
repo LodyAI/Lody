@@ -1,3 +1,4 @@
+import { openSqliteConnection } from '../../../../../packages/e2ee-core/src/adapters/node-sqlite/store.ts'
 import { existsSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
@@ -2333,6 +2334,207 @@ for (const damaged of [false, true, 'header'])
         })
       )
   })
+
+void test('revocation bypasses an unstaged candidate but preserves an unknown publication CAS across reopen', async (t) => {
+  for (const failure of ['stage', 'cas']) {
+    const directory = await fixture(t)
+    await execute(
+      Effect.gen(function* () {
+        const owner = yield* ownerWithHost(directory)
+        const prepared = yield* bind(owner)
+        const genesis = Result.getOrThrow(
+          Bytes.genesisHash(Buffer.from(prepared.genesisHashHex, 'hex'))
+        )
+        let records = [Buffer.from(prepared.genesisRecordHex, 'hex')]
+        let view = Result.getOrThrow(
+          verifyLedger({
+            anchor: genesis,
+            records,
+            checkpoint: { head: hashRecordBytes(records[0]), length: 1 }
+          })
+        )
+        const signer = yield* owner.custody.openDevice(genesis)
+        const targets = []
+        for (let index = 0; index < 2; index++) {
+          const machine = yield* owner.custody.prepareDevice()
+          const admission = yield* prepareDeviceAdmission({
+            genesis,
+            membershipId: view.inspectState().owner,
+            signer: machine,
+            encryptionPublicKey: machine.enc,
+            kind: 'machine',
+            machineId: `revocation-fixture-${index}`
+          })
+          const record = yield* signLedgerRecord(
+            Result.getOrThrow(prepareLedgerCommand(view, signer.publicKey, admission)),
+            signer
+          )
+          records.push(record)
+          view = Result.getOrThrow(
+            extendLedger(view, [record], { head: hashRecordBytes(record), length: records.length })
+          )
+          targets.push(hex(machine.publicKey.toBytes()))
+          yield* owner.custody.discardDevice(machine)
+        }
+        yield* owner.host.open(workspaceId)
+        yield* owner.host.ingestLedgerRecords(
+          workspaceId,
+          page(records, prepared.genesisHashHex, 0)
+        )
+        let blocked = false
+        const staged = new Map(),
+          attempts = [],
+          submitted = []
+        const remote = () => ({
+          history: () => Effect.succeed(page(records, prepared.genesisHashHex, 0)),
+          mailbox: () => {
+            throw new Error('this flow installs its own committed candidate')
+          },
+          log: {
+            read: () =>
+              Effect.succeed({ records, checkpoint: { head: view.head, length: view.length } }),
+            appendCas: (_anchor, expected, record) =>
+              Effect.suspend(() => {
+                submitted.push(Buffer.from(record))
+                if (blocked && failure === 'cas')
+                  return Effect.fail(new Error('synthetic unknown CAS result'))
+                assert.equal(view.head.equals(expected.head), true)
+                view = Result.getOrThrow(
+                  extendLedger(view, [record], {
+                    head: hashRecordBytes(record),
+                    length: view.length + 1
+                  })
+                )
+                records = [...records, record]
+                return Effect.void
+              })
+          },
+          staging: () => ({
+            stageGroup: (group) =>
+              Effect.suspend(() => {
+                attempts.push(group)
+                if (blocked && failure === 'stage')
+                  return Effect.fail(new Error('synthetic staging outage'))
+                staged.set(group.recordHash, group)
+                return Effect.void
+              }),
+            readGroup: (key) => Effect.succeed(staged.get(key.recordHash) ?? null),
+            deleteGroup: () => Effect.void
+          })
+        })
+        const managementDirectory = join(directory, 'workspaces', workspaceId)
+        const ownKey = hex(signer.publicKey.toBytes())
+        const snapshot = () => {
+          const candidate = openSqliteConnection(
+            join(managementDirectory, `epoch-candidates-${ownKey}.sqlite`)
+          )
+          const journal = openSqliteConnection(
+            join(managementDirectory, `management-submission-${ownKey}.sqlite`)
+          )
+          try {
+            return {
+              rows: candidate
+                .prepare('SELECT * FROM epoch_rotation_candidates ORDER BY rowid')
+                .all(),
+              pending:
+                journal.prepare('SELECT pending FROM submission_journal').get()?.pending ?? null
+            }
+          } finally {
+            candidate.close()
+            journal.close()
+          }
+        }
+        yield* owner.host.manage(workspaceId, { type: 'revoke', target: targets[0] }, remote)
+        blocked = true
+        assert.equal(
+          Result.isFailure(
+            yield* Effect.result(owner.host.manage(workspaceId, { type: 'rotate' }, remote))
+          ),
+          true
+        )
+        const retained = snapshot()
+        assert.equal(retained.rows.length, 1)
+        assert.equal(retained.pending !== null, failure === 'cas')
+        const original = Buffer.from(retained.rows[0].record)
+        assert.equal(Buffer.from(attempts[0].record).equals(original), true)
+        const point = view.head
+        yield* owner.host.closeWorkspace(workspaceId)
+        yield* owner.host.open(workspaceId)
+        assert.equal(
+          (yield* owner.host.managementState(workspaceId)).devices.find((entry) => entry.self).key,
+          ownKey
+        )
+        const revoke = yield* Effect.result(
+          owner.host.manage(workspaceId, { type: 'revoke', target: targets[1] }, remote)
+        )
+        if (failure === 'stage') {
+          assert.equal(Result.isSuccess(revoke), true)
+          assert.equal(revoke.success, 'Committed')
+          assert.equal(view.inspectState().devices.has(targets[1]), false)
+          assert.equal(view.inspectState().epoch.number, 0)
+          assert.equal(view.inspectState().epoch.rotationRequired, true)
+          assert.equal(attempts.length, 1)
+          assert.deepEqual(snapshot().rows, retained.rows)
+          assert.equal(snapshot().pending, null)
+          const request = {
+            epoch: 0,
+            room: { kind: 'doc', docId: 'revocation-survives-outage' },
+            context: {
+              protocol: 'loro-streams-crdt-payload-protection',
+              version: 2,
+              kind: 'update_batch'
+            },
+            plaintext: new Uint8Array([1]),
+            additionalData: new Uint8Array([2])
+          }
+          const sealed = yield* owner.host.seal(workspaceId, request)
+          assert.deepEqual(
+            yield* owner.host.openContent(workspaceId, { ...request, ...sealed }),
+            request.plaintext
+          )
+          blocked = false
+          assert.equal(
+            yield* owner.host.manage(workspaceId, { type: 'rotate' }, remote),
+            'Committed'
+          )
+          assert.equal(attempts.length, 2)
+          assert.equal(Buffer.from(attempts[1].record).equals(original), false)
+          for (const target of targets)
+            assert.equal(
+              attempts[1].envelopes.some((entry) => entry.recipient === target),
+              false
+            )
+          const rows = snapshot().rows
+          assert.equal(rows[0].outcome, 'Conflict')
+          assert.equal(rows[0].consumed, 1)
+          assert.deepEqual(rows[0].record, retained.rows[0].record)
+          assert.deepEqual(rows[0].envelopes, retained.rows[0].envelopes)
+        } else {
+          assert.equal(Result.isFailure(revoke), true)
+          assert.equal(view.head.equals(point), true)
+          assert.equal(view.inspectState().devices.has(targets[1]), true)
+          assert.deepEqual(snapshot().rows, retained.rows)
+          assert.deepEqual(snapshot().pending, retained.pending)
+          assert.equal(
+            submitted.slice(1).every((record) => record.equals(original)),
+            true
+          )
+          blocked = false
+          assert.equal(
+            yield* owner.host.manage(workspaceId, { type: 'revoke', target: targets[1] }, remote),
+            'Committed'
+          )
+          assert.equal(Buffer.from(records.at(-2)).equals(original), true)
+          assert.equal(view.inspectState().devices.has(targets[1]), false)
+        }
+        assert.equal(view.inspectState().epoch.number, 1)
+        assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, true)
+        assert.equal((yield* owner.host.managementState(workspaceId)).updatePending, false)
+        assert.equal(snapshot().pending, null)
+      })
+    )
+  }
+})
 
 void test('closing during a manual management ledger read aborts outside account locks and releases the host', async (t) => {
   const directory = await fixture(t)

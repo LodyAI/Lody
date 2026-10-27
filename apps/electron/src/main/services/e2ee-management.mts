@@ -211,16 +211,21 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
         }
       }
     }
-    const candidate = yield* Context.get(input.stores, EpochCandidateStore).active()
-    if (candidate) {
-      const outcome = yield* finishRotation(false)
-      if (command.type === 'rotate' || outcome === 'Conflict') return outcome
-    }
     if (command.type === 'rotate') {
+      const candidate = yield* Context.get(input.stores, EpochCandidateStore).active()
+      if (candidate) {
+        const outcome = yield* finishRotation(false)
+        if (outcome !== 'Conflict') return outcome
+        // No publication CAS was pending at entry. This explicit click may replace
+        // a candidate proven obsolete by the genuine ledger, after its ACK.
+      }
       const current = yield* input.verified.current()
       if (!current.inspectState().epoch.rotationRequired) return 'Committed'
       return yield* finishRotation(true)
     }
+    // A candidate alone has not entered LedgerSubmission/CAS. Keep its originals;
+    // staging failure cannot gate an independent revocation. Pending CAS above
+    // still reconciles the exact signed record before any new management signing.
     const target = yield* Effect.fromResult(
       Bytes.signingPublicKey(new Uint8Array(Buffer.from(command.target, 'hex')))
     )
