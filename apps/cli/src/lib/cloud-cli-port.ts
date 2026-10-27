@@ -214,6 +214,11 @@ export function createCloudE2eePort(
         })
       ),
     getContentToken: (input) => getContentToken(input, AbortSignal.timeout(30_000)),
+    readEpochGroup: (input) =>
+      client(AbortSignal.timeout(30_000)).query(api.e2eeEpochStaging.readGroup, {
+        ...input,
+        cliToken: options.token,
+      }),
     mailboxCall: async (method, input) => {
       const connection = client(AbortSignal.timeout(30_000));
       const common = z.object({ workspaceId: z.string(), credential: z.string() });

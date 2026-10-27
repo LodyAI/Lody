@@ -106,7 +106,6 @@
   `EditorInNarrowPanel` catches regressions.
 - `AnimatePresence` children must carry their own `key` (`<Reveal key=… >`);
   a key set only inside the child reads as `""` and breaks exit animations.
-
-- Claude quota continuation requires the latest provider session-limit failure and
-  a matching exhausted 5h window with a future reset; never guess from prose.
-  [Decision](../../../../../.agents/notes/proposed/feature/2026-10-27-quota-continue.md).
+- Quota continuation is the in-banner row on a terminal session-limit failure
+  with a future exhausted 5h reset; reserve the first full minute, never parse
+  prose. [Decision](../../../../../.agents/notes/implemented/feature/2026-10-27-quota-continue.md).

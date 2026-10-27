@@ -28,6 +28,8 @@ import {
   hashRecordBytes,
   prepareJoinRequest,
   prepareDeviceAdmission,
+  prepareEpochEnvelope,
+  getCommittedEpochStagingKey,
   signDeviceCredentialBinding,
   prepareLedgerCommand,
   signLedgerRecord,
@@ -1746,3 +1748,191 @@ void test('superseded unsigned retirement retains its native cause in main befor
     })
   )
 })
+
+for (const source of ['staging', 'not-a-staging-recipient', 'temporary-io'])
+  void test(`reopens without a candidate and installs the committed epoch via ${source}`, async (t) => {
+    const directory = await fixture(t)
+    let prepared, records, group
+    await execute(
+      Effect.gen(function* () {
+        const owner = yield* ownerWithHost(directory)
+        prepared = yield* bind(owner)
+        yield* owner.host.open(workspaceId)
+        const genesis = Result.getOrThrow(
+          Bytes.genesisHash(Buffer.from(prepared.genesisHashHex, 'hex'))
+        )
+        const signer = yield* owner.custody.openDevice(genesis)
+        records = [Buffer.from(prepared.genesisRecordHex, 'hex')]
+        let view = Result.getOrThrow(
+          verifyLedger({
+            anchor: genesis,
+            records,
+            checkpoint: { head: hashRecordBytes(records[0]), length: 1 }
+          })
+        )
+        const ports = Layer.mergeAll(
+          desktopE2eePorts(owner.custody, signer),
+          Layer.succeed(WorkspaceScope, { genesis }),
+          Layer.succeed(LedgerViewSource, { current: () => Effect.succeed(view) }),
+          Layer.succeed(LedgerPinStore, {
+            read: () => Effect.succeed(null),
+            write: () => Effect.void
+          })
+        )
+        const keys = Context.get(
+          yield* Layer.build(
+            InstalledEpochKeys.layer.pipe(
+              Layer.provideMerge(
+                sqliteInstalledKeyStore({
+                  path: join(directory, 'workspaces', workspaceId, 'installed-keys.sqlite'),
+                  mode: 'open'
+                })
+              ),
+              Layer.provideMerge(VerifiedLedger.layer),
+              Layer.provideMerge(ports)
+            )
+          ),
+          InstalledEpochKeys
+        )
+        const next = Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(71)))
+        try {
+          const packet = yield* Effect.acquireUseRelease(
+            keys.read(0),
+            (previousKey) =>
+              Effect.succeed(
+                Result.getOrThrow(
+                  sealHistoryPacket({ genesis, epoch: 1, currentKey: next, previousKey })
+                )
+              ),
+            (key) => Effect.sync(() => disposeEpochKey(key))
+          )
+          const commitment = Result.getOrThrow(commitEpochKey(genesis, 1, next))
+          const body = Result.getOrThrow(
+            encodeCbor([
+              view.head.toBytes(),
+              signer.publicKey.toBytes(),
+              [7, 1, commitment.toBytes(), packet]
+            ])
+          )
+          const record = yield* signLedgerRecord(
+            Result.getOrThrow(prepareLedgerRecord(view, body)),
+            signer
+          )
+          records.push(record)
+          view = Result.getOrThrow(
+            extendLedger(view, [record], { head: hashRecordBytes(record), length: 2 })
+          )
+          const frame = yield* prepareEpochEnvelope({
+            context: {
+              genesis,
+              epoch: Result.getOrThrow(Bytes.epochNumber(1)),
+              sender: signer.publicKey,
+              recipient: signer.publicKey
+            },
+            key: next,
+            signer,
+            ledger: () => Effect.succeed(view)
+          })
+          group = {
+            ...Result.getOrThrow(getCommittedEpochStagingKey(view, 1)),
+            record,
+            envelopes: [{ recipient: hex(signer.publicKey.toBytes()), frame }]
+          }
+        } finally {
+          disposeEpochKey(next)
+        }
+      })
+    )
+    // The publication key has been wiped and all former native owners are closed.
+    await execute(
+      Effect.gen(function* () {
+        const owner = yield* ownerWithHost(directory)
+        yield* owner.host.open(workspaceId)
+        yield* owner.host.ingestLedgerRecords(
+          workspaceId,
+          page(records, prepared.genesisHashHex, 0)
+        )
+        assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, false)
+        assert.equal((yield* owner.host.status(workspaceId)).writeEpoch, 0)
+        yield* owner.host.closeWorkspace(workspaceId)
+        assert.equal((yield* owner.host.open(workspaceId)).writeEpoch, 0)
+        const oldRequest = {
+          epoch: 0,
+          room: { kind: 'doc', docId: 'staged-document' },
+          context: {
+            protocol: 'loro-streams-crdt-payload-protection',
+            version: 2,
+            kind: 'update_batch'
+          },
+          plaintext: new Uint8Array([4, 5]),
+          additionalData: new Uint8Array([3])
+        }
+        const retained = yield* owner.host.seal(workspaceId, oldRequest)
+        assert.deepEqual(
+          yield* owner.host.openContent(workspaceId, { ...oldRequest, ...retained }),
+          oldRequest.plaintext
+        )
+
+        const genesis = Result.getOrThrow(
+          Bytes.genesisHash(Buffer.from(prepared.genesisHashHex, 'hex'))
+        )
+        const signer = yield* owner.custody.openDevice(genesis)
+        const view = Result.getOrThrow(
+          verifyLedger({
+            anchor: genesis,
+            records,
+            checkpoint: { head: hashRecordBytes(records.at(-1)), length: records.length }
+          })
+        )
+        const mailboxHost = yield* makeSqliteKeyMailbox({
+          path: join(directory, 'staged-only-mailbox.sqlite'),
+          mode: 'create',
+          genesis,
+          ledger: () => Effect.succeed(view)
+        })
+        const mailbox = Context.get(
+          yield* Layer.build(referenceKeyMailbox(mailboxHost, signer.publicKey)),
+          KeyMailbox
+        )
+        let unavailable = true
+        const staging = () => ({
+          readGroup: () =>
+            Effect.suspend(() =>
+              unavailable ? Effect.fail(new Error(source)) : Effect.succeed(group)
+            )
+        })
+        const missing = yield* Effect.result(
+          owner.host.keyRound(workspaceId, () => mailbox, staging)
+        )
+        assert.equal(Result.isFailure(missing) && missing.failure.reason, 'missing-key')
+        assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, false)
+        const afterFailure = yield* owner.host.seal(workspaceId, oldRequest)
+        assert.deepEqual(
+          yield* owner.host.openContent(workspaceId, { ...oldRequest, ...afterFailure }),
+          oldRequest.plaintext
+        )
+        // A missing mailbox key remains visibly missing across repeated staging failures.
+        const retried = yield* Effect.result(
+          owner.host.keyRound(workspaceId, () => mailbox, staging)
+        )
+        assert.equal(Result.isFailure(retried) && retried.failure.reason, 'missing-key')
+        assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, false)
+        if (source === 'staging') unavailable = false
+        else yield* mailbox.put('01'.repeat(16), group.envelopes[0].frame)
+        yield* owner.host.keyRound(workspaceId, () => mailbox, staging)
+        assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, true)
+        const sealed = yield* owner.host.seal(workspaceId, {
+          epoch: 1,
+          room: { kind: 'doc', docId: 'staged-document' },
+          context: {
+            protocol: 'loro-streams-crdt-payload-protection',
+            version: 2,
+            kind: 'update_batch'
+          },
+          plaintext: new Uint8Array([1, 2]),
+          additionalData: new Uint8Array([3])
+        })
+        assert.ok(sealed.sealed.length > 2)
+      })
+    )
+  })
