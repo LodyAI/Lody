@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-10-27-dsh-system-node.md)
 
+PR: https://github.com/LodyAI/Lody/pull/1948
+
 ## 摘要
 
 DeepSeek Harness 0.2.1-rc.2 在 Electron 44.9.3 下尚未完成 ACP 初始化就失败，因为 node-addon-require-builtin 0.1.9 拒绝该 Node/V8 指纹。Lody 改为从最终启动 PATH 选择独立 Node.js，在运行 npx 前检查，并让 Harness 和 Windows npm 入口使用该程序。缺失、版本不支持和无法执行的情况均在前端明确提示安装方法。用户需要负责 Node.js 的安装和升级，Harness 的执行环境不再随 Electron 安全更新而变化。
