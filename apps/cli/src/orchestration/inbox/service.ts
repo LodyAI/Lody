@@ -86,6 +86,10 @@ export class OperationInbox extends Context.Service<
       reason?: 'user_stop'
     ): Effect.Effect<boolean, unknown>;
     accept(input: InboxInput): Effect.Effect<boolean, unknown>;
+    guard<A, E, R>(
+      scopes: readonly InboxScope[],
+      body: Effect.Effect<A, E, R>
+    ): Effect.Effect<A, E | InboxAdmissionRejected, R>;
     begin(scope: InboxScope, executionId: string): Effect.Effect<boolean, unknown>;
     withdraw(input: InboxInput, executionId: string): Effect.Effect<boolean, unknown>;
     pause(
@@ -290,6 +294,16 @@ export class OperationInbox extends Context.Service<
           cancelExecution: (s, id, reason) => withGate(s, repo.cancelExecution(s, id, reason)),
           prepare,
           submit,
+          guard: (scopes, body) => {
+            const ordered = [...new Map(scopes.map((s) => [inboxScopeKey(s), s])).entries()]
+              .sort(([left], [right]) => left.localeCompare(right))
+              .map(([, s]) => s);
+            const guarded = Effect.gen(function* () {
+              if (quiesced) return yield* Effect.fail(new InboxAdmissionRejected());
+              return yield* body;
+            });
+            return ordered.reduceRight((effect, s) => withGate(s, effect), guarded);
+          },
           accept: Effect.fn('OperationInbox.accept')(function* (i: InboxInput) {
             return yield* withGate(
               i,
@@ -303,7 +317,7 @@ export class OperationInbox extends Context.Service<
               }).pipe(
                 Effect.tap((accepted) =>
                   Effect.sync(() => {
-                    if (accepted) vetoed.delete(inboxScopeKey(i));
+                    if (accepted && i.kind !== 'automation') vetoed.delete(inboxScopeKey(i));
                   })
                 ),
                 Effect.uninterruptible

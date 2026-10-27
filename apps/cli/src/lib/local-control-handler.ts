@@ -5,6 +5,12 @@ import {
   type ScheduleControlResponse,
 } from '@lody/shared';
 import {
+  AUTOMATION_CONTROL_PATH,
+  automationControlRequestSchema,
+  type AutomationControlRequest,
+  type AutomationControlResponse,
+} from '@lody/shared/automations';
+import {
   LOCAL_MACHINE_RPC_PATH,
   LocalMachineRpcResponseSchema,
   LocalProjectControlRequestSchema,
@@ -34,6 +40,7 @@ const PROJECT_CONTROL_TYPES: ReadonlyArray<LocalProjectControlRequestValidated['
   LocalProjectControlRequestSchema.options.map((option) => option.shape.type.value);
 
 export interface LocalSessionControlConfig {
+  dispatchAutomation?: (message: AutomationControlRequest) => Promise<AutomationControlResponse>;
   dispatchSchedule?: (message: ScheduleControlRequest) => Promise<ScheduleControlResponse>;
   machineId: MachineId;
   logger: Logger;
@@ -295,6 +302,27 @@ export class LocalControlHandler {
     requestId: number;
     onSessionResponse?: (response: LocalSessionControlResponse) => void;
   }): Promise<LocalControlHandlerResponse> {
+    if (request.path === AUTOMATION_CONTROL_PATH) {
+      return (async () => {
+        let raw: unknown;
+        try {
+          raw = JSON.parse(request.rawBody);
+        } catch {
+          return handlerResponse(400, { ok: false, error: 'invalid_request' });
+        }
+        const parsed = automationControlRequestSchema.safeParse(raw);
+        if (!parsed.success) return handlerResponse(400, { ok: false, error: 'invalid_request' });
+        if (parsed.data.machineId !== this.config.machineId)
+          return handlerResponse(403, { ok: false, error: 'machine_mismatch' });
+        if (!this.config.dispatchAutomation)
+          return handlerResponse(501, { ok: false, error: 'automations_unsupported' });
+        try {
+          return handlerResponse(200, await this.config.dispatchAutomation(parsed.data));
+        } catch {
+          return handlerResponse(500, { ok: false, error: 'automation_control_failed' });
+        }
+      })();
+    }
     if (request.path === LOCAL_SCHEDULE_CONTROL_PATH) {
       return (async () => {
         let raw: unknown;

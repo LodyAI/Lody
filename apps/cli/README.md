@@ -14,6 +14,13 @@ Install the CLI package:
 npm install -g lody@next
 ```
 
+## Automations
+
+`lody automation` registers durable JavaScript conditions that return results to
+the same Session, and configures native quota recovery, merge archive and idle
+compaction. See the [module guide](src/automations/README.md) for the API, execution
+authority and examples. Existing recurring Schedules retain their execution owner.
+
 ## Development type checking
 
 `tsconfig.json` includes source and tests so editor language servers resolve the

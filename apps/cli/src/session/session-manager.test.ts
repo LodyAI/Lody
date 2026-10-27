@@ -1369,6 +1369,45 @@ describe('SessionManager failed agent creation', () => {
     rmSync(tempHome, { recursive: true, force: true });
   });
 
+  it('rejects a replacement native conversation before changing the durable resume pointer', async () => {
+    const sourceDir = createLocalRepo(tempHome);
+    const sessionId = 'strict-native-resume' as SessionId;
+    let persisted = 'native-original';
+    const doc = {
+      ...createSessionDoc(),
+      setACPSessionId: async (id: ACPSessionId) => {
+        persisted = id;
+      },
+    };
+    const manager = new SessionManager(
+      createLogger(),
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      createWorkspaceDocument(new Map([[sessionId, doc]])),
+      {
+        sessionSandboxFactory: async () => createNoopSessionSandbox(),
+        cloudPort: createTestCloudPort(),
+      }
+    );
+    vi.spyOn(Session.prototype, 'createAgent').mockResolvedValue('native-replacement');
+    await expect(
+      manager.createSession(
+        createSessionConfig({
+          sessionId,
+          agentCliType: 'custom',
+          agentType: 'synthetic',
+          customAcp: { command: 'never-started', args: [] },
+          workdir: sourceDir,
+        }),
+        { resumeSessionId: 'native-original' as ACPSessionId, requireExactResume: true }
+      )
+    ).rejects.toThrow('AUTOMATION_NATIVE_RESUME_UNCONFIRMED');
+    expect(persisted).toBe('native-original');
+    expect(manager.getSession(sessionId)).toBeNull();
+    expect(manager.getPendingSession(sessionId)).toBeNull();
+  });
+
   it('publishes no lifecycle events for an instance whose agent never started', async () => {
     const sourceDir = createLocalRepo(tempHome);
     const sessionId = 'agent-start-failed' as SessionId;

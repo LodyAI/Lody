@@ -1,7 +1,15 @@
+import { verifyAutomationWorktreeHeads } from './automation-worktree';
+import { classifyCapacityFailure } from './acp-error-classification';
+import {
+  providerBindingFingerprint,
+  type AutomationObservationSink,
+  type SessionAutomationObservation,
+} from './automation-observations';
 import { resolveProjectFileRoots } from './worktree/project-member-access';
 import { type AcpLauncher, resolveAcpLauncher } from '@/agent/acp-analytics';
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
 import { queryLocalAcpRateLimits, AcpQuotaCleanupError } from '@/agent/acp-runner';
+import { isLoroRepoDocDeleted, normalizeSessionTurnInputConfig } from '@lody/shared';
 import {
   isSubscriptionQuotaEligible,
   type MachineProviderRateLimitsRefreshResponse,
@@ -327,6 +335,7 @@ type TurnRuntimeState = {
   finalizeStarted: boolean;
   finalizeCompleted: boolean;
   notificationOutcome?: TurnOutcome;
+  capacityFailure?: SessionAutomationObservation['capacityFailure'];
   /** Publish-once latch for the workspace git-state flags; both cancel routes read it. */
   workspaceGitStateSynced: boolean;
   prePromptFailureRecorded: boolean;
@@ -335,6 +344,7 @@ type TurnRuntimeState = {
   cancelRequested: boolean;
   pendingInputOnCancel: PendingInputCancellationPolicy;
   releaseFailure?: unknown;
+  releaseParentAdmission?: () => void;
   rawPromptCompletion?: Promise<void>;
   disconnectedTransport?: boolean;
   inboxOwner?: Awaited<ReturnType<OperationInboxLegacy['openExecution']>>;
@@ -878,6 +888,118 @@ export class SessionExecutionService {
       }
     | undefined;
   private operationInbox: OperationInboxLegacy | undefined;
+  private automationObservations: AutomationObservationSink | undefined;
+  setAutomationObservations(sink: AutomationObservationSink | undefined): void {
+    this.automationObservations = sink;
+  }
+  private automationAdmission:
+    | ((args: {
+        sessionId: SessionId;
+        turnId: string;
+        userId: string;
+        origin: import('@lody/shared/automations').AutomationOrigin;
+      }) => Promise<boolean>)
+    | undefined;
+  private automationSubmissionGuard:
+    | ((
+        sessionId: SessionId,
+        turnId: string,
+        origin: import('@lody/shared/automations').AutomationOrigin,
+        binding: import('./automation-observations').ProviderBinding | null
+      ) => boolean)
+    | undefined;
+
+  setAutomationAdmission(
+    admit: SessionExecutionService['automationAdmission'],
+    canSubmit?: SessionExecutionService['automationSubmissionGuard']
+  ): void {
+    this.automationAdmission = admit;
+    this.automationSubmissionGuard = canSubmit;
+  }
+  async guardAutomationAction<A>(
+    sessionIds: readonly SessionId[],
+    userId: string,
+    body: () => Promise<A>
+  ): Promise<A> {
+    if (!this.operationInbox) throw new Error('AUTOMATION_ADMISSION_UNAVAILABLE');
+    return this.operationInbox.guard(
+      sessionIds.map((sessionId) => ({
+        workspaceId: this.deps.workspaceId,
+        sessionId,
+        userId,
+      })),
+      body
+    );
+  }
+  hasBlockedAutomationExecution(sessionId: SessionId): boolean {
+    return (
+      !this.operationInbox ||
+      this.operationInbox.hasBlockedExecution(this.deps.workspaceId, sessionId)
+    );
+  }
+  automationExecutionRelease(sessionId: SessionId, executionId: string, userId: string) {
+    return this.operationInbox?.executionRelease(
+      { workspaceId: this.deps.workspaceId, sessionId, userId },
+      executionId
+    );
+  }
+  automationInputDisposition(
+    sessionId: SessionId,
+    turnId: string
+  ): 'unsubmitted' | 'cancelled' | 'ended' | 'unknown' {
+    const inbox = this.operationInbox;
+    if (!inbox) return 'unknown';
+    if (inbox.inputCanceled(this.deps.workspaceId, sessionId, turnId)) return 'cancelled';
+    if (inbox.inputEnded(this.deps.workspaceId, sessionId, turnId)) return 'ended';
+    if (
+      this.hasBlockedAutomationExecution(sessionId) ||
+      this.getExecutionSnapshot(sessionId).hasActiveTurn
+    )
+      return 'unknown';
+    return 'unsubmitted';
+  }
+  async cancelAutomationInput(sessionId: SessionId, turnId: string): Promise<boolean> {
+    const runtime = this.turnRuntimeBySession.get(sessionId);
+    if (runtime?.invocation?.sourceTurnId === turnId) {
+      const result = await this.cancelSession(
+        {
+          type: 'session/cancel',
+          sessionId,
+          turnId: runtime.turnId,
+          machineId: this.deps.machineId,
+          workspaceId: this.deps.workspaceId,
+        },
+        { pauseInbox: false, pendingInput: 'preserve', prePromptSession: 'discard' }
+      );
+      return result.success;
+    }
+    await this.abandonInboxInput(sessionId, turnId);
+    return true;
+  }
+
+  async acceptAutomationInput(args: {
+    sessionId: SessionId;
+    turnId: string;
+    userId: string;
+    config: SessionTurnInputConfig;
+  }): Promise<boolean> {
+    const origin = args.config._lodyAutomation;
+    if (
+      !origin ||
+      !this.operationInbox ||
+      !this.automationAdmission ||
+      !(await this.automationAdmission({ ...args, origin }))
+    )
+      return false;
+    return this.operationInbox.accept({
+      workspaceId: this.deps.workspaceId,
+      sessionId: args.sessionId,
+      userId: args.userId,
+      inputId: args.turnId,
+      kind: 'automation',
+      config: args.config,
+    });
+  }
   private onInboxReleased: ((sessionId: SessionId) => void) | undefined;
   setOperationInbox(
     inbox: OperationInboxLegacy | undefined,
@@ -1021,6 +1143,7 @@ export class SessionExecutionService {
   /** Start times of recent start retries, shared by every Session this service runs. */
   private readonly startRetryStartedAt: number[] = [];
   private readonly rewriteBarrierSessions = new Set<SessionId>();
+  private readonly childAdmissions = new Map<SessionId, number>();
   private readonly rewriteConflictLeaseSessions = new Set<SessionId>();
   private readonly turnReleaseWaiters = new Map<SessionId, Map<string, Set<() => void>>>();
   /** At most one goal action waits per session; a newer action replaces it. */
@@ -1143,6 +1266,17 @@ export class SessionExecutionService {
           unchanged,
           config
         );
+      }
+      if (unchanged() && this.automationObservations) {
+        await this.automationObservations
+          .capacity(
+            { bindingId: configId, fingerprint: providerBindingFingerprint(config) },
+            snapshot,
+            'query'
+          )
+          .catch((cause) =>
+            this.deps.logger.warn('Automation capacity observation could not be persisted', cause)
+          );
       }
       return unchanged();
     });
@@ -1526,7 +1660,8 @@ export class SessionExecutionService {
   tryAcquireSessionRewriteBarrier(sessionId: SessionId): (() => void) | null {
     if (
       this.rewriteBarrierSessions.has(sessionId) ||
-      this.rewriteConflictLeaseSessions.has(sessionId)
+      this.rewriteConflictLeaseSessions.has(sessionId) ||
+      this.childAdmissions.has(sessionId)
     ) {
       return null;
     }
@@ -2888,6 +3023,8 @@ export class SessionExecutionService {
     const releasedOwner = runtime?.turnId === turnId;
     if (releasedOwner) {
       runtime.inboxOwner?.detach();
+      runtime.releaseParentAdmission?.();
+      runtime.releaseParentAdmission = undefined;
       this.turnRuntimeBySession.delete(sessionId);
     }
     // Safety net: drop per-turn analytics state if the turn ended without a
@@ -3610,6 +3747,7 @@ export class SessionExecutionService {
       await this.markTurnFailed(options.sessionId, options.sessionDoc, options.userTurnId);
     }
     await this.handleTurnError(options.sessionId, options.sessionDoc, options.error);
+    options.runtime.finalizeCompleted = true;
     await options.onUnhandledError?.(options.error);
   }
 
@@ -4082,6 +4220,31 @@ export class SessionExecutionService {
     this.deps.touchSession(sessionId);
   }
 
+  private async acquireParentAdmission(
+    runtime: TurnRuntimeState,
+    doc: SessionDocument
+  ): Promise<void> {
+    if (runtime.releaseParentAdmission) return;
+    const parentId = (await doc.getMetaState())?.parentSessionId;
+    if (!parentId) return;
+    if (this.rewriteBarrierSessions.has(parentId))
+      throw new Error('Parent Session is changing; retry after it settles');
+    this.childAdmissions.set(parentId, (this.childAdmissions.get(parentId) ?? 0) + 1);
+    runtime.releaseParentAdmission = () => {
+      const remaining = (this.childAdmissions.get(parentId) ?? 1) - 1;
+      if (remaining) this.childAdmissions.set(parentId, remaining);
+      else this.childAdmissions.delete(parentId);
+    };
+    // Re-read after claiming the parent: automatic archive cannot pass its
+    // barrier until this child's actual execution owner releases the lease.
+    const parent = await this.deps.workspaceDocument.repo.getDocMeta(getSessionRoomId(parentId));
+    if (
+      parent &&
+      (isLoroRepoDocDeleted(parent) || (parent.meta as SessionMeta).isArchived === true)
+    )
+      throw new Error('Parent Session is archived');
+  }
+
   private async runVisibleSessionTurn(
     options: VisibleSessionTurnOptions,
     body: (ctx: VisibleSessionTurnContext) => Effect.Effect<void, unknown, Scope.Scope>
@@ -4128,8 +4291,34 @@ export class SessionExecutionService {
 
     const inbox = this.operationInbox;
     const invocation = options.invocation;
+    if (invocation?.inputConfig._lodyAutomation) {
+      try {
+        if (
+          !invocation.requesterUserId ||
+          !(await this.acceptAutomationInput({
+            sessionId,
+            turnId: invocation.sourceTurnId,
+            userId: invocation.requesterUserId,
+            config: invocation.inputConfig,
+          }))
+        ) {
+          releaseConflict();
+          span.end({ outcome: 'automation-admission-blocked' });
+          return 'automation-admission-blocked';
+        }
+      } catch (cause) {
+        releaseConflict();
+        span.end({ outcome: 'automation-admission-failed' });
+        throw cause;
+      }
+    }
     try {
-      if (inbox && invocation?.requesterUserId && !options.inboxBatch) {
+      if (
+        inbox &&
+        invocation?.requesterUserId &&
+        !options.inboxBatch &&
+        !invocation.inputConfig._lodyAutomation
+      ) {
         const control = await sessionDoc.getDocState();
         const receipt = control?.humanInputReceipts?.[invocation.sourceTurnId];
         if (receipt?.userId === invocation.requesterUserId)
@@ -4643,7 +4832,41 @@ export class SessionExecutionService {
                           promptBlocks: promptBlocks.length,
                         },
                         async () => {
+                          const worktreeOrigin = runtime.invocation?.inputConfig._lodyAutomation;
+                          if (worktreeOrigin?.expectedHeads?.length)
+                            await verifyAutomationWorktreeHeads(
+                              worktreeOrigin,
+                              await sessionDoc.getMetaState(),
+                              activeSession
+                            );
                           const start = () => {
+                            const currentInvocation = runtime.invocation;
+                            const origin = currentInvocation?.inputConfig._lodyAutomation;
+                            if (
+                              origin &&
+                              currentInvocation &&
+                              !self.automationSubmissionGuard?.(
+                                sessionId,
+                                currentInvocation.sourceTurnId,
+                                origin,
+                                activeSession.getProviderBinding?.() ?? null
+                              )
+                            )
+                              throw new Error('AUTOMATION_ADMISSION_CHANGED');
+                            if (origin?.nativeSessionId && acpSessionId !== origin.nativeSessionId)
+                              throw new Error('AUTOMATION_NATIVE_SESSION_CHANGED');
+                            if (origin?.maintenance) {
+                              if (origin.maintenance.expiresAt <= Date.now())
+                                throw new Error('AUTOMATION_MAINTENANCE_EXPIRED');
+                              if (
+                                !activeSession
+                                  .getAcpCapabilities?.()
+                                  ?.availableCommands?.some(
+                                    (command) => command.name.replace(/^\//, '') === 'compact'
+                                  )
+                              )
+                                throw new Error('AUTOMATION_NATIVE_COMPACT_UNAVAILABLE');
+                            }
                             runtime.promptStarted = true;
                             const raw = agentClient.prompt(acpSessionId, promptBlocks, {
                               signal,
@@ -4822,6 +5045,7 @@ export class SessionExecutionService {
       return 'cancelled';
     }
     const parsedError = parseACPError(error);
+    runtime.capacityFailure = classifyCapacityFailure(error);
     runtime.notificationOutcome = isAgentDisconnectedError(error)
       ? { kind: 'unknown', code: 'agent_disconnected' }
       : {
@@ -4865,6 +5089,40 @@ export class SessionExecutionService {
     outcome: string;
   }): Promise<void> {
     const { sessionId, sessionDoc, runtime, inbox, inboxInput, inboxBatch, outcome } = options;
+    const invocation = runtime.invocation;
+    const client = runtime.session?.agentClient;
+    const observation: SessionAutomationObservation | undefined =
+      invocation?.requesterUserId && this.automationObservations
+        ? {
+            sessionId,
+            turnId: invocation.sourceTurnId,
+            assistantTurnId: runtime.turnId,
+            userId: invocation.requesterUserId,
+            nativeSessionId: runtime.session?.acpSessionId ?? undefined,
+            binding: runtime.session?.getProviderBinding?.(),
+            modelId: client?.currentModel?.modelId,
+            outcome: runtime.cancelRequested
+              ? 'cancelled'
+              : runtime.releaseFailure
+                ? 'unknown'
+                : outcome === 'completed' && !runtime.promptFailed
+                  ? 'completed'
+                  : 'failed',
+            capacityFailure: runtime.capacityFailure,
+            inputConfig: invocation.inputConfig,
+            released: false,
+            finalized: runtime.finalizeCompleted,
+            observedAt: Date.now(),
+            ...client?.getAutomationObservations(),
+          }
+        : undefined;
+    if (observation) {
+      try {
+        this.automationObservations?.stage(observation);
+      } catch (cause) {
+        this.deps.logger.warn('Automation turn observation could not be staged', cause);
+      }
+    }
     try {
       const withdrawn =
         inboxInput &&
@@ -4924,6 +5182,19 @@ export class SessionExecutionService {
           this.onInboxReleased?.(sessionId);
         }
       } finally {
+        if (observation && this.automationObservations) {
+          const delivery = this.automationObservations
+            .turn({
+              ...observation,
+              released: !!inboxInput && !runtime.releaseFailure,
+              outcome: runtime.releaseFailure ? 'unknown' : observation.outcome,
+            })
+            .catch((cause) =>
+              this.deps.logger.warn('Automation turn observation could not be persisted', cause)
+            );
+          this.ownedWork.add(delivery);
+          void delivery.finally(() => this.ownedWork.delete(delivery));
+        }
         if (fact) {
           const delivery = this.publishTurnOutcomeFact(fact);
           this.ownedWork.add(delivery);
@@ -5618,6 +5889,8 @@ export class SessionExecutionService {
     prepareOptions?: { sessionDoc?: SessionDocument }
   ): Promise<VisibleSessionTurnPlan> {
     const { sessionId, acpSessionConfig, userId, userName, userEmail, userTurnId } = message;
+    const requiredNativeSessionId =
+      normalizeSessionTurnInputConfig(acpSessionConfig)?._lodyAutomation?.nativeSessionId;
     // System-caused turns own an assistant entry, not a user dispatch pointer.
     const executionUserTurnId =
       dispatchOptions?.dispatchSource === 'inbox' || dispatchOptions?.dispatchSource === 'goal'
@@ -5727,6 +6000,12 @@ export class SessionExecutionService {
       const requestedResumeSessionId = acpSessionConfig.resume;
       const storedResumeSessionId = resolveResumableAcpSessionId(meta);
       const resumeSessionId = requestedResumeSessionId ?? storedResumeSessionId;
+      if (
+        requiredNativeSessionId &&
+        (storedResumeSessionId !== requiredNativeSessionId ||
+          resumeSessionId !== requiredNativeSessionId)
+      )
+        return yield* Effect.fail(new Error('AUTOMATION_NATIVE_SESSION_CHANGED'));
       const resumeSource = requestedResumeSessionId
         ? 'request'
         : storedResumeSessionId
@@ -5816,6 +6095,7 @@ export class SessionExecutionService {
               () =>
                 self.deps.sessionManager.createSession(restoreConfig, {
                   resumeSessionId,
+                  requireExactResume: !!requiredNativeSessionId,
                 }),
               { terminateOnCancel: true }
             ),
@@ -5827,6 +6107,8 @@ export class SessionExecutionService {
         yield* ctx.abortIfCancelled({ terminateSession: true });
         const requested = resumeSessionId;
         const actual = restoredSession.acpSessionId ?? null;
+        if (requiredNativeSessionId && actual !== requiredNativeSessionId)
+          return yield* Effect.fail(new Error('AUTOMATION_NATIVE_RESUME_UNCONFIRMED'));
         if (requested) {
           self.deps.logger.debug(
             `[${sessionId}] Session restore result (requestedAcpSessionId=${requested} actualAcpSessionId=${actual ?? 'null'} resumed=${actual === requested ? 'yes' : 'no'})`
@@ -5865,6 +6147,7 @@ export class SessionExecutionService {
         Effect.catch((error) =>
           Effect.gen(function* () {
             yield* ctx.abortIfCancelled();
+            if (requiredNativeSessionId) return yield* Effect.fail(error);
             const errMessage = formatErrorMessage(error);
             const lowerMessage = errMessage.toLowerCase();
             const isAcpResumeError =
@@ -6008,6 +6291,8 @@ export class SessionExecutionService {
       ctx: VisibleSessionTurnContext
     ): Effect.fn.Return<void, unknown, Scope.Scope> {
       const { turnId, runtime, abortIfCancelled, openAssistantEntry, prompt } = ctx;
+      if (requiredNativeSessionId && readySession.acpSessionId !== requiredNativeSessionId)
+        yield* Effect.fail(new Error('AUTOMATION_NATIVE_SESSION_CHANGED'));
       let activeSession = readySession;
       let staleAcpPromptRecoveryAttempted = false;
       let baseCommitHash: string | null = null;
@@ -6412,6 +6697,7 @@ export class SessionExecutionService {
       body: (ctx) =>
         Effect.gen(function* () {
           ctx.setUnhandledErrorContext(turnErrorContext);
+          yield* self.tryPromise(() => self.acquireParentAdmission(ctx.runtime, sessionDoc));
           const memoryPressureResult = yield* self.tryPromise(() =>
             self.evictForTurnStart(sessionId)
           );
@@ -6776,6 +7062,7 @@ export class SessionExecutionService {
       }) =>
         Effect.gen(function* () {
           setUnhandledErrorContext(turnErrorContext);
+          yield* self.tryPromise(() => self.acquireParentAdmission(runtime, sessionDoc));
           const memoryPressureResult = yield* self.tryPromise(() =>
             self.evictForTurnStart(sessionId)
           );

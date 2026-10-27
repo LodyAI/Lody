@@ -1,3 +1,4 @@
+import { providerBindingFingerprint, type ProviderBinding } from './automation-observations';
 import { nativeSessionCredentials, type SessionCredentials } from './session-credentials';
 import { memoryEnvironment } from '@/lib/memory-providers';
 import EventEmitter from 'eventemitter3';
@@ -432,6 +433,24 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
 
   getGitHubCredentials(): SessionCredentials {
     return this.credentials;
+  }
+
+  getProviderBinding(): ProviderBinding | undefined {
+    const config = this.config;
+    if (!config.agentConfigId) return undefined;
+    return {
+      bindingId: config.agentConfigId,
+      fingerprint: providerBindingFingerprint({
+        id: config.agentConfigId,
+        cliType: config.agentCliType,
+        agentType: config.agentType,
+        env: config.env,
+        customAcp: config.customAcp,
+        runtimeOverrides: config.runtimeOverrides,
+        codexAuth: config.codexAuth,
+        magpieGatewayUrl: config.magpieGatewayUrl,
+      }),
+    };
   }
 
   getMemoryBinding(): SessionConfig['memory'] {

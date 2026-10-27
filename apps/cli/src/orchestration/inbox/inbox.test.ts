@@ -90,6 +90,21 @@ async function runInboxChild(root: string, source: string): Promise<string> {
 }
 
 describe('durable Operation inbox', () => {
+  it('automation cannot clear Stop or outrun a newly accepted human input', () => {
+    const f = fixture();
+    f.start();
+    expect(f.sql.pause(f.input, 'execution-1')).toBe(true);
+    const automated: InboxInput = { ...f.input, inputId: 'event-1', kind: 'automation' };
+    expect(f.sql.accept(automated)).toBe(false);
+    f.release('user_stop');
+    const human = { ...f.input, inputId: 'user-2' };
+    expect(f.sql.accept(human)).toBe(true);
+    expect(f.sql.accept(automated)).toBe(true);
+    expect(f.sql.begin(automated, 'event-execution')).toBe(false);
+    expect(f.sql.begin(human, 'human-execution')).toBe(true);
+    f.sql.release({ ...human, executionId: 'human-execution', outcome: 'normal' });
+    expect(f.sql.begin(automated, 'event-execution')).toBe(true);
+  });
   it('an idle wakeable receipt survives reopen and duplicate release creates no second intent', () => {
     const f = fixture();
     f.start();

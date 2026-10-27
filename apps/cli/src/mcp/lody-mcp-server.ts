@@ -136,6 +136,8 @@ import {
   OperationListQuerySchema,
 } from '@/orchestration/operation-store';
 import { registerScheduleTools } from './schedule-tools';
+import { registerAutomationTools } from './automation-tools';
+import { LODY_SKILL_INSTRUCTIONS, registerLodySkills } from './skills/server';
 import { truncateSessionHistoryText as truncateUtf8HeadTail } from '@/mcp/session-history-page';
 import { buildSessionHistoryForReader } from '@/mcp/session-history-handler';
 import { createSessionBackend } from '@/session/session-backend';
@@ -3845,9 +3847,11 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
         'To read that conversation, pass the full URI as sessionId to lody_session_history. The workspace must match this tool context. Bare session IDs are also accepted; use the exact child session ID to read a child conversation.',
         'Paginate with nextCursor when you need older turns.',
         SESSION_COLLABORATION_GUIDANCE,
+        LODY_SKILL_INSTRUCTIONS,
       ].join(' '),
     }
   );
+  registerLodySkills(server);
   registerScheduleTools(server, {
     execute: async (command) => {
       const ctx = getSessionContext();
@@ -3859,6 +3863,17 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
         socketPath: ctx.localControlSocketPath,
       });
     },
+  });
+
+  registerAutomationTools(server, async (command) => {
+    const ctx = getSessionContext();
+    const { sendDaemonAutomationCommand } = await import('@/automations/control/client');
+    return sendDaemonAutomationCommand(command, {
+      machineId: ctx.machineId,
+      workspaceId: ctx.workspaceId,
+      requesterSessionId: ctx.sessionId,
+      socketPath: ctx.localControlSocketPath,
+    });
   });
 
   const registerSessionTool = createSessionToolRegistrar(

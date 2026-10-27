@@ -91,6 +91,20 @@ export const operationInboxLegacy = (options: {
       if (Exit.isFailure(exit)) throw new Error(message, { cause: exit.cause });
     });
   return {
+    executionRelease: (scope: InboxScope, executionId: string) =>
+      options.sql.executionRelease(scope, executionId),
+    hasBlockedExecution: (workspaceId: string, sessionId: string) =>
+      options.sql.blockedExecutions(workspaceId, sessionId).length > 0,
+    /** Temporary resource-action bridge; the native Inbox remains the sole admission owner. */
+    guard: <A>(scopes: readonly InboxScope[], body: () => Promise<A>) =>
+      runtime.runPromise(
+        Effect.flatMap(OperationInbox, (inbox) =>
+          inbox.guard(
+            scopes,
+            Effect.tryPromise({ try: body, catch: (cause) => cause }).pipe(Effect.uninterruptible)
+          )
+        )
+      ),
     preferredHumanInput: (w: string, s: string) =>
       Effect.runSync(queries.preferredHumanInput(w, s)),
     inputCancellationReason: (w: string, s: string, id: string) =>

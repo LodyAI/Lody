@@ -206,6 +206,7 @@ export interface ISession {
   createAgent(config: CreateAgentConfig): Promise<string>;
   getAcpCapabilities?(): AcpCapabilitiesResult | null;
   getAcpCapabilitySourceVersion?(): string | null;
+  getProviderBinding?(): import('./automation-observations').ProviderBinding | undefined;
   getMemoryBinding?(): SessionConfig['memory'];
   getWorkdir(): string;
   /**
@@ -312,6 +313,8 @@ export type AgentStartConfig = {
   forkSessionTurnId?: string;
   /** Let a higher-level saga publish the ACP id with the complete target meta. */
   deferAcpSessionIdPersistence?: boolean;
+  /** A native continuation cannot adopt a replacement conversation or replay history. */
+  requireExactResume?: boolean;
 };
 
 export type SessionTerminatedEvent = {
@@ -971,6 +974,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         }
       }
 
+      if (
+        agentStart?.requireExactResume &&
+        (!requestedResumeSessionId || acpSessionId !== requestedResumeSessionId)
+      )
+        throw new Error('AUTOMATION_NATIVE_RESUME_UNCONFIRMED');
       this.logger.debug(`[${sessionId}] About to persist ACP session ID to doc`);
       if (!agentStart?.deferAcpSessionIdPersistence) {
         await sessionDoc.setACPSessionId(acpSessionId as ACPSessionId);

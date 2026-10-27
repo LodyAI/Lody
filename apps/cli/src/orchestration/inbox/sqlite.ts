@@ -27,7 +27,7 @@ const BatchRow = z.object({
   session_id: z.string(),
   user_id: z.string(),
   input_id: z.string(),
-  kind: z.enum(['human', 'task', 'automatic']),
+  kind: z.enum(['human', 'task', 'automatic', 'automation']),
   config_json: z.string(),
   revision: z.number(),
   owner: z.string(),
@@ -392,6 +392,7 @@ export class InboxSqlite {
     if (input.kind === 'automatic') throw new Error('Automatic work cannot authorize recovery');
     return this.transaction(() => {
       const current = this.state(input);
+      if (input.kind === 'automation' && (current.paused || current.blocked)) return false;
       const old = this.db
         .prepare(
           'SELECT canceled FROM inbox_inputs WHERE workspace_id=? AND session_id=? AND input_id=?'
@@ -404,9 +405,11 @@ export class InboxSqlite {
           'UPDATE inbox_sessions SET revision=revision+1 WHERE workspace_id=? AND session_id=? AND user_id<>?'
         )
         .run(input.workspaceId, input.sessionId, input.userId);
-      this.db
-        .prepare('UPDATE inbox_sessions SET paused=0 WHERE workspace_id=? AND session_id=?')
-        .run(input.workspaceId, input.sessionId);
+      if (input.kind !== 'automation') {
+        this.db
+          .prepare('UPDATE inbox_sessions SET paused=0 WHERE workspace_id=? AND session_id=?')
+          .run(input.workspaceId, input.sessionId);
+      }
       const revision = current.revision + 1;
       this.db
         .prepare(
@@ -468,13 +471,13 @@ export class InboxSqlite {
       return true;
     });
   }
-  inputKind(scope: InboxScope, inputId: string): 'human' | 'task' | undefined {
+  inputKind(scope: InboxScope, inputId: string): 'human' | 'task' | 'automation' | undefined {
     const row = this.db
       .prepare(
         'SELECT kind FROM inbox_inputs WHERE workspace_id=? AND session_id=? AND user_id=? AND input_id=? AND canceled=0'
       )
       .get(scope.workspaceId, scope.sessionId, scope.userId, inputId) as
-      | { kind: 'human' | 'task' }
+      | { kind: 'human' | 'task' | 'automation' }
       | undefined;
     return row?.kind;
   }
@@ -497,6 +500,16 @@ export class InboxSqlite {
       )
       .get(workspaceId, sessionId, inputId) as { cancellation_reason: string | null } | undefined;
     return row?.cancellation_reason === 'user_stop' ? 'user_stop' : undefined;
+  }
+  executionRelease(scope: InboxScope, executionId: string): InboxRelease['outcome'] | undefined {
+    const row = this.db
+      .prepare(
+        'SELECT outcome FROM inbox_releases WHERE workspace_id=? AND session_id=? AND user_id=? AND execution_id=?'
+      )
+      .get(scope.workspaceId, scope.sessionId, scope.userId, executionId) as
+      | { outcome: InboxRelease['outcome'] }
+      | undefined;
+    return row?.outcome;
   }
   /** True once an input finished or was canceled; `begin` never admits it again. */
   inputEnded(workspaceId: string, sessionId: string, inputId: string): boolean {
@@ -689,10 +702,10 @@ export class InboxSqlite {
       if (!('inputId' in s) || typeof s.inputId !== 'string') return false;
       const input = this.db
         .prepare(
-          'SELECT canceled,finished FROM inbox_inputs WHERE workspace_id=? AND session_id=? AND user_id=? AND input_id=?'
+          'SELECT canceled,finished,kind FROM inbox_inputs WHERE workspace_id=? AND session_id=? AND user_id=? AND input_id=?'
         )
         .get(s.workspaceId, s.sessionId, s.userId, s.inputId) as
-        | { canceled: number; finished: number }
+        | { canceled: number; finished: number; kind: string }
         | undefined;
       if (
         input
@@ -707,6 +720,7 @@ export class InboxSqlite {
       if (
         current.blocked ||
         current.paused ||
+        (input?.kind === 'automation' && this.preferredHumanInput(s.workspaceId, s.sessionId)) ||
         this.db
           .prepare(
             'SELECT 1 FROM inbox_sessions WHERE workspace_id=? AND session_id=? AND (active_execution IS NOT NULL OR blocked=1)'

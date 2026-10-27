@@ -15,6 +15,15 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 | Execution        | [Execution service](session-execution-service.ts) | Owns turns, steer results, cancellation, and raw-request drain.                      |
 | Process lifetime | [Session](session.ts)                             | Owns ACP resources, confirmed termination, and bounded Codex refresh-start recovery. |
 
+## Automation ownership
+
+[Session authority](session-automation-authority.ts) admits actions requested by
+[Automations](../automations/README.md). Execution stages typed outcomes before
+Inbox release; the durable source reconciles release without replaying requests.
+Native recovery preserves the exact conversation and launch binding. Archive uses
+existing admission/rewrite barriers, including parent admission held by child
+executions; it never treats an idle metadata label as release proof.
+
 ## Terminal notification facts
 
 Execution publishes typed terminal facts using the frozen invocation requester and

@@ -5,6 +5,12 @@ import {
   type ScheduleControlResponse,
 } from '../schedule-control';
 import crypto from 'node:crypto';
+import {
+  AUTOMATION_CONTROL_PATH,
+  automationControlResponseSchema,
+  type AutomationControlRequest,
+  type AutomationControlResponse,
+} from '../automations/control';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -172,6 +178,10 @@ export type LocalProbeClientService = {
 };
 
 export type LocalControlClientService = {
+  automationControl: (
+    message: AutomationControlRequest,
+    options?: LocalIpcRequestOptions
+  ) => Effect.Effect<AutomationControlResponse, IpcError>;
   scheduleControl: (
     message: ScheduleControlRequest,
     options?: LocalIpcRequestOptions
@@ -955,6 +965,19 @@ function makeControlClient(
           parseJsonBody<ScheduleControlResponse>(
             ScheduleControlResponseSchema,
             (status) => `Invalid Schedule response (HTTP ${status})`
+          )(response, payload)
+      ),
+    automationControl: (message, requestOptions) =>
+      Effect.flatMap(
+        post(
+          AUTOMATION_CONTROL_PATH,
+          message,
+          requestOptions?.timeoutMs ?? DEFAULT_LOCAL_CONTROL_TIMEOUT_MS
+        ),
+        ({ response, payload }) =>
+          parseJsonBody<AutomationControlResponse>(
+            automationControlResponseSchema,
+            (status) => `Invalid Automation response (HTTP ${status})`
           )(response, payload)
       ),
     projectControl: (message, requestOptions) =>

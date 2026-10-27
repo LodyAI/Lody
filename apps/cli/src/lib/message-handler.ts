@@ -1,4 +1,5 @@
 import { encodeSessionFilePath, resolveSessionPullRequests } from '@lody/shared';
+import { SessionAutomationAuthority } from '@/session/session-automation-authority';
 import type { SessionFileRoot } from '@lody/shared';
 import { resolveProjectFileRoots } from '@/session/worktree/project-member-access';
 import { worktreeGitLegacy } from '@/session/worktree/git-execution-legacy';
@@ -10479,6 +10480,26 @@ export class MessageHandler {
       this.hasSessionActivePresence(sessionId) ||
       this.sessionDispatchWatcher.hasPendingDispatch(sessionId)
     );
+  }
+
+  private automationSessionAuthority: SessionAutomationAuthority | undefined;
+  getAutomationSessionAuthority(): SessionAutomationAuthority {
+    return (this.automationSessionAuthority ??= new SessionAutomationAuthority({
+      manager: this.workspaceDocument,
+      execution: this.executionService,
+      machineId: this.machineId,
+      hasOtherWork: (sessionId) =>
+        this.operationCoordinator.hasPendingWorkForRequester(sessionId) ||
+        this.hasSessionActivePresence(sessionId) ||
+        this.sessionDispatchWatcher.hasPendingDispatch(sessionId),
+      hasGoal: (sessionId) => this.hasActiveGoal(sessionId),
+      nativeActivity: (sessionId) => {
+        const client = this.sessionManager.getSession(sessionId)?.agentClient;
+        return client ? client.getNativeActivityObservation() : 'idle';
+      },
+      author: (sessionId) =>
+        this.executionService.getActiveInvocationContext(sessionId)?.requesterUserId,
+    }));
   }
 
   /**

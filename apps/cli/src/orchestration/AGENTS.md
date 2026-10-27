@@ -56,9 +56,10 @@ Root/CLI rules apply; `specs/session-orchestration.md` owns behavior.
 - `inbox/service.ts` is native Effect v4. Scope owns its signal/fibers and repository connection;
   one per-Session admission covers Stop, fresh input acceptance and actual transport start.
   Core imports no platform/consumers; registered bridges execute. Submit/settle through execution owners.
-- Inbox-aware Stop pauses/cancels queued eligibility; legacy Stop only cancels execution.
-  Pause blocks only automatic wakes; fresh human and Agent-chat input both clear it. New
-  acceptance cannot revive a canceled execution or discard an already prepared human input.
+- Stop pauses queues; legacy Stop cancels execution. Fresh human/
+  Agent-chat clears pause; Host `automation` cannot and yields to humans. Never
+  revive canceled execution or discard prepared input. Automation release proof
+  requires an execution receipt, not input-ended.
 - Fixed batch claims and submission fence precede synchronous transport start under the
   same gate, with no await between. Post-fence uncertainty never replays, including
   human-plus-batch stale-ACP recovery. Retry failed settlement only, never the request.

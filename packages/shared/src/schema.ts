@@ -596,6 +596,7 @@ const acpSessionConfigSchema = schema
       agentRoleRevision: schema.Number({ required: false }),
       agentRoleSnapshot: schema.Any({ required: false }),
       chainDepth: schema.Number({ required: false }),
+      _lodyAutomation: schema.Any({ required: false }),
     },
     { required: false }
   )
@@ -1272,9 +1273,11 @@ export type MessageQueueItem = Omit<InferType<typeof messageQueueItemSchema>, 'p
 };
 export type MessageQueueItemInput = Omit<
   InferInputType<typeof messageQueueItemSchema>,
-  'project'
+  'project' | 'acpSessionConfig'
 > & {
   project: ProjectRef | undefined;
+  acpSessionConfig?: import('./ai').ACPSessionConfig &
+    Pick<import('./ai').SessionTurnInputConfig, '_lodyAutomation'>;
 };
 
 const sessionForkOperationDocSchema = schema.LoroMap(

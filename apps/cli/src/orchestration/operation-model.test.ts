@@ -11,6 +11,23 @@ describe('current Inbox scheduling contract', () => {
   it('exhaustively preserves nonempty at-most-once batches over bounded interleavings', () => {
     expect(enumerateOrchestrationModel(9).length).toBeGreaterThan(100);
   });
+  it('automation never clears Stop and an accepted human wins before automatic submission', () => {
+    expect(trace('stop', 'automation', 'schedule')).toMatchObject({
+      active: 'none',
+      paused: true,
+      automation: false,
+    });
+    expect(trace('automation', 'human', 'schedule', 'submit')).toMatchObject({
+      active: 'human',
+      submitted: true,
+      automation: true,
+    });
+    expect(trace('automation', 'schedule', 'human', 'submit')).toMatchObject({
+      active: 'automation',
+      submitted: false,
+      human: true,
+    });
+  });
   it('wakeable results coalesce before an idle conversation is scheduled', () => {
     expect(trace('result', 'result', 'schedule')).toMatchObject({
       active: 'automatic',

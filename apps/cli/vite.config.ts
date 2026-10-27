@@ -36,6 +36,8 @@ const explicitlyExternal = new Set([
   // cannot be inlined. Kept external and staged into the Electron app like the
   // other external runtime deps (apps/electron/scripts/cli-native-deps.mjs).
   'tinypool',
+  // Emscripten locates its WASM beside the package loader.
+  'quickjs-emscripten',
 ]);
 
 export default defineConfig({
@@ -83,6 +85,7 @@ export default defineConfig({
         'deepseek-acp': path.resolve(__dirname, 'src/deepseek-acp-entry.ts'),
         'devin-acp': path.resolve(__dirname, 'src/devin-acp-entry.ts'),
         'grok-acp': path.resolve(__dirname, 'src/grok-acp-entry.ts'),
+        'automation-program-worker': path.resolve(__dirname, 'src/automations/programs/worker.ts'),
         'diff-worker': path.resolve(__dirname, 'src/lib/code-collab/diff-worker.ts'),
         'file-index-scan-worker': path.resolve(
           __dirname,

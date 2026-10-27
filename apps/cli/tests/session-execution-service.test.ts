@@ -1,3 +1,5 @@
+import { AutomationLedger } from '../src/automations/storage/ledger';
+import { reconcileSessionTurnsLegacy } from '../src/automations/sources/sessions-legacy';
 import * as quotaRunner from '../src/agent/acp-runner';
 import { ProviderQuotaRefreshCache } from '../src/session/provider-quota-refresh-cache';
 import { createSessionBackend } from '@/session/session-backend';
@@ -10906,6 +10908,7 @@ describe('Operation Inbox execution boundary', () => {
       cancel: async () => {},
       prompt: async (_id: unknown, blocks: ContentBlock[]) => prompt(blocks),
       currentModel: undefined,
+      getAutomationObservations: () => ({}),
     };
     const session = {
       sessionId,
@@ -10915,6 +10918,7 @@ describe('Operation Inbox execution boundary', () => {
       getWorkdir: () => '/tmp',
       getHostWorkdir: () => '/tmp',
       getParentSessionId: () => undefined,
+      getProviderBinding: () => ({ bindingId: capabilityConfigId, fingerprint: 'frozen-launch' }),
       exec: async () => '',
       terminate: async () => {
         created = false;
@@ -11071,6 +11075,194 @@ describe('Operation Inbox execution boundary', () => {
       storePath: path.join(root, 'operations.sqlite3'),
     };
   }
+
+  it.each([true, false])(
+    'checks the live private provider binding at final automation admission (match=%s)',
+    async (matches) => {
+      const prompts: ContentBlock[][] = [];
+      const f = inboxExecutionFixture(async (blocks) => {
+        prompts.push(blocks);
+        return { stopReason: 'end_turn' };
+      });
+      const origin = {
+        invocationId: 'invocation',
+        ruleId: 'rule',
+        ruleRevision: 1,
+        eventRef: 'event',
+        authorizationUserId: 'user-1',
+        workIntentId: 'work',
+        nativeSessionId: 'acp-inbox',
+      };
+      const observed: Array<string | undefined> = [];
+      f.service.setAutomationAdmission(
+        async () => true,
+        (_session, _turn, _origin, binding) => {
+          observed.push(binding?.fingerprint);
+          return matches && binding?.fingerprint === 'frozen-launch';
+        }
+      );
+      try {
+        await f.service.continueSession({
+          ...f.message,
+          acpSessionConfig: { ...f.message.acpSessionConfig, _lodyAutomation: origin },
+        });
+        expect(observed).toEqual(['frozen-launch']);
+        expect(prompts).toHaveLength(matches ? 1 : 0);
+        expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
+        const input = (await (await createSessionBackend(f.doc)).readHistory()).find(
+          (turn) => turn.id === f.message.userTurnId
+        );
+        expect(input?.status).toBe(matches ? 'handled' : 'failed');
+        expect(JSON.stringify(input?.inputConfig)).not.toContain('frozen-launch');
+      } finally {
+        await f.close();
+      }
+    }
+  );
+
+  it.each([true, false])(
+    'checks current worktree HEAD before delivering CI evidence (match=%s)',
+    async (matches) => {
+      const prompts: ContentBlock[][] = [];
+      const f = inboxExecutionFixture(async (blocks) => {
+        prompts.push(blocks);
+        return { stopReason: 'end_turn' };
+      });
+      const head = 'a'.repeat(40);
+      f.session.exec = async (...args: unknown[]) => {
+        const command = JSON.stringify(args);
+        return command.includes('--is-inside-work-tree')
+          ? 'true'
+          : command.includes('HEAD')
+            ? head
+            : '';
+      };
+      f.service.setAutomationAdmission(
+        async () => true,
+        () => true
+      );
+      try {
+        await f.service.continueSession({
+          ...f.message,
+          acpSessionConfig: {
+            ...f.message.acpSessionConfig,
+            _lodyAutomation: {
+              invocationId: 'ci',
+              ruleId: 'wait',
+              ruleRevision: 1,
+              eventRef: 'ci-result',
+              authorizationUserId: 'user-1',
+              expectedHeads: [
+                { repository: 'owner/repo', headSha: matches ? head : 'b'.repeat(40) },
+              ],
+            },
+          },
+        });
+        expect(prompts).toHaveLength(matches ? 1 : 0);
+        const input = (await (await createSessionBackend(f.doc)).readHistory()).find(
+          (turn) => turn.id === f.message.userTurnId
+        );
+        expect(input?.status).toBe(matches ? 'handled' : 'failed');
+      } finally {
+        await f.close();
+      }
+    }
+  );
+
+  it('keeps a parent archive barrier unavailable until its child execution releases', async () => {
+    const started = createDeferred();
+    const finish = createDeferred();
+    const f = inboxExecutionFixture(async () => {
+      started.resolve();
+      await finish.promise;
+      return { stopReason: 'end_turn' };
+    });
+    const parentId = 'parent' as SessionId;
+    const originalMeta = f.doc.getMetaState.bind(f.doc);
+    f.doc.getMetaState = async () =>
+      ({ ...(await originalMeta()), parentSessionId: parentId }) as SessionMeta;
+    try {
+      await f.accept();
+      const running = f.service.continueSession(f.message);
+      await started.promise;
+      expect(f.service.tryAcquireSessionRewriteBarrier(parentId)).toBeNull();
+      finish.resolve();
+      await running;
+      const release = f.service.tryAcquireSessionRewriteBarrier(parentId);
+      expect(release).toBeTypeOf('function');
+      release?.();
+    } finally {
+      finish.resolve();
+      await f.close();
+    }
+  });
+
+  it('recovers a quota result staged before release after its delivery acknowledgement is lost', async () => {
+    const submitted: ContentBlock[][] = [];
+    const f = inboxExecutionFixture(async (blocks) => {
+      submitted.push(blocks);
+      throw new RequestError(-32603, 'quota exhausted', { codexErrorInfo: 'usageLimitExceeded' });
+    });
+    const filename = path.join(path.dirname(f.storePath), 'automations.sqlite');
+    let ledger = new AutomationLedger({ kind: 'disk', path: filename }, 'workspace-1', 'machine-1');
+    const scope = { workspaceId: 'workspace-1', sessionId: f.message.sessionId, userId: 'user-1' };
+    let stagedBeforeRelease = false;
+    try {
+      f.service.setAutomationObservations({
+        stage: (fact) => {
+          ledger.stageTurn(fact);
+          stagedBeforeRelease =
+            f.store.inbox.executionRelease(scope, fact.assistantTurnId) === undefined;
+        },
+        turn: async () => {
+          throw new Error('lost post-release delivery');
+        },
+        capacity: async () => {},
+      });
+      await f.accept();
+      await f.service.continueSession(f.message);
+      expect(stagedBeforeRelease).toBe(true);
+      const staged = ledger.stagedTurns();
+      expect(staged).toHaveLength(1);
+      expect(staged[0]?.fact).toMatchObject({
+        capacityFailure: 'quota_exhausted',
+        released: false,
+        finalized: true,
+        nativeSessionId: 'acp-inbox',
+        outcome: 'failed',
+      });
+      ledger.close();
+      ledger = new AutomationLedger({ kind: 'disk', path: filename }, 'workspace-1', 'machine-1');
+      const failures: unknown[] = [];
+      await reconcileSessionTurnsLegacy(
+        ledger,
+        f.deps.workspaceDocument,
+        (fact) => f.store.inbox.executionRelease(scope, fact.assistantTurnId),
+        (cause) => failures.push(cause)
+      );
+      expect(failures).toEqual([]);
+      expect(ledger.stagedTurns()).toEqual([]);
+      const workId = (await import('../src/automations/storage/ledger')).automationIdentity(
+        f.message.sessionId,
+        'human-input',
+        'assistant:human-input',
+        'pending-work'
+      );
+      expect(ledger.work(workId)).toMatchObject({
+        state: 'blocked_on_capacity',
+        release: 'released',
+        nativeSessionId: 'acp-inbox',
+        unresolvedEffects: false,
+        inputRef: 'human-input',
+      });
+      expect(submitted).toHaveLength(1);
+      expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
+    } finally {
+      f.service.setAutomationObservations(undefined);
+      ledger.close();
+      await f.close();
+    }
+  });
 
   it.each(['missing_identity', 'missing_active_execution', 'other_requester'] as const)(
     'persists the exact manual recovery entry for a blocked send (%s) without starting transport',

@@ -118,6 +118,7 @@
     "winston-daily-rotate-file": "^5.0.0",
     "winston-transport": "^4.7.1",
     "ws": "^8.18.3",
+    "yaml": "2.8.2",
     "yauzl": "^3.4.0",
     "zod": "catalog:",
     "zstd-stream": "^1.1.0"
@@ -136,6 +137,7 @@
     "better-sqlite3": "catalog:",
     "loro-crdt": "1.17.0",
     "tinypool": "^1.0.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "quickjs-emscripten": "0.31.0"
   }
 }

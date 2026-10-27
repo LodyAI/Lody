@@ -2203,13 +2203,22 @@ export class SessionDispatchWatcher {
       issuePRMentions: queuedItem.acpSessionConfig?.issuePRMentions,
       resume: resolveResumableAcpSessionId(meta),
     });
+    const automation = normalizeSessionTurnInputConfig(
+      queuedItem.acpSessionConfig
+    )?._lodyAutomation;
     const pendingEntry = buildPendingUserHistoryEntry({
       userId: queuedItem.userId ?? meta.userId,
       inputBlocks,
       timestamp: queuedItem.timestamp,
-      inputConfig,
+      inputConfig: { ...inputConfig, ...(automation ? { _lodyAutomation: automation } : {}) },
     });
-    return pendingEntry ? { ...pendingEntry, id: queuedTurnId } : null;
+    return pendingEntry
+      ? {
+          ...pendingEntry,
+          id: queuedTurnId,
+          ...(automation ? { author: { v: 1 as const, kind: 'system' as const } } : {}),
+        }
+      : null;
   }
 
   /**

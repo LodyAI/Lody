@@ -1,4 +1,5 @@
 import type * as http from 'http';
+import { AUTOMATION_CONTROL_PATH } from '@lody/shared/automations';
 import { LOCAL_MACHINE_RPC_PATH, LOCAL_SCHEDULE_CONTROL_PATH } from '@lody/shared';
 import { LOCAL_PROJECT_CONTROL_PATH } from '@lody/shared/node/local-project-control';
 import {
@@ -96,6 +97,7 @@ export function createLocalSessionControlRequestHandler(
 
     if (
       requestPath !== LOCAL_SCHEDULE_CONTROL_PATH &&
+      requestPath !== AUTOMATION_CONTROL_PATH &&
       requestPath !== LOCAL_SESSION_CONTROL_PATH &&
       requestPath !== LOCAL_MACHINE_RPC_PATH &&
       requestPath !== LOCAL_PROJECT_CONTROL_PATH

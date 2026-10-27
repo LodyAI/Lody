@@ -391,6 +391,12 @@ export class Lody {
     return this.runtime.getMessageHandler()?.hasAutomationSessionWork(sessionId) ?? true;
   }
 
+  getAutomationSessionAuthority() {
+    const handler = this.runtime.getMessageHandler();
+    if (!handler) throw new Error('AUTOMATION_SESSION_OWNER_UNAVAILABLE');
+    return handler.getAutomationSessionAuthority();
+  }
+
   async attachRemoteBridge(): Promise<void> {
     await this.runtime.attachRemoteBridge();
     this.startBuiltinAgentRegistration();
