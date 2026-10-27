@@ -24,16 +24,20 @@
   first. Retired cache cleanup cannot fail local open.
 - No plaintext RPC, presence, attachments or scheduled automation on encrypted workspaces
   while their encrypted channels remain unimplemented.
-- `realtime-journal.ts` is storage only; exclusive `create` provisions schema 2.
-  Never upgrade/repair/replace schema or originals. Reject unknown committed schema
-  before app settings/chmod/writes; native SQLite recovery may precede validation.
-  Immutable requests/responses/first outcomes; no expiry GC/replay. Bound owners retaining
-  permits/failed cleanup. Persist replies before send; indexes select no wire profile.
-  Failed responses retain one original/permit for exact retry and preserve results.
-  Fence execution AND Meta/history.
-  Preserve the file-global clock floor across workspaces/restarts and readable completed
-  evidence. No floor reset, deadline extension or new time source/recovery generation.
-  See [integration proposal](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-realtime-journal.md).
+- `realtime-journal.ts`: current schema 3 storage only; no migration/legacy decoder.
+  Native recovery first; only version-zero with no schema objects may initialize.
+  Archive unknown schemas intact, report path; replacement requires explicit reset.
+  Exact requests/responses/first outcomes; no expiry GC or uncertain takeover.
+  Uncertain exposes outcome unknown; other request IDs remain independent.
+  Floors key genesis/workspace. Before floor writes reject local >10 minutes ahead
+  of a current authenticated reference; frame time is never a reference.
+  No reference: keep the scoped maximum, recover via explicit local reset.
+  Reset archives the old file, creates a fresh identity, keeps control SQLite,
+  retired-ID fences and reset intent; no archive replay/import. Shared control locks
+  for ordinary calls, exclusive for reset; retain through unresolved main close.
+  Stop execution owners first. Bound permits/cleanup; persist replies before send,
+  retry exact bytes. Integration fences execution AND Meta/history; no storage authority.
+  See [recovery decision](../../../../../.agents/notes/proposed/bug-fix/2026-10-27-e2ee-realtime-journal-recovery.md).
 - `prepareCliE2eeMachineLegacy` binds the retained credential hash to the exact
   desktop-generated 16-byte pairing session using core's fixed v1 helper. Machine
   possession additionally binds the strict UTF-8 machineId; activation compares it

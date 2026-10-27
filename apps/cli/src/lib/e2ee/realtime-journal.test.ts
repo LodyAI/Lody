@@ -114,7 +114,7 @@ const expectCode = (run: () => unknown, code: RealtimeJournalError['code']) => {
 const crashBeforeCommit = async (
   filename: string,
   input: RealtimeJournalRequest,
-  version: 2 | 1 | 99,
+  version: 3 | 1 | 99,
   mode: 'rollback' | 'committed-wal' = 'rollback'
 ) => {
   const script = `
@@ -140,7 +140,7 @@ const crashBeforeCommit = async (
         db.exec('CREATE TABLE unsupported_evidence (payload BLOB NOT NULL)');
         db.prepare('INSERT INTO unsupported_evidence VALUES (?)').run(payload);
         pause();
-      } else if (version === 2) {
+      } else if (version === 3) {
         const nativePragma = Database.prototype.pragma;
         Database.prototype.pragma = function(sql, ...args) {
           const result = nativePragma.call(this, sql, ...args);
@@ -492,18 +492,20 @@ describe('host-only E2EE realtime journal', () => {
         retained = this;
         throw closeCause;
       });
-    const failure = expectCode(() => journal.read(request), 'storage');
-    expect(failure.cause).toMatchObject({ message: 'Unsupported or incomplete realtime journal' });
+    expectCode(() => journal.read(request), 'unsupported_schema');
     expect(journal.takeCleanupErrors()).toEqual([closeCause]);
     expect(retained?.open).toBe(true);
     expect(snapshotFiles(directory)).toEqual(before);
     close.mockRestore();
-    expectCode(() => journal.read(request), 'storage');
+    const failure = expectCode(() => journal.read(request), 'unsupported_schema');
     expect(retained?.open).toBe(false);
-    const recovered = new Database(filename);
-    recovered.pragma('user_version = 2');
-    recovered.close();
-    expect(journal.read(request)).toEqual(saved);
+    expect(failure.archivePath).toBeDefined();
+    const archived = new Database(failure.archivePath as string);
+    expect(archived.prepare('SELECT outcome FROM realtime_requests').get()).toEqual({
+      outcome: Buffer.from(outcome),
+    });
+    archived.close();
+    expect(saved).toMatchObject({ state: 'completed' });
     expect(journal.takeCleanupErrors()).toEqual([]);
   });
 
@@ -895,7 +897,7 @@ describe('host-only E2EE realtime journal', () => {
     );
   });
 
-  it('retains the accepted cross-workspace clock limit while completed evidence remains readable', () => {
+  it('isolates a forward clock observation from new workspaces while completed evidence remains readable', () => {
     const completed = { ...request, requestId: 'completed-before-forward-jump' };
     journal.receive(completed);
     const permit = takePermit(journal, completed);
@@ -908,12 +910,10 @@ describe('host-only E2EE realtime journal', () => {
     const other = { ...request, workspaceId: 'another-workspace', requestId: 'new-intent' };
     const reopened = new RealtimeJournal(filename, () => now);
     reopened.receive(other);
-    expect(reopened.claim(other).state).toBe('expired');
-    expect(reopened.read(other)).toMatchObject({ state: 'received', frame: other.frame });
+    expect(reopened.claim(other).state).toBe('claimed');
+    expect(reopened.read(other)).toMatchObject({ state: 'uncertain', frame: other.frame });
     expect(reopened.read(completed)).toEqual(saved);
     expect(reopened.readResponse(completed, 0)).toEqual(responseFrame);
-    // Accepted limitation: never clear the floor, extend a deadline or adopt an
-    // uncertain start to recover new execution after an erroneous forward jump.
   });
 
   it.each([
@@ -934,7 +934,7 @@ describe('host-only E2EE realtime journal', () => {
       'missing response field',
       'ALTER TABLE realtime_responses RENAME COLUMN digest TO retained_digest',
     ],
-  ])('rejects %s without rewriting SQLite bytes, evidence, mode or permissions', (_, alter) => {
+  ])('archives %s without rewriting committed evidence or permissions', (_, alter) => {
     const pending = { ...request, requestId: 'pending', expiresAt: 3_000 };
     const started = { ...request, requestId: 'started' };
     journal.receive(request);
@@ -958,26 +958,166 @@ describe('host-only E2EE realtime journal', () => {
     // All writers are closed and the fixture remains in rollback/DELETE mode.
     chmodSync(filename, 0o640);
     const beforeDatabase = snapshotDatabase(filename);
-    const beforeFiles = snapshotFiles(directory);
+    const beforeBytes = readFileSync(filename);
     const reopened = new RealtimeJournal(filename, () => now);
-    expectCode(() => reopened.read(request), 'storage');
-    expectCode(() => reopened.readResponse(request, 0), 'storage');
-    expectCode(() => reopened.receive({ ...request, requestId: 'not-admitted' }), 'storage');
-    expectCode(() => reopened.claim(pending), 'storage');
-    expectCode(() => journal.finish(permit, outcome), 'storage');
-    expectCode(() => journal.retainResponse(permit, { index: 1, frame: responseFrame }), 'storage');
-    expect(snapshotDatabase(filename)).toEqual(beforeDatabase);
-    expect(snapshotFiles(directory)).toEqual(beforeFiles);
+    const failure = expectCode(() => reopened.read(request), 'unsupported_schema');
+    const archived = failure.archivePath as string;
+    expect(readFileSync(archived)).toEqual(beforeBytes);
+    expect(snapshotDatabase(archived)).toEqual(beforeDatabase);
+    expect(statSync(archived).mode & 0o777).toBe(0o640);
+    for (const run of [
+      () => reopened.readResponse(request, 0),
+      () => reopened.receive({ ...request, requestId: 'not-admitted' }),
+      () => reopened.claim(pending),
+      () => journal.finish(permit, outcome),
+      () => journal.retainResponse(permit, { index: 1, frame: responseFrame }),
+    ])
+      expectCode(run, 'reset_required');
+    // Archival alone never provisions a replacement or interprets unknown rows.
+    expect(() => readFileSync(filename)).toThrow();
+    const reset = reopened.reset();
+    expect(reset.archivePath).toBe(archived);
+    expect(new RealtimeJournal(filename, () => now).read(request)).toBeNull();
+    expect(snapshotDatabase(archived)).toEqual(beforeDatabase);
   });
 
-  it('rejects an empty original without initializing or chmodding it', () => {
+  it('initializes an interrupted empty original without losing a later request', () => {
     const empty = path.join(directory, 'empty-original.sqlite');
-    writeFileSync(empty, '', { mode: 0o640 });
-    const before = snapshotFiles(directory);
-    const unopened = new RealtimeJournal(empty, () => now);
-    expectCode(() => unopened.receive(request), 'storage');
-    expectCode(() => unopened.claim(request), 'storage');
-    expect(snapshotFiles(directory)).toEqual(before);
+    writeFileSync(empty, '', { mode: 0o600 });
+    const reopened = new RealtimeJournal(empty, () => now);
+    expect(reopened.receive(request)).toMatchObject({ state: 'received' });
+    expect(reopened.finish(takePermit(reopened), outcome)).toMatchObject({ state: 'completed' });
+  });
+
+  it('rejects a local clock over ten minutes ahead of trusted time without advancing the floor', () => {
+    journal.receive(request);
+    const guarded = new RealtimeJournal(filename, () => now, { trustedNow: () => 100 });
+    now = 600_101;
+    const before = snapshotDatabase(filename);
+    expectCode(() => guarded.claim(request), 'clock_skew');
+    expect(snapshotDatabase(filename)).toEqual(before);
+    now = 100;
+    expect(guarded.claim(request).state).toBe('claimed');
+  });
+
+  it('exposes unknown outcomes without blocking independent requests in the same workspace', () => {
+    journal.receive(request);
+    takePermit(journal);
+    const reopened = new RealtimeJournal(filename, () => now);
+    expect(reopened.read(request)).toMatchObject({ state: 'uncertain', outcomeStatus: 'unknown' });
+    const next = { ...request, requestId: 'independent-after-uncertain' };
+    reopened.receive(next);
+    expect(reopened.claim(next).state).toBe('claimed');
+    expect(reopened.claim(request)).toMatchObject({
+      state: 'existing',
+      record: { state: 'uncertain' },
+    });
+  });
+
+  it('resets the floor, archives exact evidence, fences retired IDs and invalidates old owners', () => {
+    journal.receive(request);
+    const permit = takePermit(journal);
+    const observed = { ...request, requestId: 'far-future' };
+    journal.receive(observed);
+    now = 1_000_000_000;
+    expect(journal.claim(observed).state).toBe('expired');
+    const before = snapshotDatabase(filename);
+    now = 100;
+    const { archivePath } = new RealtimeJournal(filename, () => now).reset();
+    expect(snapshotDatabase(archivePath)).toEqual(before);
+    const reopened = new RealtimeJournal(filename, () => now);
+    expectCode(() => reopened.receive(request), 'archived_request');
+    expectCode(() => journal.finish(permit, outcome), 'journal_reset');
+    const next = { ...request, requestId: 'new-after-reset' };
+    reopened.receive(next);
+    expect(reopened.claim(next).state).toBe('claimed');
+    const second = new RealtimeJournal(filename, () => now).reset();
+    expect(second.archivePath).not.toBe(archivePath);
+    expectCode(() => new RealtimeJournal(filename, () => now).receive(request), 'archived_request');
+  });
+
+  it('accepts exactly ten minutes of skew and uses trusted time for the workspace floor', () => {
+    journal.receive(request);
+    const guarded = new RealtimeJournal(filename, () => 600_100, { trustedNow: () => 100 });
+    expect(guarded.claim(request).state).toBe('claimed');
+    const next = { ...request, requestId: 'after-tolerated-skew' };
+    journal.receive(next);
+    expect(new RealtimeJournal(filename, () => 100).claim(next).state).toBe('claimed');
+  });
+
+  it('fails closed on an invalid trusted reference without touching the clock floor', () => {
+    journal.receive(request);
+    const before = snapshotDatabase(filename);
+    const invalid = new RealtimeJournal(filename, () => now, { trustedNow: () => NaN });
+    expectCode(() => invalid.claim(request), 'storage');
+    expect(snapshotDatabase(filename)).toEqual(before);
+  });
+
+  it('resumes reset after interruption between archive and replacement schema commit', () => {
+    journal.receive(request);
+    takePermit(journal);
+    const before = snapshotDatabase(filename);
+    const nativePrepare = Database.prototype.prepare;
+    const prepare = vi.spyOn(Database.prototype, 'prepare').mockImplementation(function (
+      this: Database.Database,
+      sql: string
+    ) {
+      if (sql === 'INSERT INTO realtime_identity VALUES (?)')
+        throw new Error('synthetic interrupted replacement');
+      return nativePrepare.call(this, sql);
+    });
+    const resetter = new RealtimeJournal(filename, () => now);
+    expectCode(() => resetter.reset(), 'storage');
+    const archive = readdirSync(directory).find((name) => name.includes('.archive-'));
+    expect(archive).toBeDefined();
+    const archivePath = path.join(directory, archive as string);
+    expect(snapshotDatabase(archivePath)).toEqual(before);
+    expectCode(() => new RealtimeJournal(filename, () => now).receive(request), 'reset_required');
+    prepare.mockRestore();
+    expect(resetter.reset()).toEqual({ archivePath });
+    expectCode(() => new RealtimeJournal(filename, () => now).receive(request), 'archived_request');
+    const next = { ...request, requestId: 'after-interrupted-reset' };
+    const reopened = new RealtimeJournal(filename, () => now);
+    reopened.receive(next);
+    expect(reopened.claim(next).state).toBe('claimed');
+  });
+
+  it('keeps a reset from renaming a main handle whose cleanup is unresolved', () => {
+    journal.receive(request);
+    const nativeClose = Database.prototype.close;
+    let retained: Database.Database | undefined;
+    const close = vi
+      .spyOn(Database.prototype, 'close')
+      .mockImplementation(function (this: Database.Database) {
+        if (this.name === filename && (retained === undefined || retained === this)) {
+          retained = this;
+          throw new Error('synthetic retained handle');
+        }
+        return nativeClose.call(this);
+      });
+    expect(journal.read(request)).toMatchObject({ state: 'received' });
+    const independent = new RealtimeJournal(filename, () => now);
+    const next = { ...request, requestId: 'independent-despite-close-failure' };
+    independent.receive(next);
+    expect(independent.claim(next).state).toBe('claimed');
+    const resetter = new RealtimeJournal(filename, () => now);
+    expect(expectCode(() => resetter.reset(), 'storage').cause).toMatchObject({
+      code: 'SQLITE_BUSY',
+    });
+    expect(readdirSync(directory).some((name) => name.includes('.archive-'))).toBe(false);
+    close.mockRestore();
+    journal.retryCleanup();
+    expect(resetter.reset().archivePath).toContain('.archive-');
+  });
+
+  it('directly resets an unknown format by archiving it without decoding or upgrading it', () => {
+    const editor = new Database(filename);
+    editor.pragma('user_version = 99');
+    editor.close();
+    const before = snapshotDatabase(filename);
+    const { archivePath } = new RealtimeJournal(filename, () => now).reset();
+    expect(snapshotDatabase(archivePath)).toEqual(before);
+    expect(new RealtimeJournal(filename, () => now).read(request)).toBeNull();
   });
 
   it('enforces the current response foreign key without changing any parent evidence', () => {
@@ -1006,7 +1146,7 @@ describe('host-only E2EE realtime journal', () => {
     const archived = journal.finish(permit, outcome);
     journal.retainResponse(permit, { index: 0, frame: responseFrame });
     journal.receive(request);
-    await crashBeforeCommit(filename, request, 2);
+    await crashBeforeCommit(filename, request, 3);
 
     const reopened = new RealtimeJournal(filename, () => now);
     const observe = (read: () => unknown) => {
@@ -1066,27 +1206,21 @@ describe('host-only E2EE realtime journal', () => {
       const committed = snapshotDatabase(filename);
       const mode = statSync(filename).mode;
       await crashBeforeCommit(filename, request, version);
-      const assertOriginals = () => {
-        // Native rollback removes uncommitted pages. Application schema/version
-        // and every previously committed original must remain unchanged.
-        expect(snapshotDatabase(filename)).toEqual(committed);
-        expect(statSync(filename).mode).toBe(mode);
-      };
       const reopened = new RealtimeJournal(filename, () => now);
-      for (const owner of [journal, reopened]) {
-        expectCode(() => owner.read(request), 'storage');
-        expectCode(() => owner.claim(request), 'storage');
-        expectCode(() => owner.read(completed), 'storage');
-        expectCode(() => owner.readResponse(completed, 0), 'storage');
-        expectCode(() => owner.receive({ ...request, requestId: 'refused' }), 'storage');
-        assertOriginals();
-      }
-      expectCode(() => journal.finish(permit, outcome), 'storage');
-      expectCode(
+      const failure = expectCode(() => reopened.read(request), 'unsupported_schema');
+      const archive = failure.archivePath as string;
+      expect(snapshotDatabase(archive)).toEqual(committed);
+      expect(statSync(archive).mode).toBe(mode);
+      for (const run of [
+        () => reopened.claim(request),
+        () => reopened.read(completed),
+        () => reopened.readResponse(completed, 0),
+        () => reopened.receive({ ...request, requestId: 'refused' }),
+        () => journal.finish(permit, outcome),
         () => journal.retainResponse(permit, { index: 1, frame: responseFrame }),
-        'storage'
-      );
-      assertOriginals();
+      ])
+        expectCode(run, 'reset_required');
+      expect(snapshotDatabase(archive)).toEqual(committed);
     }
   );
 
@@ -1103,12 +1237,16 @@ describe('host-only E2EE realtime journal', () => {
     const committed = await crashBeforeCommit(filename, request, 99, 'committed-wal');
     const mainBeforeCheckpoint = readFileSync(filename);
     const reopened = new RealtimeJournal(filename, () => now);
-    expectCode(() => reopened.receive({ ...request, requestId: 'refused-unknown-wal' }), 'storage');
-    // The final native connection may checkpoint its WAL before rejecting/closing.
-    // Physical bytes are allowed to change; application schema/version/rows are not.
-    expect(readFileSync(filename).equals(mainBeforeCheckpoint)).toBe(false);
-    expect(snapshotDatabase(filename)).toEqual(committed);
-    expect(statSync(filename).mode).toBe(mode);
+    const failure = expectCode(
+      () => reopened.receive({ ...request, requestId: 'refused-unknown-wal' }),
+      'unsupported_schema'
+    );
+    const archive = failure.archivePath as string;
+    expect(readFileSync(archive).equals(mainBeforeCheckpoint)).toBe(false);
+    // Archival checkpoints through SQLite before rename. Only journal mode may
+    // change; the committed schema, version and all evidence remain identical.
+    expect(snapshotDatabase(archive)).toEqual({ ...committed, mode: 'delete' });
+    expect(statSync(archive).mode).toBe(mode);
     for (const run of [
       () => reopened.read(request),
       () => reopened.claim(request),
@@ -1116,8 +1254,8 @@ describe('host-only E2EE realtime journal', () => {
       () => journal.finish(permit, outcome),
       () => journal.retainResponse(permit, { index: 1, frame: responseFrame }),
     ])
-      expectCode(run, 'storage');
-    expect(snapshotDatabase(filename)).toEqual(committed);
+      expectCode(run, 'reset_required');
+    expect(snapshotDatabase(archive)).toEqual({ ...committed, mode: 'delete' });
   });
 
   it('gives competing native SQLite connections at most one start permit on the current schema', async () => {

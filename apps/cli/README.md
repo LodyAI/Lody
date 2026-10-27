@@ -14,6 +14,31 @@ Install the CLI package:
 npm install -g lody@next
 ```
 
+## Local encrypted execution log recovery
+
+Stop the journal's execution owners, then run:
+
+```sh
+lody e2ee journal reset --file /absolute/path/to/journal.sqlite --json
+```
+
+The command works offline and returns `archivePath` and `journalPath`. It renames
+and preserves the old execution log, creates a fresh log, and retains old current-format
+request ID fences in the adjacent `.control.sqlite`. Keep that file and the archive;
+unknown results are not automatically retried. Restart owners after reset. Retrying
+this command completes an interrupted reset using the same archive path.
+
+A clock error asks you to calibrate the system clock. Without trusted reference time,
+a bad observation can still reject new claims in its workspace until explicit reset;
+other workspaces and completed evidence remain available. Empty interrupted first
+creation initializes automatically. An unknown schema is archived and reported,
+then waits for explicit reset. No legacy data is imported.
+
+This maintenance command is available by its explicit name and hidden from general
+CLI help. The journal has no product dispatch caller yet, so there is no default
+product path or desktop reset button. See the
+[recovery decision](../../.agents/notes/proposed/bug-fix/2026-10-27-e2ee-realtime-journal-recovery.md).
+
 ## Development type checking
 
 `tsconfig.json` includes source and tests so editor language servers resolve the

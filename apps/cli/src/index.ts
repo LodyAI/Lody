@@ -45,6 +45,7 @@ import { githubCommand } from './commands/github';
 import { daemonCommand } from './commands/daemon';
 import { daemonRunnerCommand } from './commands/daemon-runner';
 import { internalCommand } from './commands/internal';
+import { e2eeCommand } from './commands/e2ee';
 import { feedbackCommand } from './commands/feedback';
 import { mcpCommand } from './commands/mcp';
 import { agentRoleCommand } from './commands/discovery';
@@ -122,6 +123,7 @@ program.addCommand(daemonCommand);
 program.addCommand(daemonRunnerCommand);
 program.addCommand(internalCommand);
 program.addCommand(feedbackCommand);
+program.addCommand(e2eeCommand, { hidden: true });
 // Configure commander to show help when no arguments provided
 program.configureHelp({
   sortSubcommands: true,
