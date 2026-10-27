@@ -3,7 +3,7 @@
 Document content (exported through `@lody/e2ee-core/protocol`; the Streams binding through `@lody/e2ee-core/adapters/loro-streams`, host admission through `@lody/e2ee-core/host`) implements the settled Loro/Flock update/snapshot workflow.
 It preserves content v0 wire bytes, purpose domains, scoped document HKDF and
 XChaCha20-Poly1305. The four document purposes share a leaf but have distinct
-signature/AAD contexts. 
+signature/AAD contexts.
 
 `deriveDocumentKey(scope, epochKey)`, `importDocumentKey(scope, bytes)` and
 `exportDocumentKey(key)` are synchronous Result functions. A document leaf is
@@ -85,6 +85,13 @@ check. A change during signing fails instead of silently re-encrypting. Each
 key read must transfer a fresh owned opaque epoch key; the codec verifies its real
 ledger commitment before deriving a scoped leaf and clears both after use.
 Historical signatures are checked before untrusted frame epochs can request keys.
+Content snapshots also require a current non-Guest personal/machine writer before
+key lookup and after decryption. Snapshot opens reuse their owned authenticated
+frame for AEAD and recheck current permission against a genuine extending ledger;
+they do not repeat signature verification on unchanged bytes. Historical update
+reads retain their previous verification path. The product's native-snapshot MVP
+and replay/trim recovery policy are recorded in the
+[PR-17 note](../../../../../.agents/notes/proposed/architecture/2026-10-27-e2ee-native-content-snapshots.md).
 It contains no Promise runner, production protector or SDK transport. Lab owns the
 actual SDK bridge, plaintext disposal after use and transport/native lifetime.
 The sole snapshot provider header is `[4]`. Snapshot content v0 inserts a u16be

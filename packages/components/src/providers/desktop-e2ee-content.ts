@@ -28,7 +28,13 @@ export function createDesktopE2eeContent(input: {
   const content: WorkspaceStreamsContent = {
     mode: 'protected',
     namespace: encryptedWorkspaceNamespace(input.genesisHash),
-    snapshotUpload: { canUpload: async () => false },
+    snapshotUpload: {
+      // SDK schedules only after local writes, suppresses a competing writer,
+      // and checks the remote snapshot before exporting a new one.
+      canUpload: () => !keyUpdateRequired,
+      debounceMs: 30_000,
+      minBytesSinceRemoteSnapshot: 1024 * 1024,
+    },
     resolve: encryptedWorkspaceResolver(
       input.workspaceId,
       (room) =>

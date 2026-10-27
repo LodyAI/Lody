@@ -88,9 +88,12 @@ describe('desktop E2EE content epoch safety', () => {
         plaintext: new Uint8Array([1, 2]),
         additionalData: () => new Uint8Array([3]),
       };
+      if (access.content.mode !== 'protected') throw new Error('expected protected content');
+      expect(await access.content.snapshotUpload.canUpload()).toBe(true);
       await room.config.provider.seal(request);
       const accepted = received.slice();
       access.updateStatus(status);
+      expect(await access.content.snapshotUpload.canUpload()).toBe(false);
       doc.getText('draft').insert(0, 'saved locally while keys update');
       doc.commit();
       await expect(

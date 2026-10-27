@@ -1,0 +1,56 @@
+diff --git a/dist/stream-id-CkYX5Gw_.js b/dist/stream-id-CkYX5Gw_.js
+index 6768860ab31b380e6e058a564439b779f6bfef89..0e0798f7d006c51da11828c291907e05c3c3106a 100644
+--- a/dist/stream-id-CkYX5Gw_.js
++++ b/dist/stream-id-CkYX5Gw_.js
+@@ -1,6 +1,8 @@
+ import { $ as parseRetryAfterMs, A as normalizeSnapshotUploadConfig, C as isReadNoProgress, D as mergeAbortSignals, E as jsonObjectEquals, F as toTransportError, H as normalizePayloadProtection, J as encodeItems, K as BINARY_CONTENT_TYPE, M as parseSseControlData$1, O as normalizeAuthProvider, P as sleep, Q as StreamRequestRouter, S as isPayloadTooLargeError, T as isStreamNotFoundError, X as MIN_SUCCESSFUL_SSE_DURATION_MS, Y as DEFAULT_RECONNECT_CONFIG, Z as computeRetryDelay, _ as classifyFetchError, at as recordErrorContext, b as decodeSseItemPayloads, d as makeEphemeralStream, et as Deque, f as HttpError, g as TimeoutError, h as ProtocolError, it as originalThrown, j as parseSnapshotByteOffset, k as normalizeSnapshotCodec, l as ephemeralAuthLegacy, m as LocalAppendFailedError, n as CrdtApplyIncompleteError, nt as atSyncErrorBoundary, p as InitialSyncTimeoutError, q as decodeItems, r as TransportCursorManager, rt as errorContext, s as EphemeralFailure, tt as atErrorBoundary, v as createProducerId, w as isSseUnsupportedErrorText$1, x as isAuthOrProtocolError, y as decodeMultipartPartItems } from "./upload-capability-DwA4z9F1.js";
+ import { Cause, Context, Effect, Exit, Layer, ManagedRuntime, Scope } from "effect";
+ import { StreamsClient, createDiagnosticId, safeRequestId, thrownToStreamError } from "@loro-dev/streams-client";
++// Failed protected snapshot decoding is identified before any CRDT import or cursor save.
++const rejectedProtectedSnapshots = new WeakSet();
+ //#region src/ephemeral-runtime.ts
+ var LegacyRoom = class extends Context.Service()("@loro-dev/streams-crdt/LegacyRoom") {};
+ /** Complete failures at the Promise boundary. This object is not safe diagnostic data. */
+@@ -1181,8 +1183,15 @@ var StreamsCrdt = class StreamsCrdt {
+ 	composeSnapshotDecoder(payloadProtection, decompressSnapshot) {
+ 		if (payloadProtection == null && decompressSnapshot == null) return;
+ 		return async (snapshot, continuationOffset) => {
+-			const clearSnapshot = payloadProtection == null ? snapshot : await payloadProtection.decodeSnapshot(snapshot, continuationOffset);
+-			return decompressSnapshot == null ? clearSnapshot : await decompressSnapshot(clearSnapshot);
++			try {
++				const clearSnapshot = payloadProtection == null ? snapshot : await payloadProtection.decodeSnapshot(snapshot, continuationOffset);
++				return decompressSnapshot == null ? clearSnapshot : await decompressSnapshot(clearSnapshot);
++			} catch (cause) {
++				if (payloadProtection == null) throw cause;
++				const error = new Error("Encrypted snapshot could not be opened", { cause });
++				rejectedProtectedSnapshots.add(error);
++				throw error;
++			}
+ 		};
+ 	}
+ 	composeSnapshotEncoder(payloadProtection, compressSnapshot) {
+@@ -1947,7 +1956,23 @@ var StreamsCrdt = class StreamsCrdt {
+ 	async bootstrapState(cursor, options = {}) {
+ 		const cursorManager = options.cursorManager ?? this.cursorManager;
+ 		const result = await atErrorBoundary({ stage: "bootstrap" }, () => this.client.bootstrap(options.signal, options.timeoutMode));
+-		let saved = await cursorManager.applyBootstrapPayload(cursor, result.snapshot, result.updates, result.nextOffset, result.upToDate, result.snapshotOffset);
++		let saved;
++		try {
++			saved = await cursorManager.applyBootstrapPayload(cursor, result.snapshot, result.updates, result.nextOffset, result.upToDate, result.snapshotOffset);
++		} catch (error) {
++			if (!rejectedProtectedSnapshots.has(error)) throw error;
++			this.logDebug("ignoring rejected encrypted snapshot; replaying history");
++			// Never reuse the bootstrap suffix: rejected snapshot state was not imported.
++			// Read from origin once, with the same protected update decoder and durability barrier.
++			const replayed = await this.catchupOrGone(this.createInitialCursor(), {
++				goneStrategy: "return-gone",
++				cursorManager,
++				signal: options.signal,
++				timeoutMode: options.timeoutMode
++			});
++			if ("kind" in replayed) throw recordErrorContext(new ProtocolError("Encrypted snapshot is unavailable or invalid and history was trimmed", 410), { source: "payload_protection", stage: "bootstrap", originalCode: "gone", status: 410 });
++			return replayed;
++		}
+ 		let bootstrapCursor = result.streamCursor;
+ 		if (!result.upToDate) {
+ 			const caughtUp = await this.catchupOrGone(saved, {

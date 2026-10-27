@@ -23,7 +23,9 @@ export interface StreamsDocumentBindingOptions {
  *
  * Every seal checks current write permission before encryption and again after
  * signing; every open verifies the historical signature before requesting a
- * key and the AEAD after. Lives in the caller's Scope, which awaits active
+ * key and the AEAD after. Snapshot reads additionally require the signer to be
+ * a current writer, including after decryption; old update reads remain valid.
+ * Lives in the caller's Scope, which awaits active
  * operations on close. See {@link makeStreamsUpdateBinding} for the callback form.
  *
  * Requires `WorkspaceScope`, `DeviceIdentity`, `VerifiedLedger` and

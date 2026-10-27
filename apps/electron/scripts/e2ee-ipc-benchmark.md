@@ -74,3 +74,54 @@ scheduling overhead. Medians of independent phases do not sum exactly.
 
 These local synthetic measurements do not establish whole-product or all-platform
 performance. No renderer key export or change to core cryptography was introduced.
+
+## PR-17 native snapshot trial (2026-10-27)
+
+```sh
+env -u ELECTRON_RUN_AS_NODE LODY_E2EE_BENCHMARK_SNAPSHOTS=1 LODY_E2EE_BENCHMARK_EDITS=20 apps/electron/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron apps/electron/scripts/e2ee-ipc-benchmark.cjs
+```
+
+The new optional mode uploads a native snapshot using the actual SDK, then appends
+a four-character suffix. Both arms use the production zstd snapshot codec. Twenty
+separately committed/uploaded map revisions follow the same initial 3 MB random
+hexadecimal text fixture before snapshot capture. Fresh replicas verify the final
+text length and revision, then read back and restore the committed IndexedDB
+state/cursor pair. Main retains the synthetic signing key and epoch key. Hidden
+window throttling is disabled. Twelve pairs alternate order; the first two are
+excluded, leaving ten samples per arm.
+
+Measured on darwin arm64, Electron 44.9.3 / embedded Node 24.22.0:
+
+| Snapshot-first SDK sync |   Median |      p95 |
+| ----------------------- | -------: | -------: |
+| Ordinary                | 56.60 ms | 58.50 ms |
+| Encrypted               | 79.50 ms | 80.80 ms |
+
+Median ratio: **1.4046×**, below the 1.5× goal in this synthetic trial. This is a
+snapshot-plus-suffix comparison, not encrypted full history versus ordinary
+snapshots. An earlier single-write trial with three signature passes measured
+1.5596×. The final snapshot reader verifies the owned frame once before key
+lookup, checks AEAD, and checks current writer permission again against a genuine
+ledger continuation; updates retain their existing path.
+
+Matched full-history trials with 2, 20 and 200 revisions did not complete within
+the 90-second harness bound, including after disabling hidden-window throttling.
+Tracing located the small trial in the first ordinary replica's catch-up; a later
+diagnostic run completed that one ordinary sample in 86.60 seconds, then hit the
+watchdog during the protected sample. No paired median exists. The cause remains
+unproven. These failed trials
+establish neither a speedup value nor a product replay failure. The earlier
+single-write full-history trial on this machine completed at 48.60 / 77.70 ms
+(ordinary / encrypted), but its fixture differs from the 20-revision trial.
+
+`LODY_E2EE_BENCHMARK_EDITS` defaults to zero and is bounded at 1000.
+`LODY_E2EE_BENCHMARK_SNAPSHOTS` defaults off, retaining the M2 trial.
+`LODY_E2EE_BENCHMARK_TRACE=1` emits synthetic sample/cursor labels to stderr.
+Representative crypto phase rows use the last captured update frame, which is
+small in the snapshot trial; they must not be read as snapshot critical-path spans.
+
+Real gateway verification was blocked because the local Docker daemon socket was
+absent. Production trim grace (assumed 48 hours), authenticated gateway behavior,
+workspace-directory/React startup, installed apps and other platforms remain
+unverified. The [MVP note](../../../.agents/notes/proposed/architecture/2026-10-27-e2ee-native-content-snapshots.md)
+records the explicit native-offset trust trade-off and recovery policy.

@@ -8,7 +8,12 @@ import * as Bytes from '../foundation/bytes';
 import { disposeEpochKey } from '../foundation/epoch-key';
 import { keyId } from '../foundation/identifiers';
 import { ContentError } from '../foundation/errors';
-import { epochHistoryPacket, requireLedgerContinuation, type LedgerView } from '../ledger';
+import {
+  contentPermissions,
+  epochHistoryPacket,
+  requireLedgerContinuation,
+  type LedgerView,
+} from '../ledger';
 import { commitEpochKey } from '../keys/history';
 import type { DeviceSigner } from '../foundation/signing';
 import {
@@ -21,7 +26,8 @@ import {
   contentSigningBytes,
   type ContentScope,
 } from '../foundation/content-format';
-import { scopedDocumentKey } from './document-key';
+import { documentKeyForScope, scopedDocumentKey } from './document-key';
+import { openContentAead } from '../crypto/content';
 import { admitDocument, authenticateDocument, openDocument, sealDocument } from './index';
 import { verifySignatureEffect, NativeSignatureError } from '../foundation/signature';
 import { bytesEqual } from '../foundation/cbor';
@@ -142,6 +148,15 @@ export function makeStreamsUpdateBinding(input: {
             ? 'flock-snapshot'
             : 'flock-update',
     });
+    const snapshotWriter = (view: LedgerView, frame: Uint8Array) =>
+      Result.gen(function* () {
+        const device = yield* Bytes.signingPublicKey(frame.subarray(7, 39));
+        const permissions = yield* Result.mapError(contentPermissions(view, device), () =>
+          error('unauthorized')
+        );
+        if (!permissions.mayWriteDocument) return yield* Result.fail(error('unauthorized'));
+        return undefined;
+      });
     const withKey = <A, E, R>(
       view: LedgerView,
       number: number,
@@ -226,13 +241,34 @@ export function makeStreamsUpdateBinding(input: {
             );
             const view = yield* ledger();
             // Untrusted epoch metadata cannot trigger key lookup until fixed historical authentication succeeds.
-            yield* Effect.fromResult(
+            const authenticated = yield* Effect.fromResult(
               authenticateDocument(view, scope(metadata.epoch, selected.kind), frame, binding)
             );
+            if (selected.kind === 'snapshot') yield* Effect.fromResult(snapshotWriter(view, frame));
             return yield* withKey(view, metadata.epoch, selected.kind, (key) =>
               Effect.gen(function* () {
                 const opened = yield* Effect.fromResult(
-                  openDocument(view, scope(metadata.epoch, selected.kind), key, frame, binding)
+                  selected.kind === 'snapshot'
+                    ? Result.gen(function* () {
+                        // frame and binding are owned copies already authenticated above.
+                        const parsed = yield* parseContentFrame(
+                          frame,
+                          scope(metadata.epoch, selected.kind).purpose
+                        );
+                        const leaf = yield* documentKeyForScope(
+                          key,
+                          scope(metadata.epoch, selected.kind)
+                        );
+                        const plaintext = yield* openContentAead(
+                          leaf,
+                          authenticated.header,
+                          parsed.nonce,
+                          parsed.ciphertext,
+                          binding
+                        );
+                        return { header: authenticated.header, plaintext };
+                      })
+                    : openDocument(view, scope(metadata.epoch, selected.kind), key, frame, binding)
                 );
                 return yield* Effect.acquireUseRelease(
                   Effect.succeed(opened.plaintext),
@@ -245,12 +281,16 @@ export function makeStreamsUpdateBinding(input: {
                         return yield* error('invalid-snapshot-offset');
                       const latest = yield* ledger();
                       yield* Effect.fromResult(
-                        authenticateDocument(
-                          latest,
-                          scope(metadata.epoch, selected.kind),
-                          frame,
-                          binding
-                        )
+                        // ledger() proved that latest extends the authenticated view.
+                        // The owned frame has not changed; only current permission can change.
+                        selected.kind === 'snapshot'
+                          ? snapshotWriter(latest, frame)
+                          : authenticateDocument(
+                              latest,
+                              scope(metadata.epoch, selected.kind),
+                              frame,
+                              binding
+                            )
                       );
                       return new Uint8Array(plaintext);
                     }),

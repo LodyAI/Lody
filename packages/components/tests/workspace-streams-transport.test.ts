@@ -26,6 +26,8 @@ import {
 import { hashRecordBytes, recordSigningBytes, verifyLedger } from '@lody/e2ee-core/protocol';
 import { encodeCbor } from '@lody/e2ee-core/protocol';
 import { encodeStreamsRoomAdditionalData } from 'loro-repo/transport/streams';
+import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
+import { RepoSyncError, RepoTransportError } from 'loro-repo';
 import { PayloadProtectionError } from '@loro-dev/streams-crdt';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Flock } from '@loro-dev/flock-wasm';
@@ -154,8 +156,7 @@ async function settle<T>(operation: Promise<T>, timeout = 5_000): Promise<T> {
 }
 
 afterEach(async () => {
-  for (const transport of openTransports)
-    await settle(transport.close(), 10_000);
+  for (const transport of openTransports) await settle(transport.close(), 10_000);
   openTransports.clear();
   for (const tab of openTabs) await settle(tab.repo.destroy(), 10_000);
   openTabs.clear();
@@ -205,7 +206,6 @@ function transportFor(
   cursorStore?: RemoteCursorStore
 ) {
   const transport = createWorkspaceStreamsTransport({
-
     repo: tab.repo,
     workspaceId: tab.workspaceId,
     documentRemoteCursorStore:
@@ -229,11 +229,16 @@ const docUrl = (workspaceId: WorkspaceId, docId: string) =>
 
 /** Byte storage only: CRDT encoding, merge, protection and cursor logic all run in the SDK. */
 function createByteServer() {
-  type Room = { batches: Uint8Array[]; snapshot?: { offset: string; body: Uint8Array } };
+  type Room = {
+    batches: Uint8Array[];
+    trimmed?: boolean;
+    snapshot?: { offset: string; body: Uint8Array };
+  };
   const rooms = new Map<string, Room>();
   const requests: { url: URL; method: string; body: Uint8Array; auth: string | null }[] = [];
   const live = new Map<string, ReadableStreamDefaultController<Uint8Array>>();
   const liveReady = Promise.withResolvers<void>();
+  const snapshotReady = Promise.withResolvers<void>();
   const room = (path: string) => {
     let value = rooms.get(path);
     if (!value) {
@@ -266,8 +271,10 @@ function createByteServer() {
       });
     }
     if (method === 'PUT') {
-      if (url.pathname.includes('/snapshot/'))
+      if (url.pathname.includes('/snapshot/')) {
         value.snapshot = { offset: decodeURIComponent(url.pathname.split('/').at(-1)!), body };
+        snapshotReady.resolve();
+      }
       return new Response(null, { status: 204 });
     }
     if (method === 'HEAD')
@@ -296,6 +303,8 @@ function createByteServer() {
       );
     }
     const from = url.searchParams.get('offset');
+    if (value.trimmed && (from === '-1' || from === null))
+      return new Response(null, { status: 410 });
     // The server assigns byte offsets; consumers only retain and return these tokens.
     let bytes = 0;
     const start =
@@ -339,7 +348,15 @@ function createByteServer() {
     });
   };
   vi.stubGlobal('fetch', fetch);
-  return { room, requests, live, liveReady: liveReady.promise, offset, tail };
+  return {
+    room,
+    requests,
+    live,
+    liveReady: liveReady.promise,
+    snapshotReady: snapshotReady.promise,
+    offset,
+    tail,
+  };
 }
 
 /** Synthetic reversible provider: verifies SDK AAD binding; deliberately not cryptography. */
@@ -544,7 +561,7 @@ describe('workspace Streams content boundary', () => {
     }
   );
 
-  it('rejects an unprotected snapshot before import and keeps the cursor absent', async () => {
+  it('ignores an unprotected snapshot and replays the available empty history', async () => {
     const server = createByteServer();
     const tab = await openTab(`bad-snapshot-${++sequence}` as WorkspaceId);
     const source = new LoroDoc();
@@ -558,9 +575,9 @@ describe('workspace Streams content boundary', () => {
     const doc = (await tab.repo.openPersistedDoc('doc-a')).doc;
     const cursor = createResilientRemoteCursorStore({ dbName: tab.cursorDbName });
     const result = await transportFor(tab, protectedContent(), cursor).syncDoc('doc-a', doc);
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
     expect(doc.toJSON()).toEqual({});
-    expect(await cursor.load(url)).toBeNull();
+    expect((await cursor.load(url))?.nextOffset).toBe(server.offset(0));
   });
 
   it.each(['meta', 'flock'] as const)(
@@ -732,6 +749,7 @@ describe('workspace Streams content boundary', () => {
       await vi.advanceTimersByTimeAsync(10);
       if (permission !== 'allow') expect(server.room(path).snapshot).toBeUndefined();
     }
+    await server.snapshotReady;
     const snapshot = server.room(path).snapshot;
     expect(snapshot).toBeDefined();
     expect(snapshot!.body[0]).not.toBe(42);
@@ -945,7 +963,7 @@ function cryptoTestProtection(
         verifyContentSignature(input.sealed, scope, syntheticSigner, input.additionalData),
         'decrypt_failed'
       );
-      if (options.fault === 'missing-key')
+      if (options.fault === 'missing-key' && (!options.snapshotOnly || snapshot))
         throw new PayloadProtectionError('missing_read_key', 'synthetic key detail');
       const trustedHeader = {
         ...scope,
@@ -1103,7 +1121,7 @@ describe('P10 public crypto and published SDK preparation', () => {
     }
   );
 
-  it.each(['valid', 'signature', 'tag', 'position'] as const)(
+  it.each(['valid', 'signature', 'tag', 'position', 'missing-key', 'trimmed'] as const)(
     'verifies the signed v0 snapshot before decompress/import/save (%s)',
     async (fault) => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
@@ -1115,7 +1133,12 @@ describe('P10 public crypto and published SDK preparation', () => {
           mode: 'protected',
           config: {
             provider: cryptoTestProtection({
-              fault: fault === 'signature' || fault === 'tag' ? fault : undefined,
+              fault:
+                fault === 'trimmed'
+                  ? 'signature'
+                  : fault === 'signature' || fault === 'tag'
+                    ? fault
+                    : undefined,
               snapshotOnly: true,
             }),
           },
@@ -1128,6 +1151,7 @@ describe('P10 public crypto and published SDK preparation', () => {
       doc.commit();
       await settle(subscription.waitUntilSynced());
       await vi.advanceTimersByTimeAsync(10);
+      await server.snapshotReady;
       const url = docUrl(writer.workspaceId, 'doc-a');
       const snapshot = server.room(new URL(url).pathname).snapshot;
       expect(snapshot).toBeDefined();
@@ -1152,7 +1176,7 @@ describe('P10 public crypto and published SDK preparation', () => {
             hostBinding
           )
         )
-      ).toBe(fault !== 'signature');
+      ).toBe(fault !== 'signature' && fault !== 'trimmed');
       // Provider field stays [4]; the continuation follows the signer inside
       // the signed/AEAD-bound content frame, not the encrypted plaintext.
       expect([snapshot!.body[10], snapshot!.body[11]]).toEqual([4, 0]);
@@ -1160,13 +1184,18 @@ describe('P10 public crypto and published SDK preparation', () => {
         Result.getOrThrow(inspectContentFrame(snapshot!.body.slice(11), 'doc-snapshot'))
           .continuationOffset
       ).toBe(snapshot!.offset);
+      const snapshotState = doc.toJSON();
+      doc.getMap('data').set('suffix', 'after snapshot');
+      doc.commit();
+      await settle(subscription.waitUntilSynced());
       if (fault === 'position') snapshot!.offset = server.offset(Number(snapshot!.offset) + 1);
+      if (fault === 'trimmed') server.room(new URL(url).pathname).trimmed = true;
       subscription.unsubscribe();
       const readerId = `v0-snapshot-r-${sequence}` as WorkspaceId;
       const reader = await openTab(readerId);
       reader.workspaceId = writer.workspaceId;
       const restored = (await reader.repo.openPersistedDoc('doc-a')).doc;
-      if (fault !== 'valid') {
+      if (fault === 'trimmed') {
         restored.getMap('data').set('draft', 'keep local draft');
         restored.commit();
         await reader.repo.persistDocNow('doc-a', restored);
@@ -1176,7 +1205,15 @@ describe('P10 public crypto and published SDK preparation', () => {
       const cursor = createResilientRemoteCursorStore({ dbName: reader.cursorDbName });
       const decompressed: Uint8Array[] = [];
       const readerContent = protectedContent({
-        resolve: () => ({ mode: 'protected', config: { provider: cryptoTestProtection() } }),
+        resolve: () => ({
+          mode: 'protected',
+          config: {
+            provider: cryptoTestProtection({
+              fault: fault === 'missing-key' ? 'missing-key' : undefined,
+              snapshotOnly: true,
+            }),
+          },
+        }),
         snapshotCodec: {
           compress: streamsSnapshotCodec.compress,
           async decompress(bytes) {
@@ -1186,28 +1223,40 @@ describe('P10 public crypto and published SDK preparation', () => {
           },
         },
       });
-      const result = await settle(transportFor(reader, readerContent, {
+      const readerTransport = transportFor(reader, readerContent, {
         load: (key) => cursor.load(key),
         async save(value) {
           const disk = await openTab(readerId);
-          expect((await disk.repo.openPersistedDoc('doc-a')).doc.toJSON()).toEqual(doc.toJSON());
+          expect((await disk.repo.openPersistedDoc('doc-a')).doc.toJSON()).toEqual(
+            restored.toJSON()
+          );
           await cursor.save(value);
         },
-      }).syncDoc('doc-a', restored));
-      expect(result.ok).toBe(fault === 'valid');
-      if (fault === 'valid') {
-        expect(decompressed).toHaveLength(1);
-        const checked = new LoroDoc();
-        checked.import(decompressed[0]!);
-        expect(checked.toJSON()).toEqual(doc.toJSON());
+      });
+      const result = await settle(readerTransport.syncDoc('doc-a', restored));
+      expect(result.ok).toBe(fault !== 'trimmed');
+      if (fault !== 'trimmed') {
+        expect(decompressed).toHaveLength(fault === 'valid' ? 1 : 0);
+        if (fault === 'valid') {
+          const checked = new LoroDoc();
+          checked.import(decompressed[0]!);
+          expect(checked.toJSON()).toEqual(snapshotState);
+          checked.free();
+        }
         expect(restored.toJSON()).toEqual(doc.toJSON());
-        expect((await cursor.load(url))?.nextOffset).toBe(snapshot!.offset);
+        expect((await cursor.load(url))?.nextOffset).toBe(server.tail(new URL(url).pathname));
       } else {
         if (!result.ok)
           expect(result.error).toMatchObject({
-            payloadProtectionReason: 'decrypt_failed',
+            streamsCode: 'protocol_error',
             retryable: false,
           });
+        if (!result.ok)
+          expect(
+            createLoroSyncErrorTools({ RepoSyncError, RepoTransportError }).formatLoroSyncError(
+              result.error
+            )
+          ).toContain('publish a fresh snapshot');
         expect(decompressed).toEqual([]);
         expect(restored.toJSON()).toEqual(savedBefore);
         expect(server.requests.filter((request) => request.method === 'POST')).toHaveLength(
@@ -1216,6 +1265,28 @@ describe('P10 public crypto and published SDK preparation', () => {
         expect(await cursor.load(url)).toBeNull();
         const disk = await openTab(readerId);
         expect((await disk.repo.openPersistedDoc('doc-a')).doc.toJSON()).toEqual(savedBefore);
+        // A healthy device can replace the single native snapshot. The same
+        // reader retries without clearing its cursor database or local draft.
+        const continuationOffset = server.tail(new URL(url).pathname);
+        const repaired = await cryptoTestProtection().seal({
+          context: {
+            protocol: 'loro-streams-crdt-payload-protection',
+            version: 2,
+            kind: 'snapshot',
+            continuationOffset,
+          },
+          plaintext: await streamsSnapshotCodec.compress(doc.export({ mode: 'snapshot' })),
+          additionalData: () => hostBinding,
+        });
+        server.room(new URL(url).pathname).snapshot = {
+          offset: continuationOffset,
+          body: new Uint8Array([...snapshot!.body.slice(0, 11), ...repaired.sealed]),
+        };
+        expect((await settle(readerTransport.syncDoc('doc-a', restored))).ok).toBe(true);
+        expect(restored.toJSON()).toEqual({
+          data: { ...doc.toJSON().data, draft: 'keep local draft' },
+        });
+        expect((await cursor.load(url))?.nextOffset).toBe(server.tail(new URL(url).pathname));
       }
     }
   );

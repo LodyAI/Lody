@@ -7,7 +7,7 @@ section lists the ports it requires; `E2eeWorkflows` wires them all together.
 
 ## VerifiedLedger
 
-*Requires `WorkspaceScope`, `LedgerViewSource`, `LedgerPinStore`.*
+_Requires `WorkspaceScope`, `LedgerViewSource`, `LedgerPinStore`._
 
 The single rollback and fork guard. `current()` fetches a view and accepts it
 only if all of the following hold:
@@ -25,8 +25,8 @@ history; global freshness still depends on the log not hiding records.
 
 ## LedgerFeed
 
-*Requires `WorkspaceScope`, `LedgerFeedStore`. Options: origin, expected
-checkpoint, budget.*
+_Requires `WorkspaceScope`, `LedgerFeedStore`. Options: origin, expected
+checkpoint, budget._
 
 The local verified copy of the ledger. The origin is either the genesis record
 or an endorsed snapshot whose `trust` is supplied again on every open. Opening
@@ -39,7 +39,7 @@ never delete committed history. `LedgerFeed.viewSource` turns the feed into a
 
 ## LedgerSubmission
 
-*Requires `WorkspaceScope`, `SubmissionJournal`, `LedgerLog`.*
+_Requires `WorkspaceScope`, `SubmissionJournal`, `LedgerLog`._
 
 Exactly-once submission of one signed record per workspace:
 
@@ -57,8 +57,8 @@ refuses a log that rolled back.
 
 ## InstalledEpochKeys and InstalledEpochHistory
 
-*Requires `WorkspaceScope`, `DeviceIdentity`, `VerifiedLedger`, `KeyProtector`,
-`InstalledKeyStore`.*
+_Requires `WorkspaceScope`, `DeviceIdentity`, `VerifiedLedger`, `KeyProtector`,
+`InstalledKeyStore`._
 
 The only owner of local key material. `saveAndReload(epoch, key)` works in
 this order:
@@ -68,7 +68,7 @@ this order:
    `purpose ‖ genesis ‖ device ‖ epoch ‖ commitment ‖ key`.
 2. Verify the new blob opens.
 3. Store it; the first stored blob wins.
-4. Succeed only after the *stored* blob reopens and matches.
+4. Succeed only after the _stored_ blob reopens and matches.
 
 An unreadable stored blob may be replaced only by a new blob that already
 opened and matched. `read(epoch)` returns a fresh opaque key that the caller
@@ -83,8 +83,8 @@ return the one requested. Corrupt, permission and storage failures are never
 
 ## KeyReceiver
 
-*Requires `WorkspaceScope`, `DeviceIdentity`, `VerifiedLedger`,
-`InstalledEpochKeys`, `KeyMailbox`, `ReceiveJournal`.*
+_Requires `WorkspaceScope`, `DeviceIdentity`, `VerifiedLedger`,
+`InstalledEpochKeys`, `KeyMailbox`, `ReceiveJournal`._
 
 Installs keys this device receives and reports them.
 
@@ -111,8 +111,8 @@ results() / acknowledge(id)   ended tasks until acknowledged
 
 ## KeyRepair
 
-*Requires `WorkspaceScope`, `DeviceIdentity`, `VerifiedLedger`, `KeyMailbox`,
-`RepairJournal`.*
+_Requires `WorkspaceScope`, `DeviceIdentity`, `VerifiedLedger`, `KeyMailbox`,
+`RepairJournal`._
 
 Asks senders for a fresh envelope when this device cannot install the current
 key. `enqueue(id, rejectedDigest?)` durably binds a caller-chosen stable id to
@@ -124,8 +124,8 @@ installation.
 
 ## KeyDistributor
 
-*Requires the receiver's ports plus `KeyReceiver`, `DeliveryOutbox`,
-`DistributionJournal`, `EpochPublicationSource`.*
+_Requires the receiver's ports plus `KeyReceiver`, `DeliveryOutbox`,
+`DistributionJournal`, `EpochPublicationSource`._
 
 Makes sure every current device can obtain the current key.
 
@@ -145,9 +145,9 @@ tasks with `task-limit`; acknowledging frees capacity without deleting history.
 
 ## EpochPublisher
 
-*Requires `WorkspaceScope`, `DeviceIdentity`, `VerifiedLedger`,
+_Requires `WorkspaceScope`, `DeviceIdentity`, `VerifiedLedger`,
 `InstalledEpochKeys`, `CandidateProtector`, `EpochStagingStore`,
-`LedgerSubmission`, `EpochCandidateStore`.*
+`LedgerSubmission`, `EpochCandidateStore`._
 
 Rotates the epoch key (`publish`), or removes a member and rotates in one
 signed record (`publishRemoving`, owner only).
@@ -169,14 +169,14 @@ confidentiality break.
 
 ## WorkspaceControl and the key round
 
-`WorkspaceControl` (*requires `DeviceIdentity`, `LedgerSubmission`,
-`LedgerSync`*) signs ordinary commands (admit member or device, set role,
+`WorkspaceControl` (_requires `DeviceIdentity`, `LedgerSubmission`,
+`LedgerSync`_) signs ordinary commands (admit member or device, set role,
 revoke, transfer owner) against a freshly refreshed view and submits each once.
 A pending or unacknowledged submission blocks new signing. A result is
 acknowledged only after the local feed contains the checkpoint it observed.
 
-`runWorkspaceKeyRound(limit, cursors)` (*requires `KeyRepair`, `KeyReceiver`,
-`KeyDistributor`*) is one finite maintenance round: flush repairs, resume
+`runWorkspaceKeyRound(limit, cursors)` (_requires `KeyRepair`, `KeyReceiver`,
+`KeyDistributor`_) is one finite maintenance round: flush repairs, resume
 installs, fetch one mailbox page, send reports, reconcile and send deliveries,
 send reports again, list results. Each queue keeps its own cursor hint.
 
@@ -197,7 +197,7 @@ opens the new personal device's workspace with the recovered keys installed.
 
 ## Recovery
 
-`RecoveryVaults` (*requires `RecoveryVaultStore`, `RecoveryVaultLocalStore`*)
+`RecoveryVaults` (_requires `RecoveryVaultStore`, `RecoveryVaultLocalStore`_)
 creates and unlocks vault-v1 vaults: a recovery file kept offline, or a
 passkey PRF. `makeWorkspaceRecovery` keeps one workspace's recovery entry
 current (setup, test, replace, skip) and performs a restore. A recovery device
@@ -223,7 +223,9 @@ document key derived from the epoch key, and purpose-bound AAD.
   run encrypts anew, so a retry must resend the returned bytes.
 - Reading authenticates the historical author before decrypting. A revoked
   author's old content still opens and is attributed to its original member,
-  also after a snapshot, but this grants no current write right.
+  also after a ledger snapshot, but this grants no current write right. The
+  Streams binding additionally requires content-snapshot signers to remain current
+  writers before key lookup and after decryption; historical updates remain readable.
 
 ## Delivery (inside the distributor)
 

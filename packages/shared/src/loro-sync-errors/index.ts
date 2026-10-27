@@ -86,9 +86,13 @@ export const createLoroSyncErrorTools = (runtime: RepoErrorRuntime) => {
       const failures = collectFailures(error);
       return failures.length
         ? failures
-            .map(
-              (failure) =>
-                `Streams ${failure.phase} failed: ${failure.streamsCode ?? failure.code} (${JSON.stringify(failure)})`
+            .map((failure) =>
+              failure.streamsCode === 'protocol_error' &&
+              failure.streamsContext?.source === 'payload_protection' &&
+              failure.streamsContext.stage === 'bootstrap' &&
+              failure.streamsContext.originalCode === 'gone'
+                ? 'Encrypted snapshot is unavailable or invalid and history was trimmed. Reconnect a device that has the workspace data, let it publish a fresh snapshot, then retry.'
+                : `Streams ${failure.phase} failed: ${failure.streamsCode ?? failure.code} (${JSON.stringify(failure)})`
             )
             .join('; ')
         : undefined;

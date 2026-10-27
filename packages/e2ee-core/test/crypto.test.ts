@@ -1228,6 +1228,54 @@ describe('ledger-bound signed document workflows', () => {
       )
     );
   });
+  it.each(['before-open', 'during-key-read'] as const)(
+    'rejects a revoked snapshot signer (%s) while retaining historical incremental reads',
+    async (revocation) => {
+      const f = ledgerFixture(true);
+      f.addPhone();
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            let revokeDuringRead = false;
+            const reader = yield* makeStreamsUpdateBinding({
+              ...bindingOptions(f),
+              readEpochKey: () =>
+                Effect.sync(() => {
+                  if (revokeDuringRead) {
+                    f.append([5, f.phone.raw]);
+                    revokeDuringRead = false;
+                  }
+                  return read(Bytes.epochKey(source));
+                }),
+            });
+            const writer = yield* makeStreamsUpdateBinding({
+              ...bindingOptions(f),
+              signer: f.phone.signer,
+            });
+            const context = {
+              ...updateContext,
+              kind: 'snapshot' as const,
+              continuationOffset: '0_123',
+            };
+            const snapshot = yield* writer.seal({ ...updateInput, context });
+            const update = yield* writer.seal(updateInput);
+            const request = { ...snapshot, context, additionalData: new Uint8Array([1, 2]) };
+            expect(yield* reader.open(request)).toEqual(updateInput.plaintext);
+            if (revocation === 'before-open') f.append([5, f.phone.raw]);
+            else revokeDuringRead = true;
+            expect(code(yield* Effect.result(reader.open(request)))).toBe('unauthorized');
+            expect(
+              yield* reader.open({
+                ...update,
+                context: updateContext,
+                additionalData: new Uint8Array([1, 2]),
+              })
+            ).toEqual(updateInput.plaintext);
+          })
+        )
+      );
+    }
+  );
   it('refuses an epoch change during native signing and clears the operation-owned key before retry', async () => {
     const f = ledgerFixture(true);
     const nextSecret = new Uint8Array(32).fill(8);
