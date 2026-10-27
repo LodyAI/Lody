@@ -23,13 +23,14 @@ The desktop lease and the ability to consume a launch have different lifetimes.
 Host inspection or fail during the lazy application import. Acknowledging a handoff
 when the lease is acquired therefore proves only port ownership, not delivery.
 
-`desktop-launch-admission.ts` separates those concerns. It starts pending and accepts
-a link only after `index.ts` has bound the existing launch buffer to
-`application.handleDesktopLaunch`. A startup that refuses Host admission, fails
+`desktop-launch-admission.ts` separates those concerns with one first-decision
+promise. A link is accepted only after `index.ts` has bound the existing launch buffer
+to `application.handleDesktopLaunch`. A startup that refuses Host admission, fails
 application import, or exits through the top-level startup failure marks admission
 rejected for that process lifetime; pending and later handoffs receive an explicit
 negative response. Once ready, delivery enters the existing buffer and parser without
-a second routing path.
+a second routing path. Concurrent waiting handoffs are delivered in arrival order
+after admission; a later ready fast path does not overtake them.
 
 The owner waits up to five seconds for admission before replying. The sending client
 waits six seconds, so it observes the owner refusal rather than racing it. A link

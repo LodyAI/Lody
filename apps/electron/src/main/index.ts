@@ -55,7 +55,6 @@ async function start(): Promise<void> {
   // Same-app launches deliver their URL to the primary; they must not be
   // mistaken for a conflict with the other distribution.
   if (!isolatedE2E && !app.requestSingleInstanceLock()) {
-    launchAdmission.markRejected()
     const url = extractDeepLinkFromArgv(process.argv)
     if (process.platform === 'win32' && url) publishDeepLinkToPrimary(url)
     app.quit()
@@ -71,7 +70,6 @@ async function start(): Promise<void> {
       onDeepLink: launchAdmission.accept
     })
     if (!lease) {
-      launchAdmission.markRejected()
       await app.whenReady()
       // Opening lody:// may start this channel while another one owns the
       // desktop lease. Hand a portable destination to that installation, then

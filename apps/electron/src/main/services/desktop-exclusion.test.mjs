@@ -187,6 +187,54 @@ void test('rejected startup refuses pending and later handoffs without delivery'
   assert.deepEqual(delivered, [])
 })
 
+void test('concurrent pending handoffs are delivered in arrival order after ready', async () => {
+  const delivered = []
+  const admission = createDesktopLaunchAdmission((url) => delivered.push(url))
+  const first = admission.accept('lody://session/first')
+  const second = admission.accept('lody://session/second')
+
+  admission.markReady()
+  const third = admission.accept('lody://session/third')
+  assert.equal(await first, true)
+  assert.equal(await second, true)
+  assert.equal(await third, true)
+  assert.deepEqual(delivered, [
+    'lody://session/first',
+    'lody://session/second',
+    'lody://session/third'
+  ])
+})
+
+void test('the first admission decision is final and later handoffs use it', async () => {
+  const readyDelivered = []
+  const ready = createDesktopLaunchAdmission((url) => readyDelivered.push(url))
+  ready.markReady()
+  ready.markRejected()
+  assert.equal(await ready.accept('lody://session/ready-later'), true)
+  assert.deepEqual(readyDelivered, ['lody://session/ready-later'])
+
+  const rejectedDelivered = []
+  const rejected = createDesktopLaunchAdmission((url) => rejectedDelivered.push(url))
+  rejected.markRejected()
+  rejected.markReady()
+  assert.equal(await rejected.accept('lody://session/rejected-later'), false)
+  assert.deepEqual(rejectedDelivered, [])
+})
+
+void test('a delivery failure preserves the original error and does not block later handoffs', async () => {
+  const failure = new Error('synthetic delivery failure')
+  const delivered = []
+  const admission = createDesktopLaunchAdmission((url) => {
+    delivered.push(url)
+    if (url === 'lody://session/bad') throw failure
+  })
+  admission.markReady()
+
+  await assert.rejects(admission.accept('lody://session/bad'), (error) => error === failure)
+  assert.equal(await admission.accept('lody://session/good'), true)
+  assert.deepEqual(delivered, ['lody://session/bad', 'lody://session/good'])
+})
+
 void test('portable destinations use the common resource scheme', () => {
   assert.equal(
     toPortableDesktopDeepLink('ai.lody.nightly://session/session-1?workspace=workspace-1'),

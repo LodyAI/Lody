@@ -56,8 +56,8 @@ Nightly 的运行时策略始终为 `reject`，包括绕过早期预约的隔离
 同一有界租约也承载启动转交。失败通道把通道中立的 `session`、`chat/new` 或
 `provider/import` 目标规范化为公共资源协议，发给当前持有者，并仅在持有者接受后退出。
 认证、邀请、checkout 及其他云端路由不经过该租约；旧版或不可用的持有者保留既有冲突提示。
-持有者校验有界消息，且在启动处理器绑定后才通过既有启动缓冲重放；被拒绝的启动明确拒收，
-不能把无人消费的缓冲当作成功确认。见[启动准入决策](../../implemented/bug-fix/2026-10-28-desktop-handoff-startup-admission.zh.md)。
+持有者校验有界消息，仅在启动准入绑定既有启动处理器后接受；被拒绝的启动明确拒收。
+见[启动准入决策](../../implemented/bug-fix/2026-10-28-desktop-handoff-startup-admission.zh.md)。
 
 目标契约见[桌面通道执行](../../../../specs/desktop-channel-execution.zh.md)。
 
@@ -82,10 +82,9 @@ composition 保留原有单提交展示。关于页面、崩溃报告和问题�
 
 行为测试位于 `desktop-channel.test.mjs` 和现有 `auth-callback-transaction.test.mjs`。
 仍需类型检查和真实打包登录验证。`desktop-exclusion.test.mjs` 覆盖竞争持有、崩溃恢复、
-启动缓冲、退出失败重试、慢启动与被拒绝的启动准入、接受/拒绝转交和便携 URL 规范化。
+启动缓冲、退出失败重试、接受/拒绝转交和便携 URL 规范化。
 `desktop-startup.test.mjs` 构建真实 main bundle，验证冲突时不加载业务/凭据模块，
-成功时重放早期回调；还验证慢启动或正常持有者接受便携启动、Host 冲突启动在新持有者
-启动前持续拒收，以及认证回调不经过租约。
+成功时重放早期回调；还验证便携启动会交给当前持有者而不显示冲突，认证回调不经过租约。
 真实 Host 端点覆盖已有所有者、损坏记录和旧所有者退出后的启动；真实打包 Supervisor
 验证停止/重启不会释放借用的 Host。测试替代 Electron UI 与应用执行，因此不证明安装包
 或系统回调路由；后端来源白名单部署也仍是发布条件。
