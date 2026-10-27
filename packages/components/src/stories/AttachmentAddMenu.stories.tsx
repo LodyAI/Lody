@@ -174,3 +174,17 @@ export const McpOnly: Story = {
     </Frame>
   ),
 };
+
+/** Open the menu and hover the disabled row to see the reason. */
+export const ScheduledSendUnavailable: Story = {
+  args: {
+    isMobile: false,
+    onScheduleSend: noop,
+    scheduleDisabledReason: 'Update the target machine CLI to schedule messages.',
+  },
+  render: (args) => (
+    <Frame>
+      <AttachmentAddMenu {...args} />
+    </Frame>
+  ),
+};
