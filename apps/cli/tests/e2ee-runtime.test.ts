@@ -2419,7 +2419,7 @@ describe('machine E2EE local runtime', () => {
     }
   });
 
-  it('stops an existing content binding when another device is revoked, retaining local edits', async () => {
+  it('keeps an existing content binding sending when another device is revoked', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-rotation-stop-'));
     try {
       const fixture = await execute(setup(directory, 2, join(directory, 'machine'), true));
@@ -2466,7 +2466,7 @@ describe('machine E2EE local runtime', () => {
           yield* runtime.ingest(page(full, fixture.records.length));
           expect((yield* runtime.status()).rotationRequired).toBe(true);
           expect((yield* runtime.status()).hasCurrentKey).toBe(true);
-          expect(Result.isFailure(yield* Effect.result(binding.seal(request)))).toBe(true);
+          expect(Result.isSuccess(yield* Effect.result(binding.seal(request)))).toBe(true);
           expect(new TextDecoder().decode(plaintext)).toBe('local edit retained after revocation');
         })
       );

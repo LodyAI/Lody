@@ -725,7 +725,7 @@ describe('ledger-bound signed document workflows', () => {
     expect(code(admitStreamsUpdateBatch({ ...options, view: f.view() }))).toBe('unauthorized');
   });
   it.each(['tag7', 'tag8', 'rotation-required'] as const)(
-    'admits original sealed updates and snapshots after %s while retaining the new-seal gate',
+    'admits original sealed updates and snapshots after %s while retaining active writer access',
     async (transition) => {
       const f = ledgerFixture(true);
       f.addPhone();
@@ -851,21 +851,22 @@ describe('ledger-bound signed document workflows', () => {
             const next = yield* Effect.result(
               binding.seal({ ...updateInput, additionalData: () => aadFor(false) })
             );
-            if (transition === 'rotation-required') expect(code(next)).toBe('unauthorized');
-            else {
+            expect(Result.isSuccess(next)).toBe(true);
+            {
               const mixed = { ...input, body: batch([old.sealed, read(next).sealed]) };
               expect(read(admitStreamsUpdateBatch(mixed))).toEqual(mixed.body);
               expect(yield* admitStreamsUpdateBatchEffect(mixed)).toEqual(mixed.body);
-              // The same genuinely signed epoch1 bytes were unknown to the old endpoint.
-              expect(
-                code(
-                  admitStreamsUpdateBatch({
-                    ...input,
-                    view: oldView,
-                    body: batch([read(next).sealed]),
-                  })
-                )
-              ).toBe('unauthorized');
+              // Only an actual epoch advance is unknown to the old endpoint.
+              if (transition !== 'rotation-required')
+                expect(
+                  code(
+                    admitStreamsUpdateBatch({
+                      ...input,
+                      view: oldView,
+                      body: batch([read(next).sealed]),
+                    })
+                  )
+                ).toBe('unauthorized');
             }
             // A real signature cannot manufacture an unpublished/future epoch.
             const futureScope = { ...f.scope, epoch: 9 };
@@ -1105,13 +1106,18 @@ describe('ledger-bound signed document workflows', () => {
             f.addPhone();
             f.append([5, f.phone.raw]);
             expect(read(admitStreamsSnapshot({ ...input, view: f.view() }))).toEqual(body);
+            const pendingSeal = yield* binding.seal({
+              ...updateInput,
+              context,
+              additionalData: aadFor,
+            });
             expect(
-              code(
-                yield* Effect.result(
-                  binding.seal({ ...updateInput, context, additionalData: aadFor })
-                )
-              )
-            ).toBe('unauthorized');
+              yield* binding.open({
+                ...pendingSeal,
+                context,
+                additionalData: aadFor(pendingSeal.header),
+              })
+            ).toEqual(updateInput.plaintext);
             expect(yield* authenticateStreamsSnapshotEffect({ ...input, view: f.view() })).toEqual(
               body
             );
@@ -1196,7 +1202,7 @@ describe('ledger-bound signed document workflows', () => {
       )
     );
   });
-  it('blocks current-epoch seals during required rotation and after writer revocation without losing old reads', async () => {
+  it('keeps active seals available during manual rotation while refusing revoked writers', async () => {
     const f = ledgerFixture(true);
     f.addPhone();
     const nextSecret = new Uint8Array(32).fill(8);
@@ -1213,7 +1219,15 @@ describe('ledger-bound signed document workflows', () => {
           const phone = yield* makeStreamsUpdateBinding({ ...options, signer: f.phone.signer });
           const old = yield* phone.seal(updateInput);
           f.append([5, f.phone.raw]);
-          expect(code(yield* Effect.result(owner.seal(updateInput)))).toBe('unauthorized');
+          const pending = yield* owner.seal(updateInput);
+          expect(
+            yield* owner.open({
+              ...pending,
+              context: updateContext,
+              additionalData: new Uint8Array([1, 2]),
+            })
+          ).toEqual(updateInput.plaintext);
+          expect(code(yield* Effect.result(phone.seal(updateInput)))).toBe('unauthorized');
           f.publishEpoch(nextSecret);
           yield* owner.seal(updateInput);
           expect(code(yield* Effect.result(phone.seal(updateInput)))).toBe('unauthorized');

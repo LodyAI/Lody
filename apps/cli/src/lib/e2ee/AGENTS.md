@@ -45,7 +45,7 @@
   installed current key; temporary failure leaves the same pairing retryable.
 
 - Pin M2 write epoch. rotationRequired only prompts administrators to update keys; it
-  must not latch sends off or block workspace use. PR20 owns removal of inherited gates.
+  must not latch sends off or block workspace use. Do not add rotation-hint send guards.
 - Prepared bindings cannot start content replicas. Activate only the native ledger/key
   receiver: verify current installed key, close temporary owner, THEN write `activation.json`
   before Fleet attaches rooms. The marker grants no authority; match genesis/device.

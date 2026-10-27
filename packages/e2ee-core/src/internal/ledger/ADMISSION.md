@@ -18,5 +18,6 @@ stay only in the separate credential-binding proof. Personal/recovery tag4 and p
 remain five fields. The current-format decoder rejects old five-field machine records.
 A replacement names the exact current same-member machine with that ID, retains old
 identity evidence and sets rotationRequired as advice to update keys, without blocking
-sends. Retries keep the signed original unchanged. Removing inherited M2 send guards
-belongs to PR20; this admission change adds no send guard.
+sends. Retries keep the signed original unchanged. The generic advisory permission
+policy comes from [#1956](https://github.com/LodyAI/Lody/pull/1956); this admission
+change adds no send guard.

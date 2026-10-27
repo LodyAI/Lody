@@ -81,8 +81,8 @@ so it returns the admission-bound user/member identity even after revocation,
 also from an endorsed snapshot or retained state. Unknown/fake views fail.
 `contentPermissions(view, device)` separates current host write admission from
 honest new-content sealing: active non-Guest personal/machine devices may write,
-Recovery never writes. rotationRequired advises administrators to update keys; it
-must not block new seals or workspace use. PR20 removes the inherited M2 send guards.
+Recovery never writes. Pending manual rotation is advisory: administrators should
+update keys without blocking active writers or new seals.
 Permission is relative to the caller-selected verified endpoint; freshness and
 scope binding remain caller obligations. Every query requires the module-created
 view, not an inspection object. Snapshot endorsement/import uses the separate entry below; delivery is a key workflow. Product integration remains separate.

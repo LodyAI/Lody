@@ -63,7 +63,7 @@ whitepaper, Specs, decisions and this package's docs. Contract:
   Revocation keeps old author identity but grants no current write permission;
   Recovery and Guest never write; rotationRequired only advises administrators to
   update keys and must not block new seals or workspace use.
-- Documents: current write checks precede encryption and repeat after
+- Documents: current writer/epoch checks precede encryption and repeat after
   signing; historical signature evidence is neither permission nor AEAD validity.
   Host admission (header 3 batches, position-bound header 4 snapshots) checks the
   genuine current writer, submitting signer, resource/model/epoch and the complete

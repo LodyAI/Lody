@@ -75,8 +75,9 @@ new seals or workspace use. Snapshot, retained and digest version 3 preserve the
 and historical device kind.
 Old developer machine records require workspace recreation, without a legacy reader
 or migration. The independent v1 vector is regenerated under this explicit pre-freeze
-approval. This does not approve production activation. PR20 removes the inherited M2
-rotation-based send guards; this ledger change adds no send guard.
+approval. This does not approve production activation. The generic advisory permission
+policy is adopted from [#1956](https://github.com/LodyAI/Lody/pull/1956); this ledger
+change adds no send guard.
 
 ## Retained verified state (proposed)
 

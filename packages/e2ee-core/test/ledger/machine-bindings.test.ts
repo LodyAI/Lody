@@ -214,7 +214,7 @@ describe('signed machine bindings and current-only state', () => {
       ).toBe(true);
   });
 
-  it('restores exact machine bindings, then replaces atomically while preserving write permission and rotation advice', () => {
+  it('restores exact machine bindings, then replaces atomically while preserving write/seal permission and rotation advice', () => {
     const base = initial(),
       machine = ok(encodeMachineId('machine'));
     const admitted = ok(extend(base, record(base, oldMachine, machine)));
@@ -235,6 +235,9 @@ describe('signed machine bindings and current-only state', () => {
       );
       expect(
         ok(Protocol.contentPermissions(replaced, replacement.signingPublicKey)).mayWriteDocument
+      ).toBe(true);
+      expect(
+        ok(Protocol.contentPermissions(replaced, replacement.signingPublicKey)).maySealNewContent
       ).toBe(true);
       expect(replaced.inspectState().epoch.rotationRequired).toBe(true);
       expect(
