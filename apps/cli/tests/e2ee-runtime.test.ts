@@ -7,7 +7,7 @@ import { mkdtemp, rm, readdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
-import { Context, Effect, Exit, Fiber, Layer, Result, Scope } from 'effect';
+import { Context, Effect, Fiber, Layer, Result } from 'effect';
 import { LoroDoc } from 'loro-crdt';
 import {
   StreamsCrdt,
@@ -3012,9 +3012,12 @@ describe('machine E2EE local runtime', () => {
           )
         ).credential
       ).toBe(fixture.credential);
-      const leaseScope = await Effect.runPromise(Scope.make());
+      const { Scope: bootstrapScope, Exit: bootstrapExit } = await import('effect');
+      const leaseScope = await Effect.runPromise(bootstrapScope.make());
       await Effect.runPromise(
-        leaseE2eeIdentity(join(machineDirectory, '..'), true).pipe(Scope.provide(leaseScope))
+        leaseE2eeIdentity(join(machineDirectory, '..'), true).pipe(
+          bootstrapScope.provide(leaseScope)
+        )
       );
       try {
         await expect(
@@ -3028,7 +3031,7 @@ describe('machine E2EE local runtime', () => {
           'e2ee_identity-busy'
         );
       } finally {
-        await Effect.runPromise(Scope.close(leaseScope, Exit.void));
+        await Effect.runPromise(bootstrapScope.close(leaseScope, bootstrapExit.void));
       }
       const routingPath = join(machineDirectory, '..', 'remote-bootstrap.json');
       const retainedRouting = await readFile(routingPath, 'utf8');
