@@ -1,3 +1,15 @@
+import { getLoginShellEnvLegacy } from '@/agent/login-shell-env';
+import { platformLayer } from '@/platform/process-options';
+import { dshPluginArguments, manageDshPlugins } from '@/agent/dsh-plugins';
+import { resolveDeepSeekHarnessProcessLaunch } from '@/agent/deepseek-harness-runtime';
+import { mergeLoginShellEnv, resolveCliAdapterEntry } from '@/agent/setting';
+import { fileLocksLegacy } from '@/utils/file-lock';
+import {
+  DshPluginsRequestSchema,
+  DshPluginsResponseSchema,
+  type DshPluginsRequest,
+  type DshPluginsResponse,
+} from '@lody/shared';
 import { publishTurnCompletionLegacy } from './turn-completion-legacy';
 import { resolveProjectFileRoots } from './worktree/project-member-access';
 import { type AcpLauncher, resolveAcpLauncher } from '@/agent/acp-analytics';
@@ -7853,6 +7865,39 @@ export class SessionExecutionService {
       },
       options
     );
+  }
+
+  async manageDshPlugins(input: DshPluginsRequest): Promise<DshPluginsResponse> {
+    try {
+      const request = DshPluginsRequestSchema.parse(input);
+      const config = await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
+        request.configId as AgentConfigId,
+        this.deps.machineId
+      );
+      if (!config || config.cliType !== 'builtin' || config.agentType !== 'deepseek') {
+        return {
+          success: false,
+          error: 'Provider config is not a builtin DSH Provider on this machine.',
+        };
+      }
+      const pluginArgs = dshPluginArguments(request);
+      const [adapterPath] = resolveCliAdapterEntry('deepseek-acp');
+      const launch = await resolveDeepSeekHarnessProcessLaunch({
+        adapterPath,
+        providerId: request.configId,
+        pluginArgs,
+      });
+      const hostEnv =
+        request.action === 'list'
+          ? {}
+          : mergeLoginShellEnv(process.env, await getLoginShellEnvLegacy());
+      const plugins = await fileLocksLegacy.runPromise(
+        manageDshPlugins(request, launch, hostEnv).pipe(Effect.provide(platformLayer({})))
+      );
+      return DshPluginsResponseSchema.parse({ success: true, plugins });
+    } catch (error) {
+      return { success: false, error: formatErrorMessage(error).slice(0, 4096) };
+    }
   }
 
   async listMachinePiExtensions(configId?: AgentConfigId): Promise<MachinePiExtensionsResponse> {

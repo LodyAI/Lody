@@ -51,7 +51,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   Keep npx argv for recovery. Windows uses npm JS without cmd.exe;
   npm, forwarder, DSH and Job children stay windowless, preserving stdio/env/containment.
   DSH uses `process.execPath` and `ELECTRON_RUN_AS_NODE`.
-  Provider ID isolates homes; preserve user YAML/settings and legacy history:
+  Provider homes preserve user deps/bundles/YAML/history; lock startup/plugin writes:
   [contract](../../../../specs/deepseek-harness-settings.md).
   Credentials stay in env. Models/reasoning use the Agent request waterfall;
   permissions use Harness presets. `agent_preset` uses `AgentPresets.mount/recompose`

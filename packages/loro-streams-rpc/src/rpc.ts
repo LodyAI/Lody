@@ -1,4 +1,10 @@
 import {
+  DshPluginsRequestSchema,
+  DshPluginsResponseSchema,
+  type DshPluginsRequest,
+  type DshPluginsResponse,
+} from '@lody/shared';
+import {
   SessionFileRootIdSchema,
   FileDownloadResponseSchema,
   type FileDownloadRequest,
@@ -257,6 +263,7 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   'machine/acp-binary-install',
   'machine/memory',
   'machine/pi-extensions',
+  'machine/dsh-plugins',
   'machine/bug-report',
   'code-collab/open-text',
   'code-collab/refresh-text',
@@ -441,6 +448,11 @@ export const LoroMachineAcpBinaryInstallRpcRequestSchema = BaseRpcRequestSchema.
 export const LoroMemoryProviderRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('machine/memory'),
   params: MemoryProviderRequestSchema,
+}).strict();
+
+export const LoroDshPluginsRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('machine/dsh-plugins'),
+  params: DshPluginsRequestSchema,
 }).strict();
 
 export const LoroMachinePiExtensionsRpcRequestSchema = BaseRpcRequestSchema.extend({
@@ -776,6 +788,7 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroMachineAcpBinaryInstallRpcRequestSchema,
   LoroMemoryProviderRpcRequestSchema,
   LoroMachinePiExtensionsRpcRequestSchema,
+  LoroDshPluginsRpcRequestSchema,
   LoroMachineBugReportRpcRequestSchema,
   LoroCodeCollabV2OpenTextRpcRequestSchema,
   LoroCodeCollabV2RefreshTextRpcRequestSchema,
@@ -1657,6 +1670,7 @@ export type LoroMachineRpcResult =
   | MachineAcpBinaryInstallResponse
   | MachineAcpBinaryProgressMessage
   | MemoryProviderResponse
+  | DshPluginsResponse
   | MachinePiExtensionsResponse
   | MachineBugReportResponse
   | SessionCancelResponse
@@ -1829,7 +1843,7 @@ const toLegacyRpcErrorResponse = (
   if (method === 'machine/memory')
     return { type: 'machine/memory', status: 'error', memories: [], error: error.message };
 
-  if (method === 'machine/pi-extensions') {
+  if (method === 'machine/pi-extensions' || method === 'machine/dsh-plugins') {
     return { success: false, error: error.message };
   }
 
@@ -2111,6 +2125,11 @@ const parseRpcSuccessResult = async (
     const parsed = MemoryProviderResponseSchema.safeParse(response.result);
     return parsed.success ? parsed.data : null;
   }
+  if (response.method === 'machine/dsh-plugins') {
+    const parsed = DshPluginsResponseSchema.safeParse(response.result);
+    return parsed.success ? parsed.data : null;
+  }
+
   if (response.method === 'machine/pi-extensions') {
     const parsed = MachinePiExtensionsResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as MachinePiExtensionsResponse) : null;
@@ -3101,6 +3120,14 @@ export class LoroStreamsMachineRpcClient {
     })) as MemoryProviderResponse | null;
   }
 
+  async requestDshPlugins(params: DshPluginsRequest): Promise<DshPluginsResponse | null> {
+    return (await this.sendRequest({
+      method: 'machine/dsh-plugins',
+      timeoutMs: 600_000,
+      params,
+    })) as DshPluginsResponse | null;
+  }
+
   async requestMachinePiExtensions(options: {
     configId?: AgentConfigId;
     timeoutMs: number;
@@ -3744,6 +3771,7 @@ export class LoroStreamsMachineRpcClient {
             agentType: string;
           };
         }
+      | { method: 'machine/dsh-plugins'; timeoutMs: number; params: DshPluginsRequest }
       | { method: 'machine/memory'; timeoutMs: number; params: MemoryProviderRequest }
       | {
           method: 'machine/pi-extensions';
@@ -4177,6 +4205,9 @@ export class LoroStreamsMachineRpcClient {
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'machine/memory':
+          request = { ...envelope, method: args.method, params: args.params };
+          break;
+        case 'machine/dsh-plugins':
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'machine/pi-extensions':

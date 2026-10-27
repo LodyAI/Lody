@@ -5533,5 +5533,21 @@
   "storageGuard.stillLow": "Still not enough space: {{free}} free, at least {{needed}} needed.",
   "storageGuard.relaunch": "Check again and restart",
   "storageGuard.checking": "Checking…",
-  "storageGuard.quit": "Quit Lody"
+  "storageGuard.quit": "Quit Lody",
+  "dshPlugins.title": "DSH plugins",
+  "dshPlugins.hint": "Install plugins for this Provider. Plugins run code on its machine.",
+  "dshPlugins.unsupported": "Update the agent on this machine to manage DSH plugins.",
+  "dshPlugins.offline": "Connect this machine to manage plugins.",
+  "dshPlugins.package": "Plugin package",
+  "dshPlugins.placeholder": "package-name@version",
+  "dshPlugins.install": "Install",
+  "dshPlugins.refresh": "Refresh list",
+  "dshPlugins.busy": "Working… This may take a few minutes.",
+  "dshPlugins.empty": "No user plugins installed.",
+  "dshPlugins.notActive": "Installed, but not enabled as a bundle. Check the plugin’s setup instructions.",
+  "dshPlugins.update": "Update",
+  "dshPlugins.remove": "Uninstall",
+  "dshPlugins.reconnect": "Changes are saved. Reconnect the DSH session to apply them.",
+  "dshPlugins.failed": "Plugin request failed. Refresh the list before retrying.",
+  "dshPlugins.invalidPackage": "Enter an npm package name with an optional version."
 }

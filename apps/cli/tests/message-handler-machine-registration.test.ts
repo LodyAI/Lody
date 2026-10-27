@@ -193,6 +193,7 @@ describe('MessageHandler machine registration', () => {
       codeCollabAllChangesScope: 1,
       magpieImport: 1,
       dshProviderIsolation: 1,
+      dshPlugins: 1,
       terminalNotifications: 1,
       memoryProviders: 1,
       sessionHistory: 3,

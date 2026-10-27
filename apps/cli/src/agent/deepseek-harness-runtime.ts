@@ -1,6 +1,8 @@
+import { z } from 'zod';
+import { fileLocksLegacy } from '@/utils/file-lock';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
-import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { getDeepSeekHarnessProviderHome } from '@lody/shared';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { pathToFileURL } from 'node:url';
@@ -282,7 +284,7 @@ export async function resolveDeepSeekHarnessSessionCompression(
   return rawArtifact ? 'none' : DEEPSEEK_HARNESS_DEFAULT_SESSION_COMPRESSION;
 }
 
-async function publishFileAtomically(filePath: string, contents: string): Promise<void> {
+export async function publishFileAtomically(filePath: string, contents: string): Promise<void> {
   const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(temporaryPath, contents, { mode: 0o600 });
   try {
@@ -293,12 +295,37 @@ async function publishFileAtomically(filePath: string, contents: string): Promis
   }
 }
 
+export const DshProfileManifestSchema = z
+  .object({
+    dependencies: z.record(z.string(), z.string()).optional(),
+    devDependencies: z.record(z.string(), z.string()).optional(),
+    optionalDependencies: z.record(z.string(), z.string()).optional(),
+    dsh: z
+      .object({
+        profile: z.object({ bundles: z.array(z.string()) }).passthrough(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+
+export function dshProfileLockName(rootDir: string): string {
+  return `dsh-profile-${createHash('sha256').update(resolve(rootDir)).digest('hex')}`;
+}
+
+export async function readDshProfileManifest(profileDir: string) {
+  return DshProfileManifestSchema.parse(
+    JSON.parse(await readFile(join(profileDir, 'package.json'), 'utf8'))
+  );
+}
+
 export async function resolveDeepSeekHarnessProcessLaunch(options: {
   adapterPath: string;
   rootDir?: string;
   providerId?: string;
   dataRoot?: string;
   extraArgs?: string[];
+  /** Host-only plugin CLI arguments, never accepted from RPC. */
+  pluginArgs?: string[];
 }) {
   const legacyHome = options.rootDir ?? resolveDeepSeekHarnessHome();
   const rootDir = options.providerId
@@ -345,44 +372,72 @@ export async function resolveDeepSeekHarnessProcessLaunch(options: {
   const profileName = DEEPSEEK_HARNESS_PROFILE_NAME;
   const profileDir = join(rootDir, 'profiles', profileName);
   const bundleDir = join(profileDir, 'node_modules', bundleName);
-  await mkdir(bundleDir, { recursive: true });
-  await Promise.all([
-    publishFileAtomically(
-      join(bundleDir, 'package.json'),
-      JSON.stringify({
-        name: bundleName,
-        private: true,
-        dsh: { bundle: { patch: './cordis.patch.yml' } },
-      }) + '\n'
-    ),
-    publishFileAtomically(join(bundleDir, 'cordis.patch.yml'), profileFiles.cordisPatchYml),
-    publishFileAtomically(join(bundleDir, 'host.patch.yml'), guardPatch),
-  ]);
-  const manifest = JSON.parse(profileFiles.packageJson);
-  manifest.dsh.profile.bundles.push(bundleName);
-  await Promise.all([
-    publishFileAtomically(
-      join(profileDir, 'package.json'),
-      JSON.stringify(manifest, null, 2) + '\n'
-    ),
-    publishFileAtomically(join(profileDir, 'pnpm-workspace.yaml'), profileFiles.pnpmWorkspaceYaml),
-    writeFile(join(profileDir, 'cordis.patch.yml'), '[]\n', { flag: 'wx', mode: 0o600 }).catch(
-      (error: NodeJS.ErrnoException) => {
-        if (error.code !== 'EEXIST') throw error;
+  await fileLocksLegacy.withLock(
+    dshProfileLockName(rootDir),
+    async () => {
+      await mkdir(bundleDir, { recursive: true });
+      await Promise.all([
+        publishFileAtomically(
+          join(bundleDir, 'package.json'),
+          JSON.stringify({
+            name: bundleName,
+            private: true,
+            dsh: { bundle: { patch: './cordis.patch.yml' } },
+          }) + '\n'
+        ),
+        publishFileAtomically(join(bundleDir, 'cordis.patch.yml'), profileFiles.cordisPatchYml),
+        publishFileAtomically(join(bundleDir, 'host.patch.yml'), guardPatch),
+      ]);
+      const generated = DshProfileManifestSchema.parse(JSON.parse(profileFiles.packageJson));
+      let manifest = generated;
+      try {
+        manifest = await readDshProfileManifest(profileDir);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }
-    ),
-  ]);
+      // User dependencies, package-manager configuration and bundle order survive upgrades.
+      // Only the base and content-addressed host layers belong to Lody.
+      const userBundles = manifest.dsh.profile.bundles.filter(
+        (name) =>
+          !name.startsWith('@lody/dsh-host-') && !generated.dsh.profile.bundles.includes(name)
+      );
+      manifest.dsh.profile.bundles = [...generated.dsh.profile.bundles, bundleName, ...userBundles];
+      manifest.dsh.profile.patchReload = 'startup';
+      await Promise.all([
+        publishFileAtomically(
+          join(profileDir, 'package.json'),
+          JSON.stringify(manifest, null, 2) + '\n'
+        ),
+        writeFile(join(profileDir, 'pnpm-workspace.yaml'), profileFiles.pnpmWorkspaceYaml, {
+          flag: 'wx',
+          mode: 0o600,
+        }).catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== 'EEXIST') throw error;
+        }),
+        writeFile(join(profileDir, 'cordis.patch.yml'), '[]\n', { flag: 'wx', mode: 0o600 }).catch(
+          (error: NodeJS.ErrnoException) => {
+            if (error.code !== 'EEXIST') throw error;
+          }
+        ),
+      ]);
+    },
+    { locksDir: join(rootDir, 'lody-locks'), timeout: 300_000 }
+  );
 
   const dshNodeArgs = [
     '--input-type=module',
     '--eval',
     createDeepSeekHarnessBootstrapSource(),
     '--',
-    '--profile',
-    profileName,
-    '--patch',
-    join(bundleDir, 'host.patch.yml'),
-    ...(options.extraArgs ?? []),
+    ...(options.pluginArgs
+      ? ['plugin', '--profile', profileName, ...options.pluginArgs]
+      : [
+          '--profile',
+          profileName,
+          '--patch',
+          join(bundleDir, 'host.patch.yml'),
+          ...(options.extraArgs ?? []),
+        ]),
   ];
 
   return {
@@ -394,6 +449,8 @@ export async function resolveDeepSeekHarnessProcessLaunch(options: {
       // independently of the Harness family and have no release at
       // `DEEPSEEK_HARNESS_VERSION`.
       ...createDeepSeekHarnessNpxSpecifiers().flatMap((specifier) => ['--package', specifier]),
+      // Plugin management must not require a globally installed package manager.
+      ...(options.pluginArgs ? ['--package', 'pnpm@10.20.0'] : []),
       // npm exec does not shell-quote executable paths, so a minimal Node
       // launcher safely passes Lody Helper's space-containing path to spawn().
       // DSH itself still runs only under process.execPath.

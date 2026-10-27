@@ -1,3 +1,4 @@
+import type { DshPluginsRequest, DshPluginsResponse } from '@lody/shared';
 import {
   FileDownloadRequestSchema,
   type FileDownloadRequest,
@@ -414,6 +415,7 @@ type RpcServerDeps = {
     onAcpBinaryProgress?: (message: MachineAcpBinaryProgressMessage) => void;
   }) => Promise<MachineAcpBinaryInstallResponse>;
   memoryProvider?: (request: MemoryProviderRequest) => Promise<MemoryProviderResponse>;
+  manageDshPlugins?: (args: DshPluginsRequest) => Promise<DshPluginsResponse>;
   listMachinePiExtensions?: (args: {
     configId?: AgentConfigId;
   }) => Promise<MachinePiExtensionsResponse>;
@@ -1322,6 +1324,16 @@ export class LoroStreamsMachineRpcServer {
           await this.appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
+        case 'machine/dsh-plugins': {
+          const response = this.deps.manageDshPlugins
+            ? await this.deps.manageDshPlugins(request.params)
+            : {
+                success: false as const,
+                error: 'DSH plugin management is unavailable on this machine.',
+              };
+          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          return;
+        }
         case 'machine/pi-extensions': {
           if (!this.deps.listMachinePiExtensions) {
             await this.appendErrorResponse(request.replyTo, request.id, request.method, {
@@ -2164,6 +2176,7 @@ export class LoroStreamsMachineRpcServer {
       | MachineAcpBinaryProgressMessage
       | MachineBugReportResponse
       | MemoryProviderResponse
+      | DshPluginsResponse
       | MachinePiExtensionsResponse
       | SessionCancelResponse
       | LoroSessionLiveStatusRpcResponse

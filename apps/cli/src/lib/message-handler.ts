@@ -3331,6 +3331,7 @@ export class MessageHandler {
             agentType,
           }),
         memoryProvider: handleMemoryProviderRequest,
+        manageDshPlugins: async (request) => await this.executionService.manageDshPlugins(request),
         listMachinePiExtensions: async ({ configId }) =>
           await this.executionService.listMachinePiExtensions(configId),
         installMachineAcpBinary: async ({ agentType, onAcpBinaryProgress }) =>
@@ -6932,6 +6933,8 @@ export class MessageHandler {
         return await this.terminateAcpSession(request.params.sessionId as SessionId);
       case 'machine/memory':
         return await handleMemoryProviderRequest(request.params);
+      case 'machine/dsh-plugins':
+        return await this.executionService.manageDshPlugins(request.params);
       case 'machine/pi-extensions':
         return await this.executionService.listMachinePiExtensions(
           request.params.configId as AgentConfigId | undefined

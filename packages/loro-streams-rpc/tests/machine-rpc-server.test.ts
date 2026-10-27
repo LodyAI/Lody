@@ -852,6 +852,57 @@ describe('LoroStreamsMachineRpcServer', () => {
     }
   );
 
+  it('returns DSH plugin installation state for the requested saved Provider', async () => {
+    const fake = createFakeStreamClient();
+    const result = {
+      success: true as const,
+      plugins: [{ name: 'synthetic-plugin', version: '1.0.0', active: true }],
+    };
+    const server = new LoroStreamsMachineRpcServer({
+      logger: createSilentLogger(),
+      workspaceId: 'workspace-1' as WorkspaceId,
+      machineId: 'machine-1' as MachineId,
+      streamClient: fake.streamClient,
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(),
+      manageDshPlugins: async (request) =>
+        request.configId === 'dsh-config' &&
+        request.action === 'install' &&
+        request.package === 'synthetic-plugin@1.0.0'
+          ? result
+          : { success: false, error: 'Wrong installation target' },
+    });
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id: 'dsh-install',
+          method: 'machine/dsh-plugins',
+          rpcVersion: '1',
+          machineId: 'machine-1',
+          workspaceId: 'workspace-1',
+          replyTo: 'workspace-1:rpc:res:client-1',
+          sentAt: 1,
+          expiresAt: Number.MAX_SAFE_INTEGER,
+          params: { configId: 'dsh-config', action: 'install', package: 'synthetic-plugin@1.0.0' },
+        },
+      ],
+      nextOffset: '1',
+      upToDate: true,
+    });
+    await server.start();
+    try {
+      await fake.waitForAppendedCount(1);
+      expect(fake.appended[0]?.value).toMatchObject({
+        id: 'dsh-install',
+        method: 'machine/dsh-plugins',
+        result,
+      });
+    } finally {
+      server.stop();
+    }
+  });
+
   it('returns Pi discovery from the saved config through the machine RPC', async () => {
     const fake = createFakeStreamClient();
     const result = {

@@ -144,6 +144,17 @@ fails; ending a local waiter never manufactures a provider refusal.
 `<Lody data root>/dsh/providers/<encoded Provider ID>` and launches the pinned closure
 through `dsh --profile lody-acp`. Its profile composes `@deepseek-ai/dsh-base`, a
 content-addressed Lody bundle, the user-owned `cordis.patch.yml`, and a final host guard.
+Startup reconciles only the base/host bundle entries, preserving user dependencies,
+other package-manager fields and user bundle order. User `pnpm-workspace.yaml`,
+lockfiles and patches survive startup and upgrades. Saved Provider details expose
+registry-package install/list/remove through `dshPlugins: 1`. Updates remain supported
+by RPC, but the update button is hidden until version availability is surfaced. The daemon runs
+the pinned DSH CLI with a pinned pnpm, without Provider API credentials. Startup and
+UI package operations share a Provider-home file lock. Ordinary failures restore
+manifest/lockfile metadata, but a partially changed dependency tree may need repair;
+inspect `.plugin-manager/logs` under the profile. Reconnect sessions after changes.
+Stop Lody before running external `dsh plugin` commands against that same profile.
+See the [plugin management decision](../../../../.agents/notes/implemented/feature/2026-10-26-dsh-plugin-management.md).
 Only missing user patches are created. DSH itself recreates the empty `cordis.yml`
 include root; Lody does not duplicate that write. The host guard preserves ACP and
 history paths and disables product telemetry, inventory and logging, so the host keeps

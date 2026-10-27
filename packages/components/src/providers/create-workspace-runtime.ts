@@ -1902,6 +1902,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestLocalMcpTools,
     requestMemoryProvider,
     requestMachinePiExtensions,
+    requestDshPlugins,
   } = createWorkspaceMachineRpcFacade({
     getSessionToken: () => authToken,
     ...(protectedContent ? { isLocalControlMachine: (machineId: MachineId) => machineId === sendLocalMachineId } : {}),
@@ -5585,6 +5586,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestLocalMcpTools,
     requestMemoryProvider,
     requestMachinePiExtensions,
+    requestDshPlugins,
     dispose,
   };
 }

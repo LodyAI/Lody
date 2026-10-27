@@ -1,3 +1,10 @@
+import {
+  DshPluginsResponseSchema,
+  MACHINE_PROTOCOL_CAPABILITIES as DSH_CAPABILITIES,
+  machineSupportsProtocolCapability as supportsDshCapability,
+  type DshPluginsRequest,
+  type DshPluginsResponse,
+} from '@lody/shared';
 import { type FileDownloadRequest, type FileDownloadResponse } from '@lody/shared';
 import {
   FilePreviewV3ResponseSchema,
@@ -1484,6 +1491,45 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     }
   };
 
+  const requestDshPlugins = async (
+    machineId: MachineId,
+    params: DshPluginsRequest
+  ): Promise<DshPluginsResponse> => {
+    try {
+      await targetRouter.resolvePlaneForMachine(machineId, {
+        timeoutMs: LOCAL_MACHINE_ID_READY_TIMEOUT_MS,
+      });
+      const plane = targetRouter.getPlaneForMachine(machineId);
+      const protocolCapabilities = await deps.getMachineProtocolCapabilities(machineId);
+      if (!supportsDshCapability({ protocolCapabilities }, DSH_CAPABILITIES.dshPlugins)) {
+        return { success: false, error: 'Update the agent on this machine to manage DSH plugins.' };
+      }
+      if (plane === 'local') {
+        const sender = getLocalMachineRpcSender();
+        if (!sender) return { success: false, error: 'Local Machine RPC is not available.' };
+        const response = await sender({
+          machineId,
+          workspaceId,
+          method: 'machine/dsh-plugins',
+          params,
+          timeoutMs: 600_000,
+        });
+        return response.ok
+          ? DshPluginsResponseSchema.parse(response.result)
+          : { success: false, error: response.error };
+      }
+      if (plane === null) return { success: false, error: 'Machine RPC routing is not available.' };
+      return (
+        (await (await getMachineRpcClient(machineId)).requestDshPlugins(params)) ?? {
+          success: false,
+          error: 'DSH plugin request timed out. Refresh the list before retrying.',
+        }
+      );
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  };
+
   const requestMachinePiExtensions = async (
     machineId: MachineId,
     options?: { configId?: AgentConfigId }
@@ -1625,5 +1671,6 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     requestMachineBugReport,
     requestMemoryProvider,
     requestMachinePiExtensions,
+    requestDshPlugins,
   };
 }
