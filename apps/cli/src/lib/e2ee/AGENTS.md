@@ -90,7 +90,9 @@
   `workspace-catalog.json.e2ee`, ordinary rows only in v1 `workspaces`; lock both writes.
   Ordinary-only mutations never rewrite encrypted rows. Old v1 writers cannot erase
   the sidecar or account/machine-bound `.e2ee-invalid` marker.
-- Never overwrite unreadable sidecars; retain errors in memory and usable ordinary rows.
+- Offline/ordinary writes never replace unreadable sidecars. Only authenticated online-list
+  reconciliation may archive a corrupt `.e2ee` file before rebuilding; permission and marker
+  errors stay errors. Retain originals, failure receipts and usable ordinary rows.
   Persist ordinary remote-list results; return degraded receipts with current auth/revocation
   checks. Atomically publish `.e2ee-invalid` BEFORE encrypted updates; retain through failed
   writes/cleanup until healthy publication. Derive unavailable from the marker, never unknown
