@@ -95,7 +95,7 @@ export class ScheduleEngine<Prepared> {
         run.state !== 'dispatched' &&
         (await p.isDispatched(run.prepared))
       ) {
-        p.store.transition(run.runKey, [run.state], { state: 'dispatched' });
+        p.store.transition(run.runKey, [run.state], { state: 'dispatched', dispatchedAt: p.now() });
         p.onEvent?.({ type: 'recovered', scheduleId: run.scheduleId, runKey: run.runKey });
       }
       const current = p.store.get(run.runKey)!;
@@ -248,7 +248,10 @@ export class ScheduleEngine<Prepared> {
           continue;
         }
         await p.dispatch(current.prepared!);
-        p.store.transition(run.runKey, ['session_prepared'], { state: 'dispatched' });
+        p.store.transition(run.runKey, ['session_prepared'], {
+          state: 'dispatched',
+          dispatchedAt: p.now(),
+        });
         p.onEvent?.({ type: 'dispatched', scheduleId: run.scheduleId, runKey: run.runKey });
         await this.project(row, {
           lastDispatch: {
@@ -263,7 +266,10 @@ export class ScheduleEngine<Prepared> {
         const current = p.store.get(run.runKey)!;
         if (current.prepared !== undefined && (await p.isDispatched(current.prepared))) {
           if (current.state !== 'dispatched')
-            p.store.transition(run.runKey, [current.state], { state: 'dispatched' });
+            p.store.transition(run.runKey, [current.state], {
+              state: 'dispatched',
+              dispatchedAt: p.now(),
+            });
         } else {
           const code =
             error instanceof ScheduleConfigurationError ? error.code : 'DISPATCH_UNAVAILABLE';
@@ -289,6 +295,8 @@ export class ScheduleEngine<Prepared> {
         p.onError(error);
       }
     }
+    for (const row of await p.list())
+      if (this.owned(row) && row.scheduledMessage) await this.project(row, {});
   }
 
   private skip(run: ScheduleRun<Prepared>, code: string): void {
@@ -300,13 +308,43 @@ export class ScheduleEngine<Prepared> {
     row: ScheduleRegistryRow,
     projection: Partial<ScheduleRuntimeRow>
   ): Promise<void> {
+    const last = this.ports.store.history(this.ports.workspaceId, row.scheduleId, 1)[0];
+    const lastDispatch =
+      last?.activationId === row.activationId &&
+      (last.state === 'dispatched' || last.state === 'finished')
+        ? {
+            scheduledFor: last.scheduledFor,
+            dispatchedAt: last.dispatchedAt ?? last.plannedAt,
+            sessionId: last.sessionId,
+          }
+        : undefined;
     this.projections.set(row.scheduleId, {
+      ...this.projections.get(row.scheduleId),
+      ...(last?.activationId === row.activationId
+        ? {
+            lastRun: {
+              state: last.state,
+              ...(last.errorCode ? { errorCode: last.errorCode } : {}),
+            },
+          }
+        : {}),
+      ...(lastDispatch ? { lastDispatch } : {}),
+      ...(row.scheduledMessage
+        ? {
+            messageState: lastDispatch
+              ? ('sent' as const)
+              : !row.enabled
+                ? ('cancelled' as const)
+                : last?.state === 'failed' || last?.state === 'skipped'
+                  ? ('failed' as const)
+                  : ('pending' as const),
+          }
+        : {}),
       scheduleId: row.scheduleId,
       machineId: this.ports.machineId,
       activationId: row.activationId,
       observedDefinitionFingerprint: row.definitionFingerprint,
       updatedAt: this.ports.now(),
-      ...this.projections.get(row.scheduleId),
       ...projection,
     });
   }

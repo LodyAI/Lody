@@ -62,8 +62,9 @@ export const SUBAGENT_EVENTS_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_CREATE_DIRECTORY_PROTOCOL_VERSION = 1;
 export const PROVIDER_SETUP_PROTOCOL_VERSION = 1;
+// v3 supports frozen full-message one-time schedules.
 // v2 preserves ACP string/boolean values and reads legacy stringified booleans.
-export const SCHEDULES_PROTOCOL_VERSION = 2;
+export const SCHEDULES_PROTOCOL_VERSION = 3;
 export const PREPARED_SESSION_INPUT_PROTOCOL_VERSION = 1;
 export const SESSION_INPUT_ATTACHMENTS_PROTOCOL_VERSION = 1;
 export const LOCAL_FILE_RESOURCES_PROTOCOL_VERSION = 1;
@@ -352,11 +353,7 @@ export function machineSupportsPiExtensions(
 export function machineSupportsSchedulesProtocol(
   machine: MachineProtocolCapabilityCarrier | null | undefined
 ): boolean {
-  return machineSupportsProtocolCapability(
-    machine,
-    MACHINE_PROTOCOL_CAPABILITIES.schedules,
-    SCHEDULES_PROTOCOL_VERSION
-  );
+  return machineSupportsProtocolCapability(machine, MACHINE_PROTOCOL_CAPABILITIES.schedules, 2);
 }
 
 /** Whether the target daemon accepts inert `prepared` user turns. */
@@ -502,4 +499,11 @@ export function machineSupportsSessionHistoryPatches(
       SESSION_HISTORY_PATCHES_PROTOCOL_VERSION
     )
   );
+}
+
+/** Frozen input blocks must never be downgraded to a plain-text prompt. */
+export function machineSupportsScheduledMessagesProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(machine, MACHINE_PROTOCOL_CAPABILITIES.schedules, 3);
 }

@@ -1,3 +1,4 @@
+import { isScheduledMessageFile } from './schedules/scheduled-message-files';
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import { encodeSessionFilePath, resolveSessionPullRequests } from '@lody/shared';
 import type { SessionFileRoot } from '@lody/shared';
@@ -8279,6 +8280,8 @@ export class MessageHandler {
       // so a staged-but-never-sent file cannot hold quota forever.
       const ageMs = await getSessionFileBlobAgeMs(blobArgs);
       if (ageMs !== null && ageMs > getDraftSessionFileBlobMaxAgeMs()) {
+        if (await isScheduledMessageFile({ repo: this.workspaceDocument.repo, ...blobArgs }))
+          return;
         await removeSessionFileBlob(blobArgs);
         this.logger.warn(
           `[${sessionId}] Reclaimed abandoned draft file blob ${fileId} (age ${Math.round(ageMs / 1000)}s)`

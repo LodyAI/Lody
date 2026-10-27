@@ -23,6 +23,7 @@ export type ScheduleRun<Prepared = unknown> = {
   agentConfigId: string;
   scheduledFor: number;
   plannedAt: number;
+  dispatchedAt?: number;
   definitionFingerprint: string;
   state: ScheduleRunState;
   manual: boolean;
@@ -34,6 +35,7 @@ export type ScheduleRun<Prepared = unknown> = {
   errorCode?: string;
   definition: ScheduleDefinition;
   prompt: string;
+  message?: ScheduleDocument['message'];
   prepared?: Prepared;
 };
 
@@ -180,6 +182,7 @@ export class ScheduleStore<Prepared = unknown> {
               manual: false,
               definition: d,
               prompt: document.prompt,
+              ...(document.message ? { message: document.message } : {}),
             });
           }
         }
@@ -230,6 +233,7 @@ export class ScheduleStore<Prepared = unknown> {
           manual: true,
           definition: d,
           prompt: document.prompt,
+          ...(document.message ? { message: document.message } : {}),
         };
         this.put(run);
         return run;
@@ -241,7 +245,10 @@ export class ScheduleStore<Prepared = unknown> {
     runKey: string,
     from: readonly ScheduleRunState[],
     patch: Partial<
-      Pick<ScheduleRun<Prepared>, 'state' | 'prepared' | 'attempts' | 'retryAt' | 'errorCode'>
+      Pick<
+        ScheduleRun<Prepared>,
+        'state' | 'prepared' | 'attempts' | 'retryAt' | 'errorCode' | 'dispatchedAt'
+      >
     >
   ): ScheduleRun<Prepared> {
     return this.db

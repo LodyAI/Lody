@@ -30,6 +30,7 @@ import { createSessionBackend } from '@/session/session-backend';
 import { streamsRoomBinding } from '../loro/streams-room-binding';
 import {
   buildScheduleRunTarget,
+  withScheduledMessageInput,
   resolveScheduleAgentRunConfig,
   buildScheduleSessionCreateOptions,
   destinationSessionProblem,
@@ -128,7 +129,11 @@ export async function createScheduleWorkspace(args: {
         machineId: auth.machineId,
         agentConfigId: agent.agentConfigId,
       });
-      if (problem) throw new ScheduleConfigurationError(problem);
+      if (problem || (run.message && (sessionRecord?.meta as SessionMeta | undefined)?.isArchived))
+        throw new ScheduleConfigurationError(problem ?? 'SESSION_UNAVAILABLE');
+      // A timed message waits for this chat rather than interrupting its active turn.
+      if (run.message && args.hasSessionWork(destinationSessionId))
+        throw new ScheduleConfigurationError('SESSION_BUSY');
     }
     return buildScheduleRunTarget({
       targetMachine: machine,
@@ -166,25 +171,37 @@ export async function createScheduleWorkspace(args: {
         auth.machineId,
         run.definition.agent
       );
-      const prepared = await prepareSessionInput(
+      let prepared = await prepareSessionInput(
         auth,
         workspace,
         manager,
         run.prompt,
-        buildScheduleSessionCreateOptions({
-          sessionId: run.sessionId as SessionId,
-          userTurnId: run.userTurnId,
-          agentConfigId: agent.agentConfigId,
-          title: run.definition.title,
-          project: run.definition.project,
-        }),
+        {
+          ...buildScheduleSessionCreateOptions({
+            sessionId: run.sessionId as SessionId,
+            userTurnId: run.userTurnId,
+            agentConfigId: agent.agentConfigId,
+            title: run.definition.title,
+            project: run.definition.project,
+          }),
+          ...(run.message
+            ? {
+                agentRoleId: run.message.agentRoleId ?? undefined,
+                agentRoleRevision: run.message.agentRoleRevision,
+                agentRoleSnapshot: run.message.agentRoleSnapshot,
+                agentRolePromptPrefix: run.message.rolePromptPrefix,
+              }
+            : {}),
+        },
         {
           ...resolveTurnDispatchConfig({}),
           ...agent,
           inheritSessionDefaults: false,
+          ...(run.message?.mcpServerIds ? { mcpServerIds: run.message.mcpServerIds } : {}),
         },
         target
       );
+      if (run.message) prepared = withScheduledMessageInput(prepared, run.message);
       if (prepared.meta.machineId !== run.machineId || prepared.meta.userId !== auth.userId)
         throw new Error('Schedule target ownership changed');
       prepared.meta.scheduleId = run.scheduleId;

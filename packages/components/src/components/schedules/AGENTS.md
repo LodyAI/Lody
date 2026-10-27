@@ -1,13 +1,12 @@
 # Schedule UI
 
-`CLAUDE.md` is a symlink to this file. Decisions and rationale:
+`CLAUDE.md` links here. Rationale:
 [scheduled tasks note](../../../../../.agents/notes/implemented/feature/2026-09-24-machine-owned-scheduled-tasks.md).
 
-- One workspace-shell Registry subscription supplies list and provenance links;
-  details acquire/release one Schedule store through WorkspaceRuntime. All writes use
-  `withScheduleStore`. Never load every definition for listing. Schedules are
-  generally available: no developer/beta gate on navigation, commands, the
-  Registry subscription, proposal cards or the Agent's Schedule tools.
+- One shell Registry subscription supplies list/provenance; details acquire/release
+  one WorkspaceRuntime Schedule store. Writes use `withScheduleStore`; full messages
+  have their own editor. Listing never opens all definitions. No developer/beta gate
+  on navigation, commands, Registry, proposals or Agent tools.
 - `schedule-view.tsx` is presentational with Storybook fixtures;
   `schedules-workspace.tsx` owns domain writes, selectors and composition.
   `schedule-save-blockers.ts` is the one save rule, `schedule-format.ts` the one
@@ -20,7 +19,7 @@
   cache just to save. Ordinary Session config validation owns runtime support.
   No project is required (none = plain chat). No consent checkbox, directory-scope
   checkbox, full-access warning or resume dialog.
-- The list is the page; no tabs, no dialog. `routes/…/schedules.tsx` is a
+- List is the page: no tabs or dialog. `routes/…/schedules.tsx` is a
   layout route that mounts `SchedulesWorkspace` once (its index and `$scheduleId`
   children render nothing), so opening a schedule animates instead of
   remounting. On desktop it slides in beside the table (`ScheduleSplitView`,
@@ -56,10 +55,8 @@
   run the guard, mark and focus the first empty field. There is no project
   mark: beside the project chip it reads as "a project is required".
 - Time and date are typed only: the native picker button is hidden
-  (`[&::-webkit-calendar-picker-indicator]:hidden`), which in Chromium also
-  removes the popup. The prompt has no resize handle: it grows with its text
-  from 4 lines to half the window (`max(6lh, 50dvh)`), then scrolls.
-  Field marks float (`absolute`) so they never narrow the text.
+  (`[&::-webkit-calendar-picker-indicator]:hidden`). Prompt: no resize handle;
+  grow from 4 lines to `max(6lh, 50dvh)`, then scroll. Field marks are absolute.
 - No time zone control. Input, preview and kind changes use `MachineMeta.timeZone`
   (device zone for older CLIs). Once retains its instant across machine changes;
   calendar rules retain wall time. [Time contract](../../../../../specs/schedule-time.md).
@@ -91,8 +88,8 @@
   double-click resets), persisted per device in `scheduleListColumnWidthsAtom`,
   as `minmax(72px, width)` so a narrow panel still fits. The header cell must
   not clip — the handle hangs into the gap. A manual row's button is Run
-  (`Play`); a timed row's is Pause/Resume (Resume is `RotateCcw`, never `Play`). Every row
-  has a context menu (open, run, pause/resume, last run, delete). Run from the
+  (`Play`); a timed row's is Pause/Resume (Resume is `RotateCcw`, never `Play`). Rows
+  have context menus (open, run, pause/resume, last run, delete). Run from the
   list starts at once with a toast; delete always confirms. Cells align to their
   first line; the target column names the machine; row actions are visible by
   default and hidden only behind `[@media(hover:hover)]`.
@@ -109,3 +106,7 @@
   `EditorInNarrowPanel` catches regressions.
 - `AnimatePresence` children must carry their own `key` (`<Reveal key=… >`);
   a key set only inside the child reads as `""` and breaks exit animations.
+
+- Claude quota continuation requires the latest provider session-limit failure and
+  a matching exhausted 5h window with a future reset; never guess from prose.
+  [Decision](../../../../../.agents/notes/proposed/feature/2026-10-27-quota-continue.md).

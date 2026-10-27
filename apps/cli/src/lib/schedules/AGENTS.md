@@ -73,3 +73,9 @@
   Timers and active evaluations must not survive workspace revocation.
 - Deterministic tests use injected clocks, explicit sync barriers and temporary
   SQLite files. Do not add wall-clock sleep or live-provider timing assertions.
+
+- Complete-message reservations require schedules v3 and `messageVersion: 1`.
+  Preserve their payload in the fingerprint and frozen ledger; never dispatch a
+  prompt-only projection. Published reservations retain staged local attachment
+  bytes. Cancellation is acknowledged only after durable dispatch reconciliation;
+  a committed dispatch wins. Busy destination chats defer handoff without interruption.

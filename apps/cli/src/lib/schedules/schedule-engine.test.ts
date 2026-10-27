@@ -1,3 +1,6 @@
+import { LoroDoc } from 'loro-crdt';
+import { ScheduleRepository, type ScheduleRepositoryPort } from '@lody/shared';
+import { isScheduledMessageFile } from './scheduled-message-files';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -324,4 +327,129 @@ it('recovers the committed ledger after closing a real SQLite file without repea
     store.close();
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+describe('One-time complete messages', () => {
+  function message() {
+    const d = document();
+    d.definition = {
+      ...d.definition,
+      messageVersion: 1,
+      project: undefined,
+      destination: { kind: 'existing_session', sessionId: 'chat' },
+      trigger: { kind: 'once', at: '1970-01-01T00:01:00Z' },
+      misfirePolicy: { kind: 'run_once' },
+    };
+    d.prompt = 'Frozen message';
+    d.message = { inputBlocks: [{ type: 'text', text: 'Frozen message' }], mcpServerIds: [] };
+    return d;
+  }
+  it('retains frozen blocks in the ledger and restores sent status without sending again', async () => {
+    const h = harness(message());
+    h.time(600_000); // Offline at the due time: one catch-up.
+    await h.engine.evaluate();
+    const [run] = h.store.history('workspace', 'schedule');
+    expect(run?.message).toEqual(h.d.message);
+    expect(run?.sessionId).toBe('chat');
+    expect(run?.state).toBe('dispatched');
+    const restarted = new ScheduleEngine(h.ports);
+    await restarted.evaluate();
+    expect(h.store.history('workspace', 'schedule')).toHaveLength(1);
+    expect(h.store.history('workspace', 'schedule')[0]?.state).toBe('dispatched');
+    expect(h.ports.publish).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        messageState: 'sent',
+        lastDispatch: expect.objectContaining({ sessionId: 'chat' }),
+      })
+    );
+  });
+  it('acknowledges cancellation before a future message has a run', async () => {
+    const h = harness(message());
+    h.time(1);
+    h.pause();
+    await h.engine.evaluate();
+    expect(h.store.history('workspace', 'schedule')).toEqual([]);
+    expect(h.ports.publish).toHaveBeenLastCalledWith(
+      expect.objectContaining({ messageState: 'cancelled' })
+    );
+  });
+  it('reports sent if a cancellation races a committed dispatch receipt', async () => {
+    const h = harness(message());
+    h.ports.dispatch = async () => {
+      h.accepted();
+      h.pause();
+      throw new Error('lost receipt');
+    };
+    await h.engine.evaluate();
+    expect(h.store.history('workspace', 'schedule')[0]?.state).toBe('dispatched');
+    expect(h.ports.publish).toHaveBeenLastCalledWith(
+      expect.objectContaining({ messageState: 'sent' })
+    );
+  });
+});
+
+it('retains scheduled local bytes without history and releases the reservation after deletion', async () => {
+  const docs = new Map<string, LoroDoc>();
+  const rows = new Map<string, unknown>();
+  const port: ScheduleRepositoryPort = {
+    openPersistedDoc: async (id) => {
+      if (!docs.has(id)) docs.set(id, new LoroDoc());
+      return { doc: docs.get(id)! };
+    },
+    openFlockDoc: async () => ({
+      flock: {
+        scan: () => [...rows].map(([key, value]) => ({ key: JSON.parse(key), value })),
+        get: (key) => rows.get(JSON.stringify(key)),
+        set: (key, value) => rows.set(JSON.stringify(key), value),
+      },
+    }),
+    flush: async () => {},
+  };
+  const repository = new ScheduleRepository(port, 'workspace' as never);
+  const d = document().definition;
+  await repository.save({
+    scheduleId: 'message-file',
+    actorId: 'owner',
+    now: 1,
+    activationId: 'a',
+    activityId: 'create',
+    create: true,
+    draft: {
+      title: d.title,
+      machineId: d.machineId,
+      agent: d.agent,
+      retryPolicy: d.retryPolicy,
+      misfirePolicy: d.misfirePolicy,
+      overlapPolicy: d.overlapPolicy,
+      prompt: '',
+      destination: { kind: 'existing_session', sessionId: 'chat' },
+      trigger: { kind: 'once', at: '2099-01-01T00:00:00Z' },
+      message: {
+        inputBlocks: [
+          {
+            type: 'file',
+            fileId: 'blob',
+            fileName: 'notes.txt',
+            mimeType: 'text/plain',
+            sizeBytes: 5,
+            sha256: 'a'.repeat(64),
+            textPreview: true,
+            uploadedAt: 1,
+            transport: 'local',
+            machineId: 'machine',
+          },
+        ],
+      },
+    },
+  });
+  const args = {
+    repo: port,
+    workspaceId: 'workspace' as never,
+    sessionId: 'chat' as never,
+    fileId: 'blob',
+  };
+  expect(await isScheduledMessageFile(args)).toBe(true);
+  expect(await isScheduledMessageFile({ ...args, sessionId: 'other' as never })).toBe(false);
+  await repository.delete('message-file', 'owner', 2);
+  expect(await isScheduledMessageFile(args)).toBe(false);
 });

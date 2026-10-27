@@ -151,6 +151,8 @@ export interface ChatComposerProps {
   imageItems?: ChatComposerImageItem[];
   attachmentAddDisabled?: boolean;
   onAttachmentAddClick?: () => void;
+  onScheduleSend?: () => void;
+  scheduleDisabledReason?: string;
   imageDropDisabled?: boolean;
   onImageDrop?: (files: File[]) => void;
   /**
@@ -269,6 +271,8 @@ export function ChatComposer({
   imageItems = [],
   attachmentAddDisabled = false,
   onAttachmentAddClick,
+  onScheduleSend,
+  scheduleDisabledReason,
   imageDropDisabled = attachmentAddDisabled,
   onImageDrop,
   onDirectoryDrop,
@@ -1066,6 +1070,8 @@ export function ChatComposer({
                   onAddAttachment={onAttachmentAddClick}
                   attachmentDisabled={attachmentAddDisabled}
                   mcp={mcp}
+                  onScheduleSend={onScheduleSend}
+                  scheduleDisabledReason={scheduleDisabledReason}
                 />
 
                 {/* Single row only: long model names must shrink/truncate inside

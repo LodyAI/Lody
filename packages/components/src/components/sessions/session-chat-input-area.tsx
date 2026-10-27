@@ -1,3 +1,7 @@
+import { QuotaContinueAction } from '../schedules/quota-continue-action';
+import { ScheduledMessagesSummary } from '../schedules/scheduled-messages-summary';
+import { useScheduledMessage } from '../schedules/use-scheduled-message';
+import { ScheduledMessageTimeDialog } from '../schedules/scheduled-message-time';
 import type { AgentConfigMeta } from '@lody/shared';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
@@ -22,7 +26,7 @@ import {
   useImperativeHandle,
 } from 'react';
 import { useAtomValue } from 'jotai';
-import { ArrowUp } from 'lucide-react';
+import { ArrowUp, Clock } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
@@ -864,6 +868,7 @@ export const SessionChatInputArea = memo(
      */
     const mentionRangesRef = useRef<MentionRange[]>([]);
     const { machine: quotaMachine } = useResolvedMachineMeta(session.machineId);
+    const scheduled = useScheduledMessage(session, quotaMachine);
     const refreshQuota = useProviderQuotaRefresh(
       session.machineId,
       session.agentConfigId,
@@ -1774,11 +1779,35 @@ export const SessionChatInputArea = memo(
           submittedDraft.files = sessionFileDraftsCache.get(session.id);
           // Use the committed callback and Role after waiting: routing and run
           // config must come from the same current composer state.
-          const accepted = await onSendMessage(inputBlocks, agentRoleTurnSelectionRef.current, {
-            ...options,
-            attachments,
-            ...(mcpServerIds ? { mcpServerIds } : {}),
-          });
+          const role = agentRoleTurnSelectionRef.current;
+          const accepted = scheduled.at
+            ? await scheduled.save({
+                inputBlocks,
+                attachments,
+                agent: {
+                  agentConfigId: session.agentConfigId ?? '',
+                  ...(selectedModeId ? { modeId: selectedModeId } : {}),
+                  ...(selectedModelId ? { modelId: selectedModelId } : {}),
+                  ...(configOptionValues ? { configOptionValues } : {}),
+                  ...(role?.memory ? { memory: role.memory } : {}),
+                },
+                message: {
+                  ...(mcpServerIds ? { mcpServerIds } : {}),
+                  ...(role
+                    ? {
+                        agentRoleId: role.agentRoleId,
+                        agentRoleRevision: role.agentRoleRevision,
+                        agentRoleSnapshot: role.agentRoleSnapshot,
+                        rolePromptPrefix: selectedAgentRoleRef.current?.promptPrefix,
+                      }
+                    : {}),
+                },
+              })
+            : await onSendMessage(inputBlocks, role, {
+                ...options,
+                attachments,
+                ...(mcpServerIds ? { mcpServerIds } : {}),
+              });
           if (accepted) {
             captureAgentRoleMentionsApplied(postHog, {
               spans: trimmedSpans,
@@ -1810,7 +1839,7 @@ export const SessionChatInputArea = memo(
               // write component state from a retired submission.
               clearSessionChatInputDrafts(session.id);
             }
-            if (submittedVisualAnnotationReferences.length > 0) {
+            if (!scheduled.at && submittedVisualAnnotationReferences.length > 0) {
               void onVisualAnnotationReferencesSubmitted?.(submittedVisualAnnotationReferences);
             }
           }
@@ -1829,6 +1858,10 @@ export const SessionChatInputArea = memo(
         durableAgentRoleReady,
         mcp,
         mcpSelectionReady,
+        scheduled,
+        selectedModeId,
+        selectedModelId,
+        configOptionValues,
         isExternalHistoryRefreshing,
         isMachineRemoved,
         isVisible,
@@ -1840,6 +1873,7 @@ export const SessionChatInputArea = memo(
         publishVisualAnnotationReferences,
         postHog,
         session.id,
+        session.agentConfigId,
         session.machineId,
         sessionProjectKind,
         updatePastedTextDraftsForSession,
@@ -1891,7 +1925,7 @@ export const SessionChatInputArea = memo(
       hasUploadedFiles ||
       commentReferences.length > 0 ||
       visualAnnotationReferences.length > 0;
-    const showStopButton = canStopAgent && !hasDraft && !isArchived;
+    const showStopButton = canStopAgent && !hasDraft && !isArchived && !scheduled.at;
     const isSendActionDisabled =
       !isVisible ||
       submissionPending ||
@@ -2258,12 +2292,16 @@ export const SessionChatInputArea = memo(
         aria-label={
           isExternalHistoryRefreshing && externalHistorySyncLabel
             ? externalHistorySyncLabel
-            : t('sessions.send')
+            : scheduled.at
+              ? t('scheduledMessage.title')
+              : t('sessions.send')
         }
         className="shadow-xs transition-all bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]"
       >
         {submissionPending || isExternalHistoryRefreshing ? (
           <Spinner size={isMobile ? 'medium' : 'small'} />
+        ) : scheduled.at ? (
+          <Clock {...stylex.props(isMobile ? styles.sendIconMobile : styles.sendIconDesktop)} />
         ) : (
           <ArrowUp {...stylex.props(isMobile ? styles.sendIconMobile : styles.sendIconDesktop)} />
         )}
@@ -2342,6 +2380,13 @@ export const SessionChatInputArea = memo(
         onImageRetry={submissionPending || isArchived ? undefined : handleRetryImage}
         fileItems={submissionPending ? [] : fileItems}
         mcp={mcp}
+        onScheduleSend={scheduled.available && !isArchived ? scheduled.openPicker : undefined}
+        scheduleDisabledReason={scheduled.disabledReason}
+        statusMessage={
+          submissionPending && scheduled.progress !== null
+            ? t('scheduledMessage.preparing', { progress: scheduled.progress })
+            : undefined
+        }
         onFileRemove={submissionPending || isArchived ? undefined : handleRemoveFile}
         onFileRetry={submissionPending || isArchived ? undefined : handleRetryFile}
         footerSelector={footerSelectorNode}
@@ -2370,6 +2415,16 @@ export const SessionChatInputArea = memo(
             unmount with them the moment it opened. Mounted only while OPEN:
             it reads machine visibility, and the composer must stay renderable
             in hosts that do not provide that context. */}
+        {isVisible && scheduled.pickerOpen && !submissionPending ? (
+          <ScheduledMessageTimeDialog
+            at={scheduled.at}
+            timeZone={scheduled.timeZone}
+            onApply={scheduled.apply}
+            onClose={scheduled.closePicker}
+            onRemoveTime={scheduled.at ? scheduled.cancel : undefined}
+            finalFocus={usesMobileKeyboardAction ? false : textareaRef}
+          />
+        ) : null}
         {agentRoleEditor && !submissionPending ? (
           <AgentRoleEditorDialog
             editor={agentRoleEditor}
@@ -2382,6 +2437,8 @@ export const SessionChatInputArea = memo(
         ) : null}
         <ConversationColumn>
           {hideTopSpacer ? null : <div aria-hidden="true" {...stylex.props(styles.topSpacer)} />}
+          <QuotaContinueAction session={session} visible={isVisible} />
+          <ScheduledMessagesSummary sessionId={session.id} timeZone={scheduled.timeZone} />
           {externalHistorySyncNode}
           {freeTurnLimitNoticeNode}
           {attachmentAddEnabled ? (

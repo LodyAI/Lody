@@ -237,7 +237,7 @@ import { UserAvatar } from '@/components/user-avatar';
 import { RenameSessionDialog, type RenameSessionDialogTarget } from './rename-session-dialog';
 import { useResolvedTheme } from '../../theme-provider';
 import { PullRequestBadge } from './pull-request-badge';
-import { SessionInfoBar } from './session-info-bar';
+import { ScheduledMessageInfoBar } from '../schedules/scheduled-message-info-bar';
 import { SessionPreviewPreload } from './session-preview-preload';
 import { CurrentSessionRelationsChip, useHasSessionRelations } from './session-relations-chip';
 import { SessionProjectMembersChip } from './session-project-members-chip';
@@ -7068,7 +7068,9 @@ export const SessionChatInterface = memo(
                       and work context, glued to the composer shell. It
                       replaced the mobile status strip / goal banner /
                       in-composer scheduled panel. */}
-                    <SessionInfoBar
+                    <ScheduledMessageInfoBar
+                      session={session}
+                      machineMeta={sessionMachine}
                       status={statusStripState}
                       machine={
                         sessionMachine
