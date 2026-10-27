@@ -36,13 +36,45 @@ tracked by [#1957](https://github.com/LodyAI/Lody/issues/1957).
 
 ## Devin integration
 
-Only the Devin gitlink moves, from `d49d357` to `15c12e1`, the merge of
+The Devin gitlink moves from `d49d357` to `15c12e1`, the merge of
 [adapter PR #6](https://github.com/LodyAI/acp-extension-devin/pull/6).
 That adds capability declarations; it cannot repair the host selection path alone.
 The official runtime remains `3000.11.3`, so its download artifact/checksum manifest
 needs no update. The adapter's own updated protocol manifest travels with the gitlink.
 The CLI bundler now inlines every manifest read, including the new protobuf-layout
 reader, so the relocated adapter does not require a sibling manifest file.
+
+## Pi follow-up: startup model ordering
+
+[Pi adapter #24](https://github.com/LodyAI/acp-extension-pi/pull/24) supplies
+per-model ladders, but its startup parser drops the dedicated `modelId` sent by
+the host. Thinking can consequently be applied to the previous model and reject
+an otherwise valid level. [Adapter #25](https://github.com/LodyAI/acp-extension-pi/pull/25),
+commit `989532ea55ee27a6d7a8455ae736c54022cb0dea`, selects `modelId` first,
+falls back to the string model config option, and only then applies thinking.
+Malformed independent fields do not discard the remaining startup configuration.
+Non-reasoning Pi models declare `["off"]`, not an empty ladder; Off remains visible.
+No host-specific wire workaround or adapter source modification is needed.
+
+Pi is an isolated downloaded runtime, unlike the bundled Devin adapter. Its
+gitlink and `pi-runtime-manifest.json` must move together after artifact
+publication and integrity readback, following the
+[managed-runtime refresh decision](../process/2026-09-17-managed-runtime-refresh.md).
+The production pins remain at `81c960da` until that distribution step is available.
+The candidate uses both Windows binaries from successful exact-commit
+[CI run 40500946908](https://github.com/LodyAI/acp-extension-pi/actions/runs/40500946908).
+Local Pi checks pass (111 tests, one skip), as do build and the real CLI synthetic
+smoke. These checks do not establish production artifact availability or an
+authenticated provider session. The generated package passes the packaged-closure
+smoke and two byte-identical archive builds. Host managed-runtime and startup
+suites pass against the candidate manifest (57 tests). The canonical candidate
+URL returns HTTP 404, so the integration is blocked on immutable publication.
+
+Candidate version: `0.2.0-lody.989532ea55ee`; file:
+`lody-pi-0.2.0-lody.989532ea55ee-88928a6b2a8c81a6.tar.zst` (16,188,064 bytes).
+SHA-256: `88928a6b2a8c81a67d2902cce4c4695774cd351c74c707ec4481bbcf349b5956`.
+Publication must be followed by full canonical-download hash/size verification;
+then update the gitlink and manifest together. No release or upload was performed.
 
 ## Verification and limits
 
