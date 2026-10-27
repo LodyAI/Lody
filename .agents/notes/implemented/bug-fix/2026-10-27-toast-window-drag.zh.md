@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1943
 
 [English](2026-10-27-toast-window-drag.md)
 
