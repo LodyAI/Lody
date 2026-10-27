@@ -1,3 +1,4 @@
+import { WorkspaceFeatureUnavailableError } from '@/lib/workspace-feature';
 import { useEffect, useRef, useState } from 'react';
 import { atom, useAtom, useAtomValue, type PrimitiveAtom } from 'jotai';
 import { atomFamily } from 'jotai/utils';
@@ -18,7 +19,7 @@ import { userAtom } from '@/atoms';
 import { activeWorkspaceRuntimeAtom, authTokenAtom } from '@/atoms/runtime';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
-import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
+import { useWorkspaceFeatureReason } from '@/hooks/use-workspace-feature';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import { toast } from '@/lib/toast';
 import {
@@ -76,12 +77,13 @@ export function useScheduledMessageDraft(
   const scope = useResolvedWorkspaceScope();
   const runtime = scope.enabled && scope.workspaceId === active?.workspaceId ? active : null;
   const user = useAtomValue(userAtom);
-  const allowed = useWorkspaceFeature('schedules');
+  const featureReason = useWorkspaceFeatureReason('schedules');
   const key = `${PREFIX}${runtime?.accountId ?? user?.id}:${runtime?.workspaceId}:${session.id}`;
   const [draft, updateDraft] = useAtom(draftAtoms(key));
   const [saving, setSaving] = useAtom(savingAtoms(key));
   const disabledReason =
-    !runtime || !user
+    featureReason ??
+    (!runtime || !user
       ? t('scheduledMessage.workspaceNotReady')
       : session.userId !== user.id || machine?.ownerUserId !== user.id
         ? t('scheduledMessage.ownMachine')
@@ -89,7 +91,7 @@ export function useScheduledMessageDraft(
           ? t('scheduledMessage.upgrade')
           : session.isArchived
             ? t('scheduledMessage.archived')
-            : undefined;
+            : undefined);
   const setDraft = (next: Draft | null) => {
     persist(key, next);
     updateDraft(next);
@@ -108,7 +110,8 @@ export function useScheduledMessageDraft(
         persist(key, null);
         return null;
       }),
-    available: allowed && !!runtime,
+    available: !featureReason && !!runtime,
+    featureUnavailable: !!featureReason,
     disabledReason,
     at: draft?.at ?? null,
     timeZone: getDeviceTimeZone(machine?.timeZone),
@@ -243,7 +246,9 @@ export function useScheduledMessage(session: SessionMeta, machine: MachineMeta |
           toast.error(
             error instanceof Error && error.message === 'SCHEDULE_TIME_PASSED'
               ? t('scheduledMessage.futureTime')
-              : t('scheduledMessage.saveError')
+              : error instanceof WorkspaceFeatureUnavailableError
+                ? error.message
+                : t('scheduledMessage.saveError')
           );
         }
         return false;

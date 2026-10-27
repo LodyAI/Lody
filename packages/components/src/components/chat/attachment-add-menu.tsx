@@ -1,4 +1,5 @@
-import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
+import { WorkspaceFeatureReasonText } from '@/components/workspace-feature-notice';
+import { useWorkspaceFeatureReason } from '@/hooks/use-workspace-feature';
 import { useState } from 'react';
 import { Clock, ChevronLeft, ChevronRight, Paperclip, Plug, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -54,16 +55,14 @@ export function AttachmentAddMenu({
   isMobile,
   isLanding,
   disabled,
-  onAddAttachment: requestedAddAttachment,
+  onAddAttachment,
   attachmentDisabled,
-  onScheduleSend: requestedScheduleSend,
+  onScheduleSend,
   scheduleDisabledReason,
   mcp,
 }: AttachmentAddMenuProps) {
-  const schedulesAllowed = useWorkspaceFeature('schedules');
-  const onScheduleSend = schedulesAllowed ? requestedScheduleSend : undefined;
-  const attachmentAllowed = useWorkspaceFeature('attachments');
-  const onAddAttachment = attachmentAllowed ? requestedAddAttachment : undefined;
+  const scheduleFeatureReason = useWorkspaceFeatureReason('schedules');
+  const attachmentFeatureReason = useWorkspaceFeatureReason('attachments');
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   // Mobile's pushed panel. Desktop uses a real submenu and stays on 'root'.
@@ -166,22 +165,31 @@ export function AttachmentAddMenu({
             {onAddAttachment ? (
               <Menu.Item
                 onClick={onAddAttachment}
-                disabled={attachmentDisabled}
+                disabled={attachmentDisabled || !!attachmentFeatureReason}
+                title={attachmentFeatureReason}
                 className={itemClass}
                 icon={Paperclip}
               >
-                {triggerLabel}
+                {attachmentFeatureReason ? (
+                  <WorkspaceFeatureReasonText reason={attachmentFeatureReason} />
+                ) : (
+                  triggerLabel
+                )}
               </Menu.Item>
             ) : null}
             {onScheduleSend ? (
               <Menu.Item
                 icon={Clock}
                 onClick={onScheduleSend}
-                disabled={!!scheduleDisabledReason}
-                title={scheduleDisabledReason}
+                disabled={!!scheduleFeatureReason || !!scheduleDisabledReason}
+                title={scheduleFeatureReason ?? scheduleDisabledReason}
                 className={itemClass}
               >
-                {t('scheduledMessage.menu')}
+                {scheduleFeatureReason ? (
+                  <WorkspaceFeatureReasonText reason={scheduleFeatureReason} />
+                ) : (
+                  t('scheduledMessage.menu')
+                )}
               </Menu.Item>
             ) : null}
             {hasMcp && mcp ? (
