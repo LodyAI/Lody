@@ -576,7 +576,7 @@ describe('DeepSeek system Node environment', () => {
       SYNTHETIC_PROVIDER: 'preserved',
     };
     const prepared = await prepareNode(env);
-    expect(prepared.LODY_DSH_NODE_EXECUTABLE).toBe(join(first, filename));
+    expect(prepared.LODY_DSH_NODE_EXECUTABLE).toBe(process.execPath);
     expect(prepared.ELECTRON_RUN_AS_NODE).toBeUndefined();
     expect(prepared.SYNTHETIC_PROVIDER).toBe('preserved');
     expect(prepared.DSH_HOME).toBe(root);
@@ -633,7 +633,7 @@ describe('DeepSeek system Node environment', () => {
     const env = { PATH: root };
     await expect(prepareNode(env)).rejects.toThrow('[DSH_NODE_NOT_FOUND]');
     await symlink(process.execPath, join(root, process.platform === 'win32' ? 'node.exe' : 'node'));
-    expect((await prepareNode(env)).LODY_DSH_NODE_EXECUTABLE).toContain(root);
+    expect((await prepareNode(env)).LODY_DSH_NODE_EXECUTABLE).toBe(process.execPath);
   });
 
   it.skipIf(process.platform === 'win32')(
@@ -642,7 +642,12 @@ describe('DeepSeek system Node environment', () => {
       const root = await mkdtemp(join(tmpdir(), 'lody-dsh-node-permissions-'));
       temporaryRoots.push(root);
       await writeFile(join(root, 'node'), 'not executable', { mode: 0o600 });
-      await expect(prepareNode({ PATH: root })).rejects.toThrow('[DSH_NODE_EXEC_FAILED]');
+      const second = join(root, 'second');
+      await mkdir(second);
+      await symlink(process.execPath, join(second, 'node'));
+      await expect(prepareNode({ PATH: [root, second].join(delimiter) })).rejects.toThrow(
+        '[DSH_NODE_EXEC_FAILED]'
+      );
     }
   );
 
@@ -655,7 +660,9 @@ describe('DeepSeek system Node environment', () => {
     temporaryRoots.push(root);
     await writeFile(
       join(root, 'node'),
-      "#!/bin/sh\nprintf '%s\n' " + JSON.stringify(JSON.stringify(runtime)) + '\n',
+      "#!/bin/sh\nprintf '%s\n' " +
+        JSON.stringify(JSON.stringify({ execPath: process.execPath, ...runtime })) +
+        '\n',
       { mode: 0o700 }
     );
     await expect(prepareNode({ PATH: root })).rejects.toThrow('[DSH_NODE_UNSUPPORTED]');

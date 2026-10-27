@@ -17,7 +17,7 @@ DeepSeek Harness 0.2.1-rc.2 在 Electron 44.9.3 下尚未完成 ACP 初始化就
 
 用户批准改用系统 Node，并要求缺失时提示安装。本决策仅替代[内置 Node 决策](2026-09-16-dsh-bundled-node-runtime.zh.md)和 [Electron 兼容决策](2026-10-10-dsh-electron-runtime.zh.md)中的运行时选择。保留 npx 固定依赖、缓存恢复、显式 `runCli()`、Provider 目录和原有会话压缩规则。不回退 [Electron 安全升级](2026-10-26-runtime-dependency-security.zh.md)，不修改下载的原生二进制。
 
-从登录 shell 与 Provider 环境合并后的最终 PATH 中，按顺序选择绝对目录里的第一个 Node。忽略空项和相对目录，避免会话工作目录隐式提供执行程序。首个候选无法执行时明确失败，不静默改用其他安装。检查仓库现有 Node 安全版本下限及 Node-API 10，并拒绝 Electron 程序。仅在 DSH 子进程环境移除 `ELECTRON_RUN_AS_NODE`。保留 PATH 顺序，包括首位的 GitHub shim。Windows npm JS 与 DSH 转发器使用同一个选中的 Node，保留无窗口启动和进程树管理。
+从登录 shell 与 Provider 环境合并后的最终 PATH 中，按顺序选择绝对目录里的第一个 Node。忽略空项和相对目录，避免会话工作目录隐式提供执行程序。候选因 EACCES/EPERM 无法检查时继续搜索后续 PATH 项；没有可用候选时保留首个权限错误。其他检查错误仍明确失败。文件选中后若无法执行，仍明确失败，不静默改用其他安装。检查在实际子进程工作目录执行，并固定使用其报告的绝对 `process.execPath` 运行 Harness 和 Windows npm；保留版本管理器 shim 会使检查与实际运行的 Node 不同。检查仓库现有 Node 安全版本下限及 Node-API 10，并拒绝 Electron 程序。仅在 DSH 子进程环境移除 `ELECTRON_RUN_AS_NODE`。保留 PATH 顺序，包括首位的 GitHub shim。Windows npm JS 与 DSH 转发器使用同一个选中的 Node，保留无窗口启动和进程树管理。
 
 普通会话在 `Session.createAgent` 的每次启动 attempt 中执行检查，位置在 shell/cache、凭据和记忆环境合并之后。返回的同一份环境用于可执行程序解析和 `sandbox.spawn`。能力与配额探测、历史读取、协议认证入口在各自环境合并后使用同一检查。稳定的 `DSH_NODE_NOT_FOUND`、`DSH_NODE_UNSUPPORTED`、`DSH_NODE_EXEC_FAILED` 标识沿现有错误消息传递；前端常开错误提示展示本地化解决方法和 Node.js 下载按钮。原始错误保留检测版本或执行失败原因，仍可完整复制。更新能力来源版本，确保升级后重新探测。
 
@@ -29,7 +29,7 @@ DeepSeek Harness 0.2.1-rc.2 在 Electron 44.9.3 下尚未完成 ACP 初始化就
 
 ## 验证与限制
 
-九组 CLI 测试共 192 项通过，包含 Session 环境、资源限制、终止，以及 Harness 启动、运行时检查、runner、认证、历史和 Agent 设置。新增 `Session.createAgent` 用例验证缺 Node 时不进入 sandbox spawn、安装后恢复、Windows npm JS 分支、最终记忆/Provider/shell 环境、取消后确认检查进程终止，以及 npm 恢复重试时重新检查 Node。临时撤掉 Session 接入后，缺 Node 和 Windows 分支两个回归测试均失败。此前两组前端测试 21 项覆盖的 UI 未改变。CLI 类型检查、改动代码 type-aware Oxlint、进程与公共边界、根目录格式化和文档检查通过。
+九组 CLI 测试共 194 项通过，包含 Session 环境、资源限制、终止，以及 Harness 启动、运行时检查、runner、认证、历史和 Agent 设置。新增 `Session.createAgent` 用例验证缺 Node 时不进入 sandbox spawn、安装后恢复、Windows npm JS 分支、最终记忆/Provider/shell 环境、取消后确认检查进程终止，以及 npm 恢复重试时重新检查 Node。临时撤掉 Session 接入后，缺 Node 和 Windows 分支两个回归测试均失败。新增真实 Session 边界用例验证：项目指定不支持的 Node 时在 sandbox spawn 前失败、修正版本后恢复、保留实际 Node 路径而非 shim，以及跳过不可访问的 PATH 目录且不改变权限。受控真实进程 Session 检查使用缓存 Node 24.22.0/24.22.1 和本地合成 ACP 服务，确认拒绝不支持版本、同一个 Session 修正后完成 initialize/session-new，以及不可访问目录仍存在时也能启动；不访问网络或发送模型请求。此前两组前端测试 21 项覆盖的 UI 未改变。CLI 类型检查、改动代码 type-aware Oxlint、进程与公共边界、根目录格式化和文档检查通过。
 
 真实隔离检查现在直接调用 **`Session.createAgent`**，经过普通环境构造、sandbox 和 ACP client。独立 Node 24.22.1 与 Electron 44.9.3 宿主均完成 `initialize` 和 `session/new`，得到 Session client 与模型能力后正常终止。检查复用此前打包的适配器、缓存 0.2.1-rc.2 依赖和仅使用缓存的 npx shim，不发送模型请求，不使用真实凭据或内置 MCP server；不验证 npm 冷安装、新安装包或原生 Windows/Linux。
 

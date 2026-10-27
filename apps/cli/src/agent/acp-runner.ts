@@ -415,11 +415,11 @@ export async function queryLocalAcpRateLimits(options: StartLocalAcpAgentOptions
 export async function prepareAcpProcessEnvironmentLegacy(
   launch: Omit<ResolvedACPProcessLaunch, 'env'> & { env?: NodeJS.ProcessEnv },
   env: NodeJS.ProcessEnv,
-  options: { logger?: Logger; signal?: AbortSignal } = {}
+  options: { logger?: Logger; signal?: AbortSignal; cwd?: string } = {}
 ): Promise<NodeJS.ProcessEnv> {
   if (!launch.env?.LODY_DSH_NODE_ARGS) return env;
   return runPromiseSquashedLegacy(
-    prepareDeepSeekNodeEnvironment(env).pipe(
+    prepareDeepSeekNodeEnvironment(env, options.cwd).pipe(
       Effect.provide(platformLayer({ logger: options.logger }))
     ),
     { signal: options.signal }
@@ -499,6 +499,7 @@ async function startLocalAcpProtocol<T>(
   );
   // Resolve only after the same shell/provider PATH used by the actual child is ready.
   mergedStartupEnv = await prepareAcpProcessEnvironmentLegacy(launch, mergedStartupEnv, {
+    cwd: options.workdir,
     logger: options.logger,
     signal: options.signal,
   });

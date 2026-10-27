@@ -26,6 +26,7 @@ export function resolveDeepSeekNodePath(
   env: NodeJS.ProcessEnv,
   platform = process.platform
 ): string {
+  let inaccessibleCandidate: DeepSeekNodeError | undefined;
   const pathKey = Object.keys(env).find((key) =>
     platform === 'win32' ? key.toLowerCase() === 'path' : key === 'PATH'
   );
@@ -43,12 +44,24 @@ export function resolveDeepSeekNodePath(
         (error.code === 'ENOENT' || error.code === 'ENOTDIR')
       )
         continue;
-      throw new DeepSeekNodeError(
+      const inspectionError = new DeepSeekNodeError(
         'DSH_NODE_EXEC_FAILED',
         `Cannot inspect Node.js at ${candidate}: ${String(error)}`
       );
+      // Search can cross an inaccessible directory without executing anything there.
+      // A selected file still has to pass the execution probe; never skip its failure.
+      if (
+        error instanceof Error &&
+        'code' in error &&
+        (error.code === 'EACCES' || error.code === 'EPERM')
+      ) {
+        inaccessibleCandidate ??= inspectionError;
+        continue;
+      }
+      throw inspectionError;
     }
   }
+  if (inaccessibleCandidate) throw inaccessibleCandidate;
   throw new DeepSeekNodeError(
     'DSH_NODE_NOT_FOUND',
     'DeepSeek Harness requires Node.js, but node was not found on the target machine PATH.'
@@ -56,6 +69,7 @@ export function resolveDeepSeekNodePath(
 }
 
 const runtimeSchema = z.object({
+  execPath: z.string().refine(isAbsolute),
   node: z.string(),
   napi: z.string().optional(),
   electron: z.string().optional(),
@@ -63,7 +77,7 @@ const runtimeSchema = z.object({
 
 /** The caller owns execution/cancellation; the shared process Scope owns probe cleanup. */
 export const prepareDeepSeekNodeEnvironment = Effect.fn('prepareDeepSeekNodeEnvironment')(
-  function* (env: NodeJS.ProcessEnv) {
+  function* (env: NodeJS.ProcessEnv, cwd?: string) {
     const executable = yield* Effect.try({
       try: () => resolveDeepSeekNodePath(env),
       catch: (error) => error,
@@ -72,9 +86,10 @@ export const prepareDeepSeekNodeEnvironment = Effect.fn('prepareDeepSeekNodeEnvi
     delete childEnv.ELECTRON_RUN_AS_NODE;
     const result = yield* runCommandOk({
       command: executable,
+      cwd,
       args: [
         '-p',
-        'JSON.stringify({node:process.versions.node,napi:process.versions.napi,electron:process.versions.electron})',
+        'JSON.stringify({execPath:process.execPath,node:process.versions.node,napi:process.versions.napi,electron:process.versions.electron})',
       ],
       // Keep an accidentally selected Electron shim in Node mode for the probe,
       // so rejecting it cannot launch a GUI. Standalone Node ignores this flag.
@@ -111,6 +126,6 @@ export const prepareDeepSeekNodeEnvironment = Effect.fn('prepareDeepSeekNodeEnvi
         )
       );
     }
-    return { ...childEnv, LODY_DSH_NODE_EXECUTABLE: executable };
+    return { ...childEnv, LODY_DSH_NODE_EXECUTABLE: runtime.execPath };
   }
 );

@@ -1,5 +1,5 @@
 import { delimiter, join } from 'node:path';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as processOptions from '../src/platform/process-options';
 import { FakeProcessTable } from '@lody/shared/node/process-testing';
@@ -298,6 +298,9 @@ describe('Session.createAgent DeepSeek Node prerequisites', () => {
     const table = new FakeProcessTable('linux');
     const probePids: number[] = [];
     let holdProbe = false;
+    let probeRuntime:
+      | ((cwd: string | undefined) => { execPath: string; node: string; napi: string })
+      | undefined;
     let announceProbe: () => void = () => {};
     const probeStarted = new Promise<void>((onStarted) => {
       announceProbe = onStarted;
@@ -313,7 +316,15 @@ describe('Session.createAgent DeepSeek Node prerequisites', () => {
             announceProbe();
             if (!holdProbe)
               queueMicrotask(() => {
-                child.stdout?.write(JSON.stringify({ node: '24.22.1', napi: '10' }));
+                child.stdout?.write(
+                  JSON.stringify(
+                    probeRuntime?.(args[2]?.cwd?.toString()) ?? {
+                      execPath: args[0],
+                      node: '24.22.1',
+                      napi: '10',
+                    }
+                  )
+                );
                 table.exitOnItsOwn(child.pid ?? -1);
               });
             return child;
@@ -371,6 +382,9 @@ describe('Session.createAgent DeepSeek Node prerequisites', () => {
       reachedSandbox,
       probeStarted,
       probePids,
+      setProbeRuntime: (runtime: NonNullable<typeof probeRuntime>) => {
+        probeRuntime = runtime;
+      },
       holdProbe: () => {
         holdProbe = true;
       },
@@ -396,9 +410,49 @@ describe('Session.createAgent DeepSeek Node prerequisites', () => {
     expect(f.table.spawned[0]?.options.env?.NMEM_AGENT_ID).toBe('synthetic-memory');
   });
 
+  it('validates a directory-sensitive manager in the Session workdir and freezes its actual Node', async () => {
+    const f = await fixture();
+    await f.installNode();
+    const actualNode = join(f.root, 'actual-node');
+    f.setProbeRuntime((cwd) => ({
+      execPath: actualNode,
+      node: cwd === f.root ? '24.22.0' : '24.22.1',
+      napi: '10',
+    }));
+    await expect(f.session.createAgent(f.callbacks)).rejects.toThrow('[DSH_NODE_UNSUPPORTED]');
+    expect(f.captured).toEqual([]);
+    expect(f.probePids.map((pid) => f.table.isAlive(pid))).toEqual([false]);
+    // Correcting the project pin restores the same Session; execution bypasses the shim.
+    f.setProbeRuntime(() => ({ execPath: actualNode, node: '24.22.1', napi: '10' }));
+    await expect(f.session.createAgent(f.callbacks)).rejects.toBe(f.reachedSandbox);
+    expect(f.captured[0]?.env.LODY_DSH_NODE_EXECUTABLE).toBe(actualNode);
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'searches past an inaccessible PATH directory without changing its permissions',
+    async () => {
+      const f = await fixture();
+      const denied = join(f.root, 'unrelated-private-bin');
+      await mkdir(denied, { mode: 0o000 });
+      resolvedLoginShellOverlay.value = { PATH: [denied, f.bin].join(delimiter) };
+      try {
+        await expect(f.session.createAgent(f.callbacks)).rejects.toThrow('[DSH_NODE_EXEC_FAILED]');
+        expect(f.captured).toEqual([]);
+        await f.installNode();
+        await expect(f.session.createAgent(f.callbacks)).rejects.toBe(f.reachedSandbox);
+        expect(f.captured[0]?.env.LODY_DSH_NODE_EXECUTABLE).toBe(f.node);
+        expect((await stat(denied)).mode & 0o777).toBe(0);
+      } finally {
+        await chmod(denied, 0o700);
+      }
+    }
+  );
+
   it('passes the validated Node into the Windows npm JS dispatch branch', async () => {
     const f = await fixture();
     await f.installNode();
+    const actualNode = join(f.root, 'selected-node.exe');
+    f.setProbeRuntime(() => ({ execPath: actualNode, node: '24.22.1', napi: '10' }));
     const npmDir = join(f.bin, 'node_modules', 'npm', 'bin');
     await mkdir(npmDir, { recursive: true });
     await writeFile(join(f.bin, 'npx.cmd'), '@exit /b 99\r\n');
@@ -414,14 +468,14 @@ describe('Session.createAgent DeepSeek Node prerequisites', () => {
       })
     );
     await expect(f.session.createAgent(f.callbacks)).rejects.toBe(f.reachedSandbox);
-    expect(f.captured[0]?.command).toBe(f.node);
+    expect(f.captured[0]?.command).toBe(actualNode);
     expect(f.captured[0]?.args.slice(0, 3)).toEqual([
       '--import',
       expect.stringContaining('data:text/javascript;base64,'),
       await realpath(npmEntry),
     ]);
     expect(f.captured[0]?.args.slice(3)).toEqual(f.callbacks.args);
-    expect(f.captured[0]?.env.LODY_DSH_NODE_EXECUTABLE).toBe(f.node);
+    expect(f.captured[0]?.env.LODY_DSH_NODE_EXECUTABLE).toBe(actualNode);
   });
 
   it('cancels the in-flight prerequisite probe without spawning npx or leaving its process alive', async () => {

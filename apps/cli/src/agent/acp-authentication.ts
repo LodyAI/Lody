@@ -960,7 +960,7 @@ export class AcpAuthenticationManager {
         env: options.env,
         resolveLoginShellEnv: this.resolveLoginShellEnv,
       }),
-      { logger: this.logger, signal: running.abortController.signal }
+      { logger: this.logger, signal: running.abortController.signal, cwd: process.cwd() }
     );
     // The process stdout is the ACP JSON-RPC channel. In a headless shell,
     // TERM can make browser launchers fall back to w3m/lynx and render HTML

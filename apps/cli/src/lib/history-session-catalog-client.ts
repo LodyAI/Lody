@@ -143,7 +143,7 @@ async function createHistoryAcpConnection(args: {
       mergeLoginShellEnv(launch.env, loginShellEnv),
       args.provider.agentType
     ),
-    { logger: args.logger }
+    { logger: args.logger, cwd: args.workdir }
   );
   return await withAcpSessionStartSlot(
     {

@@ -618,7 +618,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         const startupEnv = await prepareAcpProcessEnvironmentLegacy(
           { command: callbacks.command, args: callbacks.args ?? [], env: callbacks.env },
           prepared.env,
-          { logger: this.logger, signal: callbacks.abortSignal }
+          { logger: this.logger, signal: callbacks.abortSignal, cwd: this.getWorkdir() }
         );
         callbacks.abortSignal?.throwIfAborted();
         const executable = resolveDeepSeekHarnessSpawn({
