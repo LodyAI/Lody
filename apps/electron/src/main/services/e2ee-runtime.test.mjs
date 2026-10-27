@@ -756,6 +756,11 @@ void test('local machine approval retains its exact signed original across resta
         protection: 'file',
         admitted: false
       })
+      // A second window and retry after a lost prepare response keep the pending
+      // approval's session and material; neither authorizes a new attempt.
+      assert.deepEqual(yield* owner.host.localPairingContext(workspaceId), context)
+      assert.deepEqual(yield* owner.host.stageLocalPairing(workspaceId, material), staged)
+      assert.deepEqual(yield* owner.host.localPairingContext(workspaceId), context)
       // Preparing and cancelling the UI does not sign or append a ledger record.
       assert.equal((yield* owner.host.ledgerView(workspaceId)).recordsHex.length, 1)
       const request = yield* owner.host.approveLocalPairing(workspaceId, context.pairingSessionId)
@@ -829,8 +834,8 @@ void test('local status exposes only credential availability for old developer w
   )
 })
 
-for (const outcome of ['unsigned', 'uncertain', 'committed', 'competing']) {
-  void test(`local machine pairing can replace lost material only after ${outcome} evidence`, async (t) => {
+for (const outcome of ['unsigned', 'uncertain', 'committed', 'competing', 'admitted', 'revoked']) {
+  void test(`local machine pairing preserves pending sessions and renews only after ${outcome} evidence`, async (t) => {
     const directory = await fixture(t)
     let original
     await execute(
@@ -873,21 +878,66 @@ for (const outcome of ['unsigned', 'uncertain', 'committed', 'competing']) {
           protection: 'file'
         }
         yield* owner.host.stageLocalPairing(workspaceId, material)
-        const request =
-          outcome === 'unsigned'
+        let request =
+          outcome === 'unsigned' || outcome === 'admitted' || outcome === 'revoked'
             ? null
             : yield* owner.host.approveLocalPairing(workspaceId, context.pairingSessionId)
-        if (outcome === 'committed') {
+        if (outcome === 'admitted' || outcome === 'revoked') {
+          // Another verified admission can settle staged material even when this
+          // local journal never signed a request (approve then returns null).
+          const records = [Buffer.from(prepared.genesisRecordHex, 'hex')]
+          const view = Result.getOrThrow(
+            verifyLedger({
+              anchor: genesis,
+              records,
+              checkpoint: { length: 1, head: hashRecordBytes(records[0]) }
+            })
+          )
+          const signer = yield* owner.custody.openDevice(genesis)
+          const record = yield* signLedgerRecord(
+            Result.getOrThrow(
+              prepareLedgerCommand(view, signer.publicKey, {
+                _tag: 'AdmitDevice',
+                kind: 'machine',
+                machineId: material.machineId,
+                signingPublicKey: machine.publicKey,
+                encryptionPublicKey: machine.enc,
+                possessionSignature: possession.possessionSignature
+              })
+            ),
+            signer
+          )
+          request = { recordHex: hex(record) }
+        }
+        if (outcome === 'committed' || outcome === 'admitted' || outcome === 'revoked') {
+          const records = [
+            Buffer.from(prepared.genesisRecordHex, 'hex'),
+            Buffer.from(request.recordHex, 'hex')
+          ]
+          if (outcome === 'revoked') {
+            const view = Result.getOrThrow(
+              verifyLedger({
+                anchor: genesis,
+                records,
+                checkpoint: { length: records.length, head: hashRecordBytes(records.at(-1)) }
+              })
+            )
+            const signer = yield* owner.custody.openDevice(genesis)
+            records.push(
+              yield* signLedgerRecord(
+                Result.getOrThrow(
+                  prepareLedgerCommand(view, signer.publicKey, {
+                    _tag: 'RevokeDevice',
+                    target: machine.publicKey
+                  })
+                ),
+                signer
+              )
+            )
+          }
           yield* owner.host.ingestLedgerRecords(
             workspaceId,
-            page(
-              [
-                Buffer.from(prepared.genesisRecordHex, 'hex'),
-                Buffer.from(request.recordHex, 'hex')
-              ],
-              prepared.genesisHashHex,
-              0
-            )
+            page(records, prepared.genesisHashHex, 0)
           )
         } else if (outcome === 'competing') {
           // Include enough records to compact: terminal evidence must survive retained reopen.
@@ -898,6 +948,11 @@ for (const outcome of ['unsigned', 'uncertain', 'committed', 'competing']) {
               page(records, prepared.genesisHashHex, start, Math.min(start + 64, records.length))
             )
         }
+        if (outcome === 'admitted')
+          assert.equal(
+            yield* owner.host.approveLocalPairing(workspaceId, context.pairingSessionId),
+            null
+          )
         original = { request, material, context }
         yield* owner.custody.discardDevice(machine)
       })
@@ -907,12 +962,14 @@ for (const outcome of ['unsigned', 'uncertain', 'committed', 'competing']) {
         const owner = yield* ownerWithHost(directory)
         yield* owner.host.open(workspaceId)
         const context = yield* owner.host.localPairingContext(workspaceId)
-        if (outcome === 'uncertain') {
+        if (outcome === 'uncertain' || outcome === 'unsigned') {
           assert.equal(context.pairingSessionId, original.context.pairingSessionId)
-          assert.deepEqual(
-            yield* owner.host.approveLocalPairing(workspaceId, context.pairingSessionId),
-            original.request
+          const approved = yield* owner.host.approveLocalPairing(
+            workspaceId,
+            context.pairingSessionId
           )
+          if (outcome === 'uncertain') assert.deepEqual(approved, original.request)
+          else assert.equal(typeof approved.recordHex, 'string')
           const conflict = yield* Effect.result(
             owner.host.stageLocalPairing(workspaceId, {
               ...original.material,

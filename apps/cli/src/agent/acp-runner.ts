@@ -1,6 +1,8 @@
 import { LODY_EXTENSION_METHODS } from 'acp-extension-core';
 import { parseLodyExtensionCapabilities, parseRateLimitsSnapshot } from './lody-acp-extension';
-import { toShared } from '@/platform/process-options';
+import { platformLayer, toShared } from '@/platform/process-options';
+import { Effect } from 'effect';
+import { prepareDeepSeekNodeEnvironment } from './deepseek-system-node';
 import type { ChildProcess } from 'child_process';
 import os from 'os';
 import path from 'path';
@@ -18,7 +20,11 @@ import { z } from 'zod';
 
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
-import { startProcessLegacy, terminateChildTreeLegacy } from '@lody/shared/node/process';
+import {
+  runPromiseSquashedLegacy,
+  startProcessLegacy,
+  terminateChildTreeLegacy,
+} from '@lody/shared/node/process';
 import { withSpawn } from '@/platform/process-options';
 
 import type { NodeProcessApi } from '@lody/shared/node/process';
@@ -40,6 +46,7 @@ import {
   resolveACPProcessLaunch,
   resolveACPProcessLaunchAsync,
   withDefaultAcpPathEntries,
+  type ResolvedACPProcessLaunch,
 } from './setting';
 import type { ManagedRuntimeProgressCallback } from '@/agent/managed-agent-runtime';
 import type {
@@ -404,6 +411,21 @@ export async function queryLocalAcpRateLimits(options: StartLocalAcpAgentOptions
   return started.snapshot;
 }
 
+/** Complete builtin DSH runtime selection after each caller's environment merge. */
+export async function prepareAcpProcessEnvironmentLegacy(
+  launch: Omit<ResolvedACPProcessLaunch, 'env'> & { env?: NodeJS.ProcessEnv },
+  env: NodeJS.ProcessEnv,
+  options: { logger?: Logger; signal?: AbortSignal; cwd?: string } = {}
+): Promise<NodeJS.ProcessEnv> {
+  if (!launch.env?.LODY_DSH_NODE_ARGS) return env;
+  return runPromiseSquashedLegacy(
+    prepareDeepSeekNodeEnvironment(env, options.cwd).pipe(
+      Effect.provide(platformLayer({ logger: options.logger }))
+    ),
+    { signal: options.signal }
+  );
+}
+
 async function startLocalAcpProtocol<T>(
   options: StartLocalAcpAgentOptions,
   startClient: (options: CreateAcpClientOptions) => Promise<T>,
@@ -464,7 +486,7 @@ async function startLocalAcpProtocol<T>(
   // withLoopbackNoProxy runs outermost so a proxy contributed by the login
   // shell is covered too: the agent reaches Lody's MCP HTTP host over
   // loopback, and a proxy that intercepts that kills MCP entirely.
-  const mergedStartupEnv = withLoopbackNoProxy(
+  let mergedStartupEnv = withLoopbackNoProxy(
     withoutElectronBootstrapCredentials(
       withLodyNpmCacheForNpx(
         launch.command,
@@ -475,6 +497,12 @@ async function startLocalAcpProtocol<T>(
       )
     )
   );
+  // Resolve only after the same shell/provider PATH used by the actual child is ready.
+  mergedStartupEnv = await prepareAcpProcessEnvironmentLegacy(launch, mergedStartupEnv, {
+    cwd: options.workdir,
+    logger: options.logger,
+    signal: options.signal,
+  });
   const envWithAcpStartup = isTitleAgentCodexRun
     ? withTitleAgentCodexConfig(mergedStartupEnv)
     : mergedStartupEnv;
@@ -664,12 +692,19 @@ async function startLocalAcpProtocol<T>(
         capabilitySourceVersion: launch.capabilitySourceVersion,
       };
     } catch (error) {
+      const startupError = startupMonitor.resolveError(error);
       // The process died/failed to spawn before startup completed (the startup
       // monitor surfaces async ENOENT/EACCES/early-exit here). Protocol-level
       // failures are captured inside AgentClient.startSession, so only
       // spawn-level monitor errors are reported here to avoid double-counting.
-      if (error instanceof AcpStartupProcessExitError || error instanceof AcpStartupProcessError) {
-        captureAcpSpawnFailed({ ...spawnAnalyticsProps, reason: classifyCliSpawnReason(error) });
+      if (
+        startupError instanceof AcpStartupProcessExitError ||
+        startupError instanceof AcpStartupProcessError
+      ) {
+        captureAcpSpawnFailed({
+          ...spawnAnalyticsProps,
+          reason: classifyCliSpawnReason(startupError),
+        });
       }
       // Report a survivor, but keep the startup error: it is why the call failed.
       await terminateAcpProcessTree(agentProcess, {
@@ -683,7 +718,7 @@ async function startLocalAcpProtocol<T>(
         );
       });
 
-      throw error;
+      throw startupError;
     } finally {
       options.signal?.removeEventListener('abort', handleSignalAbort);
       startupMonitor.dispose();

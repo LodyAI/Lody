@@ -146,6 +146,16 @@ const getOptionByText = (text: string): HTMLButtonElement => {
   return option;
 };
 
+const getTitleModelOptionByText = (text: string): HTMLElement => {
+  const option = Array.from(document.body.querySelectorAll<HTMLElement>('[role="option"]')).find(
+    (element) => element.textContent?.includes(text)
+  );
+  if (!option) {
+    throw new Error(`Expected title model option containing text "${text}"`);
+  }
+  return option;
+};
+
 const setNativeTextAreaValue = (element: HTMLTextAreaElement, value: string): void => {
   const valueSetter = Object.getOwnPropertyDescriptor(
     window.HTMLTextAreaElement.prototype,
@@ -172,6 +182,14 @@ describe('AgentConfigDialog', () => {
   beforeEach(async () => {
     store = createStore();
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      }
+    );
     await initI18n('en');
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
@@ -201,6 +219,7 @@ describe('AgentConfigDialog', () => {
     container?.remove();
     container = undefined;
     document.body.innerHTML = '';
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -1915,6 +1934,17 @@ describe('AgentConfigDialog', () => {
       });
     });
     expect(document.body.textContent).toContain('Kimi K2');
+    const modelTrigger = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Kimi K2'
+    );
+    expect(modelTrigger).toBeDefined();
+    await act(async () => {
+      modelTrigger?.click();
+    });
+    expect(getTitleModelOptionByText('Kimi K2 Turbo')).toBeDefined();
+    await act(async () => {
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
     expect(document.body.textContent).not.toContain('Probing capabilities…');
     await act(async () => {
       Array.from(document.body.querySelectorAll('button'))
@@ -1923,9 +1953,63 @@ describe('AgentConfigDialog', () => {
     });
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({
-        titleGeneration: expect.objectContaining({
-          configOptionValues: expect.objectContaining({ model: expect.any(String) }),
-        }),
+        titleGeneration: { configOptionValues: { reasoning_effort: 'low' } },
+      })
+    );
+  });
+
+  it('saves the selected title model after testing capabilities', async () => {
+    const mode: AgentConfigDialogMode = { kind: 'edit', config: createBuiltinConfig() };
+    const onSubmit = vi.fn(async () => {});
+    let finishProbe!: (response: Awaited<ReturnType<RefreshCapabilities>>) => void;
+    const onRefreshCapabilities: RefreshCapabilities = () =>
+      new Promise((resolve) => {
+        finishProbe = resolve;
+      });
+    const renderMachine = (machine: MachineViewMeta) =>
+      renderDialog(mode, machine, onSubmit, undefined, onRefreshCapabilities);
+
+    await renderMachine(createMachine('Workstation'));
+    await act(async () => {
+      document.body
+        .querySelector<HTMLButtonElement>('button[aria-label="Test agent capabilities"]')!
+        .click();
+    });
+    await renderMachine(createTitleConfigMachine());
+    await act(async () => {
+      finishProbe({
+        type: 'machine/acp-capabilities-refresh_response',
+        machineId,
+        configId: kimiConfigId,
+        cliType: 'builtin',
+        agentType: 'kimi',
+        success: true,
+      });
+    });
+
+    const modelTrigger = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Kimi K2'
+    );
+    expect(modelTrigger).toBeDefined();
+    await act(async () => {
+      modelTrigger?.click();
+    });
+    await act(async () => {
+      getTitleModelOptionByText('Kimi K2 Turbo').dispatchEvent(
+        new MouseEvent('click', { bubbles: true })
+      );
+    });
+
+    await act(async () => {
+      Array.from(document.body.querySelectorAll('button'))
+        .find((button) => button.textContent?.trim() === 'Save')!
+        .click();
+    });
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        titleGeneration: {
+          configOptionValues: { model: 'kimi-k2-turbo', reasoning_effort: 'low' },
+        },
       })
     );
   });

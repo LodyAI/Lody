@@ -6,7 +6,7 @@ Index and rationale: [README.md](README.md).
 ## Composer and selectors
 
 - `attachment-add-menu.tsx` owns the single composer "+" menu and per-turn MCP
-  selection (`ChatComposer mcp` → `AttachmentAddMenuMcp`), never the footer row.
+  selection (`ChatComposer mcp` → `AttachmentAddMenuMcp`) and Schedule send.
   MCP uses a desktop hover submenu or a touch panel on the same surface with a
   back row. Toggling keeps it open; an empty catalog hides the entry.
 - Desktop project pickers use DropdownMenu with local/GitHub projects by recency.

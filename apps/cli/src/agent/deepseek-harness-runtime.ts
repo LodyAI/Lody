@@ -22,7 +22,7 @@ import {
 } from 'acp-extension-dsh/profile';
 
 export { DEEPSEEK_HARNESS_VERSION, createDeepSeekHarnessProfileFiles };
-export const DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION = `${ACP_EXTENSION_DSH_CAPABILITY_SOURCE_VERSION}:provider-home-v1`;
+export const DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION = `${ACP_EXTENSION_DSH_CAPABILITY_SOURCE_VERSION}:provider-home-v1:system-node-v1`;
 export const DEEPSEEK_HARNESS_HOME_ENV = 'DSH_HOME';
 
 const RAW_SESSION_ARTIFACT = /^session(?:\.v[1-9]\d*)?\.jsonl$/;
@@ -67,7 +67,7 @@ export function resolveDeepSeekHarnessSpawn(options: {
       .find((candidate) => candidate.toLowerCase() === name);
     return key ? env[key] : undefined;
   };
-  const directories = [workdir, ...(envValue('path') ?? '').split(';')];
+  const directories = (envValue('path') ?? '').split(';');
   const extensions = (envValue('pathext') ?? '.COM;.EXE;.BAT;.CMD').split(';');
   for (const directory of directories) {
     if (!directory) continue;
@@ -93,7 +93,7 @@ export function resolveDeepSeekHarnessSpawn(options: {
         );
       }
       return {
-        command: process.execPath,
+        command: env[DSH_NODE_EXECUTABLE_ENV],
         args: [
           '--import',
           `data:text/javascript;base64,${encodeBase64(HIDE_WINDOWS_CHILD_CONSOLES)}`,
@@ -452,8 +452,8 @@ export async function resolveDeepSeekHarnessProcessLaunch(options: {
       // Plugin management must not require a globally installed package manager.
       ...(options.pluginArgs ? ['--package', 'pnpm@10.20.0'] : []),
       // npm exec does not shell-quote executable paths, so a minimal Node
-      // launcher safely passes Lody Helper's space-containing path to spawn().
-      // DSH itself still runs only under process.execPath.
+      // launcher safely passes a Node path containing spaces to spawn().
+      // DSH itself uses the validated Node from the final launch PATH.
       'node',
       '-e',
       createDeepSeekHarnessNodeLauncherArg(),
@@ -462,7 +462,6 @@ export async function resolveDeepSeekHarnessProcessLaunch(options: {
       [DEEPSEEK_HARNESS_HOME_ENV]: rootDir,
       [ACP_EXTENSION_DSH_SESSION_ROOT_ENV]: sessionsRoot,
       [ACP_EXTENSION_DSH_QUERY_PATH_ENV]: join(sessionsRoot, 'session-query.db'),
-      [DSH_NODE_EXECUTABLE_ENV]: process.execPath,
       [DSH_NODE_ARGS_ENV]: encodeBase64(JSON.stringify(dshNodeArgs)),
     },
   };

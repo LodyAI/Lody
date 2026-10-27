@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { createPrivateKey, createPublicKey, sign } from 'node:crypto'
+import { encodeCbor, hashRecordBytes, recordSigningBytes } from '@lody/e2ee-core/protocol'
+import { encodeEpochStagedGroup } from '@lody/e2ee-core/host'
 import { Effect, Fiber, Result, Scope, Exit } from 'effect'
 import { TestClock } from 'effect/testing'
 import { makeE2eeCloudClient } from './e2ee-cloud-client.mts'
@@ -17,6 +20,293 @@ const build = (fetch, overrides = {}) =>
     fetch,
     ...overrides
   })
+
+// Synthetic signed originals; core's rotation suite verifies HPKE and authority.
+function stagedGroup() {
+  const privateKey = createPrivateKey({
+    key: Buffer.concat([
+      Buffer.from('302e020100300506032b657004220420', 'hex'),
+      Buffer.alloc(32, 17)
+    ]),
+    format: 'der',
+    type: 'pkcs8'
+  })
+  const signer = new Uint8Array(
+    createPublicKey(privateKey).export({ format: 'der', type: 'spki' }).subarray(-32)
+  )
+  const genesis = '11'.repeat(32),
+    commitment = '44'.repeat(32)
+  const body = [
+    new Uint8Array(32).fill(2),
+    signer,
+    [7, 1, new Uint8Array(32).fill(0x44), new Uint8Array(72).fill(5)]
+  ]
+  const record = Result.getOrThrow(
+    encodeCbor([
+      body,
+      new Uint8Array(
+        sign(null, recordSigningBytes(Result.getOrThrow(encodeCbor(body))), privateKey)
+      )
+    ])
+  )
+  const aad = Result.getOrThrow(encodeCbor([new Uint8Array(32).fill(0x11), 1, signer, signer]))
+  const envelope = Buffer.concat([aad, Buffer.alloc(80, 6)])
+  const frame = new Uint8Array(
+    Buffer.concat([
+      envelope,
+      sign(null, Buffer.concat([Buffer.from('lody-e2ee/epoch-env/v1\0'), envelope]), privateKey)
+    ])
+  )
+  return {
+    genesis,
+    epoch: 1,
+    commitment,
+    recordHash: Buffer.from(hashRecordBytes(record).toBytes()).toString('hex'),
+    record,
+    envelopes: [{ recipient: Buffer.from(signer).toString('hex'), frame }]
+  }
+}
+
+void test('staging owns originals across lost acknowledgements and paged cleanup, then recovers on the next call', async () => {
+  const group = stagedGroup(),
+    expected = encodeEpochStagedGroup(group)
+  const credential = { ...access }
+  let stored = null,
+    stageLost = true,
+    deletePending = true
+  const deletes = []
+  const fetch = async (_url, init) => {
+    const {
+      path,
+      args: [args]
+    } = JSON.parse(init.body)
+    assert.equal(args.credential, access.credential)
+    assert.equal(args.workspaceId, access.workspaceId)
+    assert.equal('proof' in args, false)
+    switch (path) {
+      case 'e2eeEpochStaging:stageGroup':
+        assert.deepEqual(args.group, expected)
+        stored = args.group
+        if (stageLost) {
+          stageLost = false
+          throw new Error('synthetic lost ack')
+        }
+        return response({ ok: true })
+      case 'e2eeEpochStaging:readGroup':
+        return response(stored)
+      case 'e2eeEpochStaging:deleteGroup':
+        deletes.push(args)
+        if (deletePending) {
+          deletePending = false
+          return response({ ok: true, done: false })
+        }
+        stored = null
+        return response({ ok: true, done: true })
+      default:
+        throw new Error(`unexpected endpoint ${path}`)
+    }
+  }
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const staging = (yield* build(fetch)).staging(credential)
+        const stage = staging.stageGroup(group)
+        credential.credential = 'replaced'
+        group.record.fill(0)
+        group.envelopes[0].frame.fill(0)
+        assert.equal((yield* Effect.result(stage)).failure.reason, 'unavailable')
+        assert.deepEqual(encodeEpochStagedGroup(yield* staging.readGroup(expected)), expected)
+        yield* stage
+        const occupied = { epoch: 1, commitment: '55'.repeat(32) }
+        const cleanup = staging.deleteGroup(expected, occupied)
+        occupied.commitment = '66'.repeat(32)
+        assert.equal((yield* Effect.result(cleanup)).failure.reason, 'unavailable')
+        assert.equal(deletes.length, 1)
+        assert.deepEqual(encodeEpochStagedGroup(yield* staging.readGroup(expected)), expected)
+        yield* cleanup
+        assert.deepEqual(deletes[0], deletes[1])
+        assert.equal(yield* staging.readGroup(expected), null)
+      })
+    )
+  )
+})
+
+void test('staging rejects another locator and malformed groups without poisoning later reads', async () => {
+  const group = stagedGroup(),
+    dto = encodeEpochStagedGroup(group)
+  let reply = { ...dto, genesis: '99'.repeat(32) }
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const staging = (yield* build(async () => response(reply))).staging(access)
+        const read = staging.readGroup(dto)
+        assert.equal((yield* Effect.result(read)).failure.reason, 'invalid-response')
+        reply = { ...dto, recordHash: '00'.repeat(32) }
+        assert.equal((yield* Effect.result(read)).failure.reason, 'invalid-response')
+        reply = dto
+        assert.deepEqual(encodeEpochStagedGroup(yield* read), dto)
+        assert.equal(
+          (yield* Effect.result(
+            staging.stageGroup({ ...group, envelopes: [...group.envelopes, ...group.envelopes] })
+          )).failure.reason,
+          'invalid-response'
+        )
+        assert.deepEqual(encodeEpochStagedGroup(yield* read), dto)
+      })
+    )
+  )
+})
+
+for (const code of ['e2ee_staging_invalid', 'e2ee_staging_corrupt']) {
+  void test(`staging treats ${code} as terminal and keeps the next valid call usable`, async () => {
+    const group = stagedGroup(),
+      dto = encodeEpochStagedGroup(group)
+    let fail = true
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const staging = (yield* build(async () =>
+            fail
+              ? Response.json(
+                  {
+                    status: 'error',
+                    errorMessage: 'synthetic-private-cause',
+                    errorData: { code }
+                  },
+                  { status: 560 }
+                )
+              : response(dto)
+          )).staging(access)
+          for (const operation of [
+            staging.stageGroup(group),
+            staging.readGroup(dto),
+            staging.deleteGroup(dto, { epoch: dto.epoch, commitment: '55'.repeat(32) })
+          ]) {
+            const result = yield* Effect.result(operation)
+            assert.equal(result._tag, 'Failure')
+            assert.equal(result.failure.reason, 'invalid-response')
+            assert.equal(JSON.stringify(result.failure).includes('synthetic-private-cause'), false)
+          }
+          fail = false
+          assert.deepEqual(encodeEpochStagedGroup(yield* staging.readGroup(dto)), dto)
+        })
+      )
+    )
+  })
+}
+
+void test('staging cancellation rejects a late response and isolates other workspaces', async () => {
+  const dto = encodeEpochStagedGroup(stagedGroup())
+  const entered = Promise.withResolvers(),
+    late = Promise.withResolvers()
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* build(async (_url, init) => {
+          const args = JSON.parse(init.body).args[0]
+          if (args.workspaceId !== access.workspaceId) return response(dto)
+          entered.resolve()
+          return late.promise
+        })
+        const controller = new AbortController()
+        const staging = client.staging(access, controller.signal)
+        const pending = Effect.runPromise(Effect.result(staging.readGroup(dto)))
+        yield* Effect.promise(() => entered.promise)
+        controller.abort()
+        late.resolve(response(dto))
+        assert.equal((yield* Effect.promise(() => pending)).failure.reason, 'unavailable')
+        assert.deepEqual(
+          encodeEpochStagedGroup(
+            yield* client.staging({ ...access, workspaceId: 'other' }).readGroup(dto)
+          ),
+          dto
+        )
+        assert.equal((yield* Effect.result(staging.readGroup(dto))).failure.reason, 'unavailable')
+      })
+    )
+  )
+})
+
+void test('staging retains the slow path and an expired request leaves the next call usable', async () => {
+  const dto = encodeEpochStagedGroup(stagedGroup())
+  const entered = Promise.withResolvers(),
+    slow = Promise.withResolvers(),
+    timed = Promise.withResolvers()
+  let phase = 'slow',
+    aborted = false
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const staging = (yield* build(async (_url, init) => {
+          if (phase === 'normal') return response(dto)
+          if (phase === 'slow') {
+            entered.resolve()
+            return slow.promise
+          }
+          return new Promise((_resolve, reject) => {
+            timed.resolve()
+            init.signal.addEventListener(
+              'abort',
+              () => {
+                aborted = true
+                reject(new Error('synthetic timeout'))
+              },
+              { once: true }
+            )
+          })
+        })).staging(access)
+        const normal = yield* Effect.forkChild(staging.readGroup(dto))
+        yield* Effect.promise(() => entered.promise)
+        yield* TestClock.adjust('29 seconds')
+        slow.resolve(response(dto))
+        assert.deepEqual(encodeEpochStagedGroup(yield* Fiber.join(normal)), dto)
+        phase = 'timed'
+        const pending = yield* Effect.forkChild(Effect.result(staging.readGroup(dto)))
+        yield* Effect.promise(() => timed.promise)
+        yield* TestClock.adjust('30 seconds')
+        assert.equal((yield* Fiber.join(pending)).failure.reason, 'unavailable')
+        assert.equal(aborted, true)
+        phase = 'normal'
+        assert.deepEqual(encodeEpochStagedGroup(yield* staging.readGroup(dto)), dto)
+      })
+    ).pipe(Effect.provide(TestClock.layer()))
+  )
+})
+
+void test('staging closes during auth without dispatching a late request', async () => {
+  const entered = Promise.withResolvers(),
+    auth = Promise.withResolvers()
+  const dto = encodeEpochStagedGroup(stagedGroup())
+  let requests = 0
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* build(
+          async () => {
+            requests++
+            return response(dto)
+          },
+          {
+            convexToken: () => {
+              entered.resolve()
+              return auth.promise
+            }
+          }
+        )
+        const pending = Effect.runPromise(Effect.result(client.staging(access).readGroup(dto)))
+        yield* Effect.promise(() => entered.promise)
+        yield* client.close
+        auth.resolve({ data: { token: 'synthetic-late-token' } })
+        assert.equal((yield* Effect.promise(() => pending)).failure.reason, 'unavailable')
+        assert.equal(
+          (yield* Effect.result(client.staging(access).stageGroup(stagedGroup()))).failure.reason,
+          'unavailable'
+        )
+        assert.equal(requests, 0)
+      })
+    )
+  )
+})
 
 void test('uses only explicit E2EE endpoints and preserves immutable frame/report/append bytes', async () => {
   const originals = new Map()

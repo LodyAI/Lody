@@ -554,7 +554,15 @@ export function makeLocalWorkspaceCatalog(
         const previousById = new Map(
           snapshot.workspaces.map((workspace) => [workspace.workspaceId, workspace])
         );
-        const active = input.workspaces.map((workspace): LocalCatalogWorkspace => {
+        // A mode this client does not implement is never cached: a row without
+        // `contentMode` means plaintext, so an offline restart would fail open.
+        const supported = input.workspaces.filter(
+          (workspace) =>
+            workspace.contentMode === undefined ||
+            workspace.contentMode === 'plaintext' ||
+            workspace.contentMode === 'e2ee'
+        );
+        const active = supported.map((workspace): LocalCatalogWorkspace => {
           const previous = previousById.get(workspace.id);
           return {
             workspaceId: workspace.id,

@@ -51,6 +51,16 @@ See the [decision and verification](../../../../.agents/notes/implemented/bug-fi
   refused healthy Machines and silently emptied candidate lists during a cold start or reconnect
   backoff. Contract: `specs/loro-ephemeral-presence-channel.md`.
 
+## Session placement guidance
+
+Single and batch create descriptions tell agents to explicitly set
+`useCurrentSessionAsParent=false` for sidebar sub-conversations; batch calls can
+set it in `defaults`. Use `true` only for an explicitly requested Tab within the
+current conversation. This is caller guidance: runtime defaults remain unchanged,
+including same-machine Local Project Role creation choosing a Tab when the field
+and `workContext` are omitted. An independent conversation can use `workContext`
+to select its project. See [session relations](../../../../specs/session-relations.md).
+
 ## Operation acceptance
 
 - MCP session tools use stable machine/session/agent-config ids and strict, narrow input schemas.
@@ -110,6 +120,8 @@ selects none. Creation without ids resolves target-project defaults, or workspac
 defaults when the project has no preference; continuation without ids inherits the
 target conversation's selection. Acceptance records ids in the existing per-target
 Operation configuration, so materialization/recovery does not reread edited defaults.
+Batch item values override batch defaults, including an explicit empty selection;
+omitted values preserve the existing target-default behavior.
 Role pins do not override an explicit MCP selection. CLI create/chat expose the same
 choice as `--mcp-server-ids '<JSON array>'`. See the
 [project default Spec](../../../../specs/project-default-mcp.md).
@@ -128,6 +140,10 @@ choice as `--mcp-server-ids '<JSON array>'`. See the
   a child `lody` CLI. Calls keep a ten-minute IPC bound; legacy `wait: true` adds
   its maximum wait. See
   the [decision](../../../../.agents/notes/implemented/architecture/2026-10-16-daemon-hosted-mcp-workspace-commands.md).
+- A cloud daemon command takes its workspace description from the Fleet access
+  verdict (live subscription, else the cached bootstrap entry), not from listing
+  every workspace of the login; only confirmed revocation or token rejection denies.
+  See the [resolution decision](../../../../.agents/notes/implemented/bug-fix/2026-10-27-daemon-command-workspace-access.md).
 
 ## Bounded collaboration
 
@@ -210,7 +226,6 @@ and `promptPrefix`. An update file contains only the changed `name`, `descriptio
 or `promptPrefix`; an empty string clears description/instructions. Neither accepts
 credentials, MCP selections, ownership, visibility, or run configuration. The command
 prints the requestId and pending result; it does not claim the Role was saved.
-
 
 `role.json`:
 

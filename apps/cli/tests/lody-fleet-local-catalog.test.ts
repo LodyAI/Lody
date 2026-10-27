@@ -487,6 +487,73 @@ describe('LodyFleet remote authentication boundary', () => {
     );
   });
 
+  it('gives daemon commands the bootstrap cache, then the live subscription, as their access verdict', async () => {
+    vi.useFakeTimers();
+    let push: (
+      snapshot: Parameters<Parameters<CloudPort['access']['watchWorkspaceAccess']>[0]>[0]
+    ) => void = () => {};
+    let fail: (error: Error) => void = () => {};
+    const { fleet: harness } = createFleetHarness(
+      createCatalogStub(() =>
+        Effect.succeed(
+          catalogSnapshot({ workspaces: [activeWorkspace('ws-1', 'One', 'one', 'member')] })
+        )
+      ),
+      createTestCloudPort((onValue, onError) => {
+        push = onValue;
+        fail = onError;
+        return () => {};
+      })
+    );
+    const fleet = harness as unknown as typeof harness & {
+      startWorkspaceSubscription: (options: { waitForInitial: boolean }) => Promise<void>;
+      applyRemoteWorkspaceList: () => Promise<void>;
+      readWorkspaceAccess: (workspaceId: string) => unknown;
+    };
+    fleet.applyRemoteWorkspaceList = async () => {};
+    const remote = {
+      id: 'ws-1',
+      name: 'One',
+      slug: 'one',
+      role: 'admin',
+      contentMode: 'e2ee',
+      genesisHash: 'ab'.repeat(32),
+    };
+    try {
+      expect(fleet.readWorkspaceAccess('ws-1')).toEqual({ status: 'unknown' });
+      await fleet.bootstrapFromLocalCatalog();
+      expect(fleet.readWorkspaceAccess('ws-1')).toEqual({
+        status: 'authorized',
+        workspace: { id: 'ws-1', name: 'One', slug: 'one', role: 'member' },
+      });
+      expect(fleet.readWorkspaceAccess('ws-2')).toEqual({ status: 'unknown' });
+
+      await fleet.startWorkspaceSubscription({ waitForInitial: false });
+      push({ status: 'authorized', userId: 'user-1', workspaces: [remote] });
+      expect(fleet.readWorkspaceAccess('ws-1')).toEqual({
+        status: 'authorized',
+        workspace: remote,
+      });
+      // An unreachable control plane is not a revocation.
+      fail(new Error('Synthetic subscription outage'));
+      expect(fleet.readWorkspaceAccess('ws-1')).toEqual({
+        status: 'authorized',
+        workspace: remote,
+      });
+      push({ status: 'authorized', userId: 'user-1', workspaces: [] });
+      expect(fleet.readWorkspaceAccess('ws-1')).toEqual({ status: 'revoked' });
+      push({ status: 'authorized', userId: 'user-1', workspaces: [remote] });
+      expect(fleet.readWorkspaceAccess('ws-1')).toEqual({
+        status: 'authorized',
+        workspace: remote,
+      });
+      push({ status: 'unauthorized', reason: 'CLI token is invalid or expired.' });
+      expect(fleet.readWorkspaceAccess('ws-1')).toEqual({ status: 'unauthorized' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('reports a rejected backend authorization for an invalid token', async () => {
     const runtimeStateReporter = createRuntimeStateReporter();
     const onFatalAuthFailure = vi.fn();

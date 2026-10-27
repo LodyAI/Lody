@@ -679,17 +679,22 @@ export type SessionExecutionServiceDeps = {
   collectMachineResources: () => Promise<MachineResourceInfo>;
   getMachineLifecycleCapability: () => MachineLifecycleCapability;
   /**
-   * Returns true once any ACP update for the current assistant turn has been
-   * buffered or flushed. Prompt recovery must not replay the same user turn after
-   * visible agent output, because the adapter may already have acted on it.
+   * Returns true once any ACP or image lifecycle event belongs to the current
+   * assistant turn. Prompt recovery must not replay the same user turn after
+   * any event, because the adapter may already have acted on it. Missing state
+   * must also refuse replay.
    */
-  hasPromptOutputForTurn?: (sessionId: SessionId, turnId: string) => boolean;
+  hasPromptEventsForTurn?: (sessionId: SessionId, turnId: string) => boolean;
   /**
-   * Same observation, but `undefined` when the session's transient state is gone
-   * and the answer is unknowable. The no-output guard needs that distinction:
-   * "emitted nothing" fails the turn, "cannot tell" must not.
+   * Whether the turn emitted content, independently of replay safety. Metadata,
+   * usage, checklist plans and lifecycle status do not establish a reply.
+   * Drain pending image uploads before reading; successful image writes are content.
+   * `undefined` means the turn is unobservable; the no-output guard fails open.
    */
-  observePromptOutputForTurn?: (sessionId: SessionId, turnId: string) => boolean | undefined;
+  observePromptContentForTurn?: (
+    sessionId: SessionId,
+    turnId: string
+  ) => boolean | undefined | Promise<boolean | undefined>;
   fetchAcpCapabilities: (
     cliType: AgentConfigCliType,
     agentType: string,
@@ -5479,10 +5484,10 @@ export class SessionExecutionService {
    * Must be read while the turn still owns the ACP update state, i.e. right
    * after the prompt returns and before `finalizeTurn` clears it.
    */
-  private turnProducedVisibleOutput(sessionId: SessionId, turnId: string): boolean {
+  private async turnProducedVisibleOutput(sessionId: SessionId, turnId: string): Promise<boolean> {
     // No observer wired, or transient state already gone: we cannot tell, and a
     // guess here would fail a turn that actually answered. Fail open.
-    return this.deps.observePromptOutputForTurn?.(sessionId, turnId) ?? true;
+    return (await this.deps.observePromptContentForTurn?.(sessionId, turnId)) ?? true;
   }
 
   /**
@@ -6211,8 +6216,8 @@ export class SessionExecutionService {
         prompt(promptBlocks).pipe(
           Effect.catch((error) =>
             Effect.gen(function* () {
-              const hasPromptOutput =
-                self.deps.hasPromptOutputForTurn?.(sessionId, runtime.turnId) ?? false;
+              const hasPromptEvents =
+                self.deps.hasPromptEventsForTurn?.(sessionId, runtime.turnId) ?? true;
               if (
                 dispatchOptions?.dispatchSource === 'inbox' ||
                 Boolean(dispatchOptions?.inboxBatch) ||
@@ -6221,7 +6226,7 @@ export class SessionExecutionService {
                 !shouldRecoverStaleACPConnectionPrompt({
                   error,
                   alreadyAttempted: staleAcpPromptRecoveryAttempted,
-                  hasPromptOutput,
+                  hasPromptOutput: hasPromptEvents,
                 })
               ) {
                 return yield* Effect.fail(error);
@@ -6309,7 +6314,9 @@ export class SessionExecutionService {
       const completedUserTurnId = runtime.userTurnId ?? executionUserTurnId;
       const completedRequesterUserId = runtime.invocation?.requesterUserId ?? userId;
       // Read before finalization clears the turn's ACP update state.
-      const producedOutput = self.turnProducedVisibleOutput(sessionId, completedTurnId);
+      const producedOutput = yield* self.tryPromise(() =>
+        self.turnProducedVisibleOutput(sessionId, completedTurnId)
+      );
 
       yield* self.tryPromise(() =>
         traceAsync(
@@ -7071,7 +7078,9 @@ export class SessionExecutionService {
           const completedRequesterUserId =
             runtime.invocation?.requesterUserId ?? sessionConfig.requesterUserId;
           // Read before finalization clears the turn's ACP update state.
-          const producedOutput = self.turnProducedVisibleOutput(sessionId, completedTurnId);
+          const producedOutput = yield* self.tryPromise(() =>
+            self.turnProducedVisibleOutput(sessionId, completedTurnId)
+          );
 
           yield* self.tryPromise(() =>
             traceAsync(

@@ -180,6 +180,7 @@ import {
   type AssistantTurnRenderBlock,
 } from './assistant-turn-render-blocks';
 import { SubagentTaskPanel, collectSubagentTasks, type SubagentTask } from './subagent-task-panel';
+import { isRunning as isSubagentTaskRunning } from './subagent-task-state';
 import { SubagentRunMessageList } from './subagent-run-history';
 import { styles as subagentHistoryStyles } from './subagent-run-history.stylex';
 import { SessionReadonlyContext } from './session-readonly-context';
@@ -284,6 +285,7 @@ import {
   getOperationCompletionItems,
   hasVisibleOperationContent,
 } from './operation-completion-visibility';
+import { openExternalUrl } from '@/lib/native-browser';
 import { getChatFailedDiagnosticCopy } from './chat-failed-diagnostic-copy';
 import {
   buildChatFailedErrorReport,
@@ -1412,6 +1414,7 @@ export const buildChatVirtualRows = ({
       const [segmentStart, segmentEnd] = segment.blockRange;
       const isLastSegment = segmentIndex === lastSegmentIndex;
       const segmentSubagentTasks = isLastSegment ? subagentTasks : EMPTY_SUBAGENT_TASKS;
+      const hasRunningSubagentTasks = segmentSubagentTasks.some(isSubagentTaskRunning);
 
       let hasVisibleFinalContent = false;
       for (let blockIndex = segmentStart; blockIndex < segmentEnd; blockIndex += 1) {
@@ -1475,7 +1478,7 @@ export const buildChatVirtualRows = ({
             appendBlockRows(workedRows, block, blockIndex, true);
           }
         }
-        if (segmentSubagentTasks.length > 0) {
+        if (segmentSubagentTasks.length > 0 && !hasRunningSubagentTasks) {
           appendSubagentTasksRow(workedRows, true);
         }
       }
@@ -1517,6 +1520,9 @@ export const buildChatVirtualRows = ({
       }
       if (!didInsertWorkedGroup) {
         insertWorkedGroup();
+      }
+      if (hasRunningSubagentTasks) {
+        appendSubagentTasksRow(assistantRows, false);
       }
     }
 
@@ -3401,7 +3407,7 @@ const ChatFailedNoticeView = ({
       }
     | undefined;
 
-  const diagnosticCopy = getChatFailedDiagnosticCopy(meta?.code);
+  const diagnosticCopy = getChatFailedDiagnosticCopy(meta?.code, meta?.message);
 
   // Map reason codes to user-friendly messages
   const getReasonMessage = (reason?: string): string => {
@@ -3508,6 +3514,7 @@ const ChatFailedNoticeView = ({
   };
 
   const reasonMessage = getReasonMessage(meta?.reason);
+  const installUrl = diagnosticCopy?.installUrl;
   const actionMessage = diagnosticCopy
     ? t(diagnosticCopy.actionKey, diagnosticCopy.action)
     : undefined;
@@ -3597,10 +3604,17 @@ const ChatFailedNoticeView = ({
       })}
       action={retryAction}
       footer={
-        <Button variant="ghost" size="small" onClick={() => void handleCopyError()}>
-          <Copy size={14} aria-hidden="true" />
-          {t('sessions.systemNotices.chatFailed.copyError', 'Copy error')}
-        </Button>
+        <>
+          {installUrl ? (
+            <Button variant="ghost" size="small" onClick={() => void openExternalUrl(installUrl)}>
+              {t('sessions.systemNotices.chatFailed.installNode', 'Download Node.js')}
+            </Button>
+          ) : null}
+          <Button variant="ghost" size="small" onClick={() => void handleCopyError()}>
+            <Copy size={14} aria-hidden="true" />
+            {t('sessions.systemNotices.chatFailed.copyError', 'Copy error')}
+          </Button>
+        </>
       }
     />
   );

@@ -16,3 +16,8 @@ Device access credentials are independent 32-byte random values, protected with 
 existing KEK under `lody-e2ee/local-device-credential/v1\0` plus genesis and device
 public key. `prepareDeviceCredential` publishes once; `deviceCredential` only reopens
 an existing original. Neither changes device/epoch formats or exports a content key.
+
+Credential files are scoped by genesis and signing public key. The former
+single-genesis location is read-only for the same current v1 blob with exact AAD;
+no conversion, rewrite, deletion or older-format import is permitted. New identities
+publish separate originals and never reuse another identity's credential.

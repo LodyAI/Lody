@@ -97,7 +97,24 @@ describe('convertClaudeTaskLifecycleNotification', () => {
       usage: { totalTokens: 123, toolUses: 3, durationMs: 700 },
       parentToolCallId: 'tool-1',
     });
+    expect(result.notification.update._meta?.lody?.task).not.toHaveProperty('actor');
     expect(JSON.stringify(result.notification.update._meta)).not.toContain('/tmp/task-1.output');
+  });
+
+  it('keeps an explicitly reported task type in lifecycle metadata', () => {
+    const result = convertClaudeTaskLifecycleNotification({
+      sessionId: 'acp-session-1',
+      message: {
+        subtype: 'task_notification',
+        task_id: 'task-bash',
+        task_type: 'local_bash',
+        status: 'completed',
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.notification.update._meta?.lody?.task).toMatchObject({ actor: 'local_bash' });
   });
 
   it('keeps workflow_name, is_backgrounded and patch.error in the metadata', () => {

@@ -5,6 +5,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import en from '../../../locales/en.json';
+import { ScheduledMessageTimeFields } from '../src/components/schedules/scheduled-message-time';
 import { ScheduleForm } from '../src/components/schedules/schedule-view';
 import { evaluateSchedule, ScheduleDefinitionSchema, ScheduleAgentSchema } from '@lody/shared';
 
@@ -93,6 +94,57 @@ describe('Schedule editor', () => {
       setter.call(element, text);
       element.dispatchEvent(new Event('input', { bubbles: true }));
     });
+
+  it('selects five hours from now across midnight', async () => {
+    let chosen = '';
+    await act(async () =>
+      root.render(
+        <ScheduledMessageTimeFields
+          at={null}
+          now={Date.parse('2026-10-27T20:00:00Z')}
+          timeZone="Asia/Shanghai"
+          onChange={(at) => {
+            chosen = at;
+          }}
+        />
+      )
+    );
+    const tomorrowButton = [...container.querySelectorAll('button')].find(
+      (element) => element.textContent === 'In 5 hours'
+    )!;
+    await act(async () => tomorrowButton.click());
+    expect(chosen).toBe('2026-10-28T01:00:00.000Z');
+  });
+
+  it('preserves the absolute instant when the message time is displayed on another machine clock', async () => {
+    const at = '2026-11-01T09:30:00.000Z';
+    await act(async () =>
+      root.render(
+        <ScheduledMessageTimeFields
+          at={at}
+          now={NOW}
+          timeZone="America/Los_Angeles"
+          onChange={() => {
+            throw new Error('Display must not edit the instant');
+          }}
+        />
+      )
+    );
+    expect(container.querySelector('input')?.value).toBe('2026-11-01T01:30');
+    await act(async () =>
+      root.render(
+        <ScheduledMessageTimeFields
+          at={at}
+          now={NOW}
+          timeZone="Asia/Shanghai"
+          onChange={() => {
+            throw new Error('Display must not edit the instant');
+          }}
+        />
+      )
+    );
+    expect(container.querySelector('input')?.value).toBe('2026-11-01T17:30');
+  });
 
   it('preserves typed composer changes in the saved Agent configuration', () => {
     let value: NonNullable<ComponentProps<typeof ScheduleAgentControls>['value']> = {

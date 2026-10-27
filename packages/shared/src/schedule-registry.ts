@@ -2,6 +2,8 @@ import type { SessionId, WorkspaceId } from './ids';
 import { sha256Hex } from './incremental-sha256';
 import {
   ScheduleDefinitionSchema,
+  ScheduledMessageSchema,
+  scheduledMessagePrompt,
   ScheduleRegistryRowSchema,
   ScheduleTombstoneSchema,
   scheduleUsesElevatedPermissions,
@@ -49,11 +51,21 @@ const digest = (value: unknown): string =>
   sha256Hex(new TextEncoder().encode(canonicalScheduleJson(value)));
 
 export function scheduleDefinitionFingerprint(
-  document: Pick<ScheduleDocument, 'definition' | 'prompt'>
+  document: Pick<ScheduleDocument, 'definition' | 'prompt' | 'message'>
 ): string {
   const definition = ScheduleDefinitionSchema.parse(document.definition);
   validateScheduleTrigger(definition.trigger);
-  validateSchedulePrompt(document.prompt);
+  if (definition.messageVersion === 1 && !document.message)
+    throw new Error('Scheduled message payload is missing');
+  if (document.message) {
+    ScheduledMessageSchema.parse(document.message);
+    const text = scheduledMessagePrompt(document.message);
+    if (text !== document.prompt)
+      throw new Error('Scheduled message text does not match its payload');
+    if (text.trim()) validateSchedulePrompt(text);
+    if (definition.trigger.kind !== 'once' || definition.destination.kind !== 'existing_session')
+      throw new Error('Scheduled messages require a one-time trigger and an existing chat');
+  } else validateSchedulePrompt(document.prompt);
   // Include identity and activation gates. Cosmetic title/timestamps don't
   // affect execution, and timeline appends must never invalidate a definition.
   const {
@@ -63,7 +75,11 @@ export function scheduleDefinitionFingerprint(
     createdBy: _createdBy,
     ...execution
   } = definition;
-  return digest({ definition: execution, prompt: document.prompt });
+  return digest({
+    definition: execution,
+    prompt: document.prompt,
+    ...(document.message ? { message: document.message } : {}),
+  });
 }
 
 export function buildScheduleRegistryRow(document: ScheduleDocument): ScheduleRegistryRow {
@@ -87,6 +103,7 @@ export function buildScheduleRegistryRow(document: ScheduleDocument): ScheduleRe
       : undefined,
     createdAt: d.createdAt,
     updatedAt: d.updatedAt,
+    ...(document.message ? { scheduledMessage: true as const } : {}),
     elevatedPermissions: scheduleUsesElevatedPermissions(d.agent),
     definitionFingerprint: scheduleDefinitionFingerprint(document),
   });

@@ -104,3 +104,10 @@ Node-only custody with an explicit owning Scope. The host qualifies its KEK wrap
 file protection admits machine identities only. Personal identities require OS protection.
 
 `NodeE2eeCustody.prepareDeviceCredential(genesis, signingPublicKey)` publishes an independent 32-byte device access credential once and returns its lowercase hex value plus SHA-256 of the raw bytes. `NodeE2eeCustody.deviceCredential` only reopens it; missing or corrupt originals never regenerate. Credential blobs use a distinct KEK-protected purpose bound to genesis and public key, without changing device or epoch formats. These are access credentials, never content keys.
+
+Credential locations include both genesis and the signing public key. The former
+genesis-only location is read-only: the same current v1 blob reopens only with exact
+purpose/genesis/key AAD. A genuine credential for another key remains untouched;
+explicit preparation publishes a separate original for the new key. Corrupt data,
+unsafe permissions and unknown formats still fail closed. This changes the local
+filename only, with no blob conversion, migration or older-format import.

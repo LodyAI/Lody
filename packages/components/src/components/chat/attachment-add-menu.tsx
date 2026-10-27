@@ -1,6 +1,6 @@
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { useState } from 'react';
-import { ChevronLeft, ChevronRight, Paperclip, Plug, Plus } from 'lucide-react';
+import { Clock, ChevronLeft, ChevronRight, Paperclip, Plug, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { describeMcpConnection, type McpServerId, type WorkspaceMcpServerMeta } from '@lody/shared';
 import { Button } from '@lody/ui/button';
@@ -30,6 +30,8 @@ export interface AttachmentAddMenuProps {
    * intentionally unfiltered; its owner routes the selected files by MIME. */
   onAddAttachment?: () => void;
   attachmentDisabled?: boolean;
+  onScheduleSend?: () => void;
+  scheduleDisabledReason?: string;
   /** Omit (or pass an empty catalog) to hide the MCP entry entirely. */
   mcp?: AttachmentAddMenuMcp;
 }
@@ -54,8 +56,12 @@ export function AttachmentAddMenu({
   disabled,
   onAddAttachment: requestedAddAttachment,
   attachmentDisabled,
+  onScheduleSend: requestedScheduleSend,
+  scheduleDisabledReason,
   mcp,
 }: AttachmentAddMenuProps) {
+  const schedulesAllowed = useWorkspaceFeature('schedules');
+  const onScheduleSend = schedulesAllowed ? requestedScheduleSend : undefined;
   const attachmentAllowed = useWorkspaceFeature('attachments');
   const onAddAttachment = attachmentAllowed ? requestedAddAttachment : undefined;
   const { t } = useTranslation();
@@ -66,7 +72,7 @@ export function AttachmentAddMenu({
 
   const mcpServers = mcp?.servers ?? [];
   const hasMcp = mcpServers.length > 0;
-  if (!onAddAttachment && !hasMcp) {
+  if (!onAddAttachment && !hasMcp && !onScheduleSend) {
     return null;
   }
 
@@ -165,6 +171,17 @@ export function AttachmentAddMenu({
                 icon={Paperclip}
               >
                 {triggerLabel}
+              </Menu.Item>
+            ) : null}
+            {onScheduleSend ? (
+              <Menu.Item
+                icon={Clock}
+                onClick={onScheduleSend}
+                disabled={!!scheduleDisabledReason}
+                title={scheduleDisabledReason}
+                className={itemClass}
+              >
+                {t('scheduledMessage.menu')}
               </Menu.Item>
             ) : null}
             {hasMcp && mcp ? (

@@ -30,6 +30,10 @@ context/message-flow.md "Upstream".
   use each property's `description` as the full question and `title` as its short
   header, including single-question forms whose request message is generic. Legacy
   Claude single-question forms retain their request-message prompt.
+- `claude-task-lifecycle.ts` — converts Claude task lifecycle events into ACP task
+  updates. Rendered titles may use a fallback; persisted actor metadata is omitted when
+  Claude reports no actor, so later events preserve an earlier identity. Providers that
+  rely on an unknown-actor label can configure a separate metadata fallback.
 - `acp-runner.ts` — process spawn/restart around the client. Spawn + initialize +
   `newSession`/`loadSession` share `acp-session-start-gate.ts`.
 - `acp-session-start-gate.ts` — process-wide start semaphore used by
@@ -40,7 +44,16 @@ context/message-flow.md "Upstream".
   remain in Dimcode's own configuration or provider environment. Refresh capabilities
   after upgrading. Existing registry configurations retain their saved launch contract.
 - `deepseek-harness-runtime.ts` — Provider-scoped Harness homes, atomic host bundles,
-  and npx launch wrapper around the `packages/acp-extension-dsh` submodule. It converts
+  and npx launch wrapper around the `packages/acp-extension-dsh` submodule. DSH uses
+  a supported standalone Node from the final launch PATH in the target working directory.
+  Missing, unsupported or unexecutable Node fails before npx with installation guidance. All session, probe,
+  history and protocol-auth launches share this check. `Session.createAgent` runs it
+  inside each startup attempt, after shell, credential and memory environment
+  merges; the checked environment goes to both executable resolution and sandbox
+  spawn. The probe freezes `process.execPath`, so directory-sensitive Node managers
+  cannot select a different runtime afterwards. Inaccessible PATH directories are
+  skipped; a selected executable failing its probe still fails the launch. See the
+  [system Node decision](../../../../.agents/notes/implemented/bug-fix/2026-10-27-dsh-system-node.md). It converts
   the adapter entry to a file URL for Cordis ESM imports, including Windows drive paths,
   while preset and session directories remain filesystem paths. Its Windows bootstrap
   suppresses child consoles inside npm and DSH, including the pinned native Job
@@ -190,8 +203,8 @@ move desired customizations to the YAML path shown in Provider details. See the
 
 On Windows, both session and probe/title spawns resolve the selected npx shim from
 the final child PATH and execute its adjacent `node_modules/npm/bin/npx-cli.js`
-with Lody's Node. This keeps the full pinned closure out of `cmd.exe`, whose
-8191-character limit is smaller than the package argument list. Native executable
+with the validated standalone Node. This keeps the full pinned closure out of
+`cmd.exe`, whose 8191-character limit is smaller than the package argument list. Native executable
 shims remain direct launches; a script shim without the standard npm entry fails
 with an actionable error instead of falling through to another installation.
 Cache isolation, startup budgets, and retries still see the original npx command
@@ -323,6 +336,10 @@ the isolated session selects `gpt-5.6-luna`, low reasoning, and full access. Uns
 requested options fail to the existing prompt-derived fallback. The bundled adapter
 has no automatic generator, so neither the main nor title session starts an extra
 naming turn. Main conversation settings and Provider authentication are preserved.
+
+Other isolated title sessions retain the Provider's current model unless a title model
+was explicitly saved. Catalog order does not define a model preference; inferred safe
+mode and reasoning options remain independent of the model choice.
 
 Title output accepts normal assistant text with an absent message phase, as Codex
 providers do not all emit that optional field. Explicit `commentary` is excluded;

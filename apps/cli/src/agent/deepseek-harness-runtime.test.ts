@@ -1,7 +1,7 @@
 import { getDeepSeekHarnessProviderConfigPath } from '@lody/shared';
 import { DEEPSEEK_HARNESS_CORDIS_PACKAGE_VERSIONS } from 'acp-extension-dsh/profile';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +17,17 @@ import {
   resolveDeepSeekHarnessSpawn,
   resolveDeepSeekHarnessSessionCompression,
 } from './deepseek-harness-runtime';
+
+import { Effect } from 'effect';
+import { FakeProcessTable } from '@lody/shared/node/process-testing';
+import type { ChildProcess } from 'node:child_process';
+import { processLayer, runPromiseSquashedLegacy } from '@lody/shared/node/process';
+import { prepareDeepSeekNodeEnvironment, resolveDeepSeekNodePath } from './deepseek-system-node';
+
+const prepareNode = (env: NodeJS.ProcessEnv) =>
+  runPromiseSquashedLegacy(
+    prepareDeepSeekNodeEnvironment(env).pipe(Effect.provide(processLayer({})))
+  );
 
 const temporaryRoots: string[] = [];
 
@@ -45,11 +56,11 @@ async function readGeneratedProfile(
 ) {
   const encodedRuntimeArgs = launch.env.LODY_DSH_NODE_ARGS;
   if (!encodedRuntimeArgs) {
-    throw new Error('DeepSeek Harness launch did not include bundled Node arguments');
+    throw new Error('DeepSeek Harness launch did not include Node bootstrap arguments');
   }
   const runtimeArgs: unknown = JSON.parse(Buffer.from(encodedRuntimeArgs, 'base64').toString());
   if (!Array.isArray(runtimeArgs) || !runtimeArgs.every((arg) => typeof arg === 'string')) {
-    throw new Error('DeepSeek Harness bundled Node arguments are invalid');
+    throw new Error('DeepSeek Harness Node bootstrap arguments are invalid');
   }
   const profileFlagIndex = runtimeArgs.indexOf('--profile');
   const profileName = runtimeArgs.at(profileFlagIndex + 1);
@@ -240,7 +251,7 @@ describe('resolveDeepSeekHarnessProcessLaunch', () => {
     expect(profile.generatedPatchYml).toContain('compression: zstd');
     expect(launch.args).toContain('node');
     expect(launch.args).not.toContain('dsh');
-    expect(launch.env.LODY_DSH_NODE_EXECUTABLE).toBe(process.execPath);
+    expect('LODY_DSH_NODE_EXECUTABLE' in launch.env).toBe(false);
     expect(Buffer.from(launch.env.LODY_DSH_NODE_ARGS, 'base64').toString()).toContain(
       profile.profileName
     );
@@ -349,6 +360,7 @@ export async function runCli() {
         rootDir,
         extraArgs: ['--synthetic-flag'],
       });
+      const nodeEnv = await prepareNode({ ...process.env, ...launch.env });
       const launcherIndex = launch.args.indexOf('node');
       expect(launcherIndex).toBeGreaterThan(0);
       const launcher = launch.args.at(launcherIndex + 2);
@@ -397,7 +409,7 @@ child.on('exit', code => { process.exitCode = code ?? 1; });
         expect(launch.args.join(' ').length).toBeGreaterThan(8191);
         executable = resolveDeepSeekHarnessSpawn({
           ...launch,
-          env: { ...launch.env, Path: nodeDir },
+          env: { LODY_DSH_NODE_EXECUTABLE: nodeEnv.LODY_DSH_NODE_EXECUTABLE, Path: nodeDir },
           workdir: rootDir,
           platform: 'win32',
         });
@@ -405,7 +417,7 @@ child.on('exit', code => { process.exitCode = code ?? 1; });
       await promisify(execFile)(executable.command, executable.args, {
         env: {
           ...process.env,
-          ...launch.env,
+          ...nodeEnv,
           PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
           DSH_BOOTSTRAP_OUTPUT: outputPath,
           NPX_ARGUMENTS_OUTPUT: forwardedPath,
@@ -582,5 +594,116 @@ describe('resolveDeepSeekHarnessSpawn', () => {
         platform: 'linux',
       })
     ).toEqual({ command: options.command, args: options.args });
+  });
+});
+
+describe('DeepSeek system Node environment', () => {
+  it('selects the first absolute PATH node, preserves provider env, and runs the selected executable', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'lody-dsh-system-node-'));
+    temporaryRoots.push(root);
+    const first = join(root, 'Node with spaces');
+    const second = join(root, 'another node');
+    await mkdir(first);
+    await mkdir(second);
+    const filename = process.platform === 'win32' ? 'node.exe' : 'node';
+    await symlink(process.execPath, join(first, filename));
+    await symlink(process.execPath, join(second, filename));
+    const env = {
+      PATH: [first, second].join(delimiter),
+      ELECTRON_RUN_AS_NODE: '1',
+      DSH_HOME: root,
+      SYNTHETIC_PROVIDER: 'preserved',
+    };
+    const prepared = await prepareNode(env);
+    expect(prepared.LODY_DSH_NODE_EXECUTABLE).toBe(process.execPath);
+    expect(prepared.ELECTRON_RUN_AS_NODE).toBeUndefined();
+    expect(prepared.SYNTHETIC_PROVIDER).toBe('preserved');
+    expect(prepared.DSH_HOME).toBe(root);
+    expect(env.ELECTRON_RUN_AS_NODE).toBe('1');
+    const result = await promisify(execFile)(
+      prepared.LODY_DSH_NODE_EXECUTABLE,
+      ['-p', 'JSON.stringify({node:process.versions.node,electron:process.versions.electron})'],
+      { env: prepared }
+    );
+    expect(JSON.parse(result.stdout)).toEqual({ node: process.versions.node });
+  });
+
+  it('terminates an in-flight Node probe when its caller cancels', async () => {
+    const table = new FakeProcessTable('linux');
+    let announceSpawn: (child: ChildProcess) => void = () => {};
+    const spawned = new Promise<ChildProcess>((onSpawned) => {
+      announceSpawn = onSpawned;
+    });
+    const controller = new AbortController();
+    const nodeProcess = {
+      ...table.api,
+      spawn: (...args: Parameters<typeof table.api.spawn>) => {
+        const child = table.api.spawn(...args);
+        announceSpawn(child);
+        return child;
+      },
+    };
+    const pending = runPromiseSquashedLegacy(
+      prepareDeepSeekNodeEnvironment(process.env).pipe(
+        Effect.provide(processLayer({ nodeProcess }))
+      ),
+      { signal: controller.signal }
+    );
+    const rejected = expect(pending).rejects.toBeDefined();
+    const child = await spawned;
+    expect(table.isAlive(child.pid ?? -1)).toBe(true);
+    controller.abort();
+    await rejected;
+    expect(table.isAlive(child.pid ?? -1)).toBe(false);
+  });
+
+  it('uses case-insensitive Windows Path without looking in the workdir', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'lody-dsh-node-win-'));
+    temporaryRoots.push(root);
+    await writeFile(join(root, 'node.exe'), 'synthetic executable');
+    expect(resolveDeepSeekNodePath({ Path: `;relative;"${root}"` }, 'win32')).toBe(
+      join(root, 'node.exe')
+    );
+  });
+
+  it('reports missing Node and succeeds on retry after installation', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'lody-dsh-node-missing-'));
+    temporaryRoots.push(root);
+    const env = { PATH: root };
+    await expect(prepareNode(env)).rejects.toThrow('[DSH_NODE_NOT_FOUND]');
+    await symlink(process.execPath, join(root, process.platform === 'win32' ? 'node.exe' : 'node'));
+    expect((await prepareNode(env)).LODY_DSH_NODE_EXECUTABLE).toBe(process.execPath);
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'distinguishes an unexecutable Node from a missing installation',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'lody-dsh-node-permissions-'));
+      temporaryRoots.push(root);
+      await writeFile(join(root, 'node'), 'not executable', { mode: 0o600 });
+      const second = join(root, 'second');
+      await mkdir(second);
+      await symlink(process.execPath, join(second, 'node'));
+      await expect(prepareNode({ PATH: [root, second].join(delimiter) })).rejects.toThrow(
+        '[DSH_NODE_EXEC_FAILED]'
+      );
+    }
+  );
+
+  it.skipIf(process.platform === 'win32').each([
+    { node: '24.1.0', napi: '10' },
+    { node: '24.22.1', napi: '9' },
+    { node: '24.22.1', napi: '10', electron: '44.9.3' },
+  ])('rejects unsupported runtime metadata %j', async (runtime) => {
+    const root = await mkdtemp(join(tmpdir(), 'lody-dsh-node-version-'));
+    temporaryRoots.push(root);
+    await writeFile(
+      join(root, 'node'),
+      "#!/bin/sh\nprintf '%s\n' " +
+        JSON.stringify(JSON.stringify({ execPath: process.execPath, ...runtime })) +
+        '\n',
+      { mode: 0o700 }
+    );
+    await expect(prepareNode({ PATH: root })).rejects.toThrow('[DSH_NODE_UNSUPPORTED]');
   });
 });
