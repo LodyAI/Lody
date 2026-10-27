@@ -4,7 +4,11 @@ import { beginDesktopRunRecord } from './desktop-log'
 import { isLocalPlatform, desktopInstallationProfile } from './platform'
 import { extractDeepLinkFromArgv, parseDeepLinkArg } from './deep-link-url'
 import { publishDeepLinkToPrimary, startDeepLinkIpcListener } from './deep-link-ipc'
-import { acquireDesktopLease } from './services/desktop-exclusion'
+import {
+  acquireDesktopLease,
+  CLOUD_DESKTOP_LOCK,
+  handOffDesktopDeepLink
+} from './services/desktop-exclusion'
 import { createDesktopLaunchBuffer } from './services/desktop-launch-buffer'
 import {
   acquireLocalCliHostLease,
@@ -32,6 +36,19 @@ app.on('second-instance', (_event, argv) => {
   launches.push({ url: extractDeepLinkFromArgv(argv) ?? undefined, activate: true })
 })
 
+async function forwardLaunchDeepLinks(): Promise<boolean> {
+  const argvUrl = extractDeepLinkFromArgv(process.argv)
+  const candidates = [
+    ...launches.takePending().flatMap((event) => (event.url ? [event.url] : [])),
+    ...(argvUrl ? [argvUrl] : [])
+  ]
+  let forwarded = false
+  for (const url of new Set(candidates)) {
+    if (await handOffDesktopDeepLink(url)) forwarded = true
+  }
+  return forwarded
+}
+
 async function start(): Promise<void> {
   // Same-app launches deliver their URL to the primary; they must not be
   // mistaken for a conflict with the other distribution.
@@ -47,9 +64,18 @@ async function start(): Promise<void> {
     app.once('will-quit', stop)
   }
   if (!isolatedE2E && !isLocalPlatform()) {
-    const lease = await acquireDesktopLease()
+    const lease = await acquireDesktopLease(CLOUD_DESKTOP_LOCK, {
+      onDeepLink: (url) => launches.push({ url })
+    })
     if (!lease) {
       await app.whenReady()
+      // Opening lody:// may start this channel while another one owns the
+      // desktop lease. Hand a portable destination to that installation, then
+      // leave without loading credentials or showing a conflict the user cannot act on.
+      if (await forwardLaunchDeepLinks()) {
+        app.quit()
+        return
+      }
       await dialog.showMessageBox({
         type: 'info',
         title: desktopInstallationProfile.desktopProductName,

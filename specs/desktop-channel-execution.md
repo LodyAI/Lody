@@ -19,6 +19,10 @@ remains local-only; channel identity must not enable cloud behavior in that buil
 - Supported cloud desktop versions MUST exclude one another in both launch orders,
   including control-only mode. The losing app explains how to quit the current app;
   it MUST NOT kill it, steal execution ownership, or load credential/business stores.
+  When the launch carries a channel-neutral `session`, `chat/new` or `provider/import`
+  destination and the running owner accepts a handoff, the losing app hands that
+  normalized resource link to it over the same lease and exits instead of showing the
+  conflict. Authentication and other cloud callbacks never cross that lease.
 - All pre-ready Electron configuration and early launch-event subscriptions precede
   asynchronous ownership acquisition. Accepted early callbacks survive that gate.
 - Per-app second-instance delivery remains distinct from cross-channel conflicts.

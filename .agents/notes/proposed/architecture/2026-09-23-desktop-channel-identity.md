@@ -12,8 +12,9 @@ storage to the initiating application. Desktop identity is now resolved separate
 from the shared local execution installation profile, and an early bootstrap sets
 the data directory before credential modules evaluate. Login attempts keep the existing authentication client and carry a validated
 channel selector for the callback. Browser handoff and the pinned authentication
-endpoint are covered by tests. An early OS lease now gates application loading;
-packaged cross-channel launches and OS callback dispatch remain unverified.
+endpoint are covered by tests. An early OS lease now gates application loading and
+carries channel-neutral deep-link handoffs between channels; packaged cross-channel
+launches and OS callback dispatch remain unverified.
 
 ## Decision and boundaries
 
@@ -73,6 +74,13 @@ Stable/local retain their prior runtime attach policy. This deliberately prevent
 starting an external daemon alongside a control-only Nightly window; it does not
 start Worker probes while that setting is off.
 
+The same bounded lease carries a launch handoff. A losing channel normalizes a
+channel-neutral `session`, `chat/new` or `provider/import` destination to the common
+resource scheme, sends it to the running owner, and exits only after the owner
+accepts. Authentication, invite, checkout and other cloud routes never cross the
+lease; an older or unavailable owner keeps the existing conflict prompt. The owner
+validates the bounded message and replays it through the existing launch buffer.
+
 The intended contract is [desktop channel execution](../../../../specs/desktop-channel-execution.md).
 
 ## Verification
@@ -107,10 +115,12 @@ inspection remains required.
 Behavioral coverage is in `desktop-channel.test.mjs` and the existing
 `auth-callback-transaction.test.mjs`. Type checks and real packaged login remain
 required. `desktop-exclusion.test.mjs` covers competing owners, crash recovery,
-startup buffering and failed-quit retry. `desktop-startup.test.mjs` builds the real
-main bundle and verifies that conflict never loads business/credential modules,
-while success replays the early callback. Real Host endpoints cover existing
-owners, invalid records, and startup after the old owner stops. A real bundled
+startup buffering, failed-quit retry, accepted/rejected handoffs and portable URL
+normalization. `desktop-startup.test.mjs` builds the real main bundle and verifies that
+conflict never loads business/credential modules, while success replays the early
+callback. It also verifies that a portable launch reaches the running owner without a
+conflict dialog, while an auth callback does not cross the lease. Real Host endpoints
+cover existing owners, invalid records, and startup after the old owner stops. A real bundled
 Supervisor verifies that stop/restart does not release the borrowed Host. It substitutes Electron UI and application
 execution, so it does not prove packaged installation or OS callback routing.
 Deployed backend origin admission also remains a release gate.

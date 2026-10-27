@@ -4,7 +4,8 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import test from 'node:test'
-import { acquireDesktopLease } from './desktop-exclusion.ts'
+import { acquireDesktopLease, handOffDesktopDeepLink } from './desktop-exclusion.ts'
+import { toPortableDesktopDeepLink } from './desktop-deep-link-handoff.ts'
 import { createDesktopLaunchBuffer } from './desktop-launch-buffer.ts'
 import { createDesktopQuitBarrier } from './desktop-shutdown.ts'
 
@@ -25,10 +26,13 @@ void test('desktop ownership excludes a second owner and can be handed off after
 
 void test('crashing an owner releases the OS lease without deleting a lock file', async (t) => {
   const moduleUrl = new URL('./desktop-exclusion.ts', import.meta.url).href
+  const resolveHookUrl = new URL('../../../scripts/node-test-ts-resolve.mjs', import.meta.url).href
   const child = spawn(
     process.execPath,
     [
       '--experimental-strip-types',
+      '--import',
+      resolveHookUrl,
       '--input-type=module',
       '-e',
       `
@@ -59,6 +63,79 @@ void test('crashing an owner releases the OS lease without deleting a lock file'
 
 void test('lease setup errors fail rather than admitting an unprotected desktop', async () => {
   await assert.rejects(acquireDesktopLease({ host: '127.0.0.1', port: -1 }))
+})
+
+void test('a losing channel hands a portable link to the desktop that owns the lease', async (t) => {
+  const received = Promise.withResolvers()
+  const owner = await acquireDesktopLease(loopback, {
+    onDeepLink: (url) => received.resolve(url)
+  })
+  assert.ok(owner)
+  t.after(() => owner.close())
+
+  const accepted = await handOffDesktopDeepLink(
+    'ai.lody.nightly://session/session-1?workspace=workspace-1',
+    { host: '127.0.0.1', port: owner.port }
+  )
+  assert.equal(accepted, true)
+  assert.equal(await received.promise, 'lody://session/session-1?workspace=workspace-1')
+})
+
+void test('a lease never accepts cloud callbacks or unsupported routes', async (t) => {
+  let received
+  const owner = await acquireDesktopLease(loopback, {
+    onDeepLink: (url) => {
+      received = url
+    }
+  })
+  assert.ok(owner)
+  t.after(() => owner.close())
+  const endpoint = { host: '127.0.0.1', port: owner.port }
+
+  assert.equal(
+    await handOffDesktopDeepLink(
+      'ai.lody.nightly://auth/callback#token=synthetic-attempt',
+      endpoint
+    ),
+    false
+  )
+  assert.equal(
+    await handOffDesktopDeepLink('lody://invite/open?invitation=synthetic', endpoint),
+    false
+  )
+  assert.equal(received, undefined)
+
+  assert.equal(
+    await handOffDesktopDeepLink('lody://chat/new?machine=machine-1&project=project-1', endpoint),
+    true
+  )
+  assert.equal(received, 'lody://chat/new?machine=machine-1&project=project-1')
+})
+
+void test('portable destinations use the common resource scheme', () => {
+  assert.equal(
+    toPortableDesktopDeepLink('ai.lody.nightly://session/session-1?workspace=workspace-1'),
+    'lody://session/session-1?workspace=workspace-1'
+  )
+  assert.equal(
+    toPortableDesktopDeepLink('ai.lody.stable://provider/import?v=1&data=synthetic'),
+    'lody://provider/import?v=1&data=synthetic'
+  )
+  assert.equal(toPortableDesktopDeepLink('session://legacy'), null)
+  assert.equal(toPortableDesktopDeepLink('lody://session/session-1#fragment'), null)
+  assert.equal(toPortableDesktopDeepLink('lody://auth/callback#token=synthetic'), null)
+  assert.equal(toPortableDesktopDeepLink('https://lody.ai/session/session-1'), null)
+})
+
+void test('startup event buffer can hand its pending events to another installation', () => {
+  const buffer = createDesktopLaunchBuffer()
+  buffer.push({ url: 'lody://session/pending' })
+  buffer.push({ activate: true })
+  assert.deepEqual(buffer.takePending(), [{ url: 'lody://session/pending' }, { activate: true }])
+  const received = []
+  buffer.bind((event) => received.push(event))
+  buffer.push({ url: 'lody://session/after-ready' })
+  assert.deepEqual(received, [{ url: 'lody://session/after-ready' }])
 })
 
 void test('startup retains login and activation events until the application is loaded', () => {

@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 import { runInNewContext } from 'node:vm'
 import { resolveConfig } from 'electron-vite'
 import { build } from 'vite'
-import { acquireDesktopLease } from './services/desktop-exclusion.ts'
+import { acquireDesktopLease, CLOUD_DESKTOP_LOCK } from './services/desktop-exclusion.ts'
 
 const electronRoot = fileURLToPath(new URL('../../', import.meta.url))
 const require = createRequire(new URL('../../package.json', import.meta.url))
@@ -104,7 +104,14 @@ after(async () => {
 
 function launch(
   t,
-  { port = 0, hostPort, sameAppPrimary = true, packaged = true, e2e = false } = {}
+  {
+    port = 0,
+    hostPort,
+    sameAppPrimary = true,
+    packaged = true,
+    e2e = false,
+    initialUrl = 'ai.lody.nightly://auth/callback#synthetic-attempt'
+  } = {}
 ) {
   const ready = Promise.withResolvers()
   const completed = Promise.withResolvers()
@@ -125,7 +132,7 @@ function launch(
     requestSingleInstanceLock() {
       // macOS may deliver the callback before ready and while acquiring a lease.
       const event = { preventDefault() {} }
-      app.emit('open-url', event, 'ai.lody.nightly://auth/callback#synthetic-attempt')
+      app.emit('open-url', event, initialUrl)
       return sameAppPrimary
     },
     whenReady: () => ready.promise,
@@ -158,7 +165,12 @@ function launch(
     await Promise.all(sockets.map((server) => new Promise((resolve) => server.close(resolve))))
   })
   const net = {
-    createConnection() {
+    createConnection(options) {
+      // The cross-channel handoff dials the fixed desktop lease. Redirect it to
+      // the fixture owner so no test touches the user's real port.
+      if (options && typeof options === 'object' && options.port === CLOUD_DESKTOP_LOCK.port) {
+        return createConnection({ host: options.host ?? '127.0.0.1', port })
+      }
       // No fixture may touch the user's fixed Host port or named pipe.
       if (reservedHostPort) return createConnection({ host: '127.0.0.1', port: reservedHostPort })
       const socket = new Socket()
@@ -254,6 +266,43 @@ void test('bundled entry refuses another channel before loading credential/appli
   )
   assert.equal(run.paths.get('userData'), join(root, 'Lody Nightly'))
   assert.equal(run.paths.get('sessionData'), join(root, 'Lody Nightly'))
+})
+
+void test('bundled entry hands a portable link to the running desktop instead of showing a conflict', async (t) => {
+  const received = Promise.withResolvers()
+  const owner = await acquireDesktopLease(
+    { host: '127.0.0.1', port: 0 },
+    { onDeepLink: (url) => received.resolve(url) }
+  )
+  assert.ok(owner)
+  t.after(() => owner.close())
+  const run = launch(t, {
+    port: owner.port,
+    e2e: true,
+    initialUrl: 'lody://session/session-1?workspace=workspace-1'
+  })
+  await run.done
+  assert.equal(await received.promise, 'lody://session/session-1?workspace=workspace-1')
+  assert.deepEqual(
+    run.events.filter(([name]) => !['scheme', 'name'].includes(name)).map(([name]) => name),
+    ['quit']
+  )
+  assert.equal(run.paths.get('userData'), join(root, 'Lody Nightly'))
+  assert.equal(run.paths.get('sessionData'), join(root, 'Lody Nightly'))
+})
+
+void test('an auth callback never crosses the channel lease', async (t) => {
+  let received = false
+  const owner = await acquireDesktopLease(
+    { host: '127.0.0.1', port: 0 },
+    { onDeepLink: () => (received = true) }
+  )
+  assert.ok(owner)
+  t.after(() => owner.close())
+  const run = launch(t, { port: owner.port, e2e: true })
+  await run.done
+  assert.equal(received, false)
+  assert.ok(run.events.some(([name]) => name === 'conflict'))
 })
 
 void test('bundled entry imports application after ownership and replays the early login', async (t) => {

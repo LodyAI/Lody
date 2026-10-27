@@ -35,6 +35,11 @@ product-window dispatch, preserving the explicit workspace. Provider import link
 the chosen installation and only stage user confirmation; never dispatch cloud auth or write
 Provider settings from a URL. Contract: [Magpie import](../../../../specs/magpie-provider-import.md). See [deep links](../../../../specs/deep-links.md).
 
+On a cross-channel desktop-lease conflict, hand a channel-neutral `session`,
+`chat/new` or `provider/import` destination to the running owner over the bounded
+lease before quitting. Never hand off auth/cloud callbacks, and keep credentials
+and business modules unloaded.
+
 Main-process `console` output, lifecycle, and embedded-CLI supervision reach the
 CLI daily log through `desktop-log.ts`; write synchronously, never persist
 credentials (redaction is only a backstop), and trace CLI spawns without their
