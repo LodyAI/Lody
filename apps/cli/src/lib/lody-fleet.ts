@@ -905,6 +905,7 @@ export class LodyFleet {
       });
 
       let lody: Lody | null = null;
+      let memberRemoved = false;
       let stopSchedules: (() => Promise<void>) | undefined;
       let partialPoller: PrPollerWorkspaceHandle | undefined;
       let detachTerminals: (() => void) | undefined;
@@ -913,6 +914,13 @@ export class LodyFleet {
         lody = await Lody.create({
           logger: workspaceLogger,
           onStorageWriteFailure: () => this.runtimeStateReporter.reportStorageWriteFailure(),
+          onEncryptedMemberRemoved: async (owner) => {
+            memberRemoved = true;
+            const state = this.runtimes.get(workspace.id);
+            if (!state || state.lody === owner) this.desiredWorkspaces.delete(workspace.id);
+            if (state?.lody === owner) await this.stopWorkspace(workspace.id);
+            else await owner.cleanup();
+          },
           builtinAgentConfigCliTypes: this.builtinAgentConfigCliTypes,
           supportRegistryAgentTypes: this.supportRegistryAgentTypes,
           workspaceId: workspace.id as WorkspaceId,
@@ -936,14 +944,14 @@ export class LodyFleet {
           workspaceWatchCoordinator: this.workspaceWatchCoordinator,
         });
 
-        if (!this.desiredWorkspaces.has(workspace.id) || this.stopped) {
+        if (!this.desiredWorkspaces.has(workspace.id) || this.stopped || memberRemoved) {
           await lody.cleanup();
           return;
         }
 
         await lody.start();
 
-        if (!this.desiredWorkspaces.has(workspace.id) || this.stopped) {
+        if (!this.desiredWorkspaces.has(workspace.id) || this.stopped || memberRemoved) {
           await lody.cleanup();
           return;
         }

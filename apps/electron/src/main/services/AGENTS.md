@@ -104,14 +104,14 @@ No network under locks; drain before release.
 Bad keys allow ledger open; core repairs.
 Isolate verification/storage errors; malformed input keeps readers.
 Originals precede feed/pin; compare overlaps, retain checkpoints, await history.
-Conflicts refuse fallback. Failed close retains its writer fence; report restart-required.
+Conflicts refuse fallback. Failed close retains its fence; report restart-required.
 Fixed cloud refs; auth/bound/abort; fence late disposed calls.
-Keep uncertain bytes; raw/SDK causes stay in main, never IPC/telemetry.
+Keep uncertain bytes; raw/SDK causes never leave main.
 Verified reads beat lost ACKs; cleanup retains admission.
 `e2ee_staging_invalid` and `e2ee_staging_corrupt` are terminal.
 
 Consent pins exact verified proofs/session/record/requestId/keys/credentials/pins.
-Missing credentials block approval; never export credentials. Failed begin stays discoverable.
+Missing credentials block approval; never export them. Failed begin stays discoverable.
 Archive terminal/foreign attempts, including pin-only+relay; fence same-request
 unknown/admitting. Retain installed origins, other sessions and primary/cleanup causes.
 Retirement needs exact superseded socket receipt and atomic all-null local match;
@@ -119,4 +119,4 @@ fresh sessions need consent. Unsigned staged material stays pending across windo
 until verified admission/history settlement (including later revocation); see [rationale](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-local-pairing-recovery.md). Verify pinned endorsement/self-admission before snapshot binding/pin/cursor; allow sparse positions. Keys use verified mailbox/history; committed epochs may use staging. Staging read
 denial/I/O failure cannot gate mailbox receipt. Show file protection; socket timeout stays pending. Await CLI current-key install.
 
-Revoke skips candidates, not CAS.
+Only rotate resumes candidates. Keep errors transport-free.

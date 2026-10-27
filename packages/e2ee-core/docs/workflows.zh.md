@@ -115,7 +115,7 @@ _需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`InstalledEpoch
 → Committed：经 InstalledEpochKeys 安装 | Conflict：丢弃候选密钥
 ```
 
-`resume` 在崩溃后完成同一个候选，不再签名。`cleanupStaged` 在该纪元被不同承诺占用后删除本设备的暂存组。`acknowledge` 释放已完成的结果。只有 owner 或 admin 的个人设备可以换代。绕过暂存直接追加的管理者可以扣留密钥：这是已知的可用性限制，不破坏机密性。
+`resume` 在崩溃后完成同一个候选，不再签名。匹配的 publication 原件进入 `LedgerSubmission` 后，恢复跳过重复暂存／读回，直接对账同一 CAS，不再依赖暂存服务可用。只有 candidate、尚无 submission 时，首次提交仍须完整暂存并精确读回。`cleanupStaged` 在该纪元被不同承诺占用后删除本设备的暂存组。`acknowledge` 释放已完成的结果。只有 owner 或 admin 的个人设备可以换代。绕过暂存直接追加的管理者可以扣留密钥：这是已知的可用性限制，不破坏机密性。
 
 MVP 独立移除在 capability 1 的 `DeclareCapabilities` 命令入账后，使用 `WorkspaceControl.execute({ _tag: "RemoveMember", membershipId })`。它撤销全部设备，保留 epoch 并提示手动换代；`EpochPublisher.publishRemoving` 仍保留独立的 tag8 原子契约。
 

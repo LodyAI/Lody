@@ -26,18 +26,18 @@ Translation: current
 
 尚未验证已安装桌面、真实系统钥匙串、生产服务、邮件、Stripe 或跨平台验收。完整历史启动限制为 256 页、32 MiB；超过上限需另行审查启动方案。本 PR 不改变已保存的签名账本格式，也不实现移除成员或换代 UI。
 
-## 移除与重新加入的组合
+## 移除和重新加入的组合
 
-配套[成员清理 #1982](https://github.com/LodyAI/Lody/pull/1982) 的 bootstrap 接线必须覆盖加入日志。终态清理由该 PR 比较原账号、工作区、genesis、签名公钥和 credential，并负责 owner 停止、排空和 custody 删除。同账号、工作区、genesis 下，旧凭据收到已认证 `member_removed` 响应也不能删除后来加入的新实例。
+本分支合并当前 main，包含[成员管理与本地清理 #1982](https://github.com/LodyAI/Lody/pull/1982)。Owner 升 Admin 沿用它唯一的 `setMemberRole` 端口、原生签名实现和管理日志。加入流程不另造角色命令、账本状态字段或快照版本；能力状态和快照、保留状态、摘要 v4 仍由 #1979 负责。
 
-- 完成上述精确身份比较后，随旧个人加入和创建记录一起删除匹配的 `member_joins` 和 `personal_join_histories` 行。它们可能保存已安装来源，因此普通待处理申请退役故意拒绝删除。只删除 `personal_joins` 会留下旧的完整历史来源，阻塞或污染新邀请。
-- 真正的新成员实例必须在旧设备及对应凭据清理后开始。`createDevice(genesis)` 会重开已保留的 key，只有设备文件不存在时才生成新 key。仅换邀请 token 不能授权替换密钥或结果不明的签名申请；同申请和重启重试继续使用原始 KeyPackage 与 credential。
-- 只有完整验证并安装不同签名 key 后才清除公共移除标记。除 `acceptPersonalJoin` 外，也要覆盖 `acceptMemberJoin` 和 `acceptPersonalHistory`；成员加入及 Member 批准的额外设备会使用完整历史路径。准备和提交尚不等于安装，不能清除标记。
+已认证移除继续比较原账号、工作区、genesis、签名公钥和 credential，停止并排空原生 owner 后删除该实例。清理现已覆盖 `member_joins` 和 `personal_join_histories`，避免已安装来源阻塞或污染新邀请。凭据认证的邀请接口沿用统一移除错误分类和终态清理。旧凭据的迟到响应不能通过当前身份比较，因此不会删除新实例。
 
-这些是独立 draft 的明确合并条件，不代表本 PR 已完成移除后重加入验收。移除协议与 tag 改动留在所属 PR。组合后需验证：同账号移除后重新加入产生不同签名 key 和 credential；迟到旧凭据响应不删除新实例；失败和重复接受保留原始签名内容。
+`acceptMemberJoin`、`acceptPersonalHistory` 和 `acceptPersonalJoin` 共用移除标记完成规则：先验证签名接纳或历史及其与本地设备的绑定，再仅为同 genesis、不同签名公钥清除标记。准备申请和安装失败都保留标记。旧实例清理后，新邀请生成新设备和凭据；同一未决申请的重试继续使用原件。
 
-## 协议归属与合并顺序
+渲染器沿用 #1982 唯一的本地数据定位：账号、工作区、genesis、签名公钥，正文命名空间再区分窗口。加入成功后进入现有加密运行时接纳流程，在打开正文前保存新定位，不能选择旧的仅按工作区命名的缓存或复活被移除实例。
 
-[独立移除 #1979](https://github.com/LodyAI/Lody/pull/1979) 负责 capability 集合以及快照、保留状态、摘要 v4。加入链不修改这些 core 字段或版本，直接使用 core 验证和导出接口。邀请和 KeyPackage 的 `version: 1` 是独立的传输封装，不是账本快照版本。临时组合 #1979 head `c9eeefb14b62` 后，154 项原生测试及一个真实 crypto/SQLite 用例通过；后者覆盖 capability 1 声明、tag10 移除、新成员完整历史安装、v4 导出，以及重开后 capability 保留。临时 core 覆盖与测试均不进入此分支。
+三条真实密码学和 SQLite 回归覆盖三个安装入口的移除后新邀请、不同成员实例与 key/credential、安装失败保留标记、Owner 升 Admin、旧凭据迟到保护、发钥与离线重开。真实 IPC 测试覆盖邀请管理接口触发的终态清理；渲染器回归验证新公钥选择并保留新的本地实例。这些是自动组合验证，不表示已安装设备或真实服务验收完成。
 
-公开邀请契约统一位于 `packages/cloud-api/src/e2ee-members.ts`；独立 UI 配套在同一路径携带相同内容，合并时保留一份。原生能力统一使用 `E2eeWorkspaceRuntime`，保留 #1982 的 `signingPublicKey`、`membershipId`、`memberRole` 和 `setMemberRole`，以及本 PR 的临时 `readerOwner`。组合 IPC 改动时，新增的凭据认证邀请调用须沿用 #1982 统一的 `e2ee_member_removed` 分类与精确身份终态清理，不能另造错误名或仅按工作区 ID 删除。此分支已 rebase 到包含 #1979 的 main `6a53ad05`，不另升格式版本，也未叠入任一移除分支。
+## 协议归属
+
+公开邀请 DTO 只有 `packages/cloud-api/src/e2ee-members.ts` 一处声明，平台和 UI 复用。`E2eeWorkspaceRuntime` 保留已合入的签名公钥、成员实例、角色和 `setMemberRole`，并加入本 PR 的临时 reader 所有权标识。原生配套可先合入，产品邀请与设置界面由 #1986 提供。两个独立分支不互相叠栈，也不保留临时 core overlay。

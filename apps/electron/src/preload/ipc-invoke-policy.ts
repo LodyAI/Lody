@@ -50,6 +50,8 @@ export function isIpcInvokeChannel(channel: string): boolean {
       'seal',
       'openContent',
       'contentStreamsToken',
+      'removeMember',
+      'setMemberRole',
       'refresh',
       'prepareCreation',
       'recordCreated',

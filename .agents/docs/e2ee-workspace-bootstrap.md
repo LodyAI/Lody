@@ -6,18 +6,18 @@ This developer preview creates a new, fixed-mode encrypted workspace and exposes
 
 ## Reading map
 
-| Question | Owner |
-| --- | --- |
-| Library services, protocol and whitepaper | [Core guide](../../packages/e2ee-core/README.md) |
-| Public cloud requests and responses | [Cloud DTOs](../../packages/cloud-api/src/e2ee-workspaces.ts) |
-| Host/cloud composition and ownership | [Platform port](../../packages/platform/src/e2ee-workspaces.ts) |
-| Durable device preparation | [Desktop bootstrap](../../apps/electron/src/main/services/e2ee-bootstrap.mts) |
-| Cloud account and receipt checks | [Cloud adapter](../../packages/components/src/providers/cloud-e2ee-workspaces.ts) |
-| Pending requests and fixed local identity | [Renderer storage](../../packages/components/src/lib/e2ee-workspace-storage.ts) |
-| Signature verification and readable history | [Ledger reader](../../packages/components/src/lib/e2ee-ledger-history.ts) |
-| Control page | [Workspace ledger](../../packages/components/src/components/pages/e2ee-workspace-control-page.tsx) |
-| Runtime admission | [Runtime provider](../../packages/components/src/providers/runtime-provider.tsx) |
-| Decision and evidence limits | [Implementation note](../notes/implemented/feature/2026-10-17-e2ee-workspace-bootstrap.md) |
+| Question                                    | Owner                                                                                              |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Library services, protocol and whitepaper   | [Core guide](../../packages/e2ee-core/README.md)                                                   |
+| Public cloud requests and responses         | [Cloud DTOs](../../packages/cloud-api/src/e2ee-workspaces.ts)                                      |
+| Host/cloud composition and ownership        | [Platform port](../../packages/platform/src/e2ee-workspaces.ts)                                    |
+| Durable device preparation                  | [Desktop bootstrap](../../apps/electron/src/main/services/e2ee-bootstrap.mts)                      |
+| Cloud account and receipt checks            | [Cloud adapter](../../packages/components/src/providers/cloud-e2ee-workspaces.ts)                  |
+| Pending requests and fixed local identity   | [Renderer storage](../../packages/components/src/lib/e2ee-workspace-storage.ts)                    |
+| Signature verification and readable history | [Ledger reader](../../packages/components/src/lib/e2ee-ledger-history.ts)                          |
+| Control page                                | [Workspace ledger](../../packages/components/src/components/pages/e2ee-workspace-control-page.tsx) |
+| Runtime admission                           | [Runtime provider](../../packages/components/src/providers/runtime-provider.tsx)                   |
+| Decision and evidence limits                | [Implementation note](../notes/implemented/feature/2026-10-17-e2ee-workspace-bootstrap.md)         |
 
 ## Creation ownership
 
@@ -98,3 +98,7 @@ Renderer genesis pins, history checkpoints and mode
 evidence remain. Earlier shared developer custody is not imported; account archival
 preserves it. Archived unsent work is retained without replay and old remote devices
 are not revoked. Personal identities still require OS protection.
+
+## Member controls and terminal local cleanup
+
+The native member controls sign ordinary `SetRole` and capability-1 `RemoveMember` commands through the existing `host.manage` entry and its durable submission journal. Only `rotate` recovers an uncommitted candidate; independent commands first reconcile any unknown CAS using its original bytes, then compare the full operation intent before reporting success. Role changes require Owner authority. Owner/Admin removal preserves the epoch and leaves rotation to the existing settings key-update entry. A `rotationRequired` hint never gates sending. Only a credential-authenticated whole-member removal response triggers automatic cleanup: match the original native account/device/credential, retain a terminal receipt, stop the workspace and drain its owners. The account coordinator then takes the exclusive identity lease before erasing native data. Renderer storage and cleanup share the exact account/workspace/genesis/signing-key namespace; replica/cursor/high-water state adds window scope, and pending inputs/locks/broadcasts share the identity instance across windows. A public retained locator handles cold-open removal without deleting another account or rejoined device. CLI content lives at `e2ee/<account-hash>/<workspace>/content/<genesis>/<signing-key>` under the same identity lease as its owner. Close waits for identity verification and the terminal receipt before releasing custody; full deletion remains independent of parent close. CLI execution drains before deletion and keeps user project directories. Busy/interrupted deletion retries on the next relevant workspace open; ordinary network and individual-device failures retain data. See [the decision and limits](../notes/proposed/architecture/2026-10-28-e2ee-member-controls-and-local-removal.md).

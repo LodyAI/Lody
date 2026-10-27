@@ -1,3 +1,4 @@
+import { rm } from 'node:fs/promises'
 import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
 import { createHash, randomBytes } from 'node:crypto'
 import { makeDesktopPersonalJoins, type PersonalPairingOffer } from './e2ee-personal-pairing.mjs'
@@ -261,7 +262,7 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
         }
       } else if (version !== 1 || id !== applicationId) throw fail('corrupt')
       db.exec(
-        'CREATE TABLE IF NOT EXISTS workspace_bindings(workspace_id TEXT PRIMARY KEY, genesis TEXT UNIQUE NOT NULL, request_id TEXT NOT NULL); CREATE TABLE IF NOT EXISTS creation_credentials(request_id TEXT PRIMARY KEY, credential_hash TEXT)'
+        'CREATE TABLE IF NOT EXISTS removed_workspaces(workspace_id TEXT PRIMARY KEY,genesis TEXT NOT NULL,signing_key TEXT NOT NULL); CREATE TABLE IF NOT EXISTS workspace_bindings(workspace_id TEXT PRIMARY KEY, genesis TEXT UNIQUE NOT NULL, request_id TEXT NOT NULL); CREATE TABLE IF NOT EXISTS creation_credentials(request_id TEXT PRIMARY KEY, credential_hash TEXT)'
       )
       if (
         db.prepare('SELECT account_id FROM metadata').all().length !== 1 ||
@@ -722,7 +723,127 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
         )
       })
     )
+  const removedRow = (workspaceId: string) =>
+    db
+      .prepare('SELECT genesis,signing_key FROM removed_workspaces WHERE workspace_id=?')
+      .get(workspaceId) as { genesis: string; signing_key: string } | undefined
+  const eraseRemoved = Effect.fnUntraced(function* (workspaceId: string) {
+    const row = yield* sql(() => removedRow(workspaceId))
+    if (!row) return false
+    const genesis = yield* Effect.fromResult(Bytes.genesisHash(Buffer.from(row.genesis, 'hex')))
+    const key = yield* Effect.fromResult(
+      Bytes.signingPublicKey(Buffer.from(row.signing_key, 'hex'))
+    )
+    if (!(yield* custody.forgetDevice(genesis, key, 'personal'))) return false
+    yield* Effect.tryPromise({
+      try: () => rm(join(directory, 'workspaces', workspaceId), { recursive: true, force: true }),
+      catch: () => fail('storage')
+    })
+    yield* sql(() => {
+      const binding = db
+        .prepare('SELECT request_id FROM workspace_bindings WHERE workspace_id=? AND genesis=?')
+        .get(workspaceId, row.genesis)
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        if (binding) {
+          db.prepare('DELETE FROM creation_credentials WHERE request_id=?').run(
+            binding.request_id as string
+          )
+          db.prepare('DELETE FROM creations WHERE request_id=?').run(binding.request_id as string)
+          db.prepare('DELETE FROM workspace_bindings WHERE workspace_id=? AND genesis=?').run(
+            workspaceId,
+            row.genesis
+          )
+        }
+        db.prepare('DELETE FROM personal_joins WHERE workspace_id=?').run(workspaceId)
+        db.prepare('DELETE FROM retired_personal_joins WHERE workspace_id=?').run(workspaceId)
+        db.prepare('DELETE FROM personal_join_histories WHERE workspace_id=?').run(workspaceId)
+        db.prepare('DELETE FROM member_joins WHERE workspace_id=?').run(workspaceId)
+        db.exec('COMMIT')
+      } catch (cause) {
+        db.exec('ROLLBACK')
+        throw cause
+      }
+    })
+    return true
+  })
+  const recordRemovedWorkspace = Effect.fnUntraced(function* (input: {
+    workspaceId: string
+    genesisHash: string
+    signingPublicKey: string
+    credential: string
+  }) {
+    // This is private host plumbing. Only the authenticated cloud removal result calls it.
+    const creation = yield* creationFor(input.workspaceId)
+    if (creation.genesisHash !== input.genesisHash) return false
+    return yield* withLock(
+      Effect.gen(function* () {
+        const genesis = yield* Effect.fromResult(
+          Bytes.genesisHash(Buffer.from(input.genesisHash, 'hex'))
+        )
+        const current = yield* custody.openDevice(genesis)
+        if (Buffer.from(current.publicKey.toBytes()).toString('hex') !== input.signingPublicKey)
+          return false
+        if ((yield* custody.deviceCredential(genesis, current.publicKey)) !== input.credential)
+          return false
+        yield* sql(() => {
+          const prior = removedRow(input.workspaceId)
+          if (
+            prior &&
+            (prior.genesis !== input.genesisHash || prior.signing_key !== input.signingPublicKey)
+          )
+            throw fail('conflict')
+          db.prepare(
+            'INSERT OR IGNORE INTO removed_workspaces(workspace_id,genesis,signing_key) VALUES(?,?,?)'
+          ).run(input.workspaceId, input.genesisHash, input.signingPublicKey)
+        })
+        return true
+      })
+    )
+  })
+  const forgetRemovedWorkspace = Effect.fnUntraced(function* (
+    input: Parameters<typeof recordRemovedWorkspace>[0]
+  ) {
+    const prior = yield* sql(() => removedRow(input.workspaceId))
+    if (!prior && !(yield* recordRemovedWorkspace(input))) return false
+    if (
+      prior &&
+      (prior.genesis !== input.genesisHash || prior.signing_key !== input.signingPublicKey)
+    )
+      return false
+    return yield* withLock(eraseRemoved(input.workspaceId))
+  })
+  const acceptJoin = (
+    workspaceId: string,
+    accept: Effect.Effect<void, unknown>,
+    installedOrigin: Effect.Effect<{ genesisHash: string }, unknown>
+  ) =>
+    withLock(
+      Effect.gen(function* () {
+        yield* accept
+        // The origin verifies the admission and binds it to the actual retained device.
+        const origin = yield* installedOrigin
+        const genesis = yield* Effect.fromResult(
+          Bytes.genesisHash(Buffer.from(origin.genesisHash, 'hex'))
+        )
+        const device = yield* custody.openDevice(genesis)
+        yield* sql(() => {
+          const previous = removedRow(workspaceId)
+          if (
+            previous?.genesis === origin.genesisHash &&
+            previous.signing_key !== hex(device.publicKey.toBytes())
+          )
+            db.prepare(
+              'DELETE FROM removed_workspaces WHERE workspace_id=? AND genesis=? AND signing_key=?'
+            ).run(workspaceId, previous.genesis, previous.signing_key)
+        })
+      })
+    )
   return Object.freeze({
+    recordRemovedWorkspace,
+    hasRemovedWorkspace: (workspaceId: string) => sql(() => Boolean(removedRow(workspaceId))),
+    forgetRemovedWorkspace,
+    resumeRemovedWorkspace: (workspaceId: string) => withLock(eraseRemoved(workspaceId)),
     recordAccountIdentity: (value: { accountId: string; cryptoUserId: string }) =>
       withLock(retainIdentity(value)),
     creationNeedsAccountIdentity: (input: DesktopE2eeCreationIntent) =>
@@ -753,14 +874,18 @@ export const makeDesktopE2eeBootstrap = Effect.fn('DesktopE2eeBootstrap.open')(f
         })
       ),
     acceptMemberJoin: (workspaceId: string, pages: readonly E2eeWorkspaceHistoryPage[]) =>
-      withLock(memberJoins.accept(workspaceId, pages)),
+      acceptJoin(
+        workspaceId,
+        memberJoins.accept(workspaceId, pages),
+        memberJoins.origin(workspaceId)
+      ),
     retirePersonalJoin: (workspaceId: string, pairingSessionId: string) =>
       withLock(joins.retire(workspaceId, pairingSessionId)),
     preparePersonalJoin: (offer: PersonalPairingOffer) => withLock(joins.prepare(offer)),
     acceptPersonalJoin: (workspaceId: string, invitationHex: string) =>
-      withLock(joins.accept(workspaceId, invitationHex)),
+      acceptJoin(workspaceId, joins.accept(workspaceId, invitationHex), joins.origin(workspaceId)),
     acceptPersonalHistory: (workspaceId: string, pages: readonly E2eeWorkspaceHistoryPage[]) =>
-      withLock(joins.acceptHistory(workspaceId, pages)),
+      acceptJoin(workspaceId, joins.acceptHistory(workspaceId, pages), joins.origin(workspaceId)),
     prepareCreation: (input: DesktopE2eeCreationIntent) => withLock(prepare(input)),
     recordCreated,
     creationFor,

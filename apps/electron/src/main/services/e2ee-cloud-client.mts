@@ -1,3 +1,4 @@
+import { E2eeMemberRemovedError } from './e2ee-cloud-errors.mjs'
 import { RemoteMachineStatusSchema } from '@lody/shared/e2ee-remote-pairing'
 import type { E2eeMachinePairingRequests } from '@lody/cloud-api'
 import { Bytes, decodeRecord, hashRecordBytes } from '@lody/e2ee-core/protocol'
@@ -108,6 +109,11 @@ const memberRequest = z.object({
 })
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex')
 const raw = (value: string) => new Uint8Array(Buffer.from(value, 'hex'))
+const memberDeviceAccess = (source: E2eeDeviceAccess): E2eeDeviceAccess => ({
+  workspaceId: source.workspaceId,
+  credential: source.credential,
+  ...(source.cliToken === undefined ? {} : { cliToken: source.cliToken })
+})
 const unavailable = () => new BackendError({ service: 'E2eeCloud', reason: 'unavailable' })
 
 /** Safe server capacity receipt; never contains request data or credentials. */
@@ -133,6 +139,7 @@ export class E2eeCloudDiagnosticError extends BackendError {
     super({ service: 'E2eeCloud', reason: 'unavailable' })
   }
 }
+
 function requestFailure(error: unknown): BackendError {
   if (error instanceof BackendError) return error
   // Never retain the SDK's raw error, server logs, request body, or token.
@@ -151,6 +158,7 @@ function requestFailure(error: unknown): BackendError {
   const result = z.object({ data: z.object({ code: z.string() }) }).safeParse(error)
   const code = result.success ? result.data.data.code : ''
   if (operatorCodes.has(code)) return new E2eeCloudDiagnosticError(code)
+  if (code === 'e2ee_member_removed') return new E2eeMemberRemovedError()
   const reason =
     code === 'e2ee_staging_invalid' || code === 'e2ee_staging_corrupt'
       ? 'invalid-response'
@@ -394,7 +402,11 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
         z.object({ accountId: z.string().min(1), cryptoUserId: hash })
       ),
     memberCreateInvitation: (args: E2eeMemberRequests['createInvitation']) => {
-      const original = { ...args, offer: { ...args.offer } }
+      const original = {
+        ...memberDeviceAccess(args),
+        offer: { ...args.offer },
+        ...(args.email === undefined ? {} : { email: args.email })
+      }
       return request(
         (client) => client.mutation(api.e2eeMembers.createInvitation, original),
         z.object({ offer: MemberOfferSchema })
@@ -412,7 +424,7 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
       )
     },
     memberPending: (args: E2eeMemberRequests['pending']) => {
-      const original = { ...args }
+      const original = { ...memberDeviceAccess(args) }
       return request(
         (client) => client.query(api.e2eeMembers.pending, original),
         z.object({
@@ -426,18 +438,18 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
       )
     },
     memberRead: (args: E2eeMemberRequests['read']) => {
-      const original = { ...args }
+      const original = { ...memberDeviceAccess(args), requestId: args.requestId }
       return request((client) => client.query(api.e2eeMembers.read, original), memberRequest)
     },
     memberReject: (args: E2eeMemberRequests['reject']) => {
-      const original = { ...args }
+      const original = { ...memberDeviceAccess(args), requestId: args.requestId }
       return request(
         (client) => client.mutation(api.e2eeMembers.reject, original),
         z.object({ state: z.literal('rejected') })
       )
     },
     memberRevoke: (args: E2eeMemberRequests['revoke']) => {
-      const original = { ...args }
+      const original = { ...memberDeviceAccess(args), token: args.token }
       return request(
         (client) => client.mutation(api.e2eeMembers.revoke, original),
         z.object({ revoked: z.literal(true) })

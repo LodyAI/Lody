@@ -10,7 +10,7 @@ import {
   VerifiedLedger,
   WorkspaceControl
 } from '@lody/e2ee-core'
-import { Bytes, decodeRecord } from '@lody/e2ee-core/protocol'
+import { Bytes, decodeRecord, type LedgerCommand } from '@lody/e2ee-core/protocol'
 import {
   BackendError,
   EpochCandidateStore,
@@ -33,6 +33,12 @@ import {
 } from '../e2ee-custody.mjs'
 import { WorkspaceScope } from '@lody/e2ee-core/services'
 import { E2eeStagingCapacityError } from './e2ee-cloud-client.mjs'
+
+export type DesktopE2eeManagementCommand =
+  | { type: 'rotate' }
+  | { type: 'revoke'; target: string }
+  | { type: 'removeMember'; membershipId: string }
+  | { type: 'setRole'; membershipId: string; role: 'admin' | 'member' | 'guest' }
 
 export type DesktopE2eeManagementRemote = {
   log: LedgerLog['Service']
@@ -181,9 +187,7 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
     yield* publisher.acknowledge(result)
     return result.outcome
   })
-  return Effect.fnUntraced(function* (
-    command: { type: 'rotate' } | { type: 'revoke'; target: string }
-  ) {
+  return Effect.fnUntraced(function* (command: DesktopE2eeManagementCommand) {
     yield* input.ports.refresh()
     const entry = yield* journal.pending()
     if (entry.record) {
@@ -205,7 +209,18 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
               parsed.body.type === 'ordinary' &&
               parsed.body.operation.type === 'revokeDevice' &&
               Buffer.from(parsed.body.operation.target.toBytes()).toString('hex') ===
-                command.target)
+                command.target) ||
+            (command.type === 'removeMember' &&
+              parsed.body.type === 'ordinary' &&
+              parsed.body.operation.type === 'removeMember' &&
+              Buffer.from(parsed.body.operation.membershipId.toBytes()).toString('hex') ===
+                command.membershipId) ||
+            (command.type === 'setRole' &&
+              parsed.body.type === 'ordinary' &&
+              parsed.body.operation.type === 'setRole' &&
+              parsed.body.operation.role === command.role &&
+              Buffer.from(parsed.body.operation.membershipId.toBytes()).toString('hex') ===
+                command.membershipId)
           )
             return result.outcome
         }
@@ -223,15 +238,50 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
       if (!current.inspectState().epoch.rotationRequired) return 'Committed'
       return yield* finishRotation(true)
     }
-    // Without a pending submission, candidate recovery is independent. Retain
-    // its originals; staging failure cannot gate revocation. Pending CAS above
-    // still reconciles the exact signed record before any new management signing.
-    const target = yield* Effect.fromResult(
-      Bytes.signingPublicKey(new Uint8Array(Buffer.from(command.target, 'hex')))
+    // Only rotate recovers an uncommitted candidate. Every independent command
+    // still reconciles a pending CAS above using its exact signed original.
+    if (command.type === 'revoke') {
+      const target = yield* Effect.fromResult(
+        Bytes.signingPublicKey(new Uint8Array(Buffer.from(command.target, 'hex')))
+      )
+      const view = yield* input.verified.current()
+      if (!view.inspectState().devices.has(command.target)) return 'Committed'
+      const result = yield* control.execute({ _tag: 'RevokeDevice', target })
+      yield* control.acknowledge(result)
+      return result.outcome
+    }
+    const membershipId = yield* Effect.fromResult(
+      Bytes.membershipId(new Uint8Array(Buffer.from(command.membershipId, 'hex')))
     )
-    const view = yield* input.verified.current()
-    if (!view.inspectState().devices.has(command.target)) return 'Committed'
-    const result = yield* control.execute({ _tag: 'RevokeDevice', target })
+    const state = (yield* input.verified.current()).inspectState()
+    const actorDevice = state.devices.get(
+      Buffer.from(input.device.publicKey.toBytes()).toString('hex')
+    )
+    const actor =
+      actorDevice &&
+      state.members.get(Buffer.from(actorDevice.membershipId.toBytes()).toString('hex'))
+    const target = state.members.get(command.membershipId)
+    if (
+      actorDevice?.kind !== 'personal' ||
+      !actor ||
+      (command.type === 'setRole'
+        ? actor.role !== 'owner'
+        : actor.role !== 'owner' && actor.role !== 'admin') ||
+      target?.role === 'owner' ||
+      (command.type === 'removeMember' && actor.role === 'admin' && target?.role === 'admin')
+    )
+      return yield* Effect.fail(new Error('e2ee_member_management_forbidden'))
+    if (!target || (command.type === 'setRole' && target.role === command.role)) return 'Committed'
+    if (command.type === 'removeMember' && !state.capabilities.includes(1)) {
+      const declared = yield* control.execute({ _tag: 'DeclareCapabilities', capabilities: [1] })
+      yield* control.acknowledge(declared)
+      if (declared.outcome === 'Conflict') return declared.outcome
+    }
+    const intent: LedgerCommand =
+      command.type === 'removeMember'
+        ? { _tag: 'RemoveMember', membershipId }
+        : { _tag: 'SetRole', membershipId, role: command.role }
+    const result = yield* control.execute(intent)
     yield* control.acknowledge(result)
     return result.outcome
   })

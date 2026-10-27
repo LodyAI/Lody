@@ -1,5 +1,18 @@
 import { subscribeE2eeLedgerChanges } from './e2ee-runtime-notifications';
 import { useTranslation } from 'react-i18next';
+import { desktopWindowId } from '@/lib/desktop-window';
+import {
+  isE2eeMemberRemoved,
+  retainEncryptedWorkspaceCleanup,
+  resumeEncryptedWorkspaceCleanup,
+  retryRetiredEncryptedWorkspaceCleanup,
+} from '@/lib/e2ee-member-removal';
+import {
+  readEncryptedLocalIdentity,
+  retainEncryptedLocalIdentity,
+  type E2eeLocalDataIdentity,
+  type E2eeLocalDataScope,
+} from '@/lib/e2ee-local-data';
 import { createDesktopE2eeContent } from './desktop-e2ee-content';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { SessionPendingSendsHost } from '../components/chat/session-pending-sends-host';
@@ -553,6 +566,21 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     let disposed = false;
     // Set when background verification closes a provisionally opened runtime.
     let retired = false;
+    let removed = false;
+    let removalScope: E2eeLocalDataScope | null = null;
+    let localIdentity: E2eeLocalDataIdentity | undefined;
+    const handleMemberRemoval = () => {
+      if (disposed || retired) return;
+      removed = true;
+      try {
+        if (removalScope) retainEncryptedWorkspaceCleanup(removalScope);
+      } catch (error) {
+        logRuntimeOperationError('retain removal cleanup', error);
+      }
+      retire();
+      setRuntimeInitFailure({ workspaceSlug, errorType: 'e2ee_member_removed' });
+    };
+
     const initializationAbort = new AbortController();
     let workspaceRuntime: Awaited<ReturnType<typeof createWorkspaceRuntime>> | null = null;
     let disposal: Promise<void> | null = null;
@@ -588,8 +616,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       const pending = native
         .refresh(leased, { installKeys: !nativeHasKey && workspaceRuntime === null })
         .then(acceptStatus)
-        .catch(async () => {
+        .catch(async (error: unknown) => {
           if (disposed || retired) return;
+          if (isE2eeMemberRemoved(error)) {
+            handleMemberRemoval();
+            return;
+          }
           // Reception failure stays visible and retryable. The retained epoch
           // remains writable; a status read never confirms key installation.
           try {
@@ -634,6 +666,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             await platform.e2eeWorkspaces?.runtime?.close(leased).catch(() => {});
           }
         }
+        if (removed && removalScope)
+          void resumeEncryptedWorkspaceCleanup(removalScope, true).catch((error) => {
+            logRuntimeOperationError('removed workspace cleanup', error);
+          });
       })());
     // Logging-only workspace id resolution inputs intentionally stay out of
     // this effect's dependency list. A cached id can create the runtime before
@@ -757,12 +793,31 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               clearPresenceStates();
               return;
             }
+            // A cold removal cannot export a native identity. Only a public locator
+            // saved before this host's earlier content open may select old databases.
+            const retained = readEncryptedLocalIdentity(accountId!, effectiveWorkspaceId);
+            if (retained?.genesisHash === descriptor.genesisHash)
+              removalScope = { ...retained, windowId: desktopWindowId() };
             const status = await native.open(effectiveWorkspaceId);
             nativeLease = effectiveWorkspaceId;
             nativeHasKey = status.hasCurrentKey;
-            refreshNative();
             if (status.genesisHash !== descriptor.genesisHash)
               throw new WorkspaceModeMismatchError();
+            localIdentity = {
+              accountId: accountId!,
+              workspaceId: effectiveWorkspaceId,
+              genesisHash: status.genesisHash,
+              signingPublicKey: status.signingPublicKey ?? '',
+            };
+            // Missing identity or failed durable locator storage stops before any
+            // encrypted content opens. Never fall back to a workspace-only cache.
+            retainEncryptedLocalIdentity(localIdentity);
+            removalScope = { ...localIdentity, windowId: desktopWindowId() };
+            await resumeEncryptedWorkspaceCleanup(removalScope);
+            void retryRetiredEncryptedWorkspaceCleanup(removalScope).catch((error) => {
+              logRuntimeOperationError('retired encrypted workspace cleanup', error);
+            });
+            refreshNative();
             if (!status.hasCurrentKey && status.writeEpoch == null) {
               setRuntime(null);
               setRuntimeInitializing(false);
@@ -777,6 +832,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               epoch: status.writeEpoch ?? status.epoch,
               rotationRequired: status.rotationRequired,
               onKeyUpdateRequired: () => setKeyUpdateWorkspace(effectiveWorkspaceId),
+              onMemberRemoved: handleMemberRemoval,
               onSnapshotRecoveryChange: (pending) => {
                 if (!disposed && !retired)
                   setSnapshotRecoveryWorkspace(pending ? effectiveWorkspaceId : null);
@@ -811,7 +867,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         });
         workspaceRuntime = await createWorkspaceRuntime({
           content: encryptedAccess?.content ?? { mode: 'plaintext' },
-          ...(encryptedAccess ? { e2ee: encryptedAccess.e2ee } : {}),
+          ...(encryptedAccess
+            ? { e2ee: encryptedAccess.e2ee, e2eeLocalIdentity: localIdentity }
+            : {}),
           signal: initializationAbort.signal,
           accountId,
           workspaceSlug,
@@ -892,6 +950,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           return;
         }
         setRuntime(null);
+        if (isE2eeMemberRemoved(error)) {
+          handleMemberRemoval();
+          return;
+        }
         if (admitting) {
           // Only a failed admission withdraws the mode; an ordinary runtime
           // failure keeps the pre-E2EE workspace failure presentation.

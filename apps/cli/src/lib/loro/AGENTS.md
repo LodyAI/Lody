@@ -50,7 +50,7 @@ see [observe scopes](../../commands/session-observe-runtime.ts).
 
 ## Streams cursors are replica-bound
 
-Daemon/commands share `repo.sqlite3`, not replicas: Meta/Flock cursors use `createRepoStreamsPersistence`, LoroDoc cursors from
+Per identity, share `repo.sqlite3`, not replicas: Meta/Flock cursors use `createRepoStreamsPersistence`, LoroDoc cursors from
 `createDocumentRemoteCursorStore` (shared rows: daemon only). No shared
 `remoteCursorStore` or schedule-only `onPersist*`. Test:
 `tests/cli-streams-replica-checkpoints.test.ts`.

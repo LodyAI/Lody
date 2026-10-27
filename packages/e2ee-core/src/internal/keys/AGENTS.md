@@ -39,7 +39,8 @@ Behavior: [workflows](../../../docs/workflows.md). Ports: [services](../../../do
 - `EpochPublisher` candidates use `CandidateProtector`, never installed-key
   protection, and authenticate purpose/context/original record/envelope digest.
   Persist and open the candidate, stage the complete post-transition group and
-  compare exact readback before submission. Retry exact records; install only
+  compare exact readback before the first submission. A matching pending submission
+  resumes without repeating staging/readback. Retry exact records; install only
   genuinely committed epochs; Conflict discards the candidate key. Retained submission
   recovery requires genuine checkpoint/key proof before ACK; damaged candidate keys
   require independent committed-key receipt. Never bypass CandidateProtector for

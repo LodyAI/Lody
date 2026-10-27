@@ -388,6 +388,10 @@ export const makeCliE2eeCustody = Effect.fn('CliE2eeCustody.open')(function* (op
     prepareDevice: () => custody.prepareDevice('machine'),
     retainDevice: custody.retainDevice,
     discardDevice: custody.discardDevice,
+    forgetDevice: (
+      genesis: Parameters<typeof custody.forgetDevice>[0],
+      signingKey: Parameters<typeof custody.forgetDevice>[1]
+    ) => custody.forgetDevice(genesis, signingKey, 'machine'),
     createDevice: (genesis: Parameters<typeof custody.createDevice>[0]) =>
       custody.createDevice(genesis, 'machine'),
     openDevice: (genesis: Parameters<typeof custody.openDevice>[0]) =>

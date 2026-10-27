@@ -201,6 +201,17 @@ export const openMachinePairingJournal = Effect.fnUntraced(function* (directory:
       throw failure('corrupt');
   };
   return {
+    /** Terminal member removal, under this journal's existing cross-process mutex. */
+    eraseRemovedMember: () =>
+      sql(() => {
+        db.exec('BEGIN IMMEDIATE');
+        try {
+          db.exec('DELETE FROM current_identity; DELETE FROM pairings; COMMIT');
+        } catch (cause) {
+          db.exec('ROLLBACK');
+          throw cause;
+        }
+      }),
     prepare: Effect.fnUntraced(function* (
       input: MachinePairingContext,
       acquireCustody: Effect.Effect<NodeE2eeCustody, unknown, Scope.Scope>

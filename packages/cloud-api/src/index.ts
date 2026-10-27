@@ -403,6 +403,7 @@ export type SeatInvitePreview =
 
 export type CloudApi = {
   e2eeMembers: {
+    workspaces: Query<Record<string, never>, import('./e2ee-members').E2eeMemberWorkspace[]>;
     createInvitation: Mutation<
       E2eeMemberRequests['createInvitation'],
       E2eeMemberReplies['createInvitation']

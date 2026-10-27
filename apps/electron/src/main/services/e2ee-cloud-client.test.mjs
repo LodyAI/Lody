@@ -1,3 +1,4 @@
+import { E2eeMemberRemovedError } from './e2ee-cloud-errors.mts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createPrivateKey, createPublicKey, sign } from 'node:crypto'
@@ -793,3 +794,117 @@ for (const code of ['e2ee_staging_configuration', 'e2ee_projection_corrupt'])
       )
     )
   })
+
+void test('only authenticated whole-member rejection carries the terminal local deletion signal', async () => {
+  for (const code of ['e2ee_member_removed', 'e2ee_device_revoked', 'unauthorized']) {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(async () =>
+            Response.json(
+              { status: 'error', errorMessage: 'synthetic-private-cause', errorData: { code } },
+              { status: 560 }
+            )
+          )
+          for (const operation of [
+            client.contentStreamsToken(access),
+            client.memberPending(access),
+            client.memberRead({ ...access, requestId: '11'.repeat(16) }),
+            client.memberReject({ ...access, requestId: '11'.repeat(16) }),
+            client.memberRevoke({ ...access, token: '22'.repeat(32) })
+          ]) {
+            const result = yield* Effect.result(operation)
+            assert.equal(result._tag, 'Failure')
+            assert.equal(
+              result.failure instanceof E2eeMemberRemovedError,
+              code === 'e2ee_member_removed'
+            )
+            assert.equal(JSON.stringify(result.failure).includes('synthetic-private-cause'), false)
+          }
+        })
+      )
+    )
+  }
+})
+
+void test('joining management sends only the public DTO fields while native cleanup identity stays in main', async () => {
+  const offer = {
+    version: 1,
+    workspaceId: access.workspaceId,
+    genesisHash: '11'.repeat(32),
+    genesisRecordHex: 'abcd',
+    endorser: '22'.repeat(32),
+    token: '33'.repeat(32),
+    mode: 'email',
+    expiresAt: 9000000000000
+  }
+  const requestId = '44'.repeat(16)
+  const member = {
+    id: 'request',
+    accountId: 'member-account',
+    workspaceId: access.workspaceId,
+    keyPackageHex: 'abcd',
+    signingPublicKey: '55'.repeat(32),
+    requestId,
+    source: 'email',
+    state: 'pending',
+    expiresAt: offer.expiresAt
+  }
+  const enriched = {
+    ...access,
+    accountId: 'native-account',
+    status: { signingPublicKey: '66'.repeat(32), genesisHash: offer.genesisHash }
+  }
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* build(async (_url, init) => {
+          const {
+            path,
+            args: [args]
+          } = JSON.parse(init.body)
+          const operation = path.split(':').at(-1)
+          const extra = {
+            createInvitation: { offer, email: 'synthetic@example.test' },
+            pending: {},
+            read: { requestId },
+            reject: { requestId },
+            revoke: { token: offer.token }
+          }[operation]
+          assert.ok(extra)
+          assert.deepEqual(args, { ...access, ...extra })
+          return response(
+            {
+              createInvitation: { offer },
+              pending: {
+                items: [],
+                invitations: [],
+                hasMore: false,
+                seatPreview: { status: 'not_billed', reason: 'free' }
+              },
+              read: member,
+              reject: { state: 'rejected' },
+              revoke: { revoked: true }
+            }[operation]
+          )
+        })
+        assert.deepEqual(
+          yield* client.memberCreateInvitation({
+            ...enriched,
+            offer,
+            email: 'synthetic@example.test'
+          }),
+          { offer }
+        )
+        assert.equal((yield* client.memberPending(enriched)).hasMore, false)
+        assert.deepEqual(yield* client.memberRead({ ...enriched, requestId }), member)
+        assert.deepEqual(yield* client.memberReject({ ...enriched, requestId }), {
+          state: 'rejected'
+        })
+        assert.deepEqual(yield* client.memberRevoke({ ...enriched, token: offer.token }), {
+          revoked: true
+        })
+      })
+    )
+  )
+})
