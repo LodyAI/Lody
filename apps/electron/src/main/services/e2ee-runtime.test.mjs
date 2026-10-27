@@ -2368,3 +2368,108 @@ void test('desktop reconciliation reaches more than one hundred genuine ledger r
     })
   )
 })
+
+for (const senderHint of ['registered', 'unknown']) {
+  for (const laterHonestRow of [false, true]) {
+    void test(`sender hint ${senderHint} cannot reject original bytes and later honest row=${laterHonestRow} stays usable`, async (t) => {
+      const directory = await fixture(t)
+      await execute(
+        Effect.gen(function* () {
+          const f = yield* maintenanceFixture(directory)
+          const joining = yield* f.owner.custody.prepareDevice()
+          const unregistered = yield* f.owner.custody.prepareDevice()
+          const membershipId = f
+            .view()
+            .inspectState()
+            .devices.get(hex(f.device.publicKey.toBytes())).membershipId
+          const admission = yield* signLedgerRecord(
+            Result.getOrThrow(
+              prepareLedgerCommand(
+                f.view(),
+                f.device.publicKey,
+                yield* prepareDeviceAdmission({
+                  genesis: f.genesis,
+                  membershipId,
+                  encryptionPublicKey: joining.enc,
+                  kind: 'machine',
+                  machineId: 'metadata-hint-target',
+                  signer: joining
+                })
+              )
+            ),
+            f.device
+          )
+          const records = [Buffer.from(f.prepared.genesisRecordHex, 'hex'), admission]
+          f.setView(
+            Result.getOrThrow(
+              extendLedger(f.view(), [admission], { head: hashRecordBytes(admission), length: 2 })
+            )
+          )
+          yield* f.owner.host.ingestLedgerRecords(
+            workspaceId,
+            page(records, f.prepared.genesisHashHex, 0)
+          )
+          const local = new DatabaseSync(
+            join(directory, 'workspaces', workspaceId, 'installed-keys.sqlite')
+          )
+          local
+            .prepare('UPDATE installed_epoch_keys SET blob=? WHERE epoch=0')
+            .run(new Uint8Array([1]))
+          local.close()
+          let spoof = true
+          const hostile = {
+            ...f.mailbox,
+            fetch: (epoch, cursor, limit) =>
+              f.mailbox.fetch(epoch, cursor, limit).pipe(
+                Effect.map((p) => ({
+                  ...p,
+                  items: spoof
+                    ? p.items.flatMap((row) => {
+                        const changed = {
+                          ...row,
+                          sender:
+                            senderHint === 'registered'
+                              ? hex(joining.publicKey.toBytes())
+                              : hex(unregistered.publicKey.toBytes())
+                        }
+                        return laterHonestRow ? [changed, row] : [changed]
+                      })
+                    : p.items
+                }))
+              )
+          }
+          yield* Effect.result(f.owner.host.keyRound(workspaceId, () => hostile))
+          const remote = new DatabaseSync(f.path)
+          try {
+            assert.equal(
+              remote
+                .prepare('SELECT count(*) AS n FROM mailbox_rejected WHERE digest=?')
+                .get(mailboxDigest(f.frame)).n,
+              0,
+              'untrusted sender metadata cannot permanently reject the authentic frame digest'
+            )
+            assert.equal(
+              (yield* f.owner.host.status(workspaceId)).hasCurrentKey,
+              laterHonestRow,
+              'a metadata mismatch must not stop the following honest envelope'
+            )
+            spoof = false
+            yield* f.mailbox.put('ab'.repeat(16), f.frame)
+            yield* f.owner.host.keyRound(workspaceId, () => hostile)
+            assert.equal((yield* f.owner.host.status(workspaceId)).hasCurrentKey, true)
+            assert.equal(
+              (yield* f.mailbox.fetch(0, null, 100)).items.some(
+                (row) => mailboxDigest(row.frame) === mailboxDigest(f.frame)
+              ),
+              true
+            )
+          } finally {
+            remote.close()
+            yield* f.owner.custody.discardDevice(joining)
+            yield* f.owner.custody.discardDevice(unregistered)
+          }
+        })
+      )
+    })
+  }
+}

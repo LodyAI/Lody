@@ -104,7 +104,11 @@ results() / acknowledge(id)   ended tasks until acknowledged
 
 - A report is a signed claim of installation, not proof of custody.
 - `fetchAndInstall` copies and validates the whole page before writing
-  anything, and returns no `next` cursor if any install failed.
+  anything. Unreadable routing and sender/workspace/epoch/recipient hint mismatches
+  are skipped for this fetch, without journaling or rejecting their frame digests;
+  they remain retryable after the server returns honest metadata. Later rows still
+  run every normal verification. `processed` counts scanned rows, not installed keys.
+  An actual install failure returns no `next` cursor.
   `MailboxInstallError` names the failing frame (sender, `frameDigest`) so the
   application can decide on a repair.
 - Only a genuine ledger change ends a task as `Obsolete` or `Revoked`.

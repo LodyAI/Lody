@@ -76,6 +76,7 @@ results() / acknowledge(id)   已结束任务保留到确认为止
 
 - 报告是签名的安装声明，不是托管证明。
 - `fetchAndInstall` 在写入任何内容前复制并校验整页；任一安装失败时不返回 `next`。`MailboxInstallError` 指明失败的帧（发送者、`frameDigest`），由应用决定是否请求修复。
+- 邮箱页中的路由无法解析，或 sender/工作区/epoch/收件人提示与信封原件不一致时，仅跳过本次，不登记任务、不拒绝 digest；正常元数据恢复后仍可重试。同页后续信封继续通过完整验签、权限、HPKE、commitment 检查。`processed` 是扫描行数，不是已安装密钥数量；实际安装失败仍不返回 `next`。
 - 只有真实的账本变化才把任务结束为 `Obsolete` 或 `Revoked`。
 
 ## KeyRepair

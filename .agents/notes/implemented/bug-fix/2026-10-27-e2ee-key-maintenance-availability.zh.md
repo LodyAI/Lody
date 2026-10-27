@@ -16,7 +16,7 @@ PR: [#1976](https://github.com/LodyAI/Lody/pull/1976)
 
 打开仍验证历史与独立 pin；坏密钥返回 `hasCurrentKey: false`，只有检查成功的旧钥可进入 `writeEpoch`。reader 登记、账本显示和显式刷新因此可用。只有 core 验证同一已提交密钥后才能替换坏 blob，创建原件不变。这收窄 M1/M2 对密钥健康的前提，不降低账本权限或 custody 要求。
 
-仅在信封认证/解开边界设置 `MailboxInstallError.cryptographicRejection`。报告签名、SQLite、权限变化及未知原生错误不能授权拒信封。HPKE 区分 AEAD 认证失败与无法确定的原生初始化/解封装错误。确定的拒绝登记固定 epoch/digest repair，并重取同一页；提示不授予权限。坏页超过轮数需下一次维护事件。无法确定的解封装错误仍重试，即使可能由恶意字节造成；把原生故障视为远端损坏会错误摧毁有效收钥路径。
+仅在预期 AAD 完全匹配后，信封自身签名、AEAD 或 commitment 确定失败时设置 `MailboxInstallError.cryptographicRejection`。服务器只改 sender 提示也能使未改变的好信封报 `invalid-envelope`，所以此错误不能授权拒绝 digest。安装前核对信封路由与独立工作区/epoch/收件人、响应 sender 提示是否一致；无法解析或不匹配时仅跳过本次该行，不登记任务、不拒绝 digest。同页后续信封继续处理，正常响应恢复后仍可安装同一原件。路由字节只能拒绝一次尝试，不授予签名者权限；仍执行严格验签、当前成员权限、HPKE、commitment 检查。`processed` 是扫描行数，不是安装证明。报告签名、SQLite、权限变化及未知原生错误不能授权拒信封。HPKE 区分 AEAD 认证失败与无法确定的原生初始化/解封装错误。确定的拒绝登记固定 epoch/digest repair，并重取同一页；提示不授予权限。坏页超过轮数需下一次维护事件。无法确定的解封装错误仍重试，即使可能由恶意字节造成；把原生故障视为远端损坏会错误摧毁有效收钥路径。
 
 CLI 发起 digest repair 也必须得到 core 的确定拒绝诊断，暂时性本地安装故障不能拒绝好信封。
 
@@ -24,6 +24,6 @@ CLI 发起 digest repair 也必须得到 core 的确定拒绝诊断，暂时性�
 
 ## 证据与限制
 
-真实 crypto/SQLite 回归覆盖坏 installed blob、好信封前的坏签名、超过 501 个 pending 发钥任务、终态消费且 outbox 不变，以及存储恢复且不误拒远端信封。前三项在原 runtime 上失败。core 覆盖签名有效但 HPKE 无效的信封及原生故障分类；原有关闭、慢邮箱、配对、换代和历史内容测试仍保留。具体检查见 PR。
+真实 crypto/SQLite 回归覆盖坏 installed blob、好信封前的坏签名、超过 501 个 pending 发钥任务、终态消费且 outbox 不变，以及存储恢复且不误拒远端信封。前三项在原 runtime 上失败。真实 SQLite 的 sender 提示回归覆盖已入账公钥、合法但未入账公钥，以及同页有无后续正常行；修正前复现好 digest 被拒或后续行被阻塞，修正后同一原件仍可获取并安装。core 覆盖签名有效但 HPKE 无效的信封及原生故障分类；原有关闭、慢邮箱、配对、换代和历史内容测试仍保留。具体检查见 PR。
 
 合成认证 OS 包装不证明真实钥匙串、安装版桌面、实体设备、线上 repair 或生产启用。CLI 密钥健康恢复和显式身份重置由独立工作负责。

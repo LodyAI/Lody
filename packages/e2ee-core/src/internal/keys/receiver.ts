@@ -63,6 +63,7 @@ export class ReceiveError extends Schema.TaggedError<ReceiveError>()('ReceiveErr
  * cryptographic rejection from a retryable local storage or native failure.
  * `cryptographicRejection` is true only at frame authentication/open; later
  * local signing or persistence failures never authorize rejecting the frame.
+ * Routing/hint mismatches are skipped by fetch and never authorize rejection.
  *
  * @category Errors
  */
@@ -180,9 +181,11 @@ export class KeyReceiver extends Context.Service<
     acknowledge(id: string): Effect.Effect<void, ReceiveError>;
     /**
      * Fetch one page of envelopes for the current epoch from {@link KeyMailbox}
-     * and `receive` each. Stops at the first install failure, so `next` is only
-     * returned when the whole page installed. The cursor is a caller hint and
-     * is never persisted.
+     * and `receive` each routing-matching row. Unreadable routing or mismatched
+     * sender/workspace/epoch/recipient hints are skipped for this fetch without
+     * journaling or rejecting the digest. `processed` counts scanned rows, not
+     * installed keys. An actual install failure stops the page and returns no
+     * `next`. Cursors are non-durable hints; a later fetch can retry skipped rows.
      */
     fetchAndInstall(
       cursor?: string | null,
@@ -215,9 +218,7 @@ export class KeyReceiver extends Context.Service<
             Effect.sync(() => {
               if (
                 (error instanceof ContentError &&
-                  ['invalid-envelope', 'bad-signature', 'commitment-mismatch'].includes(
-                    error.code
-                  )) ||
+                  ['bad-signature', 'commitment-mismatch'].includes(error.code)) ||
                 (error instanceof HpkePrimitiveError && error.code === 'open-failed')
               )
                 rejected?.();
@@ -678,6 +679,20 @@ export class KeyReceiver extends Context.Service<
         if (rows.length !== count) return yield* fail('invalid-page');
         if ((yield* eligible()) !== epoch) return yield* fail('rollback');
         for (const row of items) {
+          // These fields grant no authority. A server can change the row's sender
+          // without changing the original frame: skip mismatches for this fetch,
+          // never diagnose the original digest as cryptographically invalid.
+          const routing = Reports.envelopeRouting(row.frame);
+          if (
+            Result.isFailure(routing) ||
+            routing.success.genesis !== org ||
+            routing.success.epoch !== epoch ||
+            routing.success.recipient !== self ||
+            routing.success.sender !== keyId(row.sender.toBytes())
+          )
+            continue;
+          // receive still verifies the exact expected AAD, strict signature,
+          // genuine current membership, HPKE and commitment before installation.
           const frameDigest = Reports.mailboxDigest(row.frame);
           let cryptographicRejection = false;
           yield* receive(row.sender, row.frame, () => {
