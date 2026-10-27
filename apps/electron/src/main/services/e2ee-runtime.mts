@@ -728,7 +728,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             !input ||
             !Number.isSafeInteger(input.epoch) ||
             input.epoch < 0 ||
-            input.context?.kind !== 'update_batch' ||
+            !['update_batch', 'snapshot'].includes(input.context?.kind) ||
             !checkBytes(input.plaintext, 16 * 1024 * 1024) ||
             !checkBytes(input.additionalData, 65536)
           )

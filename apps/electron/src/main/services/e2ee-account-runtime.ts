@@ -375,32 +375,43 @@ export async function prepareDesktopE2eeCreation(input: DesktopE2eeCreationInten
 /** Archive one isolated workspace, or all local encrypted identities for the
  * current account. Neither operation needs to decrypt the broken KEK. */
 export function resetDesktopE2eeIdentity(input: { workspaceId?: string; resetId: string }) {
+  const auth = getIpcServiceDeps().authService
+  const { userId: accountId, generation } = auth.getCachedSessionIdentity()
+  const { workspaceId, resetId } = input
+  const checkConfirmation = Effect.sync(() => {
+    const current = auth.getCachedSessionIdentity()
+    if (!accountId || current.userId !== accountId || current.generation !== generation)
+      throw accountFailure('account_unavailable')
+  })
   return Effect.runPromise(
     Effect.uninterruptible(
       serial.withPermit(
         Effect.scoped(
           Effect.gen(function* () {
             if (quitting) return yield* Effect.fail(accountFailure('closed'))
-            const accountId = getIpcServiceDeps().authService.getCachedSessionIdentity().userId
+            yield* checkConfirmation
             if (!accountId) return yield* Effect.fail(accountFailure('account_unavailable'))
-            const directory = input.workspaceId
-              ? identityDirectory(accountId, input.workspaceId)
+            const directory = workspaceId
+              ? identityDirectory(accountId, workspaceId)
               : accountDirectory(accountId)
             const receipts = join(
               app.getPath('userData'),
               'e2ee-reset-receipts',
               createHash('sha256').update(accountId).digest('hex')
             )
-            const previous = yield* completedE2eeIdentityReset(directory, input.resetId, receipts)
+            const previous = yield* completedE2eeIdentityReset(directory, resetId, receipts)
+            yield* checkConfirmation
             if (previous) return previous
-            if (input.workspaceId) {
+            if (workspaceId) {
               const owner = owners.get(directory)
               if (owner) yield* closeOwner(owner)
             } else yield* closeCurrent
-            if (input.workspaceId) yield* leaseE2eeIdentity(accountDirectory(accountId))
+            yield* checkConfirmation
+            if (workspaceId) yield* leaseE2eeIdentity(accountDirectory(accountId))
             yield* leaseE2eeIdentity(directory, true)
+            yield* checkConfirmation
             return {
-              archive: yield* archiveE2eeIdentity(directory, Date.now(), input.resetId, receipts)
+              archive: yield* archiveE2eeIdentity(directory, Date.now(), resetId, receipts)
             }
           })
         )

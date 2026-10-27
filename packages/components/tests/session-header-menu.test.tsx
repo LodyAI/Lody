@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
+import { initI18n } from '../src/i18n';
 
 import { act, useState, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -44,7 +46,8 @@ describe('SessionHeaderMenu', () => {
   let root: Root | undefined;
   let container: HTMLDivElement | undefined;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    await initI18n('en');
     vi.useFakeTimers();
     Object.defineProperty(globalThis, 'PointerEvent', {
       configurable: true,
@@ -382,5 +385,55 @@ describe('SessionHeaderMenu', () => {
     await act(async () => trigger.click());
     await act(async () => menuItem('Cursor').click());
     expect(onSelect).toHaveBeenCalledWith(cursorLauncher);
+  });
+  it('disables encrypted export, sharing and remote controls even with callbacks supplied', async () => {
+    const store = createStore();
+    store.set(workspaceContentModeAtom, {
+      accountId: 'user',
+      workspaceSlug: 'encrypted',
+      workspaceId: 'workspace',
+      descriptor: { contentMode: 'e2ee', contentModeVersion: 1 },
+    } as never);
+    await act(async () =>
+      root?.render(
+        <Provider store={store}>
+          <ForkMenuHarness
+            onOpenPublicShare={() => {
+              throw new Error('must not open sharing');
+            }}
+            onShareWithTeam={() => {
+              throw new Error('must not share with team');
+            }}
+            sharing={{
+              visibility: 'private',
+              privateReason: 'machine',
+              canManage: true,
+              machineId: session.machineId,
+              localProjectId: null,
+              machineName: 'remote',
+              projectName: null,
+            }}
+            onShareAsImage={() => {
+              throw new Error('must not export');
+            }}
+          />
+        </Provider>
+      )
+    );
+    await openMenu();
+    for (const reason of [
+      'Encrypted workspaces do not yet support exports.',
+      'Encrypted workspaces do not yet support sharing.',
+      'Encrypted workspaces do not yet support remote preview.',
+      'Encrypted workspaces do not yet support remote machine operations.',
+    ]) {
+      const item = menuItem(reason);
+      expect(item.getAttribute('aria-disabled')).toBe('true');
+      await act(async () => item.click());
+    }
+    expect(document.body.textContent).not.toContain('Fork session');
+    expect(document.body.textContent).not.toContain('Share with team');
+    expect(container?.querySelector('[data-testid="copy-result"]')?.textContent).toBe('not copied');
+    expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe('none');
   });
 });

@@ -1,3 +1,4 @@
+import { requireWorkspaceFeature } from '@/lib/workspace-feature';
 import {
   ScheduleRepository,
   ScheduledMessageSchema,
@@ -42,7 +43,10 @@ export async function prepareScheduledMessage(args: {
   signal: AbortSignal;
   onAttachments: (attachments: SessionAttachmentDraft[]) => void;
 }): Promise<ScheduledMessage> {
-  if (args.runtime.contentMode === 'e2ee') throw new Error('e2ee_feature_unavailable');
+  requireWorkspaceFeature(
+    { mode: args.runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+    'schedules'
+  );
   let attachments = args.attachments;
   const prepared = await prepareDraftAttachments({
     content: { mode: 'plaintext' },
@@ -93,7 +97,10 @@ export async function saveScheduledMessage(args: {
   now?: number;
 }) {
   const now = args.now ?? getServerNow();
-  if (args.runtime.contentMode === 'e2ee') throw new Error('e2ee_feature_unavailable');
+  requireWorkspaceFeature(
+    { mode: args.runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+    'schedules'
+  );
   if (args.draft.trigger.kind !== 'once' || Date.parse(args.draft.trigger.at) <= now)
     throw new Error('SCHEDULE_TIME_PASSED');
   return args.runtime.withScheduleStore(

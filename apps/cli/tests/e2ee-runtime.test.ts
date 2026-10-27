@@ -26,6 +26,7 @@ import { startProcessLegacy } from '@lody/shared/node/process';
 import { describe, expect, it, vi } from 'vitest';
 import {
   Bytes,
+  inspectContentFrame,
   verifyDeviceCredentialBinding,
   hashRecordBytes,
   extendLedger,
@@ -508,6 +509,26 @@ describe('machine E2EE local runtime', () => {
         releaseHistory.resolve();
         const recovery = host.refresh(); // Queue-external receipt; never awaited by seal.
         await receiveEntered.promise;
+        const snapshotInput = {
+          ...input,
+          context: {
+            ...input.context,
+            kind: 'snapshot' as const,
+            continuationOffset: '00000000000000000100',
+          },
+        };
+        expect(await host.content.snapshotUpload.canUpload()).toBe(true);
+        const retainedSnapshot = await protection.config.provider.seal(snapshotInput);
+        expect(
+          Result.getOrThrow(inspectContentFrame(retainedSnapshot.sealed, 'doc-snapshot')).epoch
+        ).toBe(0);
+        expect(
+          await protection.config.provider.open({
+            ...retainedSnapshot,
+            context: snapshotInput.context,
+            additionalData: new Uint8Array([...retainedSnapshot.header, 9]),
+          })
+        ).toEqual(input.plaintext);
         expect((await stream.appendWriteOnly()).ok).toBe(true);
         expect(doc.getText('draft').toString()).toBe('retained local edit');
         const receivedDoc = new LoroDoc();
@@ -559,6 +580,13 @@ describe('machine E2EE local runtime', () => {
                 yield* Effect.promise(() => active.refresh());
                 expect((yield* Effect.promise(() => active.status())).epochPhase).toBe('ready');
                 expect(yield* token.getToken()).toBe('epoch-token-new');
+                const changedSnapshot = yield* Effect.promise(() =>
+                  protection.config.provider.seal(snapshotInput)
+                );
+                expect(
+                  Result.getOrThrow(inspectContentFrame(changedSnapshot.sealed, 'doc-snapshot'))
+                    .epoch
+                ).toBe(1);
                 const sealed = yield* Effect.promise(() => protection.config.provider.seal(input));
                 expect(
                   yield* Effect.promise(() =>

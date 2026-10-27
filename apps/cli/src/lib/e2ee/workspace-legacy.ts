@@ -503,10 +503,41 @@ async function openWorkspaceOwned(
     string,
     Promise<Effect.Success<ReturnType<typeof opened.runtime.binding>>>
   >();
+  const snapshotRequests = new Map<string, number>();
+  const snapshotFlights = new Set<Promise<unknown>>();
+  const requestSnapshot = (stream: string) => {
+    if (closed) return;
+    const now = Date.now();
+    if (now - (snapshotRequests.get(stream) ?? -Infinity) < 30_000) return;
+    snapshotRequests.set(stream, now);
+    const flight = options.cloud.getContentToken({
+      workspaceId: options.workspaceId,
+      credential: opened.credential,
+      requestSnapshotFor: stream,
+    });
+    snapshotFlights.add(flight);
+    void flight.then(
+      () => snapshotFlights.delete(flight),
+      () => {
+        snapshotFlights.delete(flight);
+        console.warn('[e2ee] snapshot repair request failed; will retry');
+      }
+    );
+  };
   const content: WorkspaceStreamsContent = {
     mode: 'protected',
     namespace: encryptedWorkspaceNamespace(binding.genesisHash),
-    snapshotUpload: { canUpload: async () => false },
+    snapshotUpload: {
+      onSnapshotRecovery: (streamUrl, needsSnapshot) => {
+        if (needsSnapshot)
+          requestSnapshot(decodeURIComponent(new URL(streamUrl).pathname.split('/').at(-1)!));
+      },
+      // SDK schedules only after local writes, suppresses a competing writer,
+      // and checks the remote snapshot before exporting a new one.
+      canUpload: () => !closed && !ledgerBlocked,
+      debounceMs: 30_000,
+      minBytesSinceRemoteSnapshot: 1024 * 1024,
+    },
     resolve: encryptedWorkspaceResolver(options.workspaceId, (room) => {
       const descriptor = encryptedWorkspaceRoom(options.workspaceId, room);
       const protectedProvider = epochTransition.provider((writeEpoch) => {
@@ -694,6 +725,7 @@ async function openWorkspaceOwned(
       return (closeReceipt ??= (async () => {
         await epochTransition.close();
         await refresh;
+        await Promise.allSettled([...snapshotFlights]);
         await Effect.runPromise(Scope.close(scope, Exit.void));
       })());
     },

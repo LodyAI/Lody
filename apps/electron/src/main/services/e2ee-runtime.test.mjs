@@ -449,81 +449,88 @@ void test('overlapping pages compare verified bytes, append only their suffix an
   )
 })
 
-void test('content IPC binding encrypts allowed rooms and isolates a rejected room or corrupt frame', async (t) => {
-  const directory = await fixture(t)
-  await execute(
-    Effect.gen(function* () {
-      const owner = yield* ownerWithHost(directory)
-      yield* bind(owner)
-      yield* owner.host.open(workspaceId)
-      const context = {
-        protocol: 'loro-streams-crdt-payload-protection',
-        version: 2,
-        kind: 'update_batch'
-      }
-      const plaintext = new TextEncoder().encode('CANARY-content-boundary-synthetic')
-      const additionalData = new Uint8Array([17, 22, 3])
-      for (const room of [
-        { kind: 'meta' },
-        { kind: 'doc', docId: 'session' },
-        { kind: 'flock', flockDocId: `${workspaceId}:mf:local` },
-        { kind: 'flock', flockDocId: `${workspaceId}:wf:workspace` }
-      ]) {
-        const sealed = yield* owner.host.seal(workspaceId, {
-          epoch: 0,
-          room,
-          context,
-          plaintext,
-          additionalData
-        })
-        assert.equal(Buffer.from(sealed.sealed).includes(plaintext), false)
-        assert.deepEqual(
-          yield* owner.host.openContent(workspaceId, { room, context, ...sealed, additionalData }),
-          plaintext
-        )
-        const changed = new Uint8Array(sealed.sealed)
-        changed[changed.length - 1] ^= 1
+for (const kind of ['update_batch', 'snapshot'])
+  void test(`content IPC binding encrypts allowed rooms and isolates a rejected room or corrupt frame (${kind})`, async (t) => {
+    const directory = await fixture(t)
+    await execute(
+      Effect.gen(function* () {
+        const owner = yield* ownerWithHost(directory)
+        yield* bind(owner)
+        yield* owner.host.open(workspaceId)
+        const context = {
+          protocol: 'loro-streams-crdt-payload-protection',
+          version: 2,
+          kind,
+          ...(kind === 'snapshot' ? { continuationOffset: 'opaque:100' } : {})
+        }
+        const plaintext = new TextEncoder().encode('CANARY-content-boundary-synthetic')
+        const additionalData = new Uint8Array([17, 22, 3])
+        for (const room of [
+          { kind: 'meta' },
+          { kind: 'doc', docId: 'session' },
+          { kind: 'flock', flockDocId: `${workspaceId}:mf:local` },
+          { kind: 'flock', flockDocId: `${workspaceId}:wf:workspace` }
+        ]) {
+          const sealed = yield* owner.host.seal(workspaceId, {
+            epoch: 0,
+            room,
+            context,
+            plaintext,
+            additionalData
+          })
+          assert.equal(Buffer.from(sealed.sealed).includes(plaintext), false)
+          assert.deepEqual(
+            yield* owner.host.openContent(workspaceId, {
+              room,
+              context,
+              ...sealed,
+              additionalData
+            }),
+            plaintext
+          )
+          const changed = new Uint8Array(sealed.sealed)
+          changed[changed.length - 1] ^= 1
+          assert.equal(
+            Result.isFailure(
+              yield* Effect.result(
+                owner.host.openContent(workspaceId, {
+                  room,
+                  context,
+                  ...sealed,
+                  sealed: changed,
+                  additionalData
+                })
+              )
+            ),
+            true
+          )
+        }
         assert.equal(
           Result.isFailure(
             yield* Effect.result(
-              owner.host.openContent(workspaceId, {
-                room,
+              owner.host.seal(workspaceId, {
+                epoch: 0,
+                room: { kind: 'flock', flockDocId: 'code-index' },
                 context,
-                ...sealed,
-                sealed: changed,
+                plaintext,
                 additionalData
               })
             )
           ),
           true
         )
-      }
-      assert.equal(
-        Result.isFailure(
-          yield* Effect.result(
-            owner.host.seal(workspaceId, {
-              epoch: 0,
-              room: { kind: 'flock', flockDocId: 'code-index' },
-              context,
-              plaintext,
-              additionalData
-            })
-          )
-        ),
-        true
-      )
-      assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, true)
-      const valid = yield* owner.host.seal(workspaceId, {
-        epoch: 0,
-        room: { kind: 'meta' },
-        context,
-        plaintext,
-        additionalData
+        assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, true)
+        const valid = yield* owner.host.seal(workspaceId, {
+          epoch: 0,
+          room: { kind: 'meta' },
+          context,
+          plaintext,
+          additionalData
+        })
+        assert.ok(valid.sealed.length > plaintext.length)
       })
-      assert.ok(valid.sealed.length > plaintext.length)
-    })
-  )
-})
+    )
+  })
 
 void test('obsolete-cache deletion failure preserves the rebuilt feed and subsequent local opens', async (t) => {
   const directory = await fixture(t)

@@ -1,3 +1,4 @@
+import { requireWorkspaceFeature } from '@/lib/workspace-feature';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { FileLinkCandidateDialog } from './file-link-candidate-dialog';
 import {
@@ -3253,7 +3254,10 @@ const SessionDetail = ({
   }, [activeSession, machineDotlodyPath, resolvedLocalProjectMeta?.rootPath, sessionMachine]);
 
   const handleCopyConversationHistory = useCallback(() => {
-    if (runtime?.contentMode === 'e2ee') throw new Error('e2ee_export_unavailable');
+    requireWorkspaceFeature(
+      { mode: runtime?.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+      'export'
+    );
     if (activeDraftTab) {
       return;
     }
@@ -3275,7 +3279,10 @@ const SessionDetail = ({
   }, [runtime?.contentMode, activeDraftTab, activeTabSessionId, captureSessionDetailEvent, t]);
 
   const handleShareAsImage = useCallback(async () => {
-    if (runtime?.contentMode === 'e2ee') throw new Error('e2ee_export_unavailable');
+    requireWorkspaceFeature(
+      { mode: runtime?.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+      'export'
+    );
     if (activeDraftTab) {
       return;
     }
@@ -3926,7 +3933,10 @@ const SessionDetail = ({
 
   const handleOpenBrowser = useCallback(
     (tabSessionId?: SessionId, navigateCandidate = false) => {
-      if (runtime?.contentMode === 'e2ee') throw new Error('e2ee_preview_unavailable');
+      requireWorkspaceFeature(
+        { mode: runtime?.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+        'remote-preview'
+      );
       const browserSessionId = tabSessionId ?? activeBrowserSession?.id;
       if (tabSessionId) {
         navigateToSessionTab(tabSessionId, { push: true });

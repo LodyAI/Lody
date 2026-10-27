@@ -18,10 +18,33 @@ export function createDesktopE2eeContent(input: {
   authToken: () => string | null | undefined;
   rotationRequired?: boolean;
   onKeyUpdateRequired?: () => void;
+  onSnapshotRecoveryChange?: (pending: boolean) => void;
   onPhase?: (phase: WorkspaceEpochPhase) => void;
 }) {
   if (!/^[0-9a-f]{64}$/.test(input.genesisHash)) throw new Error('e2ee_invalid_genesis');
   let bucketId: string | null = null;
+  const recovering = new Set<string>();
+  const requested = new Map<string, number>();
+  const recovery = (stream: string, pending: boolean) => {
+    if (pending) recovering.add(stream);
+    else recovering.delete(stream);
+    try {
+      input.onSnapshotRecoveryChange?.(recovering.size > 0);
+    } catch {
+      /* Observational only. */
+    }
+  };
+  const snapshotRecovery = (stream: string, pending: boolean) => {
+    recovery(stream, pending);
+    if (!pending) return;
+    const now = Date.now();
+    if (now - (requested.get(stream) ?? -Infinity) < 30_000) return;
+    requested.set(stream, now);
+    // The existing host action relays fixed hints for read-only devices too.
+    void input.runtime.contentStreamsToken(input.workspaceId, undefined, stream).catch(() => {
+      console.warn('[e2ee] snapshot repair request failed; will retry');
+    });
+  };
   const tokens = new Set<ReturnType<typeof createLoroStreamsTokenProviderLegacy>>();
   const transition = createWorkspaceEpochTransitionLegacy({
     epoch: input.epoch,
@@ -43,7 +66,19 @@ export function createDesktopE2eeContent(input: {
   const content: WorkspaceStreamsContent = {
     mode: 'protected',
     namespace: encryptedWorkspaceNamespace(input.genesisHash),
-    snapshotUpload: { canUpload: async () => false },
+    snapshotUpload: {
+      // SDK rejection also covers absent/malformed envelopes before provider.open.
+      onSnapshotRecovery: (streamUrl, pending) =>
+        snapshotRecovery(
+          decodeURIComponent(new URL(streamUrl).pathname.split('/').at(-1)!),
+          pending
+        ),
+      // SDK schedules only after local writes, suppresses a competing writer,
+      // and checks the remote snapshot before exporting a new one.
+      canUpload: () => transition.phase() !== 'closed',
+      debounceMs: 30_000,
+      minBytesSinceRemoteSnapshot: 1024 * 1024,
+    },
     resolve: encryptedWorkspaceResolver(input.workspaceId, (room) =>
       transition.provider(
         (epoch) =>
