@@ -2,7 +2,7 @@ import { EpochCandidateStore, SubmissionJournal } from '@lody/e2ee-core/services
 import {
   desktopManagementStores,
   makeDesktopE2eeManagement,
-  type DesktopE2eeManagementPorts
+  type DesktopE2eeManagementRemote
 } from './e2ee-management.mjs'
 import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
 import { randomUUID } from 'node:crypto'
@@ -188,7 +188,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
       {
         manage: (
           command: { type: 'rotate' } | { type: 'revoke'; target: string },
-          ports: (signal: AbortSignal) => DesktopE2eeManagementPorts
+          ports: (signal: AbortSignal) => DesktopE2eeManagementRemote
         ) => Effect.Effect<unknown, unknown>
         managementState: () => Effect.Effect<import('@lody/platform').E2eeManagementState, unknown>
         scope: Scope.Closeable
@@ -1058,7 +1058,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         })
         const manage = Effect.fnUntraced(function* (
           command: { type: 'rotate' } | { type: 'revoke'; target: string },
-          remote: (signal: AbortSignal) => DesktopE2eeManagementPorts
+          remote: (signal: AbortSignal) => DesktopE2eeManagementRemote
         ) {
           if (closing) return yield* fail('closed')
           if (managing) return yield* Effect.fail(new Error('e2ee_management_pending'))
@@ -1082,11 +1082,39 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                       const upstream = remote(networkAbort.signal)
                       return {
                         ...upstream,
+                        // Admitted work never re-enters the account lock. Local ingest
+                        // failures retain this owner instead of awaiting its own close.
+                        refresh: () =>
+                          Effect.gen(function* () {
+                            const after = (yield* status()).position ?? undefined
+                            let cursor: string | undefined
+                            let checkpoint: E2eeWorkspaceHistoryPage['checkpoint'] | undefined
+                            for (let pageNumber = 0; pageNumber < 256; pageNumber++) {
+                              if (closing) return yield* fail('closed')
+                              const page = yield* upstream.history({
+                                workspaceId,
+                                ...(cursor ? { cursor, checkpoint } : after ? { after } : {})
+                              })
+                              checkpoint ??= page.checkpoint
+                              yield* serial.withPermit(
+                                Effect.suspend(() =>
+                                  closing ? Effect.fail(fail('closed')) : ingest(page)
+                                )
+                              )
+                              if (!page.nextCursor) return undefined
+                              cursor = page.nextCursor
+                            }
+                            return yield* fail('invalid-ledger')
+                          }),
                         receive: () =>
                           Effect.gen(function* () {
                             const latest = (yield* verified.current()).inspectState().epoch.number
                             const installedCurrent = yield* Effect.result(keys.check(latest))
-                            if (Result.isFailure(installedCurrent)) yield* upstream.receive()
+                            if (Result.isFailure(installedCurrent))
+                              yield* keyRound(
+                                () => upstream.mailbox(),
+                                () => upstream.staging()
+                              )
                             // A later installed epoch can restore an older pending publication key.
                             yield* Context.get(historyContext, InstalledEpochHistory).recover()
                           }).pipe(Effect.asVoid)
@@ -1202,7 +1230,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
       manage: (
         workspaceId: string,
         command: { type: 'rotate' } | { type: 'revoke'; target: string },
-        ports: (signal: AbortSignal) => DesktopE2eeManagementPorts
+        ports: (signal: AbortSignal) => DesktopE2eeManagementRemote
       ) =>
         Effect.flatMap(run(openWorkspace(workspaceId)), (entry) =>
           entry.manage(command, ports)

@@ -1,3 +1,4 @@
+import type { E2eeWorkspaceHistoryPage, E2eeWorkspaceHistoryRequest } from '@lody/cloud-api'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
@@ -17,6 +18,7 @@ import {
   EpochStagingStore,
   LedgerLog,
   LedgerLogError,
+  KeyMailbox,
   LedgerSync,
   LocalStoreError
 } from '@lody/e2ee-core/services'
@@ -31,6 +33,15 @@ import {
 } from '../e2ee-custody.mjs'
 import { WorkspaceScope } from '@lody/e2ee-core/services'
 import { E2eeStagingCapacityError } from './e2ee-cloud-client.mjs'
+
+export type DesktopE2eeManagementRemote = {
+  log: LedgerLog['Service']
+  staging: (round?: string) => EpochStagingStore['Service']
+  mailbox: () => KeyMailbox['Service']
+  history: (
+    request: E2eeWorkspaceHistoryRequest
+  ) => Effect.Effect<E2eeWorkspaceHistoryPage, unknown>
+}
 
 export type DesktopE2eeManagementPorts = {
   log: LedgerLog['Service']

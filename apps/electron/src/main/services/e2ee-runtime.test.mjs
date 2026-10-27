@@ -2139,40 +2139,20 @@ for (const damaged of [false, true, 'header'])
         Effect.gen(function* () {
           const owner = yield* ownerWithHost(directory)
           yield* owner.host.open(workspaceId)
-          const refresh = () =>
-            Effect.gen(function* () {
-              yield* owner.host.ingestLedgerRecords(
-                workspaceId,
-                page(records, prepared.genesisHashHex, 0)
-              )
-            })
+          const signer = yield* owner.custody.openDevice(genesis)
+          const mailboxHost = yield* makeSqliteKeyMailbox({
+            path: join(directory, 'management-mailbox.sqlite'),
+            mode: existsSync(join(directory, 'management-mailbox.sqlite')) ? 'open' : 'create',
+            genesis,
+            ledger: () => Effect.succeed(view)
+          })
+          const mailbox = Context.get(
+            yield* Layer.build(referenceKeyMailbox(mailboxHost, signer.publicKey)),
+            KeyMailbox
+          )
           const ports = () => ({
-            refresh,
-            receive: () =>
-              Effect.gen(function* () {
-                const signer = yield* owner.custody.openDevice(genesis)
-                const mailboxHost = yield* makeSqliteKeyMailbox({
-                  path: join(directory, 'management-mailbox.sqlite'),
-                  mode: existsSync(join(directory, 'management-mailbox.sqlite'))
-                    ? 'open'
-                    : 'create',
-                  genesis,
-                  ledger: () => Effect.succeed(view)
-                })
-                const mailbox = Context.get(
-                  yield* Layer.build(referenceKeyMailbox(mailboxHost, signer.publicKey)),
-                  KeyMailbox
-                )
-                yield* owner.host.keyRound(
-                  workspaceId,
-                  () => mailbox,
-                  () => ({
-                    stageGroup: () => Effect.void,
-                    readGroup: (key) => Effect.succeed(groups.get(key.recordHash) ?? null),
-                    deleteGroup: () => Effect.void
-                  })
-                )
-              }),
+            history: () => Effect.succeed(page(records, prepared.genesisHashHex, 0)),
+            mailbox: () => mailbox,
             log: {
               read: () =>
                 Effect.succeed({ records, checkpoint: { head: view.head, length: view.length } }),
@@ -2339,3 +2319,63 @@ for (const damaged of [false, true, 'header'])
         })
       )
   })
+
+void test('closing during a manual management ledger read aborts outside account locks and releases the host', async (t) => {
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory)
+      yield* bind(owner)
+      yield* owner.host.open(workspaceId)
+      const entered = Promise.withResolvers()
+      let aborted = false
+      const management = Effect.runPromise(
+        Effect.result(
+          owner.host.manage(workspaceId, { type: 'rotate' }, (signal) => ({
+            history: () =>
+              Effect.tryPromise({
+                try: () =>
+                  new Promise((resolve, reject) => {
+                    signal.addEventListener(
+                      'abort',
+                      () => {
+                        aborted = true
+                        reject(new Error('synthetic aborted ledger request'))
+                      },
+                      { once: true }
+                    )
+                    entered.resolve()
+                  }),
+                catch: (error) => error
+              }),
+            log: {
+              read: () => Effect.die('refresh must precede submission'),
+              appendCas: () => Effect.die('no signing')
+            },
+            staging: () => ({
+              stageGroup: () => Effect.die('no stage'),
+              readGroup: () => Effect.succeed(null),
+              deleteGroup: () => Effect.void
+            }),
+            mailbox: () => {
+              throw new Error('no key reception')
+            }
+          }))
+        )
+      )
+      yield* Effect.promise(() =>
+        Promise.race([
+          entered.promise,
+          management.then(() => {
+            throw new Error('management failed before the remote boundary')
+          })
+        ])
+      )
+      yield* owner.host.closeWorkspace(workspaceId)
+      const result = yield* Effect.promise(() => management)
+      assert.equal(aborted, true)
+      assert.equal(Result.isFailure(result), true)
+      assert.equal((yield* owner.host.open(workspaceId)).hasCurrentKey, true)
+    })
+  )
+})

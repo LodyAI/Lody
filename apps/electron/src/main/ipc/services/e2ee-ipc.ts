@@ -823,17 +823,9 @@ export class E2eeIpc extends IpcService {
               log: cloud.client.ledgerLog(workspaceId, signal),
               staging: (round) =>
                 cloud.client.staging({ workspaceId, credential: access.credential }, signal, round),
-              refresh: () =>
-                Effect.tryPromise({
-                  try: () =>
-                    this.refresh(workspaceId, { installKeys: false }).then(() => undefined),
-                  catch: (error) => error
-                }),
-              receive: () =>
-                Effect.tryPromise({
-                  try: () => this.refresh(workspaceId).then(() => undefined),
-                  catch: (error) => error
-                })
+              history: (request) => cloud.client.history(request, signal),
+              mailbox: () =>
+                cloud.client.mailbox({ workspaceId, credential: access.credential }, signal)
             }))
           )
         : Effect.fail(new Error('e2ee_not_open'))

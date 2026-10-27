@@ -498,12 +498,16 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
         (client) => client.action(api.e2eeContent.contentStreamsToken, { ...access }),
         contentToken
       ),
-    history: (requestInput: E2eeWorkspaceHistoryRequest) => {
+    history: (requestInput: E2eeWorkspaceHistoryRequest, signal?: AbortSignal) => {
       const original = {
         ...requestInput,
         ...(requestInput.checkpoint ? { checkpoint: { ...requestInput.checkpoint } } : {})
       }
-      return request((client) => client.action(api.e2eeWorkspaces.history, original), historyPage)
+      return request(
+        (client) => client.action(api.e2eeWorkspaces.history, original),
+        historyPage,
+        signal
+      )
     },
     staging
   })
