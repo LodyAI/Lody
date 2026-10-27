@@ -25,12 +25,14 @@ import {
   hashRecordBytes,
   hasVerifiedCheckpoint,
   restoreVerifiedState,
+  getCommittedEpochStagingKey,
   verifyLedgerEffect,
   extendLedgerEffect,
   type RetainedLedgerState
 } from '@lody/e2ee-core/protocol'
 import {
   EpochPublicationSource,
+  EpochStagingStore,
   KeyMailbox,
   InstalledKeyStore,
   LedgerFeedStore,
@@ -155,7 +157,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         isClosing: () => boolean
         close: Effect.Effect<void>
         keyRound: (
-          mailbox: (signal: AbortSignal) => KeyMailbox['Service']
+          mailbox: (signal: AbortSignal) => KeyMailbox['Service'],
+          staging?: (signal: AbortSignal) => EpochStagingStore['Service']
         ) => Effect.Effect<void, unknown>
         seal: (
           input: E2eeContentSeal
@@ -585,7 +588,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         })
         const isClosing = () => closing
         const keyRound = Effect.fnUntraced(function* (
-          mailbox: (signal: AbortSignal) => KeyMailbox['Service']
+          mailbox: (signal: AbortSignal) => KeyMailbox['Service'],
+          staging?: (signal: AbortSignal) => EpochStagingStore['Service']
         ) {
           if (closing) return yield* fail('closed')
           roundAgain = true
@@ -659,8 +663,30 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                 }
                 do {
                   roundAgain = false
+                  const view = yield* verified.current()
+                  const epoch = view.inspectState().epoch.number
+                  const checked = yield* Effect.result(keys.check(epoch))
+                  if (staging && epoch > 0 && Result.isFailure(checked)) {
+                    if (checked.failure.reason !== 'missing-key') return yield* checked.failure
+                    const located = getCommittedEpochStagingKey(view, epoch)
+                    // A snapshot-joined device without this publication original uses mailbox/history.
+                    if (Result.isSuccess(located)) {
+                      // Staging denial or I/O failure must not gate verified mailbox receipt.
+                      const group = yield* staging(networkAbort.signal)
+                        .readGroup(located.success)
+                        .pipe(Effect.catch(() => Effect.succeed(null)))
+                      if (
+                        group?.envelopes.some(
+                          (row) => row.recipient === hex(device.publicKey.toBytes())
+                        )
+                      )
+                        yield* Context.get(maintenance, KeyReceiver).receiveStagedGroup(group)
+                    } else if (view.verification !== 'endorsed-snapshot')
+                      return yield* located.failure
+                  }
                   yield* runWorkspaceKeyRound().pipe(Effect.provide(maintenance))
                 } while (roundAgain && !isClosing())
+                return undefined
               })
             )
           )
@@ -723,6 +749,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           return yield* provider.open(input)
         })
         let upgradeRequiredAt: number | undefined
+        let retainedWriteEpoch: number | undefined
         const status = Effect.fnUntraced(function* (): Effect.fn.Return<
           E2eeRuntimeStatus,
           unknown
@@ -741,7 +768,31 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             checked.failure.reason !== 'unauthorized'
           )
             return yield* checked.failure
+          let writeEpoch: number | null = Result.isSuccess(checked)
+            ? publicState.epoch.number
+            : null
+          if (
+            !continuityPending &&
+            Result.isFailure(checked) &&
+            checked.failure.reason === 'missing-key'
+          ) {
+            for (
+              let candidate = retainedWriteEpoch ?? publicState.epoch.number - 1;
+              candidate >= 0;
+              candidate -= 1
+            ) {
+              const older = yield* Effect.result(keys.check(candidate))
+              if (Result.isSuccess(older)) {
+                writeEpoch = candidate
+                break
+              }
+              if (older.failure.reason === 'unauthorized') break
+              if (older.failure.reason !== 'missing-key') return yield* older.failure
+            }
+          }
+          if (writeEpoch !== null) retainedWriteEpoch = writeEpoch
           return {
+            writeEpoch,
             workspaceId,
             genesisHash: creation.genesisHash,
             length: state.view.length,
@@ -1040,7 +1091,11 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.status())),
       // The lookup is serialized locally; mailbox/network work deliberately
       // runs after releasing the host's resource lock.
-      keyRound: (workspaceId: string, mailbox: (signal: AbortSignal) => KeyMailbox['Service']) =>
+      keyRound: (
+        workspaceId: string,
+        mailbox: (signal: AbortSignal) => KeyMailbox['Service'],
+        staging?: (signal: AbortSignal) => EpochStagingStore['Service']
+      ) =>
         Effect.flatMap(
           run(
             Effect.suspend(() =>
@@ -1049,7 +1104,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                 : Effect.fail(fail('closed'))
             )
           ),
-          (entry) => entry.keyRound(mailbox)
+          (entry) => entry.keyRound(mailbox, staging)
         ),
       seal: (workspaceId: string, input: E2eeContentSeal) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.seal(input))),

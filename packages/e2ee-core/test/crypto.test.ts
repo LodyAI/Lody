@@ -852,7 +852,7 @@ describe('ledger-bound signed document workflows', () => {
               binding.seal({ ...updateInput, additionalData: () => aadFor(false) })
             );
             expect(Result.isSuccess(next)).toBe(true);
-            {
+            if (Result.isSuccess(next)) {
               const mixed = { ...input, body: batch([old.sealed, read(next).sealed]) };
               expect(read(admitStreamsUpdateBatch(mixed))).toEqual(mixed.body);
               expect(yield* admitStreamsUpdateBatchEffect(mixed)).toEqual(mixed.body);
@@ -1179,7 +1179,14 @@ describe('ledger-bound signed document workflows', () => {
                 additionalData: new Uint8Array([1, 2]),
               })
             ).toEqual(updateInput.plaintext);
-          expect(code(yield* Effect.result(pinned.seal(updateInput)))).toBe('unauthorized');
+          const retained = yield* pinned.seal(updateInput);
+          expect(
+            yield* pinned.open({
+              ...retained,
+              context: updateContext,
+              additionalData: new Uint8Array([1, 2]),
+            })
+          ).toEqual(updateInput.plaintext);
           const missing = yield* makeStreamsUpdateBinding({
             ...bindingOptions(f),
             writeEpoch: 'current',
@@ -1242,7 +1249,7 @@ describe('ledger-bound signed document workflows', () => {
       )
     );
   });
-  it('refuses an epoch change during native signing and clears the operation-owned key before retry', async () => {
+  it('finishes the selected published epoch during signing and clears its operation-owned key', async () => {
     const f = ledgerFixture(true);
     const nextSecret = new Uint8Array(32).fill(8);
     const owned: Bytes.EpochKey[] = [];
@@ -1280,7 +1287,26 @@ describe('ledger-bound signed document workflows', () => {
           yield* Deferred.await(entered);
           f.publishEpoch(nextSecret);
           yield* Deferred.succeed(release, undefined);
-          expect(code(yield* Fiber.join(sealing))).toBe('unauthorized');
+          const retained = read(yield* Fiber.join(sealing));
+          expect(
+            read(
+              verifyContentSignature(
+                retained.sealed,
+                f.scope,
+                f.owner.publicKey,
+                new Uint8Array([1, 2])
+              )
+            ).epoch
+          ).toBe(0);
+          const fixed = yield* makeStreamsUpdateBinding({ ...bindingOptions(f), writeEpoch: 0 });
+          const offline = yield* fixed.seal(updateInput);
+          expect(
+            yield* fixed.open({
+              ...offline,
+              context: updateContext,
+              additionalData: new Uint8Array([1, 2]),
+            })
+          ).toEqual(updateInput.plaintext);
           expect(code(deriveContentKey(owned[0]!, header))).toBe('invalid-content-key');
           hold = false;
           const sealed = yield* binding.seal(updateInput);

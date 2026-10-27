@@ -124,6 +124,9 @@ export type LocalWorkspaceCatalogError =
   | CatalogPermissionError;
 
 export type CacheRemoteWorkspacesInput = {
+  /** Only the authenticated complete online-list owner may rebuild a corrupt
+   * encrypted index. Local provisioning and offline reads cannot grant this. */
+  authenticatedOnline?: true;
   identity: LocalCatalogIdentity;
   machine: LocalCatalogMachine;
   workspaces: Array<{
@@ -323,7 +326,8 @@ async function writeCatalogFile(
   filePath: string,
   snapshot: LocalWorkspaceCatalogSnapshot,
   previous?: LocalWorkspaceCatalogSnapshot,
-  allowDegradedEncryptedCache = false
+  allowDegradedEncryptedCache = false,
+  rebuildCorruptEncryptedCache = false
 ): Promise<LocalWorkspaceCatalogSnapshot> {
   const ids = new Set(
     snapshot.workspaces
@@ -393,9 +397,18 @@ async function writeCatalogFile(
     }
   }
   if (refreshEncrypted && invalidMarkerPublished) {
-    // Never replace originals that could not be read. Ordinary mutations do
-    // not touch the encrypted slice, so they remain independently writable.
+    // Only an authenticated remote-list reconciliation can rebuild discovery.
+    // Publish the fence before archiving, so a crash or failed publication can
+    // never make stale encrypted rows usable. Permission/marker errors stay errors.
     try {
+      if (
+        rebuildCorruptEncryptedCache &&
+        encryptedError instanceof CatalogCorruptError &&
+        encryptedError.path === encryptedPath
+      ) {
+        await fs.rename(encryptedPath, `${encryptedPath}.corrupt-${crypto.randomUUID()}`);
+        encryptedError = undefined;
+      }
       if (encryptedError) throw encryptedError;
       await writeCatalogSnapshot(encryptedPath, encryptedSnapshot);
     } catch (error) {
@@ -426,9 +439,13 @@ async function writeCatalogFile(
       }
     }
   }
+  const { encryptedCatalogError: _previousError, ...reconciledSnapshot } = snapshot;
   return encryptedError
     ? { ...ordinarySnapshot, encryptedCatalogError: encryptedError }
-    : { ...snapshot, encryptedCatalogUnavailable: ordinarySnapshot.encryptedCatalogUnavailable };
+    : {
+        ...reconciledSnapshot,
+        encryptedCatalogUnavailable: ordinarySnapshot.encryptedCatalogUnavailable,
+      };
 }
 
 async function backupCorruptCatalog(filePath: string): Promise<void> {
@@ -513,7 +530,8 @@ export function makeLocalWorkspaceCatalog(
 
   const mutate = (
     fn: (snapshot: LocalWorkspaceCatalogSnapshot) => LocalWorkspaceCatalogSnapshot,
-    allowDegradedEncryptedCache = false
+    allowDegradedEncryptedCache = false,
+    rebuildCorruptEncryptedCache = false
   ): Effect.Effect<LocalWorkspaceCatalogSnapshot, LocalWorkspaceCatalogError, FileLocks> =>
     withFileLock(
       lockName,
@@ -522,7 +540,14 @@ export function makeLocalWorkspaceCatalog(
           const snapshot = yield* readRecoveringFromDisk();
           const updated = fn(snapshot);
           const persisted = yield* Effect.tryPromise({
-            try: () => writeCatalogFile(filePath, updated, snapshot, allowDegradedEncryptedCache),
+            try: () =>
+              writeCatalogFile(
+                filePath,
+                updated,
+                snapshot,
+                allowDegradedEncryptedCache,
+                rebuildCorruptEncryptedCache
+              ),
             catch: (error) => toCatalogError(filePath, error),
           });
           cacheRevision += 1;
@@ -544,60 +569,64 @@ export function makeLocalWorkspaceCatalog(
         )
       ),
     cacheRemoteWorkspaces: (input) =>
-      mutate((snapshot) => {
-        const now = getServerNow();
-        const remoteIds = new Set(input.workspaces.map((workspace) => workspace.id));
-        // Member grants were verified for the previous account and Machine.
-        const keepMemberGrants =
-          snapshot.identity?.userId === input.identity.userId &&
-          snapshot.machine?.machineId === input.machine.machineId;
-        const previousById = new Map(
-          snapshot.workspaces.map((workspace) => [workspace.workspaceId, workspace])
-        );
-        // A mode this client does not implement is never cached: a row without
-        // `contentMode` means plaintext, so an offline restart would fail open.
-        const supported = input.workspaces.filter(
-          (workspace) =>
-            workspace.contentMode === undefined ||
-            workspace.contentMode === 'plaintext' ||
-            workspace.contentMode === 'e2ee'
-        );
-        const active = supported.map((workspace): LocalCatalogWorkspace => {
-          const previous = previousById.get(workspace.id);
-          return {
-            workspaceId: workspace.id,
-            name: workspace.name,
-            slug: workspace.slug,
-            role: workspace.role,
-            ...(workspace.contentMode === 'e2ee'
-              ? { contentMode: 'e2ee' as const, genesisHash: workspace.genesisHash }
-              : {}),
-            state: 'active',
-            cachedAt: now,
-            machine: {
-              ...input.machine,
+      mutate(
+        (snapshot) => {
+          const now = getServerNow();
+          const remoteIds = new Set(input.workspaces.map((workspace) => workspace.id));
+          // Member grants were verified for the previous account and Machine.
+          const keepMemberGrants =
+            snapshot.identity?.userId === input.identity.userId &&
+            snapshot.machine?.machineId === input.machine.machineId;
+          const previousById = new Map(
+            snapshot.workspaces.map((workspace) => [workspace.workspaceId, workspace])
+          );
+          // A mode this client does not implement is never cached: a row without
+          // `contentMode` means plaintext, so an offline restart would fail open.
+          const supported = input.workspaces.filter(
+            (workspace) =>
+              workspace.contentMode === undefined ||
+              workspace.contentMode === 'plaintext' ||
+              workspace.contentMode === 'e2ee'
+          );
+          const active = supported.map((workspace): LocalCatalogWorkspace => {
+            const previous = previousById.get(workspace.id);
+            return {
+              workspaceId: workspace.id,
+              name: workspace.name,
+              slug: workspace.slug,
+              role: workspace.role,
+              ...(workspace.contentMode === 'e2ee'
+                ? { contentMode: 'e2ee' as const, genesisHash: workspace.genesisHash }
+                : {}),
+              state: 'active',
               cachedAt: now,
-            },
-            ...(previous?.accessSnapshot ? { accessSnapshot: previous.accessSnapshot } : {}),
-            ...(keepMemberGrants && previous?.memberAccessSnapshots
-              ? { memberAccessSnapshots: previous.memberAccessSnapshots }
-              : {}),
+              machine: {
+                ...input.machine,
+                cachedAt: now,
+              },
+              ...(previous?.accessSnapshot ? { accessSnapshot: previous.accessSnapshot } : {}),
+              ...(keepMemberGrants && previous?.memberAccessSnapshots
+                ? { memberAccessSnapshots: previous.memberAccessSnapshots }
+                : {}),
+            };
+          });
+          const remoteMissing = snapshot.workspaces
+            .filter((workspace) => !remoteIds.has(workspace.workspaceId))
+            .map((workspace): LocalCatalogWorkspace => ({
+              ...workspace,
+              state: 'remote_missing',
+              remoteMissingAt: workspace.remoteMissingAt ?? now,
+            }));
+          return {
+            ...snapshot,
+            identity: input.identity,
+            machine: input.machine,
+            workspaces: [...active, ...remoteMissing],
           };
-        });
-        const remoteMissing = snapshot.workspaces
-          .filter((workspace) => !remoteIds.has(workspace.workspaceId))
-          .map((workspace): LocalCatalogWorkspace => ({
-            ...workspace,
-            state: 'remote_missing',
-            remoteMissingAt: workspace.remoteMissingAt ?? now,
-          }));
-        return {
-          ...snapshot,
-          identity: input.identity,
-          machine: input.machine,
-          workspaces: [...active, ...remoteMissing],
-        };
-      }, true).pipe(
+        },
+        true,
+        input.authenticatedOnline === true
+      ).pipe(
         Effect.map((snapshot) =>
           snapshot.encryptedCatalogError
             ? { encryptedCatalogError: snapshot.encryptedCatalogError }

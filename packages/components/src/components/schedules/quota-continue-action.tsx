@@ -3,10 +3,12 @@ import { useAtomValue } from 'jotai';
 import { useNavigate } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
-import { Clock } from 'lucide-react';
+import { Check, Clock, Loader2 } from 'lucide-react';
 import { Button } from '@lody/ui/button';
-import { space } from '@lody/ui/tokens/scales.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space, text } from '@lody/ui/tokens/scales.stylex';
 import {
+  getDeviceTimeZone,
   getServerNow,
   machineSupportsScheduledMessagesProtocol,
   type SessionMeta,
@@ -21,11 +23,13 @@ import { useSessionDoc } from '@/hooks/use-session-doc';
 import { useConversationTail } from '@/hooks/use-conversation-view';
 import { useSchedules } from '@/hooks/use-schedules';
 import { toast } from '@/lib/toast';
+import { formatClockWithZone } from './schedule-format';
 import {
   findClaudeSessionLimit,
   quotaContinueDraft,
   quotaContinueIdentity,
   quotaContinueReset,
+  quotaContinueSendAt,
 } from './quota-continue';
 import { saveScheduledMessage } from './scheduled-message-write';
 
@@ -34,27 +38,51 @@ const styles = stylex.create({
     display: 'flex',
     flexWrap: 'wrap',
     alignItems: 'center',
-    gap: space[2],
-    paddingBottom: space[2],
+    columnGap: space[3],
+    rowGap: space[2],
+    paddingTop: space[2],
+    borderTopWidth: 1,
+    borderTopStyle: 'solid',
+    borderTopColor: colors.separator,
     minWidth: 0,
+  },
+  copy: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minWidth: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: text.bodyLeading,
+    color: colors.label,
+    overflowWrap: 'anywhere',
   },
 });
 
-/** The quota and tail subscriptions stay outside the composer and conversation tree. */
-export const QuotaContinueAction = memo(function QuotaContinueAction({
+/**
+ * The action lives inside the terminal session-limit banner, so the failure and
+ * its one-click recovery share one card. All quota/history subscriptions stay
+ * in this leaf; the conversation tree does not re-render on quota refreshes.
+ */
+export const SessionLimitContinueAction = memo(function SessionLimitContinueAction({
   session,
-  visible,
+  entryId,
 }: {
   session: SessionMeta;
-  visible: boolean;
+  entryId: string;
 }) {
   const allowed = useWorkspaceFeature('schedules');
   if (!allowed || session.agentType !== 'claude' || session.isArchived) return null;
-  return <QuotaContinueOwner key={session.id} session={session} visible={visible} />;
+  return <SessionLimitContinueOwner key={session.id} session={session} entryId={entryId} />;
 });
 
-function QuotaContinueOwner({ session, visible }: { session: SessionMeta; visible: boolean }) {
-  const { t } = useTranslation();
+function SessionLimitContinueOwner({
+  session,
+  entryId,
+}: {
+  session: SessionMeta;
+  entryId: string;
+}) {
+  const { t, i18n } = useTranslation();
   const user = useAtomValue(userAtom);
   const active = useAtomValue(activeWorkspaceRuntimeAtom);
   const scope = useResolvedWorkspaceScope();
@@ -62,22 +90,33 @@ function QuotaContinueOwner({ session, visible }: { session: SessionMeta; visibl
   const slug = useAtomValue(currentWorkspaceSlugAtom);
   const navigate = useNavigate();
   const { machine } = useResolvedMachineMeta(session.machineId);
-  const { history } = useSessionDoc(session.id, { enabled: visible });
+  // The banner is only rendered while its turn is in the stream's window; the
+  // leaf unmounts with it and releases the acquired tail range.
+  const { history } = useSessionDoc(session.id);
   const { turns } = useConversationTail(history, { extendToLastUserTurn: true });
   const failure = findClaudeSessionLimit(turns);
+  const isThisFailure = failure?.noticeId === entryId;
   useProviderQuotaRefresh(
     session.machineId,
     session.agentConfigId,
-    visible &&
-      !!failure &&
+    isThisFailure &&
       machine?.acpCapabilities?.[session.agentConfigId ?? '']?.rateLimits?.query === true
   );
   const registry = useSchedules();
-  const reset = failure
-    ? quotaContinueReset({ failure, session, rateLimits: machine?.raceLimits, now: getServerNow() })
-    : null;
+  const reset =
+    failure && isThisFailure
+      ? quotaContinueReset({
+          failure,
+          session,
+          rateLimits: machine?.raceLimits,
+          now: getServerNow(),
+        })
+      : null;
+  const sendAt = reset === null ? null : quotaContinueSendAt(reset);
   const identity =
-    runtime && reset ? quotaContinueIdentity(runtime.workspaceId, session.id, reset) : null;
+    runtime && reset !== null
+      ? quotaContinueIdentity(runtime.workspaceId, session.id, reset)
+      : null;
   const key = `${runtime?.accountId}:${runtime?.workspaceId}:${user?.id}:${identity?.scheduleId}`;
   const [saved, setSaved] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
@@ -91,12 +130,13 @@ function QuotaContinueOwner({ session, visible }: { session: SessionMeta; visibl
     };
   }, [key, runtime]);
   if (
-    !visible ||
     !runtime ||
     !user ||
     !machine ||
     !failure ||
-    !reset ||
+    !isThisFailure ||
+    reset === null ||
+    sendAt === null ||
     !identity ||
     !registry.ready ||
     registry.error ||
@@ -107,6 +147,11 @@ function QuotaContinueOwner({ session, visible }: { session: SessionMeta; visibl
     return null;
   const exists =
     saved === key || registry.rows.some((row) => row.scheduleId === identity.scheduleId);
+  const timeLabel = formatClockWithZone(
+    sendAt,
+    machine.timeZone ?? getDeviceTimeZone(),
+    i18n.language
+  );
   const open = () => {
     if (slug)
       void navigate({
@@ -118,15 +163,16 @@ function QuotaContinueOwner({ session, visible }: { session: SessionMeta; visibl
     if (inFlight.current || !owner.current) return;
     // The reset or failed turn may have changed while this control was visible.
     const current = findClaudeSessionLimit(turns);
-    if (
-      !current ||
-      quotaContinueReset({
-        failure: current,
-        session,
-        rateLimits: machine.raceLimits,
-        now: getServerNow(),
-      }) !== reset
-    ) {
+    const currentReset =
+      current && current.noticeId === entryId
+        ? quotaContinueReset({
+            failure: current,
+            session,
+            rateLimits: machine.raceLimits,
+            now: getServerNow(),
+          })
+        : null;
+    if (!current || currentReset !== reset) {
       toast.error(t('scheduledMessage.futureTime'));
       return;
     }
@@ -139,7 +185,7 @@ function QuotaContinueOwner({ session, visible }: { session: SessionMeta; visibl
         actorId: user.id,
         ...identity,
         create: true,
-        draft: quotaContinueDraft(session, failure.user, reset, t('scheduledMessage.quotaTitle')),
+        draft: quotaContinueDraft(session, current.user, sendAt, t('scheduledMessage.quotaTitle')),
       });
       if (owner.current === token) {
         setSaved(key);
@@ -153,34 +199,61 @@ function QuotaContinueOwner({ session, visible }: { session: SessionMeta; visibl
     }
   };
   return (
-    <QuotaContinueView
-      saved={exists}
-      pending={pending === key}
-      onClick={exists ? open : () => void save()}
+    <SessionLimitContinueRow
+      state={exists ? 'scheduled' : pending === key ? 'pending' : 'idle'}
+      timeLabel={timeLabel}
+      onSchedule={() => void save()}
+      onOpen={open}
     />
   );
 }
 
-export function QuotaContinueView({
-  saved,
-  pending,
-  onClick,
+export function SessionLimitContinueRow({
+  state,
+  timeLabel,
+  onSchedule,
+  onOpen,
 }: {
-  saved: boolean;
-  pending: boolean;
-  onClick: () => void;
+  state: 'idle' | 'pending' | 'scheduled';
+  timeLabel: string;
+  onSchedule: () => void;
+  onOpen: () => void;
 }) {
   const { t } = useTranslation();
+  const scheduled = state === 'scheduled';
+  const pending = state === 'pending';
   return (
     <div {...stylex.props(styles.row)}>
-      <Button size="small" variant="ghost" disabled={pending} onClick={onClick}>
-        <Clock size={14} aria-hidden="true" />
-        {pending
-          ? t('schedules.saving')
-          : saved
-            ? t('scheduledMessage.quotaView')
-            : t('scheduledMessage.quotaContinue')}
-      </Button>
+      {scheduled ? (
+        <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+      ) : pending ? (
+        <Loader2
+          className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground"
+          aria-hidden="true"
+        />
+      ) : (
+        <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+      )}
+      <span {...stylex.props(styles.copy)}>
+        {scheduled
+          ? t('scheduledMessage.quotaScheduled', { time: timeLabel })
+          : t('scheduledMessage.quotaSchedule', { time: timeLabel })}
+      </span>
+      {scheduled ? (
+        <Button variant="ghost" size="small" onClick={onOpen}>
+          {t('common.view')}
+        </Button>
+      ) : (
+        <Button
+          variant="secondary"
+          size="small"
+          shape="pill"
+          disabled={pending}
+          onClick={onSchedule}
+        >
+          {pending ? t('schedules.saving') : t('scheduledMessage.quotaScheduleAction')}
+        </Button>
+      )}
     </div>
   );
 }

@@ -35,14 +35,18 @@
   evidence. No floor reset, deadline extension or new time source/recovery generation.
   See [integration proposal](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-realtime-journal.md).
 - `prepareCliE2eeMachineLegacy` binds the retained credential hash to the exact
-  desktop-generated 16-byte pairing session using core's fixed v1 helper.
+  desktop-generated 16-byte pairing session using core's fixed v1 helper. Machine
+  possession additionally binds the strict UTF-8 machineId; activation compares it
+  with both the verified current device and the retained signed admission. Session
+  IDs stay outside possession and ledger records; old developer formats need recreation.
   Pairing preparation and activation run only on the OS-user control socket;
   Fleet checks its own account and discovered encrypted workspace/genesis first.
   Activation refreshes the verified ledger and mailbox and acknowledges only an
   installed current key; temporary failure leaves the same pairing retryable.
 
-- Pin M2 write epoch; epoch change/rotation-required latches sends off, retaining local
-  state. M3 owns resumption.
+- Staging read denial/I/O failure cannot block independently verified mailbox reception.
+- Retain old-epoch sends; select confirmed keys per operation. Rotation hints never pause.
+  [M3 selection](../../../../../.agents/notes/proposed/architecture/2026-10-27-e2ee-epoch-receive-barrier.md).
 - Prepared bindings cannot start content replicas. Activate only the native ledger/key
   receiver: verify current installed key, close temporary owner, THEN write `activation.json`
   before Fleet attaches rooms. The marker grants no authority; match genesis/device.
@@ -63,9 +67,10 @@
 - Only activation/binding/device-original ENOENT means pairing wait. Check the
   original before custody init; stale hints cannot trigger keyring probes. Preserve
   other file errors/Fleet retry; never cache transient storage as missing pairing.
-- Ingest storage failure fences writes until verified refresh. Next seal coalesces one
-  storage-error refresh without reconnecting healthy readers. Validation/conflict needs
-  explicit normal refresh; seal cannot auto-recover it.
+- Ingest storage failure fences writes until verified refresh. Seal only requests
+  coalesced storage repair and returns; never await refresh inside an SDK save queue.
+  Healthy readers stay attached.
+  Validation/conflict needs explicit normal refresh; seal cannot auto-recover it.
 
 ## Local machine pairing
 
@@ -90,7 +95,9 @@
   `workspace-catalog.json.e2ee`, ordinary rows only in v1 `workspaces`; lock both writes.
   Ordinary-only mutations never rewrite encrypted rows. Old v1 writers cannot erase
   the sidecar or account/machine-bound `.e2ee-invalid` marker.
-- Never overwrite unreadable sidecars; retain errors in memory and usable ordinary rows.
+- Offline/ordinary writes never replace unreadable sidecars. Only authenticated online-list
+  reconciliation may archive a corrupt `.e2ee` file before rebuilding; permission and marker
+  errors stay errors. Retain originals, failure receipts and usable ordinary rows.
   Persist ordinary remote-list results; return degraded receipts with current auth/revocation
   checks. Atomically publish `.e2ee-invalid` BEFORE encrypted updates; retain through failed
   writes/cleanup until healthy publication. Derive unavailable from the marker, never unknown

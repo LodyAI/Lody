@@ -1491,6 +1491,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   searchBlockId,
   headingAnchors = false,
   compact = false,
+  muted = false,
 }: {
   text: string;
   size?: MarkdownRendererSize;
@@ -1505,6 +1506,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   headingAnchors?: boolean;
   /** Tool prose shares the control role without scaling nested code a second time. */
   compact?: boolean;
+  /** Use secondary text color without changing prose typography. */
+  muted?: boolean;
 }) {
   ({ text, size, allowHtml, isStreaming, searchBlockId } = useSelectionStableValue({
     text,
@@ -1764,7 +1767,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         ref={containerRef}
         data-search-block-id={searchBlockId}
         {...withClassName(
-          stylex.props(markdownStyles.root, compact && markdownStyles.muted),
+          stylex.props(markdownStyles.root, (compact || muted) && markdownStyles.muted),
           cn(MARKDOWN_BASE_CLASSNAME, className)
         )}
         style={markdownFontSizeStyle(normalizedSize, compact)}

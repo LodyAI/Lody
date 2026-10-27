@@ -73,7 +73,9 @@ async function readGeneratedProfile(
     readFile(join(profileDir, 'cordis.patch.yml'), 'utf8'),
     readFile(join(profileDir, 'pnpm-workspace.yaml'), 'utf8'),
   ]);
-  const bundle = JSON.parse(packageJson).dsh.profile.bundles.at(-1);
+  const bundle = JSON.parse(packageJson).dsh.profile.bundles.find((name: string) =>
+    name.startsWith('@lody/dsh-host-')
+  );
   const generatedPatchYml = await readFile(
     join(profileDir, 'node_modules', bundle, 'cordis.patch.yml'),
     'utf8'
@@ -128,6 +130,19 @@ describe('resolveDeepSeekHarnessProcessLaunch', () => {
     const configPath = getDeepSeekHarnessProviderConfigPath(dataRoot, 'provider-a');
     const edited = '- id: agent-default-model\n  config:\n    model: custom-model\n';
     await writeFile(configPath, edited);
+    const profileDir = join(first.env.DSH_HOME, 'profiles', 'lody-acp');
+    const manifestPath = join(profileDir, 'package.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+    manifest.dependencies = { 'synthetic-plugin': '1.2.3' };
+    manifest.dsh.profile.bundles.push('synthetic-plugin');
+    manifest.dsh.profile.customOption = 'preserved';
+    manifest.pnpm = { overrides: { 'synthetic-dependency': '1.0.0' } };
+    await writeFile(manifestPath, JSON.stringify(manifest));
+    await writeFile(join(profileDir, 'pnpm-lock.yaml'), 'synthetic-lockfile');
+    await writeFile(
+      join(profileDir, 'pnpm-workspace.yaml'),
+      'allowBuilds:\n  synthetic-plugin: true\n'
+    );
     const settingsPath = join(first.env.DSH_HOME, 'settings.yaml');
     await writeFile(settingsPath, 'synthetic-setting: preserved\n');
     const [upgrade] = await Promise.all([
@@ -146,6 +161,18 @@ describe('resolveDeepSeekHarnessProcessLaunch', () => {
     const profile = await readGeneratedProfile(upgrade, first.env.DSH_HOME);
     expect(profile.generatedPatchYml).toContain('file:///app/v2/deepseek-acp.js');
     expect(profile.generatedPatchYml).toContain('compression: none');
+    const upgradedManifest = JSON.parse(profile.packageJson);
+    expect(upgradedManifest.dependencies).toEqual(manifest.dependencies);
+    expect(upgradedManifest.pnpm).toEqual(manifest.pnpm);
+    expect(upgradedManifest.dsh.profile.customOption).toBe('preserved');
+    expect(upgradedManifest.dsh.profile.bundles.at(-1)).toBe('synthetic-plugin');
+    expect(
+      upgradedManifest.dsh.profile.bundles.filter((name: string) =>
+        name.startsWith('@lody/dsh-host-')
+      )
+    ).toHaveLength(1);
+    expect(await readFile(join(profileDir, 'pnpm-lock.yaml'), 'utf8')).toBe('synthetic-lockfile');
+    expect(profile.pnpmWorkspaceYaml).toBe('allowBuilds:\n  synthetic-plugin: true\n');
     expect(await readFile(configPath, 'utf8')).toBe(edited);
     expect(await readFile(settingsPath, 'utf8')).toBe('synthetic-setting: preserved\n');
     expect(
@@ -153,6 +180,18 @@ describe('resolveDeepSeekHarnessProcessLaunch', () => {
     ).toBe('[]\n');
     expect(await readFile(artifact, 'utf8')).toBe('synthetic history');
     expect(upgrade.env.ACP_EXTENSION_DSH_QUERY_PATH).toBe(join(sessionsRoot, 'session-query.db'));
+  });
+
+  it('leaves a malformed user manifest unchanged and reports the failure', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'lody-dsh-invalid-'));
+    temporaryRoots.push(rootDir);
+    await resolveDeepSeekHarnessProcessLaunch({ rootDir, adapterPath: '/synthetic/acp.js' });
+    const manifest = join(rootDir, 'profiles', 'lody-acp', 'package.json');
+    await writeFile(manifest, '{broken');
+    await expect(
+      resolveDeepSeekHarnessProcessLaunch({ rootDir, adapterPath: '/synthetic/v2/acp.js' })
+    ).rejects.toThrow();
+    expect(await readFile(manifest, 'utf8')).toBe('{broken');
   });
 
   it('publishes the adapter path and the preset root into a dsh profile', async () => {
