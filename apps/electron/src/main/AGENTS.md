@@ -94,3 +94,7 @@ activation belongs in this host workflow.
 The owning test uses synthetic authenticated safeStorage plus real crypto,
 filesystem and another OS process. It does not prove an OS keychain or all-platform
 packaging result; native safeStorage assurance needs an isolated platform run.
+
+`e2ee.readIdentity` is an expected-account-bound local read of retained verified identity.
+It grants no renderer reader/status/content capability. Preserve existing readers;
+release a cold temporary host before replying. `status` still requires a window reader.

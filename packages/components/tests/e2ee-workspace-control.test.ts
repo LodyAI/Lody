@@ -437,6 +437,10 @@ describe('encrypted workspace recovery classification', () => {
 
   it('separates identity conflicts, rollbacks and invalid server history', () => {
     const fixture = historyFixture();
+    expect(classifyE2eeControlFailure(new Error('e2ee_conflict'))).toEqual({
+      kind: 'identity-conflict',
+      code: 'pin-mismatch',
+    });
     expect(
       failureOf(() =>
         appendLedgerHistory(null, fixture.firstPage, {

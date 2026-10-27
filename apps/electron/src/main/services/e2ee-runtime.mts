@@ -20,17 +20,20 @@ import {
 } from '@lody/e2ee-core'
 import {
   Bytes,
+  LedgerError,
   decodeRecord,
   exportVerifiedState,
   hashRecordBytes,
   hasVerifiedCheckpoint,
   restoreVerifiedState,
+  getCommittedEpochStagingKey,
   verifyLedgerEffect,
   extendLedgerEffect,
   type RetainedLedgerState
 } from '@lody/e2ee-core/protocol'
 import {
   EpochPublicationSource,
+  EpochStagingStore,
   KeyMailbox,
   InstalledKeyStore,
   LedgerFeedStore,
@@ -60,6 +63,9 @@ import type { makeDesktopE2eeBootstrap } from './e2ee-bootstrap.mjs'
 /** Stable host failures: IPC callers never receive native errors or their raw causes. */
 export class DesktopE2eeRuntimeError extends Data.TaggedError('DesktopE2eeRuntimeError')<{
   readonly code:
+    | 'restart-required'
+    | 'local-history-recovery-required'
+    | 'trusted-pin-unavailable'
     | 'closed'
     | 'invalid-input'
     | 'corrupt'
@@ -70,6 +76,17 @@ export class DesktopE2eeRuntimeError extends Data.TaggedError('DesktopE2eeRuntim
     | 'conflict'
 }> {}
 const fail = (code: DesktopE2eeRuntimeError['code']) => new DesktopE2eeRuntimeError({ code })
+const pinFailure = (error: LocalStoreError) =>
+  error.store === 'LedgerPinStore' && error.reason === 'corrupt'
+    ? fail('trusted-pin-unavailable')
+    : error
+const historyFailure = (error: unknown) =>
+  error instanceof LedgerError &&
+  !['native-unavailable', 'upgrade-required', 'unknown-version', 'unknown-operation'].includes(
+    error.code
+  )
+    ? fail('local-history-recovery-required')
+    : error
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex')
 const unhex = (value: string) => {
   if (typeof value !== 'string' || !/^(?:[0-9a-f]{2})+$/.test(value)) throw fail('invalid-input')
@@ -80,7 +97,20 @@ function sql<A>(work: () => A) {
     try: work,
     catch: (error) => {
       rememberDesktopE2eeFailure('runtime-sql', error)
-      return error instanceof DesktopE2eeRuntimeError ? error : fail('storage')
+      return error instanceof DesktopE2eeRuntimeError
+        ? error
+        : fail(
+            error instanceof Error &&
+              'code' in error &&
+              typeof error.code === 'string' &&
+              (/^(?:SQLITE_CORRUPT(?:_.*)?|SQLITE_NOTADB)$/.test(error.code) ||
+                (error.code === 'ERR_SQLITE_ERROR' &&
+                  'errcode' in error &&
+                  typeof error.errcode === 'number' &&
+                  [11, 26].includes(error.errcode & 0xff)))
+              ? 'local-history-recovery-required'
+              : 'storage'
+          )
     }
   })
 }
@@ -153,9 +183,11 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         observe: (checkpoint: ObservedCheckpoint) => Effect.Effect<void, unknown>
         stop: () => void
         isClosing: () => boolean
-        close: Effect.Effect<void>
+        close: Effect.Effect<void, DesktopE2eeRuntimeError>
+        restartRequired: () => boolean
         keyRound: (
-          mailbox: (signal: AbortSignal) => KeyMailbox['Service']
+          mailbox: (signal: AbortSignal) => KeyMailbox['Service'],
+          staging?: (signal: AbortSignal) => EpochStagingStore['Service']
         ) => Effect.Effect<void, unknown>
         seal: (
           input: E2eeContentSeal
@@ -172,7 +204,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         return yield* fail('invalid-input')
       const openedEntry = entries.get(workspaceId)
       if (openedEntry) {
-        if (openedEntry.isClosing()) return yield* fail('closed')
+        if (openedEntry.isClosing())
+          return yield* fail(openedEntry.restartRequired() ? 'restart-required' : 'closed')
         if (observed) yield* openedEntry.observe(observed)
         return openedEntry
       }
@@ -196,9 +229,14 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         const db = yield* Effect.acquireRelease(
           sql(() => {
             const connection = new DatabaseSync(join(directory, 'history.sqlite'))
-            connection.exec(
-              'PRAGMA synchronous=FULL; PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS records(position INTEGER PRIMARY KEY, record BLOB NOT NULL, locator TEXT); CREATE TABLE IF NOT EXISTS cache(id INTEGER PRIMARY KEY CHECK(id=1),name TEXT NOT NULL,origin TEXT)'
-            )
+            try {
+              connection.exec(
+                'PRAGMA synchronous=FULL; PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS records(position INTEGER PRIMARY KEY, record BLOB NOT NULL, locator TEXT); CREATE TABLE IF NOT EXISTS cache(id INTEGER PRIMARY KEY CHECK(id=1),name TEXT NOT NULL,origin TEXT)'
+              )
+            } catch (error) {
+              connection.close()
+              throw error
+            }
             connection
               .prepare('INSERT OR IGNORE INTO records(position,record) VALUES(0,?)')
               .run(creation.record)
@@ -232,10 +270,12 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             mode: 'create-or-open'
           })
         ).pipe(Layer.provideMerge(base))
-        const storeContext = yield* Layer.buildWithScope(stores, scope)
+        const storeContext = yield* Layer.buildWithScope(stores, scope).pipe(
+          Effect.mapError(pinFailure)
+        )
         const pins = Context.get(storeContext, LedgerPinStore)
         const installedStore = Context.get(storeContext, InstalledKeyStore)
-        const pin = yield* pins.read()
+        const pin = yield* pins.read().pipe(Effect.mapError(pinFailure))
         let minimumPin = pin
         const rows = () =>
           db
@@ -244,7 +284,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         const originals = yield* sql(rows)
         const suffix = originals.filter((row) => row.position >= initialCount)
         if (suffix.some((row, index) => row.position !== initialCount + index))
-          return yield* fail('corrupt')
+          return yield* fail('local-history-recovery-required')
         const endpoint = suffix.length
           ? { head: hashRecordBytes(suffix.at(-1)!.record), length: suffix.at(-1)!.position + 1 }
           : initialPoint
@@ -388,7 +428,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           if (cachedScope) yield* Scope.close(cachedScope, Exit.void)
           compactedAt = initialCount
           // Cache is disposable; prove the original history and pin before replacing it.
-          const view = yield* replayOriginals()
+          const view = yield* replayOriginals().pipe(Effect.mapError(historyFailure))
           if (pin && view.length >= pin.length) {
             const contains = yield* Effect.fromResult(hasVerifiedCheckpoint(view, pin))
             if (!contains) return yield* fail('local-evidence-conflict')
@@ -568,24 +608,33 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           roundAgain = false
           networkAbort.abort()
         }
-        let closeDone: Deferred.Deferred<void> | undefined
+        let closeFailed = false
+        let closeDone: Deferred.Deferred<void, DesktopE2eeRuntimeError> | undefined
         const closeEntry = Effect.suspend(() => {
           if (closeDone) return Deferred.await(closeDone)
-          closeDone = Deferred.makeUnsafe<void>()
+          closeDone = Deferred.makeUnsafe<void, DesktopE2eeRuntimeError>()
           const done = closeDone
           stop()
           return Effect.uninterruptible(
             Effect.gen(function* () {
               if (round) yield* Effect.exit(Deferred.await(round))
               const result = yield* Effect.exit(Scope.close(scope, Exit.void))
-              yield* Deferred.done(done, result)
-              return yield* result
+              if (Exit.isFailure(result)) {
+                closeFailed = true
+                rememberDesktopE2eeFailure('runtime-close', result.cause)
+              }
+              const receipt = Exit.isFailure(result)
+                ? Exit.fail(fail('restart-required'))
+                : Exit.void
+              yield* Deferred.done(done, receipt)
+              return yield* receipt
             })
           )
         })
         const isClosing = () => closing
         const keyRound = Effect.fnUntraced(function* (
-          mailbox: (signal: AbortSignal) => KeyMailbox['Service']
+          mailbox: (signal: AbortSignal) => KeyMailbox['Service'],
+          staging?: (signal: AbortSignal) => EpochStagingStore['Service']
         ) {
           if (closing) return yield* fail('closed')
           roundAgain = true
@@ -659,8 +708,30 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                 }
                 do {
                   roundAgain = false
+                  const view = yield* verified.current()
+                  const epoch = view.inspectState().epoch.number
+                  const checked = yield* Effect.result(keys.check(epoch))
+                  if (staging && epoch > 0 && Result.isFailure(checked)) {
+                    if (checked.failure.reason !== 'missing-key') return yield* checked.failure
+                    const located = getCommittedEpochStagingKey(view, epoch)
+                    // A snapshot-joined device without this publication original uses mailbox/history.
+                    if (Result.isSuccess(located)) {
+                      // Staging denial or I/O failure must not gate verified mailbox receipt.
+                      const group = yield* staging(networkAbort.signal)
+                        .readGroup(located.success)
+                        .pipe(Effect.catch(() => Effect.succeed(null)))
+                      if (
+                        group?.envelopes.some(
+                          (row) => row.recipient === hex(device.publicKey.toBytes())
+                        )
+                      )
+                        yield* Context.get(maintenance, KeyReceiver).receiveStagedGroup(group)
+                    } else if (view.verification !== 'endorsed-snapshot')
+                      return yield* located.failure
+                  }
                   yield* runWorkspaceKeyRound().pipe(Effect.provide(maintenance))
                 } while (roundAgain && !isClosing())
+                return undefined
               })
             )
           )
@@ -702,7 +773,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             !input ||
             !Number.isSafeInteger(input.epoch) ||
             input.epoch < 0 ||
-            input.context?.kind !== 'update_batch' ||
+            !['update_batch', 'snapshot'].includes(input.context?.kind) ||
             !checkBytes(input.plaintext, 16 * 1024 * 1024) ||
             !checkBytes(input.additionalData, 65536)
           )
@@ -723,6 +794,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           return yield* provider.open(input)
         })
         let upgradeRequiredAt: number | undefined
+        let retainedWriteEpoch: number | undefined
         const status = Effect.fnUntraced(function* (): Effect.fn.Return<
           E2eeRuntimeStatus,
           unknown
@@ -741,7 +813,31 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             checked.failure.reason !== 'unauthorized'
           )
             return yield* checked.failure
+          let writeEpoch: number | null = Result.isSuccess(checked)
+            ? publicState.epoch.number
+            : null
+          if (
+            !continuityPending &&
+            Result.isFailure(checked) &&
+            checked.failure.reason === 'missing-key'
+          ) {
+            for (
+              let candidate = retainedWriteEpoch ?? publicState.epoch.number - 1;
+              candidate >= 0;
+              candidate -= 1
+            ) {
+              const older = yield* Effect.result(keys.check(candidate))
+              if (Result.isSuccess(older)) {
+                writeEpoch = candidate
+                break
+              }
+              if (older.failure.reason === 'unauthorized') break
+              if (older.failure.reason !== 'missing-key') return yield* older.failure
+            }
+          }
+          if (writeEpoch !== null) retainedWriteEpoch = writeEpoch
           return {
+            writeEpoch,
             workspaceId,
             genesisHash: creation.genesisHash,
             length: state.view.length,
@@ -907,7 +1003,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           keyRound,
           stop,
           isClosing: () => closing,
-          close: closeEntry
+          close: closeEntry,
+          restartRequired: () => closeFailed
         }
       }).pipe(Scope.provide(scope))
       const result = yield* Effect.result(make)
@@ -958,7 +1055,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
       if (failed && Exit.isFailure(failed)) return yield* Effect.failCause(failed.cause)
       return entries.clear()
     })
-    yield* Effect.addFinalizer(() => close)
+    yield* Effect.addFinalizer(() => close.pipe(Effect.orDie))
     function withPairing<A>(
       workspaceId: string,
       work: (pairing: ReturnType<typeof makeDesktopLocalPairing>) => Effect.Effect<A, unknown>
@@ -1016,6 +1113,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             entry.personalPairing.invitation(session)
           )
         ),
+      resetLocalPairing: (workspaceId: string, resetId: string) =>
+        withPairing(workspaceId, (pairing) => pairing.reset(resetId)),
       localPairingContext: (workspaceId: string) =>
         withPairing(workspaceId, (pairing) => pairing.context()),
       retireSupersededLocalPairing: (
@@ -1040,7 +1139,11 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.status())),
       // The lookup is serialized locally; mailbox/network work deliberately
       // runs after releasing the host's resource lock.
-      keyRound: (workspaceId: string, mailbox: (signal: AbortSignal) => KeyMailbox['Service']) =>
+      keyRound: (
+        workspaceId: string,
+        mailbox: (signal: AbortSignal) => KeyMailbox['Service'],
+        staging?: (signal: AbortSignal) => EpochStagingStore['Service']
+      ) =>
         Effect.flatMap(
           run(
             Effect.suspend(() =>
@@ -1049,7 +1152,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                 : Effect.fail(fail('closed'))
             )
           ),
-          (entry) => entry.keyRound(mailbox)
+          (entry) => entry.keyRound(mailbox, staging)
         ),
       seal: (workspaceId: string, input: E2eeContentSeal) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.seal(input))),

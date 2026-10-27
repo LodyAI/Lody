@@ -1,3 +1,4 @@
+import { E2eeIdentityRecovery } from './e2ee-identity-recovery';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -18,6 +19,7 @@ const styles = stylex.create({
 });
 type Runtime = Pick<
   E2eeWorkspaceRuntime,
+  | 'resetIdentity'
   | 'personalPairingOffer'
   | 'preparePersonalJoin'
   | 'pendingPersonalJoin'
@@ -53,6 +55,7 @@ function PersonalPairingSession({
   onJoined: () => void;
 }) {
   const { t } = useTranslation();
+  const [recoveryError, setRecoveryError] = useState('');
   const [offer, setOffer] = useState<E2eePersonalPairingOffer | null>(null);
   const [input, setInput] = useState('');
   const [joining, setJoining] = useState<{
@@ -95,8 +98,9 @@ function PersonalPairingSession({
           if (pending) setPhase('waiting');
           setRecovering(false);
         },
-        () => {
+        (error) => {
           if (cancelled) return;
+          setRecoveryError(error instanceof Error ? error.message : '');
           setPhase('error');
           setRecovering(false);
         }
@@ -112,8 +116,11 @@ function PersonalPairingSession({
     setPhase('busy');
     try {
       await operation();
-    } catch {
-      if (isLive()) setPhase('error');
+    } catch (error) {
+      if (isLive()) {
+        setRecoveryError(error instanceof Error ? error.message : '');
+        setPhase('error');
+      }
     } finally {
       busy.current = false;
     }
@@ -214,6 +221,19 @@ function PersonalPairingSession({
     });
   return (
     <Card.Root>
+      {phase === 'error' && (
+        <E2eeIdentityRecovery
+          error={recoveryError}
+          runtime={runtime}
+          workspaceId={workspaceId}
+          onReset={() => {
+            setRecoveryError('');
+            setJoining(null);
+            setPhase('idle');
+            onJoined();
+          }}
+        />
+      )}
       <Card.Header>
         <Card.Title>{t('e2ee.pair.title')}</Card.Title>
         <Card.Description>{t('e2ee.pair.help')}</Card.Description>

@@ -10,7 +10,10 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   compose native FileLocks and keep the file write inside its lease. Read-cache
   refresh orchestration remains Promise-based. Existing application entrypoints
   provide the lock through the shared `fileLocksLegacy` runtime until daemon
-  composition migrates.
+  composition migrates. Encrypted discovery uses a separate account/machine-bound sidecar.
+  Only authenticated online-list reconciliation can archive a corrupt sidecar and
+  rebuild it behind the invalid marker; offline and ordinary operations retain the error.
+  [Recovery decision](../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-catalog-recovery.md).
 
 ## Resource discovery
 

@@ -1,4 +1,5 @@
-import { workspaceSupports, type WorkspaceStreamsMode } from '@lody/shared/workspace-streams-content';
+import { requireWorkspaceFeature } from '@/lib/workspace-feature';
+import { type WorkspaceStreamsMode } from '@lody/shared/workspace-streams-content';
 import type { MachineId, SessionFilePayload, SessionId, WorkspaceId } from '@lody/shared';
 import { sendSessionFileToLocalRuntime } from './electron-session-file-sender';
 import {
@@ -49,7 +50,7 @@ export function prepareSessionFile(
       }
     }
     throwIfSendAborted(signal);
-    if (!workspaceSupports(args.content, 'attachments')) throw new Error('e2ee_attachments_unavailable');
+    requireWorkspaceFeature(args.content, 'attachments');
     if (!args.token) throw new SessionFilePreparationAuthError();
     const progress = (value: SessionFileUploadProgress) => {
       if (!signal.aborted) args.onProgress?.(value);

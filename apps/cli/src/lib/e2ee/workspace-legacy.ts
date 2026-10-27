@@ -1,5 +1,6 @@
+import { leaseE2eeIdentity } from '@lody/shared/node/e2ee-identity';
 import { createHash, randomBytes } from 'node:crypto';
-import { constants } from 'node:fs';
+import { constants, existsSync } from 'node:fs';
 import { link, mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Effect, Exit, Scope, Result } from 'effect';
@@ -7,11 +8,13 @@ import { z } from 'zod';
 import type { PayloadProtectionProvider } from '@loro-dev/streams-crdt';
 import type { CloudE2eePort, CloudStreamsTokenPort } from '@lody/platform';
 import { BackendError, KeyMailbox } from '@lody/e2ee-core/services';
+import { decodeEpochStagedGroup } from '@lody/e2ee-core/host';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import {
   encryptedWorkspaceNamespace,
   encryptedWorkspaceResolver,
   encryptedWorkspaceRoom,
+  createWorkspaceEpochTransitionLegacy,
   type WorkspaceStreamsContent,
 } from '@lody/shared/workspace-streams-content';
 import { makeCliE2eeCustody, type MachineKeyring } from './custody';
@@ -27,7 +30,7 @@ const Binding = z
   .strict();
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex');
 const bytes = (value: string) => new Uint8Array(Buffer.from(value, 'hex'));
-const directoryFor = (accountId: string, workspaceId: string) => {
+export const cliE2eeIdentityDirectory = (accountId: string, workspaceId: string) => {
   if (!accountId || !/^[A-Za-z0-9_-]{1,128}$/.test(workspaceId))
     throw new Error('e2ee_invalid_input');
   return join(
@@ -38,14 +41,28 @@ const directoryFor = (accountId: string, workspaceId: string) => {
   );
 };
 
-/** Public pairing evidence is retained only through the trusted local approval
- * path. This operation neither admits a device nor obtains cloud credentials. */
 export async function retainCliE2eeWorkspaceBinding(
   accountId: string,
   input: z.input<typeof Binding>
 ) {
+  return Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* leaseE2eeIdentity(cliE2eeIdentityDirectory(accountId, input.workspaceId));
+        return yield* Effect.tryPromise({
+          try: () => retainBinding(accountId, input),
+          catch: (error) => error,
+        });
+      })
+    )
+  );
+}
+
+/** Public pairing evidence is retained only through the trusted local approval
+ * path. This operation neither admits a device nor obtains cloud credentials. */
+async function retainBinding(accountId: string, input: z.input<typeof Binding>) {
   const binding = Binding.parse(input);
-  const directory = directoryFor(accountId, binding.workspaceId);
+  const directory = cliE2eeIdentityDirectory(accountId, binding.workspaceId);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const destination = join(directory, 'binding.json');
   const temporary = join(directory, `binding-${randomBytes(16).toString('hex')}.pending`);
@@ -118,9 +135,24 @@ function mailbox(
   };
 }
 
+/** @deprecated Promise entry for the existing same-user control consumer. */
+export async function prepareCliE2eeMachineLegacy(options: Parameters<typeof prepareMachine>[0]) {
+  return Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* leaseE2eeIdentity(cliE2eeIdentityDirectory(options.accountId, options.workspaceId));
+        return yield* Effect.tryPromise({
+          try: () => prepareMachine(options),
+          catch: (error) => error,
+        });
+      })
+    )
+  );
+}
+
 /** Build the retained machine identity, possession proof and fixed credential
  * binding for the desktop-generated pairing session. No admission or cloud I/O. */
-export async function prepareCliE2eeMachineLegacy(
+async function prepareMachine(
   options: z.input<typeof Binding> & {
     accountId: string;
     machineId: string;
@@ -150,10 +182,11 @@ export async function prepareCliE2eeMachineLegacy(
   return Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
-        const directory = directoryFor(options.accountId, options.workspaceId);
+        const directory = cliE2eeIdentityDirectory(options.accountId, options.workspaceId);
         const journal = yield* openMachinePairingJournal(directory);
         const custody = makeCliE2eeCustody({
           directory: join(directory, 'custody'),
+          requireOsProtection: existsSync(`${directory}.require-os`),
           keyring: options.keyring,
         });
         return yield* journal
@@ -226,8 +259,9 @@ export async function validateCliE2eePairingIntentLegacy(options: {
   await Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
+        yield* leaseE2eeIdentity(cliE2eeIdentityDirectory(options.accountId, options.workspaceId));
         const journal = yield* openMachinePairingJournal(
-          directoryFor(options.accountId, options.workspaceId)
+          cliE2eeIdentityDirectory(options.accountId, options.workspaceId)
         );
         const retained = yield* journal.retained(options.pairingSessionId);
         if (
@@ -245,9 +279,26 @@ export async function validateCliE2eePairingIntentLegacy(options: {
   );
 }
 
+/** @deprecated Promise entry; retain the identity lease through activation publication. */
+export async function activateCliE2eeWorkspaceLegacy(
+  options: Parameters<typeof activateWorkspace>[0]
+) {
+  return Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* leaseE2eeIdentity(cliE2eeIdentityDirectory(options.accountId, options.workspaceId));
+        return yield* Effect.tryPromise({
+          try: () => activateWorkspace(options),
+          catch: (error) => error,
+        });
+      })
+    )
+  );
+}
+
 /** Verify actual admission and install the current key before allowing Fleet to attach rooms.
  * The marker is only a startup hint: subsequent authorization still comes from core's verified ledger. */
-export async function activateCliE2eeWorkspaceLegacy(
+async function activateWorkspace(
   options: CliE2eeWorkspaceOptions & {
     pairingSessionId: string;
     frontendSigningPublicKey: string;
@@ -276,7 +327,7 @@ export async function activateCliE2eeWorkspaceLegacy(
     // actually released its SQLite/custody resources.
     await pending.close();
   }
-  const directory = directoryFor(options.accountId, options.workspaceId);
+  const directory = cliE2eeIdentityDirectory(options.accountId, options.workspaceId);
   const destination = join(directory, 'activation.json');
   const temporary = join(directory, `activation-${randomBytes(16).toString('hex')}.pending`);
   const handle = await open(temporary, 'wx', 0o600);
@@ -303,7 +354,27 @@ async function openWorkspace(
   requireActivation: boolean,
   pairing?: { pairingSessionId: string; frontendSigningPublicKey: string; signingPublicKey: string }
 ) {
-  const directory = directoryFor(options.accountId, options.workspaceId);
+  const scope = Effect.runSync(Scope.make());
+  try {
+    await Effect.runPromise(
+      leaseE2eeIdentity(cliE2eeIdentityDirectory(options.accountId, options.workspaceId)).pipe(
+        Scope.provide(scope)
+      )
+    );
+    return await openWorkspaceOwned(scope, options, requireActivation, pairing);
+  } catch (error) {
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    throw error;
+  }
+}
+
+async function openWorkspaceOwned(
+  scope: Scope.Closeable,
+  options: CliE2eeWorkspaceOptions,
+  requireActivation: boolean,
+  pairing?: { pairingSessionId: string; frontendSigningPublicKey: string; signingPublicKey: string }
+) {
+  const directory = cliE2eeIdentityDirectory(options.accountId, options.workspaceId);
   let activation: z.infer<typeof Activation> | undefined;
   if (requireActivation) {
     const marker = await open(
@@ -351,13 +422,13 @@ async function openWorkspace(
     throw new Error('e2ee_pairing_required', { cause: error });
   });
   await original.close();
-  const scope = Effect.runSync(Scope.make());
   const run = <A, E>(work: Effect.Effect<A, E, Scope.Scope>) =>
     Effect.runPromise(work.pipe(Scope.provide(scope)));
   const opened = await run(
     Effect.gen(function* () {
       const custody = yield* makeCliE2eeCustody({
         directory: join(directory, 'custody'),
+        requireOsProtection: existsSync(`${directory}.require-os`),
         keyring: options.keyring,
       });
       const { Bytes, hashRecordBytes } = yield* Effect.promise(
@@ -371,6 +442,7 @@ async function openWorkspace(
       if (activation && activation.signingPublicKey !== hex(device.publicKey.toBytes()))
         throw new Error('e2ee_binding_conflict');
       const credential = yield* custody.deviceCredential(genesis, device.publicKey);
+      const readEpochGroup = options.cloud.readEpochGroup?.bind(options.cloud);
       const runtime = yield* makeCliE2eeRuntime({
         directory: join(directory, 'runtime', hex(device.publicKey.toBytes())),
         workspaceId: options.workspaceId,
@@ -378,6 +450,30 @@ async function openWorkspace(
         device,
         genesisRecord: bytes(binding.genesisRecordHex),
         mailbox: mailbox(options.cloud, options.workspaceId, credential),
+        staging: readEpochGroup
+          ? {
+              readGroup: (key) =>
+                Effect.tryPromise({
+                  try: () => readEpochGroup({ workspaceId: options.workspaceId, credential, key }),
+                  catch: () =>
+                    new BackendError({ service: 'EpochStagingStore', reason: 'unavailable' }),
+                }).pipe(
+                  Effect.flatMap((group) =>
+                    group === null
+                      ? Effect.succeed(null)
+                      : Effect.fromResult(decodeEpochStagedGroup(group)).pipe(
+                          Effect.mapError(
+                            () =>
+                              new BackendError({
+                                service: 'EpochStagingStore',
+                                reason: 'invalid-response',
+                              })
+                          )
+                        )
+                  )
+                ),
+            }
+          : undefined,
       });
       return { runtime, credential };
     })
@@ -386,13 +482,19 @@ async function openWorkspace(
     throw error;
   });
   const initialStatus = await run(opened.runtime.status());
-  const writeEpoch = initialStatus.epoch;
-  let latestEpoch = writeEpoch;
-  let keyUpdateRequired = initialStatus.rotationRequired;
+  const tokensInUse = new Set<
+    Awaited<Effect.Success<ReturnType<NonNullable<CloudE2eePort['createContentTokenProvider']>>>>
+  >();
+  const epochTransition = createWorkspaceEpochTransitionLegacy({
+    ...initialStatus,
+    epoch: initialStatus.writeEpoch ?? initialStatus.epoch,
+  });
+  epochTransition.observe(initialStatus);
   let ledgerBlocked = false;
   let pairingConfirmed = false;
   let pairingFailure: unknown;
-  let retryLedgerOnSeal = false;
+  let ledgerRetryAttempts = 0;
+  let ledgerRetryTimer: ReturnType<typeof setTimeout> | undefined;
   let closed = false;
   let refresh: Promise<void> | undefined;
   let pending = false;
@@ -402,40 +504,74 @@ async function openWorkspace(
     string,
     Promise<Effect.Success<ReturnType<typeof opened.runtime.binding>>>
   >();
+  const snapshotRequests = new Map<string, number>();
+  const snapshotFlights = new Set<Promise<unknown>>();
+  const requestSnapshot = (stream: string) => {
+    if (closed) return;
+    const now = Date.now();
+    if (now - (snapshotRequests.get(stream) ?? -Infinity) < 30_000) return;
+    snapshotRequests.set(stream, now);
+    const flight = options.cloud.getContentToken({
+      workspaceId: options.workspaceId,
+      credential: opened.credential,
+      requestSnapshotFor: stream,
+    });
+    snapshotFlights.add(flight);
+    void flight.then(
+      () => snapshotFlights.delete(flight),
+      () => {
+        snapshotFlights.delete(flight);
+        console.warn('[e2ee] snapshot repair request failed; will retry');
+      }
+    );
+  };
   const content: WorkspaceStreamsContent = {
     mode: 'protected',
     namespace: encryptedWorkspaceNamespace(binding.genesisHash),
-    snapshotUpload: { canUpload: async () => false },
+    snapshotUpload: {
+      onSnapshotRecovery: (streamUrl, needsSnapshot) => {
+        if (needsSnapshot)
+          requestSnapshot(decodeURIComponent(new URL(streamUrl).pathname.split('/').at(-1)!));
+      },
+      // SDK schedules only after local writes, suppresses a competing writer,
+      // and checks the remote snapshot before exporting a new one.
+      canUpload: () => !closed && !ledgerBlocked,
+      debounceMs: 30_000,
+      minBytesSinceRemoteSnapshot: 1024 * 1024,
+    },
     resolve: encryptedWorkspaceResolver(options.workspaceId, (room) => {
       const descriptor = encryptedWorkspaceRoom(options.workspaceId, room);
-      const get = () => {
-        if (closed) return Promise.reject(new Error('e2ee_closed'));
-        let existing = bindings.get(descriptor.resource);
-        if (!existing) {
-          existing = run(opened.runtime.binding(descriptor.resource, descriptor.model, writeEpoch));
-          bindings.set(descriptor.resource, existing);
-          existing.catch(() => {
-            if (bindings.get(descriptor.resource) === existing)
-              bindings.delete(descriptor.resource);
-          });
-        }
-        return existing;
-      };
+      const protectedProvider = epochTransition.provider((writeEpoch) => {
+        const getForEpoch = () => {
+          const key = `${descriptor.resource}:${writeEpoch}`;
+          let value = bindings.get(key);
+          if (!value) {
+            value = run(opened.runtime.binding(descriptor.resource, descriptor.model, writeEpoch));
+            bindings.set(key, value);
+            value.catch(() => {
+              if (bindings.get(key) === value) bindings.delete(key);
+            });
+          }
+          return value;
+        };
+        return {
+          maxSealOverheadBytes: 4096,
+          seal: async (input) => run((await getForEpoch()).seal(input)),
+          open: async (input) => run((await getForEpoch()).open(input)),
+        } satisfies PayloadProtectionProvider;
+      });
       return {
-        maxSealOverheadBytes: 4096,
+        ...protectedProvider,
         seal: async (input) => {
-          // Streams retries failed writes without reconnecting its healthy read
-          // stream. A temporary local storage failure must therefore use that
-          // next write attempt to refresh the ledger again. Security/validation
-          // failures remain fenced until an explicit normal refresh succeeds.
-          if (ledgerBlocked && retryLedgerOnSeal) await refreshInBackground();
-          if (ledgerBlocked) throw new Error('e2ee_invalid_ledger');
-          if (keyUpdateRequired || latestEpoch !== writeEpoch)
-            throw new Error('e2ee_key_update_required');
-          return run((await get()).seal(input));
+          // A seal runs inside the SDK save queue. Request recovery without
+          // awaiting it here: the queue must exit before any refresh can finish.
+          if (ledgerBlocked) {
+            retryLedger();
+            throw new Error('e2ee_invalid_ledger');
+          }
+          return protectedProvider.seal(input);
         },
-        open: async (input) => run((await get()).open(input)),
-      } satisfies PayloadProtectionProvider;
+      };
     }),
   };
   const tokens: CloudStreamsTokenPort = {
@@ -448,6 +584,12 @@ async function openWorkspace(
           credential: opened.credential,
         });
         bucket = provider.getBucketId;
+        tokensInUse.add(provider);
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            tokensInUse.delete(provider);
+          })
+        );
         return provider;
       }),
     // E2EE never attaches the old Machine RPC or presence token consumers.
@@ -481,8 +623,31 @@ async function openWorkspace(
       )
     );
   };
-  const refreshInBackground = () => {
+  const clearLedgerRetry = () => {
+    if (ledgerRetryTimer !== undefined) clearTimeout(ledgerRetryTimer);
+    ledgerRetryTimer = undefined;
+  };
+  const retryLedger = (): void => {
+    if (closed || !ledgerBlocked || refresh || ledgerRetryAttempts >= 3) return;
+    clearLedgerRetry();
+    ledgerRetryAttempts++;
+    void refreshInBackground(false);
+  };
+  const scheduleLedgerRetry = () => {
+    if (closed || !ledgerBlocked || ledgerRetryTimer !== undefined || ledgerRetryAttempts >= 3)
+      return;
+    ledgerRetryTimer = setTimeout(() => {
+      ledgerRetryTimer = undefined;
+      retryLedger();
+    }, [250, 1_000, 4_000][ledgerRetryAttempts]);
+    ledgerRetryTimer.unref?.();
+  };
+  const refreshInBackground = (resetRetries = true) => {
     if (closed) return Promise.resolve();
+    if (resetRetries) {
+      clearLedgerRetry();
+      ledgerRetryAttempts = 0;
+    }
     pending = true;
     if (refresh) return refresh;
     if (pairing) pairingConfirmed = false;
@@ -504,26 +669,15 @@ async function openWorkspace(
           });
           if (closed) return;
           checkpoint ??= { ...page.checkpoint };
-          retryLedgerOnSeal = false;
-          status = await run(
-            opened.runtime.ingest(page).pipe(
-              Effect.tapError((error) =>
-                Effect.sync(() => {
-                  ledgerBlocked = true;
-                  retryLedgerOnSeal = 'code' in error && error.code === 'storage';
-                })
-              )
-            )
-          ).catch((error) => {
+          status = await run(opened.runtime.ingest(page)).catch((error) => {
             // Unexpected defects are fenced too, without classifying them as
             // transient storage or weakening the verification boundary.
             ledgerBlocked = true;
             throw error;
           });
           ledgerBlocked = false;
-          retryLedgerOnSeal = false;
-          latestEpoch = status.epoch;
-          keyUpdateRequired ||= status.rotationRequired || latestEpoch !== writeEpoch;
+          ledgerRetryAttempts = 0;
+          epochTransition.observe(status);
           cursor = page.nextCursor ?? undefined;
         } while (cursor && !isClosed());
         if (!closed) {
@@ -531,7 +685,20 @@ async function openWorkspace(
             await confirmPairing(pairing);
             pairingConfirmed = true;
           }
-          if (requireActivation || pairing) await run(opened.runtime.receiveKeys());
+          if (epochTransition.needsUpdate()) {
+            await epochTransition.transition({
+              install: async () => {
+                await run(opened.runtime.receiveKeys());
+                const installed = await run(opened.runtime.status());
+                if (installed.hasCurrentKey && installed.epoch > epochTransition.epoch()) {
+                  for (const token of tokensInUse) await run(token.invalidate());
+                }
+                return installed;
+              },
+            });
+          } else if (requireActivation || pairing) {
+            await run(opened.runtime.receiveKeys());
+          }
         }
       }
     })()
@@ -545,10 +712,11 @@ async function openWorkspace(
       })
       .finally(() => {
         refresh = undefined;
+        scheduleLedgerRetry();
       });
     return refresh;
   };
-  // Startup is one of the three refresh triggers; no network request is awaited by open.
+  // Startup schedules the first refresh; local open never awaits network work.
   void refreshInBackground();
   return {
     assertPairingConfirmed: () => {
@@ -560,12 +728,20 @@ async function openWorkspace(
     tokens,
     bucketId: () => bucket?.(),
     status: () =>
-      closed ? Promise.reject(new Error('e2ee_closed')) : run(opened.runtime.status()),
-    refresh: refreshInBackground,
+      closed
+        ? Promise.reject(new Error('e2ee_closed'))
+        : run(opened.runtime.status()).then((status) => ({
+            ...status,
+            epochPhase: epochTransition.phase(),
+          })),
+    refresh: () => refreshInBackground(),
     close: () => {
       closed = true;
+      clearLedgerRetry();
       return (closeReceipt ??= (async () => {
+        await epochTransition.close();
         await refresh;
+        await Promise.allSettled([...snapshotFlights]);
         await Effect.runPromise(Scope.close(scope, Exit.void));
       })());
     },

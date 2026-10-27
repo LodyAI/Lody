@@ -20,6 +20,7 @@
 - Resume first Windows ACL setup only in an empty custody directory; otherwise validate only.
 - `runtime.ts` composes Feed/VerifiedLedger, installed keys and optional receiver.
   Open/status are offline; cloud requests stay in cloud-cli-port.
+  Report damaged history/pins distinctly; never reset trusted pins from remote hints.
 - Journal originals before feed/pin advancement. Rebase after 64 more records, core pin
   first. Retired cache cleanup cannot fail local open.
 - No plaintext RPC, presence, attachments or scheduled automation on encrypted workspaces
@@ -48,8 +49,9 @@
   Activation refreshes the verified ledger and mailbox and acknowledges only an
   installed current key; temporary failure leaves the same pairing retryable.
 
-- Pin M2 write epoch. rotationRequired only prompts administrators to update keys; it
-  must not latch sends off or block workspace use. Do not add rotation-hint send guards.
+- Staging read denial/I/O failure cannot block independently verified mailbox reception.
+- Retain old-epoch sends; select confirmed keys per operation. Rotation hints never pause.
+  [M3 selection](../../../../../.agents/notes/proposed/architecture/2026-10-27-e2ee-epoch-receive-barrier.md).
 - Prepared bindings cannot start content replicas. Activate only the native ledger/key
   receiver: verify current installed key, close temporary owner, THEN write `activation.json`
   before Fleet attaches rooms. The marker grants no authority; match genesis/device.
@@ -70,9 +72,10 @@
 - Only activation/binding/device-original ENOENT means pairing wait. Check the
   original before custody init; stale hints cannot trigger keyring probes. Preserve
   other file errors/Fleet retry; never cache transient storage as missing pairing.
-- Ingest storage failure fences writes until verified refresh. Next seal coalesces one
-  storage-error refresh without reconnecting healthy readers. Validation/conflict needs
-  explicit normal refresh; seal cannot auto-recover it.
+- Ingest failure fences new seals until verified refresh; keep the last verified view
+  and healthy readers. Retry at most three times per failure episode; explicit refresh
+  restarts that budget. Seal may request retry but never await it in the SDK save queue.
+  Never skip rejected records or reset pins. Close cancels pending retry timers.
 
 ## Local machine pairing
 
@@ -97,7 +100,9 @@
   `workspace-catalog.json.e2ee`, ordinary rows only in v1 `workspaces`; lock both writes.
   Ordinary-only mutations never rewrite encrypted rows. Old v1 writers cannot erase
   the sidecar or account/machine-bound `.e2ee-invalid` marker.
-- Never overwrite unreadable sidecars; retain errors in memory and usable ordinary rows.
+- Offline/ordinary writes never replace unreadable sidecars. Only authenticated online-list
+  reconciliation may archive a corrupt `.e2ee` file before rebuilding; permission and marker
+  errors stay errors. Retain originals, failure receipts and usable ordinary rows.
   Persist ordinary remote-list results; return degraded receipts with current auth/revocation
   checks. Atomically publish `.e2ee-invalid` BEFORE encrypted updates; retain through failed
   writes/cleanup until healthy publication. Derive unavailable from the marker, never unknown
@@ -109,3 +114,6 @@
 - Never cache an unimplemented content mode; `export` refuses and `sync` skips schedules
   for encrypted workspaces
   ([note](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-cli-review-fixes.md)).
+
+- Reset: same-user socket; drain, exclusive sibling lease, archive whole dir;
+  fresh approval/KEK. OS/unknown stays OS.

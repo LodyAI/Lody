@@ -14,7 +14,9 @@ import {
 } from '@lody/e2ee-core';
 import {
   Bytes,
+  LedgerError,
   hashRecordBytes,
+  getCommittedEpochStagingKey,
   hasVerifiedCheckpoint,
   restoreVerifiedState,
   verifyLedgerEffect,
@@ -26,6 +28,7 @@ import {
   InstalledKeyStore,
   KeyProtector,
   KeyMailbox,
+  EpochStagingStore,
   LedgerFeedStore,
   LedgerPinStore,
   LocalStoreError,
@@ -43,9 +46,19 @@ import { makeStreamsUpdateBinding } from '@lody/e2ee-core/adapters/loro-streams'
 
 /** Safe local failures. Raw errors and decrypted material never cross this boundary. */
 export class CliE2eeRuntimeError extends Data.TaggedError('CliE2eeRuntimeError')<{
-  readonly code: 'invalid-input' | 'storage' | 'local-evidence-conflict' | 'closed';
+  readonly code:
+    | 'invalid-input'
+    | 'storage'
+    | 'local-evidence-conflict'
+    | 'closed'
+    | 'local-history-recovery-required'
+    | 'trusted-pin-unavailable';
 }> {}
 const failure = (code: CliE2eeRuntimeError['code']) => new CliE2eeRuntimeError({ code });
+const pinFailure = (error: LocalStoreError) =>
+  error.store === 'LedgerPinStore' && error.reason === 'corrupt'
+    ? failure('trusted-pin-unavailable')
+    : error;
 const hex = (value: Uint8Array) => Buffer.from(value).toString('hex');
 const unhex = (value: string) => {
   if (!/^(?:[0-9a-f]{2})+$/.test(value)) throw failure('invalid-input');
@@ -54,7 +67,21 @@ const unhex = (value: string) => {
 const sql = <A>(work: () => A) =>
   Effect.try({
     try: work,
-    catch: (error) => (error instanceof CliE2eeRuntimeError ? error : failure('storage')),
+    catch: (error) =>
+      error instanceof CliE2eeRuntimeError
+        ? error
+        : failure(
+            error instanceof Error &&
+              'code' in error &&
+              typeof error.code === 'string' &&
+              (/^(?:SQLITE_CORRUPT(?:_.*)?|SQLITE_NOTADB)$/.test(error.code) ||
+                (error.code === 'ERR_SQLITE_ERROR' &&
+                  'errcode' in error &&
+                  typeof error.errcode === 'number' &&
+                  [11, 26].includes(error.errcode & 0xff)))
+              ? 'local-history-recovery-required'
+              : 'storage'
+          ),
   });
 type FeedOrigin = Parameters<typeof LedgerFeed.layer>[0]['origin'];
 type HistoryRow = { position: number; record: Uint8Array; locator: string | null };
@@ -102,6 +129,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
   device: NodeE2eeDevice;
   genesisRecord: Uint8Array;
   mailbox?: KeyMailbox['Service'];
+  staging?: Pick<EpochStagingStore['Service'], 'readGroup'>;
 }) {
   const genesisRecord = new Uint8Array(options.genesisRecord);
   const genesis = yield* Effect.fromResult(
@@ -118,9 +146,14 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
   const db = yield* Effect.acquireRelease(
     sql(() => {
       const connection = new DatabaseSync(join(options.directory, 'history.sqlite'));
-      connection.exec(
-        'PRAGMA synchronous=FULL; PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS records(position INTEGER PRIMARY KEY,record BLOB NOT NULL,locator TEXT); CREATE TABLE IF NOT EXISTS cache(id INTEGER PRIMARY KEY CHECK(id=1),name TEXT NOT NULL,origin TEXT)'
-      );
+      try {
+        connection.exec(
+          'PRAGMA synchronous=FULL; PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS records(position INTEGER PRIMARY KEY,record BLOB NOT NULL,locator TEXT); CREATE TABLE IF NOT EXISTS cache(id INTEGER PRIMARY KEY CHECK(id=1),name TEXT NOT NULL,origin TEXT)'
+        );
+      } catch (error) {
+        connection.close();
+        throw error;
+      }
       connection
         .prepare('INSERT OR IGNORE INTO records(position,record) VALUES(0,?)')
         .run(genesisRecord);
@@ -155,9 +188,9 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
       mode: 'create-or-open',
     })
   ).pipe(Layer.provideMerge(base));
-  const local = yield* Layer.buildWithScope(stores, scope);
+  const local = yield* Layer.buildWithScope(stores, scope).pipe(Effect.mapError(pinFailure));
   const pins = Context.get(local, LedgerPinStore);
-  const pin = yield* pins.read();
+  const pin = yield* pins.read().pipe(Effect.mapError(pinFailure));
   const originals = yield* sql(
     () =>
       db
@@ -269,7 +302,19 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
       anchor: genesis,
       records: originals.map((row) => row.record),
       checkpoint: endpoint,
-    });
+    }).pipe(
+      Effect.mapError((error) =>
+        error instanceof LedgerError &&
+        ![
+          'native-unavailable',
+          'upgrade-required',
+          'unknown-version',
+          'unknown-operation',
+        ].includes(error.code)
+          ? failure('local-history-recovery-required')
+          : error
+      )
+    );
     if (pin && !Result.getOrThrow(hasVerifiedCheckpoint(view, pin)))
       return yield* failure('local-evidence-conflict');
     const name = `ledger-feed-${randomUUID()}.sqlite`;
@@ -341,6 +386,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
   const receiver = receiving ? Context.get(receiving, KeyReceiver) : undefined;
   const repair = receiving ? Context.get(receiving, KeyRepair) : undefined;
   const guard = () => (closed ? Effect.fail(failure('closed')) : Effect.void);
+  let retainedWriteEpoch: number | undefined;
   const status = Effect.fnUntraced(function* () {
     yield* guard();
     const state = yield* feed.current();
@@ -349,7 +395,21 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
     const key = yield* Effect.result(installed.check(epoch));
     if (Result.isFailure(key) && !['missing-key', 'unauthorized'].includes(key.failure.reason))
       return yield* key.failure;
+    let writeEpoch: number | null = Result.isSuccess(key) ? epoch : null;
+    if (Result.isFailure(key) && key.failure.reason === 'missing-key') {
+      for (let candidate = retainedWriteEpoch ?? epoch - 1; candidate >= 0; candidate -= 1) {
+        const older = yield* Effect.result(installed.check(candidate));
+        if (Result.isSuccess(older)) {
+          writeEpoch = candidate;
+          break;
+        }
+        if (older.failure.reason === 'unauthorized') break;
+        if (older.failure.reason !== 'missing-key') return yield* older.failure;
+      }
+    }
+    if (writeEpoch !== null) retainedWriteEpoch = writeEpoch;
     return {
+      writeEpoch,
       length: view.length,
       headHash: hex(view.head.toBytes()),
       position: state.bootstrap ? null : state.offset,
@@ -488,6 +548,26 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
       receiver
         ? Effect.gen(function* () {
             yield* guard();
+            const view = yield* verified.current();
+            const epoch = view.inspectState().epoch.number;
+            const checked = yield* Effect.result(installed.check(epoch));
+            if (options.staging && epoch > 0 && Result.isFailure(checked)) {
+              if (checked.failure.reason !== 'missing-key') return yield* checked.failure;
+              const located = getCommittedEpochStagingKey(view, epoch);
+              if (Result.isSuccess(located)) {
+                // Staging access is optional (late recipients are denied). Mailbox
+                // reception independently authenticates and installs its own envelopes.
+                const group = yield* options.staging
+                  .readGroup(located.success)
+                  .pipe(Effect.catch(() => Effect.succeed(null)));
+                if (
+                  group?.envelopes.some(
+                    (row) => row.recipient === hex(options.device.publicKey.toBytes())
+                  )
+                )
+                  yield* receiver.receiveStagedGroup(group);
+              } else if (view.verification !== 'endorsed-snapshot') return yield* located.failure;
+            }
             if (repair) yield* repair.flush();
             yield* receiver.resume();
             for (let cursor: string | null = null; ;) {
@@ -510,6 +590,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
               cursor = page.next;
             }
             yield* receiver.flushReports();
+            return undefined;
           })
         : Effect.fail(failure('invalid-input')),
     credential: () => options.custody.deviceCredential(genesis, options.device.publicKey),

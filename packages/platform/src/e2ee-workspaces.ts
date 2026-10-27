@@ -70,6 +70,8 @@ export interface E2eeRuntimeStatus {
   readonly rotationRequired: boolean;
   readonly deviceKind: 'personal' | 'machine' | 'recovery' | null;
   readonly hasCurrentKey: boolean;
+  /** Confirmed retained key usable for sends while current-key reception retries. */
+  readonly writeEpoch?: number | null;
   /** Local credential availability only; the credential remains in the host. */
   readonly hasDeviceCredential?: boolean;
   readonly continuityPending: boolean;
@@ -130,16 +132,26 @@ export interface E2eeWorkspaceRuntime {
     workspaceId: string,
     pairingSessionId: string
   ): Promise<{ admitted: true; ready: boolean }>;
-  refresh(workspaceId: string): Promise<E2eeRuntimeStatus>;
+  /** Ledger-only refresh separates discovery from retryable background key reception. */
+  refresh(workspaceId: string, options?: { installKeys?: boolean }): Promise<E2eeRuntimeStatus>;
   contentStreamsToken(
     workspaceId: string,
-    rejectedToken?: string
+    rejectedToken?: string,
+    requestSnapshotFor?: string
   ): Promise<import('@lody/cloud-api').E2eeContentToken>;
   seal(
     workspaceId: string,
     input: E2eeContentSeal
   ): Promise<{ header: Uint8Array; sealed: Uint8Array }>;
   openContent(workspaceId: string, input: E2eeContentOpen): Promise<Uint8Array>;
+  /** Explicitly archive local originals and require fresh independently approved pairing. */
+  resetIdentity?(input: {
+    workspaceId?: string;
+    resetId: string;
+    confirm: true;
+  }): Promise<{ archive: string | null }>;
+  /** Archive the local CLI machine identity; retain the desktop personal identity. */
+  resetLocalAgent?(input: { workspaceId: string; resetId: string; confirm: true }): Promise<void>;
   recordCreated(input: {
     workspaceId: string;
     genesisHash: string;
@@ -150,6 +162,13 @@ export interface E2eeWorkspaceRuntime {
     observed?: { genesisHash: string; headHash: string; length: number }
   ): Promise<E2eeRuntimeStatus>;
   close(workspaceId: string): Promise<void>;
+  /** Read retained verified identity without granting this window a reader.
+   * The host binds the expected account and releases its temporary read before
+   * returning. Missing on older hosts; callers must not fall back to status. */
+  readIdentity?(input: { accountId: string; workspaceId: string }): Promise<{
+    workspaceId: string;
+    genesisHash: string;
+  }>;
   status(workspaceId: string): Promise<E2eeRuntimeStatus>;
   ingestLedgerRecords(
     workspaceId: string,

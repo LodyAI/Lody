@@ -949,3 +949,21 @@ void test('an unreserved old identity refusal removes only renderer intent and r
   assert.deepEqual(stored(directory), saved)
   assert.deepEqual(await prepare(directory), original)
 })
+
+for (const image of ['not a SQLite database', 'corrupt SQLite header'])
+  void test(`definite bootstrap SQLite damage is recoverable corruption: ${image}`, async (t) => {
+    const directory = await fixture(t)
+    await prepare(directory)
+    const path = join(directory, 'creations.sqlite')
+    const bytes = await readFile(path)
+    const damaged =
+      image === 'not a SQLite database'
+        ? Buffer.from('damaged original SQLite image')
+        : Buffer.from(bytes)
+    if (image === 'corrupt SQLite header') damaged[100] = 0xff
+    await writeFile(path, damaged)
+    const result = await execute(Effect.result(openOwner(directory)))
+    assert.equal(result._tag, 'Failure')
+    assert.equal(result.failure.code, 'corrupt')
+    assert.deepEqual(await readFile(path), damaged)
+  })

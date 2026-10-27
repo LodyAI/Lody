@@ -21,3 +21,7 @@ Credential files are scoped by genesis and signing public key. The former
 single-genesis location is read-only for the same current v1 blob with exact AAD;
 no conversion, rewrite, deletion or older-format import is permitted. New identities
 publish separate originals and never reuse another identity's credential.
+
+Missing KEKs with surviving originals return identity-lost; access/mode failures
+return permissions for explicit repair. Host reset archives a closed identity as a
+whole before opening independent custody; generic custody never replaces originals.

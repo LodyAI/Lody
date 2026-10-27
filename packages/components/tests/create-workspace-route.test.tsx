@@ -228,8 +228,29 @@ describe('create workspace route with a saved encrypted request', () => {
     expect(button('e2ee.create.resume')).toBeDefined();
   });
 
+  it('resumes a healthy request beside malformed and mismatched intents without changing their bytes', async () => {
+    fixture.creationEnabled = true;
+    const damaged = 'lody-e2ee-pending-creation:account:broken';
+    const alias = 'lody-e2ee-pending-creation:account:alias';
+    const malformed = '{broken';
+    const mismatched = JSON.stringify({ ...pending, name: 'Conflicting alias' });
+    localStorage.setItem(damaged, malformed);
+    localStorage.setItem(alias, mismatched);
+    savePendingE2eeWorkspace(localStorage, pending);
+    await render();
+    expect(input('workspace-name').value).toBe('Saved');
+    await click('e2ee.create.resume');
+    expect(container!.textContent).toContain('e2ee.create.failed');
+    expect(listPendingE2eeWorkspaces(localStorage, 'account')).toEqual([pending]);
+    expect(localStorage.getItem(damaged)).toBe(malformed);
+    expect(localStorage.getItem(alias)).toBe(mismatched);
+    const fresh = { ...pending, requestId: 'fresh', slug: 'fresh' };
+    savePendingE2eeWorkspace(localStorage, fresh);
+    expect(listPendingE2eeWorkspaces(localStorage, 'account')).toEqual([fresh, pending]);
+  });
+
   it.each([false, true])(
-    'treats an unreadable saved request as none unless encrypted creation is on (%s)',
+    'isolates an unreadable saved request while new creation remains available (%s)',
     async (enabled) => {
       fixture.creationEnabled = enabled;
       localStorage.setItem('lody-e2ee-pending-creation:account:broken', '{broken');
@@ -246,11 +267,10 @@ describe('create workspace route with a saved encrypted request', () => {
         });
       await type('workspace-name', 'Plain');
       await type('workspace-slug', 'plain');
-      expect(button('organization.createWorkspace')!.disabled).toBe(enabled);
-      if (!enabled) {
-        await click('organization.createWorkspace');
-        expect(fixture.createOrganization).toHaveBeenCalledWith('Plain', 'plain');
-      }
+      expect(button('organization.createWorkspace')!.disabled).toBe(false);
+      await click('organization.createWorkspace');
+      expect(fixture.createOrganization).toHaveBeenCalledWith('Plain', 'plain');
+      expect(localStorage.getItem('lody-e2ee-pending-creation:account:broken')).toBe('{broken');
     }
   );
 });

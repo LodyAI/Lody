@@ -324,5 +324,39 @@ export function makeDesktopLocalPairing(input: {
       }
     })
   })
-  return { context, retireSuperseded, stage, approve, confirmed }
+  const reset = Effect.fnUntraced(function* (resetId: string) {
+    yield* input.current()
+    yield* sql(() => {
+      input.db.exec(
+        'CREATE TABLE IF NOT EXISTS archived_local_pairings(reset_id TEXT PRIMARY KEY, session TEXT, material TEXT, request_id TEXT, record BLOB)'
+      )
+      input.db.exec('BEGIN IMMEDIATE')
+      try {
+        if (
+          !input.db.prepare('SELECT 1 FROM archived_local_pairings WHERE reset_id=?').get(resetId)
+        ) {
+          const row = read()
+          input.db
+            .prepare('INSERT INTO archived_local_pairings VALUES(?,?,?,?,?)')
+            .run(
+              resetId,
+              row?.session ?? null,
+              row?.material ?? null,
+              row?.request_id ?? null,
+              row?.record ?? null
+            )
+          input.db
+            .prepare(
+              'UPDATE local_pairing SET session=?,material=NULL,request_id=NULL,record=NULL WHERE id=1'
+            )
+            .run(randomBytes(16).toString('hex'))
+        }
+        input.db.exec('COMMIT')
+      } catch (cause) {
+        input.db.exec('ROLLBACK')
+        throw cause
+      }
+    })
+  })
+  return { context, retireSuperseded, stage, approve, confirmed, reset }
 }
