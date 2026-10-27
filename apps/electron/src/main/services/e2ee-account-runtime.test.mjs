@@ -1517,4 +1517,11 @@ void test('isolated desktop workspace reset archives real custody and journals, 
     api.withDesktopE2eeAccount((owner) => owner.host.open('sibling'), 'sibling'),
     /e2ee_missing-binding/
   )
+  const afterAccountReset = await create('first')
+  await api.resetDesktopE2eeIdentity({ workspaceId: 'first', resetId })
+  assert.equal(
+    (await api.withDesktopE2eeAccount((owner) => owner.host.localPairingContext('first'), 'first'))
+      .frontendSigningPublicKey,
+    afterAccountReset.signingPublicKey
+  )
 })

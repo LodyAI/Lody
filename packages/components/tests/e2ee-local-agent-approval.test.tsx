@@ -18,7 +18,7 @@ describe('local encrypted agent approval', () => {
   let protection: 'file' | 'os-keystore' = 'file';
   let runtime: Pick<
     E2eeWorkspaceRuntime,
-    'prepareLocalAgent' | 'admitLocalAgent' | 'status' | 'resetLocalAgent'
+    'prepareLocalAgent' | 'admitLocalAgent' | 'status' | 'resetLocalAgent' | 'resetIdentity'
   >;
   beforeEach(() => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -65,7 +65,10 @@ describe('local encrypted agent approval', () => {
     const prepareOriginal = runtime.prepareLocalAgent;
     let broken = true;
     runtime.prepareLocalAgent = async (...args) => {
-      if (broken) throw new Error('e2ee_machine_corrupt');
+      if (broken)
+        throw new Error(
+          "Error invoking remote method 'e2ee:prepareLocalAgent': Error: e2ee_machine_corrupt"
+        );
       if (!prepareOriginal) throw new Error('missing fixture preparation');
       return prepareOriginal(...args);
     };
@@ -90,6 +93,27 @@ describe('local encrypted agent approval', () => {
     expect(admitted).toBe(false);
     await click('e2ee.localAgent.allow');
     expect(admitted).toBe(true);
+  });
+
+  it('a desktop status failure offers the desktop identity reset, not machine reset', async () => {
+    let desktopReset = false;
+    runtime.status = async () => {
+      throw new Error("Error invoking remote method 'e2ee:status': Error: e2ee_corrupt");
+    };
+    runtime.resetIdentity = async () => {
+      desktopReset = true;
+      return { archive: '/synthetic/archive' };
+    };
+    runtime.resetLocalAgent = async () => {
+      throw new Error('wrong recovery scope');
+    };
+    await render();
+    expect(container.textContent).toContain('e2ee.identity.resetWorkspace');
+    expect(container.textContent).not.toContain('e2ee.identity.resetMachine');
+    await click('e2ee.identity.resetWorkspace');
+    await click('e2ee.identity.confirm');
+    expect(desktopReset).toBe(true);
+    expect(admitted).toBe(false);
   });
 
   it('permission repair offers retry without an identity reset', async () => {

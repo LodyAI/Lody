@@ -27,7 +27,10 @@ export function E2eeIdentityRecovery({
   const [failure, setFailure] = useState(false);
   // An uncertain response retries the same reset, never archives a newer identity.
   const resetIds = useRef(new Map<string, string>());
-  const code = error.replace(/^e2ee_(?:machine_)?/, '');
+  const code =
+    /\be2ee_(?:machine_)?(permissions|custody_unavailable|unavailable|basic-text|identity-lost|corrupt|conflict|missing-binding|rewrap-failed)\b/.exec(
+      error
+    )?.[1] ?? '';
   const permissions = code === 'permissions';
   const locked = ['custody_unavailable', 'unavailable', 'basic-text'].includes(code);
   const lost = [

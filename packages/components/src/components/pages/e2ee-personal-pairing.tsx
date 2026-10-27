@@ -98,8 +98,9 @@ function PersonalPairingSession({
           if (pending) setPhase('waiting');
           setRecovering(false);
         },
-        () => {
+        (error) => {
           if (cancelled) return;
+          setRecoveryError(error instanceof Error ? error.message : '');
           setPhase('error');
           setRecovering(false);
         }
@@ -219,7 +220,7 @@ function PersonalPairingSession({
       }
     });
   return (
-    <>
+    <Card.Root>
       {phase === 'error' && (
         <E2eeIdentityRecovery
           error={recoveryError}
@@ -233,113 +234,107 @@ function PersonalPairingSession({
           }}
         />
       )}
-      <Card.Root>
-        <Card.Header>
-          <Card.Title>{t('e2ee.pair.title')}</Card.Title>
-          <Card.Description>{t('e2ee.pair.help')}</Card.Description>
-        </Card.Header>
-        <div {...stylex.props(styles.actions)}>
-          {canApprove && !offer && (
-            <Button
-              variant="secondary"
-              disabled={phase === 'busy' || recovering}
-              onClick={() => void createOffer()}
-            >
-              {t('e2ee.pair.create')}
-            </Button>
+      <Card.Header>
+        <Card.Title>{t('e2ee.pair.title')}</Card.Title>
+        <Card.Description>{t('e2ee.pair.help')}</Card.Description>
+      </Card.Header>
+      <div {...stylex.props(styles.actions)}>
+        {canApprove && !offer && (
+          <Button
+            variant="secondary"
+            disabled={phase === 'busy' || recovering}
+            onClick={() => void createOffer()}
+          >
+            {t('e2ee.pair.create')}
+          </Button>
+        )}
+      </div>
+      {offer && (
+        <>
+          <p>{t('e2ee.pair.transfer')}</p>
+          <div {...stylex.props(styles.qr)}>
+            <LedgerQrCode payload={JSON.stringify(offer)} size={200} label={t('e2ee.pair.code')} />
+          </div>
+          <Textarea aria-label={t('e2ee.pair.code')} value={JSON.stringify(offer)} readOnly />
+          <Button
+            variant="secondary"
+            disabled={phase === 'busy' || recovering}
+            onClick={() => void inspect()}
+          >
+            {t('e2ee.pair.inspect')}
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={phase === 'busy' || recovering || phase === 'published'}
+            onClick={() => void cancel(offer.pairingSessionId)}
+          >
+            {t('common.cancel')}
+          </Button>
+        </>
+      )}
+      {!canApprove && !joining && (
+        <>
+          <Textarea
+            aria-label={t('e2ee.pair.code')}
+            value={input}
+            maxLength={20000}
+            onChange={(event) => setInput(event.target.value)}
+          />
+          <Button
+            variant="secondary"
+            disabled={!input || phase === 'busy' || recovering}
+            onClick={() => void prepare()}
+          >
+            {t('e2ee.pair.trust')}
+          </Button>
+        </>
+      )}
+      {preview && (
+        <>
+          <p>{t('e2ee.pair.compare')}</p>
+          <p {...stylex.props(styles.code)}>{preview.signingPublicKey}</p>
+          <Button
+            disabled={phase === 'busy' || phase === 'published'}
+            onClick={() => void approve()}
+          >
+            {t(phase === 'retryPublication' ? 'e2ee.pair.retryPublication' : 'e2ee.pair.approve')}
+          </Button>
+        </>
+      )}
+      {joining && (
+        <>
+          {joining.signingPublicKey && (
+            <p {...stylex.props(styles.code)}>{joining.signingPublicKey}</p>
           )}
-        </div>
-        {offer && (
-          <>
-            <p>{t('e2ee.pair.transfer')}</p>
-            <div {...stylex.props(styles.qr)}>
-              <LedgerQrCode
-                payload={JSON.stringify(offer)}
-                size={200}
-                label={t('e2ee.pair.code')}
-              />
-            </div>
-            <Textarea aria-label={t('e2ee.pair.code')} value={JSON.stringify(offer)} readOnly />
+          <div {...stylex.props(styles.actions)}>
+            <Button
+              disabled={phase === 'busy' || phase === 'cancelled'}
+              onClick={() => void claim()}
+            >
+              {t('e2ee.pair.claim')}
+            </Button>
             <Button
               variant="secondary"
-              disabled={phase === 'busy' || recovering}
-              onClick={() => void inspect()}
+              disabled={phase === 'busy' || phase === 'ready'}
+              onClick={() => void prepare(joining.offer)}
             >
-              {t('e2ee.pair.inspect')}
+              {t('e2ee.pair.retrySubmission')}
             </Button>
             <Button
               variant="ghost"
-              disabled={phase === 'busy' || recovering || phase === 'published'}
-              onClick={() => void cancel(offer.pairingSessionId)}
+              disabled={phase === 'busy' || phase === 'cancelled' || phase === 'ready'}
+              onClick={() => void cancel(joining.pairingSessionId)}
             >
               {t('common.cancel')}
             </Button>
-          </>
-        )}
-        {!canApprove && !joining && (
-          <>
-            <Textarea
-              aria-label={t('e2ee.pair.code')}
-              value={input}
-              maxLength={20000}
-              onChange={(event) => setInput(event.target.value)}
-            />
-            <Button
-              variant="secondary"
-              disabled={!input || phase === 'busy' || recovering}
-              onClick={() => void prepare()}
-            >
-              {t('e2ee.pair.trust')}
-            </Button>
-          </>
-        )}
-        {preview && (
-          <>
-            <p>{t('e2ee.pair.compare')}</p>
-            <p {...stylex.props(styles.code)}>{preview.signingPublicKey}</p>
-            <Button
-              disabled={phase === 'busy' || phase === 'published'}
-              onClick={() => void approve()}
-            >
-              {t(phase === 'retryPublication' ? 'e2ee.pair.retryPublication' : 'e2ee.pair.approve')}
-            </Button>
-          </>
-        )}
-        {joining && (
-          <>
-            {joining.signingPublicKey && (
-              <p {...stylex.props(styles.code)}>{joining.signingPublicKey}</p>
-            )}
-            <div {...stylex.props(styles.actions)}>
-              <Button
-                disabled={phase === 'busy' || phase === 'cancelled'}
-                onClick={() => void claim()}
-              >
-                {t('e2ee.pair.claim')}
-              </Button>
-              <Button
-                variant="secondary"
-                disabled={phase === 'busy' || phase === 'ready'}
-                onClick={() => void prepare(joining.offer)}
-              >
-                {t('e2ee.pair.retrySubmission')}
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={phase === 'busy' || phase === 'cancelled' || phase === 'ready'}
-                onClick={() => void cancel(joining.pairingSessionId)}
-              >
-                {t('common.cancel')}
-              </Button>
-            </div>
-          </>
-        )}
-        {phase !== 'idle' && phase !== 'busy' && (
-          <p role={phase === 'error' ? 'alert' : 'status'} {...stylex.props(styles.error)}>
-            {t(`e2ee.pair.${phase}`)}
-          </p>
-        )}
-      </Card.Root>
-    </>
+          </div>
+        </>
+      )}
+      {phase !== 'idle' && phase !== 'busy' && (
+        <p role={phase === 'error' ? 'alert' : 'status'} {...stylex.props(styles.error)}>
+          {t(`e2ee.pair.${phase}`)}
+        </p>
+      )}
+    </Card.Root>
   );
 }

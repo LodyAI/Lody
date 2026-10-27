@@ -33,7 +33,7 @@ export function E2eeLocalAgentApproval({
   runtime:
     | Pick<
         E2eeWorkspaceRuntime,
-        'prepareLocalAgent' | 'admitLocalAgent' | 'status' | 'resetLocalAgent'
+        'prepareLocalAgent' | 'admitLocalAgent' | 'status' | 'resetLocalAgent' | 'resetIdentity'
       >
     | undefined;
   enabled: boolean;
@@ -43,6 +43,7 @@ export function E2eeLocalAgentApproval({
     'idle' | 'preparing' | 'confirm' | 'admitting' | 'waiting' | 'error' | 'ready'
   >('idle');
   const [recoveryError, setRecoveryError] = useState('');
+  const [recoveryMachine, setRecoveryMachine] = useState(true);
   const [admitted, setAdmitted] = useState(false);
   const [pairing, setPairing] = useState<Pairing | null>(null);
   const approved = useRef(false);
@@ -55,8 +56,12 @@ export function E2eeLocalAgentApproval({
         (status) => {
           if (current) setAvailable(status.hasDeviceCredential === true);
         },
-        () => {
-          if (current) setPhase('error');
+        (error) => {
+          if (current) {
+            setRecoveryMachine(false);
+            setRecoveryError(error instanceof Error ? error.message : '');
+            setPhase('error');
+          }
         }
       );
     return () => {
@@ -92,7 +97,10 @@ export function E2eeLocalAgentApproval({
         setPhase(result.ready ? 'ready' : 'waiting');
       }
     } catch (error) {
-      if (active.current && error instanceof Error) setRecoveryError(error.message);
+      if (active.current && error instanceof Error) {
+        setRecoveryError(error.message);
+        setRecoveryMachine(/\be2ee_machine_/.test(error.message));
+      }
       if (active.current)
         setPhase(
           error instanceof Error && error.message.includes('e2ee_local_agent_pending')
@@ -120,7 +128,10 @@ export function E2eeLocalAgentApproval({
         setPhase('confirm');
       }
     } catch (error) {
-      if (active.current && error instanceof Error) setRecoveryError(error.message);
+      if (active.current && error instanceof Error) {
+        setRecoveryError(error.message);
+        setRecoveryMachine(/\be2ee_machine_/.test(error.message));
+      }
       if (active.current)
         setPhase(
           error instanceof Error && error.message.includes('e2ee_local_agent_pending')
@@ -162,7 +173,7 @@ export function E2eeLocalAgentApproval({
           error={recoveryError}
           runtime={runtime}
           workspaceId={workspaceId}
-          machine
+          machine={recoveryMachine}
           onReset={() => {
             approved.current = false;
             setPairing(null);

@@ -386,14 +386,22 @@ export function resetDesktopE2eeIdentity(input: { workspaceId?: string; resetId:
             const directory = input.workspaceId
               ? identityDirectory(accountId, input.workspaceId)
               : accountDirectory(accountId)
-            const previous = yield* completedE2eeIdentityReset(directory, input.resetId)
+            const receipts = join(
+              app.getPath('userData'),
+              'e2ee-reset-receipts',
+              createHash('sha256').update(accountId).digest('hex')
+            )
+            const previous = yield* completedE2eeIdentityReset(directory, input.resetId, receipts)
             if (previous) return previous
             if (input.workspaceId) {
               const owner = owners.get(directory)
               if (owner) yield* closeOwner(owner)
             } else yield* closeCurrent
+            if (input.workspaceId) yield* leaseE2eeIdentity(accountDirectory(accountId))
             yield* leaseE2eeIdentity(directory, true)
-            return { archive: yield* archiveE2eeIdentity(directory, Date.now(), input.resetId) }
+            return {
+              archive: yield* archiveE2eeIdentity(directory, Date.now(), input.resetId, receipts)
+            }
           })
         )
       )
