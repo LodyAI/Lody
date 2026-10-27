@@ -32,13 +32,17 @@ changes, downgrade readers or gitlink changes are introduced.
 
 Desktop main and CLI custody keep all keys and signing. Existing header 4 signs
 the complete encrypted snapshot frame including its continuation; room AAD binds
-workspace/resource/model. Sealing checks current epoch and writer permission
-before and after signing. Reading verifies historical signature before key lookup,
+workspace/resource/model. After composing merged #1954, a seal keeps its single
+selected `writeEpoch` across header construction, encryption and signing, including
+an already admitted seal that finishes during a transition. Pending/manual key
+rotation may use a retained published epoch no later than the current one; current
+writer permission is still checked before and after signing. Normal and repair
+snapshots use this same transition provider. Reading verifies historical signature before key lookup,
 then AEAD and the exact native continuation. The owner's later decision on the same
 date supersedes the initial current-writer read gate: historically admitted devices
 remain acceptable snapshot signers after revocation; never-admitted keys are rejected.
 The final snapshot check reuses owned verified bytes and genuine ledger continuation.
-Upload still requires a current writer and epoch. There are no production encrypted
+Upload still requires a current writer and its selected published epoch. There are no production encrypted
 workspaces to migrate and no old snapshot-format reader is retained.
 
 ## Scheduling and recovery
@@ -103,6 +107,14 @@ observed a competing writer, under the production 1 MiB gate. Concurrent native
 plaintext joins retain one owner and close all live work. Core accepts revoked signers before open/during key lookup
 and rejects never-admitted signers plus workspace/document replay.
 Affected checks and reversible ablations are reported in the PR.
+
+Lab coverage distinguishes successful verified-history fallback from a rejected
+snapshot whose history is already trimmed. The latter retains the SDK's validated
+410 recovery cause rather than misclassifying an earlier provider error as local
+corruption. SQL refusal still preserves both native state and cursor. The Loro/Flock
+three-role plans check automatic retry of the next authentic bootstrap and reopen
+its durable result; they do not fabricate host history. The old CLI actor failure
+is fixed by main's approved Claude submodule pin, with its original assertion kept.
 
 The existing finite Effect core remains native. Repo/SDK Promise integration stays
 at its existing application facade; migrating those unfinished dependencies would

@@ -4,6 +4,7 @@ import { Clock, ChevronLeft, ChevronRight, Paperclip, Plug, Plus } from 'lucide-
 import { useTranslation } from 'react-i18next';
 import { describeMcpConnection, type McpServerId, type WorkspaceMcpServerMeta } from '@lody/shared';
 import { Button } from '@lody/ui/button';
+import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { Menu } from '@/ui/menu';
 import { MCP_TRANSPORT_LABELS } from '@/components/shared/mcp-transport';
@@ -85,6 +86,34 @@ export function AttachmentAddMenu({
     selectedCount > 0
       ? t('session.mcp.loadCount', { count: selectedCount })
       : t('session.mcp.loadNone');
+
+  const scheduleDisabled = Boolean(scheduleDisabledReason);
+  const scheduleItem = onScheduleSend ? (
+    <Menu.Item
+      icon={Clock}
+      onClick={onScheduleSend}
+      disabled={scheduleDisabled}
+      className={itemClass}
+    >
+      {t('scheduledMessage.menu')}
+    </Menu.Item>
+  ) : null;
+
+  // A disabled menu row does not receive pointer events, so a `title` on it can
+  // never show. Keep the row disabled and put the hover target on a wrapper that
+  // owns the same box; the tooltip then explains the state without making the
+  // command clickable.
+  const scheduleEntry =
+    scheduleItem && scheduleDisabled ? (
+      <Tooltip.Root>
+        <Tooltip.Trigger delay={0} render={<div />}>
+          {scheduleItem}
+        </Tooltip.Trigger>
+        <Tooltip.Content side="right">{scheduleDisabledReason}</Tooltip.Content>
+      </Tooltip.Root>
+    ) : (
+      scheduleItem
+    );
 
   return (
     <Menu.Root
@@ -173,17 +202,7 @@ export function AttachmentAddMenu({
                 {triggerLabel}
               </Menu.Item>
             ) : null}
-            {onScheduleSend ? (
-              <Menu.Item
-                icon={Clock}
-                onClick={onScheduleSend}
-                disabled={!!scheduleDisabledReason}
-                title={scheduleDisabledReason}
-                className={itemClass}
-              >
-                {t('scheduledMessage.menu')}
-              </Menu.Item>
-            ) : null}
+            {scheduleEntry}
             {hasMcp && mcp ? (
               <>
                 {onAddAttachment ? <Menu.Separator /> : null}

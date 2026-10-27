@@ -758,6 +758,8 @@ export function ScheduleListView({
   runtimes,
   ready,
   error,
+  retrying,
+  onRetry,
   onOpen,
   onNew,
   onToggle,
@@ -779,6 +781,8 @@ export function ScheduleListView({
   runtimes: ScheduleRuntimeRow[];
   ready: boolean;
   error?: string;
+  retrying?: boolean;
+  onRetry?: () => void;
   onOpen: (id: string) => void;
   onNew: () => void;
   onToggle?: (row: ScheduleRegistryRow) => void;
@@ -926,7 +930,26 @@ export function ScheduleListView({
                 )
               )}
             >
-              {ready && !error && filtered.length > 0 ? (
+              {error ? (
+                <div {...stylex.props(styles.error)} role="alert">
+                  <p>
+                    {rows.length > 0
+                      ? t(
+                          'schedules.syncError',
+                          'Schedules could not be synced. Showing saved tasks.'
+                        )
+                      : t('schedules.loadError', 'Schedules could not be loaded.')}
+                  </p>
+                  {onRetry ? (
+                    <Button variant="secondary" size="small" disabled={retrying} onClick={onRetry}>
+                      {retrying
+                        ? t('schedules.retrying', 'Retrying…')
+                        : t('schedules.retry', 'Retry')}
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
+              {ready && filtered.length > 0 ? (
                 <div
                   {...stylex.props(
                     styles.listGrid,
@@ -973,11 +996,7 @@ export function ScheduleListView({
                     </div>
                   ))}
                 </div>
-              ) : error ? (
-                <p {...stylex.props(styles.error)} role="alert">
-                  {t('schedules.loadError', 'Schedules could not be loaded.')}
-                </p>
-              ) : filtered.length === 0 ? (
+              ) : error && rows.length === 0 ? null : filtered.length === 0 ? (
                 <div {...stylex.props(styles.empty)}>
                   <CalendarClock {...stylex.props(styles.emptyIcon)} aria-hidden="true" />
                   <p {...stylex.props(styles.emptyTitle)}>

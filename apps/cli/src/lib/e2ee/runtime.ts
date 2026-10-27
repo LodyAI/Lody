@@ -15,6 +15,7 @@ import {
 import {
   Bytes,
   hashRecordBytes,
+  getCommittedEpochStagingKey,
   hasVerifiedCheckpoint,
   restoreVerifiedState,
   verifyLedgerEffect,
@@ -26,6 +27,7 @@ import {
   InstalledKeyStore,
   KeyProtector,
   KeyMailbox,
+  EpochStagingStore,
   LedgerFeedStore,
   LedgerPinStore,
   LocalStoreError,
@@ -102,6 +104,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
   device: NodeE2eeDevice;
   genesisRecord: Uint8Array;
   mailbox?: KeyMailbox['Service'];
+  staging?: Pick<EpochStagingStore['Service'], 'readGroup'>;
 }) {
   const genesisRecord = new Uint8Array(options.genesisRecord);
   const genesis = yield* Effect.fromResult(
@@ -341,6 +344,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
   const receiver = receiving ? Context.get(receiving, KeyReceiver) : undefined;
   const repair = receiving ? Context.get(receiving, KeyRepair) : undefined;
   const guard = () => (closed ? Effect.fail(failure('closed')) : Effect.void);
+  let retainedWriteEpoch: number | undefined;
   const status = Effect.fnUntraced(function* () {
     yield* guard();
     const state = yield* feed.current();
@@ -349,7 +353,21 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
     const key = yield* Effect.result(installed.check(epoch));
     if (Result.isFailure(key) && !['missing-key', 'unauthorized'].includes(key.failure.reason))
       return yield* key.failure;
+    let writeEpoch: number | null = Result.isSuccess(key) ? epoch : null;
+    if (Result.isFailure(key) && key.failure.reason === 'missing-key') {
+      for (let candidate = retainedWriteEpoch ?? epoch - 1; candidate >= 0; candidate -= 1) {
+        const older = yield* Effect.result(installed.check(candidate));
+        if (Result.isSuccess(older)) {
+          writeEpoch = candidate;
+          break;
+        }
+        if (older.failure.reason === 'unauthorized') break;
+        if (older.failure.reason !== 'missing-key') return yield* older.failure;
+      }
+    }
+    if (writeEpoch !== null) retainedWriteEpoch = writeEpoch;
     return {
+      writeEpoch,
       length: view.length,
       headHash: hex(view.head.toBytes()),
       position: state.bootstrap ? null : state.offset,
@@ -488,6 +506,26 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
       receiver
         ? Effect.gen(function* () {
             yield* guard();
+            const view = yield* verified.current();
+            const epoch = view.inspectState().epoch.number;
+            const checked = yield* Effect.result(installed.check(epoch));
+            if (options.staging && epoch > 0 && Result.isFailure(checked)) {
+              if (checked.failure.reason !== 'missing-key') return yield* checked.failure;
+              const located = getCommittedEpochStagingKey(view, epoch);
+              if (Result.isSuccess(located)) {
+                // Staging access is optional (late recipients are denied). Mailbox
+                // reception independently authenticates and installs its own envelopes.
+                const group = yield* options.staging
+                  .readGroup(located.success)
+                  .pipe(Effect.catch(() => Effect.succeed(null)));
+                if (
+                  group?.envelopes.some(
+                    (row) => row.recipient === hex(options.device.publicKey.toBytes())
+                  )
+                )
+                  yield* receiver.receiveStagedGroup(group);
+              } else if (view.verification !== 'endorsed-snapshot') return yield* located.failure;
+            }
             if (repair) yield* repair.flush();
             yield* receiver.resume();
             for (let cursor: string | null = null; ;) {
@@ -510,6 +548,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
               cursor = page.next;
             }
             yield* receiver.flushReports();
+            return undefined;
           })
         : Effect.fail(failure('invalid-input')),
     credential: () => options.custody.deviceCredential(genesis, options.device.publicKey),

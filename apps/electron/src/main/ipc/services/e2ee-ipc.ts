@@ -461,7 +461,14 @@ export class E2eeIpc extends IpcService {
     return { ...result, cleanupPending }
   }
   @IpcMethod()
-  async refresh(workspaceId: string) {
+  async refresh(workspaceId: string, options?: { installKeys?: boolean }) {
+    if (
+      options !== undefined &&
+      (typeof options !== 'object' ||
+        options === null ||
+        (options.installKeys !== undefined && typeof options.installKeys !== 'boolean'))
+    )
+      throw new Error('e2ee_invalid-input')
     const id = sender()
     const access = await withDesktopE2eeAccount((owner) =>
       Effect.gen(function* () {
@@ -495,11 +502,16 @@ export class E2eeIpc extends IpcService {
       await runDesktopE2eeOperation(access.accountId, ingest)
       cursor = page.nextCursor ?? undefined
     } while (cursor)
+    if (options?.installKeys === false) return this.status(workspaceId)
     const work = await withDesktopE2eeAccount((owner) =>
       owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
         ? Effect.succeed(
-            owner.host.keyRound(workspaceId, (signal) =>
-              cloud.client.mailbox({ workspaceId, credential: access.credential }, signal)
+            owner.host.keyRound(
+              workspaceId,
+              (signal) =>
+                cloud.client.mailbox({ workspaceId, credential: access.credential }, signal),
+              (signal) =>
+                cloud.client.staging({ workspaceId, credential: access.credential }, signal)
             )
           )
         : Effect.fail(new Error('e2ee_not_open'))

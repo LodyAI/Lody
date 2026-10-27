@@ -1,4 +1,3 @@
-import { QuotaContinueAction } from '../schedules/quota-continue-action';
 import { ScheduledMessagesSummary } from '../schedules/scheduled-messages-summary';
 import { useScheduledMessage } from '../schedules/use-scheduled-message';
 import { useLatestRef } from '@/hooks/use-latest-ref';
@@ -2441,7 +2440,6 @@ export const SessionChatInputArea = memo(
         ) : null}
         <ConversationColumn>
           {hideTopSpacer ? null : <div aria-hidden="true" {...stylex.props(styles.topSpacer)} />}
-          <QuotaContinueAction session={session} visible={isVisible} />
           <ScheduledMessagesSummary sessionId={session.id} timeZone={scheduled.timeZone} />
           {externalHistorySyncNode}
           {freeTurnLimitNoticeNode}

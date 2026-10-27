@@ -7,7 +7,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { __test__, shutdownLocalAcpAgent, spawnAcpProcess } from './acp-runner';
+import {
+  __test__,
+  prepareAcpProcessEnvironmentLegacy,
+  shutdownLocalAcpAgent,
+  spawnAcpProcess,
+} from './acp-runner';
 import type { Logger } from '@/utils/logger';
 import { FakeProcessTable } from '@lody/shared/node/process-testing';
 
@@ -290,4 +295,20 @@ describe('read-only quota ACP handshake', () => {
       });
     }
   );
+});
+
+describe('ACP system Node prerequisites', () => {
+  it('leaves other launch environments unchanged even if inherited fields resemble DSH', async () => {
+    const env = { PATH: '', ELECTRON_RUN_AS_NODE: '1', LODY_DSH_NODE_ARGS: 'inherited' };
+    expect(
+      await prepareAcpProcessEnvironmentLegacy({ command: 'other-agent', args: [] }, env)
+    ).toBe(env);
+  });
+
+  it('reports Node missing before starting a builtin DSH process', async () => {
+    const launch = { command: 'npx', args: [], env: { LODY_DSH_NODE_ARGS: 'synthetic' } };
+    await expect(prepareAcpProcessEnvironmentLegacy(launch, { PATH: '' })).rejects.toThrow(
+      '[DSH_NODE_NOT_FOUND]'
+    );
+  });
 });

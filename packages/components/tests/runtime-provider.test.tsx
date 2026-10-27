@@ -234,7 +234,7 @@ describe('RuntimeProvider warm workspace preparation', () => {
     }) as const;
 
   it.each(['success', 'temporary failure'])(
-    'keeps the local replica visible and announces a required key update after background refresh %s',
+    'keeps the local replica and resumes or offers retry after background refresh %s',
     async (outcome) => {
       ordinaryCloud();
       listEncrypted();
@@ -249,11 +249,13 @@ describe('RuntimeProvider warm workspace preparation', () => {
       environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
       environment.e2eeWorkspaces!.runtime = {
         open: async () => status,
-        refresh: () =>
-          new Promise((resolve, reject) => {
-            finishRefresh = resolve;
-            failRefresh = () => reject(new Error('temporary network failure'));
-          }),
+        refresh: (_workspaceId, options) =>
+          options?.installKeys === false
+            ? new Promise((resolve, reject) => {
+                finishRefresh = resolve;
+                failRefresh = () => reject(new Error('temporary network failure'));
+              })
+            : Promise.resolve({ ...status, epoch: 1 }),
         status: async () => ({ ...status, epoch: 1 }),
         close: async () => {},
       } as unknown as E2eeWorkspaceRuntime;
@@ -262,9 +264,11 @@ describe('RuntimeProvider warm workspace preparation', () => {
       await act(async () =>
         outcome === 'success' ? finishRefresh({ ...status, epoch: 1 }) : failRefresh()
       );
-      expect(container.querySelector('[role="status"]')?.textContent).toBe(
-        'e2ee.content.keyUpdateRequired'
-      );
+      if (outcome === 'success') expect(container.querySelector('[role="status"]')).toBeNull();
+      else
+        expect(container.querySelector('[role="status"]')?.textContent).toContain(
+          'e2ee.content.keyUpdateRequired'
+        );
       expect(store.get(runtimeAtom)).toBe(prepared);
       expect(prepared.disposed).toBe(false);
     }
@@ -329,6 +333,69 @@ describe('RuntimeProvider warm workspace preparation', () => {
       );
     });
     expect(container.querySelector('[role="status"]')).toBeNull();
+    expect(prepared.disposed).toBe(false);
+  });
+
+  it('installs a missing current key at cold open before any content sessions exist', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    let installed = false;
+    const status = () => ({
+      genesisHash: '11'.repeat(32),
+      epoch: 1,
+      hasCurrentKey: installed,
+      rotationRequired: false,
+    });
+    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+    environment.e2eeWorkspaces!.runtime = {
+      open: async () => status(),
+      refresh: async (_workspaceId, options) => {
+        if (options?.installKeys !== false) installed = true;
+        return status();
+      },
+      status: async () => status(),
+      close: async () => {},
+    } as unknown as E2eeWorkspaceRuntime;
+    await render();
+    expect(installed).toBe(true);
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    expect(prepared.disposed).toBe(false);
+  });
+
+  it('opens with a retained key while current-key reception fails', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    const status = {
+      genesisHash: '11'.repeat(32),
+      epoch: 1,
+      hasCurrentKey: false,
+      writeEpoch: 0,
+      rotationRequired: false,
+    };
+    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+    environment.e2eeWorkspaces!.runtime = {
+      open: async () => status,
+      status: async () => status,
+      refresh: async () => {
+        throw new Error('temporary staging failure');
+      },
+      close: async () => {},
+    } as unknown as E2eeWorkspaceRuntime;
+    await render();
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    expect(prepared.disposed).toBe(false);
+    expect(container.querySelector('[role="status"]')?.textContent).toContain(
+      'e2ee.content.keyUpdateRequired'
+    );
+    environment.e2eeWorkspaces!.runtime!.refresh = async () => ({
+      ...status,
+      hasCurrentKey: true,
+      writeEpoch: 1,
+    });
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('[role="status"] button')!.click()
+    );
+    expect(store.get(runtimeAtom)).toBe(prepared);
     expect(prepared.disposed).toBe(false);
   });
 

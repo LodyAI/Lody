@@ -75,7 +75,7 @@ const typography = stylex.create({
 });
 
 type ChatComposerTone = 'light' | 'dark';
-type ChatComposerVariant = 'landing' | 'session' | 'dialog';
+type ChatComposerVariant = 'landing' | 'session' | 'dialog' | 'sheet';
 type ChatComposerStatusTone = 'error' | 'warning' | 'info';
 
 export interface ChatComposerAction {
@@ -130,6 +130,8 @@ export interface ChatComposerProps {
   compactPlaceholderName?: string | null;
   promptDisabled?: boolean;
   promptRows?: number;
+  /** Focus the prompt as soon as this composer mounts (new-chat sheet). */
+  promptAutoFocus?: boolean;
   promptEnterKeyHint?: TextareaProps['enterKeyHint'];
   promptRef?: Ref<HTMLTextAreaElement>;
   pastedTextDrafts?: PastedTextDraft[];
@@ -212,17 +214,21 @@ export function getChatComposerTextareaClassName({
   isMobile?: boolean;
 }) {
   const isLanding = variant === 'landing';
+  const isSheet = variant === 'sheet';
 
   return cn(
     'input-scrollbar resize-none transition-shadow',
     stylex.props(typography.prompt).className,
-    isLanding
-      ? 'min-h-[120px] border-transparent bg-transparent px-0 py-0 sm:min-h-[140px]'
-      : cn(
-          'border-transparent bg-transparent px-1 py-0',
-          // Mobile session composer floors at a single line; desktop keeps two.
-          isMobile ? 'min-h-[24px]' : 'min-h-[48px]'
-        ),
+    isSheet
+      ? 'min-h-0 flex-1 border-transparent bg-transparent px-5 py-4 text-base leading-7'
+      : isLanding
+        ? 'min-h-[120px] border-transparent bg-transparent px-0 py-0 sm:min-h-[140px]'
+        : cn(
+            'text-sm leading-6',
+            'border-transparent bg-transparent px-1 py-0',
+            // Mobile session composer floors at a single line; desktop keeps two.
+            isMobile ? 'min-h-[24px]' : 'min-h-[48px]'
+          ),
     'focus-visible:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0',
     'text-input-foreground placeholder:text-input-placeholder/85'
   );
@@ -260,6 +266,7 @@ export function ChatComposer({
   compactPlaceholderName,
   promptDisabled = false,
   promptRows = 3,
+  promptAutoFocus = false,
   promptEnterKeyHint,
   promptRef,
   pastedTextDrafts = [],
@@ -312,10 +319,11 @@ export function ChatComposer({
   const isMobile = useIsMobile();
   const isDialog = variant === 'dialog';
   const isLanding = variant === 'landing';
+  const isSheet = variant === 'sheet';
   // Mobile session composer starts at a single line to save vertical space
   // (desktop keeps its 2-line default); it still auto-grows as the user types.
   const singleLineMobile = isMobile && variant === 'session';
-  const effectivePromptRows = singleLineMobile ? 1 : promptRows;
+  const effectivePromptRows = singleLineMobile || isSheet ? 1 : promptRows;
   // Desktop-only ⌘L discovery hint in the empty composer. Requires a fine pointer
   // AND non-mobile layout so phone frames / narrow viewports never show a
   // keyboard shortcut that doesn't exist on touch. Hidden once focused or typing.
@@ -364,18 +372,22 @@ export function ChatComposer({
     const compact = getChatComposerCompactPlaceholder({ name: compactPlaceholderName });
     return compact.name ? t(compact.key, { name: compact.name }) : t(compact.key);
   })();
-  const resolvedPromptPlaceholder = useCompactPlaceholder
-    ? compactPromptPlaceholder
-    : (promptPlaceholder ??
-      (isMobile
-        ? t(getChatComposerMobilePromptPlaceholderKey({ mentionSource, skillAgent }))
-        : t(
-            getChatComposerPromptPlaceholderKey({
-              mentionSource,
-              availableCommands,
-              skillAgent,
-            })
-          )));
+  /* The sheet's writing surface is deliberately roomy and its narrow-window
+     compact placeholder ("Ask anything") drops the / @ $ discovery hints that
+     make the blank composer legible. Keep the full hint there. */
+  const resolvedPromptPlaceholder =
+    useCompactPlaceholder && !isSheet
+      ? compactPromptPlaceholder
+      : (promptPlaceholder ??
+        (isMobile
+          ? t(getChatComposerMobilePromptPlaceholderKey({ mentionSource, skillAgent }))
+          : t(
+              getChatComposerPromptPlaceholderKey({
+                mentionSource,
+                availableCommands,
+                skillAgent,
+              })
+            )));
   const numberFormatter = useMemo(() => new Intl.NumberFormat(intlLocale), [intlLocale]);
   const previewPastedTextDraft =
     pastedTextDrafts.find((item) => item.id === previewPastedTextDraftId) ?? null;
@@ -657,8 +669,10 @@ export function ChatComposer({
     isDialog
       ? 'h-10 rounded-lg px-5'
       : isLanding
-        ? 'h-6 rounded-[4px] px-2'
-        : 'h-7 rounded-md px-2.5'
+        ? 'h-6 rounded-[4px] px-2 text-[11px] leading-tight'
+        : isSheet
+          ? 'h-9 rounded-full px-3 text-sm'
+          : 'h-7 rounded-md px-2.5 text-xs'
   );
 
   const actionWidthClassName = isLanding ? 'w-auto shrink-0' : 'w-auto';
@@ -675,7 +689,17 @@ export function ChatComposer({
 
   const sessionContainerClassName = cn(COMPOSER_SESSION_SURFACE_CLASS, mentionSurfaceClassName);
 
-  const boxContainerClassName = isLanding ? landingContainerClassName : sessionContainerClassName;
+  /* Sheet: the composer is the page, not a card floating on it. The writing
+     surface runs edge to edge; only the footer draws a separator. */
+  const sheetContainerClassName = cn(
+    'flex h-full min-h-0 flex-col px-0 py-0',
+    mentionSurfaceClassName
+  );
+  const boxContainerClassName = isSheet
+    ? sheetContainerClassName
+    : isLanding
+      ? landingContainerClassName
+      : sessionContainerClassName;
   const composerHasAttachments =
     imageItems.length > 0 ||
     fileItems.length > 0 ||
@@ -690,11 +714,16 @@ export function ChatComposer({
     ? 'border-primary/50 bg-primary/[0.04] ring-2 ring-primary/25'
     : undefined;
   const boxFooterClassName = cn(
-    'flex select-none items-center gap-x-1.5',
-    isLanding ? 'pt-2' : 'pt-0.5'
+    'flex shrink-0 select-none items-center gap-x-1.5',
+    isSheet
+      ? 'border-t border-border/60 px-3 pb-[calc(8px+var(--safe-area-bottom,0px))] pt-2'
+      : isLanding
+        ? 'pt-2'
+        : 'pt-0.5'
   );
   const statusClassName = cn(
-    'px-1',
+    'text-xs leading-snug',
+    isSheet ? 'px-5' : 'px-1',
     stylex.props(typography.helper).className,
     statusTone === 'error'
       ? 'text-destructive'
@@ -714,7 +743,7 @@ export function ChatComposer({
       <div
         className={cn(
           'flex w-full flex-col',
-          isDialog ? 'gap-3' : isLanding ? 'gap-12' : 'gap-2',
+          isSheet ? 'min-h-0 flex-1 gap-0' : isDialog ? 'gap-3' : isLanding ? 'gap-12' : 'gap-2',
           className
         )}
       >
@@ -725,7 +754,12 @@ export function ChatComposer({
         ) : null}
 
         {!isDialog ? (
-          <div className={cn('flex flex-col', isLanding ? 'gap-2' : 'gap-1')}>
+          <div
+            className={cn(
+              'flex flex-col',
+              isSheet ? 'h-full min-h-0 gap-0' : isLanding ? 'gap-2' : 'gap-1'
+            )}
+          >
             {/* Top selector (repo, branch) - shown outside and above the input box */}
             {topSelector ? (
               <div className="flex w-full min-w-0 select-none items-center gap-1">
@@ -764,7 +798,7 @@ export function ChatComposer({
               }
             >
               {commentReferenceItems.length > 0 ? (
-                <div className="flex flex-wrap gap-2 pb-1">
+                <div className={cn('flex flex-wrap gap-2 pb-1', isSheet && 'px-5 pt-3')}>
                   {commentReferenceItems.map((item) => (
                     <CommentReferenceChip
                       key={item.localId}
@@ -777,7 +811,7 @@ export function ChatComposer({
                 </div>
               ) : null}
               {visualAnnotationReferenceItems.length > 0 ? (
-                <div className="flex flex-wrap gap-2 pb-1">
+                <div className={cn('flex flex-wrap gap-2 pb-1', isSheet && 'px-5 pt-3')}>
                   {visualAnnotationReferenceItems.map((item) => (
                     <VisualAnnotationReferenceChip
                       key={item.localId}
@@ -792,7 +826,12 @@ export function ChatComposer({
                 // Unified horizontal, scrollable attachment strip: image thumbnails
                 // and file cards share the same square-card shape and scroll
                 // sideways together (cards step up in size on mobile for touch).
-                <div className="input-scrollbar flex gap-2 overflow-x-auto pb-1">
+                <div
+                  className={cn(
+                    'input-scrollbar flex gap-2 overflow-x-auto pb-1',
+                    isSheet && 'px-5 pt-3'
+                  )}
+                >
                   {imageItems.map((image) => (
                     <div
                       key={image.id}
@@ -1033,6 +1072,9 @@ export function ChatComposer({
                 // room for it so the placeholder wraps before the chip; the padding is
                 // dropped once the user types (showFocusHint → false → full width).
                 className={cn(boxTextareaClassName, showFocusHint && 'pr-16')}
+                fillHeight={isSheet}
+                mentionPanelPlacement={isSheet ? 'bottom' : undefined}
+                autoFocus={promptAutoFocus}
                 data-keyboard-nav="composer"
               />
 

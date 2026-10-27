@@ -15,6 +15,8 @@ export interface Device {
   readonly membershipId: Bytes.MembershipId;
   readonly kind: DeviceKind;
   readonly encryptionPublicKey: Bytes.EncryptionPublicKey;
+  /** Present exactly for machine devices, including their historical binding. */
+  readonly machineId?: string;
 }
 /** Detached snapshot of the state a verified view describes: owner, members, devices and epoch. */
 export interface LedgerState {
@@ -36,6 +38,8 @@ export interface HistoricalContentAuthor {
 }
 /** A device ever admitted, kept after revocation or its member's removal. */
 export interface DeviceRecord {
+  readonly kind: DeviceKind;
+  readonly machineId?: string;
   readonly signingPublicKey: Bytes.SigningPublicKey;
   readonly encryptionPublicKey: Bytes.EncryptionPublicKey;
   readonly membershipId: Bytes.MembershipId;
@@ -55,6 +59,8 @@ export interface InternalState {
   owner: Bytes.MembershipId;
   members: HashMap.HashMap<string, Member>;
   devices: HashMap.HashMap<string, Device>;
+  /** Derived index of active machine bindings; never an independent authority. */
+  machineDevices: HashMap.HashMap<string, string>;
   epoch: LedgerState['epoch'];
   /** Every membership ever admitted and its user, kept after removal. `members` is only the current ones. */
   membershipUsers: HashMap.HashMap<string, Bytes.UserId>;
@@ -99,6 +105,7 @@ export function genesisState(
         }),
       ],
     ]),
+    machineDevices: HashMap.empty(),
     epoch: Object.freeze({
       number: 0,
       keyCommitment: body.epochCommitment,
@@ -109,6 +116,7 @@ export function genesisState(
       [
         id(body.signer),
         Object.freeze({
+          kind: 'personal',
           signingPublicKey: body.signer,
           encryptionPublicKey: body.encryptionPublicKey,
           membershipId: body.membershipId,
@@ -184,6 +192,7 @@ export function applyOperation(
           s.deviceHistory,
           sign,
           Object.freeze({
+            kind: 'personal',
             signingPublicKey: op.request.signingPublicKey,
             encryptionPublicKey: op.request.encryptionPublicKey,
             membershipId: op.membershipId,
@@ -229,10 +238,42 @@ export function applyOperation(
           enc = id(op.encryptionPublicKey);
         if (HashMap.has(s.deviceHistory, sign) || HashSet.has(s.usedEncKeys, enc))
           return yield* fail('replay');
+        // All checks precede either mutation: a replacement is one ledger transition,
+        // never a separately completed revocation followed by a fallible admission.
+        let replaced: string | undefined;
+        if (op.kind === 'machine') {
+          if (typeof op.machineId !== 'string' || op.machineId.length === 0)
+            return yield* fail('invalid-operation');
+          const current = stateGet(s.machineDevices, op.machineId);
+          if (op.replaces == null) {
+            if (current !== undefined) return yield* fail('invalid-operation');
+          } else {
+            replaced = id(op.replaces);
+            const previous = stateGet(s.devices, replaced);
+            if (
+              actor.kind !== 'personal' ||
+              !previous ||
+              previous.kind !== 'machine' ||
+              !previous.membershipId.equals(actor.membershipId) ||
+              previous.machineId !== op.machineId ||
+              current !== replaced
+            )
+              return yield* fail('unauthorized');
+          }
+        } else if (op.machineId !== undefined || op.replaces !== undefined) {
+          return yield* fail('invalid-operation');
+        }
+        if (replaced !== undefined) {
+          s.devices = HashMap.remove(s.devices, replaced);
+          s.epoch = Object.freeze({ ...s.epoch, rotationRequired: true });
+        }
+        const machineBinding = op.kind === 'machine' ? { machineId: op.machineId } : {};
         s.deviceHistory = HashMap.set(
           s.deviceHistory,
           sign,
           Object.freeze({
+            kind: op.kind,
+            ...machineBinding,
             signingPublicKey: op.signingPublicKey,
             encryptionPublicKey: op.encryptionPublicKey,
             membershipId: actor.membershipId,
@@ -246,8 +287,11 @@ export function applyOperation(
             membershipId: actor.membershipId,
             kind: op.kind,
             encryptionPublicKey: op.encryptionPublicKey,
+            ...machineBinding,
           })
         );
+        if (op.kind === 'machine' && op.machineId !== undefined)
+          s.machineDevices = HashMap.set(s.machineDevices, op.machineId, sign);
         break;
       }
       case 'revokeDevice': {
@@ -261,6 +305,8 @@ export function applyOperation(
         )
           return yield* fail('unauthorized');
         s.devices = HashMap.remove(s.devices, target);
+        if (found.kind === 'machine' && found.machineId !== undefined)
+          s.machineDevices = HashMap.remove(s.machineDevices, found.machineId);
         s.epoch = Object.freeze({ ...s.epoch, rotationRequired: true });
         break;
       }
@@ -308,9 +354,12 @@ export function applyOperation(
           s.members = HashMap.remove(s.members, id(op.membershipId));
           // The history tables keep this membership and its devices, so authorship
           // and replay facts survive; only the current views drop them.
-          for (const [key, device] of s.devices)
-            if (device.membershipId.equals(op.membershipId))
-              s.devices = HashMap.remove(s.devices, key);
+          for (const [key, device] of s.devices) {
+            if (!device.membershipId.equals(op.membershipId)) continue;
+            s.devices = HashMap.remove(s.devices, key);
+            if (device.kind === 'machine' && device.machineId !== undefined)
+              s.machineDevices = HashMap.remove(s.machineDevices, device.machineId);
+          }
         }
         s.usedCommitments = HashSet.add(s.usedCommitments, id(op.commitment));
         s.historyPackets = HashMap.set(

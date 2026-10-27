@@ -218,8 +218,9 @@ document key derived from the epoch key, and purpose-bound AAD.
   `DeviceIdentity`, `VerifiedLedger` and `InstalledEpochHistory`.
 - **Other transports**: `sealDocument`, `openDocument` and
   `authenticateDocument` (`/protocol`) take a document key, a signer and a
-  verified-view lookup. A new seal requires current write permission at the
-  exact current epoch, checked before encryption and again after signing. Each
+  verified-view lookup. A new seal requires current write permission and a verified published epoch
+  no later than current, checked before encryption and again after signing.
+  Pending manual rotation does not stop retained-key sends. Each
   run encrypts anew, so a retry must resend the returned bytes.
 - Reading authenticates the historical author before decrypting. A revoked
   author's old content still opens and is attributed to its original member,

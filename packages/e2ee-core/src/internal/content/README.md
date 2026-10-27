@@ -23,8 +23,9 @@ The caller supplies a borrowed DeviceSigner and a synchronized verified-view
 lookup. Each view must be genuine full replay or explicitly qualified endorsed
 state, with its provenance preserved. Later lookups must extend the first verified
 prefix; known rollback/forks fail. Sealing binds
-the caller's genesis, resource, purpose and current epoch; active non-Guest
-personal/machine devices may seal only when rotation is not required. It checks
+the caller's genesis, resource, purpose and a verified published epoch no later
+than the current one. Active non-Guest personal/machine devices may keep sealing
+with retained keys while manual rotation or current-key reception is pending. It checks
 before encryption and after asynchronous signing, and always verifies signer
 output with the fixed strict verifier. No injected verifier/authority can accept
 unsigned content. Each run is a new encryption; a transport retry must retain the
@@ -65,7 +66,7 @@ are released on every exit, and borrowed epoch/signer capabilities stay with the
 owner. Open verifies the exact expected signer and context before deriving a key
 or decrypting. A successful open returns caller-owned plaintext, not permission.
 The caller must still check body semantics, target binding, request correlation,
-TTL/freshness, membership, epoch/rotation pause and journal requirements.
+TTL/freshness, membership, epoch selection and journal requirements.
 
 Run package `typecheck` and `test`. The owning crypto suite uses fixed synthetic
 Node/native WebCrypto signatures, real HKDF/AEAD and explicit Deferred/native
@@ -81,7 +82,7 @@ admission, awaits active operations and rejects late output. The independently
 selected Org/resource/model and fixed signer are captured once. A numeric
 `writeEpoch` remains fixed; explicit `writeEpoch: 'current'` selects the genuine
 current epoch for each seal, then binds that operation through its final authority
-check. A change during signing fails instead of silently re-encrypting. Each
+check. An epoch advance during signing retains that operation's selected published epoch; current device/member revocation still fails. Each
 key read must transfer a fresh owned opaque epoch key; the codec verifies its real
 ledger commitment before deriving a scoped leaf and clears both after use.
 Historical signatures are checked before untrusted frame epochs can request keys.
@@ -111,8 +112,8 @@ current view must grant `mayWriteDocument` to the externally authenticated signi
 device, and the frame epoch must have a verified history packet and be no later
 than that view's current epoch. A required rotation or a later tag7/tag8 publication
 does not invalidate an active writer's earlier sealed bytes. New `sealDocument`
-and streams-binding seals instead require `maySealNewContent` and the exact
-current epoch, before encryption and again after asynchronous signing. Revoked,
+and streams-binding seals require current `mayWriteDocument` and a verified
+published epoch no later than current, before encryption and after asynchronous signing. Revoked,
 removed, Guest or Recovery writers still cannot upload; historical
 `authenticateDocument` remains separate and grants no upload permission.
 `admitStreamsUpdateBatch` checks released streams-crdt at the current catalog version framing and header3,

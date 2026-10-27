@@ -6,6 +6,8 @@ import {
   hashRecordBytes,
   decodeRecord,
   prepareLedgerCommand,
+  possessionSigningBytes,
+  verifySignature,
   signLedgerRecord,
   verifyDeviceCredentialBinding,
   type DeviceSigner,
@@ -76,7 +78,7 @@ export function makeDesktopLocalPairing(input: {
     if (!parsed.success || parsed.data.pairingSessionId !== row.session) throw failure('corrupt')
     return parsed.data
   }
-  const check = (row: PairingRow, view: LedgerView) => {
+  const checkedMaterial = (row: PairingRow, view: LedgerView) => {
     const value = material(row)
     const publicKey = Result.getOrThrow(Bytes.signingPublicKey(raw(value.signingPublicKey)))
     const binding = verifyDeviceCredentialBinding(
@@ -89,11 +91,15 @@ export function makeDesktopLocalPairing(input: {
       raw(value.bindingSignature)
     )
     if (Result.isFailure(binding)) throw failure('invalid-input')
-    const ownMembership = membership(view)
+    return { value, publicKey, ownMembership: membership(view) }
+  }
+  const check = (row: PairingRow, view: LedgerView) => {
+    const { value, publicKey, ownMembership } = checkedMaterial(row, view)
     const admitted = view.inspectState().devices.get(value.signingPublicKey)
     if (admitted) {
       if (
         admitted.kind !== 'machine' ||
+        admitted.machineId !== value.machineId ||
         !admitted.membershipId.equals(ownMembership) ||
         hex(admitted.encryptionPublicKey.toBytes()) !== value.encryptionPublicKey
       )
@@ -103,6 +109,13 @@ export function makeDesktopLocalPairing(input: {
     const command = {
       _tag: 'AdmitDevice' as const,
       kind: 'machine' as const,
+      machineId: value.machineId,
+      replaces: (() => {
+        const previous = [...view.inspectState().devices].find(
+          ([, device]) => device.kind === 'machine' && device.machineId === value.machineId
+        )?.[0]
+        return previous ? Result.getOrThrow(Bytes.signingPublicKey(raw(previous))) : null
+      })(),
       signingPublicKey: publicKey,
       encryptionPublicKey: Result.getOrThrow(
         Bytes.encryptionPublicKey(raw(value.encryptionPublicKey))
@@ -122,14 +135,48 @@ export function makeDesktopLocalPairing(input: {
   // Only verified original history can settle a signed journal. A missing
   // device/current head alone cannot prove that an uncertain append lost CAS.
   const settled = (row: PairingRow, view: LedgerView) => {
-    if (!row.record && !row.request_id) return true
+    const originals = input.db
+      .prepare('SELECT record FROM records WHERE position < ?')
+      .all(view.length)
+    if (!row.record && !row.request_id) {
+      const { value, publicKey, ownMembership } = checkedMaterial(row, view)
+      // A real admission settles unsigned staging even if the device was later
+      // revoked. Bind the retained proof to this member before consulting history;
+      // a used key or another member's admission alone cannot settle this session.
+      const proofInput = {
+        genesis: input.genesis,
+        targetMembershipId: ownMembership,
+        signingPublicKey: publicKey,
+        encryptionPublicKey: Result.getOrThrow(
+          Bytes.encryptionPublicKey(raw(value.encryptionPublicKey))
+        ),
+        kind: 'machine' as const,
+        machineId: value.machineId
+      }
+      const proof = Result.getOrThrow(possessionSigningBytes(proofInput))
+      if (
+        Result.isFailure(
+          verifySignature(publicKey.toBytes(), proof, raw(value.possessionSignature))
+        )
+      )
+        throw failure('invalid-input')
+      if (view.inspectState().devices.has(value.signingPublicKey)) return check(row, view).admitted
+      return originals.some((item) => {
+        const body = Result.getOrThrow(decodeRecord(item.record as Uint8Array)).body
+        return (
+          body.type === 'ordinary' &&
+          body.operation.type === 'admitDevice' &&
+          body.operation.kind === 'machine' &&
+          hex(body.operation.signingPublicKey.toBytes()) === value.signingPublicKey &&
+          hex(body.operation.encryptionPublicKey.toBytes()) === value.encryptionPublicKey &&
+          hex(body.operation.possessionSignature.toBytes()) === value.possessionSignature
+        )
+      })
+    }
     if (!row.record || !row.request_id) throw failure('corrupt')
     const signed = Result.getOrThrow(decodeRecord(row.record)).body
     if (signed.type !== 'ordinary') throw failure('corrupt')
     const hash = hex(hashRecordBytes(row.record).toBytes())
-    const originals = input.db
-      .prepare('SELECT record FROM records WHERE position < ?')
-      .all(view.length)
     return originals.some((item) => {
       const record = item.record as Uint8Array
       if (hex(hashRecordBytes(record).toBytes()) === hash) return true

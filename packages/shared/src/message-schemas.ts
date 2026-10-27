@@ -2316,6 +2316,7 @@ export const SessionHistoryWriteResponseSchema = z
   });
 
 export const LocalSessionControlRequestSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('machine/dsh-providers'), machineId: MachineIdSchema }).strict(),
   SessionCreateRequestSchema,
   SessionChatRequestSchema,
   SessionCancelRequestSchema,
@@ -2342,6 +2343,12 @@ export const LocalSessionControlRequestSchema = z.discriminatedUnion('type', [
 ]);
 
 export const LocalSessionControlResponseSchema = z.discriminatedUnion('type', [
+  z
+    .object({
+      type: z.literal('machine/dsh-providers_response'),
+      providers: z.array(z.object({ id: z.string().min(1), name: z.string() }).strict()),
+    })
+    .strict(),
   SessionCreateAckSchema,
   SessionCreateResponseSchema,
   SessionChatAckSchema,

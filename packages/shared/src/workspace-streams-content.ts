@@ -109,3 +109,138 @@ export function workspaceSupports(
 ): boolean {
   return content.mode === 'plaintext';
 }
+
+/** Verified host facts only. This state never supplies ledger authority. */
+export type WorkspaceEpochStatus = {
+  epoch: number;
+  rotationRequired: boolean;
+  hasCurrentKey: boolean;
+};
+/** Reception progress only: every non-closed phase permits retained-epoch sends. */
+export type WorkspaceEpochPhase = 'ready' | 'installing' | 'waiting-key' | 'failed' | 'closed';
+
+/** Stable room providers select a confirmed installed epoch per operation.
+ * Reception never removes transports or blocks old-epoch sends. Timed-out raw
+ * work stays owned until settlement; its late receipt cannot commit a selection.
+ * @deprecated Compose this Promise SDK boundary when its callers migrate.
+ */
+export function createWorkspaceEpochTransitionLegacy(input: {
+  epoch: number;
+  rotationRequired?: boolean;
+  timeoutMs?: number;
+  onPhase?: (phase: WorkspaceEpochPhase) => void;
+}) {
+  let epoch = input.epoch;
+  let latest: WorkspaceEpochStatus = {
+    epoch,
+    rotationRequired: !!input.rotationRequired,
+    hasCurrentKey: true,
+  };
+  let phase: WorkspaceEpochPhase = 'ready';
+  let generation = 0;
+  let flight: Promise<boolean> | undefined;
+  let installation: Promise<WorkspaceEpochStatus> | undefined;
+  const admitted = new Set<Promise<unknown>>();
+  const isClosed = () => phase === 'closed';
+  const publish = (next: WorkspaceEpochPhase) => {
+    phase = next;
+    input.onPhase?.(next);
+  };
+  const observe = (status: WorkspaceEpochStatus) => {
+    if (!isClosed() && status.epoch >= latest.epoch) latest = { ...status };
+  };
+  const needsUpdate = () => !isClosed() && latest.epoch > epoch;
+  return {
+    observe,
+    needsUpdate,
+    phase: () => phase,
+    epoch: () => epoch,
+    provider(
+      make: (writeEpoch: number) => import('@loro-dev/streams-crdt').PayloadProtectionProvider
+    ) {
+      const track = async <A>(work: () => A | Promise<A>): Promise<A> => {
+        if (isClosed()) throw new Error('e2ee_closed');
+        const pending = Promise.resolve(work());
+        admitted.add(pending);
+        try {
+          const result = await pending;
+          if (isClosed()) throw new Error('e2ee_closed');
+          return result;
+        } finally {
+          admitted.delete(pending);
+        }
+      };
+      return {
+        maxSealOverheadBytes: make(epoch).maxSealOverheadBytes,
+        seal: (request) => {
+          const selected = make(epoch);
+          return track(() => selected.seal(request));
+        },
+        open: (request) => {
+          const selected = make(epoch);
+          return track(() => selected.open(request));
+        },
+      } satisfies import('@loro-dev/streams-crdt').PayloadProtectionProvider;
+    },
+    transition(ports: { install(): Promise<WorkspaceEpochStatus> }): Promise<boolean> {
+      if (isClosed()) return Promise.reject(new Error('e2ee_closed'));
+      if (flight) return flight;
+      if (!needsUpdate()) return Promise.resolve(true);
+      // A timed-out native call may still be running. Retain one raw owner and
+      // let the next trigger retry only after that owner settles.
+      if (installation) return Promise.resolve(false);
+      const attempt = ++generation;
+      publish('installing');
+      const raw = Promise.resolve().then(ports.install);
+      installation = raw;
+      void raw.then(
+        () => {
+          if (installation === raw) installation = undefined;
+        },
+        () => {
+          if (installation === raw) installation = undefined;
+        }
+      );
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('e2ee_key_update_timeout')),
+          input.timeoutMs ?? 10_000
+        );
+      });
+      flight = (async () => {
+        try {
+          const installed = await Promise.race([raw, deadline]);
+          if (isClosed() || generation !== attempt) return false;
+          observe(installed);
+          if (!installed.hasCurrentKey || installed.epoch !== latest.epoch) {
+            publish('waiting-key');
+            return false;
+          }
+          // No await between key readback and selection. Existing room callbacks
+          // keep the same provider and obtain this epoch on their next seal.
+          epoch = installed.epoch;
+          publish('ready');
+          return true;
+        } catch (error) {
+          if (!isClosed()) {
+            generation += 1;
+            publish('failed');
+          }
+          throw error;
+        } finally {
+          clearTimeout(timer);
+          flight = undefined;
+        }
+      })();
+      return flight;
+    },
+    async close() {
+      generation += 1;
+      publish('closed');
+      await flight?.catch(() => {});
+      await installation?.catch(() => {});
+      await Promise.allSettled([...admitted]);
+    },
+  };
+}
