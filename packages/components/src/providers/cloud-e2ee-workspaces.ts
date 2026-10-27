@@ -28,7 +28,7 @@ export class E2eeClientUpgradeRequiredError extends Error {
  */
 export function createCloudE2eeWorkspaces(input: {
   session: () => PlatformSessionState;
-  remote: Pick<PlatformE2eeWorkspaces, 'create' | 'describe' | 'history'>;
+  remote: Pick<PlatformE2eeWorkspaces, 'create' | 'describe' | 'history' | 'memberProfiles'>;
   prepareCreation?: PlatformE2eeWorkspaces['prepareCreation'];
   runtime?: PlatformE2eeWorkspaces['runtime'];
   refreshWorkspaces: () => Promise<void>;
@@ -46,6 +46,26 @@ export function createCloudE2eeWorkspaces(input: {
   const intentKey = (owner: string, requestId: string) => JSON.stringify([owner, requestId]);
 
   return {
+    ...(input.remote.memberProfiles
+      ? {
+          memberProfiles: async (request: { workspaceId: string }) => {
+            const owner = account();
+            const workspaceId = request.workspaceId;
+            const result = await input.remote.memberProfiles!({ workspaceId });
+            assertAccount(owner);
+            if (result.workspaceId !== workspaceId) throw new Error('e2ee_profiles_scope_mismatch');
+            // Keep only display fields; callers must resolve IDs through verified ledger state.
+            return {
+              workspaceId,
+              profiles: result.profiles.map(({ cryptoUserId, name, image }) => ({
+                cryptoUserId,
+                name,
+                image,
+              })),
+            };
+          },
+        }
+      : {}),
     ...(input.runtime ? { runtime: input.runtime } : {}),
     ...(prepareCreation
       ? {

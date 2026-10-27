@@ -18,6 +18,8 @@ import type {
   E2eeWorkspaceCreateResult,
   E2eeWorkspaceHistoryRequest,
   E2eeWorkspaceHistoryPage,
+  E2eeWorkspaceMemberProfilesRequest,
+  E2eeWorkspaceMemberProfiles,
 } from './e2ee-workspaces';
 export type {
   WorkspaceAdmissionDescriptor,
@@ -25,6 +27,8 @@ export type {
   E2eeWorkspaceCreateRequest,
   E2eeWorkspaceCreateResult,
   E2eeLedgerCheckpoint,
+  E2eeWorkspaceMemberProfilesRequest,
+  E2eeWorkspaceMemberProfiles,
   E2eeWorkspaceHistoryRequest,
   E2eeWorkspaceHistoryPage,
 } from './e2ee-workspaces';
@@ -415,6 +419,7 @@ export type CloudApi = {
     appendRecord: Action<E2eeAppendRecordRequest, E2eeAppendRecordReply>;
     create: Action<E2eeWorkspaceCreateRequest, E2eeWorkspaceCreateResult>;
     describe: Query<{ workspaceId: string }, WorkspaceAdmissionDescriptor>;
+    memberProfiles: Query<E2eeWorkspaceMemberProfilesRequest, E2eeWorkspaceMemberProfiles>;
     history: Action<E2eeWorkspaceHistoryRequest, E2eeWorkspaceHistoryPage>;
   };
   /** Optional E2EE ciphertext staging. No ordinary/local product constructs it. */

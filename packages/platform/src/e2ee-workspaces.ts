@@ -4,6 +4,8 @@ import type {
   E2eeWorkspaceHistoryPage,
   E2eeWorkspaceHistoryRequest,
   E2eePersonalPairingOffer,
+  E2eeWorkspaceMemberProfilesRequest,
+  E2eeWorkspaceMemberProfiles,
   WorkspaceAdmissionDescriptor,
 } from '@lody/cloud-api';
 
@@ -31,6 +33,10 @@ export interface E2eeWorkspacePrepared extends E2eeWorkspacePrepareInput {
  */
 export interface PlatformE2eeWorkspaces {
   readonly runtime?: E2eeWorkspaceRuntime;
+  /** Optional display directory. Names/images never establish permission, keys or identity pins. */
+  readonly memberProfiles?: (
+    input: E2eeWorkspaceMemberProfilesRequest
+  ) => Promise<E2eeWorkspaceMemberProfiles>;
   /** Absent when this platform has no installed, persistent key-custody adapter.
    * A failed/unknown creation preserves its original local intent for reconciliation.
    */

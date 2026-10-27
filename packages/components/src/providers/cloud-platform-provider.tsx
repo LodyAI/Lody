@@ -217,6 +217,8 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
           }
         : {}),
       remote: {
+        memberProfiles: (request) =>
+          cloudClient.query(cloudOperations.e2eeWorkspaces.memberProfiles, request),
         create: (request) => cloudClient.action(cloudOperations.e2eeWorkspaces.create, request),
         describe: (request) => cloudClient.query(cloudOperations.e2eeWorkspaces.describe, request),
         history: (request) => cloudClient.action(cloudOperations.e2eeWorkspaces.history, request),

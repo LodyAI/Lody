@@ -298,11 +298,20 @@ function useMemberNames(
 ) {
   const { t } = useTranslation();
   return useMemo(() => {
-    const merged = new Map(profiles);
+    const merged = new Map<string, E2eeMemberProfile>();
+    for (const member of overview?.members ?? []) {
+      const profile = profiles?.get(member.userId);
+      if (profile) merged.set(member.membershipId, profile);
+    }
     let self: string | null = null;
     // Only a creation pin on this device ties the genesis member to this account.
     const genesis = overview?.events[0];
-    if (history?.locallyPinned === true && you && genesis?.type === 'genesis') {
+    if (
+      profiles === undefined &&
+      history?.locallyPinned === true &&
+      you &&
+      genesis?.type === 'genesis'
+    ) {
       self = genesis.actor.membershipId;
       merged.set(self, you);
     }
@@ -419,7 +428,7 @@ export interface E2eeWorkspaceControlPageProps {
   unavailable?: boolean;
   /** The signed-in account; shown on the genesis member only when this device holds the creation pin. */
   you?: E2eeMemberProfile;
-  /** Server-provided display profiles by membership ID. Display only: verify with the ledger code. */
+  /** Server-provided display profiles by crypto user ID. Display only: verify with the ledger code. */
   memberProfiles?: ReadonlyMap<string, E2eeMemberProfile>;
   /** Builds the support report on demand; it contains no keys or record bodies. */
   diagnostics: () => string;
