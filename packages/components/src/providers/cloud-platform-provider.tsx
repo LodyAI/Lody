@@ -186,8 +186,6 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
         ? {
             prepareCreation: (request) => native.prepareCreation(request),
             runtime: {
-              promoteMember: (workspaceId, membershipId) =>
-                native.promoteMember(workspaceId, membershipId),
               createMemberInvitation: (input) => native.createMemberInvitation(input),
               prepareMemberJoin: (offer) => native.prepareMemberJoin(offer),
               pendingMemberJoin: (workspaceId) => native.pendingMemberJoin(workspaceId),

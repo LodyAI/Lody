@@ -297,79 +297,7 @@ export function makeDesktopMemberApprovals(input: {
   db.exec(
     'CREATE TABLE IF NOT EXISTS member_previews(request_id TEXT PRIMARY KEY,key_package TEXT NOT NULL)'
   )
-  db.exec(
-    'CREATE TABLE IF NOT EXISTS member_promotions(submission_id TEXT PRIMARY KEY,membership_id TEXT NOT NULL,record BLOB NOT NULL)'
-  )
-  const promotionRole = Effect.fnUntraced(function* (membershipId: string) {
-    const view = yield* input.current()
-    return view.inspectState().members.get(membershipId)?.role ?? null
-  })
   return {
-    promotionRole,
-    promote: Effect.fnUntraced(function* (membershipId: string) {
-      const target = yield* Effect.fromResult(Bytes.membershipId(raw(membershipId)))
-      const view = yield* input.current()
-      const state = view.inspectState()
-      const own = state.devices.get(hex(input.signer.publicKey.toBytes()))
-      if (
-        own?.kind !== 'personal' ||
-        state.members.get(hex(own.membershipId.toBytes()))?.role !== 'owner'
-      )
-        return yield* Effect.fail(fail('unauthorized'))
-      const member = state.members.get(membershipId)
-      if (!member || (member.role !== 'member' && member.role !== 'admin'))
-        return yield* Effect.fail(fail('unauthorized'))
-      if (member.role === 'admin') return null
-      const prior = yield* sql(() =>
-        db
-          .prepare(
-            'SELECT * FROM member_promotions WHERE membership_id=? ORDER BY rowid DESC LIMIT 1'
-          )
-          .get(membershipId)
-      )
-      if (prior) {
-        if (!(prior.record instanceof Uint8Array)) return yield* Effect.fail(fail('corrupt'))
-        const old = ok(decodeRecord(prior.record))
-        if (old.body.type !== 'ordinary') return yield* Effect.fail(fail('corrupt'))
-        const parent = old.body.previousHash
-        const priorHash = hashRecordBytes(prior.record)
-        const disposition = yield* sql(() => {
-          let competing = false
-          for (const row of db
-            .prepare('SELECT record FROM records WHERE position < ?')
-            .all(view.length)) {
-            if (!(row.record instanceof Uint8Array)) throw fail('corrupt')
-            if (hashRecordBytes(row.record).equals(priorHash)) return 'committed'
-            const body = ok(decodeRecord(row.record)).body
-            if (body.type === 'ordinary' && body.previousHash.equals(parent)) competing = true
-          }
-          return competing ? 'lost' : 'unknown'
-        })
-        if (disposition === 'unknown')
-          return {
-            workspaceId: input.workspaceId,
-            requestId: String(prior.submission_id),
-            recordHex: hex(prior.record)
-          }
-      }
-      const prepared = yield* Effect.fromResult(
-        prepareLedgerCommand(view, input.signer.publicKey, {
-          _tag: 'SetRole',
-          membershipId: target,
-          role: 'admin'
-        })
-      )
-      const record = yield* signLedgerRecord(prepared, input.signer)
-      const requestId = `promote-${randomUUID()}`
-      yield* sql(() =>
-        db
-          .prepare(
-            'INSERT INTO member_promotions(submission_id,membership_id,record) VALUES(?,?,?)'
-          )
-          .run(requestId, membershipId, record)
-      )
-      return { workspaceId: input.workspaceId, requestId, recordHex: hex(record) }
-    }),
     inspect: Effect.fnUntraced(function* (keyPackageHex: string) {
       const proof = yield* sql(() => decodeMemberKeyPackage(keyPackageHex))
       const view = yield* input.current()

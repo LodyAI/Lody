@@ -108,8 +108,6 @@ export interface E2eeWorkspaceRuntime {
   managementState?(workspaceId: string): Promise<E2eeManagementState>;
   updateKeys?(workspaceId: string): Promise<void>;
   revokeDevice?(workspaceId: string, signingPublicKey: string): Promise<void>;
-  /** Owner-personal promotion only; native journaling retains unknown signed originals. */
-  promoteMember?(workspaceId: string, membershipId: string): Promise<{ promoted: boolean }>;
   /** Create public email/link pins using a current manager's native device. */
   createMemberInvitation?(input: {
     workspaceId: string;

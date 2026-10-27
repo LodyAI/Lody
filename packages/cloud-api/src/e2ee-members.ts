@@ -70,3 +70,21 @@ export type E2eeMemberReplies = {
   revoke: { revoked: true };
   claim: E2eeMemberRequest;
 };
+
+/** Authenticated navigation/profile projection, never a content-access credential. */
+export type E2eeMemberWorkspace = {
+  id: string;
+  name: string;
+  slug: string;
+  contentMode: 'e2ee';
+  contentModeVersion: number;
+  cryptoOrgId: string;
+  genesisHash: string;
+  role: 'owner' | 'admin' | 'member' | 'guest';
+  members: Array<{
+    id: string;
+    userId: string;
+    role: string;
+    user: { id: string; name: string; email: string; image?: string };
+  }>;
+};

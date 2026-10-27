@@ -1364,18 +1364,6 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             )
           })
         ),
-      prepareMemberPromotion: (workspaceId: string, membershipId: string) =>
-        run(
-          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
-            entry.memberApprovals.promote(membershipId)
-          )
-        ),
-      memberPromotionRole: (workspaceId: string, membershipId: string) =>
-        run(
-          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
-            entry.memberApprovals.promotionRole(membershipId)
-          )
-        ),
       memberOffer: (workspaceId: string, mode: 'email' | 'link', expiresAt: number) =>
         run(
           Effect.flatMap(openWorkspace(workspaceId), (entry) =>

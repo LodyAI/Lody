@@ -1978,12 +1978,11 @@ async function memberIpcFixture() {
       acceptMemberJoin: () => Effect.void
     },
     host: {
-      prepareMemberPromotion: () =>
+      memberOffer: () =>
         Effect.sync(() => {
           signed.push(label)
-          return { workspaceId: 'team', requestId: 'promotion', recordHex: 'abcd' }
+          return { workspaceId: 'team', genesisHash: '11'.repeat(32), mode: 'link' }
         }),
-      memberPromotionRole: () => Effect.succeed('admin'),
       open: () => Effect.succeed({ hasCurrentKey: true }),
       ingestLedgerRecords: () => Effect.void,
       status: () => Effect.succeed({ hasCurrentKey: true }),
@@ -2073,10 +2072,10 @@ function deferredMember() {
   })
   return { promise, resolve }
 }
-void test('member approval retains its original native namespace across a delayed cloud call', async () => {
+void test('member invitation retains its original native namespace across a delayed cloud call', async () => {
   const f = await memberIpcFixture()
   f.holdCloud()
-  const operation = f.ipc.promoteMember('team', '11'.repeat(16))
+  const operation = f.ipc.createMemberInvitation({ workspaceId: 'team', mode: 'link' })
   const rejected = assert.rejects(operation, /e2ee_account_mismatch/)
   await f.cloudEntered.promise
   f.setOwner(f.makeOwner('A', 'replacement-A'))

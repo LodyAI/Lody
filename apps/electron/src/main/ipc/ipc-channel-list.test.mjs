@@ -12,7 +12,6 @@ const registerServicesPath = path.join(ipcDirectory, 'register-services.ts')
 void test('invoke policy allows methods only within renderer-facing service groups', () => {
   assert.equal(isIpcInvokeChannel('auth.getSession'), true)
   for (const method of [
-    'promoteMember',
     'createMemberInvitation',
     'pendingMemberJoin',
     'prepareMemberJoin',
@@ -46,6 +45,7 @@ void test('invoke policy allows methods only within renderer-facing service grou
     'exportKey',
     'createDevice',
     'deviceCredential',
+    'promoteMember',
     'memberScope',
     'installMemberJoin',
     'unknown'

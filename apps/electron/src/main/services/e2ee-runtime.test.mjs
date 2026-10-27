@@ -520,26 +520,6 @@ void test('a different account retains its KeyPackage, joins as Member, exchange
         plaintext
       )
       yield* owner.host.ingestLedgerRecords(workspaceId, expandedPage)
-      const membershipId = hex(memberState.membershipId.toBytes())
-      assert.ok(
-        Result.isFailure(
-          yield* Effect.result(member.host.prepareMemberPromotion(workspaceId, membershipId))
-        )
-      )
-      const promotion = yield* owner.host.prepareMemberPromotion(workspaceId, membershipId)
-      assert.deepEqual(
-        yield* owner.host.prepareMemberPromotion(workspaceId, membershipId),
-        promotion
-      )
-      const promotedPage = page(
-        [...expanded, Buffer.from(promotion.recordHex, 'hex')],
-        offer.genesisHash,
-        0
-      )
-      yield* owner.host.ingestLedgerRecords(workspaceId, promotedPage)
-      yield* member.host.ingestLedgerRecords(workspaceId, promotedPage)
-      assert.equal((yield* member.host.status(workspaceId)).memberRole, 'admin')
-      assert.equal(yield* owner.host.prepareMemberPromotion(workspaceId, membershipId), null)
     })
   )
   await execute(

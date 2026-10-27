@@ -17,12 +17,12 @@ Translation: current
 - 换用新邀请前，先向已认证服务对账旧申请。只有已取消、已过期且未预约、或已拒绝的申请才能退役本地待处理意图；正在签入或已提交的申请继续恢复。安装和清理不会删除已安装的来源。
 - 新设备从独立保存的 genesis 开始，完整验证有大小上限的权限历史页。服务端角色或未验证快照不能建立本地身份。当前和保留 epoch 的密钥沿用现有信箱发放。
 - 已加入的 Member 可以批准同账号的其他个人设备；不能借此加入另一个账号、机器或恢复身份。服务端另外核验发布者属于同一当前成员。
-- Owner 升级成员沿用现有角色签名命令，并在网络请求前保留原始尝试。Admin 不能升级；结果不明时先对账，再接受新的意图。
+- 成员角色调整复用配套 #1982 的 `setMemberRole` 和管理日志。加入运行时不再保留单独的升权命令、端口或日志。
 - 每次异步成员操作捕获已认证账号和实际原生 owner 实例。后台借用的 reader 携带临时归属标记；迟到的清理不能释放后来替换的 namespace，同账号重置也一样。
 
 ## 证据与限制
 
-所属运行时测试使用真实密码学、SQLite 和合成的已认证 safeStorage，覆盖不同账号、原始申请恢复、篡改凭据绑定拒绝、真实历史验证、双向加密数据、额外个人设备、角色升级及离线重开。真实 IPC 边界测试覆盖账号、namespace 替换和 reader 归属；preload 测试覆盖 renderer 的显式允许列表。后端邀请政策和产品 UI 分开审查，不编译进本公开主进程 PR。
+所属运行时测试使用真实密码学、SQLite 和合成的已认证 safeStorage，覆盖不同账号、原始申请恢复、篡改凭据绑定拒绝、真实历史验证、双向加密数据、额外个人设备及离线重开。真实 IPC 边界测试覆盖账号、namespace 替换和 reader 归属；preload 测试覆盖 renderer 的显式允许列表。后端邀请政策和产品 UI 分开审查，不编译进本公开主进程 PR。
 
 尚未验证已安装桌面、真实系统钥匙串、生产服务、邮件、Stripe 或跨平台验收。完整历史启动限制为 256 页、32 MiB；超过上限需另行审查启动方案。本 PR 不改变已保存的签名账本格式，也不实现移除成员或换代 UI。
 
@@ -30,8 +30,14 @@ Translation: current
 
 配套[成员清理 #1982](https://github.com/LodyAI/Lody/pull/1982) 的 bootstrap 接线必须覆盖加入日志。终态清理由该 PR 比较原账号、工作区、genesis、签名公钥和 credential，并负责 owner 停止、排空和 custody 删除。同账号、工作区、genesis 下，旧凭据收到已认证 `member_removed` 响应也不能删除后来加入的新实例。
 
-- 完成上述精确身份比较后，随旧个人加入和创建记录一起删除匹配的 `member_joins` 行。该行可能保存已安装来源，因此普通 `retireMemberJoin` 故意拒绝删除。只删除 `personal_joins` 会留下旧成员来源，挡住新邀请。
+- 完成上述精确身份比较后，随旧个人加入和创建记录一起删除匹配的 `member_joins` 和 `personal_join_histories` 行。它们可能保存已安装来源，因此普通待处理申请退役故意拒绝删除。只删除 `personal_joins` 会留下旧的完整历史来源，阻塞或污染新邀请。
 - 真正的新成员实例必须在旧设备及对应凭据清理后开始。`createDevice(genesis)` 会重开已保留的 key，只有设备文件不存在时才生成新 key。仅换邀请 token 不能授权替换密钥或结果不明的签名申请；同申请和重启重试继续使用原始 KeyPackage 与 credential。
 - 只有完整验证并安装不同签名 key 后才清除公共移除标记。除 `acceptPersonalJoin` 外，也要覆盖 `acceptMemberJoin` 和 `acceptPersonalHistory`；成员加入及 Member 批准的额外设备会使用完整历史路径。准备和提交尚不等于安装，不能清除标记。
 
 这些是独立 draft 的明确合并条件，不代表本 PR 已完成移除后重加入验收。移除协议与 tag 改动留在所属 PR。组合后需验证：同账号移除后重新加入产生不同签名 key 和 credential；迟到旧凭据响应不删除新实例；失败和重复接受保留原始签名内容。
+
+## 协议归属与合并顺序
+
+[独立移除 #1979](https://github.com/LodyAI/Lody/pull/1979) 负责 capability 集合以及快照、保留状态、摘要 v4。加入链不修改这些 core 字段或版本，直接使用 core 验证和导出接口。邀请和 KeyPackage 的 `version: 1` 是独立的传输封装，不是账本快照版本。临时组合 #1979 head `c9eeefb14b62` 后，154 项原生测试及一个真实 crypto/SQLite 用例通过；后者覆盖 capability 1 声明、tag10 移除、新成员完整历史安装、v4 导出，以及重开后 capability 保留。临时 core 覆盖与测试均不进入此分支。
+
+公开邀请契约统一位于 `packages/cloud-api/src/e2ee-members.ts`；独立 UI 配套在同一路径携带相同内容，合并时保留一份。原生能力统一使用 `E2eeWorkspaceRuntime`，保留 #1982 的 `signingPublicKey`、`membershipId`、`memberRole` 和 `setMemberRole`，以及本 PR 的临时 `readerOwner`。组合 IPC 改动时，新增的凭据认证邀请调用须沿用 #1982 统一的 `e2ee_member_removed` 分类与精确身份终态清理，不能另造错误名或仅按工作区 ID 删除。#1979 合入后 rebase 到 main，不另升格式版本，也不叠入任一移除分支。

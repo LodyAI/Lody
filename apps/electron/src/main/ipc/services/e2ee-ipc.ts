@@ -121,38 +121,6 @@ export class E2eeIpc extends IpcService {
     throw new Error('e2ee_ledger_budget_exceeded')
   }
   @IpcMethod()
-  async promoteMember(workspaceId: string, membershipId: string) {
-    const reader = sender()
-    const scope = this.memberScope(workspaceId)
-    if (!/^[0-9a-f]{32}$/.test(membershipId)) throw new Error('e2ee_invalid-input')
-    const access = await this.memberAccess(workspaceId, reader, scope)
-    const cloud = await desktopE2eeCloudClient()
-    if (cloud.accountId !== access.accountId) throw new Error('e2ee_account_mismatch')
-    const pending = await scope((owner) =>
-      owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(reader)
-        ? owner.host.prepareMemberPromotion(workspaceId, membershipId)
-        : Effect.fail(new Error('e2ee_account_mismatch'))
-    )
-    if (pending) {
-      try {
-        await Effect.runPromise(cloud.client.appendRecord(pending))
-      } catch (cause) {
-        this.pairingFailure = cause
-      }
-    }
-    try {
-      await this.refresh(workspaceId)
-    } catch (cause) {
-      this.pairingFailure = cause
-    }
-    const role = await scope((owner) =>
-      owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(reader)
-        ? owner.host.memberPromotionRole(workspaceId, membershipId)
-        : Effect.fail(new Error('e2ee_account_mismatch'))
-    )
-    return { promoted: role === 'admin' }
-  }
-  @IpcMethod()
   async createMemberInvitation(input: {
     workspaceId: string
     mode: 'email' | 'link'
