@@ -110,3 +110,6 @@
 - Never cache an unimplemented content mode; `export` refuses and `sync` skips schedules
   for encrypted workspaces
   ([note](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-cli-review-fixes.md)).
+
+- Reset: same-user socket; drain, exclusive sibling lease, archive whole dir;
+  fresh approval/KEK. OS/unknown stays OS.

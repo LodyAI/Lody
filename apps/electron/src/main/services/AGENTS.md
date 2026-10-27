@@ -99,7 +99,7 @@ Read [M1](../../../../../.agents/notes/implemented/architecture/2026-10-21-e2ee-
 [join](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-personal-desktop-join.md)
 and [machine](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-machine-pairing-journal.md).
 Fence opens/late D03 registration by identity/generation; pin D03 before signing.
-Lazy custody; no network under locks; drain native work before release.
+Isolate workspace custody. Reset binds account/generation, rechecks after lock/drain, then archives. No network under locks; drain before release.
 Keep verification/storage errors owner-local; malformed input keeps readers.
 Originals precede feed/pin; compare overlaps, retain checkpoints, await history.
 Conflicts refuse fallback. Failed close retains its writer fence; report restart-required.
@@ -117,4 +117,4 @@ fresh sessions need consent. Unsigned staged material stays pending across windo
 until verified admission/history settlement (including later revocation); see [rationale](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-local-pairing-recovery.md). Verify pinned endorsement/self-admission before snapshot binding/pin/cursor; allow sparse positions. Keys use verified mailbox/history; committed epochs may use staging. Staging read
 denial/I/O failure cannot gate mailbox receipt. Show file protection; socket timeout stays pending. Await CLI current-key install.
 
-Manual management persists rounds; never re-enter account locks or close its own admitted work.
+Manual rotations only.

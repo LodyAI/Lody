@@ -1,5 +1,6 @@
+import { leaseE2eeIdentity } from '@lody/shared/node/e2ee-identity';
 import { createHash, randomBytes } from 'node:crypto';
-import { constants } from 'node:fs';
+import { constants, existsSync } from 'node:fs';
 import { link, mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Effect, Exit, Scope, Result } from 'effect';
@@ -29,7 +30,7 @@ const Binding = z
   .strict();
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex');
 const bytes = (value: string) => new Uint8Array(Buffer.from(value, 'hex'));
-const directoryFor = (accountId: string, workspaceId: string) => {
+export const cliE2eeIdentityDirectory = (accountId: string, workspaceId: string) => {
   if (!accountId || !/^[A-Za-z0-9_-]{1,128}$/.test(workspaceId))
     throw new Error('e2ee_invalid_input');
   return join(
@@ -40,14 +41,28 @@ const directoryFor = (accountId: string, workspaceId: string) => {
   );
 };
 
-/** Public pairing evidence is retained only through the trusted local approval
- * path. This operation neither admits a device nor obtains cloud credentials. */
 export async function retainCliE2eeWorkspaceBinding(
   accountId: string,
   input: z.input<typeof Binding>
 ) {
+  return Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* leaseE2eeIdentity(cliE2eeIdentityDirectory(accountId, input.workspaceId));
+        return yield* Effect.tryPromise({
+          try: () => retainBinding(accountId, input),
+          catch: (error) => error,
+        });
+      })
+    )
+  );
+}
+
+/** Public pairing evidence is retained only through the trusted local approval
+ * path. This operation neither admits a device nor obtains cloud credentials. */
+async function retainBinding(accountId: string, input: z.input<typeof Binding>) {
   const binding = Binding.parse(input);
-  const directory = directoryFor(accountId, binding.workspaceId);
+  const directory = cliE2eeIdentityDirectory(accountId, binding.workspaceId);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const destination = join(directory, 'binding.json');
   const temporary = join(directory, `binding-${randomBytes(16).toString('hex')}.pending`);
@@ -120,9 +135,24 @@ function mailbox(
   };
 }
 
+/** @deprecated Promise entry for the existing same-user control consumer. */
+export async function prepareCliE2eeMachineLegacy(options: Parameters<typeof prepareMachine>[0]) {
+  return Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* leaseE2eeIdentity(cliE2eeIdentityDirectory(options.accountId, options.workspaceId));
+        return yield* Effect.tryPromise({
+          try: () => prepareMachine(options),
+          catch: (error) => error,
+        });
+      })
+    )
+  );
+}
+
 /** Build the retained machine identity, possession proof and fixed credential
  * binding for the desktop-generated pairing session. No admission or cloud I/O. */
-export async function prepareCliE2eeMachineLegacy(
+async function prepareMachine(
   options: z.input<typeof Binding> & {
     accountId: string;
     machineId: string;
@@ -152,10 +182,11 @@ export async function prepareCliE2eeMachineLegacy(
   return Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
-        const directory = directoryFor(options.accountId, options.workspaceId);
+        const directory = cliE2eeIdentityDirectory(options.accountId, options.workspaceId);
         const journal = yield* openMachinePairingJournal(directory);
         const custody = makeCliE2eeCustody({
           directory: join(directory, 'custody'),
+          requireOsProtection: existsSync(`${directory}.require-os`),
           keyring: options.keyring,
         });
         return yield* journal
@@ -228,8 +259,9 @@ export async function validateCliE2eePairingIntentLegacy(options: {
   await Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
+        yield* leaseE2eeIdentity(cliE2eeIdentityDirectory(options.accountId, options.workspaceId));
         const journal = yield* openMachinePairingJournal(
-          directoryFor(options.accountId, options.workspaceId)
+          cliE2eeIdentityDirectory(options.accountId, options.workspaceId)
         );
         const retained = yield* journal.retained(options.pairingSessionId);
         if (
@@ -247,9 +279,26 @@ export async function validateCliE2eePairingIntentLegacy(options: {
   );
 }
 
+/** @deprecated Promise entry; retain the identity lease through activation publication. */
+export async function activateCliE2eeWorkspaceLegacy(
+  options: Parameters<typeof activateWorkspace>[0]
+) {
+  return Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* leaseE2eeIdentity(cliE2eeIdentityDirectory(options.accountId, options.workspaceId));
+        return yield* Effect.tryPromise({
+          try: () => activateWorkspace(options),
+          catch: (error) => error,
+        });
+      })
+    )
+  );
+}
+
 /** Verify actual admission and install the current key before allowing Fleet to attach rooms.
  * The marker is only a startup hint: subsequent authorization still comes from core's verified ledger. */
-export async function activateCliE2eeWorkspaceLegacy(
+async function activateWorkspace(
   options: CliE2eeWorkspaceOptions & {
     pairingSessionId: string;
     frontendSigningPublicKey: string;
@@ -278,7 +327,7 @@ export async function activateCliE2eeWorkspaceLegacy(
     // actually released its SQLite/custody resources.
     await pending.close();
   }
-  const directory = directoryFor(options.accountId, options.workspaceId);
+  const directory = cliE2eeIdentityDirectory(options.accountId, options.workspaceId);
   const destination = join(directory, 'activation.json');
   const temporary = join(directory, `activation-${randomBytes(16).toString('hex')}.pending`);
   const handle = await open(temporary, 'wx', 0o600);
@@ -305,7 +354,27 @@ async function openWorkspace(
   requireActivation: boolean,
   pairing?: { pairingSessionId: string; frontendSigningPublicKey: string; signingPublicKey: string }
 ) {
-  const directory = directoryFor(options.accountId, options.workspaceId);
+  const scope = Effect.runSync(Scope.make());
+  try {
+    await Effect.runPromise(
+      leaseE2eeIdentity(cliE2eeIdentityDirectory(options.accountId, options.workspaceId)).pipe(
+        Scope.provide(scope)
+      )
+    );
+    return await openWorkspaceOwned(scope, options, requireActivation, pairing);
+  } catch (error) {
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    throw error;
+  }
+}
+
+async function openWorkspaceOwned(
+  scope: Scope.Closeable,
+  options: CliE2eeWorkspaceOptions,
+  requireActivation: boolean,
+  pairing?: { pairingSessionId: string; frontendSigningPublicKey: string; signingPublicKey: string }
+) {
+  const directory = cliE2eeIdentityDirectory(options.accountId, options.workspaceId);
   let activation: z.infer<typeof Activation> | undefined;
   if (requireActivation) {
     const marker = await open(
@@ -353,13 +422,13 @@ async function openWorkspace(
     throw new Error('e2ee_pairing_required', { cause: error });
   });
   await original.close();
-  const scope = Effect.runSync(Scope.make());
   const run = <A, E>(work: Effect.Effect<A, E, Scope.Scope>) =>
     Effect.runPromise(work.pipe(Scope.provide(scope)));
   const opened = await run(
     Effect.gen(function* () {
       const custody = yield* makeCliE2eeCustody({
         directory: join(directory, 'custody'),
+        requireOsProtection: existsSync(`${directory}.require-os`),
         keyring: options.keyring,
       });
       const { Bytes, hashRecordBytes } = yield* Effect.promise(

@@ -210,6 +210,8 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
               seal: (workspaceId, input) => native.seal(workspaceId, input),
               openContent: (workspaceId, input) => native.openContent(workspaceId, input),
               account: (options) => native.account(options),
+              resetIdentity: (request) => native.resetIdentity(request),
+              resetLocalAgent: (request) => native.resetLocalAgent(request),
               recordCreated: (request) => native.recordCreated(request),
               open: (workspaceId, observed) => native.open(workspaceId, observed),
               close: (workspaceId) => native.close(workspaceId),

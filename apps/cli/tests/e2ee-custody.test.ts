@@ -189,7 +189,7 @@ describe('machine E2EE custody', () => {
             )
           )
         );
-        expect(result).toMatchObject({ _tag: 'Failure', failure: { code: 'corrupt' } });
+        expect(result).toMatchObject({ _tag: 'Failure', failure: { code: 'identity-lost' } });
         expect(existsSync(join(directory, missing))).toBe(false);
         for (const [name, bytes] of originals)
           expect(readFileSync(join(directory, name))).toEqual(bytes);

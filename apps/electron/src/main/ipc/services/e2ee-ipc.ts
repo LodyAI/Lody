@@ -8,6 +8,8 @@ import {
 } from '../../services/e2ee-bootstrap.mjs'
 import {
   releaseDesktopE2eeReader,
+  resetDesktopE2eeIdentity,
+  recordDesktopE2eeCreated,
   prepareDesktopE2eeCreation,
   desktopE2eeCloudClient,
   runDesktopE2eeOperation,
@@ -16,6 +18,7 @@ import {
 import { assertProductWindowSender } from '../assert-sender'
 import { getIpcServiceDeps } from '../ipc-service-deps'
 import { PersonalPairingOfferSchema } from '../../services/e2ee-personal-pairing.mjs'
+import { LocalE2eeRecoveryFailureSchema } from '@lody/shared/e2ee-local-pairing'
 import type { E2eeJoinSession, E2eePersonalPairingOffer } from '@lody/cloud-api'
 
 const observedSenders = new WeakSet<Electron.WebContents>()
@@ -68,7 +71,7 @@ export class E2eeIpc extends IpcService {
     const errors: unknown[] = []
     const attempt = async (work: Parameters<typeof withDesktopE2eeAccount>[0]) => {
       try {
-        await withDesktopE2eeAccount(work)
+        await withDesktopE2eeAccount(work, workspaceId, false)
       } catch (error) {
         errors.push(error)
       }
@@ -103,37 +106,43 @@ export class E2eeIpc extends IpcService {
   /** A relay slot is immutable. Different complete material cannot admit this
    * host's saved request; archive only that local attempt, retaining all originals. */
   private async foreignPersonalJoin(accountId: string, result: E2eeJoinSession) {
-    return withDesktopE2eeAccount((owner) =>
-      Effect.gen(function* () {
-        if (owner.accountId !== accountId)
-          return yield* Effect.fail(new Error('e2ee_account_mismatch'))
-        const pending = yield* owner.bootstrap.pendingPersonalJoin(result.workspaceId)
-        if (!pending || pending.pairingSessionId !== result.pairingSessionId) return false
-        if (pending.offer.genesisHash !== result.genesisHash)
-          return yield* Effect.fail(new Error('e2ee_conflict'))
-        // This host persists its request before joinBegin can publish it. A
-        // complete relay request cannot be ours while only our pin is saved.
-        if (!pending.requestHex) return true
-        return (
-          pending.signingPublicKey !== result.signingPublicKey ||
-          pending.credentialHash !== result.credentialHash ||
-          pending.requestHex !== result.requestHex
-        )
-      })
+    return withDesktopE2eeAccount(
+      (owner) =>
+        Effect.gen(function* () {
+          if (owner.accountId !== accountId)
+            return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+          const pending = yield* owner.bootstrap.pendingPersonalJoin(result.workspaceId)
+          if (!pending || pending.pairingSessionId !== result.pairingSessionId) return false
+          if (pending.offer.genesisHash !== result.genesisHash)
+            return yield* Effect.fail(new Error('e2ee_conflict'))
+          // This host persists its request before joinBegin can publish it. A
+          // complete relay request cannot be ours while only our pin is saved.
+          if (!pending.requestHex) return true
+          return (
+            pending.signingPublicKey !== result.signingPublicKey ||
+            pending.credentialHash !== result.credentialHash ||
+            pending.requestHex !== result.requestHex
+          )
+        }),
+      result.workspaceId,
+      false
     )
   }
   @IpcMethod()
   async personalPairingOffer(workspaceId: string) {
     const id = sender()
-    const saved = await withDesktopE2eeAccount((owner) =>
-      Effect.gen(function* () {
-        if (!owner.readers.get(workspaceId)?.has(id))
-          return yield* Effect.fail(new Error('e2ee_not_open'))
-        return {
-          accountId: owner.accountId,
-          offer: yield* owner.host.personalPairingOffer(workspaceId)
-        }
-      })
+    const saved = await withDesktopE2eeAccount(
+      (owner) =>
+        Effect.gen(function* () {
+          if (!owner.readers.get(workspaceId)?.has(id))
+            return yield* Effect.fail(new Error('e2ee_not_open'))
+          return {
+            accountId: owner.accountId,
+            offer: yield* owner.host.personalPairingOffer(workspaceId)
+          }
+        }),
+      workspaceId,
+      false
     )
     const cloud = await desktopE2eeCloudClient().catch((error) => {
       this.pairingFailure = error
@@ -178,24 +187,41 @@ export class E2eeIpc extends IpcService {
         )
       }
     }
-    return withDesktopE2eeAccount((owner) =>
-      owner.accountId === saved.accountId && owner.readers.get(workspaceId)?.has(id)
-        ? owner.host.personalPairingOffer(workspaceId)
-        : Effect.fail(new Error('e2ee_account_mismatch'))
+    return withDesktopE2eeAccount(
+      (owner) =>
+        owner.accountId === saved.accountId && owner.readers.get(workspaceId)?.has(id)
+          ? owner.host.personalPairingOffer(workspaceId)
+          : Effect.fail(new Error('e2ee_account_mismatch')),
+      workspaceId,
+      false
     )
   }
   @IpcMethod()
   async pendingPersonalJoin(workspaceId: string) {
     sender()
-    return withDesktopE2eeAccount((owner) => owner.bootstrap.pendingPersonalJoin(workspaceId))
+    return withDesktopE2eeAccount(
+      (owner) => owner.bootstrap.pendingPersonalJoin(workspaceId),
+      workspaceId,
+      false
+    ).catch((error) => {
+      if (error instanceof Error && error.message === 'e2ee_missing-binding') return null
+      throw error
+    })
   }
   private async reconcilePendingPersonalJoin(workspaceId: string) {
-    const saved = await withDesktopE2eeAccount((owner) =>
-      Effect.map(owner.bootstrap.pendingPersonalJoin(workspaceId), (pending) => ({
-        accountId: owner.accountId,
-        pending
-      }))
-    )
+    const saved = await withDesktopE2eeAccount(
+      (owner) =>
+        Effect.map(owner.bootstrap.pendingPersonalJoin(workspaceId), (pending) => ({
+          accountId: owner.accountId,
+          pending
+        })),
+      workspaceId,
+      false
+    ).catch((error) => {
+      if (error instanceof Error && error.message === 'e2ee_missing-binding')
+        return { accountId: '', pending: null }
+      throw error
+    })
     if (!saved.pending) return null
     const cloud = await desktopE2eeCloudClient()
     if (cloud.accountId !== saved.accountId) throw new Error('e2ee_account_mismatch')
@@ -231,10 +257,13 @@ export class E2eeIpc extends IpcService {
           result.status
         )
     }
-    return withDesktopE2eeAccount((owner) =>
-      owner.accountId === saved.accountId
-        ? owner.bootstrap.pendingPersonalJoin(workspaceId)
-        : Effect.fail(new Error('e2ee_account_mismatch'))
+    return withDesktopE2eeAccount(
+      (owner) =>
+        owner.accountId === saved.accountId
+          ? owner.bootstrap.pendingPersonalJoin(workspaceId)
+          : Effect.fail(new Error('e2ee_account_mismatch')),
+      workspaceId,
+      false
     )
   }
   @IpcMethod()
@@ -244,11 +273,13 @@ export class E2eeIpc extends IpcService {
     if (!parsed.success) throw new Error('e2ee_invalid-input')
     const offer = parsed.data
     await this.reconcilePendingPersonalJoin(offer.workspaceId)
-    const prepared = await withDesktopE2eeAccount((owner) =>
-      Effect.map(owner.bootstrap.preparePersonalJoin(offer), (request) => ({
-        accountId: owner.accountId,
-        request
-      }))
+    const prepared = await withDesktopE2eeAccount(
+      (owner) =>
+        Effect.map(owner.bootstrap.preparePersonalJoin(offer), (request) => ({
+          accountId: owner.accountId,
+          request
+        })),
+      offer.workspaceId
     )
     const cloud = await desktopE2eeCloudClient()
     if (cloud.accountId !== prepared.accountId) throw new Error('e2ee_account_mismatch')
@@ -267,10 +298,12 @@ export class E2eeIpc extends IpcService {
       throw new Error('e2ee_conflict')
     if (result.status === 'cancelled' || result.status === 'conflict') {
       try {
-        await withDesktopE2eeAccount((owner) =>
-          owner.accountId === prepared.accountId
-            ? owner.bootstrap.retirePersonalJoin(offer.workspaceId, offer.pairingSessionId)
-            : Effect.fail(new Error('e2ee_account_mismatch'))
+        await withDesktopE2eeAccount(
+          (owner) =>
+            owner.accountId === prepared.accountId
+              ? owner.bootstrap.retirePersonalJoin(offer.workspaceId, offer.pairingSessionId)
+              : Effect.fail(new Error('e2ee_account_mismatch')),
+          offer.workspaceId
         )
       } catch (error) {
         this.pairingFailure = error
@@ -286,15 +319,18 @@ export class E2eeIpc extends IpcService {
   async inspectPersonalJoin(workspaceId: string, pairingSessionId: string) {
     const id = sender()
     pairingSession(pairingSessionId)
-    const access = await withDesktopE2eeAccount((owner) =>
-      Effect.gen(function* () {
-        if (!owner.readers.get(workspaceId)?.has(id))
-          return yield* Effect.fail(new Error('e2ee_not_open'))
-        return {
-          accountId: owner.accountId,
-          credential: yield* owner.bootstrap.deviceCredential(workspaceId)
-        }
-      })
+    const access = await withDesktopE2eeAccount(
+      (owner) =>
+        Effect.gen(function* () {
+          if (!owner.readers.get(workspaceId)?.has(id))
+            return yield* Effect.fail(new Error('e2ee_not_open'))
+          return {
+            accountId: owner.accountId,
+            credential: yield* owner.bootstrap.deviceCredential(workspaceId)
+          }
+        }),
+      workspaceId,
+      false
     )
     const cloud = await desktopE2eeCloudClient()
     if (cloud.accountId !== access.accountId) throw new Error('e2ee_account_mismatch')
@@ -302,10 +338,13 @@ export class E2eeIpc extends IpcService {
       cloud.client.joinReadRequest({ workspaceId, pairingSessionId, credential: access.credential })
     )
     if (request.status === 'cancelled') {
-      await withDesktopE2eeAccount((owner) =>
-        owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
-          ? owner.host.cancelPersonalPairing(workspaceId, pairingSessionId)
-          : Effect.fail(new Error('e2ee_account_mismatch'))
+      await withDesktopE2eeAccount(
+        (owner) =>
+          owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
+            ? owner.host.cancelPersonalPairing(workspaceId, pairingSessionId)
+            : Effect.fail(new Error('e2ee_account_mismatch')),
+        workspaceId,
+        false
       )
       throw new Error('e2ee_join_cancelled')
     }
@@ -317,17 +356,23 @@ export class E2eeIpc extends IpcService {
       } catch (error) {
         this.pairingFailure = error
       }
-      await withDesktopE2eeAccount((owner) =>
-        owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
-          ? owner.host.retirePersonalPairing(workspaceId, pairingSessionId)
-          : Effect.fail(new Error('e2ee_account_mismatch'))
+      await withDesktopE2eeAccount(
+        (owner) =>
+          owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
+            ? owner.host.retirePersonalPairing(workspaceId, pairingSessionId)
+            : Effect.fail(new Error('e2ee_account_mismatch')),
+        workspaceId,
+        false
       )
       throw new Error('e2ee_join_conflict')
     }
-    return withDesktopE2eeAccount((owner) =>
-      owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
-        ? owner.host.previewPersonalAdmission(workspaceId, request.requestHex)
-        : Effect.fail(new Error('e2ee_account_mismatch'))
+    return withDesktopE2eeAccount(
+      (owner) =>
+        owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
+          ? owner.host.previewPersonalAdmission(workspaceId, request.requestHex)
+          : Effect.fail(new Error('e2ee_account_mismatch')),
+      workspaceId,
+      false
     )
   }
   @IpcMethod()
@@ -339,20 +384,26 @@ export class E2eeIpc extends IpcService {
     const preview = await this.inspectPersonalJoin(workspaceId, pairingSessionId)
     if (preview.pairingSessionId !== pairingSessionId) throw new Error('e2ee_conflict')
     const cloud = await desktopE2eeCloudClient()
-    const access = await withDesktopE2eeAccount((owner) =>
-      Effect.gen(function* () {
-        if (owner.accountId !== cloud.accountId || !owner.readers.get(workspaceId)?.has(id))
-          return yield* Effect.fail(new Error('e2ee_not_open'))
-        return { credential: yield* owner.bootstrap.deviceCredential(workspaceId) }
-      })
+    const access = await withDesktopE2eeAccount(
+      (owner) =>
+        Effect.gen(function* () {
+          if (owner.accountId !== cloud.accountId || !owner.readers.get(workspaceId)?.has(id))
+            return yield* Effect.fail(new Error('e2ee_not_open'))
+          return { credential: yield* owner.bootstrap.deviceCredential(workspaceId) }
+        }),
+      workspaceId,
+      false
     )
     const material = await Effect.runPromise(
       cloud.client.joinReadRequest({ workspaceId, pairingSessionId, credential: access.credential })
     )
-    const pending = await withDesktopE2eeAccount((owner) =>
-      owner.accountId === cloud.accountId && owner.readers.get(workspaceId)?.has(id)
-        ? owner.host.preparePersonalAdmission(workspaceId, material.requestHex)
-        : Effect.fail(new Error('e2ee_account_mismatch'))
+    const pending = await withDesktopE2eeAccount(
+      (owner) =>
+        owner.accountId === cloud.accountId && owner.readers.get(workspaceId)?.has(id)
+          ? owner.host.preparePersonalAdmission(workspaceId, material.requestHex)
+          : Effect.fail(new Error('e2ee_account_mismatch')),
+      workspaceId,
+      false
     )
     let appendFailure: unknown
     try {
@@ -367,10 +418,13 @@ export class E2eeIpc extends IpcService {
     }
     let invitation
     try {
-      invitation = await withDesktopE2eeAccount((owner) =>
-        owner.accountId === cloud.accountId && owner.readers.get(workspaceId)?.has(id)
-          ? owner.host.personalInvitation(workspaceId, pairingSessionId)
-          : Effect.fail(new Error('e2ee_account_mismatch'))
+      invitation = await withDesktopE2eeAccount(
+        (owner) =>
+          owner.accountId === cloud.accountId && owner.readers.get(workspaceId)?.has(id)
+            ? owner.host.personalInvitation(workspaceId, pairingSessionId)
+            : Effect.fail(new Error('e2ee_account_mismatch')),
+        workspaceId,
+        false
       )
     } catch (error) {
       this.pairingFailure = new AggregateError(
@@ -421,10 +475,13 @@ export class E2eeIpc extends IpcService {
       return { ready: false, status: 'conflict' }
     }
     if (!result.invitationHex) return { ready: false, status: result.status }
-    await withDesktopE2eeAccount((owner) =>
-      owner.accountId === cloud.accountId
-        ? owner.bootstrap.acceptPersonalJoin(workspaceId, result.invitationHex!)
-        : Effect.fail(new Error('e2ee_account_mismatch'))
+    await withDesktopE2eeAccount(
+      (owner) =>
+        owner.accountId === cloud.accountId
+          ? owner.bootstrap.acceptPersonalJoin(workspaceId, result.invitationHex!)
+          : Effect.fail(new Error('e2ee_account_mismatch')),
+      workspaceId,
+      false
     )
     await this.open(workspaceId)
     try {
@@ -470,16 +527,19 @@ export class E2eeIpc extends IpcService {
     )
       throw new Error('e2ee_invalid-input')
     const id = sender()
-    const access = await withDesktopE2eeAccount((owner) =>
-      Effect.gen(function* () {
-        if (!owner.readers.get(workspaceId)?.has(id))
-          return yield* Effect.fail(new Error('e2ee_not_open'))
-        return {
-          accountId: owner.accountId,
-          credential: yield* owner.bootstrap.deviceCredential(workspaceId),
-          status: yield* owner.host.status(workspaceId)
-        }
-      })
+    const access = await withDesktopE2eeAccount(
+      (owner) =>
+        Effect.gen(function* () {
+          if (!owner.readers.get(workspaceId)?.has(id))
+            return yield* Effect.fail(new Error('e2ee_not_open'))
+          return {
+            accountId: owner.accountId,
+            credential: yield* owner.bootstrap.deviceCredential(workspaceId),
+            status: yield* owner.host.status(workspaceId)
+          }
+        }),
+      workspaceId,
+      false
     )
     const cloud = await desktopE2eeCloudClient()
     if (cloud.accountId !== access.accountId) throw new Error('e2ee_account_mismatch')
@@ -494,27 +554,33 @@ export class E2eeIpc extends IpcService {
         })
       )
       checkpoint ??= page.checkpoint
-      const ingest = await withDesktopE2eeAccount((owner) =>
-        owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
-          ? Effect.succeed(owner.host.ingestLedgerRecords(workspaceId, page))
-          : Effect.fail(new Error('e2ee_not_open'))
+      const ingest = await withDesktopE2eeAccount(
+        (owner) =>
+          owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
+            ? Effect.succeed(owner.host.ingestLedgerRecords(workspaceId, page))
+            : Effect.fail(new Error('e2ee_not_open')),
+        workspaceId,
+        false
       )
       await runDesktopE2eeOperation(access.accountId, ingest)
       cursor = page.nextCursor ?? undefined
     } while (cursor)
     if (options?.installKeys === false) return this.status(workspaceId)
-    const work = await withDesktopE2eeAccount((owner) =>
-      owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
-        ? Effect.succeed(
-            owner.host.keyRound(
-              workspaceId,
-              (signal) =>
-                cloud.client.mailbox({ workspaceId, credential: access.credential }, signal),
-              (signal) =>
-                cloud.client.staging({ workspaceId, credential: access.credential }, signal)
+    const work = await withDesktopE2eeAccount(
+      (owner) =>
+        owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
+          ? Effect.succeed(
+              owner.host.keyRound(
+                workspaceId,
+                (signal) =>
+                  cloud.client.mailbox({ workspaceId, credential: access.credential }, signal),
+                (signal) =>
+                  cloud.client.staging({ workspaceId, credential: access.credential }, signal)
+              )
             )
-          )
-        : Effect.fail(new Error('e2ee_not_open'))
+          : Effect.fail(new Error('e2ee_not_open')),
+      workspaceId,
+      false
     )
     await runDesktopE2eeOperation(access.accountId, work)
     return this.status(workspaceId)
@@ -523,16 +589,19 @@ export class E2eeIpc extends IpcService {
   async prepareLocalAgent(workspaceId: string) {
     this.pairingFailure = undefined
     const id = sender()
-    const context = await withDesktopE2eeAccount((owner) =>
-      Effect.gen(function* () {
-        if (!owner.readers.get(workspaceId)?.has(id))
-          return yield* Effect.fail(new Error('e2ee_not_open'))
-        yield* owner.bootstrap.deviceCredential(workspaceId)
-        return {
-          accountId: owner.accountId,
-          ...(yield* owner.host.localPairingContext(workspaceId))
-        }
-      })
+    const context = await withDesktopE2eeAccount(
+      (owner) =>
+        Effect.gen(function* () {
+          if (!owner.readers.get(workspaceId)?.has(id))
+            return yield* Effect.fail(new Error('e2ee_not_open'))
+          yield* owner.bootstrap.deviceCredential(workspaceId)
+          return {
+            accountId: owner.accountId,
+            ...(yield* owner.host.localPairingContext(workspaceId))
+          }
+        }),
+      workspaceId,
+      false
     )
     const cli = getIpcServiceDeps().cliService
     const machineId = await cli.getLocalMachineId()
@@ -545,9 +614,14 @@ export class E2eeIpc extends IpcService {
       // Original retained above; attaching it would leak raw causes through the IPC logger.
       // eslint-disable-next-line preserve-caught-error
       throw new Error(
-        error instanceof Error && error.message === 'e2ee_local_agent_pending'
-          ? 'e2ee_local_agent_pending'
-          : 'e2ee_local_agent_unavailable'
+        LocalE2eeRecoveryFailureSchema.safeParse({
+          ok: false,
+          error: error instanceof Error ? error.message : ''
+        }).success
+          ? `e2ee_machine_${(error as Error).message.slice(5)}`
+          : error instanceof Error && error.message === 'e2ee_local_agent_pending'
+            ? 'e2ee_local_agent_pending'
+            : 'e2ee_local_agent_unavailable'
       )
     }
     if (material.machineId !== machineId || material.pairingSessionId !== context.pairingSessionId)
@@ -555,16 +629,19 @@ export class E2eeIpc extends IpcService {
     if (material.type === 'prepare-superseded') {
       let retirementFailure: unknown
       try {
-        await withDesktopE2eeAccount((owner) =>
-          owner.accountId === context.accountId && owner.readers.get(workspaceId)?.has(id)
-            ? owner.host.retireSupersededLocalPairing(
-                workspaceId,
-                context.pairingSessionId,
-                (error) => {
-                  retirementFailure = error
-                }
-              )
-            : Effect.fail(new Error('e2ee_account_mismatch'))
+        await withDesktopE2eeAccount(
+          (owner) =>
+            owner.accountId === context.accountId && owner.readers.get(workspaceId)?.has(id)
+              ? owner.host.retireSupersededLocalPairing(
+                  workspaceId,
+                  context.pairingSessionId,
+                  (error) => {
+                    retirementFailure = error
+                  }
+                )
+              : Effect.fail(new Error('e2ee_account_mismatch')),
+          workspaceId,
+          false
         )
       } catch (error) {
         const superseded = new Error('e2ee_pairing_superseded')
@@ -579,10 +656,13 @@ export class E2eeIpc extends IpcService {
       }
       throw new Error('e2ee_local_agent_pending')
     }
-    return withDesktopE2eeAccount((owner) =>
-      owner.accountId === context.accountId && owner.readers.get(workspaceId)?.has(id)
-        ? owner.host.stageLocalPairing(workspaceId, material)
-        : Effect.fail(new Error('e2ee_account_mismatch'))
+    return withDesktopE2eeAccount(
+      (owner) =>
+        owner.accountId === context.accountId && owner.readers.get(workspaceId)?.has(id)
+          ? owner.host.stageLocalPairing(workspaceId, material)
+          : Effect.fail(new Error('e2ee_account_mismatch')),
+      workspaceId,
+      false
     )
   }
   @IpcMethod()
@@ -591,15 +671,18 @@ export class E2eeIpc extends IpcService {
     const id = sender()
     if (typeof pairingSessionId !== 'string' || !/^[0-9a-f]{32}$/.test(pairingSessionId))
       throw new Error('e2ee_invalid-input')
-    const pending = await withDesktopE2eeAccount((owner) =>
-      Effect.gen(function* () {
-        if (!owner.readers.get(workspaceId)?.has(id))
-          return yield* Effect.fail(new Error('e2ee_not_open'))
-        return {
-          accountId: owner.accountId,
-          request: yield* owner.host.approveLocalPairing(workspaceId, pairingSessionId)
-        }
-      })
+    const pending = await withDesktopE2eeAccount(
+      (owner) =>
+        Effect.gen(function* () {
+          if (!owner.readers.get(workspaceId)?.has(id))
+            return yield* Effect.fail(new Error('e2ee_not_open'))
+          return {
+            accountId: owner.accountId,
+            request: yield* owner.host.approveLocalPairing(workspaceId, pairingSessionId)
+          }
+        }),
+      workspaceId,
+      false
     )
     let appendFailure: unknown
     if (pending.request) {
@@ -622,10 +705,13 @@ export class E2eeIpc extends IpcService {
     }
     let confirmed
     try {
-      confirmed = await withDesktopE2eeAccount((owner) =>
-        owner.accountId === pending.accountId && owner.readers.get(workspaceId)?.has(id)
-          ? owner.host.confirmLocalPairing(workspaceId, pairingSessionId)
-          : Effect.fail(new Error('e2ee_account_mismatch'))
+      confirmed = await withDesktopE2eeAccount(
+        (owner) =>
+          owner.accountId === pending.accountId && owner.readers.get(workspaceId)?.has(id)
+            ? owner.host.confirmLocalPairing(workspaceId, pairingSessionId)
+            : Effect.fail(new Error('e2ee_account_mismatch')),
+        workspaceId,
+        false
       )
     } catch (error) {
       // Keep both failures in main for diagnosis. Only a stable message crosses
@@ -670,13 +756,16 @@ export class E2eeIpc extends IpcService {
     requestSnapshotFor?: string
   ) {
     const id = sender()
-    const access = await withDesktopE2eeAccount((owner) =>
-      owner.readers.get(workspaceId)?.has(id)
-        ? Effect.map(owner.bootstrap.deviceCredential(workspaceId), (credential) => ({
-            accountId: owner.accountId,
-            credential
-          }))
-        : Effect.fail(new Error('e2ee_not_open'))
+    const access = await withDesktopE2eeAccount(
+      (owner) =>
+        owner.readers.get(workspaceId)?.has(id)
+          ? Effect.map(owner.bootstrap.deviceCredential(workspaceId), (credential) => ({
+              accountId: owner.accountId,
+              credential
+            }))
+          : Effect.fail(new Error('e2ee_not_open')),
+      workspaceId,
+      false
     )
     const cloud = await desktopE2eeCloudClient()
     if (cloud.accountId !== access.accountId) throw new Error('e2ee_account_mismatch')
@@ -695,10 +784,13 @@ export class E2eeIpc extends IpcService {
   @IpcMethod()
   async seal(workspaceId: string, input: Parameters<E2eeWorkspaceRuntime['seal']>[1]) {
     const id = sender()
-    return withDesktopE2eeAccount((owner) =>
-      owner.readers.get(workspaceId)?.has(id)
-        ? owner.host.seal(workspaceId, input)
-        : Effect.fail(new Error('e2ee_not_open'))
+    return withDesktopE2eeAccount(
+      (owner) =>
+        owner.readers.get(workspaceId)?.has(id)
+          ? owner.host.seal(workspaceId, input)
+          : Effect.fail(new Error('e2ee_not_open')),
+      workspaceId,
+      false
     )
   }
   @IpcMethod()
@@ -707,11 +799,62 @@ export class E2eeIpc extends IpcService {
     input: Parameters<E2eeWorkspaceRuntime['openContent']>[1]
   ) {
     const id = sender()
-    return withDesktopE2eeAccount((owner) =>
-      owner.readers.get(workspaceId)?.has(id)
-        ? owner.host.openContent(workspaceId, input)
-        : Effect.fail(new Error('e2ee_not_open'))
+    return withDesktopE2eeAccount(
+      (owner) =>
+        owner.readers.get(workspaceId)?.has(id)
+          ? owner.host.openContent(workspaceId, input)
+          : Effect.fail(new Error('e2ee_not_open')),
+      workspaceId,
+      false
     )
+  }
+  @IpcMethod()
+  async resetLocalAgent(input: { workspaceId: string; resetId: string; confirm: true }) {
+    const id = sender()
+    if (
+      !input ||
+      input.confirm !== true ||
+      !/^[a-f0-9-]{36}$/.test(input.resetId) ||
+      !/^[A-Za-z0-9_-]{1,128}$/.test(input.workspaceId)
+    )
+      throw new Error('e2ee_invalid-input')
+    const accountId = await withDesktopE2eeAccount(
+      (owner) =>
+        owner.readers.get(input.workspaceId)?.has(id)
+          ? Effect.as(owner.bootstrap.deviceCredential(input.workspaceId), owner.accountId)
+          : Effect.fail(new Error('e2ee_not_open')),
+      input.workspaceId,
+      false
+    )
+    const cli = getIpcServiceDeps().cliService
+    const machineId = await cli.getLocalMachineId()
+    if (!machineId) throw new Error('e2ee_local_agent_unavailable')
+    await cli.resetLocalE2eeIdentity({
+      accountId,
+      machineId,
+      workspaceId: input.workspaceId,
+      resetId: input.resetId
+    })
+    await withDesktopE2eeAccount(
+      (owner) =>
+        owner.accountId === accountId && owner.readers.get(input.workspaceId)?.has(id)
+          ? owner.host.resetLocalPairing(input.workspaceId, input.resetId)
+          : Effect.fail(new Error('e2ee_account_mismatch')),
+      input.workspaceId,
+      false
+    )
+  }
+  @IpcMethod()
+  async resetIdentity(input: { workspaceId?: string; resetId: string; confirm: true }) {
+    sender()
+    if (
+      !input ||
+      input.confirm !== true ||
+      !/^[a-f0-9-]{36}$/.test(input.resetId) ||
+      (input.workspaceId !== undefined && !/^[A-Za-z0-9_-]{1,128}$/.test(input.workspaceId))
+    )
+      throw new Error('e2ee_invalid-input')
+    return resetDesktopE2eeIdentity({ workspaceId: input.workspaceId, resetId: input.resetId })
   }
   @IpcMethod()
   async prepareCreation(payload: DesktopE2eeCreationIntent) {
@@ -724,37 +867,43 @@ export class E2eeIpc extends IpcService {
   async recordCreated(input: Parameters<E2eeWorkspaceRuntime['recordCreated']>[0]) {
     sender()
     const captured = { ...input }
-    return withDesktopE2eeAccount((owner) => owner.bootstrap.recordCreated(captured))
+    return recordDesktopE2eeCreated(captured)
   }
   @IpcMethod()
   async open(workspaceId: string, observed?: Parameters<E2eeWorkspaceRuntime['open']>[1]) {
     const id = sender()
-    return withDesktopE2eeAccount((owner) =>
-      Effect.gen(function* () {
-        const status = yield* owner.host.open(workspaceId, observed)
-        const readers = owner.readers.get(workspaceId) ?? new Map<number, number>()
-        readers.set(id, (readers.get(id) ?? 0) + 1)
-        owner.readers.set(workspaceId, readers)
-        return status
-      })
+    return withDesktopE2eeAccount(
+      (owner) =>
+        Effect.gen(function* () {
+          const status = yield* owner.host.open(workspaceId, observed)
+          const readers = owner.readers.get(workspaceId) ?? new Map<number, number>()
+          readers.set(id, (readers.get(id) ?? 0) + 1)
+          owner.readers.set(workspaceId, readers)
+          return status
+        }),
+      workspaceId,
+      false
     )
   }
   @IpcMethod()
   async close(workspaceId: string) {
     const id = sender()
-    const cleanup = await withDesktopE2eeAccount((owner) =>
-      Effect.gen(function* () {
-        const readers = owner.readers.get(workspaceId)
-        const count = readers?.get(id) ?? 0
-        if (count > 1) readers!.set(id, count - 1)
-        else readers?.delete(id)
-        if (readers?.size === 0) {
-          const drain = yield* owner.host.beginCloseWorkspace(workspaceId)
-          owner.readers.delete(workspaceId)
-          return drain
-        }
-        return Effect.void
-      })
+    const cleanup = await withDesktopE2eeAccount(
+      (owner) =>
+        Effect.gen(function* () {
+          const readers = owner.readers.get(workspaceId)
+          const count = readers?.get(id) ?? 0
+          if (count > 1) readers!.set(id, count - 1)
+          else readers?.delete(id)
+          if (readers?.size === 0) {
+            const drain = yield* owner.host.beginCloseWorkspace(workspaceId)
+            owner.readers.delete(workspaceId)
+            return drain
+          }
+          return Effect.void
+        }),
+      workspaceId,
+      false
     )
     await Effect.runPromise(cleanup).catch(() => {
       throw new Error(
@@ -769,21 +918,24 @@ export class E2eeIpc extends IpcService {
     if (!input || typeof input.accountId !== 'string' || typeof input.workspaceId !== 'string')
       throw new Error('e2ee_invalid-input')
     const { accountId, workspaceId } = input
-    const captured = await withDesktopE2eeAccount((owner) =>
-      Effect.gen(function* () {
-        if (owner.accountId !== accountId)
-          return yield* Effect.fail(new Error('e2ee_account_mismatch'))
-        const status = yield* owner.host.open(workspaceId)
-        // The account lock protects this temporary read. Existing window readers
-        // keep their host; otherwise detach here and drain outside that lock.
-        const cleanup = owner.readers.get(workspaceId)?.size
-          ? Effect.void
-          : yield* owner.host.beginCloseWorkspace(workspaceId)
-        return {
-          identity: { workspaceId: status.workspaceId, genesisHash: status.genesisHash },
-          cleanup
-        }
-      })
+    const captured = await withDesktopE2eeAccount(
+      (owner) =>
+        Effect.gen(function* () {
+          if (owner.accountId !== accountId)
+            return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+          const status = yield* owner.host.open(workspaceId)
+          // The account lock protects this temporary read. Existing window readers
+          // keep their host; otherwise detach here and drain outside that lock.
+          const cleanup = owner.readers.get(workspaceId)?.size
+            ? Effect.void
+            : yield* owner.host.beginCloseWorkspace(workspaceId)
+          return {
+            identity: { workspaceId: status.workspaceId, genesisHash: status.genesisHash },
+            cleanup
+          }
+        }),
+      workspaceId,
+      false
     )
     await Effect.runPromise(captured.cleanup).catch(() => {
       throw new Error('e2ee_cleanup_failed')
@@ -793,10 +945,13 @@ export class E2eeIpc extends IpcService {
   @IpcMethod()
   async managementState(workspaceId: string) {
     const id = sender()
-    return withDesktopE2eeAccount((owner) =>
-      owner.readers.get(workspaceId)?.has(id)
-        ? owner.host.managementState(workspaceId)
-        : Effect.fail(new Error('e2ee_not_open'))
+    return withDesktopE2eeAccount(
+      (owner) =>
+        owner.readers.get(workspaceId)?.has(id)
+          ? owner.host.managementState(workspaceId)
+          : Effect.fail(new Error('e2ee_not_open')),
+      workspaceId,
+      false
     )
   }
   private async manageKeys(
@@ -804,31 +959,41 @@ export class E2eeIpc extends IpcService {
     command: { type: 'rotate' } | { type: 'revoke'; target: string }
   ) {
     const id = sender()
-    const access = await withDesktopE2eeAccount((owner) =>
-      Effect.gen(function* () {
-        if (!owner.readers.get(workspaceId)?.has(id))
-          return yield* Effect.fail(new Error('e2ee_not_open'))
-        return {
-          accountId: owner.accountId,
-          credential: yield* owner.bootstrap.deviceCredential(workspaceId)
-        }
-      })
+    const access = await withDesktopE2eeAccount(
+      (owner) =>
+        Effect.gen(function* () {
+          if (!owner.readers.get(workspaceId)?.has(id))
+            return yield* Effect.fail(new Error('e2ee_not_open'))
+          return {
+            accountId: owner.accountId,
+            credential: yield* owner.bootstrap.deviceCredential(workspaceId)
+          }
+        }),
+      workspaceId,
+      false
     )
     const cloud = await desktopE2eeCloudClient()
     if (cloud.accountId !== access.accountId) throw new Error('e2ee_account_mismatch')
-    const work = await withDesktopE2eeAccount((owner) =>
-      owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
-        ? Effect.succeed(
-            owner.host.manage(workspaceId, command, (signal) => ({
-              log: cloud.client.ledgerLog(workspaceId, signal),
-              staging: (round) =>
-                cloud.client.staging({ workspaceId, credential: access.credential }, signal, round),
-              history: (request) => cloud.client.history(request, signal),
-              mailbox: () =>
-                cloud.client.mailbox({ workspaceId, credential: access.credential }, signal)
-            }))
-          )
-        : Effect.fail(new Error('e2ee_not_open'))
+    const work = await withDesktopE2eeAccount(
+      (owner) =>
+        owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
+          ? Effect.succeed(
+              owner.host.manage(workspaceId, command, (signal) => ({
+                log: cloud.client.ledgerLog(workspaceId, signal),
+                staging: (round) =>
+                  cloud.client.staging(
+                    { workspaceId, credential: access.credential },
+                    signal,
+                    round
+                  ),
+                history: (request) => cloud.client.history(request, signal),
+                mailbox: () =>
+                  cloud.client.mailbox({ workspaceId, credential: access.credential }, signal)
+              }))
+            )
+          : Effect.fail(new Error('e2ee_not_open')),
+      workspaceId,
+      false
     )
     try {
       const outcome = await runDesktopE2eeOperation(access.accountId, work)
@@ -851,10 +1016,13 @@ export class E2eeIpc extends IpcService {
   @IpcMethod()
   async status(workspaceId: string) {
     const id = sender()
-    return withDesktopE2eeAccount((owner) =>
-      owner.readers.get(workspaceId)?.has(id)
-        ? owner.host.status(workspaceId)
-        : Effect.fail(new Error('e2ee_not_open'))
+    return withDesktopE2eeAccount(
+      (owner) =>
+        owner.readers.get(workspaceId)?.has(id)
+          ? owner.host.status(workspaceId)
+          : Effect.fail(new Error('e2ee_not_open')),
+      workspaceId,
+      false
     )
   }
   @IpcMethod()
@@ -863,23 +1031,29 @@ export class E2eeIpc extends IpcService {
     page: Parameters<E2eeWorkspaceRuntime['ingestLedgerRecords']>[1]
   ) {
     const id = sender()
-    const captured = await withDesktopE2eeAccount((owner) =>
-      owner.readers.get(workspaceId)?.has(id)
-        ? Effect.succeed({
-            accountId: owner.accountId,
-            work: owner.host.ingestLedgerRecords(workspaceId, page)
-          })
-        : Effect.fail(new Error('e2ee_not_open'))
+    const captured = await withDesktopE2eeAccount(
+      (owner) =>
+        owner.readers.get(workspaceId)?.has(id)
+          ? Effect.succeed({
+              accountId: owner.accountId,
+              work: owner.host.ingestLedgerRecords(workspaceId, page)
+            })
+          : Effect.fail(new Error('e2ee_not_open')),
+      workspaceId,
+      false
     )
     return runDesktopE2eeOperation(captured.accountId, captured.work)
   }
   @IpcMethod()
   async ledgerView(workspaceId: string) {
     const id = sender()
-    return withDesktopE2eeAccount((owner) =>
-      owner.readers.get(workspaceId)?.has(id)
-        ? owner.host.ledgerView(workspaceId)
-        : Effect.fail(new Error('e2ee_not_open'))
+    return withDesktopE2eeAccount(
+      (owner) =>
+        owner.readers.get(workspaceId)?.has(id)
+          ? owner.host.ledgerView(workspaceId)
+          : Effect.fail(new Error('e2ee_not_open')),
+      workspaceId,
+      false
     )
   }
 }

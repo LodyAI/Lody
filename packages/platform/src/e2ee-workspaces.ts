@@ -162,6 +162,14 @@ export interface E2eeWorkspaceRuntime {
     input: E2eeContentSeal
   ): Promise<{ header: Uint8Array; sealed: Uint8Array }>;
   openContent(workspaceId: string, input: E2eeContentOpen): Promise<Uint8Array>;
+  /** Explicitly archive local originals and require fresh independently approved pairing. */
+  resetIdentity?(input: {
+    workspaceId?: string;
+    resetId: string;
+    confirm: true;
+  }): Promise<{ archive: string | null }>;
+  /** Archive the local CLI machine identity; retain the desktop personal identity. */
+  resetLocalAgent?(input: { workspaceId: string; resetId: string; confirm: true }): Promise<void>;
   recordCreated(input: {
     workspaceId: string;
     genesisHash: string;
