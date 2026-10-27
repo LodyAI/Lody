@@ -240,16 +240,18 @@ export class LodyFleet {
     this.onFatalAuthFailure = options.onFatalAuthFailure;
     this.localWorkspaceCatalog = options.localWorkspaceCatalog ?? makeLocalWorkspaceCatalog();
     this.memoryPressure = new MemoryPressureSampler(this.logger);
-    this.remoteBridge = this.cloudPort.streamsTokens
-      ? new RemoteBridge({
-          logger: this.logger,
-          catalog: this.localWorkspaceCatalog,
-          userId: this.userId,
-          machineId: this.machineId,
-          machineName: this.machineName,
-          getRuntime: (workspaceId) => this.runtimes.get(workspaceId)?.lody,
-        })
-      : null;
+    this.remoteBridge =
+      this.cloudPort.streamsTokens || this.cloudPort.e2eeMachineScope
+        ? new RemoteBridge({
+            logger: this.logger,
+            catalog: this.localWorkspaceCatalog,
+            e2eeMachineScope: this.cloudPort.e2eeMachineScope,
+            userId: this.userId,
+            machineId: this.machineId,
+            machineName: this.machineName,
+            getRuntime: (workspaceId) => this.runtimes.get(workspaceId)?.lody,
+          })
+        : null;
     this.localPlatform = this.cloudPort.kind === 'local';
     // The local platform has no cloud reconcile: the catalog bootstrap is the
     // only workspace source, so it is unconditionally on.

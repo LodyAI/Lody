@@ -1,3 +1,4 @@
+import { makeDesktopRemotePairing } from './e2ee-remote-pairing.mjs'
 import { EpochCandidateStore, SubmissionJournal } from '@lody/e2ee-core/services'
 import {
   desktopManagementStores,
@@ -195,6 +196,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         managementState: () => Effect.Effect<import('@lody/platform').E2eeManagementState, unknown>
         scope: Scope.Closeable
         pairing: ReturnType<typeof makeDesktopLocalPairing>
+        remotePairing: ReturnType<typeof makeDesktopRemotePairing>
         personalPairing: ReturnType<typeof makeDesktopPersonalPairing>
         status: () => Effect.Effect<E2eeRuntimeStatus, unknown>
         ledgerView: () => Effect.Effect<E2eeRuntimeLedgerView, unknown>
@@ -580,6 +582,16 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         }
         const pairing = yield* sql(() =>
           makeDesktopLocalPairing({
+            db,
+            workspaceId,
+            genesis,
+            genesisRecord: creation.record,
+            signer: device,
+            current: () => verified.current()
+          })
+        )
+        const remotePairing = yield* sql(() =>
+          makeDesktopRemotePairing({
             db,
             workspaceId,
             genesis,
@@ -1159,6 +1171,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           managementState,
           scope,
           pairing,
+          remotePairing,
           personalPairing,
           status,
           ledgerView,
@@ -1247,6 +1260,39 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
       )
     }
     return {
+      remoteMachineOffer: (
+        workspaceId: string,
+        args: { accountId: string; deploymentUrl: string; ingressUrl: string }
+      ) =>
+        run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.remotePairing.offer(args))),
+      stageRemoteMachine: (
+        workspaceId: string,
+        session: string,
+        material: LocalE2eePrepareResponse
+      ) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.remotePairing.stage(session, material)
+          )
+        ),
+      approveRemoteMachine: (workspaceId: string, session: string, summary: string) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.remotePairing.approve(session, summary)
+          )
+        ),
+      confirmRemoteMachine: (workspaceId: string, session: string) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.remotePairing.confirmed(session)
+          )
+        ),
+      retireRemoteMachine: (workspaceId: string, session: string, noAdmissionReserved: boolean) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.remotePairing.retire(session, noAdmissionReserved)
+          )
+        ),
       managementState: (workspaceId: string) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.managementState())),
       manage: (

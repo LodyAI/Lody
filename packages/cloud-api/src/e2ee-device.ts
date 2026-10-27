@@ -1,4 +1,4 @@
-/** Opaque device access credential. Account authentication is independently required. */
+/** Opaque device credential. Remote machines use an explicitly admitted, device-scoped service grant. */
 export type E2eeDeviceAccess = { workspaceId: string; credential: string; cliToken?: string };
 export type E2eeContentTokenRequest = E2eeDeviceAccess & {
   rejectedToken?: string;
@@ -39,6 +39,8 @@ export type E2eeAppendRecordRequest = {
   requestId: string;
   recordHex: string;
   credentialHash?: string;
+  /** Remote machine cancellation/admission fence. */
+  machinePairingSessionId?: string;
   /** Personal join cancellation fence, consumed with the writer reservation. */
   pairingSessionId?: string;
 };

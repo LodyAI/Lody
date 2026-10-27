@@ -303,3 +303,77 @@ describe('local encrypted agent approval', () => {
     expect(container.textContent).toBe('');
   });
 });
+
+describe('remote encrypted machine approval', () => {
+  it('shows the exact summary and file protection before separate approval, then preserves pending installation', async () => {
+    const { E2eeRemoteMachinePairing } =
+      await import('../src/components/pages/e2ee-remote-machine-pairing');
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const pairingSessionId = '11'.repeat(16),
+      summary = Array(8).fill('12345678').join(' ');
+    let state: 'claimed' | 'admitted' = 'claimed';
+    const material = {
+      ok: true as const,
+      type: 'prepare' as const,
+      machineId: 'synthetic-machine',
+      pairingSessionId,
+      signingPublicKey: '22'.repeat(32),
+      encryptionPublicKey: '33'.repeat(32),
+      possessionSignature: '44'.repeat(64),
+      credentialHash: '55'.repeat(32),
+      bindingSignature: '66'.repeat(64),
+      protection: 'file' as const,
+    };
+    const view = () => ({
+      pairingSessionId,
+      summary,
+      material,
+      status: state,
+      expiresAt: 2_000_000,
+      location: { country: 'CN', city: 'Shanghai' },
+    });
+    const runtime = {
+      beginRemoteMachinePairing: async () => ({
+        ...view(),
+        command: 'lody machine pair --offer synthetic-command',
+      }),
+      inspectRemoteMachinePairing: async () => view(),
+      approveRemoteMachinePairing: async (_workspace: string, session: string, shown: string) => {
+        if (session !== pairingSessionId || shown !== summary) throw new Error('evidence changed');
+        state = 'admitted';
+        return { admitted: true, ready: false };
+      },
+      cancelRemoteMachinePairing: async () => ({ ...view(), status: 'cancelled' as const }),
+    };
+    const click = async (key: string) => {
+      const button = Array.from(container.querySelectorAll('button')).find(
+        (item) => item.textContent === key
+      );
+      if (!button) throw new Error(`missing ${key}`);
+      await act(async () => button.click());
+    };
+    try {
+      await act(async () =>
+        root.render(<E2eeRemoteMachinePairing workspaceId="workspace" runtime={runtime} />)
+      );
+      await click('e2ee.remoteMachine.create');
+      expect(container.querySelector('textarea')?.value).toContain('synthetic-command');
+      expect(container.textContent).not.toContain(summary);
+      await click('e2ee.remoteMachine.check');
+      expect(state).toBe('claimed');
+      expect(container.textContent).toContain(summary);
+      expect(container.textContent).toContain('e2ee.localAgent.fileProtection');
+      await click('e2ee.remoteMachine.allow');
+      expect(state).toBe('admitted');
+      expect(container.textContent).toContain('e2ee.remoteMachine.status.admitted');
+      expect(container.textContent).toContain('e2ee.remoteMachine.resume');
+      expect(container.textContent).not.toContain('e2ee.remoteMachine.status.ready');
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+});

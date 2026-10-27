@@ -28,11 +28,11 @@ import { isIpcInvokeChannel } from '../../preload/ipc-invoke-policy.ts'
 import { PersonalPairingOfferSchema } from './e2ee-personal-pairing.mts'
 import { desktopE2eeFailure } from './e2ee-diagnostics.mts'
 const require = createRequire(import.meta.url)
-async function load(relative, dependencies, console = globalThis.console) {
+async function load(relative, dependencies, console = globalThis.console, env = {}) {
   const source = await readFile(new URL(relative, import.meta.url), 'utf8')
   const exports = {}
   runInNewContext(
-    ts.transpileModule(source.replaceAll('import.meta.env', '{}'), {
+    ts.transpileModule(source.replaceAll('import.meta.env', JSON.stringify(env)), {
       compilerOptions: {
         target: ts.ScriptTarget.ES2022,
         module: ts.ModuleKind.CommonJS,
@@ -43,6 +43,8 @@ async function load(relative, dependencies, console = globalThis.console) {
       exports,
       Error,
       crypto: globalThis.crypto,
+      Buffer,
+      URL,
       setTimeout,
       clearTimeout,
       console,
@@ -1982,4 +1984,125 @@ void test('slow terminal deletion fences only that workspace and never holds the
     release.resolve()
     await removal
   }
+})
+
+void test('remote commands use workspace custody and never create an account control identity', async (t) => {
+  const { api, directory } = await nativeAccountFixture(t)
+  const first = await createAccountWorkspace(api, 'first')
+  const second = await createAccountWorkspace(api, 'second')
+  const sender = Object.assign(new EventEmitter(), { id: 19 })
+  const sessions = new Map()
+  const { E2eeIpc } = await load(
+    '../ipc/services/e2ee-ipc.ts',
+    {
+      '../ipc-service-deps': { getIpcServiceDeps: () => ({}) },
+      'electron-ipc-decorator': {
+        IpcService: class {},
+        IpcMethod: () => (_target, _name, descriptor) => descriptor,
+        getIpcContext: () => ({ event: { sender } })
+      },
+      '../../platform': { isLocalPlatform: () => false },
+      '../../services/e2ee-bootstrap.mjs': {},
+      '../../services/e2ee-account-runtime': {
+        ...api,
+        desktopE2eeCloudClient: async () => ({
+          accountId: 'account',
+          client: {
+            machineBegin: ({ workspaceId, offer }) =>
+              Effect.sync(() => {
+                sessions.set(workspaceId, {
+                  pairingSessionId: offer.pairingSessionId,
+                  status: 'pending',
+                  offer
+                })
+                return sessions.get(workspaceId)
+              }),
+            machineInspect: ({ workspaceId }) => Effect.succeed(sessions.get(workspaceId)),
+            machineCancel: ({ workspaceId }) =>
+              Effect.sync(() => {
+                const next = {
+                  ...sessions.get(workspaceId),
+                  status: 'cancelled',
+                  noAdmissionReserved: true
+                }
+                sessions.set(workspaceId, next)
+                return next
+              })
+          }
+        })
+      },
+      '../assert-sender': { assertProductWindowSender: () => {} }
+    },
+    globalThis.console,
+    {
+      VITE_CONVEX_DEPLOY_URL: 'https://cloud.synthetic.test',
+      VITE_SERVER_URL: 'https://edge.synthetic.test'
+    }
+  )
+  const ipc = new E2eeIpc()
+  const { ipcBridge } = await load('../../preload/ipc-bridge.ts', {
+    electron: {
+      ipcRenderer: {
+        on: () => {},
+        invoke: (channel, ...args) => ipc[channel.split('.')[1]](...args)
+      }
+    },
+    './ipc-invoke-policy': { isIpcInvokeChannel },
+    '@lody/shared/electron-ipc': electronIpc
+  })
+  for (const [workspaceId, expected] of [
+    ['first', first],
+    ['second', second]
+  ]) {
+    await ipcBridge.invoke('e2ee.open', workspaceId)
+    const started = await ipcBridge.invoke('e2ee.beginRemoteMachinePairing', workspaceId)
+    const offer = JSON.parse(
+      Buffer.from(started.command.split(' --offer ')[1], 'base64url').toString()
+    )
+    assert.equal(offer.frontendSigningPublicKey, expected.signingPublicKey)
+    assert.equal(offer.genesisHash, expected.creation.genesisHashHex)
+    await assert.rejects(
+      ipcBridge.invoke(
+        'e2ee.approveRemoteMachinePairing',
+        workspaceId,
+        offer.pairingSessionId,
+        Array(8).fill('00000000').join(' ')
+      ),
+      /e2ee_conflict/
+    )
+    assert.equal(
+      (await ipcBridge.invoke('e2ee.beginRemoteMachinePairing', workspaceId)).command,
+      started.command
+    )
+    assert.equal(
+      (
+        await ipcBridge.invoke(
+          'e2ee.inspectRemoteMachinePairing',
+          workspaceId,
+          offer.pairingSessionId
+        )
+      ).status,
+      'pending'
+    )
+    assert.equal(
+      (
+        await ipcBridge.invoke(
+          'e2ee.cancelRemoteMachinePairing',
+          workspaceId,
+          offer.pairingSessionId
+        )
+      ).status,
+      'cancelled'
+    )
+    const next = await ipcBridge.invoke('e2ee.beginRemoteMachinePairing', workspaceId)
+    assert.notEqual(next.pairingSessionId, offer.pairingSessionId)
+    assert.equal(
+      (await ipcBridge.invoke('e2ee.status', workspaceId)).genesisHash,
+      expected.creation.genesisHashHex
+    )
+    await ipcBridge.invoke('e2ee.close', workspaceId)
+  }
+  assert.notEqual(first.signingPublicKey, second.signingPublicKey)
+  const roots = await readdir(join(directory, 'e2ee-bootstrap'))
+  assert.ok(!(await readdir(join(directory, 'e2ee-bootstrap', roots[0]))).includes('control'))
 })

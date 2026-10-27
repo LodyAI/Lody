@@ -71,7 +71,7 @@ Only one device may currently bind a machineId within one workspace. Replacing i
 requires the existing same-member personal-device authority and revokes the exact
 old key while admitting the new one in the same record. Historical keys stay
 non-reusable; rotationRequired advises administrators to update keys without blocking
-new seals or workspace use. Snapshot, retained and digest version 3 preserve the binding
+new seals or workspace use. Snapshot, retained and digest version 4 preserve the binding
 and historical device kind.
 Old developer machine records require workspace recreation, without a legacy reader
 or migration. The independent v1 vector is regenerated under this explicit pre-freeze
@@ -91,7 +91,7 @@ Full replay costs about 5.4 ms per record on an idle desktop-class host (4,096 r
 - **One state encoding.** Retained state, endorsed snapshots and the comparison digest share one authorization-state encoding, so all three sources (full replay, qualified snapshot import, retained restore) agree on the state, its digest and every author at the same position. The retained envelope adds only the verification source, which survives a round trip and is never upgraded; verified hashes before the restore point are not kept. Layout and acceptance: [compact state note](../.agents/notes/proposed/architecture/2026-10-20-e2ee-compact-ledger-state.md).
 - **Digest use.** `stateDigest` identifies a state for cross-party comparison (comparison notes) and for background audits. Restore checks it only when the caller supplies it, which costs one hash and no re-verification.
 - **Background audit (deferred).** A full replay from genesis compared with the retained digest can catch bugs or storage corruption. It is optional, not part of this change, and may run outside the host's request runtime (for example a separate worker that reads the stored ledger and the retained digest). If added, a mismatch is an incident that stops writes for that ledger until resolved.
-- **Format.** The retained encoding is current-format only and versioned: retained envelope version 3, snapshot body version 3 and the `snapshot-digest/v3` digest domain (version 1 was the pre-compact layout). Any other version fails with `unknown-version`; the party then discards its retained state and rebuilds it by one full replay of v1 history. Changing the encoding bumps these versions.
+- **Format.** The retained encoding is current-format only and versioned: retained envelope version 4, snapshot body version 4 and the `snapshot-digest/v4` digest domain (version 1 was the pre-compact layout). Any other version fails with `unknown-version`; the party then discards its retained state and rebuilds it by one full replay of v1 history. Changing the encoding bumps these versions.
 - **Reads.** A host serving history pages needs no verification on the read path; clients verify what they receive. Host verification belongs to write admission.
 - **Local stores.** If adopted, clients may restore their local retained state on open instead of revalidating all stored records, which supersedes the full revalidation described below.
 

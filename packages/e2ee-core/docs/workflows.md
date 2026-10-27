@@ -164,7 +164,10 @@ generate key → seal history packet → sign record → envelope per device
 → Committed: install via InstalledEpochKeys | Conflict: discard candidate key
 ```
 
-`resume` finishes the same candidate after a crash, without signing again. A missing
+`resume` finishes the same candidate after a crash, without signing again. Once the
+matching publication original is in `LedgerSubmission`, resume skips staging/readback
+and reconciles that exact CAS, even if staging is unavailable. Candidate-only attempts
+still stage and compare readback before their first submission. A missing
 candidate may reconcile its exact retained submission only after genuine commitment or
 conflict proof; it cannot authorize CAS at an unchanged parent. Normal receiver paths
 install committed keys independently. Existing installed keys permit terminal acknowledgement
@@ -174,6 +177,8 @@ occupies its epoch. `acknowledge` releases the finished result. Only owner or
 admin personal devices may rotate. A manager who bypasses staging and appends
 directly can withhold the key. That is a known availability limitation, not a
 confidentiality break.
+
+Independent MVP member removal uses `WorkspaceControl.execute({ _tag: "RemoveMember", membershipId })` after an authorized `DeclareCapabilities` command for code 1 has committed. It revokes every device, preserves the epoch and advises manual rotation. `EpochPublisher.publishRemoving` retains its separate atomic tag8 contract.
 
 ## WorkspaceControl and the key round
 

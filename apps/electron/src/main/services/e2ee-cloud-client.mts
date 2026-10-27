@@ -1,3 +1,6 @@
+import { RemoteMachineStatusSchema } from '@lody/shared/e2ee-remote-pairing'
+import type { E2eeMachinePairingRequests } from '@lody/cloud-api'
+import { Bytes, decodeRecord, hashRecordBytes } from '@lody/e2ee-core/protocol'
 import { ConvexHttpClient } from 'convex/browser'
 import { api } from '@lody/cloud-api'
 import type {
@@ -20,7 +23,6 @@ import {
   ownEpochStagedGroup,
   ownEpochStagedGroupKey
 } from '@lody/e2ee-core/host'
-import { Bytes, decodeRecord, hashRecordBytes } from '@lody/e2ee-core/protocol'
 import { Effect, Result } from 'effect'
 import { z } from 'zod'
 
@@ -411,6 +413,26 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
         })
       )
     },
+    machineBegin: (requestInput: E2eeMachinePairingRequests['begin']) =>
+      request(
+        (client) => client.mutation(api.e2eeMachinePairing.begin, requestInput),
+        RemoteMachineStatusSchema
+      ),
+    machineInspect: (requestInput: E2eeMachinePairingRequests['inspect']) =>
+      request(
+        (client) => client.query(api.e2eeMachinePairing.inspect, requestInput),
+        RemoteMachineStatusSchema
+      ),
+    machineAuthorizeExisting: (requestInput: E2eeMachinePairingRequests['inspect']) =>
+      request(
+        (client) => client.mutation(api.e2eeMachinePairing.authorizeExisting, requestInput),
+        RemoteMachineStatusSchema
+      ),
+    machineCancel: (requestInput: E2eeMachinePairingRequests['cancel']) =>
+      request(
+        (client) => client.mutation(api.e2eeMachinePairing.cancel, requestInput),
+        RemoteMachineStatusSchema
+      ),
     ledgerLog: (workspaceId: string, signal?: AbortSignal): LedgerLog['Service'] => {
       let observed: { head: string; length: number } | undefined
       return LedgerLog.of({

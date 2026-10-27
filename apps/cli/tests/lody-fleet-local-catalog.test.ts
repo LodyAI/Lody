@@ -1144,6 +1144,116 @@ it('joins background project observation before closing its workspace document',
   expect(fleet.runtimes.has('observing')).toBe(false);
 });
 
+it('starts only the scoped encrypted workspace without a legacy Streams bridge or account catalog rewrite', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'fleet-paired-service-'));
+  const filePath = join(directory, 'catalog.json');
+  const catalog = makeLocalWorkspaceCatalog({
+    filePath,
+    lockName: `paired-${basename(directory)}`,
+    cacheTtlMs: 0,
+  });
+  try {
+    await fileLocksLegacy.runPromise(
+      catalog.cacheRemoteWorkspaces({
+        identity: { userId: 'user-1' },
+        machine: { machineId: 'machine-1', machineName: 'host' },
+        workspaces: [{ id: 'ordinary', name: 'Ordinary', slug: null, role: 'owner' }],
+      })
+    );
+    const original = await readFile(filePath, 'utf8');
+    const workspace = {
+      id: 'paired',
+      name: 'Encrypted',
+      slug: null,
+      role: 'member',
+      contentMode: 'e2ee',
+      genesisHash: 'ab'.repeat(32),
+    };
+    const base = createLocalCloudPort({ identity: { userId: 'user-1' }, workspaces: [] });
+    const cloud: CloudPort = {
+      ...base,
+      kind: 'cloud',
+      e2eeMachineScope: { workspaceId: workspace.id, genesisHash: workspace.genesisHash },
+      e2ee: {
+        getHistory: async () => {
+          throw new Error('unused');
+        },
+        getContentToken: async () => {
+          throw new Error('unused');
+        },
+        mailboxCall: async () => {
+          throw new Error('unused');
+        },
+      },
+    };
+    const { fleet, started } = createFleetHarness(catalog, cloud);
+    const native = fleet as unknown as {
+      applyRemoteWorkspaceList(input: {
+        status: 'authorized';
+        userId: string;
+        workspaces: (typeof workspace)[];
+      }): Promise<void>;
+      desiredWorkspaces: Map<string, unknown>;
+      startWorkspace(item: typeof workspace): Promise<void>;
+      runtimes: Map<string, unknown>;
+      remoteBridge: RemoteBridge;
+    };
+    let attached = false;
+    native.startWorkspace = async (item) => {
+      started.push(item.id);
+      native.runtimes.set(item.id, {
+        workspace: item,
+        lody: {
+          attachRemoteBridge: async () => {
+            attached = true;
+          },
+          detachRemoteBridge: async () => {
+            attached = false;
+          },
+          handleRemoteAccessRevoked: async () => {
+            attached = false;
+          },
+          isRemoteBridgeAttached: () => attached,
+          isControlPlaneReady: () => attached,
+          isControlPlaneRecovering: () => false,
+          getActiveSessionCount: () => 0,
+          getConnectedRoomCount: () => (attached ? 1 : 0),
+        },
+      });
+    };
+    await native.applyRemoteWorkspaceList({
+      status: 'authorized',
+      userId: 'user-1',
+      workspaces: [workspace],
+    });
+    expect([...native.desiredWorkspaces.keys()]).toEqual(['paired']);
+    expect(started).toEqual(['paired']);
+    expect(attached).toBe(true);
+    expect(await readFile(filePath, 'utf8')).toBe(original);
+    for (const changed of [
+      { ...workspace, id: 'other' },
+      { ...workspace, contentMode: 'plaintext' },
+      { ...workspace, genesisHash: 'cd'.repeat(32) },
+    ]) {
+      await expect(
+        native.applyRemoteWorkspaceList({
+          status: 'authorized',
+          userId: 'user-1',
+          workspaces: [changed],
+        })
+      ).rejects.toThrow('scope mismatch');
+      expect([...native.desiredWorkspaces.keys()]).toEqual(['paired']);
+    }
+    await native.remoteBridge.markOffline(
+      [...native.runtimes.values()].map((value) => (value as { lody: RemoteBridgeRuntime }).lody)
+    );
+    expect(attached).toBe(false);
+    native.remoteBridge.shutdown();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 describe('local DSH Provider discovery', () => {
   it('returns only local builtin DSH ids/names across workspaces, without credentials', async () => {
     const { fleet: raw } = createFleetHarness(

@@ -91,7 +91,7 @@ export const prepareDeviceAdmission = Effect.fnUntraced(function* (input: {
     ...(kind === 'machine' ? { machineId, replaces: null } : {}),
   });
 });
-/** Existing ordinary intent only. Atomic removal and lifecycle rotation are separate gates. */
+/** Ordinary ledger intents; independent removal requires a prior capability 1 declaration. */
 export type LedgerCommand =
   | {
       readonly _tag: 'AdmitMember';
@@ -113,6 +113,8 @@ export type LedgerCommand =
       readonly replaces?: Bytes.SigningPublicKey | null;
     }
   | { readonly _tag: 'RevokeDevice'; readonly target: Bytes.SigningPublicKey }
+  | { readonly _tag: 'RemoveMember'; readonly membershipId: Bytes.MembershipId }
+  | { readonly _tag: 'DeclareCapabilities'; readonly capabilities: readonly number[] }
   | { readonly _tag: 'TransferOwner'; readonly successorMembershipId: Bytes.MembershipId };
 function operation(command: LedgerCommand): Result.Result<CborValue, LedgerError> {
   switch (command._tag) {
@@ -165,6 +167,10 @@ function operation(command: LedgerCommand): Result.Result<CborValue, LedgerError
           ...binding,
         ];
       });
+    case 'RemoveMember':
+      return Result.succeed([10, command.membershipId.toBytes()]);
+    case 'DeclareCapabilities':
+      return Result.succeed([9, [...command.capabilities]]);
     case 'RevokeDevice':
       return Result.succeed([5, command.target.toBytes()]);
     case 'TransferOwner':

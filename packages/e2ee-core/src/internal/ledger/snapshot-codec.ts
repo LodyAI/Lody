@@ -17,6 +17,7 @@ import { LedgerError } from './errors';
 import { decodeMachineId, encodeMachineId } from './machine-id';
 import { fail, type DeviceKind, type Role } from './records';
 import {
+  SUPPORTED_CAPABILITIES,
   hashAt,
   stateGet,
   type InternalState,
@@ -31,18 +32,18 @@ const lift = <A>(r: Result.Result<A, { readonly code: LedgerError['code'] }>) =>
   Result.mapError(r, (e) => new LedgerError({ code: e.code }));
 /**
  * Format versions of the compact authorization-state encoding `S`. Current-only:
- * decoders reject every other version as `unknown-version`. Version 3 preserves machine bindings and historical device kinds; older layouts
+ * decoders reject every other version as `unknown-version`. Version 4 also preserves declared capabilities; older layouts
  * cannot restore those facts and are rejected without migration.
  */
-const SNAPSHOT_BODY_VERSION = 3;
+const SNAPSHOT_BODY_VERSION = 4;
 /** Retained envelope version; the digest body shares it so the digest is derivable from retained bytes. */
-const RETAINED_VERSION = 3;
-const DIGEST_DOMAIN = 'snapshot-digest/v3';
+const RETAINED_VERSION = 4;
+const DIGEST_DOMAIN = 'snapshot-digest/v4';
 const digestOfBody = (body: Uint8Array) =>
   lift(Bytes.recordHash(sha256(concat([domain(DIGEST_DOMAIN), body]))));
 /**
- * Deterministic CBOR: the digest body `[3, genesis, length, head, S]` is the
- * retained array `[3, genesis, length, head, S, verification]` with a 5-element
+ * Deterministic CBOR: the digest body `[4, genesis, length, head, S]` is the
+ * retained array `[4, genesis, length, head, S, verification]` with a 5-element
  * head and without its last one-byte element, so the digest needs no second encoding.
  */
 const retainedDigest = (bytes: Uint8Array) =>
@@ -237,6 +238,7 @@ function authState(s: InternalState): CborValue {
     packets,
     s.epoch.rotationRequired,
     concat(machineRows),
+    [...s.capabilities].sort((a, b) => a - b),
   ];
 }
 function eligible(s: InternalState, signer: Bytes.SigningPublicKey) {
@@ -402,7 +404,18 @@ function decodeAuthState(
     v instanceof Uint8Array && v.length % row === 0 ? Result.succeed(v) : fail('canonical');
   return Result.gen(function* () {
     const fields = yield* array(value);
-    if (fields.length !== 7) return yield* fail('canonical');
+    if (fields.length !== 8) return yield* fail('canonical');
+    const capabilities = yield* array(fields[7]);
+    if (capabilities.length > 16) return yield* fail('canonical');
+    let previousCapability = 0;
+    const declared: number[] = [];
+    for (const capability of capabilities) {
+      const code = yield* uint(capability);
+      if (code <= previousCapability || code > 0xffff_ffff) return yield* fail('canonical');
+      if (!SUPPORTED_CAPABILITIES.has(code)) return yield* fail('upgrade-required');
+      previousCapability = code;
+      declared.push(code);
+    }
     const membershipBytes = yield* table(fields[0], MEMBERSHIP_ROW),
       deviceBytes = yield* table(fields[1], DEVICE_ROW),
       joinBytes = yield* table(fields[2], JOIN_ROW),
@@ -570,12 +583,14 @@ function decodeAuthState(
       (membershipCount !== 1 ||
         deviceCount !== 1 ||
         [...devices.values()][0]?.kind !== 'personal' ||
-        rotationRequired)
+        rotationRequired ||
+        declared.length !== 0)
     )
       return yield* fail('canonical');
     return {
       genesis: at.genesis,
       owner,
+      capabilities: HashSet.fromIterable(declared),
       members: HashMap.fromIterable(members),
       devices: HashMap.fromIterable(devices),
       machineDevices: HashMap.fromIterable(machineDevices),

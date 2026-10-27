@@ -112,7 +112,7 @@ describe('encrypted workspace control page reading', () => {
     genesisHash: vector.anchor,
     localPin,
   });
-  // The final record declares a capability this client cannot verify past.
+  // The final record declares an unsupported capability after independent removal.
   const full = appendLedgerHistory(
     null,
     page(vector.records.length, vector.records.at(-1)!.hash),
@@ -192,6 +192,21 @@ describe('encrypted workspace control page reading', () => {
       container!.querySelector<HTMLButtonElement>('button[aria-label="e2ee.control.help"]')!.click()
     );
     expect(container!.textContent).toContain('e2ee.verify.hint');
+  });
+
+  it('reads independent removal while preserving the published epoch', () => {
+    const count = vector.records.length - 1;
+    const verified = appendLedgerHistory(
+      null,
+      page(count, vector.records[count - 1]!.hash),
+      expected(vector.anchor)
+    );
+    render({ history: verified });
+    expect(container!.textContent).toContain('e2ee.summary.removeMember');
+    expect(
+      container!.querySelectorAll('section[aria-label="e2ee.control.members"] li')
+    ).toHaveLength(1);
+    expect(verified.view.inspectState().epoch).toMatchObject({ number: 2, rotationRequired: true });
   });
 
   it('stops at an unverifiable capability and asks for an upgrade instead of offering more', () => {

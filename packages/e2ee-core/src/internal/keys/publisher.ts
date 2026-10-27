@@ -454,8 +454,9 @@ export class EpochPublisher extends Context.Service<
             if (entry.record && !bytesEqual(entry.record, row.record)) return yield* fail('busy');
             if (row.outcome && !entry.record) return yield* confirm(row, row.outcome, key);
             // The immutable complete group is durable locally and remotely before the
-            // CAS may be attempted. An advanced verified prefix reconciles only.
-            if (!bound && view.length === row.parentCount) {
+            // first CAS may be attempted. A matching submission journal original
+            // has already passed staging/readback; resume it without staging I/O.
+            if (!entry.record && !bound && view.length === row.parentCount) {
               const proposed = yield* Effect.fromResult(
                 extendLedger(view, [row.record], {
                   head: hashRecordBytes(row.record),

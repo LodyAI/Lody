@@ -38,8 +38,8 @@
   possession additionally binds the strict UTF-8 machineId; activation compares it
   with both the verified current device and the retained signed admission. Session
   IDs stay outside possession and ledger records; old developer formats need recreation.
-  Pairing preparation and activation run only on the OS-user control socket;
-  Fleet checks its own account and discovered encrypted workspace/genesis first.
+  Local preparation/activation uses the OS-user socket; remote pairing uses the
+  signed offer and scoped service port. Fleet checks account/workspace/genesis first.
   Activation refreshes the verified ledger and mailbox and acknowledges only an
   installed current key; temporary failure leaves the same pairing retryable.
 
@@ -85,8 +85,8 @@
   signing-key-scoped credentials. Ledger-only owners cannot receive keys. Same-identity
   retries keep healthy owners; only identical intents share flights. Cancellation never
   guesses remote settlement. See [recovery rationale](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-local-pairing-recovery.md).
-- OS-user socket only; partial upgrades fail closed. No remote authentication. See the
-  [pairing note](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-machine-pairing-journal.md).
+- Remote commands use workspace custody and scoped grants; see the
+  [remote contract](../../../../../.agents/notes/proposed/feature/2026-10-27-e2ee-remote-machine-pairing.md).
 
 ## Catalog and Fleet containment
 

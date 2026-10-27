@@ -1,3 +1,4 @@
+import { E2eeRemoteMachinePairing } from '@/components/pages/e2ee-remote-machine-pairing';
 import { E2eeIdentityRecovery } from '@/components/pages/e2ee-identity-recovery';
 import { desktopWindowId } from '@/lib/desktop-window';
 import { readEncryptedLocalIdentity, type E2eeLocalDataScope } from '@/lib/e2ee-local-data';
@@ -456,6 +457,13 @@ function WorkspaceControlRoute() {
             runtime={port.runtime}
             canApprove={Boolean(current?.history?.locallyPinned)}
             onJoined={refresh}
+          />
+        )}
+        {port?.runtime && current?.history?.locallyPinned && (
+          <E2eeRemoteMachinePairing
+            key={identity + ':remote-machine'}
+            workspaceId={workspaceId}
+            runtime={port.runtime}
           />
         )}
         {port && current?.history?.locallyPinned && (

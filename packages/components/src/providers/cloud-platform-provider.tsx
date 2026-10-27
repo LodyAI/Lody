@@ -201,6 +201,15 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
                 native.removeMember(workspaceId, membershipId),
               setMemberRole: (workspaceId, membershipId, role) =>
                 native.setMemberRole(workspaceId, membershipId, role),
+
+              beginRemoteMachinePairing: (workspaceId) =>
+                native.beginRemoteMachinePairing(workspaceId),
+              inspectRemoteMachinePairing: (workspaceId, pairingSessionId) =>
+                native.inspectRemoteMachinePairing(workspaceId, pairingSessionId),
+              approveRemoteMachinePairing: (workspaceId, pairingSessionId, summary) =>
+                native.approveRemoteMachinePairing(workspaceId, pairingSessionId, summary),
+              cancelRemoteMachinePairing: (workspaceId, pairingSessionId) =>
+                native.cancelRemoteMachinePairing(workspaceId, pairingSessionId),
               prepareLocalAgent: (workspaceId) => native.prepareLocalAgent(workspaceId),
               admitLocalAgent: (workspaceId, pairingSessionId) =>
                 native.admitLocalAgent(workspaceId, pairingSessionId),

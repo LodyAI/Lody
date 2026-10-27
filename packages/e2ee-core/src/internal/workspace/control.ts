@@ -65,6 +65,16 @@ function captureCommand(command: LedgerCommand) {
               }
             : {}),
         });
+      case 'DeclareCapabilities':
+        return Object.freeze({
+          _tag: command._tag,
+          capabilities: Object.freeze([...command.capabilities]),
+        });
+      case 'RemoveMember':
+        return Object.freeze({
+          _tag: command._tag,
+          membershipId: yield* Bytes.membershipId(command.membershipId.toBytes()),
+        });
       case 'SetRole':
         return Object.freeze({
           _tag: command._tag,

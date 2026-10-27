@@ -35,12 +35,16 @@ type PairingRow = {
  * No cloud call occurs here, and cancellation before approval signs nothing. */
 export function makeDesktopLocalPairing(input: {
   db: DatabaseSync
+  journal?: 'remote'
   workspaceId: string
   genesis: Bytes.GenesisHash
   genesisRecord: Uint8Array
   signer: DeviceSigner
   current: () => Effect.Effect<LedgerView, unknown>
 }) {
+  const pairingTable = input.journal === 'remote' ? 'remote_local_pairing' : 'local_pairing'
+  const retiredTable =
+    input.journal === 'remote' ? 'retired_remote_local_pairings' : 'retired_local_pairings'
   function sql<A>(work: () => A) {
     return Effect.try({
       try: work,
@@ -55,12 +59,12 @@ export function makeDesktopLocalPairing(input: {
     })
   }
   input.db.exec(
-    'CREATE TABLE IF NOT EXISTS local_pairing(id INTEGER PRIMARY KEY CHECK(id=1), session TEXT NOT NULL, material TEXT, request_id TEXT, record BLOB)'
+    `CREATE TABLE IF NOT EXISTS ${pairingTable}(id INTEGER PRIMARY KEY CHECK(id=1), session TEXT NOT NULL, material TEXT, request_id TEXT, record BLOB)`
   )
   // Only empty unsigned attempts enter this archive. Machine originals remain in CLI.
-  input.db.exec('CREATE TABLE IF NOT EXISTS retired_local_pairings(session TEXT PRIMARY KEY)')
+  input.db.exec(`CREATE TABLE IF NOT EXISTS ${retiredTable}(session TEXT PRIMARY KEY)`)
   const read = () =>
-    input.db.prepare('SELECT * FROM local_pairing WHERE id=1').get() as PairingRow | undefined
+    input.db.prepare(`SELECT * FROM ${pairingTable} WHERE id=1`).get() as PairingRow | undefined
   const membership = (view: LedgerView) => {
     const state = view.inspectState()
     const device = state.devices.get(hex(input.signer.publicKey.toBytes()))
@@ -189,13 +193,13 @@ export function makeDesktopLocalPairing(input: {
     const membershipId = yield* sql(() => hex(membership(view).toBytes()))
     const row = yield* sql(() => {
       input.db
-        .prepare('INSERT OR IGNORE INTO local_pairing(id,session) VALUES(1,?)')
+        .prepare(`INSERT OR IGNORE INTO ${pairingTable}(id,session) VALUES(1,?)`)
         .run(randomBytes(16).toString('hex'))
       const stored = read()!
       if (stored.material && settled(stored, view)) {
         input.db
           .prepare(
-            'UPDATE local_pairing SET session=?,material=NULL,request_id=NULL,record=NULL WHERE id=1'
+            `UPDATE ${pairingTable} SET session=?,material=NULL,request_id=NULL,record=NULL WHERE id=1`
           )
           .run(randomBytes(16).toString('hex'))
         return read()!
@@ -225,11 +229,9 @@ export function makeDesktopLocalPairing(input: {
           row.request_id !== null
         )
           throw failure('conflict')
+        input.db.prepare(`INSERT OR IGNORE INTO ${retiredTable}(session) VALUES(?)`).run(session)
         input.db
-          .prepare('INSERT OR IGNORE INTO retired_local_pairings(session) VALUES(?)')
-          .run(session)
-        input.db
-          .prepare('UPDATE local_pairing SET session=? WHERE id=1 AND session=?')
+          .prepare(`UPDATE ${pairingTable} SET session=? WHERE id=1 AND session=?`)
           .run(randomBytes(16).toString('hex'), session)
         input.db.exec('COMMIT')
       } catch (cause) {
@@ -257,7 +259,7 @@ export function makeDesktopLocalPairing(input: {
       const original = JSON.stringify(parsed.data)
       if (row.material && row.material !== original) throw failure('conflict')
       const checked = check({ ...row, material: original }, view)
-      input.db.prepare('UPDATE local_pairing SET material=? WHERE id=1').run(original)
+      input.db.prepare(`UPDATE ${pairingTable} SET material=? WHERE id=1`).run(original)
       return {
         pairingSessionId: row.session,
         protection: checked.value.protection,
@@ -286,7 +288,7 @@ export function makeDesktopLocalPairing(input: {
     // exact bytes, including when the original parent no longer is the tail.
     yield* sql(() =>
       input.db
-        .prepare('UPDATE local_pairing SET request_id=?,record=? WHERE id=1')
+        .prepare(`UPDATE ${pairingTable} SET request_id=?,record=? WHERE id=1`)
         .run(requestId, record)
     )
     return {

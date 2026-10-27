@@ -48,7 +48,7 @@ extends exactly like the exported one; the next record must name its head. It
 keeps every device's historical author but reports original epoch publication
 records as unavailable. Never restore another party's bytes;
 that is what endorsed snapshots are for. Retained bytes are current-format only
-(envelope version 3); any other version fails with `unknown-version`, and the
+(envelope version 4); any other version fails with `unknown-version`, and the
 caller rebuilds them by one full replay.
 
 Preserved candidate v1 arrays/domains: genesis, admit Member, set role, admit own
@@ -58,11 +58,9 @@ Owner. Recovery devices only admit their own personal devices. Revocation affect
 only its target, records never create an approval ancestry tree, and Owner retains
 a personal/recovery path. Retired signing/encryption keys, member IDs, closed join
 requests and epoch commitments remain replay facts. Legacy tag 2 removal is rejected:
-it violates the already adopted atomic removal/rotation rule; [P12](../../../README.md) owns the current tag8 transition.
+independent removal uses capability-gated tag 10, while [P12](../../../README.md) retains the tag8 transition.
 Tag 9 declares capabilities: Owner/Admin personal devices list strictly ascending
-nonzero u32 codes, monotonically. This verifier implements none, so a genuine
-declaration ends verification at its position with `upgrade-required` rather than
-an invalid-ledger code. The v1 arrays and domains above become permanent at the
+nonzero u32 codes, monotonically. Capability 1 enables tag10 `[10, membershipId]`: Owner may remove any non-Owner; Admin may remove only Member/Guest. Removal drops all current devices, retains retired identities and authors, preserves the epoch and sets advisory rotationRequired. Unknown genuine declarations end verification with `upgrade-required`. Declared capabilities are monotonic and preserved by snapshot/retained state v4. The v1 arrays and domains above become permanent at the
 first production creation; see the
 [frozen vector](../../../test/ledger-v1-vector.json) and
 [format compatibility](../../../../../specs/e2ee-foundations.md#format-compatibility).
@@ -111,16 +109,16 @@ Execute signing once, then persist and submit the returned original bytes throug
 proposal is not a durable command. The parent is fixed, and a competing suffix
 requires CAS conflict handling, never automatic re-signing or rebasing. This entry
 does not create genesis, discover freshness, generate/store private keys, or own
-transport. Legacy removal remains rejected.
+transport. Legacy tag2 remains rejected; use RemoveMember/tag10 after DeclareCapabilities([1]).
 
 [Signing durability decisions](../../../../../.agents/notes/implemented/architecture/2026-10-15-e2ee-current-decisions.md#durability-and-lifecycle)
 and [source/destination fingerprints](https://github.com/LodyAI/Lody/blob/5f97599e60700d6185834632df85922ea0d73ec6/packages/e2ee-core/src/ledger/signing-provenance.json).
 
 ## Authenticated permission snapshots
 
-The snapshot functions use snapshot body version 3
+The snapshot functions use snapshot body version 4
 (the compact state; any other version is `unknown-version`) and the snapshot/v1,
-head-attest/v1 and snapshot-digest/v3 domains. Caller-pinned
+head-attest/v1 and snapshot-digest/v4 domains. Caller-pinned
 external qualification must include genesis, exact head/count, endorser key,
 membership, Owner/Admin role and personal kind. Missing role facts never default
 from signed self-claims or journal data. These are externally confirmed facts; the
@@ -174,8 +172,8 @@ database tampering is outside the whitepaper's threat model. Behavior:
 Current tag8 is `[8, membershipId, nextEpoch, commitment, previousEpochKey]`.
 It removes a non-Owner member and all its current devices while installing the
 next commitment/history packet in one transition. Only the pre-state Owner's
-personal device may sign it. Current snapshot-v1 already contains the resulting
+personal device may sign it. Current snapshot v4 contains the resulting
 members/devices, epoch, history packets and used identities; the same-point state
 digest is identical after full replay or independently qualified snapshot replay.
 Historical authors are retained when their history is available. No second snapshot
-format, capability-negotiation layer, old-tag2 reader or dual emission is added.
+format, old-tag2 reader or dual emission is added. Independent tag10 removal is the MVP action; later tag7 publication is optional manual work.

@@ -211,6 +211,8 @@ export function ledgerRecordFields(
       return { ...base, successorMembershipId: bytesToHex(op.successorMembershipId.toBytes()) };
     case 'publishEpoch':
       return { ...base, epoch: op.epoch, commitment: bytesToHex(op.commitment.toBytes()) };
+    case 'removeMember':
+      return { ...base, membershipId: bytesToHex(op.membershipId.toBytes()) };
     case 'removeMemberAndPublishEpoch':
       return {
         ...base,
@@ -218,8 +220,6 @@ export function ledgerRecordFields(
         epoch: op.epoch,
         commitment: bytesToHex(op.commitment.toBytes()),
       };
-    case 'removeMember':
-      return { ...base, membershipId: bytesToHex(op.membershipId.toBytes()) };
     case 'declareCapabilities':
       return { ...base, capabilities: op.capabilities.join(', ') };
   }
