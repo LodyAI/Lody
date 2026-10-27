@@ -2383,7 +2383,11 @@ export const SessionChatInputArea = memo(
         onImageRetry={submissionPending || isArchived ? undefined : handleRetryImage}
         fileItems={submissionPending ? [] : fileItems}
         mcp={mcp}
-        onScheduleSend={scheduled.available && !isArchived ? scheduled.openPicker : undefined}
+        onScheduleSend={
+          (scheduled.available || scheduled.featureUnavailable) && !isArchived
+            ? scheduled.openPicker
+            : undefined
+        }
         scheduleDisabledReason={scheduled.disabledReason}
         statusMessage={
           submissionPending && scheduled.progress !== null

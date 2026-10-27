@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1978](https://github.com/LodyAI/Lody/pull/1978)
 
 [中文](2026-10-27-e2ee-recovery-diagnostics.zh.md)
 

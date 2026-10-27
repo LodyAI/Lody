@@ -299,106 +299,6 @@ const page = (records: Uint8Array[], start = 0, end = records.length) => ({
 });
 
 describe('machine E2EE local runtime', () => {
-  it.each(['history', 'pin'] as const)(
-    'classifies authoritative %s damage without replacing originals or trusted pins',
-    async (damage) => {
-      const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-history-recovery-'));
-      try {
-        const fixture = await execute(setup(directory));
-        const openRuntime = Effect.gen(function* () {
-          const custody = yield* makeCliE2eeCustody({
-            directory: join(directory, 'machine'),
-            keyring: noKeyring,
-          });
-          const device = yield* custody.openDevice(fixture.genesis);
-          return yield* makeCliE2eeRuntime({
-            directory: join(directory, 'runtime'),
-            workspaceId: 'workspace',
-            custody,
-            device,
-            genesisRecord: fixture.genesisRecord,
-          });
-        });
-        await execute(
-          Effect.flatMap(openRuntime, (runtime) => runtime.ingest(page(fixture.records)))
-        );
-        const pinPath = join(directory, 'runtime', 'ledger-pin.sqlite');
-        const pin = new DatabaseSync(pinPath);
-        const trusted = pin.prepare('SELECT * FROM ledger_pin').all();
-        if (damage === 'pin') pin.exec('UPDATE ledger_pin SET count=0');
-        pin.close();
-        const damaged = fixture.record.slice();
-        damaged[damaged.length - 1] ^= 1;
-        const history = new DatabaseSync(join(directory, 'runtime', 'history.sqlite'));
-        if (damage === 'history')
-          history.prepare('UPDATE records SET record=? WHERE position=1').run(damaged);
-        const result = await execute(Effect.result(openRuntime));
-        expect(Result.isFailure(result)).toBe(true);
-        if (Result.isSuccess(result)) throw new Error('expected local recovery failure');
-        expect(result.failure).toMatchObject({
-          code:
-            damage === 'history' ? 'local-history-recovery-required' : 'trusted-pin-unavailable',
-        });
-        const after = new DatabaseSync(pinPath);
-        if (damage === 'history') {
-          expect(after.prepare('SELECT * FROM ledger_pin').all()).toEqual(trusted);
-          expect(
-            new Uint8Array(
-              history.prepare('SELECT record FROM records WHERE position=1').get()!
-                .record as Uint8Array
-            )
-          ).toEqual(damaged);
-        } else expect(after.prepare('SELECT count FROM ledger_pin').get()!.count).toBe(0);
-        after.close();
-        history.close();
-      } finally {
-        await rm(directory, { recursive: true, force: true });
-      }
-    }
-  );
-
-  it.each(['history', 'pin'] as const)(
-    'preserves a corrupt %s SQLite image and distinguishes it from temporary I/O',
-    async (damage) => {
-      const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-corrupt-image-'));
-      try {
-        const fixture = await execute(setup(directory));
-        const openRuntime = Effect.gen(function* () {
-          const custody = yield* makeCliE2eeCustody({
-            directory: join(directory, 'machine'),
-            keyring: noKeyring,
-          });
-          const device = yield* custody.openDevice(fixture.genesis);
-          return yield* makeCliE2eeRuntime({
-            directory: join(directory, 'runtime'),
-            workspaceId: 'workspace',
-            custody,
-            device,
-            genesisRecord: fixture.genesisRecord,
-          });
-        });
-        await execute(openRuntime);
-        const path = join(
-          directory,
-          'runtime',
-          damage === 'history' ? 'history.sqlite' : 'ledger-pin.sqlite'
-        );
-        const original = Buffer.from('synthetic damaged SQLite image');
-        await fs.writeFile(path, original);
-        const failed = await execute(Effect.result(openRuntime));
-        expect(Result.isFailure(failed)).toBe(true);
-        if (Result.isSuccess(failed)) throw new Error('expected local damage');
-        expect(failed.failure).toMatchObject({
-          code:
-            damage === 'history' ? 'local-history-recovery-required' : 'trusted-pin-unavailable',
-        });
-        expect(await readFile(path)).toEqual(original);
-      } finally {
-        await rm(directory, { recursive: true, force: true });
-      }
-    }
-  );
-
   it.each([false, true, 'published', 'epoch'] as const)(
     'releases the real SDK save queue before storage recovery when rotation=%s',
     async (rotation) => {
@@ -1882,6 +1782,106 @@ describe('machine E2EE local runtime', () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it.each(['history', 'pin'] as const)(
+    'classifies authoritative %s damage without replacing originals or trusted pins',
+    async (damage) => {
+      const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-history-recovery-'));
+      try {
+        const fixture = await execute(setup(directory));
+        const openRuntime = Effect.gen(function* () {
+          const custody = yield* makeCliE2eeCustody({
+            directory: join(directory, 'machine'),
+            keyring: noKeyring,
+          });
+          const device = yield* custody.openDevice(fixture.genesis);
+          return yield* makeCliE2eeRuntime({
+            directory: join(directory, 'runtime'),
+            workspaceId: 'workspace',
+            custody,
+            device,
+            genesisRecord: fixture.genesisRecord,
+          });
+        });
+        await execute(
+          Effect.flatMap(openRuntime, (runtime) => runtime.ingest(page(fixture.records)))
+        );
+        const pinPath = join(directory, 'runtime', 'ledger-pin.sqlite');
+        const pin = new DatabaseSync(pinPath);
+        const trusted = pin.prepare('SELECT * FROM ledger_pin').all();
+        if (damage === 'pin') pin.exec('UPDATE ledger_pin SET count=0');
+        pin.close();
+        const damaged = fixture.record.slice();
+        damaged[damaged.length - 1] ^= 1;
+        const history = new DatabaseSync(join(directory, 'runtime', 'history.sqlite'));
+        if (damage === 'history')
+          history.prepare('UPDATE records SET record=? WHERE position=1').run(damaged);
+        const result = await execute(Effect.result(openRuntime));
+        expect(Result.isFailure(result)).toBe(true);
+        if (Result.isSuccess(result)) throw new Error('expected local recovery failure');
+        expect(result.failure).toMatchObject({
+          code:
+            damage === 'history' ? 'local-history-recovery-required' : 'trusted-pin-unavailable',
+        });
+        const after = new DatabaseSync(pinPath);
+        if (damage === 'history') {
+          expect(after.prepare('SELECT * FROM ledger_pin').all()).toEqual(trusted);
+          expect(
+            new Uint8Array(
+              history.prepare('SELECT record FROM records WHERE position=1').get()!
+                .record as Uint8Array
+            )
+          ).toEqual(damaged);
+        } else expect(after.prepare('SELECT count FROM ledger_pin').get()!.count).toBe(0);
+        after.close();
+        history.close();
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each(['history', 'pin'] as const)(
+    'preserves a corrupt %s SQLite image and distinguishes it from temporary I/O',
+    async (damage) => {
+      const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-corrupt-image-'));
+      try {
+        const fixture = await execute(setup(directory));
+        const openRuntime = Effect.gen(function* () {
+          const custody = yield* makeCliE2eeCustody({
+            directory: join(directory, 'machine'),
+            keyring: noKeyring,
+          });
+          const device = yield* custody.openDevice(fixture.genesis);
+          return yield* makeCliE2eeRuntime({
+            directory: join(directory, 'runtime'),
+            workspaceId: 'workspace',
+            custody,
+            device,
+            genesisRecord: fixture.genesisRecord,
+          });
+        });
+        await execute(openRuntime);
+        const path = join(
+          directory,
+          'runtime',
+          damage === 'history' ? 'history.sqlite' : 'ledger-pin.sqlite'
+        );
+        const original = Buffer.from('synthetic damaged SQLite image');
+        await fs.writeFile(path, original);
+        const failed = await execute(Effect.result(openRuntime));
+        expect(Result.isFailure(failed)).toBe(true);
+        if (Result.isSuccess(failed)) throw new Error('expected local damage');
+        expect(failed.failure).toMatchObject({
+          code:
+            damage === 'history' ? 'local-history-recovery-required' : 'trusted-pin-unavailable',
+        });
+        expect(await readFile(path)).toEqual(original);
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  );
 
   it('reopens entirely offline with the same accepted position and credential', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-runtime-'));
