@@ -2,6 +2,7 @@
 
 Status: proposed
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1954
 
 [中文](2026-10-27-e2ee-epoch-receive-barrier.zh.md)
 
