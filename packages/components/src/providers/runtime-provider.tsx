@@ -457,13 +457,15 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       workspaceSlug: workspaceSlug!,
       errorType: describeErrorType(error),
       modeAdmission: {
-        knownEncrypted: knownEncryptedRef.current ||
+        knownEncrypted:
+          knownEncryptedRef.current ||
           (error instanceof E2eeLocalEvidenceCorruptError &&
             ['Invalid genesis pin', 'Invalid encrypted evidence'].includes(error.message)) ||
           (error instanceof E2eeLocalEvidenceConflictError &&
             error.message === 'Workspace mode conflicts with encrypted evidence'),
         ...((effectiveWorkspaceId ?? recoveryWorkspaceIdRef.current)
-          ? { workspaceId: (effectiveWorkspaceId ?? recoveryWorkspaceIdRef.current)! } : {}),
+          ? { workspaceId: (effectiveWorkspaceId ?? recoveryWorkspaceIdRef.current)! }
+          : {}),
       },
     });
     // A restart of the same account/workspace (local-agent toggle, retry) keeps
