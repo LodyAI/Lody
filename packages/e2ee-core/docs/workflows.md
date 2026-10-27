@@ -265,3 +265,5 @@ genesis; a valid signature neither admits a device nor replaces possession proof
 Verification uses the existing strict Ed25519 policy. The first creator device
 does not need this proof. `test/foundation.test.ts` retains a fixed signing vector
 and checks substitution of every context field.
+
+Desktop error classification, independent paging and terminal acknowledgement are described in [key maintenance availability](../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-key-maintenance-availability.md). `MailboxInstallError.cryptographicRejection` marks only a deterministic rejection at envelope verification; local writes, report signing and unknown native errors never authorize rejecting an envelope.

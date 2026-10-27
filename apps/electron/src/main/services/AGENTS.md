@@ -100,6 +100,7 @@ Read [M1](../../../../../.agents/notes/implemented/architecture/2026-10-21-e2ee-
 and [machine](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-machine-pairing-journal.md).
 Fence opens/late D03 registration by identity/generation; pin D03 before signing.
 Lazy custody; no network under locks; drain native work before release.
+Keep ledger access independent of key health; only core-verified replacements repair blobs.
 Keep verification/storage errors owner-local; malformed input keeps readers.
 Originals precede feed/pin; compare overlaps, retain checkpoints, await history.
 Conflicts refuse fallback; availability may use pinned renderer reads.

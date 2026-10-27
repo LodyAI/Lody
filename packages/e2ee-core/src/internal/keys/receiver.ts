@@ -20,11 +20,11 @@ import {
 } from './envelope';
 import { commitEpochKey } from './history';
 import { InstalledEpochKeys, type InstalledKeyError } from './installed-keys';
-import type { ContentError, ValidationError } from '../foundation/errors';
+import { ContentError, type ValidationError } from '../foundation/errors';
 import type { LedgerError } from '../ledger/errors';
 import type { EpochKeyError } from './history';
 import type { EpochStagingError } from './staging';
-import type { HpkePrimitiveError } from '../crypto/hpke';
+import { HpkePrimitiveError } from '../crypto/hpke';
 import * as Reports from './reports';
 import {
   authenticateEpochStagedGroup,
@@ -61,6 +61,8 @@ export class ReceiveError extends Schema.TaggedError<ReceiveError>()('ReceiveErr
  * application can decide whether to request a repair; it is not permission to
  * reject the envelope or to advance a fetch cursor. `cause` distinguishes a
  * cryptographic rejection from a retryable local storage or native failure.
+ * `cryptographicRejection` is true only at frame authentication/open; later
+ * local signing or persistence failures never authorize rejecting the frame.
  *
  * @category Errors
  */
@@ -72,6 +74,8 @@ export class MailboxInstallError extends Schema.TaggedError<MailboxInstallError>
     recipient: Schema.String,
     sender: Schema.String,
     frameDigest: Schema.String,
+    /** True only for a rejection observed while authenticating/opening this frame. */
+    cryptographicRejection: Schema.Boolean,
     cause: Schema.Defect(),
   }
 ) {}
@@ -205,6 +209,21 @@ export class KeyReceiver extends Context.Service<
       const mailbox = own(yield* KeyMailbox);
       const journal = own(yield* ReceiveJournal);
       const gate = yield* makeCloseGuard(() => fail('closed'));
+      const envelopeStep = <A, E, R>(work: Effect.Effect<A, E, R>, rejected?: () => void) =>
+        work.pipe(
+          Effect.tapError((error) =>
+            Effect.sync(() => {
+              if (
+                (error instanceof ContentError &&
+                  ['invalid-envelope', 'bad-signature', 'commitment-mismatch'].includes(
+                    error.code
+                  )) ||
+                (error instanceof HpkePrimitiveError && error.code === 'open-failed')
+              )
+                rejected?.();
+            })
+          )
+        );
       const self = keyId(signer.publicKey.toBytes()),
         org = keyId(anchor.toBytes());
 
@@ -307,7 +326,7 @@ export class KeyReceiver extends Context.Service<
           (key) => Effect.sync(() => disposeEpochKey(key))
         );
 
-      const finishInstallation = Effect.fnUntraced(function* (id: string) {
+      const finishInstallation = Effect.fnUntraced(function* (id: string, rejected?: () => void) {
         const task = yield* load(id);
         if (task.phase === 'Revoked' || task.phase === 'Obsolete')
           return yield* fail('context-changed');
@@ -345,7 +364,10 @@ export class KeyReceiver extends Context.Service<
           };
           // Install is pending work, not evidence that this ciphertext has been opened.
           yield* Effect.acquireUseRelease(
-            openEpochEnvelope({ context, pair, frame: task.frame, ledger: current }),
+            envelopeStep(
+              openEpochEnvelope({ context, pair, frame: task.frame, ledger: current }),
+              rejected
+            ),
             (key) => keys.saveAndReload(task.context.epoch, key),
             (key) => Effect.sync(() => disposeEpochKey(key))
           );
@@ -518,7 +540,8 @@ export class KeyReceiver extends Context.Service<
 
       const receive = Effect.fnUntraced(function* (
         senderInput: Bytes.SigningPublicKey,
-        inputFrame: Uint8Array
+        inputFrame: Uint8Array,
+        rejected?: () => void
       ) {
         if (!bounded(inputFrame, 512)) return yield* fail('invalid-input');
         const frame = new Uint8Array(inputFrame);
@@ -531,7 +554,10 @@ export class KeyReceiver extends Context.Service<
           sender,
           recipient: signer.publicKey,
         };
-        yield* Effect.fromResult(authenticateEpochEnvelope(view, context, frame));
+        yield* envelopeStep(
+          Effect.fromResult(authenticateEpochEnvelope(view, context, frame)),
+          rejected
+        );
         const target = { genesis: org, epoch, recipient: self },
           hint = yield* mailbox.status(target);
         yield* gate.guard;
@@ -549,7 +575,7 @@ export class KeyReceiver extends Context.Service<
           return yield* fail('context-changed');
         yield* Effect.fromResult(Reports.checkInstallationContext(yield* current(), install));
         const id = yield* saveOriginal(install, frame, null);
-        yield* finishInstallation(id);
+        yield* finishInstallation(id, rejected);
         return { id, outcome: 'Installed' as const };
       });
 
@@ -653,7 +679,10 @@ export class KeyReceiver extends Context.Service<
         if ((yield* eligible()) !== epoch) return yield* fail('rollback');
         for (const row of items) {
           const frameDigest = Reports.mailboxDigest(row.frame);
-          yield* receive(row.sender, row.frame).pipe(
+          let cryptographicRejection = false;
+          yield* receive(row.sender, row.frame, () => {
+            cryptographicRejection = true;
+          }).pipe(
             Effect.catchCause((failure) =>
               Effect.failCause(
                 Cause.map(
@@ -665,6 +694,7 @@ export class KeyReceiver extends Context.Service<
                       recipient: self,
                       sender: keyId(row.sender.toBytes()),
                       frameDigest,
+                      cryptographicRejection,
                       cause,
                     })
                 )

@@ -26,6 +26,8 @@ import {
   commitEpochKey,
   sealHistoryPacket,
   hashRecordBytes,
+  mailboxDigest,
+  epochDeliveryId,
   prepareJoinRequest,
   prepareDeviceAdmission,
   prepareEpochEnvelope,
@@ -1936,3 +1938,287 @@ for (const source of ['staging', 'not-a-staging-recipient', 'temporary-io'])
       })
     )
   })
+
+const maintenanceFixture = (directory) =>
+  Effect.gen(function* () {
+    const owner = yield* ownerWithHost(directory)
+    const prepared = yield* bind(owner)
+    yield* owner.host.open(workspaceId)
+    const genesis = Result.getOrThrow(
+      Bytes.genesisHash(Buffer.from(prepared.genesisHashHex, 'hex'))
+    )
+    const record = Buffer.from(prepared.genesisRecordHex, 'hex')
+    let view = Result.getOrThrow(
+      verifyLedger({
+        anchor: genesis,
+        records: [record],
+        checkpoint: { head: hashRecordBytes(record), length: 1 }
+      })
+    )
+    const device = yield* owner.custody.openDevice(genesis)
+    const keys = Context.get(
+      yield* Layer.build(
+        InstalledEpochKeys.layer.pipe(
+          Layer.provideMerge(
+            sqliteInstalledKeyStore({
+              path: join(directory, 'workspaces', workspaceId, 'installed-keys.sqlite'),
+              mode: 'open'
+            })
+          ),
+          Layer.provideMerge(VerifiedLedger.layer),
+          Layer.provideMerge(
+            Layer.mergeAll(
+              desktopE2eePorts(owner.custody, device),
+              Layer.succeed(WorkspaceScope, { genesis }),
+              Layer.succeed(LedgerViewSource, { current: () => Effect.succeed(view) }),
+              Layer.succeed(LedgerPinStore, {
+                read: () => Effect.succeed(null),
+                write: () => Effect.void
+              })
+            )
+          )
+        )
+      ),
+      InstalledEpochKeys
+    )
+    const frame = yield* Effect.acquireUseRelease(
+      keys.read(0),
+      (key) =>
+        prepareEpochEnvelope({
+          context: { genesis, epoch: 0, sender: device.publicKey, recipient: device.publicKey },
+          key,
+          signer: device,
+          ledger: () => Effect.succeed(view)
+        }),
+      (key) => Effect.sync(() => disposeEpochKey(key))
+    )
+    const path = join(directory, 'maintenance-mailbox.sqlite')
+    const backend = yield* makeSqliteKeyMailbox({
+      path,
+      mode: 'create',
+      genesis,
+      ledger: () => Effect.succeed(view)
+    })
+    const mailbox = Context.get(
+      yield* Layer.build(referenceKeyMailbox(backend, device.publicKey)),
+      KeyMailbox
+    )
+    yield* mailbox.put('ab'.repeat(16), frame)
+    return {
+      owner,
+      mailbox,
+      path,
+      frame,
+      device,
+      genesis,
+      prepared,
+      view: () => view,
+      setView: (next) => {
+        view = next
+      }
+    }
+  })
+void test('an unreadable installed blob keeps ledger open and is replaced only by a verified mailbox key', async (t) => {
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const { owner, mailbox } = yield* maintenanceFixture(directory)
+      yield* owner.host.closeWorkspace(workspaceId)
+      const db = new DatabaseSync(
+        join(directory, 'workspaces', workspaceId, 'installed-keys.sqlite')
+      )
+      db.prepare('UPDATE installed_epoch_keys SET blob=? WHERE epoch=0').run(
+        new Uint8Array([1, 2, 3])
+      )
+      db.close()
+      const status = yield* owner.host.open(workspaceId)
+      assert.equal(status.hasCurrentKey, false)
+      assert.equal(status.writeEpoch, null)
+      assert.equal((yield* owner.host.ledgerView(workspaceId)).status.length, 1)
+      yield* owner.host.keyRound(workspaceId, () => mailbox)
+      assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, true)
+    })
+  )
+})
+void test('a rejected envelope is repaired by digest and the following good envelope installs in the same maintenance call', async (t) => {
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const { owner, mailbox, path, frame, device } = yield* maintenanceFixture(directory)
+      const bad = frame.slice()
+      // Force the hostile frame to sort before the good original, deterministically.
+      for (let n = 0; ; n++) {
+        new DataView(bad.buffer).setUint32(bad.length - 4, n)
+        if (mailboxDigest(bad) < mailboxDigest(frame)) break
+      }
+      const digest = mailboxDigest(bad)
+      const db = new DatabaseSync(path)
+      db.prepare('INSERT INTO mailbox_envelopes VALUES(?,?,?,?,?,?)').run(
+        0,
+        hex(device.publicKey.toBytes()),
+        hex(device.publicKey.toBytes()),
+        'cd'.repeat(16),
+        digest,
+        bad
+      )
+      yield* owner.host.keyRound(workspaceId, () => mailbox)
+      assert.equal(db.prepare('SELECT digest FROM mailbox_rejected').get().digest, digest)
+      assert.equal(db.prepare('SELECT count(*) AS n FROM mailbox_reports').get().n, 2)
+      assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, true)
+      db.close()
+    })
+  )
+})
+
+void test('finite rounds retain independent delivery cursors past blocked tasks and ACK terminal results without deleting originals', async (t) => {
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const { owner, mailbox, device } = yield* maintenanceFixture(directory)
+      yield* owner.host.keyRound(workspaceId, () => mailbox)
+      const genesis = Result.getOrThrow(
+        Bytes.genesisHash(Buffer.from((yield* owner.host.status(workspaceId)).genesisHash, 'hex'))
+      )
+      const delivery = Result.getOrThrow(
+        epochDeliveryId({
+          genesis,
+          epoch: 0,
+          sender: device.publicKey,
+          recipient: device.publicKey
+        })
+      )
+      const taskId = (revision) =>
+        mailboxDigest(
+          new TextEncoder().encode(`lody-e2ee/local-distribution-task/v0:${delivery}:${revision}`)
+        )
+      const last = taskId(0)
+      const db = new DatabaseSync(join(directory, 'workspaces', workspaceId, 'distribution.sqlite'))
+      const insert = db.prepare("INSERT INTO distribution_tasks VALUES(?,0,?,?,'Pending',0)")
+      let count = 0
+      for (let revision = 1; count < 501; revision++) {
+        const id = taskId(revision)
+        if (id >= last) continue
+        insert.run(id, hex(device.publicKey.toBytes()), revision)
+        count++
+      }
+      insert.run(last, hex(device.publicKey.toBytes()), 0)
+      yield* owner.host.keyRound(workspaceId, () => mailbox)
+      assert.equal(
+        db.prepare('SELECT phase FROM distribution_tasks WHERE id=?').get(last).phase,
+        'Pending'
+      )
+      yield* owner.host.keyRound(workspaceId, () => mailbox)
+      assert.deepEqual(
+        { ...db.prepare('SELECT phase,consumed FROM distribution_tasks WHERE id=?').get(last) },
+        { phase: 'Observed', consumed: 1 }
+      )
+      assert.equal(
+        db.prepare("SELECT count(*) AS n FROM distribution_tasks WHERE phase='Pending'").get().n,
+        501
+      )
+      db.close()
+      const outbox = new DatabaseSync(join(directory, 'workspaces', workspaceId, 'outbox.sqlite'))
+      const originals = outbox.prepare('SELECT * FROM epoch_delivery').all()
+      assert.equal(originals.length, 1)
+      yield* owner.host.keyRound(workspaceId, () => mailbox)
+      assert.deepEqual(outbox.prepare('SELECT * FROM epoch_delivery').all(), originals)
+      outbox.close()
+    })
+  )
+})
+
+void test('a transient installed-key write failure never rejects the good mailbox envelope and retries after storage recovers', async (t) => {
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const { owner, mailbox, path } = yield* maintenanceFixture(directory)
+      const local = new DatabaseSync(
+        join(directory, 'workspaces', workspaceId, 'installed-keys.sqlite')
+      )
+      local.prepare('UPDATE installed_epoch_keys SET blob=? WHERE epoch=0').run(new Uint8Array([1]))
+      local.exec(
+        "CREATE TRIGGER block_replace BEFORE UPDATE ON installed_epoch_keys BEGIN SELECT RAISE(ABORT,'synthetic write failure'); END"
+      )
+      const failed = yield* Effect.result(owner.host.keyRound(workspaceId, () => mailbox))
+      assert.equal(failed.failure.cryptographicRejection, false)
+      const remote = new DatabaseSync(path)
+      assert.equal(remote.prepare('SELECT count(*) AS n FROM mailbox_rejected').get().n, 0)
+      assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, false)
+      local.exec('DROP TRIGGER block_replace')
+      yield* owner.host.keyRound(workspaceId, () => mailbox)
+      assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, true)
+      remote.close()
+      local.close()
+    })
+  )
+})
+
+void test('desktop reconciliation reaches more than one hundred genuine ledger recipients', async (t) => {
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const f = yield* maintenanceFixture(directory)
+      let view = f.view()
+      const records = [Buffer.from(f.prepared.genesisRecordHex, 'hex')]
+      const membershipId = view
+        .inspectState()
+        .devices.get(hex(f.device.publicKey.toBytes())).membershipId
+      for (let index = 0; index < 105; index++) {
+        const joining = yield* f.owner.custody.prepareDevice()
+        const machineId = `synthetic-recipient-${index}`
+        const possession = yield* prepareDeviceAdmission({
+          genesis: f.genesis,
+          membershipId,
+          encryptionPublicKey: joining.enc,
+          kind: 'machine',
+          machineId,
+          signer: joining
+        })
+        const record = yield* signLedgerRecord(
+          Result.getOrThrow(
+            prepareLedgerCommand(view, f.device.publicKey, {
+              _tag: 'AdmitDevice',
+              kind: 'machine',
+              machineId,
+              signingPublicKey: joining.publicKey,
+              encryptionPublicKey: joining.enc,
+              possessionSignature: possession.possessionSignature
+            })
+          ),
+          f.device
+        )
+        records.push(record)
+        view = Result.getOrThrow(
+          extendLedger(view, [record], { head: hashRecordBytes(record), length: records.length })
+        )
+        yield* f.owner.custody.discardDevice(joining)
+      }
+      f.setView(view)
+      for (let start = 0; start < records.length; start += 64) {
+        yield* f.owner.host.ingestLedgerRecords(
+          workspaceId,
+          page(records, f.prepared.genesisHashHex, start, Math.min(start + 64, records.length))
+        )
+      }
+      yield* f.owner.host.keyRound(workspaceId, () => f.mailbox)
+      const db = new DatabaseSync(f.path)
+      assert.equal(
+        db.prepare('SELECT count(DISTINCT recipient) AS n FROM mailbox_envelopes').get().n,
+        106
+      )
+      db.close()
+      const journal = new DatabaseSync(
+        join(directory, 'workspaces', workspaceId, 'distribution.sqlite')
+      )
+      assert.equal(
+        journal
+          .prepare(
+            "SELECT count(*) AS n FROM distribution_tasks WHERE phase='Observed' AND consumed=1"
+          )
+          .get().n,
+        105
+      )
+      journal.close()
+    })
+  )
+})
