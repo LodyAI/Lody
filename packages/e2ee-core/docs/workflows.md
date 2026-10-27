@@ -164,7 +164,11 @@ generate key → seal history packet → sign record → envelope per device
 → Committed: install via InstalledEpochKeys | Conflict: discard candidate key
 ```
 
-`resume` finishes the same candidate after a crash, without signing again. A missing
+`resume` finishes the same candidate after a crash, without signing again. Before the first
+submission it still stages and verifies the exact complete group. Once the matching
+original is in the submission journal, retries reconcile/CAS that original without
+repeating staging or readback; staging outages cannot gate that recovery. Candidate
+protection, verified installation and acknowledgement still apply. A missing
 candidate may reconcile its exact retained submission only after genuine commitment or
 conflict proof; it cannot authorize CAS at an unchanged parent. Normal receiver paths
 install committed keys independently. Existing installed keys permit terminal acknowledgement

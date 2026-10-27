@@ -162,7 +162,8 @@ export class EpochPublisher extends Context.Service<
     publishRemoving(
       membership: Bytes.MembershipId
     ): Effect.Effect<EpochPublishResult, EpochPublishFailure>;
-    /** Finish the unfinished rotation, if any. */
+    /** Finish the original rotation, if any. A journaled publication resumes CAS
+     * without repeating staging; candidate/key and verified installation checks remain. */
     resume(): Effect.Effect<EpochPublishResult | null, EpochPublishFailure>;
     /** The local result of the unconsumed rotation, without contacting the backend. */
     result(): Effect.Effect<EpochPublishResult | null, EpochPublishError>;
@@ -453,9 +454,10 @@ export class EpochPublisher extends Context.Service<
             const entry = yield* submit(submission.pending());
             if (entry.record && !bytesEqual(entry.record, row.record)) return yield* fail('busy');
             if (row.outcome && !entry.record) return yield* confirm(row, row.outcome, key);
-            // The immutable complete group is durable locally and remotely before the
-            // CAS may be attempted. An advanced verified prefix reconciles only.
-            if (!bound && view.length === row.parentCount) {
+            // First submission requires exact staging/readback. A matching journal
+            // original has already passed that boundary and resumes CAS independently
+            // of staging availability. An advanced verified prefix reconciles only.
+            if (!entry.record && !bound && view.length === row.parentCount) {
               const proposed = yield* Effect.fromResult(
                 extendLedger(view, [row.record], {
                   head: hashRecordBytes(row.record),

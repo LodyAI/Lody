@@ -3,6 +3,7 @@ import { EpochCandidateStore, SubmissionJournal } from '@lody/e2ee-core/services
 import {
   desktopManagementStores,
   makeDesktopE2eeManagement,
+  type DesktopE2eeManagementCommand,
   type DesktopE2eeManagementRemote
 } from './e2ee-management.mjs'
 import { makeDesktopKeyMaintenance } from './e2ee-key-maintenance.mjs'
@@ -188,7 +189,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
       string,
       {
         manage: (
-          command: { type: 'rotate' } | { type: 'revoke'; target: string },
+          command: DesktopE2eeManagementCommand,
           ports: (signal: AbortSignal) => DesktopE2eeManagementRemote
         ) => Effect.Effect<unknown, unknown>
         managementState: () => Effect.Effect<import('@lody/platform').E2eeManagementState, unknown>
@@ -1082,7 +1083,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           }
         })
         const manage = Effect.fnUntraced(function* (
-          command: { type: 'rotate' } | { type: 'revoke'; target: string },
+          command: DesktopE2eeManagementCommand,
           remote: (signal: AbortSignal) => DesktopE2eeManagementRemote
         ) {
           if (closing) return yield* fail('closed')
@@ -1288,7 +1289,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.managementState())),
       manage: (
         workspaceId: string,
-        command: { type: 'rotate' } | { type: 'revoke'; target: string },
+        command: DesktopE2eeManagementCommand,
         ports: (signal: AbortSignal) => DesktopE2eeManagementRemote
       ) =>
         Effect.flatMap(run(openWorkspace(workspaceId)), (entry) =>

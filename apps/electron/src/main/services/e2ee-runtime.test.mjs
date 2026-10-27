@@ -2337,8 +2337,13 @@ for (const damaged of [false, true, 'header'])
       )
   })
 
-void test('revocation bypasses an unstaged candidate but preserves an unknown publication CAS across reopen', async (t) => {
-  for (const failure of ['stage', 'cas']) {
+async function managementFailureFixture(t, commandType) {
+  for (const failure of [
+    'stage',
+    'cas',
+    'cas-staging-offline',
+    'cas-staging-offline-missing-old-key'
+  ]) {
     const directory = await fixture(t)
     await execute(
       Effect.gen(function* () {
@@ -2347,17 +2352,28 @@ void test('revocation bypasses an unstaged candidate but preserves an unknown pu
         const genesis = Result.getOrThrow(
           Bytes.genesisHash(Buffer.from(prepared.genesisHashHex, 'hex'))
         )
-        let records = [Buffer.from(prepared.genesisRecordHex, 'hex')]
+        let records =
+          commandType === 'removeMember'
+            ? yield* makeRecords(owner.custody, prepared, 2)
+            : [Buffer.from(prepared.genesisRecordHex, 'hex')]
         let view = Result.getOrThrow(
           verifyLedger({
             anchor: genesis,
             records,
-            checkpoint: { head: hashRecordBytes(records[0]), length: 1 }
+            checkpoint: { head: hashRecordBytes(records.at(-1)), length: records.length }
           })
         )
         const signer = yield* owner.custody.openDevice(genesis)
         const targets = []
         for (let index = 0; index < 2; index++) {
+          if (commandType === 'removeMember' && index === 1) {
+            targets.push(
+              [...view.inspectState().devices].find(
+                ([, device]) => hex(device.membershipId.toBytes()) === '11'.repeat(16)
+              )[0]
+            )
+            continue
+          }
           const machine = yield* owner.custody.prepareDevice()
           const admission = yield* prepareDeviceAdmission({
             genesis,
@@ -2373,17 +2389,25 @@ void test('revocation bypasses an unstaged candidate but preserves an unknown pu
           )
           records.push(record)
           view = Result.getOrThrow(
-            extendLedger(view, [record], { head: hashRecordBytes(record), length: records.length })
+            extendLedger(view, [record], {
+              head: hashRecordBytes(record),
+              length: records.length
+            })
           )
           targets.push(hex(machine.publicKey.toBytes()))
           yield* owner.custody.discardDevice(machine)
         }
+        const independentCommand =
+          commandType === 'revoke'
+            ? { type: 'revoke', target: targets[1] }
+            : { type: 'removeMember', membershipId: '11'.repeat(16) }
         yield* owner.host.open(workspaceId)
         yield* owner.host.ingestLedgerRecords(
           workspaceId,
           page(records, prepared.genesisHashHex, 0)
         )
         let blocked = false
+        let stageDown = false
         const staged = new Map(),
           attempts = [],
           submitted = []
@@ -2398,7 +2422,7 @@ void test('revocation bypasses an unstaged candidate but preserves an unknown pu
             appendCas: (_anchor, expected, record) =>
               Effect.suspend(() => {
                 submitted.push(Buffer.from(record))
-                if (blocked && failure === 'cas')
+                if (blocked && failure !== 'stage')
                   return Effect.fail(new Error('synthetic unknown CAS result'))
                 assert.equal(view.head.equals(expected.head), true)
                 view = Result.getOrThrow(
@@ -2415,12 +2439,15 @@ void test('revocation bypasses an unstaged candidate but preserves an unknown pu
             stageGroup: (group) =>
               Effect.suspend(() => {
                 attempts.push(group)
-                if (blocked && failure === 'stage')
+                if (stageDown || (blocked && failure === 'stage'))
                   return Effect.fail(new Error('synthetic staging outage'))
                 staged.set(group.recordHash, group)
                 return Effect.void
               }),
-            readGroup: (key) => Effect.succeed(staged.get(key.recordHash) ?? null),
+            readGroup: (key) =>
+              stageDown
+                ? Effect.fail(new Error('synthetic staging read outage'))
+                : Effect.succeed(staged.get(key.recordHash) ?? null),
             deleteGroup: () => Effect.void
           })
         })
@@ -2456,23 +2483,38 @@ void test('revocation bypasses an unstaged candidate but preserves an unknown pu
         )
         const retained = snapshot()
         assert.equal(retained.rows.length, 1)
-        assert.equal(retained.pending !== null, failure === 'cas')
+        assert.equal(retained.pending !== null, failure !== 'stage')
         const original = Buffer.from(retained.rows[0].record)
         assert.equal(Buffer.from(attempts[0].record).equals(original), true)
         const point = view.head
+        const publicationIndex = view.length
+        if (failure.endsWith('missing-old-key')) {
+          const installed = new DatabaseSync(join(managementDirectory, 'installed-keys.sqlite'))
+          try {
+            installed.exec('DELETE FROM installed_epoch_keys WHERE epoch=0')
+          } finally {
+            installed.close()
+          }
+        }
         yield* owner.host.closeWorkspace(workspaceId)
         yield* owner.host.open(workspaceId)
         assert.equal(
           (yield* owner.host.managementState(workspaceId)).devices.find((entry) => entry.self).key,
           ownKey
         )
+        if (failure.startsWith('cas-staging-offline')) {
+          blocked = false
+          stageDown = true
+        }
         const revoke = yield* Effect.result(
-          owner.host.manage(workspaceId, { type: 'revoke', target: targets[1] }, remote)
+          owner.host.manage(workspaceId, independentCommand, remote)
         )
         if (failure === 'stage') {
           assert.equal(Result.isSuccess(revoke), true)
           assert.equal(revoke.success, 'Committed')
           assert.equal(view.inspectState().devices.has(targets[1]), false)
+          if (commandType === 'removeMember')
+            assert.equal(view.inspectState().members.has('11'.repeat(16)), false)
           assert.equal(view.inspectState().epoch.number, 0)
           assert.equal(view.inspectState().epoch.rotationRequired, true)
           assert.equal(attempts.length, 1)
@@ -2511,6 +2553,18 @@ void test('revocation bypasses an unstaged candidate but preserves an unknown pu
           assert.equal(rows[0].consumed, 1)
           assert.deepEqual(rows[0].record, retained.rows[0].record)
           assert.deepEqual(rows[0].envelopes, retained.rows[0].envelopes)
+        } else if (failure.startsWith('cas-staging-offline')) {
+          assert.equal(Result.isSuccess(revoke), true)
+          assert.equal(revoke.success, 'Committed')
+          assert.equal(Buffer.from(records[publicationIndex]).equals(original), true)
+          assert.equal(view.inspectState().devices.has(targets[1]), false)
+          if (commandType === 'removeMember')
+            assert.equal(view.inspectState().members.has('11'.repeat(16)), false)
+          assert.equal(attempts.length, 1)
+          assert.equal(snapshot().rows[0].consumed, 1)
+          assert.deepEqual(snapshot().rows[0].record, retained.rows[0].record)
+          assert.deepEqual(snapshot().rows[0].envelopes, retained.rows[0].envelopes)
+          assert.equal(view.inspectState().epoch.rotationRequired, true)
         } else {
           assert.equal(Result.isFailure(revoke), true)
           assert.equal(view.head.equals(point), true)
@@ -2523,10 +2577,10 @@ void test('revocation bypasses an unstaged candidate but preserves an unknown pu
           )
           blocked = false
           assert.equal(
-            yield* owner.host.manage(workspaceId, { type: 'revoke', target: targets[1] }, remote),
+            yield* owner.host.manage(workspaceId, independentCommand, remote),
             'Committed'
           )
-          assert.equal(Buffer.from(records.at(-2)).equals(original), true)
+          assert.equal(Buffer.from(records[publicationIndex]).equals(original), true)
           assert.equal(view.inspectState().devices.has(targets[1]), false)
         }
         assert.equal(view.inspectState().epoch.number, 1)
@@ -2536,7 +2590,11 @@ void test('revocation bypasses an unstaged candidate but preserves an unknown pu
       })
     )
   }
-})
+}
+for (const commandType of ['revoke', 'removeMember']) {
+  void test(`${commandType} bypasses an unstaged candidate but preserves an unknown publication CAS across reopen`, (t) =>
+    managementFailureFixture(t, commandType))
+}
 
 void test('closing during a manual management ledger read aborts outside account locks and releases the host', async (t) => {
   const directory = await fixture(t)

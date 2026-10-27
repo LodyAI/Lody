@@ -34,6 +34,12 @@ import {
 import { WorkspaceScope } from '@lody/e2ee-core/services'
 import { E2eeStagingCapacityError } from './e2ee-cloud-client.mjs'
 
+/** Native commands share one durable submission owner; renderer ports stay purpose-bound. */
+export type DesktopE2eeManagementCommand =
+  | { type: 'rotate' }
+  | { type: 'revoke'; target: string }
+  | { type: 'removeMember'; membershipId: string }
+
 export type DesktopE2eeManagementRemote = {
   log: LedgerLog['Service']
   staging: (round?: string) => EpochStagingStore['Service']
@@ -181,9 +187,7 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
     yield* publisher.acknowledge(result)
     return result.outcome
   })
-  return Effect.fnUntraced(function* (
-    command: { type: 'rotate' } | { type: 'revoke'; target: string }
-  ) {
+  return Effect.fnUntraced(function* (command: DesktopE2eeManagementCommand) {
     yield* input.ports.refresh()
     const entry = yield* journal.pending()
     if (entry.record) {
@@ -205,7 +209,12 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
               parsed.body.type === 'ordinary' &&
               parsed.body.operation.type === 'revokeDevice' &&
               Buffer.from(parsed.body.operation.target.toBytes()).toString('hex') ===
-                command.target)
+                command.target) ||
+            (command.type === 'removeMember' &&
+              parsed.body.type === 'ordinary' &&
+              parsed.body.operation.type === 'removeMember' &&
+              Buffer.from(parsed.body.operation.membershipId.toBytes()).toString('hex') ===
+                command.membershipId)
           )
             return result.outcome
         }
@@ -223,15 +232,43 @@ export const makeDesktopE2eeManagement = Effect.fnUntraced(function* (input: {
       if (!current.inspectState().epoch.rotationRequired) return 'Committed'
       return yield* finishRotation(true)
     }
-    // Without a pending submission, candidate recovery is independent. Retain
-    // its originals; staging failure cannot gate revocation. Pending CAS above
-    // still reconciles the exact signed record before any new management signing.
-    const target = yield* Effect.fromResult(
-      Bytes.signingPublicKey(new Uint8Array(Buffer.from(command.target, 'hex')))
+    // Unsubmitted candidates are independent of ordinary management commands.
+    if (command.type === 'revoke') {
+      const target = yield* Effect.fromResult(
+        Bytes.signingPublicKey(new Uint8Array(Buffer.from(command.target, 'hex')))
+      )
+      const view = yield* input.verified.current()
+      if (!view.inspectState().devices.has(command.target)) return 'Committed'
+      const result = yield* control.execute({ _tag: 'RevokeDevice', target })
+      yield* control.acknowledge(result)
+      return result.outcome
+    }
+    const membershipId = yield* Effect.fromResult(
+      Bytes.membershipId(Buffer.from(command.membershipId, 'hex'))
     )
-    const view = yield* input.verified.current()
-    if (!view.inspectState().devices.has(command.target)) return 'Committed'
-    const result = yield* control.execute({ _tag: 'RevokeDevice', target })
+    const state = (yield* input.verified.current()).inspectState()
+    const actorDevice = state.devices.get(
+      Buffer.from(input.device.publicKey.toBytes()).toString('hex')
+    )
+    const actor =
+      actorDevice &&
+      state.members.get(Buffer.from(actorDevice.membershipId.toBytes()).toString('hex'))
+    const target = state.members.get(command.membershipId)
+    if (
+      actorDevice?.kind !== 'personal' ||
+      !actor ||
+      (actor.role !== 'owner' && actor.role !== 'admin') ||
+      target?.role === 'owner' ||
+      (actor.role === 'admin' && target?.role === 'admin')
+    )
+      return yield* Effect.fail(new Error('e2ee_member_management_forbidden'))
+    if (!target) return 'Committed'
+    if (!state.capabilities.includes(1)) {
+      const declaration = yield* control.execute({ _tag: 'DeclareCapabilities', capabilities: [1] })
+      yield* control.acknowledge(declaration)
+      if (declaration.outcome === 'Conflict') return declaration.outcome
+    }
+    const result = yield* control.execute({ _tag: 'RemoveMember', membershipId })
     yield* control.acknowledge(result)
     return result.outcome
   })

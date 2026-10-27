@@ -384,6 +384,46 @@ describe('durable local epoch rotation', () => {
       )
     );
   });
+  it('resumes a journaled publication across reopen while staging is unavailable, without signing', async () => {
+    const f = fixture();
+    f.mode('unavailable');
+    let original: Uint8Array;
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { rotation, journal } = yield* f.open();
+          failureCode(yield* Effect.exit(rotation.publish()), 'unconfirmed');
+          original = new Uint8Array(f.row()!.record);
+          expect((yield* journal.load(f.context.genesis)).record).toEqual(original);
+          expect(f.view().inspectState().epoch.number).toBe(0);
+        })
+      )
+    );
+    f.mode('ok');
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { rotation, installed, journal } = yield* f.open('open', {
+            signer: { ...f.owner.signer, sign: () => Effect.die('recovery must never sign') },
+            staging: {
+              stageGroup: () => Effect.die('journaled original must not stage again'),
+              readGroup: () => Effect.die('journaled original must not read staging again'),
+              deleteGroup: () => Effect.die('recovery cannot delete staging'),
+            },
+          });
+          const result = yield* rotation.resume();
+          expect(result).toMatchObject({ outcome: 'Committed', epoch: 1, record: original! });
+          expect(f.records().at(-1)).toEqual(original!);
+          expect(f.signed()).toBe(1);
+          yield* installed.check(1);
+          yield* rotation.acknowledge(result!);
+          expect((yield* journal.load(f.context.genesis)).record).toBeNull();
+          expect(f.row()!.consumed).toBe(1);
+        })
+      )
+    );
+  });
+
   it('keeps uncommitted ciphertext inert and installs real HPKE after permanent publisher destruction, including Recovery', async () => {
     for (const kind of [0, 2] as const) {
       const f = fixture(kind),
