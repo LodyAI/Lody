@@ -1,3 +1,4 @@
+import { E2eeTeamInboxHost } from '@/components/e2ee/email-admission-worker';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
 import {
@@ -291,5 +292,25 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
     [e2eeWorkspaces, localAgentSyncMode, sessionStore, workspacesStore]
   );
 
-  return <PlatformContext.Provider value={provider}>{children}</PlatformContext.Provider>;
+  const memberAccountId = session.data?.user.id;
+  return (
+    <PlatformContext.Provider value={provider}>
+      {memberAccountId &&
+        e2eeWorkspaces.runtime &&
+        organization.organizations?.map((workspace) =>
+          'contentMode' in workspace &&
+          workspace.contentMode === 'e2ee' &&
+          'role' in workspace &&
+          ['owner', 'admin'].includes(String(workspace.role)) ? (
+            <E2eeTeamInboxHost
+              key={`${memberAccountId}:${workspace.id}`}
+              runtime={e2eeWorkspaces.runtime!}
+              workspaceId={workspace.id}
+              accountId={memberAccountId}
+            />
+          ) : null
+        )}
+      {children}
+    </PlatformContext.Provider>
+  );
 }

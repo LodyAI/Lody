@@ -1,3 +1,5 @@
+import { E2eeMemberJoinSurface } from './e2ee-member-join';
+import { readMemberOffer } from '@/lib/e2ee-member-offer';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useCloudMutation, useCloudQuery, usePlatformCapability } from '@lody/platform/react';
@@ -12,7 +14,7 @@ export interface WorkspaceJoinRequestSurfaceProps {
   token: string;
   onSignInRequested: () => void;
   onEmailVerificationRequested: () => void;
-  onWorkspaceRequested: (workspaceSlug: string | null) => void;
+  onWorkspaceRequested: (workspaceSlug: string | null, workspaceId?: string) => void;
   onHomeRequested: () => void;
 }
 
@@ -22,7 +24,7 @@ export interface WorkspaceJoinRequestSurfaceProps {
  * Navigation stays with the host so this surface never imports the product
  * router, route tree, workspace runtime, or Flock document implementation.
  */
-export function WorkspaceJoinRequestSurface({
+function OrdinaryWorkspaceJoinRequestSurface({
   token,
   onSignInRequested,
   onEmailVerificationRequested,
@@ -86,4 +88,13 @@ export function WorkspaceJoinRequestSurface({
       onBackHome={onHomeRequested}
     />
   );
+}
+
+export function WorkspaceJoinRequestSurface(props: WorkspaceJoinRequestSurfaceProps) {
+  return <JoinInvitationSession key={props.token} {...props} />;
+}
+function JoinInvitationSession(props: WorkspaceJoinRequestSurfaceProps) {
+  const [offer] = useState(() => readMemberOffer(props.token));
+  if (offer) return <E2eeMemberJoinSurface {...props} offer={offer} />;
+  return <OrdinaryWorkspaceJoinRequestSurface {...props} />;
 }

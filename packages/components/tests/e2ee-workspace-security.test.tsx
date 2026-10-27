@@ -142,6 +142,50 @@ describe('encrypted workspace settings', () => {
     expect(container.textContent).toContain('e2ee.security.complete');
     expect(container.querySelector('[role=status]')).not.toBeNull();
   });
+  it('reuses the settings badge for a pending link request and clears it after approval', async () => {
+    vi.useFakeTimers();
+    try {
+      state = { ...state, rotationRequired: false };
+      let pending = true;
+      platform.e2eeWorkspaces!.runtime!.memberJoinRequests = async () =>
+        ({
+          items: pending ? [{ source: 'link', state: 'pending' }] : [],
+        }) as never;
+      await render();
+      expect(container.querySelector('[role=status]')).not.toBeNull();
+      pending = false;
+      await act(async () => vi.advanceTimersByTimeAsync(15_000));
+      expect(container.querySelector('[role=status]')).toBeNull();
+      expect(signed).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('does not let a late invitation queue result mark a different workspace', async () => {
+    state = { ...state, rotationRequired: false };
+    const late =
+      Promise.withResolvers<
+        Awaited<
+          ReturnType<
+            NonNullable<import('@lody/platform').E2eeWorkspaceRuntime['memberJoinRequests']>
+          >
+        >
+      >();
+    platform.e2eeWorkspaces!.runtime!.memberJoinRequests = async (workspaceId) =>
+      workspaceId === 'workspace' ? late.promise : ({ items: [] } as never);
+    await render();
+    const mode = store.get(workspaceContentModeAtom)!;
+    await act(async () =>
+      store.set(workspaceContentModeAtom, {
+        ...mode,
+        workspaceId: 'other',
+        workspaceSlug: 'other',
+        descriptor: { ...mode.descriptor!, workspaceId: 'other' },
+      } as typeof mode)
+    );
+    await act(async () => late.resolve({ items: [{ source: 'link', state: 'pending' }] } as never));
+    expect(container.querySelector('[role=status]')).toBeNull();
+  });
   it('drops late native facts from the previous workspace', async () => {
     const late = Promise.withResolvers<E2eeManagementState>();
     const original = state;
@@ -201,6 +245,9 @@ describe('encrypted workspace settings', () => {
   it('ordinary workspaces show ordinary settings and never access a management port', async () => {
     platform.e2eeWorkspaces!.runtime!.managementState = async () => {
       throw new Error('ordinary must never query crypto');
+    };
+    platform.e2eeWorkspaces!.runtime!.memberJoinRequests = async () => {
+      throw new Error('ordinary must never query member requests');
     };
     store.set(workspaceContentModeAtom, null);
     await render();

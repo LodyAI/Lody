@@ -664,7 +664,8 @@ function DesktopDeepLinkRouter() {
       }
 
       if (invitePath) {
-        void navigate({ to: invitePath, replace: true });
+        const target = new URL(invitePath, 'https://lody.invalid');
+        void navigate({ to: target.pathname, hash: target.hash.slice(1), replace: true });
         return;
       }
 

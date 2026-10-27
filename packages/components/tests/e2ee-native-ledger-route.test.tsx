@@ -64,6 +64,8 @@ vi.mock('@/components/pages/e2ee-workspace-control-page', () => ({
       children
     ),
 }));
+vi.mock('@/components/settings/e2ee-team-settings', () => ({ E2eeTeamSettingsHost: () => null }));
+vi.mock('@/components/e2ee/email-admission-worker', () => ({ EmailAdmissionWorker: () => null }));
 vi.mock('@/components/pages/e2ee-personal-pairing', () => ({
   E2eePersonalPairing: ({ workspaceId }: { workspaceId: string }) =>
     fixture.showTools ? createElement('aside', { 'data-pairing': workspaceId }) : null,

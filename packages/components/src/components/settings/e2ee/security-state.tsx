@@ -2,7 +2,7 @@ import { notifyE2eeLedgerChanged } from '../../../providers/e2ee-runtime-notific
 import { useEffect, useState } from 'react';
 import { atom, useAtomValue, useSetAtom } from 'jotai';
 import { usePlatformSession, usePlatform } from '@lody/platform/react';
-import type { E2eeManagementState } from '@lody/platform';
+import type { E2eeManagementState, E2eeWorkspaceRuntime } from '@lody/platform';
 import { useTranslation } from 'react-i18next';
 import { Settings } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
@@ -93,13 +93,57 @@ export function useSecurityState() {
 }
 
 export function E2eeSettingsIcon() {
-  const { state, encrypted } = useSecurityState();
+  const { state, encrypted, native, workspaceId, accountId } = useSecurityState();
+  const admissionAttention = useMemberJoinAttention(
+    native,
+    workspaceId,
+    accountId,
+    !!state.data?.mayRotate
+  );
   const attention = !!(
     encrypted &&
-    state.data?.mayRotate &&
-    (state.data.rotationRequired || state.data.updatePending)
+    ((state.data?.mayRotate && (state.data.rotationRequired || state.data.updatePending)) ||
+      admissionAttention)
   );
   return <E2eeSettingsGlyph attention={attention} />;
+}
+
+function useMemberJoinAttention(
+  native: E2eeWorkspaceRuntime | undefined,
+  workspaceId: string | null,
+  accountId: string | null | undefined,
+  mayManage: boolean
+) {
+  const key = JSON.stringify([accountId, workspaceId]);
+  const [snapshot, setSnapshot] = useState<{ key: string; attention: boolean }>();
+  useEffect(() => {
+    if (!workspaceId || !accountId || !mayManage || !native?.memberJoinRequests) return undefined;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = async () => {
+      try {
+        const requests = await native.memberJoinRequests!(workspaceId);
+        if (active)
+          setSnapshot({
+            key,
+            attention: requests.items.some(
+              (request) =>
+                request.source === 'link' && ['pending', 'admitting'].includes(request.state)
+            ),
+          });
+      } catch {
+        // An unavailable invitation queue does not hide key-update attention or pause work.
+      } finally {
+        if (active) timer = setTimeout(() => void load(), 15_000);
+      }
+    };
+    void load();
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [native, workspaceId, accountId, mayManage, key]);
+  return mayManage && snapshot?.key === key && snapshot.attention;
 }
 export function E2eeSettingsGlyph({ attention }: { attention: boolean }) {
   const { t } = useTranslation();
