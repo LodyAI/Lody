@@ -1,3 +1,4 @@
+import { E2eeMemberActions, type E2eeMemberManagement } from './e2ee-member-actions';
 import * as stylex from '@stylexjs/stylex';
 import { Accordion } from '@lody/ui/accordion';
 import { Alert } from '@lody/ui/alert';
@@ -359,6 +360,11 @@ function eventSentence(t: TFunction, name: ResolveMember, event: LedgerEventSumm
       return t('e2ee.summary.transferOwner', { actor, member: name(event.member) });
     case 'publishEpoch':
       return t('e2ee.summary.publishEpoch', { actor, epoch: event.epoch });
+    case 'removeMember':
+      return t('e2ee.summary.removeMember', {
+        actor: name(event.actor),
+        member: name(event.member),
+      });
     case 'removeMemberAndPublishEpoch':
       return t('e2ee.summary.removeMemberAndPublishEpoch', {
         actor,
@@ -374,6 +380,7 @@ function eventSentence(t: TFunction, name: ResolveMember, event: LedgerEventSumm
 function MembersSection(props: {
   overview: LedgerOverview;
   names: ReturnType<typeof useMemberNames>;
+  management?: E2eeMemberManagement;
 }) {
   const { t } = useTranslation();
   const { names } = props;
@@ -412,6 +419,9 @@ function MembersSection(props: {
               >
                 {t('e2ee.control.deviceCount', { count: member.devices.length })}
               </span>
+              {props.management && (
+                <E2eeMemberActions member={member} name={name} management={props.management} />
+              )}
             </li>
           );
         })}
@@ -421,6 +431,7 @@ function MembersSection(props: {
 }
 
 export interface E2eeWorkspaceControlPageProps {
+  memberManagement?: E2eeMemberManagement;
   workspaceId: string;
   genesisHash?: string;
   history: VerifiedLedgerHistory | null;
@@ -529,7 +540,14 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
         )}
         {history && <LedgerVerificationCard history={history} />}
         {props.children}
-        {history && overview && <MembersSection overview={overview} names={names} />}
+        {history?.view.inspectState().epoch.rotationRequired && (
+          <Alert.Root tone="warning">
+            <Alert.Description>{t('e2ee.members.rotationHint')}</Alert.Description>
+          </Alert.Root>
+        )}
+        {history && overview && (
+          <MembersSection overview={overview} names={names} management={props.memberManagement} />
+        )}
         {history && overview && (
           <section aria-label={t('e2ee.control.history')} {...stylex.props(styles.section)}>
             <h2 {...stylex.props(styles.sectionHeading)}>

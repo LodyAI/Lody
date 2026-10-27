@@ -9,7 +9,7 @@ import {
   completedE2eeIdentityReset
 } from '@lody/shared/node/e2ee-identity'
 import { app } from 'electron'
-import { Effect, Exit, Scope, Semaphore } from 'effect'
+import { Effect, Exit, Scope, Semaphore, Deferred } from 'effect'
 import { makeElectronE2eeCustody } from '../e2ee-custody-electron'
 import { makeDesktopE2eeBootstrap, type DesktopE2eeCreationIntent } from './e2ee-bootstrap.mjs'
 import type { E2eeCloudClient } from './e2ee-cloud-client.mjs'
@@ -44,6 +44,7 @@ const CreationReceipt = z
   })
   .strict()
 const owners = new Map<string, Account>()
+const removing = new Map<string, Deferred.Deferred<boolean, unknown>>()
 const accountDirectory = (accountId: string) =>
   join(
     app.getPath('userData'),
@@ -161,6 +162,7 @@ export function withDesktopE2eeAccount<A>(
             yield* closeCurrent
           const accountId = identity.userId
           const directory = identityDirectory(accountId, location)
+          if (removing.has(directory)) return yield* Effect.fail(accountFailure('member_removed'))
           if (!create)
             yield* Effect.tryPromise({
               try: () => lstat(directory),
@@ -431,6 +433,86 @@ export function resetDesktopE2eeIdentity(input: { workspaceId?: string; resetId:
   })
 }
 
+/** Terminal receipt comes only from credential-authenticated removal. Close the
+ * isolated workspace owner, then take the existing exclusive identity lease;
+ * another process or a failed release cannot be bypassed by automatic deletion. */
+export function cleanupRemovedDesktopWorkspace(input: {
+  accountId: string
+  workspaceId: string
+}): Promise<boolean> {
+  const { workspaceId } = input
+  return Effect.runPromise(
+    Effect.uninterruptible(
+      Effect.gen(function* () {
+        const plan = yield* serial.withPermit(
+          Effect.gen(function* () {
+            const accountId = getIpcServiceDeps().authService.getCachedSessionIdentity().userId
+            if (!accountId || accountId !== input.accountId)
+              return yield* Effect.fail(accountFailure('account_unavailable'))
+            const directory = identityDirectory(accountId, workspaceId)
+            const pending = removing.get(directory)
+            if (pending) return { kind: 'pending' as const, directory, pending }
+            const owner = owners.get(directory)
+            if (owner) {
+              if (!(yield* owner.bootstrap.hasRemovedWorkspace(workspaceId))) return null
+            } else {
+              const exists = yield* Effect.tryPromise({
+                try: async () => {
+                  try {
+                    await lstat(directory)
+                    return true
+                  } catch (cause) {
+                    if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return false
+                    throw cause
+                  }
+                },
+                catch: () => accountFailure('storage')
+              })
+              if (!exists) return null
+            }
+            const done = Deferred.makeUnsafe<boolean, unknown>()
+            removing.set(directory, done)
+            return { kind: 'owner' as const, directory, owner, done }
+          })
+        )
+        if (!plan) return false
+        if (plan.kind === 'pending') return yield* Deferred.await(plan.pending)
+        const result = yield* Effect.exit(
+          Effect.scoped(
+            Effect.gen(function* () {
+              // Only this directory is fenced; release/deletion never holds the global account lock.
+              if (plan.owner) yield* closeOwner(plan.owner)
+              yield* leaseE2eeIdentity(accountDirectory(input.accountId))
+              yield* leaseE2eeIdentity(plan.directory, true)
+              if (
+                getIpcServiceDeps().authService.getCachedSessionIdentity().userId !==
+                input.accountId
+              )
+                return yield* Effect.fail(accountFailure('account_unavailable'))
+              const custody = yield* makeElectronE2eeCustody(join(plan.directory, 'custody'))
+              const bootstrap = yield* makeDesktopE2eeBootstrap({
+                directory: plan.directory,
+                accountId: input.accountId,
+                custody
+              })
+              return yield* bootstrap.resumeRemovedWorkspace(workspaceId)
+            })
+          )
+        )
+        yield* serial.withPermit(
+          Effect.gen(function* () {
+            if (removing.get(plan.directory) === plan.done) removing.delete(plan.directory)
+            yield* Deferred.done(plan.done, result)
+          })
+        )
+        return yield* result
+      })
+    )
+  ).catch((error) => {
+    throw publicE2eeFailure(error)
+  })
+}
+
 /** Move a complete pending creation to its workspace after durable server
  * publication. No key rewrap/copy or shared account custody is involved. */
 export async function recordDesktopE2eeCreated(input: {
@@ -514,6 +596,7 @@ function publicE2eeFailure(error: unknown): Error {
     'account_unavailable',
     'custody_unavailable',
     'missing-binding',
+    'member_removed',
     'conflict',
     'local-evidence-conflict',
     'closed',

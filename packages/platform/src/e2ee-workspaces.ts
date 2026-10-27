@@ -68,6 +68,10 @@ export interface E2eeRuntimeStatus {
   readonly position: string | null;
   readonly epoch: number;
   readonly rotationRequired: boolean;
+  /** Current self membership, derived only from the host's verified ledger. */
+  readonly signingPublicKey?: string;
+  readonly membershipId?: string | null;
+  readonly memberRole?: 'owner' | 'admin' | 'member' | 'guest' | null;
   readonly deviceKind: 'personal' | 'machine' | 'recovery' | null;
   readonly hasCurrentKey: boolean;
   /** Confirmed retained key usable for sends while current-key reception retries. */
@@ -105,6 +109,14 @@ export interface E2eeWorkspaceRuntime {
   managementState?(workspaceId: string): Promise<E2eeManagementState>;
   updateKeys?(workspaceId: string): Promise<void>;
   revokeDevice?(workspaceId: string, signingPublicKey: string): Promise<void>;
+  /** Explicit management intent; the host signs once and retains the exact original. */
+  removeMember?(workspaceId: string, membershipId: string): Promise<void>;
+  /** Owner-only Admin promotion/demotion, checked against the latest verified ledger. */
+  setMemberRole?(
+    workspaceId: string,
+    membershipId: string,
+    role: 'admin' | 'member'
+  ): Promise<void>;
   personalPairingOffer?(workspaceId: string): Promise<E2eePersonalPairingOffer>;
   preparePersonalJoin?(
     offer: E2eePersonalPairingOffer

@@ -417,6 +417,10 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
       rotationRequired: view.inspectState().epoch.rotationRequired,
       hasCurrentKey: Result.isSuccess(key),
       devicePublicKey: hex(options.device.publicKey.toBytes()),
+      membershipId: (() => {
+        const device = view.inspectState().devices.get(hex(options.device.publicKey.toBytes()));
+        return device ? hex(device.membershipId.toBytes()) : null;
+      })(),
       protection: options.custody.protection,
     };
   });

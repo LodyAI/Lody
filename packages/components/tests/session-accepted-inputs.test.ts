@@ -15,7 +15,9 @@ import { acceptSessionUserTurn } from '../src/lib/session-send-admission';
 import { createSessionSubmission } from '../src/lib/session-submission';
 import * as localFileSender from '../src/lib/electron-session-file-sender';
 import type { WorkspaceRuntime } from '../src/atoms/runtime';
-import { IDBFactory } from 'fake-indexeddb';
+import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
+import { removeEncryptedWorkspaceLocalData } from '../src/lib/e2ee-member-removal';
+import { createEagerSyncHighWaterStore } from '../src/lib/eager-sync-high-water-cache';
 import {
   createAcceptedSessionInputs,
   SESSION_INPUT_SLOW_STAGE_MS,
@@ -1199,4 +1201,65 @@ describe('locally accepted Roost input', () => {
       });
     }
   );
+});
+
+it('member removal deletes only the stopped workspace input and replica namespaces', async () => {
+  const factory = new IDBFactory();
+  vi.stubGlobal('indexedDB', factory);
+  vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+  const removed = createSessionInputStorage('input-account', 'input-workspace');
+  const otherAccount = createSessionInputStorage('other-account', 'input-workspace');
+  const otherWorkspace = createSessionInputStorage('input-account', 'other-workspace');
+  cleanup.push(
+    () => removed.close(),
+    () => otherAccount.close(),
+    () => otherWorkspace.close()
+  );
+  await removed.save(send('gone'));
+  await otherAccount.save(send('other-account'));
+  await otherWorkspace.save(send('other-workspace', { workspaceId: 'other-workspace' }));
+  const gone = await createEagerSyncHighWaterStore('input-workspace:window', { now: () => 1 });
+  const kept = await createEagerSyncHighWaterStore('other-workspace:window', { now: () => 1 });
+  gone.set('session' as SessionId, 100);
+  kept.set('session' as SessionId, 200);
+  await gone.flush();
+  await kept.flush();
+  gone.close();
+  kept.close();
+  const database = (name: string) =>
+    new Promise<IDBDatabase>((resolve, reject) => {
+      const request = factory.open(name, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore('content');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  for (const namespace of [
+    'input-workspace:window',
+    'other-workspace:window',
+    'input-workspace:other-window',
+  ]) {
+    for (const prefix of ['lody-loro-repo-db-', 'lody-loro-stream-cursors-']) {
+      const db = await database(prefix + namespace);
+      db.close();
+    }
+  }
+  await removeEncryptedWorkspaceLocalData({
+    accountId: 'input-account',
+    workspaceId: 'input-workspace',
+    windowId: 'window',
+  });
+  expect(await removed.list()).toEqual([]);
+  expect((await otherAccount.list()).map((row) => row.id)).toEqual(['other-account']);
+  expect((await otherWorkspace.list()).map((row) => row.id)).toEqual(['other-workspace']);
+  const names = (await factory.databases()).map((row) => row.name);
+  expect(names).not.toContain('lody-loro-repo-db-input-workspace:window');
+  expect(names).not.toContain('lody-loro-stream-cursors-input-workspace:window');
+  expect(names).toContain('lody-loro-repo-db-other-workspace:window');
+  expect(names).toContain('lody-loro-repo-db-input-workspace:other-window');
+  const goneAgain = await createEagerSyncHighWaterStore('input-workspace:window', { now: () => 1 });
+  const keptAgain = await createEagerSyncHighWaterStore('other-workspace:window', { now: () => 1 });
+  expect(goneAgain.get('session' as SessionId)).toBeUndefined();
+  expect(keptAgain.get('session' as SessionId)).toBe(200);
+  goneAgain.close();
+  keptAgain.close();
 });

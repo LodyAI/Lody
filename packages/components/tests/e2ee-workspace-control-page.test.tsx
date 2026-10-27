@@ -1,3 +1,4 @@
+import { E2eeMemberActions } from '../src/components/pages/e2ee-member-actions';
 // @vitest-environment jsdom
 
 import { act } from 'react';
@@ -97,7 +98,7 @@ describe('encrypted workspace control page reading', () => {
   // Frozen synthetic ledger v1 vector signed by fixed test keys.
   const vector = JSON.parse(
     readFileSync(join(import.meta.dirname, '../../e2ee-core/test/ledger-v1-vector.json'), 'utf8')
-  ) as { anchor: string; records: { hex: string }[] };
+  ) as { anchor: string; records: { hex: string; hash: string }[] };
   const page = (count: number, headHash: string) => ({
     workspaceId: 'w',
     genesisHash: vector.anchor,
@@ -111,10 +112,10 @@ describe('encrypted workspace control page reading', () => {
     genesisHash: vector.anchor,
     localPin,
   });
-  // Record 12 declares a capability this client cannot verify past.
+  // The final record declares a capability this client cannot verify past.
   const full = appendLedgerHistory(
     null,
-    page(12, 'f678de325f3a87488d3b6b40ad7da5aa8d8e7ef531e3f912a806ca1087887cc7'),
+    page(vector.records.length, vector.records.at(-1)!.hash),
     expected(vector.anchor)
   );
   const history = (localPin: string | null) =>
@@ -200,4 +201,51 @@ describe('encrypted workspace control page reading', () => {
     );
     expect(button('e2ee.control.loadMore')).toBeUndefined();
   });
+});
+
+it('requires confirmation, carries the member incarnation, and hides forbidden member controls', async () => {
+  const remove = vi.fn(async () => {}),
+    setRole = vi.fn(async () => {});
+  const member = {
+    ordinal: 2,
+    membershipId: '12'.repeat(16),
+    userId: '23'.repeat(32),
+    role: 'member' as const,
+    devices: [],
+  };
+  container = document.createElement('div');
+  document.body.append(container);
+  root = createRoot(container);
+  const show = (actorRole: 'owner' | 'admin', role: 'owner' | 'admin' | 'member') =>
+    act(() =>
+      root!.render(
+        <E2eeMemberActions
+          member={{ ...member, role }}
+          name="Jordan"
+          management={{ actorRole, remove, setRole }}
+        />
+      )
+    );
+  show('admin', 'admin');
+  expect(container.querySelector('button')).toBeNull();
+  show('owner', 'owner');
+  expect(container.querySelector('button')).toBeNull();
+  show('owner', 'member');
+  await act(async () => container!.querySelector('button')!.click());
+  const action = (key: string) =>
+    [...document.querySelectorAll('[role="menuitem"]')].find(
+      (node) => node.textContent === key
+    ) as HTMLElement;
+  expect(action('e2ee.members.promote')).toBeDefined();
+  await act(async () => action('e2ee.members.remove').click());
+  expect(remove).not.toHaveBeenCalled();
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
+    'e2ee.members.removeDescription'
+  );
+  const confirm = [...document.querySelectorAll('[role="dialog"] button')].find(
+    (node) => node.textContent === 'e2ee.members.remove'
+  ) as HTMLButtonElement;
+  await act(async () => confirm.click());
+  expect(remove.mock.calls).toEqual([[member.membershipId]]);
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
 });

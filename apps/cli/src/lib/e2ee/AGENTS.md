@@ -3,28 +3,26 @@
 `CLAUDE.md` is a symlink to this file. Parent CLI rules apply.
 
 - Lazy, machine-only module: ordinary CLI startup never probes the keyring.
-- First creation write/read-probes a temporary OS keystore entry and permanently selects
-  os-keystore or file protection. Reopen never probes/changes selection; originals require
-  their selector and KEK.
+- First creation write/read-probes the OS keystore and permanently selects OS or
+  file protection. Reopen requires the original selector/KEK; never probe or switch.
 - File protection requires owner-only directories/files, no symlinks; Windows uses actual
   owner/DACL checks through the official process Layer, not Unix mode bits.
-- Blob formats belong in core node-custody. No personal management, private exports,
-  plaintext device files or silent downgrade after keyring errors.
+- Core node-custody owns blobs. No personal management, private exports, plaintext
+  device files or silent keyring downgrade.
 - Display file protection before pairing approval.
 
-- Native keyring calls run in a managed helper: 10-second timeout, secrets only on stdin.
-  Confirm termination before fallback; preserve process-release recovery owners.
-- Batch Windows root/file ACL checks in one process. SQLite selection retries SQLITE_BUSY
-  asynchronously with a bound; no blocking busy_timeout while awaiting keyring work.
+- Keyring helper: 10-second timeout, stdin secrets. Confirm termination before
+  fallback; retain failed release owners.
+- Batch Windows ACL checks. Retry SQLite BUSY asynchronously with a bound;
+  never block busy_timeout during keyring work.
 
 - Resume first Windows ACL setup only in an empty custody directory; otherwise validate only.
 - `runtime.ts` composes Feed/VerifiedLedger, installed keys and optional receiver.
   Open/status are offline; cloud requests stay in cloud-cli-port.
   Report damaged history/pins distinctly; never reset trusted pins from remote hints.
-- Journal originals before feed/pin advancement. Rebase after 64 more records, core pin
-  first. Retired cache cleanup cannot fail local open.
-- No plaintext RPC, presence, attachments or scheduled automation on encrypted workspaces
-  while their encrypted channels remain unimplemented.
+- Journal originals before feed/pin; rebase core pin first after 64 records.
+  Retired cache cleanup cannot fail local open.
+- No plaintext RPC, presence, attachments or schedules until encrypted channels exist.
 - `realtime-journal.ts`: schema 3 only; no migration. Recover SQLite first;
   Init only v0/no objects. Archive intact after retiring readable current
   keys despite damage; unreadable keys refuse reset. No auto-replace/GC/archive replay/import.
@@ -65,9 +63,9 @@
   Hints follow replacements only after verified admission/install. Pairing waits raise
   no startup issue/timer/global offline state. Activation binds the approved key,
   drains other identities and retains its cleanup retry owner.
-- Only activation/binding/device-original ENOENT means pairing wait. Check the
-  original before custody init; stale hints cannot trigger keyring probes. Preserve
-  other file errors/Fleet retry; never cache transient storage as missing pairing.
+- Only activation/binding/device-original ENOENT means pairing wait. Check originals
+  before custody init; stale hints never probe keyrings. Other errors retain Fleet
+  retry; never cache transient I/O as missing pairing.
 - Ingest failure fences new seals until verified refresh; keep the last verified view
   and healthy readers. Retry at most three times per failure episode; explicit refresh
   restarts that budget. Seal may request retry but never await it in the SDK save queue.
@@ -113,3 +111,7 @@
 
 - Reset: same-user socket; drain, exclusive sibling lease, archive whole dir;
   fresh approval/KEK. OS/unknown stays OS.
+
+Member removal: bind the original device, stop/drain execution and sync, retain
+its receipt, then erase managed data under exclusive identity lease/pairing mutex.
+Retry busy cleanup before open; preserve projects. Rejoin with fresh member/keys.

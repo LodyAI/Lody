@@ -1,7 +1,9 @@
+import { isCloudE2eeMemberRemoved } from '../cloud-e2ee-errors';
+import type { LoroStreamsTokenAuth } from '@lody/shared';
 import { leaseE2eeIdentity } from '@lody/shared/node/e2ee-identity';
 import { createHash, randomBytes } from 'node:crypto';
 import { constants, existsSync } from 'node:fs';
-import { link, mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
+import { link, mkdir, open, readFile, rename, unlink, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Effect, Exit, Scope, Result } from 'effect';
 import { z } from 'zod';
@@ -41,6 +43,95 @@ export const cliE2eeIdentityDirectory = (accountId: string, workspaceId: string)
   );
 };
 
+const Removed = z
+  .object({
+    genesisHash: z.string().regex(/^[0-9a-f]{64}$/),
+    signingPublicKey: z.string().regex(/^[0-9a-f]{64}$/),
+    membershipId: z.string().regex(/^[0-9a-f]{32}$/),
+  })
+  .strict();
+async function readRemoval(directory: string) {
+  try {
+    return Removed.parse(JSON.parse(await readFile(join(directory, 'removed.json'), 'utf8')));
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw cause;
+  }
+}
+/** Only after the caller's workspace owners drain. The pairing mutex excludes a
+ * replacement identity during the exact-key check and deletion. Keep a public
+ * terminal receipt so interrupted erasure retries before any later attachment. */
+async function eraseRemovedWorkspace(
+  options: Pick<
+    CliE2eeWorkspaceOptions,
+    'accountId' | 'workspaceId' | 'keyring' | 'expectedSigningPublicKey'
+  >
+) {
+  const directory = cliE2eeIdentityDirectory(options.accountId, options.workspaceId);
+  const removed = await readRemoval(directory);
+  if (
+    !removed ||
+    (options.expectedSigningPublicKey &&
+      options.expectedSigningPublicKey !== removed.signingPublicKey)
+  )
+    return false;
+  const removal = removed;
+  return executeRemoval();
+  async function executeRemoval() {
+    return Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* leaseE2eeIdentity(directory, true);
+          const journal = yield* openMachinePairingJournal(directory);
+          const original = join(directory, 'custody', `${removal.genesisHash}.machine.device`);
+          const exists = yield* Effect.tryPromise({
+            try: async () => {
+              try {
+                await readFile(original);
+                return true;
+              } catch (cause) {
+                if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return false;
+                throw cause;
+              }
+            },
+            catch: (cause) => cause,
+          });
+          if (exists) {
+            const same = yield* Effect.scoped(
+              Effect.gen(function* () {
+                const custody = yield* makeCliE2eeCustody({
+                  directory: join(directory, 'custody'),
+                  keyring: options.keyring,
+                });
+                const { Bytes } = yield* Effect.promise(() => import('@lody/e2ee-core/protocol'));
+                const genesis = yield* Effect.fromResult(
+                  Bytes.genesisHash(bytes(removal.genesisHash))
+                );
+                const device = yield* custody.openDevice(genesis);
+                return hex(device.publicKey.toBytes()) === removal.signingPublicKey;
+              })
+            );
+            if (!same) return false;
+          }
+          // The mutex and empty journal remain; user project/worktree directories are outside this scope.
+          yield* Effect.promise(async () => {
+            for (const name of ['custody', 'runtime', 'binding.json', 'activation.json'])
+              await rm(join(directory, name), { recursive: true, force: true });
+            await rm(join(getLodyDataDir(), 'loro-repo', options.workspaceId), {
+              recursive: true,
+              force: true,
+            });
+          });
+          yield* journal.eraseRemovedMember();
+          return true;
+        })
+      )
+    );
+  }
+}
+
+/** Public pairing evidence is retained only through the trusted local approval
+ * path. This operation neither admits a device nor obtains cloud credentials. */
 export async function retainCliE2eeWorkspaceBinding(
   accountId: string,
   input: z.input<typeof Binding>
@@ -137,6 +228,16 @@ function mailbox(
 
 /** @deprecated Promise entry for the existing same-user control consumer. */
 export async function prepareCliE2eeMachineLegacy(options: Parameters<typeof prepareMachine>[0]) {
+  const priorRemoval = await readRemoval(
+    cliE2eeIdentityDirectory(options.accountId, options.workspaceId)
+  );
+  if (priorRemoval) {
+    if (priorRemoval.membershipId === options.membershipId) throw new Error('e2ee_member_removed');
+    if (await eraseRemovedWorkspace(options))
+      await unlink(
+        join(cliE2eeIdentityDirectory(options.accountId, options.workspaceId), 'removed.json')
+      );
+  }
   return Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
@@ -227,6 +328,8 @@ type CliE2eeWorkspaceOptions = {
   expectedSigningPublicKey?: string;
   cloud: CloudE2eePort;
   onUnavailable: () => void;
+  /** Stop and drain the document/execution owner. Invoked outside the refresh flight. */
+  onRemoved?: () => Promise<void>;
   keyring?: MachineKeyring;
 };
 const Activation = z
@@ -354,6 +457,7 @@ async function openWorkspace(
   requireActivation: boolean,
   pairing?: { pairingSessionId: string; frontendSigningPublicKey: string; signingPublicKey: string }
 ) {
+  if (await eraseRemovedWorkspace(options)) throw new Error('e2ee_member_removed');
   const scope = Effect.runSync(Scope.make());
   try {
     await Effect.runPromise(
@@ -475,7 +579,7 @@ async function openWorkspaceOwned(
             }
           : undefined,
       });
-      return { runtime, credential };
+      return { runtime, credential, custody, signingPublicKey: hex(device.publicKey.toBytes()) };
     })
   ).catch(async (error) => {
     await Effect.runPromise(Scope.close(scope, Exit.void));
@@ -519,8 +623,12 @@ async function openWorkspaceOwned(
     snapshotFlights.add(flight);
     void flight.then(
       () => snapshotFlights.delete(flight),
-      () => {
+      (cause) => {
         snapshotFlights.delete(flight);
+        if (isCloudE2eeMemberRemoved(cause)) {
+          startMemberRemoval();
+          return;
+        }
         console.warn('[e2ee] snapshot repair request failed; will retry');
       }
     );
@@ -584,19 +692,43 @@ async function openWorkspaceOwned(
           credential: opened.credential,
         });
         bucket = provider.getBucketId;
-        tokensInUse.add(provider);
+        const observe =
+          (auth: LoroStreamsTokenAuth): LoroStreamsTokenAuth =>
+          (context) =>
+            auth(context).pipe(
+              Effect.tapCause((cause) =>
+                Effect.sync(() => {
+                  if (
+                    cause.reasons.some((reason) =>
+                      reason._tag === 'Fail'
+                        ? isCloudE2eeMemberRemoved(reason.error)
+                        : reason._tag === 'Die' && isCloudE2eeMemberRemoved(reason.defect)
+                    )
+                  )
+                    startMemberRemoval();
+                })
+              )
+            );
+        const observed = {
+          ...provider,
+          getToken: observe(provider.getToken),
+          createAuthCallback: () => observe(provider.createAuthCallback()),
+        };
+        tokensInUse.add(observed);
         yield* Effect.addFinalizer(() =>
           Effect.sync(() => {
-            tokensInUse.delete(provider);
+            tokensInUse.delete(observed);
           })
         );
-        return provider;
+        return observed;
       }),
     // E2EE never attaches the old Machine RPC or presence token consumers.
     createTokenProviderLegacy: () => {
       throw new Error('e2ee_plaintext_channel_disabled');
     },
   };
+  let memberRemoved = false;
+  let removalReceipt: Promise<void> | undefined;
   const isClosed = () => closed;
   const confirmPairing = async (intent: {
     pairingSessionId: string;
@@ -642,6 +774,64 @@ async function openWorkspaceOwned(
     }, [250, 1_000, 4_000][ledgerRetryAttempts]);
     ledgerRetryTimer.unref?.();
   };
+  const startMemberRemoval = () => {
+    if (removalReceipt) return;
+    memberRemoved = true;
+    closed = true;
+    ledgerBlocked = true;
+    clearLedgerRetry();
+    removalReceipt = (async () => {
+      const removedStatus = await run(opened.runtime.status());
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            yield* openMachinePairingJournal(directory);
+            const { Bytes } = yield* Effect.promise(() => import('@lody/e2ee-core/protocol'));
+            const genesis = yield* Effect.fromResult(Bytes.genesisHash(bytes(options.genesisHash)));
+            const current = yield* opened.custody.openDevice(genesis);
+            if (
+              hex(current.publicKey.toBytes()) !== opened.signingPublicKey ||
+              (yield* opened.custody.deviceCredential(genesis, current.publicKey)) !==
+                opened.credential
+            )
+              return;
+            const receipt = Removed.parse({
+              genesisHash: options.genesisHash,
+              signingPublicKey: opened.signingPublicKey,
+              membershipId: removedStatus.membershipId,
+            });
+            yield* Effect.promise(async () => {
+              const temporary = join(
+                directory,
+                `removed-${randomBytes(16).toString('hex')}.pending`
+              );
+              const file = await open(temporary, 'wx', 0o600);
+              try {
+                await file.writeFile(JSON.stringify(receipt));
+                await file.sync();
+                await file.close();
+                await rename(temporary, join(directory, 'removed.json'));
+              } finally {
+                await file.close().catch(() => undefined);
+                await unlink(temporary).catch(() => undefined);
+              }
+            });
+          })
+        )
+      ).catch(() => options.onUnavailable());
+      await options.onRemoved?.();
+      await close();
+      await eraseRemovedWorkspace({
+        ...options,
+        expectedSigningPublicKey: opened.signingPublicKey,
+      });
+    })();
+    void removalReceipt.catch(() => {
+      try {
+        options.onUnavailable();
+      } catch {}
+    });
+  };
   const refreshInBackground = (resetRetries = true) => {
     if (closed) return Promise.resolve();
     if (resetRetries) {
@@ -658,15 +848,27 @@ async function openWorkspaceOwned(
         let cursor: string | undefined;
         let checkpoint: Parameters<CloudE2eePort['getHistory']>[0]['checkpoint'];
         do {
-          const page = await options.cloud.getHistory({
-            workspaceId: options.workspaceId,
-            credential: opened.credential,
-            ...(cursor
-              ? { cursor, checkpoint }
-              : status.position
-                ? { after: status.position }
-                : {}),
-          });
+          const page = await options.cloud
+            .getHistory({
+              workspaceId: options.workspaceId,
+              credential: opened.credential,
+              ...(cursor
+                ? { cursor, checkpoint }
+                : status.position
+                  ? { after: status.position }
+                  : {}),
+            })
+            .catch(async (historyError: unknown) => {
+              try {
+                await options.cloud.getContentToken({
+                  workspaceId: options.workspaceId,
+                  credential: opened.credential,
+                });
+              } catch (cause) {
+                if (isCloudE2eeMemberRemoved(cause)) throw cause;
+              }
+              throw historyError;
+            });
           if (closed) return;
           checkpoint ??= { ...page.checkpoint };
           status = await run(opened.runtime.ingest(page)).catch((error) => {
@@ -702,8 +904,9 @@ async function openWorkspaceOwned(
         }
       }
     })()
-      .catch((error: unknown) => {
+      .catch(async (error: unknown) => {
         if (pairing) pairingFailure = error;
+        if (isCloudE2eeMemberRemoved(error)) startMemberRemoval();
         try {
           options.onUnavailable();
         } catch {
@@ -716,7 +919,17 @@ async function openWorkspaceOwned(
       });
     return refresh;
   };
-  // Startup schedules the first refresh; local open never awaits network work.
+  const close = () => {
+    closed = true;
+    clearLedgerRetry();
+    return (closeReceipt ??= (async () => {
+      await epochTransition.close();
+      await refresh;
+      await Promise.allSettled([...snapshotFlights]);
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+    })());
+  };
+  // Startup is one of the three refresh triggers; no network request is awaited by open.
   void refreshInBackground();
   return {
     assertPairingConfirmed: () => {
@@ -729,22 +942,15 @@ async function openWorkspaceOwned(
     bucketId: () => bucket?.(),
     status: () =>
       closed
-        ? Promise.reject(new Error('e2ee_closed'))
+        ? Promise.reject(new Error(memberRemoved ? 'e2ee_member_removed' : 'e2ee_closed'))
         : run(opened.runtime.status()).then((status) => ({
             ...status,
             epochPhase: epochTransition.phase(),
           })),
     refresh: () => refreshInBackground(),
-    close: () => {
-      closed = true;
-      clearLedgerRetry();
-      return (closeReceipt ??= (async () => {
-        await epochTransition.close();
-        await refresh;
-        await Promise.allSettled([...snapshotFlights]);
-        await Effect.runPromise(Scope.close(scope, Exit.void));
-      })());
-    },
+    /** Actual terminal cleanup receipt; owner close itself never waits for its caller. */
+    removalCleanup: () => removalReceipt ?? Promise.resolve(),
+    close,
   };
 }
 export type CliE2eeWorkspaceLegacy = Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>>;

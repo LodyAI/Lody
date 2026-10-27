@@ -1,4 +1,5 @@
 import * as identityStorage from '@lody/shared/node/e2ee-identity'
+import { E2eeMemberRemovedError } from './e2ee-cloud-client.mts'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { readFile, mkdtemp, rm, readdir, writeFile } from 'node:fs/promises'
@@ -48,9 +49,11 @@ async function load(relative, dependencies, console = globalThis.console) {
       require: (id) =>
         Object.hasOwn(dependencies, id)
           ? dependencies[id]
-          : id === '../../services/e2ee-personal-pairing.mjs'
-            ? { PersonalPairingOfferSchema }
-            : require(id)
+          : id === '../../services/e2ee-cloud-client.mjs'
+            ? { E2eeMemberRemovedError }
+            : id === '../../services/e2ee-personal-pairing.mjs'
+              ? { PersonalPairingOfferSchema }
+              : require(id)
     }
   )
   return exports
@@ -720,7 +723,7 @@ async function personalJoinFixture(t) {
   }
   let lockDepth = 0
   const rows = new Map()
-  const relay = { statusFailure: null, loseCancelReceipt: false }
+  const relay = { statusFailure: null, loseCancelReceipt: false, memberRemoved: false }
   const remote = (work) =>
     Effect.try({
       try: () => {
@@ -735,6 +738,11 @@ async function personalJoinFixture(t) {
     return row
   }
   const client = {
+    history: () => Effect.fail(new Error('unauthorized history')),
+    contentStreamsToken: () =>
+      relay.memberRemoved
+        ? Effect.fail(new E2eeMemberRemovedError())
+        : Effect.fail(new Error('e2ee_device_revoked')),
     joinBegin: (request) =>
       remote(() => {
         const existing = rows.get(request.pairingSessionId)
@@ -816,6 +824,14 @@ async function personalJoinFixture(t) {
             lockDepth--
           }
         },
+        cleanupRemovedDesktopWorkspace: async ({ workspaceId: removedWorkspaceId }) => {
+          const erased = await Effect.runPromise(
+            owner.bootstrap.resumeRemovedWorkspace(removedWorkspaceId)
+          )
+          if (erased) owner.readers.delete(removedWorkspaceId)
+          return erased
+        },
+        runDesktopE2eeOperation: (_accountId, work) => Effect.runPromise(work),
         desktopE2eeCloudClient: async () => ({ accountId, client })
       }
     })
@@ -1459,7 +1475,7 @@ void test('management diagnostics preserve safe recovery actions without exposin
   }
 })
 
-async function nativeAccountFixture(t) {
+async function nativeAccountFixture(t, storage = identityStorage) {
   const directory = await mkdtemp(join(tmpdir(), 'desktop-identity-reset-'))
   let locked = false
   const wrapping = Buffer.alloc(32, 121)
@@ -1483,7 +1499,7 @@ async function nativeAccountFixture(t) {
   }
   const native = await account({
     directory,
-    identityStorage,
+    identityStorage: storage,
     custody: (path) => makeDesktopE2eeCustody({ directory: path, platform: 'linux', safeStorage }),
     bootstrap: makeDesktopE2eeBootstrap,
     host: makeDesktopE2eeRuntimeHost,
@@ -1832,4 +1848,138 @@ void test('real preload bridge admits only confirmed trusted reset IPC and archi
     }
   }
   await assert.rejects(ipcBridge.invoke('e2ee.exportKey'), /Blocked IPC invoke/)
+})
+
+void test('credential-authenticated member removal drains and deletes through the real IPC boundary; device-only rejection preserves data', async (t) => {
+  const f = await personalJoinFixture(t)
+  const owner = await f.open('removed-ipc')
+  await owner.create()
+  const status = await owner.ipc.status(f.workspaceId)
+  await assert.rejects(
+    owner.ipc.refresh(f.workspaceId, { installKeys: false }),
+    /unauthorized history/
+  )
+  assert.equal((await owner.ipc.status(f.workspaceId)).signingPublicKey, status.signingPublicKey)
+  f.relay.memberRemoved = true
+  await assert.rejects(
+    owner.ipc.refresh(f.workspaceId, { installKeys: false }),
+    /^Error: e2ee_member_removed$/
+  )
+  await assert.rejects(owner.ipc.status(f.workspaceId), /e2ee_not_open/)
+  assert.equal(owner.readers.has(f.workspaceId), false)
+  assert.equal(
+    f.db(
+      owner,
+      'creations.sqlite',
+      (db) => db.prepare('SELECT count(*) AS n FROM creations').get().n
+    ),
+    0
+  )
+  await assert.rejects(owner.ipc.open(f.workspaceId), (error) => error.code === 'member_removed')
+})
+
+void test('automatic removal retries the exclusive native identity lease and preserves a sibling workspace', async (t) => {
+  const { api } = await nativeAccountFixture(t)
+  const first = await createAccountWorkspace(api, 'removed')
+  await createAccountWorkspace(api, 'sibling')
+  const scope = await Effect.runPromise(Scope.make())
+  await Effect.runPromise(
+    identityStorage.leaseE2eeIdentity(first.directory).pipe(Scope.provide(scope))
+  )
+  const drain = await api.withDesktopE2eeAccount(
+    (owner) =>
+      Effect.gen(function* () {
+        const status = yield* owner.host.status('removed')
+        const credential = yield* owner.bootstrap.deviceCredential('removed')
+        yield* owner.bootstrap.recordRemovedWorkspace({
+          workspaceId: 'removed',
+          genesisHash: status.genesisHash,
+          signingPublicKey: status.signingPublicKey,
+          credential
+        })
+        return yield* owner.host.beginCloseWorkspace('removed')
+      }),
+    'removed'
+  )
+  await Effect.runPromise(drain)
+  await assert.rejects(
+    api.cleanupRemovedDesktopWorkspace({ accountId: 'account', workspaceId: 'removed' }),
+    /e2ee_identity-busy/
+  )
+  const original = join(
+    first.directory,
+    'custody',
+    first.creation.genesisHashHex + '.personal.device'
+  )
+  assert.ok((await readFile(original)).length > 0)
+  await Effect.runPromise(Scope.close(scope, Exit.void))
+  assert.equal(
+    await api.cleanupRemovedDesktopWorkspace({ accountId: 'account', workspaceId: 'removed' }),
+    true
+  )
+  await assert.rejects(readFile(original), (error) => error.code === 'ENOENT')
+  const status = await api.withDesktopE2eeAccount(
+    (owner) => owner.host.status('sibling'),
+    'sibling'
+  )
+  assert.equal(status.epoch, 0)
+  await assert.rejects(
+    api.withDesktopE2eeAccount((owner) => owner.host.open('removed'), 'removed'),
+    /e2ee_member_removed/
+  )
+})
+
+void test('slow terminal deletion fences only that workspace and never holds the account lock', async (t) => {
+  const entered = Promise.withResolvers(),
+    release = Promise.withResolvers()
+  let hold = true
+  const storage = {
+    ...identityStorage,
+    leaseE2eeIdentity: (directory, exclusive) =>
+      Effect.gen(function* () {
+        yield* identityStorage.leaseE2eeIdentity(directory, exclusive)
+        if (exclusive && directory.endsWith('/removed') && hold) {
+          entered.resolve()
+          yield* Effect.promise(() => release.promise)
+        }
+      })
+  }
+  const { api } = await nativeAccountFixture(t, storage)
+  await createAccountWorkspace(api, 'removed')
+  await createAccountWorkspace(api, 'sibling')
+  const drain = await api.withDesktopE2eeAccount(
+    (owner) =>
+      Effect.gen(function* () {
+        const status = yield* owner.host.status('removed')
+        const credential = yield* owner.bootstrap.deviceCredential('removed')
+        yield* owner.bootstrap.recordRemovedWorkspace({
+          workspaceId: 'removed',
+          genesisHash: status.genesisHash,
+          signingPublicKey: status.signingPublicKey,
+          credential
+        })
+        return yield* owner.host.beginCloseWorkspace('removed')
+      }),
+    'removed'
+  )
+  await Effect.runPromise(drain)
+  const removal = api.cleanupRemovedDesktopWorkspace({
+    accountId: 'account',
+    workspaceId: 'removed'
+  })
+  try {
+    await entered.promise
+    assert.equal(
+      (await api.withDesktopE2eeAccount((owner) => owner.host.status('sibling'), 'sibling')).epoch,
+      0
+    )
+    await assert.rejects(
+      api.withDesktopE2eeAccount(() => Effect.void, 'removed'),
+      /e2ee_member_removed/
+    )
+  } finally {
+    hold = false
+    release.resolve()
+    await removal
+  }
 })

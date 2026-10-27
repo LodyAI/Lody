@@ -6,18 +6,18 @@
 
 ## 阅读入口
 
-| 问题 | 负责位置 |
-| --- | --- |
-| 库的服务、协议与白皮书 | [Core 导读](../../packages/e2ee-core/README.md) |
-| 公开云端请求与响应 | [Cloud DTO](../../packages/cloud-api/src/e2ee-workspaces.ts) |
-| 宿主与云端组合、调用归属 | [平台接口](../../packages/platform/src/e2ee-workspaces.ts) |
-| 设备持久初始化 | [桌面初始化](../../apps/electron/src/main/services/e2ee-bootstrap.mts) |
-| 云端账号与创建回执校验 | [云端适配器](../../packages/components/src/providers/cloud-e2ee-workspaces.ts) |
-| 待确认请求与本地固定身份 | [渲染进程存储](../../packages/components/src/lib/e2ee-workspace-storage.ts) |
-| 签名验证与可读历史 | [账本读取器](../../packages/components/src/lib/e2ee-ledger-history.ts) |
-| 控制页面 | [工作区账本](../../packages/components/src/components/pages/e2ee-workspace-control-page.tsx) |
-| 运行时准入 | [Runtime provider](../../packages/components/src/providers/runtime-provider.tsx) |
-| 决策与验证范围 | [实施记录](../notes/implemented/feature/2026-10-17-e2ee-workspace-bootstrap.zh.md) |
+| 问题                     | 负责位置                                                                                     |
+| ------------------------ | -------------------------------------------------------------------------------------------- |
+| 库的服务、协议与白皮书   | [Core 导读](../../packages/e2ee-core/README.md)                                              |
+| 公开云端请求与响应       | [Cloud DTO](../../packages/cloud-api/src/e2ee-workspaces.ts)                                 |
+| 宿主与云端组合、调用归属 | [平台接口](../../packages/platform/src/e2ee-workspaces.ts)                                   |
+| 设备持久初始化           | [桌面初始化](../../apps/electron/src/main/services/e2ee-bootstrap.mts)                       |
+| 云端账号与创建回执校验   | [云端适配器](../../packages/components/src/providers/cloud-e2ee-workspaces.ts)               |
+| 待确认请求与本地固定身份 | [渲染进程存储](../../packages/components/src/lib/e2ee-workspace-storage.ts)                  |
+| 签名验证与可读历史       | [账本读取器](../../packages/components/src/lib/e2ee-ledger-history.ts)                       |
+| 控制页面                 | [工作区账本](../../packages/components/src/components/pages/e2ee-workspace-control-page.tsx) |
+| 运行时准入               | [Runtime provider](../../packages/components/src/providers/runtime-provider.tsx)             |
+| 决策与验证范围           | [实施记录](../notes/implemented/feature/2026-10-17-e2ee-workspace-bootstrap.zh.md)           |
 
 ## 创建过程的责任
 
@@ -88,8 +88,12 @@ E2EE 对普通用户保持不可见（[决定](../notes/implemented/feature/2026
 提供完整目录归档与按工作区独立保管。创建 owner 在服务端发布后整体移动，
 原字节重试跟随保留的请求回执。权限或钥匙串问题引导修复后重试；原件缺失或
 损坏提供显式重置和重新审批配对；系统保护永久丢失时可归档账号。渲染器的
- genesis 固定值、历史检查点和模式证据保留。不导入旧共享开发保管，账号归档
+genesis 固定值、历史检查点和模式证据保留。不导入旧共享开发保管，账号归档
 仍保留其证据。未发送数据保留但不自动重放，不撤销远端旧设备。个人身份仍
 要求系统保护。
 
 重置确认绑定账号与认证 generation，并在取得锁和原生 drain 后复核；SQLite 镜像损坏保留原件并显示恢复入口。冷身份读取仅打开对应工作区目录。本机历史或可信 pin 不可用时提供显式归档与重新审批；写入者关闭失败则要求重启 Lody，不提供重置控件。
+
+## 成员管理与本地终结清理
+
+原生成员管理通过独立持久提交日志签署普通 SetRole 和 capability 1 的 RemoveMember。角色调整仅 Owner 可用；Owner/Admin 移除保持 epoch，复用设置里的密钥更新入口，rotationRequired 不阻塞发送。仅设备凭据确认的整成员移除触发自动清理：核对原生账号/设备/凭据，保留终结标记，停止并等待该工作区运行结束，再由账号协调器取得独占身份租约后删除原生数据。Renderer 仅清理已停止的账号/工作区/窗口副本、游标、高水位和待发送输入。CLI 同样先停止执行并等待结束，保留用户项目目录。租约繁忙或清理中断在下次打开相关工作区时重试；普通网络错误和单设备撤销保留数据。见[决定与限制](../notes/proposed/architecture/2026-10-28-e2ee-member-controls-and-local-removal.zh.md)。

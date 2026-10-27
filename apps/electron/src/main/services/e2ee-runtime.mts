@@ -5,6 +5,11 @@ import {
   type DesktopE2eeManagementRemote
 } from './e2ee-management.mjs'
 import { makeDesktopKeyMaintenance } from './e2ee-key-maintenance.mjs'
+import {
+  makeDesktopMemberManager,
+  type MemberCommand,
+  type MemberRemote
+} from './e2ee-member-management.mjs'
 import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
 import { randomUUID } from 'node:crypto'
 import { makeDesktopPersonalPairing } from './e2ee-personal-pairing.mjs'
@@ -39,6 +44,7 @@ import {
   type RetainedLedgerState
 } from '@lody/e2ee-core/protocol'
 import {
+  DeviceIdentity,
   EpochPublicationSource,
   EpochStagingStore,
   KeyMailbox,
@@ -51,6 +57,7 @@ import {
   WorkspaceScope
 } from '@lody/e2ee-core/services'
 import {
+  sqliteSubmissionJournal,
   sqliteDeliveryOutbox,
   sqliteDistributionJournal,
   sqliteReceiveJournal,
@@ -83,6 +90,7 @@ export class DesktopE2eeRuntimeError extends Data.TaggedError('DesktopE2eeRuntim
     | 'management_operator_required'
     | 'management_retry'
     | 'invalid-ledger'
+    | 'member_removed'
     | 'missing-binding'
     | 'conflict'
 }> {}
@@ -194,6 +202,10 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         scope: Scope.Closeable
         pairing: ReturnType<typeof makeDesktopLocalPairing>
         personalPairing: ReturnType<typeof makeDesktopPersonalPairing>
+        manageMember: (
+          command: MemberCommand,
+          remote: (signal: AbortSignal) => MemberRemote
+        ) => Effect.Effect<'Committed' | 'Conflict', unknown>
         status: () => Effect.Effect<E2eeRuntimeStatus, unknown>
         ledgerView: () => Effect.Effect<E2eeRuntimeLedgerView, unknown>
         observe: (checkpoint: ObservedCheckpoint) => Effect.Effect<void, unknown>
@@ -225,6 +237,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         if (observed) yield* openedEntry.observe(observed)
         return openedEntry
       }
+      if (yield* options.bootstrap.hasRemovedWorkspace(workspaceId))
+        return yield* fail('member_removed')
       const creation = yield* options.bootstrap.creationFor(workspaceId)
       const genesis = yield* Effect.fromResult(Bytes.genesisHash(unhex(creation.genesisHash)))
       const invitation = creation.invitation
@@ -638,6 +652,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         }
         let closeFailed = false
         let closeDone: Deferred.Deferred<void, DesktopE2eeRuntimeError> | undefined
+        let memberManager: Effect.Success<ReturnType<typeof makeDesktopMemberManager>> | undefined
+        let memberManaging: Deferred.Deferred<void, unknown> | undefined
         const closeEntry = Effect.suspend(() => {
           if (closeDone) return Deferred.await(closeDone)
           closeDone = Deferred.makeUnsafe<void, DesktopE2eeRuntimeError>()
@@ -647,6 +663,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             Effect.gen(function* () {
               if (round) yield* Effect.exit(Deferred.await(round))
               if (managing) yield* Effect.exit(Deferred.await(managing))
+              if (memberManaging) yield* Effect.exit(Deferred.await(memberManaging))
               const result = yield* Effect.exit(Scope.close(scope, Exit.void))
               if (Exit.isFailure(result)) {
                 closeFailed = true
@@ -887,6 +904,11 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             position: state.bootstrap ? null : state.offset,
             epoch: publicState.epoch.number,
             rotationRequired: publicState.epoch.rotationRequired,
+            signingPublicKey: hex(device.publicKey.toBytes()),
+            membershipId: ownDevice ? hex(ownDevice.membershipId.toBytes()) : null,
+            memberRole: ownDevice
+              ? (publicState.members.get(hex(ownDevice.membershipId.toBytes()))?.role ?? null)
+              : null,
             deviceKind: ownDevice?.kind ?? null,
             hasCurrentKey: Result.isSuccess(checked),
             hasDeviceCredential: Result.isSuccess(
@@ -1069,6 +1091,26 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             }))
           }
         })
+        const refreshManagementHistory = (readHistory: DesktopE2eeManagementRemote['history']) =>
+          Effect.gen(function* () {
+            const after = (yield* status()).position ?? undefined
+            let cursor: string | undefined
+            let checkpoint: E2eeWorkspaceHistoryPage['checkpoint'] | undefined
+            for (let pageNumber = 0; pageNumber < 256; pageNumber++) {
+              if (closing) return yield* fail('closed')
+              const page = yield* readHistory({
+                workspaceId,
+                ...(cursor ? { cursor, checkpoint } : after ? { after } : {})
+              })
+              checkpoint ??= page.checkpoint
+              yield* serial.withPermit(
+                Effect.suspend(() => (closing ? Effect.fail(fail('closed')) : ingest(page)))
+              )
+              if (!page.nextCursor) return undefined
+              cursor = page.nextCursor
+            }
+            return yield* fail('invalid-ledger')
+          })
         const manage = Effect.fnUntraced(function* (
           command: { type: 'rotate' } | { type: 'revoke'; target: string },
           remote: (signal: AbortSignal) => DesktopE2eeManagementRemote
@@ -1098,27 +1140,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                         // Admitted work never re-enters the account lock. Local ingest
                         // failures retain this owner instead of awaiting its own close.
                         refresh: () =>
-                          Effect.gen(function* () {
-                            const after = (yield* status()).position ?? undefined
-                            let cursor: string | undefined
-                            let checkpoint: E2eeWorkspaceHistoryPage['checkpoint'] | undefined
-                            for (let pageNumber = 0; pageNumber < 256; pageNumber++) {
-                              if (closing) return yield* fail('closed')
-                              const page = yield* upstream.history({
-                                workspaceId,
-                                ...(cursor ? { cursor, checkpoint } : after ? { after } : {})
-                              })
-                              checkpoint ??= page.checkpoint
-                              yield* serial.withPermit(
-                                Effect.suspend(() =>
-                                  closing ? Effect.fail(fail('closed')) : ingest(page)
-                                )
-                              )
-                              if (!page.nextCursor) return undefined
-                              cursor = page.nextCursor
-                            }
-                            return yield* fail('invalid-ledger')
-                          }),
+                          refreshManagementHistory((request) => upstream.history(request)),
                         receive: () =>
                           Effect.gen(function* () {
                             const latest = (yield* verified.current()).inspectState().epoch.number
@@ -1145,10 +1167,59 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           )
           return yield* result
         })
+        const manageMember = Effect.fnUntraced(function* (
+          command: MemberCommand,
+          remote: (signal: AbortSignal) => MemberRemote
+        ) {
+          if (closing) return yield* fail('closed')
+          if (memberManaging) return yield* Effect.fail(new Error('e2ee_member_management_pending'))
+          const done = Deferred.makeUnsafe<void, unknown>()
+          memberManaging = done
+          const result = yield* Effect.exit(
+            Effect.uninterruptible(
+              Effect.gen(function* () {
+                if (!memberManager) {
+                  const journalContext = yield* Layer.buildWithScope(
+                    sqliteSubmissionJournal({
+                      path: join(
+                        directory,
+                        `member-submission-${hex(device.publicKey.toBytes())}.sqlite`
+                      )
+                    }).pipe(Layer.provideMerge(base)),
+                    scope
+                  )
+                  memberManager = yield* makeDesktopMemberManager({
+                    identity: Context.get(storeContext, DeviceIdentity),
+                    genesis,
+                    journal: Context.get(journalContext, SubmissionJournal),
+                    verified,
+                    current: () => feed.current(),
+                    ports: (() => {
+                      const upstream = remote(networkAbort.signal)
+                      return {
+                        ...upstream,
+                        refresh: () =>
+                          refreshManagementHistory((request) => upstream.history(request))
+                      }
+                    })()
+                  }).pipe(Scope.provide(scope))
+                }
+                return yield* memberManager(command)
+              })
+            )
+          )
+          memberManaging = undefined
+          yield* Deferred.done(
+            done,
+            Exit.isSuccess(result) ? Exit.succeed(undefined) : Exit.failCause(result.cause)
+          )
+          return yield* result
+        })
         return {
           manage,
           managementState,
           scope,
+          manageMember,
           pairing,
           personalPairing,
           status,
@@ -1269,6 +1340,22 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                   : 'management_retry'
             )
           })
+        ),
+      manageMember: (
+        workspaceId: string,
+        command: MemberCommand,
+        remote: (signal: AbortSignal) => MemberRemote
+      ) =>
+        Effect.flatMap(
+          run(
+            Effect.suspend(() => {
+              const entry = entries.get(workspaceId)
+              return entry && !entry.isClosing()
+                ? Effect.succeed(entry)
+                : Effect.fail(fail('closed'))
+            })
+          ),
+          (entry) => entry.manageMember(command, remote)
         ),
       personalPairingOffer: (workspaceId: string) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.personalPairing.offer())),

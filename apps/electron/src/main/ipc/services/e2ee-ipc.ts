@@ -1,3 +1,4 @@
+import { E2eeMemberRemovedError } from '../../services/e2ee-cloud-client.mjs'
 import { Effect } from 'effect'
 import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
 import type { E2eeWorkspaceRuntime } from '@lody/platform'
@@ -13,7 +14,8 @@ import {
   prepareDesktopE2eeCreation,
   desktopE2eeCloudClient,
   runDesktopE2eeOperation,
-  withDesktopE2eeAccount
+  withDesktopE2eeAccount,
+  cleanupRemovedDesktopWorkspace
 } from '../../services/e2ee-account-runtime'
 import { assertProductWindowSender } from '../assert-sender'
 import { getIpcServiceDeps } from '../ipc-service-deps'
@@ -519,6 +521,9 @@ export class E2eeIpc extends IpcService {
   }
   @IpcMethod()
   async refresh(workspaceId: string, options?: { installKeys?: boolean }) {
+    return this.refreshLedger(workspaceId, options)
+  }
+  private async refreshLedger(workspaceId: string, options?: { installKeys?: boolean }) {
     if (
       options !== undefined &&
       (typeof options !== 'object' ||
@@ -552,7 +557,18 @@ export class E2eeIpc extends IpcService {
           workspaceId,
           ...(cursor ? { cursor, checkpoint } : after ? { after } : {})
         })
-      )
+      ).catch(async (error) => {
+        try {
+          await Effect.runPromise(
+            cloud.client.contentStreamsToken({ workspaceId, credential: access.credential })
+          )
+        } catch (checked) {
+          if (checked instanceof E2eeMemberRemovedError) {
+            return this.removeLocalWorkspace(access)
+          }
+        }
+        throw error
+      })
       checkpoint ??= page.checkpoint
       const ingest = await withDesktopE2eeAccount(
         (owner) =>
@@ -749,6 +765,108 @@ export class E2eeIpc extends IpcService {
       return { admitted: true as const, ready: false }
     }
   }
+  private async removeLocalWorkspace(access: {
+    accountId: string
+    credential: string
+    status: import('@lody/platform').E2eeRuntimeStatus
+  }): Promise<never> {
+    const { workspaceId, genesisHash, signingPublicKey } = access.status
+    if (!signingPublicKey) throw new Error('e2ee_local_cleanup_pending')
+    const drain = await withDesktopE2eeAccount(
+      (owner) =>
+        Effect.gen(function* () {
+          if (owner.accountId !== access.accountId)
+            return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+          const current = yield* owner.host.status(workspaceId)
+          const credential = yield* owner.bootstrap.deviceCredential(workspaceId)
+          if (
+            current.genesisHash !== genesisHash ||
+            current.signingPublicKey !== signingPublicKey ||
+            credential !== access.credential
+          )
+            return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+          if (
+            !(yield* owner.bootstrap.recordRemovedWorkspace({
+              workspaceId,
+              genesisHash,
+              signingPublicKey,
+              credential: access.credential
+            }))
+          )
+            return yield* Effect.fail(new Error('e2ee_account_mismatch'))
+          return yield* owner.host.beginCloseWorkspace(workspaceId)
+        }),
+      workspaceId,
+      false
+    )
+    await Effect.runPromise(drain)
+    const deleted = await cleanupRemovedDesktopWorkspace({
+      accountId: access.accountId,
+      workspaceId
+    }).catch((cause) => {
+      this.pairingFailure = cause
+      if (getIpcServiceDeps().authService.getCachedSessionIdentity().userId !== access.accountId)
+        throw new Error('e2ee_account_mismatch')
+      // Receipt survives a busy process lease or interrupted cleanup; the next open retries it.
+      return true
+    })
+    if (deleted) throw new Error('e2ee_member_removed')
+    // A newer local incarnation superseded the old credential's late response.
+    throw new Error('e2ee_account_mismatch')
+  }
+  private async manageMember(
+    workspaceId: string,
+    command: import('../../services/e2ee-member-management.mjs').MemberCommand
+  ) {
+    const id = sender()
+    if (
+      !/^[0-9a-f]{32}$/.test(command.membershipId) ||
+      (command.type === 'setMemberRole' && command.role !== 'admin' && command.role !== 'member')
+    )
+      throw new Error('e2ee_invalid-input')
+    const cloud = await desktopE2eeCloudClient()
+    const access = await withDesktopE2eeAccount(
+      (owner) =>
+        Effect.gen(function* () {
+          if (owner.accountId !== cloud.accountId || !owner.readers.get(workspaceId)?.has(id))
+            return yield* Effect.fail(new Error('e2ee_not_open'))
+          return {
+            accountId: owner.accountId,
+            credential: yield* owner.bootstrap.deviceCredential(workspaceId),
+            status: yield* owner.host.status(workspaceId),
+            work: owner.host.manageMember(workspaceId, command, (signal) => ({
+              log: cloud.client.ledgerLog(workspaceId, signal),
+              history: (request) => cloud.client.history(request, signal)
+            }))
+          }
+        }),
+      workspaceId,
+      false
+    )
+    const result = await runDesktopE2eeOperation(cloud.accountId, access.work).catch(
+      async (error) => {
+        // The admitted native owner has settled; only now may a credential diagnosis
+        // re-enter the account coordinator and schedule terminal cleanup.
+        try {
+          await Effect.runPromise(
+            cloud.client.contentStreamsToken({ workspaceId, credential: access.credential })
+          )
+        } catch (checked) {
+          if (checked instanceof E2eeMemberRemovedError) return this.removeLocalWorkspace(access)
+        }
+        throw error
+      }
+    )
+    if (result === 'Conflict') throw new Error('e2ee_member_management_conflict')
+  }
+  @IpcMethod()
+  async removeMember(workspaceId: string, membershipId: string) {
+    await this.manageMember(workspaceId, { type: 'removeMember', membershipId })
+  }
+  @IpcMethod()
+  async setMemberRole(workspaceId: string, membershipId: string, role: 'admin' | 'member') {
+    await this.manageMember(workspaceId, { type: 'setMemberRole', membershipId, role })
+  }
   @IpcMethod()
   async contentStreamsToken(
     workspaceId: string,
@@ -759,10 +877,13 @@ export class E2eeIpc extends IpcService {
     const access = await withDesktopE2eeAccount(
       (owner) =>
         owner.readers.get(workspaceId)?.has(id)
-          ? Effect.map(owner.bootstrap.deviceCredential(workspaceId), (credential) => ({
-              accountId: owner.accountId,
-              credential
-            }))
+          ? Effect.gen(function* () {
+              return {
+                accountId: owner.accountId,
+                credential: yield* owner.bootstrap.deviceCredential(workspaceId),
+                status: yield* owner.host.status(workspaceId)
+              }
+            })
           : Effect.fail(new Error('e2ee_not_open')),
       workspaceId,
       false
@@ -776,7 +897,10 @@ export class E2eeIpc extends IpcService {
         ...(rejectedToken ? { rejectedToken } : {}),
         ...(requestSnapshotFor ? { requestSnapshotFor } : {})
       })
-    )
+    ).catch((error) => {
+      if (error instanceof E2eeMemberRemovedError) return this.removeLocalWorkspace(access)
+      throw error
+    })
     if (getIpcServiceDeps().authService.getCachedSessionIdentity().userId !== access.accountId)
       throw new Error('e2ee_account_mismatch')
     return result
@@ -872,9 +996,11 @@ export class E2eeIpc extends IpcService {
   @IpcMethod()
   async open(workspaceId: string, observed?: Parameters<E2eeWorkspaceRuntime['open']>[1]) {
     const id = sender()
+    let accountId: string | undefined
     return withDesktopE2eeAccount(
       (owner) =>
         Effect.gen(function* () {
+          accountId = owner.accountId
           const status = yield* owner.host.open(workspaceId, observed)
           const readers = owner.readers.get(workspaceId) ?? new Map<number, number>()
           readers.set(id, (readers.get(id) ?? 0) + 1)
@@ -883,7 +1009,16 @@ export class E2eeIpc extends IpcService {
         }),
       workspaceId,
       false
-    )
+    ).catch(async (error) => {
+      if (!(error instanceof Error) || error.message !== 'e2ee_member_removed' || !accountId)
+        throw error
+      await cleanupRemovedDesktopWorkspace({ accountId, workspaceId }).catch((cause) => {
+        this.pairingFailure = cause
+        if (getIpcServiceDeps().authService.getCachedSessionIdentity().userId !== accountId)
+          throw new Error('e2ee_account_mismatch')
+      })
+      throw error
+    })
   }
   @IpcMethod()
   async close(workspaceId: string) {

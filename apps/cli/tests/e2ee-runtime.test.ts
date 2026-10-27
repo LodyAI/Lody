@@ -1,3 +1,4 @@
+import { CloudE2eeMemberRemoved } from '../src/lib/cloud-e2ee-errors';
 import { randomUUID } from 'node:crypto';
 import { resetCliE2eeIdentity } from '../src/lib/e2ee/reset-identity';
 import { leaseE2eeIdentity } from '@lody/shared/node/e2ee-identity';
@@ -7,7 +8,15 @@ import { mkdtemp, rm, readdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
-import { Context, Effect, Fiber, Layer, Result } from 'effect';
+import {
+  Context,
+  Effect,
+  Fiber,
+  Layer,
+  Result,
+  Scope as TokenScope,
+  Exit as TokenExit,
+} from 'effect';
 import { LoroDoc } from 'loro-crdt';
 import {
   StreamsCrdt,
@@ -3489,3 +3498,172 @@ describe('machine E2EE local runtime', () => {
     }
   });
 });
+
+it.each(['history', 'renewal', 'snapshot'] as const)(
+  'member removal drains the machine owner before erasing managed data and requires a fresh member (%s)',
+  async (source) => {
+    const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-member-removal-'));
+    vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
+    const accountId = 'removed-account';
+    const root = join(
+      getLodyDataDir(),
+      'e2ee',
+      createHash('sha256').update(accountId).digest('hex'),
+      'workspace'
+    );
+    let host: Awaited<ReturnType<typeof openCliE2eeWorkspaceLegacy>> | undefined;
+    const ownerEntered = Promise.withResolvers<void>();
+    const tokenScope = await Effect.runPromise(TokenScope.make());
+    const ownerReleased = Promise.withResolvers<void>();
+    try {
+      const fixture = await execute(setup(directory, 2, join(root, 'custody')));
+      const binding = {
+        workspaceId: 'workspace',
+        genesisHash: hex(fixture.genesis.toBytes()),
+        genesisRecordHex: hex(fixture.genesisRecord),
+      };
+      await retainCliE2eeWorkspaceBinding(accountId, binding);
+      const key = await execute(
+        Effect.gen(function* () {
+          const custody = yield* makeCliE2eeCustody({
+            directory: join(root, 'custody'),
+            keyring: noKeyring,
+          });
+          return hex((yield* custody.openDevice(fixture.genesis)).publicKey.toBytes());
+        })
+      );
+      await fs.writeFile(
+        join(root, 'activation.json'),
+        JSON.stringify({ genesisHash: binding.genesisHash, signingPublicKey: key })
+      );
+      const repo = join(getLodyDataDir(), 'loro-repo', 'workspace');
+      const project = join(directory, 'user-project');
+      await fs.mkdir(repo, { recursive: true });
+      await fs.mkdir(project);
+      await fs.writeFile(join(repo, 'repo.sqlite3'), 'synthetic local content');
+      await fs.writeFile(join(project, 'keep.txt'), 'user source');
+      let denied = false;
+      let rejection = 'e2ee_device_revoked';
+      let tokenRemoved = false;
+      const cloud = {
+        createContentTokenProvider: () =>
+          Effect.gen(function* () {
+            const ports = makeLoroStreamsTokenWebPorts({
+              credential: Effect.succeed('synthetic-credential'),
+              fetchImpl: async () => {
+                if (tokenRemoved) throw new CloudE2eeMemberRemoved();
+                return Response.json({
+                  token: 'synthetic-token',
+                  expiresIn: 900,
+                  expiresAt: 1_000_000,
+                  gatewayBaseUrl: 'https://synthetic.invalid',
+                });
+              },
+            });
+            const provider = yield* makeLoroStreamsTokenProvider({
+              endpoint: 'https://synthetic.invalid',
+              workspaceId: 'workspace',
+            }).pipe(
+              Effect.provideService(LoroStreamsTokenPorts, {
+                ...ports,
+                now: Effect.succeed(100_000),
+              })
+            );
+            return { ...provider, getBucketId: () => 'synthetic-bucket' };
+          }),
+        getHistory: async () => {
+          if (denied) throw new Error('unauthorized');
+          return page(fixture.records);
+        },
+        getContentToken: async () => {
+          if (rejection === 'e2ee_member_removed') throw new CloudE2eeMemberRemoved();
+          throw new Error(rejection);
+        },
+        mailboxCall: async (method: string) => {
+          if (method === 'fetch') return { items: [], next: null };
+          throw new Error('unavailable');
+        },
+      } as unknown as CloudE2eePort;
+      const options = {
+        accountId,
+        ...binding,
+        cloud,
+        keyring: noKeyring,
+        onUnavailable: () => {},
+        onRemoved: async () => {
+          ownerEntered.resolve();
+          await ownerReleased.promise;
+        },
+      };
+      host = await openCliE2eeWorkspaceLegacy(options);
+      await host.refresh();
+      denied = true;
+      await host.refresh();
+      // A single-device revoke or network error preserves all local originals.
+      expect(await fs.readFile(join(repo, 'repo.sqlite3'), 'utf8')).toContain('synthetic');
+      expect(await host.status()).toMatchObject({ devicePublicKey: key });
+      rejection = 'e2ee_member_removed';
+      if (source === 'history') await host.refresh();
+      else if (source === 'renewal') {
+        denied = false;
+        const provider = await Effect.runPromise(
+          host.tokens.createTokenProvider().pipe(TokenScope.provide(tokenScope))
+        );
+        expect(await Effect.runPromise(provider.getToken())).toBe('synthetic-token');
+        tokenRemoved = true;
+        await Effect.runPromise(provider.invalidate('unauthorized'));
+        expect(Result.isFailure(await Effect.runPromise(Effect.result(provider.getToken())))).toBe(
+          true
+        );
+      } else {
+        denied = false;
+        host.content.snapshotUpload?.onSnapshotRecovery?.(
+          'https://synthetic.invalid/stream/synthetic-document',
+          true
+        );
+        await ownerEntered.promise;
+      }
+      await expect(host.status()).rejects.toThrow('e2ee_member_removed');
+      await ownerEntered.promise;
+      await Effect.runPromise(TokenScope.close(tokenScope, TokenExit.void));
+      expect(await fs.readFile(join(repo, 'repo.sqlite3'), 'utf8')).toContain('synthetic');
+      ownerReleased.resolve();
+      await host.removalCleanup();
+      await expect(fs.readFile(join(repo, 'repo.sqlite3'))).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+      await expect(
+        fs.readFile(join(root, 'custody', binding.genesisHash + '.machine.device'))
+      ).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await fs.readFile(join(project, 'keep.txt'), 'utf8')).toBe('user source');
+      await expect(openCliE2eeWorkspaceLegacy(options)).rejects.toThrow('e2ee_member_removed');
+      const tombstone = JSON.parse(await fs.readFile(join(root, 'removed.json'), 'utf8')) as {
+        membershipId: string;
+      };
+      await expect(
+        prepareCliE2eeMachineLegacy({
+          ...options,
+          machineId: 'synthetic-machine',
+          frontendSigningPublicKey: fixture.sender,
+          membershipId: tombstone.membershipId,
+          pairingSessionId: 'fe'.repeat(16),
+        })
+      ).rejects.toThrow('e2ee_member_removed');
+      const next = await prepareCliE2eeMachineLegacy({
+        ...options,
+        machineId: 'synthetic-machine',
+        frontendSigningPublicKey: fixture.sender,
+        membershipId: 'ef'.repeat(16),
+        pairingSessionId: 'ef'.repeat(16),
+      });
+      expect(next).not.toHaveProperty('superseded');
+      expect('signingPublicKey' in next && next.signingPublicKey).not.toBe(key);
+    } finally {
+      ownerReleased.resolve();
+      await Effect.runPromise(TokenScope.close(tokenScope, TokenExit.void));
+      await host?.close();
+      vi.unstubAllEnvs();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+);

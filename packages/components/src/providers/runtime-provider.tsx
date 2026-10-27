@@ -1,5 +1,11 @@
 import { subscribeE2eeLedgerChanges } from './e2ee-runtime-notifications';
 import { useTranslation } from 'react-i18next';
+import { desktopWindowId } from '@/lib/desktop-window';
+import {
+  isE2eeMemberRemoved,
+  retainEncryptedWorkspaceCleanup,
+  resumeEncryptedWorkspaceCleanup,
+} from '@/lib/e2ee-member-removal';
 import { createDesktopE2eeContent } from './desktop-e2ee-content';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { SessionPendingSendsHost } from '../components/chat/session-pending-sends-host';
@@ -553,6 +559,24 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     let disposed = false;
     // Set when background verification closes a provisionally opened runtime.
     let retired = false;
+    let removed = false;
+    const removalScope = {
+      accountId: accountId!,
+      workspaceId: effectiveWorkspaceId,
+      windowId: desktopWindowId(),
+    };
+    const handleMemberRemoval = () => {
+      if (disposed || retired) return;
+      removed = true;
+      try {
+        retainEncryptedWorkspaceCleanup(removalScope);
+      } catch (error) {
+        logRuntimeOperationError('retain removal cleanup', error);
+      }
+      retire();
+      setRuntimeInitFailure({ workspaceSlug, errorType: 'e2ee_member_removed' });
+    };
+
     const initializationAbort = new AbortController();
     let workspaceRuntime: Awaited<ReturnType<typeof createWorkspaceRuntime>> | null = null;
     let disposal: Promise<void> | null = null;
@@ -588,8 +612,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       const pending = native
         .refresh(leased, { installKeys: !nativeHasKey && workspaceRuntime === null })
         .then(acceptStatus)
-        .catch(async () => {
+        .catch(async (error: unknown) => {
           if (disposed || retired) return;
+          if (isE2eeMemberRemoved(error)) {
+            handleMemberRemoval();
+            return;
+          }
           // Reception failure stays visible and retryable. The retained epoch
           // remains writable; a status read never confirms key installation.
           try {
@@ -634,6 +662,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             await platform.e2eeWorkspaces?.runtime?.close(leased).catch(() => {});
           }
         }
+        if (removed)
+          void resumeEncryptedWorkspaceCleanup(removalScope, true).catch((error) => {
+            logRuntimeOperationError('removed workspace cleanup', error);
+          });
       })());
     // Logging-only workspace id resolution inputs intentionally stay out of
     // this effect's dependency list. A cached id can create the runtime before
@@ -730,6 +762,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       let admitting = false;
       try {
         await previousShutdown.current;
+        await resumeEncryptedWorkspaceCleanup(removalScope);
         if (disposed) return;
         if (modeCloud && requiresAdmission) {
           // Neither a cached organization nor a developer preference authorizes
@@ -777,6 +810,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               epoch: status.writeEpoch ?? status.epoch,
               rotationRequired: status.rotationRequired,
               onKeyUpdateRequired: () => setKeyUpdateWorkspace(effectiveWorkspaceId),
+              onMemberRemoved: handleMemberRemoval,
               onSnapshotRecoveryChange: (pending) => {
                 if (!disposed && !retired)
                   setSnapshotRecoveryWorkspace(pending ? effectiveWorkspaceId : null);
@@ -892,6 +926,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           return;
         }
         setRuntime(null);
+        if (isE2eeMemberRemoved(error)) {
+          handleMemberRemoval();
+          return;
+        }
         if (admitting) {
           // Only a failed admission withdraws the mode; an ordinary runtime
           // failure keeps the pre-E2EE workspace failure presentation.

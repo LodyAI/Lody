@@ -89,6 +89,14 @@ export function WorkspaceAdmissionGate({
       if (currentScope.current === recoveryScope) currentScope.current = null;
     };
   }, [recoveryScope]);
+  if (failure?.workspaceSlug === workspaceName && failure.errorType === 'e2ee_member_removed')
+    return (
+      <RouteMessage
+        gate={null}
+        title={t('e2ee.members.removedTitle')}
+        description={t('e2ee.members.removed')}
+      />
+    );
   if (!platform.e2eeWorkspaces) return children;
   if (!mode || mode.workspaceSlug !== workspaceName || mode.accountId !== accountId) {
     if (failure?.workspaceSlug !== workspaceName) {

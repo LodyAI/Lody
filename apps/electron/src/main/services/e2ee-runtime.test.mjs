@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
-import { Context, Effect, Layer, Result, Scope, Exit } from 'effect'
+import { Context, Effect, Layer, Result, Scope, Exit, Deferred, Fiber } from 'effect'
 import {
   KeyMailbox,
   WorkspaceScope,
@@ -24,6 +24,7 @@ import {
 import {
   Bytes,
   encodeCbor,
+  decodeRecord,
   prepareLedgerRecord,
   commitEpochKey,
   sealHistoryPacket,
@@ -2986,3 +2987,190 @@ for (const senderHint of ['registered', 'unknown']) {
     })
   }
 }
+void test('member controls use ordinary durable records and keep the old epoch available', async (t) => {
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory)
+      const prepared = yield* bind(owner)
+      const records = yield* makeRecords(owner.custody, prepared, 2)
+      yield* owner.host.open(workspaceId)
+      yield* owner.host.ingestLedgerRecords(workspaceId, page(records, prepared.genesisHashHex, 0))
+      const remote = () => ({
+        log: {
+          read: () =>
+            Effect.sync(() => ({
+              records: records.map((x) => new Uint8Array(x)),
+              checkpoint: { head: hashRecordBytes(records.at(-1)), length: records.length }
+            })),
+          appendCas: (_genesis, point, original) =>
+            Effect.sync(() => {
+              assert.equal(
+                hex(point.head.toBytes()),
+                hex(hashRecordBytes(records.at(-1)).toBytes())
+              )
+              records.push(new Uint8Array(original))
+            })
+        },
+        history: () => Effect.succeed(page(records, prepared.genesisHashHex, 0))
+      })
+      const membershipId = '11'.repeat(16)
+      assert.equal(
+        yield* owner.host.manageMember(
+          workspaceId,
+          { type: 'setMemberRole', membershipId, role: 'admin' },
+          remote
+        ),
+        'Committed'
+      )
+      assert.equal((yield* owner.host.status(workspaceId)).epoch, 0)
+      assert.equal(
+        yield* owner.host.manageMember(
+          workspaceId,
+          { type: 'setMemberRole', membershipId, role: 'member' },
+          remote
+        ),
+        'Committed'
+      )
+      assert.equal(
+        yield* owner.host.manageMember(workspaceId, { type: 'removeMember', membershipId }, remote),
+        'Committed'
+      )
+      const status = yield* owner.host.status(workspaceId)
+      assert.equal(status.epoch, 0)
+      assert.equal(status.rotationRequired, true)
+      assert.equal(status.hasCurrentKey, true)
+      assert.equal(status.memberRole, 'owner')
+      const management = yield* owner.host.managementState(workspaceId)
+      assert.equal(management.rotationRequired, true)
+      assert.equal(management.mayRotate, true)
+      assert.equal(management.updatePending, false)
+      const count = records.length
+      assert.equal(
+        yield* owner.host.manageMember(workspaceId, { type: 'removeMember', membershipId }, remote),
+        'Committed'
+      )
+      assert.equal(records.length, count)
+      assert.deepEqual(
+        records
+          .slice(-2)
+          .map((record) => Result.getOrThrow(decodeRecord(record)).body.operation.type),
+        ['declareCapabilities', 'removeMember']
+      )
+    })
+  )
+})
+
+void test('member removal reopens its uncertain original and never signs a replacement', async (t) => {
+  const directory = await fixture(t)
+  let records,
+    prepared,
+    uncertain,
+    blocked = false
+  const membershipId = '11'.repeat(16)
+  const remote = () => ({
+    log: {
+      read: () =>
+        blocked
+          ? Effect.fail(new Error('synthetic readback unavailable'))
+          : Effect.succeed({
+              records: records.map((x) => new Uint8Array(x)),
+              checkpoint: { head: hashRecordBytes(records.at(-1)), length: records.length }
+            }),
+      appendCas: (_genesis, _point, original) =>
+        Effect.suspend(() => {
+          records.push(new Uint8Array(original))
+          if (Result.getOrThrow(decodeRecord(original)).body.operation.type === 'removeMember') {
+            uncertain = new Uint8Array(original)
+            blocked = true
+            return Effect.fail(new Error('synthetic lost ACK'))
+          }
+          return Effect.void
+        })
+    },
+    history: () =>
+      blocked
+        ? Effect.fail(new Error('synthetic history unavailable'))
+        : Effect.succeed(page(records, prepared.genesisHashHex, 0))
+  })
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory)
+      prepared = yield* bind(owner)
+      records = yield* makeRecords(owner.custody, prepared, 2)
+      yield* owner.host.open(workspaceId)
+      yield* owner.host.ingestLedgerRecords(workspaceId, page(records, prepared.genesisHashHex, 0))
+      assert.equal(
+        (yield* Effect.result(
+          owner.host.manageMember(workspaceId, { type: 'removeMember', membershipId }, remote)
+        ))._tag,
+        'Failure'
+      )
+    })
+  )
+  const count = records.length
+  blocked = false
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory)
+      yield* owner.host.open(workspaceId)
+      assert.equal(
+        yield* owner.host.manageMember(workspaceId, { type: 'removeMember', membershipId }, remote),
+        'Committed'
+      )
+      assert.equal(records.length, count)
+      assert.deepEqual(records.at(-1), uncertain)
+      assert.equal((yield* owner.host.status(workspaceId)).epoch, 0)
+      assert.equal((yield* owner.host.status(workspaceId)).rotationRequired, true)
+    })
+  )
+})
+
+void test('member operation history releases on workspace close without reentering the account coordinator', async (t) => {
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory),
+        prepared = yield* bind(owner)
+      const records = yield* makeRecords(owner.custody, prepared, 2)
+      yield* owner.host.open(workspaceId)
+      yield* owner.host.ingestLedgerRecords(workspaceId, page(records, prepared.genesisHashHex, 0))
+      const entered = Deferred.makeUnsafe(),
+        release = Deferred.makeUnsafe(),
+        stopped = Deferred.makeUnsafe()
+      const work = yield* Effect.forkChild(
+        owner.host.manageMember(
+          workspaceId,
+          { type: 'removeMember', membershipId: '11'.repeat(16) },
+          (signal) => {
+            signal.addEventListener('abort', () => Deferred.doneUnsafe(stopped, Effect.void), {
+              once: true
+            })
+            return {
+              log: {
+                read: () => Effect.die('not reached'),
+                appendCas: () => Effect.die('not reached')
+              },
+              history: () =>
+                Effect.gen(function* () {
+                  yield* Deferred.succeed(entered, undefined)
+                  yield* Deferred.await(release)
+                  return page(records, prepared.genesisHashHex, 0)
+                })
+            }
+          }
+        )
+      )
+      yield* Deferred.await(entered)
+      const close = yield* Effect.forkChild(owner.host.closeWorkspace(workspaceId))
+      yield* Deferred.await(stopped)
+      yield* Deferred.succeed(release, undefined)
+      assert.equal(Exit.isFailure(yield* Fiber.await(work)), true)
+      yield* Fiber.join(close)
+      const reopened = yield* owner.host.open(workspaceId)
+      assert.equal(reopened.epoch, 0)
+      assert.equal(reopened.rotationRequired, false)
+      assert.equal(records.length, 2)
+    })
+  )
+})

@@ -1,3 +1,4 @@
+import { CloudE2eeMemberRemoved } from './cloud-e2ee-errors';
 import { Effect } from 'effect';
 import { SessionAttachmentTransfer } from './session-attachment-transfer';
 import { getCliPlatformKind } from './cli-platform';
@@ -198,13 +199,21 @@ export function createCloudE2eePort(
   const getContentToken = async (
     input: Parameters<CloudE2eePort['getContentToken']>[0],
     signal: AbortSignal
-  ) =>
-    tokenSchema.parse(
-      await client(signal).action(api.e2eeContent.contentStreamsToken, {
-        ...input,
-        cliToken: options.token,
-      })
-    );
+  ) => {
+    try {
+      return tokenSchema.parse(
+        await client(signal).action(api.e2eeContent.contentStreamsToken, {
+          ...input,
+          cliToken: options.token,
+        })
+      );
+    } catch (cause) {
+      const rejected = z.object({ data: z.object({ code: z.string() }) }).safeParse(cause);
+      if (rejected.success && rejected.data.data.code === 'e2ee_member_removed')
+        throw new CloudE2eeMemberRemoved();
+      throw cause;
+    }
+  };
   return {
     getHistory: async (input) =>
       e2eeHistoryPageSchema.parse(

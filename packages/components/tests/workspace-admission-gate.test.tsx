@@ -76,6 +76,15 @@ describe('WorkspaceAdmissionGate', () => {
     container.remove();
   });
 
+  it('explains terminal member removal and requires a new invitation', async () => {
+    fail({ errorType: 'e2ee_member_removed' });
+    await render();
+    expect(text()).toContain('Workspace access removed');
+    expect(text()).toContain('Rejoining requires a new invitation');
+    expect(text()).not.toContain('workspace content');
+    expect(container.querySelector('button')).toBeNull();
+  });
+
   it('renders an ordinary workspace under a provisional verdict without mentioning encryption', async () => {
     store.set(workspaceContentModeAtom, {
       accountId: 'account',

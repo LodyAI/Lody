@@ -1,4 +1,3 @@
-import { Bytes, decodeRecord, hashRecordBytes } from '@lody/e2ee-core/protocol'
 import { ConvexHttpClient } from 'convex/browser'
 import { api } from '@lody/cloud-api'
 import type {
@@ -21,6 +20,7 @@ import {
   ownEpochStagedGroup,
   ownEpochStagedGroupKey
 } from '@lody/e2ee-core/host'
+import { Bytes, decodeRecord, hashRecordBytes } from '@lody/e2ee-core/protocol'
 import { Effect, Result } from 'effect'
 import { z } from 'zod'
 
@@ -104,6 +104,13 @@ export class E2eeCloudDiagnosticError extends BackendError {
     super({ service: 'E2eeCloud', reason: 'unavailable' })
   }
 }
+
+/** Only the authenticated device endpoint can classify a removed member. */
+export class E2eeMemberRemovedError extends BackendError {
+  constructor() {
+    super({ service: 'E2eeCloud', reason: 'unauthorized' })
+  }
+}
 function requestFailure(error: unknown): BackendError {
   if (error instanceof BackendError) return error
   // Never retain the SDK's raw error, server logs, request body, or token.
@@ -122,6 +129,7 @@ function requestFailure(error: unknown): BackendError {
   const result = z.object({ data: z.object({ code: z.string() }) }).safeParse(error)
   const code = result.success ? result.data.data.code : ''
   if (operatorCodes.has(code)) return new E2eeCloudDiagnosticError(code)
+  if (code === 'e2ee_member_removed') return new E2eeMemberRemovedError()
   const reason =
     code === 'e2ee_staging_invalid' || code === 'e2ee_staging_corrupt'
       ? 'invalid-response'

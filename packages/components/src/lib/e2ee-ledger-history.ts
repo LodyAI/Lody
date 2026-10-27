@@ -218,6 +218,8 @@ export function ledgerRecordFields(
         epoch: op.epoch,
         commitment: bytesToHex(op.commitment.toBytes()),
       };
+    case 'removeMember':
+      return { ...base, membershipId: bytesToHex(op.membershipId.toBytes()) };
     case 'declareCapabilities':
       return { ...base, capabilities: op.capabilities.join(', ') };
   }
