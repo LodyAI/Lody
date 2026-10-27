@@ -61,9 +61,12 @@ import { useCloudMutation, useCloudQuery, usePlatform } from '@lody/platform/rea
 import { usePostHog } from '@posthog/react';
 import {
   ArrowUp,
+  FolderKanban,
   FolderOpen,
   Github as GithubIcon,
+  ChevronsUpDown,
   LockKeyhole,
+  MessageCircle,
   Monitor,
   PanelLeft,
   RefreshCw,
@@ -274,7 +277,7 @@ import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
 import { buildHomeWeekUsage, type HomeWeekUsageOption } from '@/lib/home-week-usage';
 import { createMachinePairing } from '@/lib/cli-api-key';
-import { ContextSwitch, type SessionContextType } from './context-switch';
+import type { SessionContextType } from './context-switch';
 import {
   UNIFIED_PROJECT_OPTION_RENDER_LIMIT,
   UnifiedProjectSelectorView,
@@ -338,6 +341,9 @@ import {
   MobileNewChatSheet,
   type MobileNewChatSheetContentProps,
 } from '@/components/mobile/mobile-new-chat-sheet';
+import { MobileFooterRail } from '@/components/mobile/mobile-footer-rail';
+import { MobileNewChatProjectSheet } from '@/components/mobile/mobile-new-chat-project-sheet';
+import { resolveMobileNewChatTargetLabel } from '@/components/mobile/mobile-new-chat-target';
 import { MobileWorkspaceSwitcherSheet } from '@/components/mobile/mobile-workspace-switcher-sheet';
 import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspace-mark';
 import { MobileCreateWorkspaceSheet } from '@/components/mobile/mobile-create-workspace-sheet';
@@ -355,15 +361,12 @@ import {
 } from '@/lib/local-project-rpc-file-provider';
 import { GitHubRepoFileProvider } from '@/lib/github-repo-file-provider';
 import type { FileWorkspaceProvider } from '@/lib/file-workspace-provider';
-import { Tabs } from '@lody/ui/tabs';
-import { Folder as FolderIcon, GitBranch as GitBranchIcon } from 'lucide-react';
+import { GitBranch as GitBranchIcon } from 'lucide-react';
 import { AddLocalProjectDialogContainer } from '@/components/local-projects/add-local-project-dialog-container';
 import {
-  MobileInlinePicker,
-  MobileInlinePickerCoordinator,
-  MobileInlinePickerRowSlot,
-  type MobileInlinePickerOption,
-} from '@/components/mobile/mobile-inline-picker';
+  MobileNativeSelect,
+  type MobileNativeSelectOption,
+} from '@/components/mobile/mobile-native-select';
 import {
   buildChildSessionsByParent,
   buildSidebarOpenerRowResolver,
@@ -3584,12 +3587,6 @@ function WorkspaceChatLanding({
     () => (selectedMachineId && isSelectedMachineValid ? selectedMachineId : localProjectMachineId),
     [localProjectMachineId, selectedMachineId, isSelectedMachineValid]
   );
-  const localProjectSelectorMachineId =
-    contextType === 'local' ? (selectedMachineId ?? localProjectMachineId) : null;
-  const localProjectSelectorEmptyText = t(
-    getEmptyLocalProjectsMessageKey(Boolean(localProjectSelectorMachineId))
-  );
-
   const { showBranchSelector, isBranchDisabled, branchSelectorKey } =
     getChatLandingBranchSelectorState({
       contextType,
@@ -4148,170 +4145,202 @@ function WorkspaceChatLanding({
 
   const bottomBarNode = null;
 
-  /* ── Mobile-sheet (new-chat bottom sheet) selector nodes ──
-     The sheet drives every selector through the unified
-     `MobileInlinePicker` — a chip-style trigger that expands a drawer
-     of options inline below it. We bypass the desktop selector
-     desktop selector components
-     and feed the picker raw option arrays here so the interaction +
-     animation are identical across machine / project / branch / model /
-     thinking / agent / permission. The pill switchers (类型, 模式) stay
-     as Tabs since they're already inline. */
+  /* ── Mobile-sheet targets ──
+     Target rows are real HTML selects so touch platforms present their own
+     option picker. The unified project select carries Chat, local projects and
+     GitHub repositories in one control; machine / branch / worktree live in
+     the composer's bottom rail. Layout follows the community contribution in
+     [#491](https://github.com/LodyAI/Lody/pull/491) by @natsustan. */
 
-  /* ── Machine ── */
+  /* ── Machine and project target ──
+     Local folders live on machines, so the project sheet owns the machine
+     choice AND one search across local folders + GitHub repos. The header and
+     the footer machine chip both open it; the old native select is gone. */
+  const [mobileProjectPickerOpen, setMobileProjectPickerOpen] = useState(false);
   const mobileSheetOnlineMachines = useOnlineMachines();
-  const mobileSheetMachineOptions = useMemo<MobileInlinePickerOption<MachineId>[]>(() => {
-    return mobileSheetOnlineMachines.map((m) => ({
-      value: m.id as MachineId,
-      label: m.name,
-      searchText: m.name,
-      icon: <Monitor className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />,
-    }));
-  }, [mobileSheetOnlineMachines]);
-  const mobileSheetSelectedMachineLabel = useMemo(() => {
-    if (!selectedMachineId) return null;
-    return mobileSheetMachineOptions.find((opt) => opt.value === selectedMachineId)?.label ?? null;
-  }, [mobileSheetMachineOptions, selectedMachineId]);
+  const mobileProjectSelectedMachineId =
+    selectedMachineId && isSelectedMachineValid
+      ? selectedMachineId
+      : (selectedLocalProject?.machineId ?? null);
+  const mobileSheetSelectedMachineLabel = mobileProjectSelectedMachineId
+    ? (machines.get(mobileProjectSelectedMachineId)?.name ?? null)
+    : null;
+  const mobileProjectMachines = useMemo(() => {
+    const onlineIds = new Set(mobileSheetOnlineMachines.map((machine) => machine.id));
+    const localMachineIds = new Set(
+      [...visibleLocalProjectMap.values()].map((entry) => entry.machineId)
+    );
+    return [...machines.values()]
+      .filter(
+        (machine) =>
+          onlineIds.has(machine.id) ||
+          localMachineIds.has(machine.id) ||
+          machine.id === mobileProjectSelectedMachineId ||
+          machine.id === activeAgentRole?.machineId
+      )
+      .map((machine) => ({
+        id: machine.id,
+        name: machine.name,
+        online: onlineIds.has(machine.id),
+        disabledReason:
+          !onlineIds.has(machine.id) && machine.id !== mobileProjectSelectedMachineId
+            ? t('chat.machineSelector.offline', 'Offline')
+            : undefined,
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }, [
+    activeAgentRole?.machineId,
+    machines,
+    mobileProjectSelectedMachineId,
+    mobileSheetOnlineMachines,
+    t,
+    visibleLocalProjectMap,
+  ]);
+  const mobileProjectFolders = useMemo(
+    () =>
+      [...visibleLocalProjectMap.values()].map((entry) => ({
+        machineId: entry.machineId,
+        localProjectId: entry.project.id,
+        name: entry.project.name,
+        rootPath: entry.project.rootPath,
+        lastUsedAt:
+          mobileSheetRecency.byProject.get(entry.key) ??
+          entry.project.lastOpenedAtMs ??
+          entry.project.createdAtMs,
+      })),
+    [mobileSheetRecency.byProject, visibleLocalProjectMap]
+  );
+  const mobileProjectRepos = useMemo(
+    () =>
+      [...(repositories ?? [])].map((repository) => ({
+        fullName: repository.fullName,
+        description: repository.description ?? undefined,
+        lastUsedAt: mobileSheetRecency.byRepo.get(repository.fullName),
+      })),
+    [mobileSheetRecency.byRepo, repositories]
+  );
+  const mobileProjectGroups = useMemo(
+    () =>
+      desktopProjectGroupOptions.map((group) => ({
+        projectId: group.projectId,
+        name: group.name,
+        memberCount: group.memberCount,
+        availability: group.availability,
+        disabledReason: group.disabledReason,
+        lastUsedAt: group.lastUsedAt,
+      })),
+    [desktopProjectGroupOptions]
+  );
+
   const mobileSheetMachineNode = (
-    <MobileInlinePicker<MachineId>
-      id="mobile-sheet-machine"
-      value={selectedMachineId}
-      onChange={(id) => handleMachineChange(id)}
-      options={mobileSheetMachineOptions}
-      disabled={hasNoMachine}
-      loading={isInitialDataLoading}
-      ariaLabel={t('chat.machineSelector.placeholder', 'Machine')}
-      emptyText={t('chat.machineSelector.emptyText', 'No machines online')}
-      searchable={mobileSheetMachineOptions.length > 5}
-      searchPlaceholder={t('chat.machineSelector.searchPlaceholder', 'Search machines')}
-      triggerContent={
-        <>
-          <Monitor className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
-          <span className="truncate">
-            {isInitialDataLoading
-              ? t('chat.machineSelector.loading', 'Loading machine...')
-              : (mobileSheetSelectedMachineLabel ??
-                t('chat.machineSelector.placeholder', 'Machine'))}
-          </span>
-        </>
-      }
+    <button
+      type="button"
+      onClick={() => setMobileProjectPickerOpen(true)}
+      aria-label={t('chat.machineSelector.placeholder', 'Machine')}
+      className="flex h-8 w-full min-w-0 items-center gap-1.5 rounded-full px-1.5 text-left text-sm text-foreground/85"
+    >
+      <Monitor className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate">
+        {mobileSheetSelectedMachineLabel ?? t('chat.machineSelector.placeholder', 'Machine')}
+      </span>
+      <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+    </button>
+  );
+
+  const mobileSheetSelectedProjectName = useMemo(() => {
+    if (desktopProjectSelection.kind === 'group') {
+      return (
+        desktopProjectGroupOptions.find(
+          (group) => group.projectId === desktopProjectSelection.projectId
+        )?.name ?? null
+      );
+    }
+    if (desktopProjectSelection.kind === 'local') {
+      const key = buildLocalProjectKey(
+        desktopProjectSelection.machineId,
+        desktopProjectSelection.localProjectId
+      );
+      return (
+        desktopLocalProjectOptions.find((project) => project.key === key)?.name ??
+        visibleLocalProjectMap.get(key)?.project.name ??
+        null
+      );
+    }
+    return null;
+  }, [
+    desktopLocalProjectOptions,
+    desktopProjectGroupOptions,
+    desktopProjectSelection,
+    visibleLocalProjectMap,
+  ]);
+  const mobileSheetTargetLabel =
+    desktopProjectSelection.kind === 'group'
+      ? (mobileSheetSelectedProjectName ??
+        String(t('chat.validation.missingProject', 'Select a project')))
+      : resolveMobileNewChatTargetLabel({
+          contextType,
+          repoFullName: selectedRepo,
+          projectName: mobileSheetSelectedProjectName,
+          labels: {
+            chat: String(t('chat.contextSwitch.chat', 'Chat')),
+            project: String(t('chat.validation.missingProject', 'Select a project')),
+            repository: String(t('chat.repoPlaceholder', 'Repository')),
+          },
+        });
+  const mobileSheetProjectNode = (
+    <button
+      type="button"
+      onClick={() => setMobileProjectPickerOpen(true)}
+      aria-label={t('chat.projectPicker.placeholder', 'Select a project')}
+      className={cn(
+        'flex h-11 min-w-0 max-w-full items-center gap-2 rounded-full px-3 text-xl font-semibold',
+        'text-foreground transition-colors hover:bg-muted/60 active:bg-muted'
+      )}
+    >
+      {desktopProjectSelection.kind === 'group' ? (
+        <FolderKanban className="h-4 w-4 shrink-0 opacity-70" aria-hidden="true" />
+      ) : contextType === 'chat' ? (
+        <MessageCircle className="h-4 w-4 shrink-0 opacity-70" aria-hidden="true" />
+      ) : desktopProjectSelection.kind === 'github' ? (
+        <GithubIcon className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
+      ) : (
+        <FolderOpen className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
+      )}
+      <span className="truncate">{mobileSheetTargetLabel}</span>
+      <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+    </button>
+  );
+
+  const mobileProjectSheetNode = (
+    <MobileNewChatProjectSheet
+      open={mobileProjectPickerOpen}
+      onOpenChange={setMobileProjectPickerOpen}
+      machines={mobileProjectMachines}
+      selectedMachineId={mobileProjectSelectedMachineId}
+      onMachineChange={handleMachineChange}
+      localProjects={mobileProjectFolders}
+      repositories={mobileProjectRepos}
+      groups={mobileProjectGroups}
+      selection={desktopProjectSelection}
+      onSelect={handleDesktopProjectChange}
+      onAddLocalProject={handleAddLocalProject}
+      onConnectGitHub={handleConnectGitRepo}
+      lockedMachineId={activeAgentRole?.machineId ?? null}
+      lockedMachineReason={t('chat.mobileNewChat.roleMachineLocked')}
     />
   );
 
-  /* ── Project (per context) ── */
-  const mobileSheetGitHubRepoOptions = useMemo<MobileInlinePickerOption<string>[]>(() => {
-    if (contextType !== 'github') return [];
-    const repos = [...(repositories ?? [])].sort((a, b) =>
-      compareChatLandingRepositoryByRecency(a, b, mobileSheetRecency.byRepo)
-    );
-    return repos.map((repo) => ({
-      value: repo.fullName,
-      label: repo.fullName,
-      searchText: repo.fullName,
-      description: repo.description ?? undefined,
-      icon: <GithubIcon className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />,
-    }));
-  }, [contextType, repositories, mobileSheetRecency]);
-  const mobileSheetLocalProjectOptions = useMemo<MobileInlinePickerOption<string>[]>(() => {
-    if (contextType !== 'local') return [];
-    const entries = [...visibleLocalProjectMap.values()]
-      .filter(
-        (entry) =>
-          !localProjectSelectorMachineId || entry.machineId === localProjectSelectorMachineId
-      )
-      .sort((left, right) =>
-        compareChatLandingLocalProjectByRecency(left, right, mobileSheetRecency.byProject)
-      );
-    return entries.map((entry) => ({
-      value: buildLocalProjectKey(entry.machineId, entry.project.id),
-      label: entry.project.name,
-      searchText: `${entry.project.name} ${entry.project.rootPath}`,
-      description: entry.project.rootPath,
-      icon: <FolderOpen className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />,
-    }));
-  }, [contextType, localProjectSelectorMachineId, visibleLocalProjectMap, mobileSheetRecency]);
-  const mobileSheetSelectedLocalProjectKey = selectedLocalProject
-    ? buildLocalProjectKey(selectedLocalProject.machineId, selectedLocalProject.localProjectId)
-    : null;
-  const mobileSheetSelectedRepoLabel = selectedRepo ?? null;
-  const mobileSheetSelectedLocalProjectLabel = useMemo(() => {
-    if (!mobileSheetSelectedLocalProjectKey) return null;
-    return (
-      mobileSheetLocalProjectOptions.find((opt) => opt.value === mobileSheetSelectedLocalProjectKey)
-        ?.label ?? null
-    );
-  }, [mobileSheetLocalProjectOptions, mobileSheetSelectedLocalProjectKey]);
-  const mobileSheetProjectNode =
-    contextType === 'github' ? (
-      <MobileInlinePicker<string>
-        id="mobile-sheet-repo"
-        value={selectedRepo ?? null}
-        onChange={(repo) => {
-          setSelectedRepo(repo);
-          setContextType('github');
-        }}
-        options={mobileSheetGitHubRepoOptions}
-        ariaLabel={t('chat.repoPlaceholder', 'Repository')}
-        emptyText={t(
-          'chat.mobileHome.emptyGitHubProjects',
-          '当前 workspace 没有已授权的 GitHub 仓库'
-        )}
-        searchable={mobileSheetGitHubRepoOptions.length > 5}
-        searchPlaceholder={t('chat.mobileHome.repoSearchPlaceholder', 'Search repositories')}
-        triggerContent={
-          <>
-            <GithubIcon className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
-            <span className="truncate">
-              {mobileSheetSelectedRepoLabel ?? t('chat.repoPlaceholder', 'Repository')}
-            </span>
-          </>
-        }
-      />
-    ) : (
-      <MobileInlinePicker<string>
-        id="mobile-sheet-local-project"
-        value={mobileSheetSelectedLocalProjectKey}
-        onChange={(key) => {
-          const opt = visibleLocalProjectMap.get(key);
-          if (!opt) return;
-          handleSelectedLocalProjectChange({
-            machineId: opt.machineId,
-            localProjectId: opt.project.id,
-          });
-          setContextType('local');
-        }}
-        options={mobileSheetLocalProjectOptions}
-        ariaLabel={t('chat.validation.missingProject', 'Select a project')}
-        emptyText={localProjectSelectorEmptyText}
-        searchable={mobileSheetLocalProjectOptions.length > 5}
-        searchPlaceholder={t('chat.mobileHome.localProjectSearchPlaceholder', 'Search projects')}
-        triggerContent={
-          <>
-            <FolderOpen className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
-            <span className="truncate">
-              {mobileSheetSelectedLocalProjectLabel ??
-                t('chat.validation.missingProject', 'Select a project')}
-            </span>
-          </>
-        }
-      />
-    );
-
   /* ── Branch ── */
-  const mobileSheetBranchOptions = useMemo<MobileInlinePickerOption<string>[]>(
+  const mobileSheetBranchOptions = useMemo<MobileNativeSelectOption<string>[]>(
     () =>
       branchOptions.map((opt) => ({
         value: opt.value,
         label: opt.label,
-        searchText: opt.label,
-        description: opt.description,
-        icon: <GitBranchIcon className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />,
       })),
     [branchOptions]
   );
   const mobileSheetBranchNode = showBranchSelector ? (
-    <MobileInlinePicker<string>
-      id="mobile-sheet-branch"
+    <MobileNativeSelect<string>
       key={branchSelectorKey}
       value={currentBranch}
       onChange={(value) => setCurrentBranch(value)}
@@ -4320,9 +4349,7 @@ function WorkspaceChatLanding({
       loading={contextType === 'local' ? loadingLocalGitState || runtimeInitializing : false}
       loadingText={t('chat.branchLoading', { defaultValue: 'Loading branches...' })}
       ariaLabel={t('chat.branchPlaceholder', 'Branch')}
-      emptyText={t('chat.branchEmpty', { defaultValue: 'No branches found' })}
-      searchable={mobileSheetBranchOptions.length > 5}
-      searchPlaceholder={t('chat.branchSearchPlaceholder', { defaultValue: 'Search branches' })}
+      className="h-8 w-fit max-w-full"
       triggerContent={
         <>
           <GitBranchIcon
@@ -4338,52 +4365,23 @@ function WorkspaceChatLanding({
     />
   ) : null;
 
-  /* Project and branch now live on their own rows in the new-chat
-     sheet (see `MobileNewChatSheet` `perTypeNode` + `branchNode`
-     slots), so the previous side-by-side wrapper is gone. The two
-     nodes are passed individually to the sheet. */
-
-  /* Local-only: workdir mode lives on its own row in the sheet as a
-     pill switcher (本地文件 / 新工作树), matching the visual pattern of
-     the type pill above. The desktop WorkdirModeSelector dropdown is too
-     small to read at a glance on a phone and doesn't surface both
-     options without an extra tap. */
-  /* Workdir mode pills: icon+label as a tight group, centered in each
-     equal-width segment (same affinity pattern as the Type ContextSwitch).
-     The track, the pill and the dimming of an unavailable choice are the
-     primitive's; a stretched strip is what splits the width between them. */
+  /* Local files are the implicit default. Only the optional isolation choice
+     needs a visible control, kept inline with the project target row. */
   const mobileSheetWorkdirModeNode =
     contextType === 'local' && selectedLocalProject ? (
-      <Tabs.Root
-        value={effectiveWorkdirMode}
-        onValueChange={(value) => handleWorkdirModeChange(value as WorkdirMode)}
-      >
-        <Tabs.List size="large" stretch>
-          <Tabs.Tab value="local">
-            <FolderIcon className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>{t('chat.mobileNewChat.workdirLocalLabel', '本地文件')}</span>
-          </Tabs.Tab>
-          <Tabs.Tab
-            value="worktree"
-            disabled={!worktreeAvailable || worktreeLoading}
-            title={worktreeUnavailableReason}
-            aria-busy={worktreeLoading || undefined}
-          >
-            {worktreeLoading ? (
-              <Spinner size="small" label={null} />
-            ) : (
-              <GitBranchIcon className="h-3.5 w-3.5" aria-hidden="true" />
-            )}
-            <span>{t('chat.mobileNewChat.workdirWorktreeLabel', '新工作树')}</span>
-          </Tabs.Tab>
-        </Tabs.List>
-      </Tabs.Root>
+      <WorktreeCheckboxPill
+        checked={effectiveWorkdirMode === 'worktree'}
+        onCheckedChange={(checked) => handleWorkdirModeChange(checked ? 'worktree' : 'local')}
+        disabled={!worktreeAvailable}
+        disabledReason={!worktreeAvailable ? worktreeUnavailableReason : undefined}
+        className="h-7 bg-transparent px-1.5 hover:bg-hover/60"
+      />
     ) : null;
 
-  /* ── Composer footer: same MobileSessionRunConfig as the in-session
-     composer (agent / model / reasoning / permission / Plan / Fast in one
-     sheet). Usage stays in the footer; the old below-composer agent +
-     permission + plan row is gone. */
+  /* ── Composer footer rail ──
+     One horizontal rail: run config + usage, then machine, worktree and branch.
+     Attachment and send stay outside it, so a long target label can never hide
+     the send action. */
   const mobileSheetFooterSelectorNode = (
     <ErrorBoundary
       name="MobileSheetFooterSelector"
@@ -4391,82 +4389,67 @@ function WorkspaceChatLanding({
       resetKeys={[workspaceId, selectedAgent?.agentId]}
       fallback={null}
     >
-      <div className="flex w-full min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-hidden">
-        {/* flex-1 + overflow so the run-config button can shrink; only the
-            model label inside it truncates. Usage stays full-width. */}
-        <div className="min-w-0 flex-1 overflow-hidden">
-          <MobileSessionRunConfig
-            agentSelection={selectedAgent}
-            allowedMachineIds={scopedMachineId ? [scopedMachineId] : []}
-            agentLocked={false}
-            onAgentConfigChange={setSelectedAgent}
-            modelOptions={modelOptions}
-            selectedModelId={selectedModelId}
-            onModelChange={setSelectedModelName}
-            modeOptions={modeOptions}
-            selectedModeId={selectedModeId}
-            onModeChange={setSelectedModeId}
-            configOptionSelectors={configOptionSelectors}
-            configOptionValues={configOptionValues}
-            onConfigOptionChange={handleConfigOptionChange}
-            fallbackAgent={{
-              cliType: selectedConfig?.cliType,
-              agentType: selectedConfig?.agentType,
-            }}
-            agentRoles={{
-              items: composerAgentRoleItems,
-              selectedRoleId: activeAgentRole?.id ?? null,
-              onSelect: handleAgentRoleSelect,
-              onCreate: handleAgentRoleCreate,
-            }}
+      <MobileFooterRail>
+        <div
+          className={cn(
+            'flex h-8 max-w-[70vw] min-w-0 shrink-0 items-center overflow-hidden rounded-full',
+            'bg-muted/55 pl-0.5 pr-1 dark:bg-input/80'
+          )}
+        >
+          <div className="min-w-0">
+            <MobileSessionRunConfig
+              agentSelection={selectedAgent}
+              allowedMachineIds={scopedMachineId ? [scopedMachineId] : []}
+              agentLocked={false}
+              onAgentConfigChange={setSelectedAgent}
+              modelOptions={modelOptions}
+              selectedModelId={selectedModelId}
+              onModelChange={setSelectedModelName}
+              modeOptions={modeOptions}
+              selectedModeId={selectedModeId}
+              onModeChange={setSelectedModeId}
+              configOptionSelectors={configOptionSelectors}
+              configOptionValues={configOptionValues}
+              onConfigOptionChange={handleConfigOptionChange}
+              fallbackAgent={{
+                cliType: selectedConfig?.cliType,
+                agentType: selectedConfig?.agentType,
+              }}
+              agentRoles={{
+                items: composerAgentRoleItems,
+                selectedRoleId: activeAgentRole?.id ?? null,
+                onSelect: handleAgentRoleSelect,
+                onCreate: handleAgentRoleCreate,
+              }}
+            />
+          </div>
+          <SessionUsagePopover
+            onRefreshQuota={refreshQuota}
+            rateLimits={selectedRateLimits}
+            agentType={selectedConfig?.agentType ?? ''}
+            agentConfigId={selectedConfig?.id}
+            modelId={selectedModelId}
+            modelLabel={selectedModelLabel}
+            showCodexResetForecast={showCodexResetForecast}
+            showRateLimitWithoutContext
+            className="h-7 shrink-0"
           />
         </div>
-        <SessionUsagePopover
-          onRefreshQuota={refreshQuota}
-          rateLimits={selectedRateLimits}
-          agentType={selectedConfig?.agentType ?? ''}
-          agentConfigId={selectedConfig?.id}
-          modelId={selectedModelId}
-          modelLabel={selectedModelLabel}
-          showCodexResetForecast={showCodexResetForecast}
-          showRateLimitWithoutContext
-          className="h-8 shrink-0"
-        />
-      </div>
+        <div className="flex h-8 max-w-[70vw] min-w-0 shrink-0 items-center rounded-full border border-border/60 bg-muted/50 px-2 dark:bg-input/80">
+          {mobileSheetMachineNode}
+        </div>
+        {mobileSheetWorkdirModeNode ? (
+          <div className="flex h-8 shrink-0 items-center rounded-full border border-border/60 bg-muted/50 px-1 dark:bg-input/80">
+            {mobileSheetWorkdirModeNode}
+          </div>
+        ) : null}
+        {mobileSheetBranchNode ? (
+          <div className="flex h-8 max-w-[70vw] min-w-0 shrink-0 items-center rounded-full border border-border/60 bg-muted/50 px-2 dark:bg-input/80">
+            {mobileSheetBranchNode}
+          </div>
+        ) : null}
+      </MobileFooterRail>
     </ErrorBoundary>
-  );
-  /* New-chat no longer needs a below-composer selector row — every run
-     knob lives inside MobileSessionRunConfig. */
-  const mobileSheetBelowComposerNode = null;
-
-  /* Mobile-sheet Type row: same ContextSwitch as desktop. Icon+label are a
-     tight centered pair inside each equal-width pill (not icon-left /
-     label-centered, which broke icon–label affinity). */
-  const mobileSheetContextSwitchNode = (
-    <ContextSwitch
-      value={contextType}
-      onChange={setContextType}
-      tone={tone}
-      localLabel={t('chat.contextSwitch.localProjects', 'Local')}
-      githubLabel={t('chat.contextSwitch.github', 'GitHub')}
-      chatLabel={t('chat.contextSwitch.chat', 'Chat')}
-      /* The mobile new-chat sheet is a compact launcher — empty Local/GitHub tabs must
-         NOT carry the desktop's
-         "Open project" / "Connect GitHub" affordance, whose onClick navigates
-         away (and was firing on hover/click/Enter). Omit onClick so the tab
-         stays plainly disabled with only an explanatory tooltip. */
-      localDisabled={hasLocalProjects ? undefined : { label: localProjectSelectorEmptyText }}
-      githubDisabled={
-        !hasGitHubRepos
-          ? {
-              label: t(
-                'chat.mobileHome.emptyGitHubProjects',
-                '当前 workspace 没有已授权的 GitHub 仓库'
-              ),
-            }
-          : undefined
-      }
-    />
   );
 
   // ── Hints ──
@@ -6355,32 +6338,16 @@ function WorkspaceChatLanding({
   const mobileNewChatSheetContentProps: MobileNewChatSheetContentProps = {
     labels: {
       title: t('chat.mobileNewChat.title', '新建对话'),
-      closeAriaLabel: t('common.close', 'Close'),
-      machineLabel: t('chat.mobileNewChat.machineLabel', '机器'),
-      contextTypeLabel: t('chat.mobileNewChat.contextTypeLabel', '类型'),
-      perTypeLabel:
-        contextType === 'github'
-          ? t('chat.mobileNewChat.repoLabel', '仓库')
-          : t('chat.mobileNewChat.projectLabel', '项目'),
-      branchLabel: t('chat.mobileNewChat.branchLabel', '分支'),
-      secondaryPerTypeLabel: t('chat.mobileNewChat.workdirModeLabel', '模式'),
+      backAriaLabel: t('common.back', 'Back'),
     },
-    coordinator: MobileInlinePickerCoordinator,
-    machineNode: mobileSheetMachineNode,
-    contextTypeNode: mobileSheetContextSwitchNode,
-    /* Project / repo on its own row; branch on its own row below
-         (split per the user's design ask — chips no longer share a row
-         and so don't truncate on narrow phones). */
-    perTypeNode: contextType === 'chat' ? null : mobileSheetProjectNode,
-    branchNode: contextType === 'chat' ? null : mobileSheetBranchNode,
-    secondaryPerTypeNode: mobileSheetWorkdirModeNode,
+    targetNode: mobileSheetProjectNode,
     composer: (
       <ErrorBoundary
         name="MobileNewChatSheetComposer"
         variant="section"
         resetKeys={[workspaceId, workspaceSlug, contextType, mobileNewChatOpen]}
       >
-        <MobileInlinePickerRowSlot>
+        <div className="flex h-full min-h-0 flex-col">
           <input
             ref={attachmentInputRef}
             type="file"
@@ -6388,10 +6355,11 @@ function WorkspaceChatLanding({
             className="hidden"
             onChange={handleAttachmentInputChange}
           />
-          {composerNoticeNode}
+          {composerNoticeNode ? <div className="px-4 pt-2">{composerNoticeNode}</div> : null}
           <ChatComposer
             tone={tone}
-            variant="session"
+            variant="sheet"
+            className="min-h-0 flex-1"
             mentionSource={mentionSource}
             availableCommands={availableCommands}
             skillAgent={skillAgent}
@@ -6406,8 +6374,10 @@ function WorkspaceChatLanding({
             promptPlaceholder={promptPlaceholder}
             compactPlaceholderName={activeAgentRole?.name ?? selectedConfig?.name ?? null}
             promptDisabled={submitting}
-            promptRows={4}
+            promptRows={1}
             promptEnterKeyHint={promptEnterKeyHint}
+            promptAutoFocus
+            focusOnContainerClick
             pastedTextDrafts={submitting ? [] : pastedTextDrafts}
             onPastedTextDraftsChange={submitting ? undefined : setPastedTextDrafts}
             onMentionRangesChange={handleMentionRangesChange}
@@ -6444,19 +6414,19 @@ function WorkspaceChatLanding({
                 {submitting ? <Spinner className="h-5 w-5" /> : <ArrowUp className="h-5 w-5" />}
               </Button>
             }
-            autoResize
-            maxRows={6}
           />
-        </MobileInlinePickerRowSlot>
+        </div>
       </ErrorBoundary>
     ),
-    belowComposerNode: mobileSheetBelowComposerNode,
   };
 
   const mobileNewChatSheetNode = (
     <MobileNewChatSheet
       open={mobileNewChatOpen}
-      onOpenChange={setMobileNewChatOpen}
+      onOpenChange={(open) => {
+        setMobileNewChatOpen(open);
+        if (!open) setMobileProjectPickerOpen(false);
+      }}
       {...mobileNewChatSheetContentProps}
     />
   );
@@ -6465,6 +6435,7 @@ function WorkspaceChatLanding({
     return (
       <>
         {mobileNewChatSheetNode}
+        {mobileProjectSheetNode}
         <MobileProjectScreen
           project={mobileProjectContext}
           conversations={visibleProjectConversations}
@@ -6845,6 +6816,7 @@ function WorkspaceChatLanding({
           </>
         ) : null}
         {mobileNewChatSheetNode}
+        {mobileProjectSheetNode}
         <AddLocalProjectDialogContainer
           open={addProjectOpen}
           onOpenChange={handleAddProjectOpenChange}
