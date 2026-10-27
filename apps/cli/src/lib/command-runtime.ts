@@ -429,7 +429,14 @@ export async function withWorkspaceManager<T>(
             workspace.id as WorkspaceId
           ),
         }
-      );
+      ).catch(async (error: unknown) => {
+        // The manager owns `e2ee.close()` only once created; otherwise close the
+        // opened custody/history/refresh owner here, keeping the original error.
+        await e2ee?.close().catch((cleanup: unknown) => {
+          logger.debug(`e2ee_cleanup_failed: ${formatErrorMessage(cleanup)}`);
+        });
+        throw error;
+      });
       // E2EE local acceptance never waits for a token or network connection.
       if (e2ee)
         void manager

@@ -110,3 +110,6 @@
 A same-context `creating=-1` socket reply is `prepare-superseded`; other errors stay
 errors. Main archives only the matching all-null unsigned desktop attempt before
 fresh consent. Retain CLI originals.
+- Never cache an unimplemented content mode (offline startup would read it as
+  plaintext); `export` refuses and `sync` skips schedules for encrypted workspaces
+  ([note](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-cli-review-fixes.md)).

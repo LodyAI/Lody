@@ -10443,7 +10443,8 @@ export class MessageHandler {
     void this.sessionDispatchWatcher.enqueueSessionCheck(sessionId);
   }
 
-  // =====================================================================  // GC-related public methods
+  // =====================================================================
+  // GC-related public methods
   // =====================================================================
   /**
    * Check if a session has pending ACP updates that haven't been flushed yet.

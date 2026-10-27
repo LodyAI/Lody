@@ -16,6 +16,7 @@ import {
 import { exportWorkspaceData } from '@/lib/session-export';
 import { mapWithConcurrency } from '@/lib/session-export/concurrency';
 import { listWorkspacesForToken, type WorkspaceSummary } from '@/lib/workspace';
+import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 
 type ExportOptions = Pick<CommonCommandOptions, 'workspace' | 'debug'> & {
   images?: boolean;
@@ -80,9 +81,23 @@ export const exportCommand = new Command('export')
         throw new Error('Pass either --workspace or --all-workspace, not both.');
       }
 
-      const workspaces = options.allWorkspace
+      const requested = options.allWorkspace
         ? await listWorkspacesForToken(auth.token)
         : [await resolveWorkspaceOrThrow(auth, options.workspace)];
+      // A plaintext export of an encrypted workspace is a restricted feature until its
+      // E2EE milestone; never decrypt to disk here.
+      const exportable = (workspace: WorkspaceSummary) =>
+        workspaceSupports(
+          { mode: workspace.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+          'export'
+        );
+      if (!options.allWorkspace && requested.some((workspace) => !exportable(workspace)))
+        throw new Error('Export is not available for end-to-end encrypted workspaces.');
+      const workspaces = requested.filter(exportable);
+      for (const skipped of requested.filter((workspace) => !exportable(workspace)))
+        console.log(
+          `Skipped end-to-end encrypted workspace ${skipped.name}: export is not available.`
+        );
 
       let totalSessions = 0;
       const warnings: string[] = [];
