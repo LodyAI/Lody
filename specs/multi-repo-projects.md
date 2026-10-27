@@ -29,11 +29,13 @@ looks only at that branch.
   identified by `(machineId, localProjectId)`. A repository added once as a local
   folder and once from GitHub, or added from two subdirectories of one monorepo,
   is a single Member.
-- A Member is either a **repository Member** or a **machine-bound Member**. A local
-  folder whose GitHub remote is known joins as a repository Member: it records the
-  repository, not the machine, so the same Project runs on any machine. Only a
-  local repository without a GitHub remote and a non-Git directory are
-  machine-bound. All machine-bound Members of one Project are on one machine, and
+- A Member is either a **repository Member** or a **machine-bound Member**. A
+  repository chosen from GitHub joins as a repository Member: it records the
+  repository, not the machine, so it runs on any machine. A folder chosen on a
+  machine joins as a machine-bound Member, even when its GitHub remote is known
+  (it is still deduplicated and tracked by that repository), so a Project built
+  from one machine's folders runs only there. Projects saved earlier keep any
+  repository Member that uses a local copy until it is edited. All machine-bound Members of one Project are on one machine, and
   that machine is the Project's only execution machine; a Project without
   machine-bound Members can run on any machine.
 - Each flattened Member has a directory name that is unique within the Project. It
@@ -111,8 +113,9 @@ cleanup of unused hidden registrations is outside this change. Explicitly adding
 a retained directory restores its existing identity and standalone entry.
 
 **Preserve execution semantics.** Direct selection does not introduce exact-copy
-binding: known GitHub-backed folders still become portable repository members;
-other members retain the existing machine constraint. Explain this distinction
+binding: a chosen folder binds the Project to its machine, including a
+GitHub-backed one (revised 2026-10-27 at the user's request; earlier such folders
+became portable repository members). Explain this distinction
 in the editor. Ordinary folders modify originals without worktree isolation;
 selecting a repository subdirectory does not promise independent Git isolation.
 No new CLI/MCP interface, automatic directory relocation, or permission model is
@@ -305,9 +308,9 @@ GC scope extended to `<data>/repos/project-*/worktrees/<session>`.
   to show which machines can run a Project. It names a repository, never a path,
   and only the owning daemon writes it.
 - A Project saved before repository Members existed keeps its local Members as
-  they are. When the editor saves it again, a local Member whose machine publishes
-  a GitHub remote becomes a repository Member, keeping its ID, directory and
-  submodule placement.
+  they are, and editing no longer converts them: a folder stays its machine's.
+  Editing on a machine turns a repository Member that used a local copy there
+  into that machine's folder.
 - Conversation metadata keeps the Member snapshot frozen at creation, including
   the Project name and the main directory name. Deleting or editing a Project does
   not affect existing conversations; after a Project is deleted, its conversations

@@ -53,7 +53,9 @@ not approve unrelated portions of that draft Spec or the earlier
   The existing daemon owns execution and error recovery. No per-project lifecycle
   owner or migration is introduced. Cross-document writes retain existing sync
   semantics; this does not introduce distributed transactions.
-- GitHub-backed selections retain portable repository semantics. Ordinary folders
+- GitHub-backed selections retain portable repository semantics (superseded on
+  2026-10-27: chosen folders now bind the Project to their machine; see the
+  [creation wizard](../feature/2026-10-26-project-creation-wizard.md)). Ordinary folders
   remain machine-bound and visibly warn that originals are edited in place.
   Existing entries stay visible when reused as members.
 

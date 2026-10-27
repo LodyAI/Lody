@@ -43,6 +43,16 @@ picker to offer creation beside Settings and the sidebar menu.
   wizard remembers the folder tick, so either tab can be unticked independently;
   unticking GitHub returns the member to the local copy. GitHub-only scope also turns
   copy-preferring members into plain clones.
+- Folders bind (user decision, 2026-10-27). A folder ticked on the chosen machine
+  joins as that machine's folder member even when it has a GitHub remote, so the
+  project is offered, placed and run on that machine only; the daemon already
+  refuses a folder member from another machine. Only GitHub-tab repositories are
+  portable clones. The dialog no longer converts folder members with a remote
+  into repository members, and `bindProjectGroupToMachine` turns an older
+  copy-preferring member into the chosen machine's folder when edited. A folder
+  ticked in both tabs still lets GitHub win. No contract change was needed, so
+  released daemons and clients behave the same; projects saved earlier stay
+  portable until edited.
 - The GitHub tab lists only repositories the workspace's GitHub integration lists
   (`ProjectMemberSourceOption.onGithub`). A repository known only from a local
   folder's remote is offered as that folder; ticking it as a clone would need

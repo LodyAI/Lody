@@ -278,6 +278,33 @@ export function setProjectGroupMemberSource(
   };
 }
 
+/**
+ * Binds a project to the machine whose folders it was built from: a
+ * repository member that would use a local copy becomes that machine's folder
+ * (picked folders included), so the project runs there only. Members cloned
+ * from GitHub, and repositories without a copy there, are left as they are.
+ */
+export function bindProjectGroupToMachine(
+  value: ProjectGroupFormValue,
+  machineId: MachineId,
+  copyOf: (repoFullName: string) => LocalProjectId | undefined
+): ProjectGroupFormValue {
+  let changed = false;
+  const members = value.members.map((member) => {
+    if (member.source.kind !== 'github' || !member.source.preferLocal) return member;
+    const localProjectId =
+      member.directory?.machineId === machineId
+        ? member.directory.localProjectId
+        : member.directory
+          ? undefined
+          : copyOf(member.source.repoFullName);
+    if (!localProjectId) return member;
+    changed = true;
+    return { ...member, source: { kind: 'local', machineId, localProjectId } as const };
+  });
+  return changed ? { ...value, members } : value;
+}
+
 /** A name for a new project from its first member, unless one was typed. */
 export function suggestProjectGroupName(
   value: ProjectGroupFormValue,
@@ -494,41 +521,6 @@ export function buildProjectGroupFormValue(project: WorkspaceProject): ProjectGr
       placementOrigin: 'user',
     })),
   };
-}
-
-/**
- * Turns local members whose machine now publishes a GitHub remote into
- * repository Members, keeping each member's id, directory, submodule
- * placement and base branch, so a group saved before repository Members runs
- * on any machine once it is saved again. A member whose repository is already
- * in the group stays as it is; validation reports the duplicate. Returns the
- * same value when nothing changes.
- */
-export function upgradeProjectGroupRepositoryMembers(
-  value: ProjectGroupFormValue,
-  remoteOf: (source: Extract<ProjectMemberSource, { kind: 'local' }>) => string | undefined
-): ProjectGroupFormValue {
-  const taken = new Set(
-    value.members.flatMap((member) =>
-      member.source.kind === 'github' ? [member.source.repoFullName.toLowerCase()] : []
-    )
-  );
-  let changed = false;
-  const members = value.members.map((member) => {
-    if (member.source.kind !== 'local') return member;
-    const repoFullName = remoteOf(member.source);
-    if (!repoFullName || taken.has(repoFullName.toLowerCase())) return member;
-    taken.add(repoFullName.toLowerCase());
-    changed = true;
-    const source: ProjectMemberSource = {
-      kind: 'github',
-      repoFullName,
-      preferLocal: true,
-      ...(member.source.baseBranch ? { baseBranch: member.source.baseBranch } : {}),
-    };
-    return { ...member, source };
-  });
-  return changed ? { ...value, members } : value;
 }
 
 const sameContent = (left: WorkspaceProject, right: WorkspaceProject): boolean =>

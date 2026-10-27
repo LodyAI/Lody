@@ -8,6 +8,7 @@ import type {
 } from '@lody/shared';
 import {
   addProjectGroupMember,
+  bindProjectGroupToMachine,
   addProjectGroupDirectory,
   applySourceSelection,
   applyDetectedProjectSubmodules,
@@ -20,7 +21,6 @@ import {
   suggestProjectGroupName,
   suggestProjectMemberDir,
   updateProjectGroupMemberPlacement,
-  upgradeProjectGroupRepositoryMembers,
   validateProjectGroupForm,
   type ProjectGroupFormValue,
   type ProjectGroupMemberDraft,
@@ -263,36 +263,6 @@ describe('project group form', () => {
     expect(result.valid).toBe(false);
     expect([...result.memberErrors]).toEqual([[value.members[2]!.id, 'machine_mismatch']]);
   });
-
-  it('turns local members with a published remote into repository members in place', () => {
-    const createId = ids();
-    let value: ProjectGroupFormValue = { ...EMPTY_PROJECT_GROUP_FORM_VALUE, name: 'Shop' };
-    value = addProjectGroupMember(value, local('web'), 'web', createId);
-    value = addProjectGroupMember(value, local('notes'), 'notes', createId);
-    value = addProjectGroupMember(value, local('api'), 'api', createId);
-    value = addProjectGroupMember(value, github('acme/api'), 'acme/api', createId);
-    value = updateProjectGroupMemberPlacement(value, value.members[0]!.id, {
-      kind: 'root',
-      dir: 'frontend',
-    });
-    const remotes: Record<string, string> = { web: 'acme/web', api: 'Acme/API' };
-    const next = upgradeProjectGroupRepositoryMembers(
-      value,
-      (source) => remotes[source.localProjectId]
-    );
-    // web keeps its id and the directory the user chose.
-    expect(next.members[0]).toEqual({
-      ...value.members[0]!,
-      source: { kind: 'github', repoFullName: 'acme/web', preferLocal: true },
-    });
-    // notes has no remote; api is already in the group from GitHub, so the
-    // folder stays and validation reports the duplicate.
-    expect(next.members.slice(1)).toEqual(value.members.slice(1));
-    expect(
-      upgradeProjectGroupRepositoryMembers(next, (source) => remotes[source.localProjectId])
-    ).toBe(next);
-    expect(upgradeProjectGroupRepositoryMembers(value, () => undefined)).toBe(value);
-  });
 });
 
 describe('direct folder drafts', () => {
@@ -380,5 +350,28 @@ describe('direct folder drafts', () => {
     expect(suggestProjectGroupName(value, labelOf)).toBe('web');
     expect(suggestProjectGroupName({ ...value, name: 'Shop' }, labelOf)).toBe('Shop');
     expect(suggestProjectGroupName(EMPTY_PROJECT_GROUP_FORM_VALUE, labelOf)).toBe('');
+  });
+  it('binds folders to the machine they were chosen on, leaving clones portable', () => {
+    const createId = ids();
+    let value = addProjectGroupMember(
+      EMPTY_PROJECT_GROUP_FORM_VALUE,
+      { kind: 'github', repoFullName: 'acme/web', preferLocal: true },
+      'acme/web',
+      createId
+    );
+    value = addProjectGroupMember(value, github('acme/proto'), 'acme/proto', createId);
+    value = addProjectGroupDirectory(value, directory);
+    const machine = 'machine-1' as MachineId;
+    const bound = bindProjectGroupToMachine(value, machine, (repo) =>
+      repo === 'acme/web' ? ('web-copy' as LocalProjectId) : undefined
+    );
+    expect(bound.members.map((member) => member.source)).toEqual([
+      { kind: 'local', machineId: machine, localProjectId: 'web-copy' },
+      { kind: 'github', repoFullName: 'acme/proto' },
+      { kind: 'local', machineId: machine, localProjectId: directory.localProjectId },
+    ]);
+    // Bound to the folders' machine: the project can no longer run elsewhere.
+    expect(validateProjectGroupForm({ ...bound, name: 'Shop' }).valid).toBe(true);
+    expect(bindProjectGroupToMachine(bound, machine, () => undefined)).toBe(bound);
   });
 });

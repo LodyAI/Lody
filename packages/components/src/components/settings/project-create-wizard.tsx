@@ -19,9 +19,8 @@ import {
   getProjectMemberSourceKey,
   removeProjectGroupMember,
   retainProjectGroupScope,
-  setProjectGroupMemberSource,
+  bindProjectGroupToMachine,
   suggestProjectGroupName,
-  withoutLocalCopy,
   type ProjectGroupFormValidation,
   type ProjectGroupFormValue,
   type ProjectGroupMemberDraft,
@@ -235,6 +234,15 @@ type PickRow = {
   toggle: () => void;
 };
 
+const sourceKey = getProjectMemberSourceKey;
+const keyOf = (member: ProjectGroupMemberDraft) => sourceKey(member.source);
+
+type MemberUsage = 'inPlace' | 'localCopy' | 'worktree';
+
+/** How a member is used: in place, a machine's copy, or a fresh clone. */
+const usageOf = (member: ProjectGroupMemberDraft): MemberUsage =>
+  member.source.kind === 'local' ? 'inPlace' : member.source.preferLocal ? 'localCopy' : 'worktree';
+
 /**
  * The scope a draft already implies. A folder decides it; a repository that
  * uses a local copy names the machine holding one, this machine first. A
@@ -257,15 +265,6 @@ function scopeOf(
   const copy = copies.find((candidate) => candidate.machineId === currentMachineId) ?? copies[0];
   return copy ? { kind: 'machine', machineId: copy.machineId } : { kind: 'github' };
 }
-
-const sourceKey = getProjectMemberSourceKey;
-const keyOf = (member: ProjectGroupMemberDraft) => sourceKey(member.source);
-
-type MemberUsage = 'inPlace' | 'localCopy' | 'worktree';
-
-/** How a member is used: in place, a machine's copy, or a fresh clone. */
-const usageOf = (member: ProjectGroupMemberDraft): MemberUsage =>
-  member.source.kind === 'local' ? 'inPlace' : member.source.preferLocal ? 'localCopy' : 'worktree';
 
 /**
  * Creating a project, one question at a time: what it holds (folders on a
@@ -327,8 +326,21 @@ export function ProjectCreateWizard({
         ? t('settings.projectGroups.picker.thisMachine')
         : (machines.find((candidate) => candidate.id === id)?.name ?? id);
 
+  // Folders from the chosen machine bind the project to it.
+  const fitScope = (draft: ProjectGroupFormValue, target: ProjectGroupScope) => {
+    const retained = retainProjectGroupScope(draft, target, labelOf);
+    if (target.kind !== 'machine') return retained;
+    return bindProjectGroupToMachine(
+      retained,
+      target.machineId,
+      (repoFullName) =>
+        sources
+          .find((option) => option.key === `github:${repoFullName.toLowerCase()}`)
+          ?.copies.find((copy) => copy.machineId === target.machineId)?.localProjectId
+    );
+  };
   const chooseScope = (next: ProjectGroupScope) => {
-    const retained = retainProjectGroupScope(value, next, labelOf);
+    const retained = fitScope(value, next);
     if (retained !== value) onChange(retained);
     setAlsoFolder(new Set());
     go('sources', next);
@@ -345,15 +357,30 @@ export function ProjectCreateWizard({
     else if (step === 'details') go('sources');
   };
   const next = () => {
-    let draft = scope ? retainProjectGroupScope(value, scope, labelOf) : value;
+    let draft = scope ? fitScope(value, scope) : value;
     const named = suggestProjectGroupName(draft, labelOf);
     if (named !== draft.name) draft = { ...draft, name: named };
     if (draft !== value) onChange(draft);
     go('details');
   };
 
+  // Clones whose folder on this machine is ticked as well.
   const doubled = value.members.filter(
-    (member) => alsoFolder.has(keyOf(member)) && usageOf(member) === 'worktree'
+    (member) =>
+      usageOf(member) === 'worktree' &&
+      sources
+        .find((option) => option.key === keyOf(member))
+        ?.copies.some(
+          (copy) =>
+            copy.machineId === machineId &&
+            alsoFolder.has(
+              getProjectMemberSourceKey({
+                kind: 'local',
+                machineId: copy.machineId,
+                localProjectId: copy.localProjectId,
+              })
+            )
+        )
   );
   const doubleNotice =
     doubled.length > 0 ? (
@@ -708,121 +735,153 @@ function SourcesStep({
     onAlsoFolderChange(next);
   };
   const plain = (repoFullName: string): ProjectMemberSource => ({ kind: 'github', repoFullName });
+  /** Replace one member with another source: GitHub and its folder are one repository. */
+  const swap = (
+    from: ProjectGroupMemberDraft,
+    source: ProjectMemberSource,
+    label: string
+  ): ProjectGroupFormValue =>
+    addProjectGroupMember(removeProjectGroupMember(value, from.id, labelOf), source, label);
 
   // Folders on the chosen machine, including its copies of GitHub repositories.
+  // A folder joins as that machine's folder even with a GitHub remote, so the
+  // project runs on that machine only; the GitHub tab is for clones.
   const folderRows: PickRow[] = [];
-  const folderKeys = new Set<string>();
+  // Each repository's folder on this machine. A folder picked from the browser
+  // has no listed row to return to, so it carries no source.
+  const folderOfRepo = new Map<
+    string,
+    { key: string; source?: ProjectMemberSource; label: string }
+  >();
   if (scope.kind === 'machine') {
+    const addFolderRow = (input: {
+      folderKey: string;
+      repoKey?: string;
+      source: ProjectMemberSource;
+      label: string;
+      detail?: string;
+      icon: PickRow['icon'];
+      previous: boolean;
+    }) => {
+      const folder = members.get(input.folderKey);
+      const repo = input.repoKey ? members.get(input.repoKey) : undefined;
+      // A copy-preferring repository member from before is this folder.
+      const legacy =
+        repo && repo.source.kind === 'github' && repo.source.preferLocal ? repo : undefined;
+      const both = alsoFolder.has(input.folderKey) && repo !== undefined;
+      const selected = Boolean(folder || legacy || both);
+      if (input.repoKey)
+        folderOfRepo.set(input.repoKey, {
+          key: input.folderKey,
+          source: input.source,
+          label: input.label,
+        });
+      folderRows.push({
+        key: input.folderKey,
+        label: input.label,
+        detail: input.detail,
+        icon: input.icon,
+        previous: input.previous,
+        selected,
+        toggle: () => {
+          if (both) withKey(input.folderKey, false);
+          else if (folder) onChange(removeProjectGroupMember(value, folder.id, labelOf));
+          else if (legacy) onChange(removeProjectGroupMember(value, legacy.id, labelOf));
+          // Already ticked as a GitHub repository, which wins: only noted.
+          else if (repo) withKey(input.folderKey, true);
+          else onChange(addProjectGroupMember(value, input.source, input.label));
+        },
+      });
+    };
     for (const option of sources) {
       const copy = option.copies.find((candidate) => candidate.machineId === scope.machineId);
       if (!copy) continue;
-      folderKeys.add(option.key);
-      const member = members.get(option.key);
-      // A repository ticked only in the GitHub tab is a clone, not this folder.
-      const selected =
-        member !== undefined && (usageOf(member) !== 'worktree' || alsoFolder.has(option.key));
-      folderRows.push({
-        key: option.key,
-        label:
-          option.kind === 'repository'
-            ? (option.label.split('/').pop() ?? option.label)
-            : option.label,
+      const source: ProjectMemberSource =
+        option.kind === 'repository'
+          ? { kind: 'local', machineId: copy.machineId, localProjectId: copy.localProjectId }
+          : option.source;
+      const folderKey = getProjectMemberSourceKey(source);
+      const name =
+        option.kind === 'repository'
+          ? (option.label.split('/').pop() ?? option.label)
+          : option.label;
+      addFolderRow({
+        folderKey,
+        ...(option.kind === 'repository' ? { repoKey: option.key } : {}),
+        source,
+        label: name,
         detail:
           option.kind === 'repository'
             ? [option.label, copy.rootPath].filter(Boolean).join(' · ')
             : copy.rootPath,
         icon: option.kind === 'repository' ? 'repository' : 'folder',
-        previous: (previousUsage?.get(option.key) ?? 'worktree') !== 'worktree',
-        selected,
-        toggle: () => {
-          if (selected && member) {
-            // Also ticked on GitHub: it stays, as the clone it already is.
-            if (alsoFolder.has(option.key)) withKey(option.key, false);
-            else onChange(removeProjectGroupMember(value, member.id, labelOf));
-          } else if (member) {
-            // Already ticked as a GitHub repository, which wins: only noted.
-            withKey(option.key, true);
-          } else onChange(addProjectGroupMember(value, option.source, option.label));
-        },
+        previous:
+          previousUsage?.has(folderKey) === true ||
+          (option.kind === 'repository' && previousUsage?.get(option.key) === 'localCopy'),
       });
     }
     // A folder picked from the browser is not a listed project yet; it is
     // shown, ticked, until saving registers it.
+    const listed = new Set(folderRows.map((row) => row.key));
     for (const member of value.members) {
       const key = keyOf(member);
-      if (
-        !member.directory ||
-        member.directory.machineId !== scope.machineId ||
-        folderKeys.has(key)
-      )
+      if (!member.directory || member.directory.machineId !== scope.machineId || listed.has(key))
         continue;
-      folderKeys.add(key);
+      const remote = member.directory.inspection.repoFullName;
       folderRows.unshift({
         key,
         label: labelOf(member),
         detail: member.directory.rootPath,
-        icon: member.source.kind === 'github' ? 'repository' : 'folder',
+        icon: remote ? 'repository' : 'folder',
         selected: true,
-        toggle: () => {
-          if (alsoFolder.has(key)) {
-            // The GitHub tick remains: keep the clone, forget the folder.
-            onChange(
-              setProjectGroupMemberSource(value, member.id, member.source, { dropDirectory: true })
-            );
-            withKey(key, false);
-          } else onChange(removeProjectGroupMember(value, member.id, labelOf));
-        },
+        toggle: () => onChange(removeProjectGroupMember(value, member.id, labelOf)),
       });
+      if (remote)
+        folderOfRepo.set(`github:${remote.toLowerCase()}`, { key, label: labelOf(member) });
     }
   }
 
-  // Every GitHub repository, including those with a copy here: choosing one
-  // there as well is allowed, and only noted.
+  // Every repository GitHub integration can clone, plus a member already cloned
+  // from one it no longer lists, so it can still be unticked. Ticking one whose
+  // folder is ticked too is allowed and only noted: GitHub wins.
   const repositoryRows: PickRow[] = sources
-    // Only what GitHub integration can clone, plus a member already cloned
-    // from one it no longer lists, so it can still be unticked.
     .filter(
       (option) =>
         option.kind === 'repository' &&
-        (option.onGithub === true ||
-          (members.has(option.key) && usageOf(members.get(option.key)!) === 'worktree'))
+        (option.onGithub === true || members.get(option.key)?.source.kind === 'github')
     )
     .map((option) => {
       const member = members.get(option.key);
-      const both = alsoFolder.has(option.key);
+      const folderOf = folderOfRepo.get(option.key);
+      const folder = folderOf ? members.get(folderOf.key) : undefined;
+      // A legacy copy-preferring member on this machine is shown as the folder.
       const selected =
         member !== undefined &&
         member.source.kind === 'github' &&
-        (usageOf(member) === 'worktree' || !folderKeys.has(option.key));
+        !(member.source.preferLocal && folderOf);
       return {
         key: option.key,
         label: option.label,
         detail: option.description,
         icon: 'github' as const,
-        previous:
-          previousUsage?.has(option.key) === true &&
-          (previousUsage.get(option.key) === 'worktree' || !folderKeys.has(option.key)),
+        previous: previousUsage?.get(option.key) === 'worktree',
         selected,
         toggle: () => {
           if (selected && member) {
-            // Still ticked as a folder: it goes back to using the local copy.
-            if (both && member.source.kind === 'github') {
-              onChange(
-                setProjectGroupMemberSource(value, member.id, {
-                  ...member.source,
-                  preferLocal: true,
-                })
-              );
-              withKey(option.key, false);
+            // Still ticked as a folder: it goes back to being that folder.
+            if (folderOf?.source && alsoFolder.has(folderOf.key)) {
+              onChange(swap(member, folderOf.source, folderOf.label));
+              withKey(folderOf.key, false);
             } else onChange(removeProjectGroupMember(value, member.id, labelOf));
-          } else if (member && member.source.kind === 'github') {
+          } else if (folder && folderOf) {
             // Ticked as a folder too: GitHub wins, so it becomes a clone.
-            onChange(
-              setProjectGroupMemberSource(value, member.id, withoutLocalCopy(member.source))
-            );
-            withKey(option.key, true);
-          } else if (!member)
-            onChange(addProjectGroupMember(value, plain(option.label), option.label));
+            onChange(swap(folder, plain(option.label), option.label));
+            if (folderOf.source) withKey(folderOf.key, true);
+          } else if (member) {
+            // A copy-preferring member shown as the folder: the same, GitHub wins.
+            onChange(swap(member, plain(option.label), option.label));
+            if (folderOf?.source) withKey(folderOf.key, true);
+          } else onChange(addProjectGroupMember(value, plain(option.label), option.label));
         },
       };
     });

@@ -29,7 +29,6 @@ import {
   buildWorkspaceProjectFromForm,
   EMPTY_PROJECT_GROUP_FORM_VALUE,
   getProjectMemberSourceKey,
-  upgradeProjectGroupRepositoryMembers,
   validateProjectGroupForm,
   type ProjectGroupFormValue,
   type ProjectGroupMemberDraft,
@@ -149,15 +148,6 @@ export function ProjectGroupEditorDialog({
     },
     [byKey, machineName, machinesOf]
   );
-  // Where each machine's local project went: a project with a GitHub remote
-  // is listed under its repository, not on its own.
-  const remoteByLocalKey = useMemo(() => {
-    const remotes = new Map<string, string>();
-    for (const option of options) {
-      for (const key of option.localKeys) remotes.set(key, option.label);
-    }
-    return remotes;
-  }, [options]);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   // Machines whose daemon can inspect a folder without registering it; set
   // below once the machine list is known.
@@ -317,22 +307,20 @@ export function ProjectGroupEditorDialog({
     [detection.repositories]
   );
 
-  // Fold detection into the draft as answers arrive, and turn local members
-  // whose machine now publishes a GitHub remote into repository Members. Both
-  // helpers return the same value when nothing moves, so this settles.
+  // Fold detection into the draft as answers arrive. A folder stays its
+  // machine's folder even once its GitHub remote is known: the project was
+  // built from that machine and runs there. The helper returns the same value
+  // when nothing moves, so this settles.
   useEffect(() => {
     if (!openEditor || readOnly) return;
-    const upgraded = upgradeProjectGroupRepositoryMembers(openEditor.value, (source) =>
-      remoteByLocalKey.get(getProjectMemberSourceKey(source))
-    );
     const next = applyDetectedProjectSubmodules(
-      upgraded,
+      openEditor.value,
       detection.detected,
       repositoryOf,
       labelOf
     );
     if (next !== openEditor.value) onChange({ ...openEditor, value: next });
-  }, [detection.detected, labelOf, onChange, openEditor, readOnly, remoteByLocalKey, repositoryOf]);
+  }, [detection.detected, labelOf, onChange, openEditor, readOnly, repositoryOf]);
 
   const validation = useMemo(
     () =>
