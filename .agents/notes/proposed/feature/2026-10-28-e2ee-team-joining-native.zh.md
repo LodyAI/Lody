@@ -25,3 +25,13 @@ Translation: current
 所属运行时测试使用真实密码学、SQLite 和合成的已认证 safeStorage，覆盖不同账号、原始申请恢复、篡改凭据绑定拒绝、真实历史验证、双向加密数据、额外个人设备、角色升级及离线重开。真实 IPC 边界测试覆盖账号、namespace 替换和 reader 归属；preload 测试覆盖 renderer 的显式允许列表。后端邀请政策和产品 UI 分开审查，不编译进本公开主进程 PR。
 
 尚未验证已安装桌面、真实系统钥匙串、生产服务、邮件、Stripe 或跨平台验收。完整历史启动限制为 256 页、32 MiB；超过上限需另行审查启动方案。本 PR 不改变已保存的签名账本格式，也不实现移除成员或换代 UI。
+
+## 移除与重新加入的组合
+
+配套[成员清理 #1982](https://github.com/LodyAI/Lody/pull/1982) 的 bootstrap 接线必须覆盖加入日志。终态清理由该 PR 比较原账号、工作区、genesis、签名公钥和 credential，并负责 owner 停止、排空和 custody 删除。同账号、工作区、genesis 下，旧凭据收到已认证 `member_removed` 响应也不能删除后来加入的新实例。
+
+- 完成上述精确身份比较后，随旧个人加入和创建记录一起删除匹配的 `member_joins` 行。该行可能保存已安装来源，因此普通 `retireMemberJoin` 故意拒绝删除。只删除 `personal_joins` 会留下旧成员来源，挡住新邀请。
+- 真正的新成员实例必须在旧设备及对应凭据清理后开始。`createDevice(genesis)` 会重开已保留的 key，只有设备文件不存在时才生成新 key。仅换邀请 token 不能授权替换密钥或结果不明的签名申请；同申请和重启重试继续使用原始 KeyPackage 与 credential。
+- 只有完整验证并安装不同签名 key 后才清除公共移除标记。除 `acceptPersonalJoin` 外，也要覆盖 `acceptMemberJoin` 和 `acceptPersonalHistory`；成员加入及 Member 批准的额外设备会使用完整历史路径。准备和提交尚不等于安装，不能清除标记。
+
+这些是独立 draft 的明确合并条件，不代表本 PR 已完成移除后重加入验收。移除协议与 tag 改动留在所属 PR。组合后需验证：同账号移除后重新加入产生不同签名 key 和 credential；迟到旧凭据响应不删除新实例；失败和重复接受保留原始签名内容。
