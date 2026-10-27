@@ -4,12 +4,12 @@ Capture production components in a real Chromium browser, compare their pixels
 and computed geometry, and generate a self-contained HTML report. Screenshot
 evidence is separate from behavior tests and from the real Electron smoke run.
 
-| Entry                   | Responsibility                                                                 |
-| ----------------------- | ------------------------------------------------------------------------------ |
-| `visual-regression.mjs` | Capture, assemble and compare immutable screenshot phases.                     |
-| `serve.mjs`             | Serve a fixed Storybook build on loopback.                                     |
-| `*-targets.json`        | Story, viewport, theme and interaction-state coverage.                         |
-| `electron-smoke.mts`    | Launch the actual built OSS desktop through the existing isolated E2E harness. |
+| Entry                   | Responsibility                                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `visual-regression.mjs` | Capture, assemble and compare immutable screenshot phases.                                                    |
+| `serve.mjs`             | Serve a fixed Storybook build or report directory on loopback; missing files return 404 when no index exists. |
+| `*-targets.json`        | Story, viewport, theme and interaction-state coverage.                                                        |
+| `electron-smoke.mts`    | Launch the actual built OSS desktop through the existing isolated E2E harness.                                |
 
 ## Capture a component batch
 

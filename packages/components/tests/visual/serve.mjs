@@ -54,6 +54,10 @@ const server = createServer((request, response) => {
     // Storybook's iframe routes are all served by the same index.
     file = path.join(root, 'index.html');
   }
+  if (!existsSync(file) || !statSync(file).isFile()) {
+    response.writeHead(404).end('Not found');
+    return;
+  }
   response.writeHead(200, {
     'content-type': TYPES[path.extname(file)] ?? 'application/octet-stream',
     // The browser caches the bundle inside a capture context; without this the

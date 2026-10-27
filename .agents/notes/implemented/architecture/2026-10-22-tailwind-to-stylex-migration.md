@@ -894,6 +894,11 @@ keyboard actions, close cleanup and 1280/390px layouts pass with zero page error
 or external requests. The rejected metrics label and stale HTTP-page run remain
 separate evidence; only the final file is signed as reviewed.
 
+The artifact server also handles directories without an `index.html`: missing
+assets return 404 instead of opening a nonexistent fallback and crashing. Real
+HTTP checks verify that the report remains byte-identical and readable after
+missing-asset requests, while Storybook's existing index fallback still works.
+
 Two additional after-only palette-pruning controls render the actual production
 controls with all three palette variables removed. After finite animations and
 four stable full-CSS frames, light/dark PNGs are byte-identical to their ordinary
