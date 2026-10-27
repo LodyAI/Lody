@@ -1,8 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { chmodSync, closeSync, mkdirSync, openSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, renameSync } from 'node:fs';
 import { dirname } from 'node:path';
 import Database from 'better-sqlite3';
 import { z } from 'zod';
+
+const timestamp = z.number().int().nonnegative().safe();
+const isExists = (cause: unknown) =>
+  cause instanceof Error && 'code' in cause && cause.code === 'EEXIST';
+const isEmptyDatabase = (db: Database.Database) =>
+  db.prepare('SELECT 1 FROM sqlite_schema LIMIT 1').get() === undefined;
 
 const keySchema = z.object({
   genesis: z.string().min(1),
@@ -43,7 +49,8 @@ export type RealtimeJournalRequest = z.infer<typeof requestSchema>;
 export type RealtimeJournalRecord = RealtimeJournalRequest & {
   readonly digest: string;
 } & (
-    | { readonly state: 'received' | 'uncertain' }
+    | { readonly state: 'received' }
+    | { readonly state: 'uncertain'; readonly outcomeStatus: 'unknown' }
     | { readonly state: 'completed'; readonly outcome: Uint8Array }
   );
 
@@ -54,15 +61,29 @@ export class RealtimeJournalError extends Error {
   constructor(
     readonly code:
       | 'storage'
+      | 'clock_skew'
+      | 'unsupported_schema'
+      | 'reset_required'
+      | 'journal_reset'
+      | 'archived_request'
+      | 'request_keys_unreadable'
       | 'identity_conflict'
       | 'missing'
       | 'permit'
       | 'outcome_conflict'
       | 'response_conflict'
       | 'response_gap',
-    cause?: unknown
+    cause?: unknown,
+    readonly archivePath?: string
   ) {
-    super(`E2EE realtime journal: ${code}`, { cause });
+    super(
+      code === 'clock_skew'
+        ? 'E2EE realtime journal: local clock or retained clock floor is more than 10 minutes ahead of trusted time. Correct your system clock; if already correct, reset the local execution log.'
+        : code === 'request_keys_unreadable'
+          ? 'E2EE realtime journal: Cannot safely reset: current request identities cannot be read. Preserve the original journal and restore its request-key evidence before retrying.'
+          : `E2EE realtime journal: ${code}${archivePath !== undefined ? `; evidence: ${archivePath}; run lody e2ee journal reset --file <journal>` : ''}`,
+      { cause }
+    );
     this.name = 'RealtimeJournalError';
   }
 }
@@ -109,13 +130,20 @@ export class RealtimeJournal {
   private readonly pendingClose = new Map<Database.Database, unknown>();
   private readonly cleanupErrors: unknown[] = [];
 
+  private journalId?: string;
+
   constructor(
     private readonly filename: string,
-    private readonly now: () => number
+    private readonly now: () => number,
+    private readonly options: { readonly trustedNow?: () => number | undefined } = {}
   ) {}
 
   /** Explicit first provisioning only. Restart/open must use the constructor. */
-  static create(filename: string, now: () => number): RealtimeJournal {
+  static create(
+    filename: string,
+    now: () => number,
+    options: { readonly trustedNow?: () => number | undefined } = {}
+  ): RealtimeJournal {
     try {
       mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
       const fd = openSync(filename, 'wx', 0o600);
@@ -123,8 +151,8 @@ export class RealtimeJournal {
     } catch (cause) {
       throw new RealtimeJournalError('storage', cause);
     }
-    const journal = new RealtimeJournal(filename, now);
-    journal.withDatabase(() => undefined, true);
+    const journal = new RealtimeJournal(filename, now, options);
+    journal.withDatabase(() => undefined);
     return journal;
   }
 
@@ -136,6 +164,7 @@ export class RealtimeJournal {
   retryCleanup(): void {
     for (const db of this.pendingClose.keys()) {
       if (this.closeDatabase(db).closed) this.pendingClose.delete(db);
+      else break; // Keep the control lock until the earlier main handle closes.
     }
   }
 
@@ -153,26 +182,209 @@ export class RealtimeJournal {
     }
   }
 
-  private withDatabase<A>(body: (db: Database.Database) => A, provision = false): A {
+  /** Adapter opens hold a shared control lock; reset/rename requires exclusive access.
+   * Locks are released on process death.
+   * Never remove this control file: its retired IDs prevent replay across resets. */
+  private withControl<A>(body: (control: Database.Database) => A, exclusive = true): A {
     this.retryCleanup();
     if (this.pendingClose.size > 0)
       throw new RealtimeJournalError('storage', this.pendingClose.values().next().value);
-    let db: Database.Database | undefined;
+    let control: Database.Database | undefined;
     try {
-      // Restart and I/O recovery never create a missing or empty replacement.
-      db = new Database(this.filename, { timeout: 0, fileMustExist: true });
-      // Native SQLite rollback/checkpoint may change physical files before this
-      // read-only application validation. No application migration, replacement,
-      // permission change or mutation setting is allowed for an unknown schema.
-      if (!provision) this.ensureSchema(db);
-      chmodSync(this.filename, 0o600);
-      db.pragma('synchronous = FULL');
-      db.pragma('foreign_keys = ON');
-      if (provision) {
-        const database = db;
-        database
-          .transaction(() =>
-            database.exec(`CREATE TABLE realtime_requests (
+      const lockPath = `${this.filename}.control.sqlite`;
+      try {
+        closeSync(openSync(lockPath, 'wx', 0o600));
+      } catch (cause) {
+        if (!isExists(cause)) throw cause;
+      }
+      control = new Database(lockPath, { timeout: 0, fileMustExist: true });
+      const database = control;
+      database.pragma('synchronous = FULL');
+      database.exec(exclusive ? 'BEGIN EXCLUSIVE' : 'BEGIN DEFERRED');
+      const version = database.pragma('user_version', { simple: true });
+      if (version === 0 && isEmptyDatabase(database)) {
+        database.exec(`CREATE TABLE retired_requests (identity TEXT PRIMARY KEY) WITHOUT ROWID;
+          CREATE TABLE pending_reset (id INTEGER PRIMARY KEY CHECK(id = 1),
+            archive_path TEXT NOT NULL, replacement_id TEXT NOT NULL, reason TEXT NOT NULL);
+          PRAGMA user_version = 1;`);
+      } else if (version !== 1) throw new Error('Unsupported realtime journal control store');
+      const result = body(database);
+      // A confirmed main commit stays successful even if its handle cannot close.
+      // Retain the mutex with it so another owner cannot rename an open database.
+      if (this.pendingClose.size === 0) database.exec('COMMIT');
+      return result;
+    } catch (cause) {
+      if (cause instanceof RealtimeJournalError) throw cause;
+      throw new RealtimeJournalError('storage', cause);
+    } finally {
+      if (control) {
+        if (this.pendingClose.size > 0) {
+          this.pendingClose.set(control, this.pendingClose.values().next().value);
+        } else this.closeDatabase(control); // close also rolls back failed transactions.
+      }
+    }
+  }
+
+  /** Rename/provision steps require confirmed close; retain original operation failures. */
+  private withClosedDatabase<A>(body: (db: Database.Database) => A): A {
+    const db = new Database(this.filename, { fileMustExist: true, timeout: 0 });
+    let result: A;
+    try {
+      result = body(db);
+    } catch (cause) {
+      this.closeDatabase(db);
+      throw cause;
+    }
+    const closed = this.closeDatabase(db);
+    if (!closed.closed) throw new RealtimeJournalError('storage', closed.cause);
+    return result;
+  }
+
+  private pendingReset(control: Database.Database) {
+    const row = control
+      .prepare('SELECT archive_path, replacement_id, reason FROM pending_reset WHERE id = 1')
+      .get();
+    return row === undefined
+      ? null
+      : z
+          .object({
+            archive_path: z.string(),
+            replacement_id: z.string(),
+            reason: z.enum(['reset', 'unsupported']),
+          })
+          .parse(row);
+  }
+
+  /** Explicit local operation. Stop execution/dispatch owners before calling.
+   * Durable intent precedes rename; retry completes an interrupted reset. */
+  reset(): { archivePath: string } {
+    try {
+      this.stageReset('reset');
+    } catch (cause) {
+      if (!(cause instanceof RealtimeJournalError) || cause.code !== 'unsupported_schema')
+        throw cause;
+      this.stageReset('unsupported');
+    }
+    return this.completeReset(true);
+  }
+
+  private stageReset(reason: 'reset' | 'unsupported'): void {
+    this.withControl((control) => {
+      if (this.pendingReset(control)) return;
+      this.withClosedDatabase((db) => {
+        if (reason === 'unsupported') {
+          let unsupported = false;
+          try {
+            this.ensureSchema(db);
+          } catch (cause) {
+            if (!(cause instanceof RealtimeJournalError) || cause.code !== 'unsupported_schema')
+              throw cause;
+            unsupported = true;
+          }
+          if (!unsupported) throw new RealtimeJournalError('journal_reset');
+        }
+        if (reason === 'reset') this.ensureSchema(db);
+        // Schema usability and request-key evidence are independent. Even an
+        // incomplete current store must retire its IDs before it can be archived.
+        if (db.pragma('user_version', { simple: true }) === 3) {
+          const retire = control.prepare('INSERT OR IGNORE INTO retired_requests VALUES (?)');
+          for (const key of this.readCurrentRequestKeys(db))
+            retire.run(digest(Buffer.from(JSON.stringify(keyValues(key)))));
+        }
+        const replacementId = randomUUID();
+        control
+          .prepare('INSERT INTO pending_reset VALUES (1, ?, ?, ?)')
+          .run(`${this.filename}.archive-${randomUUID()}`, replacementId, reason);
+      });
+    });
+  }
+
+  private *readCurrentRequestKeys(db: Database.Database): Generator<RealtimeRequestKey> {
+    try {
+      for (const row of db
+        .prepare(`SELECT genesis, workspace_id AS workspaceId,
+        target_machine_id AS targetMachineId, request_id AS requestId FROM realtime_requests`)
+        .iterate())
+        yield keySchema.parse(row);
+    } catch (cause) {
+      throw new RealtimeJournalError('request_keys_unreadable', cause);
+    }
+  }
+
+  private completeReset(createReplacement: boolean): { archivePath: string } {
+    return this.withControl((control) => {
+      const pending = this.pendingReset(control);
+      if (!pending) throw new RealtimeJournalError('storage');
+      if (!existsSync(pending.archive_path)) {
+        this.withClosedDatabase((db) => {
+          // Native recovery/checkpoint must finish before renaming. Refuse a
+          // busy external reader/writer; never split a WAL/hot journal pair.
+          if (db.pragma('journal_mode = DELETE', { simple: true }) !== 'delete')
+            throw new RealtimeJournalError('storage');
+          db.transaction(() => undefined).exclusive();
+        });
+        renameSync(this.filename, pending.archive_path);
+      }
+      if (createReplacement) {
+        if (!existsSync(this.filename)) closeSync(openSync(this.filename, 'wx', 0o600));
+        this.withClosedDatabase((db) => {
+          this.initializeEmpty(db, pending.replacement_id);
+          this.ensureSchema(db);
+          const id = z
+            .object({ id: z.string() })
+            .parse(db.prepare('SELECT id FROM realtime_identity').get()).id;
+          if (id !== pending.replacement_id) throw new RealtimeJournalError('journal_reset');
+        });
+        control.prepare('DELETE FROM pending_reset WHERE id = 1').run();
+      }
+      return { archivePath: pending.archive_path };
+    });
+  }
+
+  private withDatabase<A>(body: (db: Database.Database, control: Database.Database) => A): A {
+    try {
+      return this.withControl((control) => {
+        const pending = this.pendingReset(control);
+        if (pending)
+          throw new RealtimeJournalError('reset_required', undefined, pending.archive_path);
+        let db: Database.Database | undefined;
+        try {
+          db = new Database(this.filename, { timeout: 0, fileMustExist: true });
+          this.initializeEmpty(db);
+          this.ensureSchema(db);
+          const id = z
+            .object({ id: z.string() })
+            .parse(db.prepare('SELECT id FROM realtime_identity').get()).id;
+          if (this.journalId !== undefined && id !== this.journalId)
+            throw new RealtimeJournalError('journal_reset');
+          this.journalId = id;
+          chmodSync(this.filename, 0o600);
+          db.pragma('synchronous = FULL');
+          db.pragma('foreign_keys = ON');
+          return body(db, control);
+        } finally {
+          if (db) this.closeDatabase(db);
+        }
+      }, false);
+    } catch (cause) {
+      if (cause instanceof RealtimeJournalError && cause.code === 'unsupported_schema') {
+        if (this.pendingClose.size > 0) throw cause;
+        this.stageReset('unsupported');
+        const { archivePath } = this.completeReset(false);
+        throw new RealtimeJournalError('unsupported_schema', cause, archivePath);
+      }
+      throw cause;
+    }
+  }
+
+  private initializeEmpty(db: Database.Database, id: string = randomUUID()): void {
+    // BEGIN IMMEDIATE serializes interrupted-first-create recovery. SQLite reads
+    // the schema after native rollback; only version zero with no objects is empty.
+    if (db.pragma('user_version', { simple: true }) !== 0 || !isEmptyDatabase(db)) return;
+    db.pragma('synchronous = FULL');
+    db.transaction(() => {
+      if (db.pragma('user_version', { simple: true }) !== 0 || !isEmptyDatabase(db)) return;
+      db.exec(`CREATE TABLE realtime_requests (
         genesis TEXT NOT NULL, workspace_id TEXT NOT NULL,
         target_machine_id TEXT NOT NULL, request_id TEXT NOT NULL,
         requester TEXT NOT NULL, expires_at INTEGER NOT NULL,
@@ -185,32 +397,30 @@ export class RealtimeJournal {
           OR (state = 'completed' AND claim IS NOT NULL AND outcome IS NOT NULL AND outcome_digest IS NOT NULL))
       ) WITHOUT ROWID;
       CREATE TABLE realtime_clock (
-        id INTEGER PRIMARY KEY CHECK(id = 1), observed_at INTEGER NOT NULL
-      ); ${responseTable}; PRAGMA user_version = 2;`)
-          )
-          .immediate();
-      }
-      this.ensureSchema(db);
-      return body(db);
-    } catch (cause) {
-      if (cause instanceof RealtimeJournalError) throw cause;
-      throw new RealtimeJournalError('storage', cause);
-    } finally {
-      // A committed result stays successful; this owner retains cleanup.
-      if (db) this.closeDatabase(db);
-    }
+        genesis TEXT NOT NULL, workspace_id TEXT NOT NULL, observed_at INTEGER NOT NULL,
+        PRIMARY KEY (genesis, workspace_id)
+      ) WITHOUT ROWID;
+      CREATE TABLE realtime_identity (id TEXT PRIMARY KEY) WITHOUT ROWID;
+      ${responseTable}; PRAGMA user_version = 3;`);
+      db.prepare('INSERT INTO realtime_identity VALUES (?)').run(id);
+    }).immediate();
   }
 
   private ensureSchema(db: Database.Database): void {
     const version = db.pragma('user_version', { simple: true });
-    if (version !== 2) throw new Error('Unsupported or incomplete realtime journal');
-    db.prepare(`SELECT genesis, workspace_id, target_machine_id, request_id,
+    if (version !== 3) throw new RealtimeJournalError('unsupported_schema');
+    try {
+      db.prepare(`SELECT genesis, workspace_id, target_machine_id, request_id,
       requester, expires_at, frame, digest, state, claim, outcome, outcome_digest
       FROM realtime_requests LIMIT 0`).all();
-    db.prepare('SELECT id, observed_at FROM realtime_clock LIMIT 0').all();
-    // No application migration, repair or reset. SQLite owns native recovery.
-    db.prepare(`SELECT genesis, workspace_id, target_machine_id, request_id,
+      db.prepare('SELECT genesis, workspace_id, observed_at FROM realtime_clock LIMIT 0').all();
+      db.prepare('SELECT id FROM realtime_identity LIMIT 0').all();
+      // No schema migration or evidence repair. SQLite owns native recovery.
+      db.prepare(`SELECT genesis, workspace_id, target_machine_id, request_id,
       position, frame, digest FROM realtime_responses LIMIT 0`).all();
+    } catch (cause) {
+      throw new RealtimeJournalError('unsupported_schema', cause);
+    }
   }
 
   private readRow(db: Database.Database, key: RealtimeRequestKey) {
@@ -244,7 +454,9 @@ export class RealtimeJournal {
     };
     return row.state === 'completed' && row.outcome !== null
       ? { ...request, state: 'completed', outcome: Uint8Array.from(row.outcome) }
-      : { ...request, state: row.state === 'received' ? 'received' : 'uncertain' };
+      : row.state === 'received'
+        ? { ...request, state: 'received' }
+        : { ...request, state: 'uncertain', outcomeStatus: 'unknown' };
   }
 
   private matching(db: Database.Database, request: RealtimeJournalRequest) {
@@ -272,9 +484,15 @@ export class RealtimeJournal {
 
   receive(input: RealtimeJournalRequest): RealtimeJournalRecord {
     const request = copyRequest(input);
-    return this.withDatabase((db) =>
+    return this.withDatabase((db, control) =>
       db
         .transaction(() => {
+          if (
+            control
+              .prepare('SELECT 1 FROM retired_requests WHERE identity = ?')
+              .get(digest(Buffer.from(JSON.stringify(keyValues(request)))))
+          )
+            throw new RealtimeJournalError('archived_request');
           db.prepare(`INSERT OR IGNORE INTO realtime_requests
           (genesis, workspace_id, target_machine_id, request_id, requester,
            expires_at, frame, digest, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'received')`).run(
@@ -312,15 +530,29 @@ export class RealtimeJournal {
           const row = this.matching(db, request);
           if (row.state !== 'received')
             return { state: 'existing' as const, record: this.record(request, row) };
-          const current = z.number().int().nonnegative().safe().parse(this.now());
-          const observed = db.prepare('SELECT observed_at FROM realtime_clock WHERE id = 1').get();
+          const current = timestamp.parse(this.now());
+          // Caller supplies a current independently authenticated reference,
+          // never a timestamp taken from this opaque request. No network here.
+          const reference = this.options.trustedNow?.();
+          if (reference !== undefined && current - timestamp.parse(reference) > 600_000)
+            throw new RealtimeJournalError('clock_skew');
+          const observed = db
+            .prepare(
+              'SELECT observed_at FROM realtime_clock WHERE genesis = ? AND workspace_id = ?'
+            )
+            .get(request.genesis, request.workspaceId);
           const previous = observed
-            ? z.object({ observed_at: z.number().int().nonnegative().safe() }).parse(observed)
-                .observed_at
+            ? z.object({ observed_at: timestamp }).parse(observed).observed_at
             : 0;
-          const now = Math.max(current, previous);
-          db.prepare(`INSERT INTO realtime_clock (id, observed_at) VALUES (1, ?)
-          ON CONFLICT(id) DO UPDATE SET observed_at = excluded.observed_at`).run(now);
+          if (reference !== undefined && previous - reference > 600_000)
+            throw new RealtimeJournalError('clock_skew');
+          const now = Math.max(reference ?? current, previous);
+          db.prepare(`INSERT INTO realtime_clock (genesis, workspace_id, observed_at) VALUES (?, ?, ?)
+            ON CONFLICT(genesis, workspace_id) DO UPDATE SET observed_at = excluded.observed_at`).run(
+            request.genesis,
+            request.workspaceId,
+            now
+          );
           if (request.expiresAt <= now)
             return { state: 'expired' as const, record: this.record(request, row) };
           const claim = randomUUID();

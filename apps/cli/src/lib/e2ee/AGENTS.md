@@ -20,27 +20,28 @@
 - Resume first Windows ACL setup only in an empty custody directory; otherwise validate only.
 - `runtime.ts` composes Feed/VerifiedLedger, installed keys and optional receiver.
   Open/status are offline; cloud requests stay in cloud-cli-port.
+  Report damaged history/pins distinctly; never reset trusted pins from remote hints.
 - Journal originals before feed/pin advancement. Rebase after 64 more records, core pin
   first. Retired cache cleanup cannot fail local open.
 - No plaintext RPC, presence, attachments or scheduled automation on encrypted workspaces
   while their encrypted channels remain unimplemented.
-- `realtime-journal.ts` is storage only; exclusive `create` provisions schema 2.
-  Never upgrade/repair/replace schema or originals. Reject unknown committed schema
-  before app settings/chmod/writes; native SQLite recovery may precede validation.
-  Immutable requests/responses/first outcomes; no expiry GC/replay. Bound owners retaining
-  permits/failed cleanup. Persist replies before send; indexes select no wire profile.
-  Failed responses retain one original/permit for exact retry and preserve results.
-  Fence execution AND Meta/history.
-  Preserve the file-global clock floor across workspaces/restarts and readable completed
-  evidence. No floor reset, deadline extension or new time source/recovery generation.
-  See [integration proposal](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-realtime-journal.md).
+- `realtime-journal.ts`: schema 3 only; no migration. Recover SQLite first;
+  Init only v0/no objects. Archive intact after retiring readable current
+  keys despite damage; unreadable keys refuse reset. No auto-replace/GC/archive replay/import.
+  Exact originals/first outcome; uncertain=unknown/no takeover; independent IDs.
+  Floors: genesis/workspace; before writes reject local >10min ahead of authenticated
+  current time, never frame time. No reference: scoped max; reset.
+  Reset: stop owners, archive, fresh ID; keep control/retired IDs/intent. Shared call
+  locks, exclusive reset; retain through failed main close. Bound permits/cleanup;
+  reply before send, exact retries; fence execution AND Meta/history. No authority.
+  [Recovery](../../../README.md#local-encrypted-execution-log-recovery).
 - `prepareCliE2eeMachineLegacy` binds the retained credential hash to the exact
   desktop-generated 16-byte pairing session using core's fixed v1 helper. Machine
   possession additionally binds the strict UTF-8 machineId; activation compares it
   with both the verified current device and the retained signed admission. Session
   IDs stay outside possession and ledger records; old developer formats need recreation.
-  Pairing preparation and activation run only on the OS-user control socket;
-  Fleet checks its own account and discovered encrypted workspace/genesis first.
+  Local preparation/activation uses the OS-user socket; remote pairing uses the
+  signed offer and scoped service port. Fleet checks account/workspace/genesis first.
   Activation refreshes the verified ledger and mailbox and acknowledges only an
   installed current key; temporary failure leaves the same pairing retryable.
 
@@ -67,10 +68,10 @@
 - Only activation/binding/device-original ENOENT means pairing wait. Check the
   original before custody init; stale hints cannot trigger keyring probes. Preserve
   other file errors/Fleet retry; never cache transient storage as missing pairing.
-- Ingest storage failure fences writes until verified refresh. Seal only requests
-  coalesced storage repair and returns; never await refresh inside an SDK save queue.
-  Healthy readers stay attached.
-  Validation/conflict needs explicit normal refresh; seal cannot auto-recover it.
+- Ingest failure fences new seals until verified refresh; keep the last verified view
+  and healthy readers. Retry at most three times per failure episode; explicit refresh
+  restarts that budget. Seal may request retry but never await it in the SDK save queue.
+  Never skip rejected records or reset pins. Close cancels pending retry timers.
 
 ## Local machine pairing
 
@@ -86,8 +87,8 @@
   signing-key-scoped credentials. Ledger-only owners cannot receive keys. Same-identity
   retries keep healthy owners; only identical intents share flights. Cancellation never
   guesses remote settlement. See [recovery rationale](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-local-pairing-recovery.md).
-- OS-user socket only; partial upgrades fail closed. No remote authentication. See the
-  [pairing note](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-machine-pairing-journal.md).
+- Remote commands use workspace custody and scoped grants; see the
+  [remote contract](../../../../../.agents/notes/proposed/feature/2026-10-27-e2ee-remote-machine-pairing.md).
 
 ## Catalog and Fleet containment
 
@@ -109,3 +110,6 @@
 - Never cache an unimplemented content mode; `export` refuses and `sync` skips schedules
   for encrypted workspaces
   ([note](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-cli-review-fixes.md)).
+
+- Reset: same-user socket; drain, exclusive sibling lease, archive whole dir;
+  fresh approval/KEK. OS/unknown stays OS.

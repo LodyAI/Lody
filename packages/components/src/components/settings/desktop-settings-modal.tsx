@@ -1,3 +1,4 @@
+import { WorkspaceSettings } from './e2ee/workspace-security';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { MemorySetting } from './memory-setting';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
@@ -255,7 +256,10 @@ function SettingsModalBody() {
   const resolvedTheme = useResolvedTheme();
   const shortcutsAllowed = useWorkspaceFeature('shortcuts');
   const sharingAllowed = useWorkspaceFeature('sharing');
-  const platformTabs = useVisibleSettingsTabs().filter(tab => (tab.id !== 'prompt-shortcuts' || shortcutsAllowed) && (tab.id !== 'shares' || sharingAllowed));
+  const platformTabs = useVisibleSettingsTabs().filter(
+    (tab) =>
+      (tab.id !== 'prompt-shortcuts' || shortcutsAllowed) && (tab.id !== 'shares' || sharingAllowed)
+  );
   const visibleTabs = isNativeAppShell()
     ? platformTabs.filter((tab) => tab.id !== 'billing')
     : platformTabs;
@@ -558,7 +562,7 @@ function SettingsTabContent({ tabId }: { tabId: SettingsTabId }) {
     case 'account':
       return <AccountSettingsComponent surface="account" />;
     case 'workspace':
-      return <AccountSettingsComponent surface="workspace" />;
+      return <WorkspaceSettings />;
     case 'people':
       return <AccountSettingsComponent surface="workspace" />;
     case 'billing':

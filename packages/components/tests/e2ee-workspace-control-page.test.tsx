@@ -97,7 +97,7 @@ describe('encrypted workspace control page reading', () => {
   // Frozen synthetic ledger v1 vector signed by fixed test keys.
   const vector = JSON.parse(
     readFileSync(join(import.meta.dirname, '../../e2ee-core/test/ledger-v1-vector.json'), 'utf8')
-  ) as { anchor: string; records: { hex: string }[] };
+  ) as { anchor: string; records: { hex: string; hash: string }[] };
   const page = (count: number, headHash: string) => ({
     workspaceId: 'w',
     genesisHash: vector.anchor,
@@ -111,10 +111,10 @@ describe('encrypted workspace control page reading', () => {
     genesisHash: vector.anchor,
     localPin,
   });
-  // Record 12 declares a capability this client cannot verify past.
+  // The final record declares an unsupported capability after independent removal.
   const full = appendLedgerHistory(
     null,
-    page(12, 'f678de325f3a87488d3b6b40ad7da5aa8d8e7ef531e3f912a806ca1087887cc7'),
+    page(vector.records.length, vector.records.at(-1)!.hash),
     expected(vector.anchor)
   );
   const history = (localPin: string | null) =>
@@ -191,6 +191,21 @@ describe('encrypted workspace control page reading', () => {
       container!.querySelector<HTMLButtonElement>('button[aria-label="e2ee.control.help"]')!.click()
     );
     expect(container!.textContent).toContain('e2ee.verify.hint');
+  });
+
+  it('reads independent removal while preserving the published epoch', () => {
+    const count = vector.records.length - 1;
+    const verified = appendLedgerHistory(
+      null,
+      page(count, vector.records[count - 1]!.hash),
+      expected(vector.anchor)
+    );
+    render({ history: verified });
+    expect(container!.textContent).toContain('e2ee.summary.removeMember');
+    expect(
+      container!.querySelectorAll('section[aria-label="e2ee.control.members"] li')
+    ).toHaveLength(1);
+    expect(verified.view.inspectState().epoch).toMatchObject({ number: 2, rotationRequired: true });
   });
 
   it('stops at an unverifiable capability and asks for an upgrade instead of offering more', () => {

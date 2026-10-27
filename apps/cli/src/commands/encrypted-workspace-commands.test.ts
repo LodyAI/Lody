@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getScheduleRegistryFlockDocId } from '@lody/shared';
 
@@ -87,5 +90,47 @@ describe('encrypted workspaces in one-shot data commands', () => {
       getScheduleRegistryFlockDocId('plain' as never),
       getScheduleRegistryFlockDocId('plain' as never),
     ]);
+  });
+});
+
+describe('local encrypted execution log maintenance', () => {
+  it('resets through the CLI and reports an evidence archive while fencing the old request', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'lody-journal-command-'));
+    try {
+      const { RealtimeJournal } = await import('../lib/e2ee/realtime-journal');
+      const filename = join(directory, 'journal.sqlite');
+      const original = {
+        genesis: 'synthetic-genesis',
+        workspaceId: 'synthetic-workspace',
+        targetMachineId: 'synthetic-machine',
+        requestId: 'synthetic-request',
+        requester: 'synthetic-device',
+        expiresAt: 1_000,
+        frame: Uint8Array.of(1, 2, 3),
+      };
+      const journal = RealtimeJournal.create(filename, () => 100);
+      journal.receive(original);
+      expect(journal.claim(original).state).toBe('claimed');
+      const before = readFileSync(filename);
+      const { e2eeCommand } = await import('./e2ee');
+      await e2eeCommand.parseAsync(['journal', 'reset', '--file', filename, '--json'], {
+        from: 'user',
+      });
+      const lines = vi.mocked(console.log).mock.calls.map(([value]) => String(value));
+      const receipt = JSON.parse(lines.find((line) => line.includes('archivePath')) ?? '{}') as {
+        ok: boolean;
+        archivePath: string;
+        journalPath: string;
+      };
+      expect(receipt).toMatchObject({ ok: true, journalPath: filename });
+      expect(readFileSync(receipt.archivePath)).toEqual(before);
+      const fresh = new RealtimeJournal(filename, () => 100);
+      expect(() => fresh.receive(original)).toThrow('archived_request');
+      const next = { ...original, requestId: 'synthetic-new-request' };
+      fresh.receive(next);
+      expect(fresh.claim(next).state).toBe('claimed');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

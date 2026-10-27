@@ -197,18 +197,33 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
                 native.claimPersonalJoin(workspaceId, pairingSessionId),
               cancelPersonalJoin: (workspaceId, pairingSessionId) =>
                 native.cancelPersonalJoin(workspaceId, pairingSessionId),
+              beginRemoteMachinePairing: (workspaceId) =>
+                native.beginRemoteMachinePairing(workspaceId),
+              inspectRemoteMachinePairing: (workspaceId, pairingSessionId) =>
+                native.inspectRemoteMachinePairing(workspaceId, pairingSessionId),
+              approveRemoteMachinePairing: (workspaceId, pairingSessionId, summary) =>
+                native.approveRemoteMachinePairing(workspaceId, pairingSessionId, summary),
+              cancelRemoteMachinePairing: (workspaceId, pairingSessionId) =>
+                native.cancelRemoteMachinePairing(workspaceId, pairingSessionId),
               prepareLocalAgent: (workspaceId) => native.prepareLocalAgent(workspaceId),
               admitLocalAgent: (workspaceId, pairingSessionId) =>
                 native.admitLocalAgent(workspaceId, pairingSessionId),
-              refresh: (workspaceId) => native.refresh(workspaceId),
+              managementState: (workspaceId) => native.managementState(workspaceId),
+              updateKeys: (workspaceId) => native.updateKeys(workspaceId),
+              revokeDevice: (workspaceId, signingPublicKey) =>
+                native.revokeDevice(workspaceId, signingPublicKey),
+              refresh: (workspaceId, options) => native.refresh(workspaceId, options),
               contentStreamsToken: (workspaceId, rejectedToken) =>
                 native.contentStreamsToken(workspaceId, rejectedToken),
               seal: (workspaceId, input) => native.seal(workspaceId, input),
               openContent: (workspaceId, input) => native.openContent(workspaceId, input),
               account: (options) => native.account(options),
+              resetIdentity: (request) => native.resetIdentity(request),
+              resetLocalAgent: (request) => native.resetLocalAgent(request),
               recordCreated: (request) => native.recordCreated(request),
               open: (workspaceId, observed) => native.open(workspaceId, observed),
               close: (workspaceId) => native.close(workspaceId),
+              readIdentity: (input) => native.readIdentity(input),
               status: (workspaceId) => native.status(workspaceId),
               ingestLedgerRecords: (workspaceId, page) =>
                 native.ingestLedgerRecords(workspaceId, page),

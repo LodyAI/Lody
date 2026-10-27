@@ -104,7 +104,11 @@ results() / acknowledge(id)   ended tasks until acknowledged
 
 - A report is a signed claim of installation, not proof of custody.
 - `fetchAndInstall` copies and validates the whole page before writing
-  anything, and returns no `next` cursor if any install failed.
+  anything. Unreadable routing and sender/workspace/epoch/recipient hint mismatches
+  are skipped for this fetch, without journaling or rejecting their frame digests;
+  they remain retryable after the server returns honest metadata. Later rows still
+  run every normal verification. `processed` counts scanned rows, not installed keys.
+  An actual install failure returns no `next` cursor.
   `MailboxInstallError` names the failing frame (sender, `frameDigest`) so the
   application can decide on a repair.
 - Only a genuine ledger change ends a task as `Obsolete` or `Revoked`.
@@ -160,7 +164,11 @@ generate key → seal history packet → sign record → envelope per device
 → Committed: install via InstalledEpochKeys | Conflict: discard candidate key
 ```
 
-`resume` finishes the same candidate after a crash, without signing again.
+`resume` finishes the same candidate after a crash, without signing again. A missing
+candidate may reconcile its exact retained submission only after genuine commitment or
+conflict proof; it cannot authorize CAS at an unchanged parent. Normal receiver paths
+install committed keys independently. Existing installed keys permit terminal acknowledgement
+without reopening the candidate blob. Unpublished keys never bypass CandidateProtector.
 `cleanupStaged` deletes this device's group once a different commitment
 occupies its epoch. `acknowledge` releases the finished result. Only owner or
 admin personal devices may rotate. A manager who bypasses staging and appends
@@ -226,7 +234,9 @@ document key derived from the epoch key, and purpose-bound AAD.
   run encrypts anew, so a retry must resend the returned bytes.
 - Reading authenticates the historical author before decrypting. A revoked
   author's old content still opens and is attributed to its original member,
-  also after a snapshot, but this grants no current write right.
+  also after a ledger snapshot, but this grants no current write right. This applies
+  to both Streams snapshots and updates: historical ledger admission, signature,
+  readable epoch and AEAD remain mandatory; current author validity is not a read gate.
 
 ## Delivery (inside the distributor)
 
@@ -267,3 +277,5 @@ genesis; a valid signature neither admits a device nor replaces possession proof
 Verification uses the existing strict Ed25519 policy. The first creator device
 does not need this proof. `test/foundation.test.ts` retains a fixed signing vector
 and checks substitution of every context field.
+
+Desktop error classification, independent paging and terminal acknowledgement are described in [key maintenance availability](../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-key-maintenance-availability.md). `MailboxInstallError.cryptographicRejection` marks only a deterministic rejection at envelope verification; local writes, report signing and unknown native errors never authorize rejecting an envelope.

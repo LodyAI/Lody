@@ -744,17 +744,19 @@ async function exitOneShotCommand(code: number): Promise<void> {
 export async function runOneShotCommand(
   loggerName: string,
   options: Pick<CommonCommandOptions, 'json' | 'jsonl' | 'debug'>,
-  action: () => Promise<void>
+  action: () => Promise<void>,
+  execution: { localOnly?: boolean } = {}
 ): Promise<void> {
   if (options.debug) {
     rootLogger.setDebug(true);
   }
 
-  // Start the analytics poster once per one-shot command (idempotent; no-op without a key).
-  initCliAnalytics();
+  // Local maintenance must remain usable without cloud time or analytics setup.
+  // Other commands start the analytics poster once (idempotent; no-op without a key).
+  if (execution.localOnly !== true) initCliAnalytics();
 
   try {
-    await syncCommandTime(loggerName);
+    if (execution.localOnly !== true) await syncCommandTime(loggerName);
     await action();
     await exitOneShotCommand(0);
   } catch (error) {

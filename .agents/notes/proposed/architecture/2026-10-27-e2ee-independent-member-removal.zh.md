@@ -2,6 +2,7 @@
 
 Status: proposed
 Translation: current
+PR: [#1979](https://github.com/LodyAI/Lody/pull/1979)
 
 [English](2026-10-27-e2ee-independent-member-removal.md)
 
@@ -22,3 +23,5 @@ Owner 个人设备可移除非 Owner；Admin 个人设备只能移除 Member/Gue
 ## 验证与限制
 
 新增原生 Ed25519 用例在改动前失败，覆盖角色/设备种类权限、全部设备失权、历史作者保留、旧代继续加密、新成员实例重新加入、真实命令签名、能力门槛和快照/保留状态等价。现有真实 SQLite feed/reopen 与换代测试随新状态格式运行。这些检查不证明部署后的 token 过期、真实钥匙串、安装版删除行为或 Spec 获批。公开移除 Spec 保持 draft。
+
+最新 main 组合保留 candidate 恢复和独立移除的各自契约。CI 的两个组件分片仍把 capability 1 当作未知能力、沿用旧向量端点；现使用 capability 2（index 13）测试升级停止，端点哈希/数量跟随真实签名向量。更新预期还发现真实读回遗漏：tag10 在现有账本界面抛出 Unsupported ledger operation。现补只读记录与中英展示，真实签名向量回归覆盖移除后 epoch 不变、成员变化及未知能力停止；修补前为 RED。成员管理按钮仍由独立产品接线负责。

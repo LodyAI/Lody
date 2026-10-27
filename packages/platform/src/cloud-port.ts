@@ -53,6 +53,11 @@ export interface CloudSessionSharingPort {
  */
 /** Device-scoped cloud transport; local opens and custody stay with its host. */
 export interface CloudE2eePort {
+  completeMachinePairing?(input: {
+    workspaceId: string;
+    credential: string;
+    pairingSessionId: string;
+  }): Promise<void>;
   /** CLI-only native kernel assembled by its optional cloud composition. */
   createContentTokenProvider?(input: {
     workspaceId: string;
@@ -79,6 +84,8 @@ export interface CloudE2eePort {
 export interface CloudPort {
   /** Absent in ordinary/local composition; does not own local key material. */
   e2ee?: CloudE2eePort | null;
+  /** Explicit one-workspace machine service composition; never permits a legacy bridge. */
+  readonly e2eeMachineScope?: { workspaceId: string; genesisHash: string };
   readonly kind: PlatformKind;
   /** The identity every durable write is authored under. */
   identity: CloudPortIdentity;

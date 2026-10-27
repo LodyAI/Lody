@@ -85,8 +85,26 @@ export interface E2eeRuntimeLedgerView {
   /** Absolute ledger positions; a snapshot-origin host need not hold the prefix. */
   readonly recordPositions?: readonly number[];
 }
+/** Facts from the host's current verified ledger, never cloud projections. */
+export interface E2eeManagementState {
+  readonly epoch: number;
+  readonly rotationRequired: boolean;
+  readonly mayRotate: boolean;
+  readonly updatePending: boolean;
+  readonly recoveryIssue?: 'candidate-unavailable';
+  readonly devices: readonly {
+    key: string;
+    kind: 'personal' | 'machine' | 'recovery';
+    machineId: string | null;
+    self: boolean;
+    mayRevoke: boolean;
+  }[];
+}
 /** Desktop-only purpose-limited IPC; opening an existing workspace never creates an identity. */
 export interface E2eeWorkspaceRuntime {
+  managementState?(workspaceId: string): Promise<E2eeManagementState>;
+  updateKeys?(workspaceId: string): Promise<void>;
+  revokeDevice?(workspaceId: string, signingPublicKey: string): Promise<void>;
   personalPairingOffer?(workspaceId: string): Promise<E2eePersonalPairingOffer>;
   preparePersonalJoin?(
     offer: E2eePersonalPairingOffer
@@ -123,6 +141,24 @@ export interface E2eeWorkspaceRuntime {
   account(options?: {
     token?: string;
   }): Promise<{ userId: string; source: 'network' | 'offline' } | null>;
+  beginRemoteMachinePairing?(
+    workspaceId: string
+  ): Promise<import('@lody/shared/e2ee-remote-pairing').RemoteMachineStatus & { command: string }>;
+  inspectRemoteMachinePairing?(
+    workspaceId: string,
+    pairingSessionId: string
+  ): Promise<
+    import('@lody/shared/e2ee-remote-pairing').RemoteMachineStatus & { summary: string | null }
+  >;
+  approveRemoteMachinePairing?(
+    workspaceId: string,
+    pairingSessionId: string,
+    summary: string
+  ): Promise<{ admitted: boolean; ready: boolean }>;
+  cancelRemoteMachinePairing?(
+    workspaceId: string,
+    pairingSessionId: string
+  ): Promise<import('@lody/shared/e2ee-remote-pairing').RemoteMachineStatus>;
   /** Prepare public same-user machine evidence; this never admits the device. */
   prepareLocalAgent?(
     workspaceId: string
@@ -136,13 +172,22 @@ export interface E2eeWorkspaceRuntime {
   refresh(workspaceId: string, options?: { installKeys?: boolean }): Promise<E2eeRuntimeStatus>;
   contentStreamsToken(
     workspaceId: string,
-    rejectedToken?: string
+    rejectedToken?: string,
+    requestSnapshotFor?: string
   ): Promise<import('@lody/cloud-api').E2eeContentToken>;
   seal(
     workspaceId: string,
     input: E2eeContentSeal
   ): Promise<{ header: Uint8Array; sealed: Uint8Array }>;
   openContent(workspaceId: string, input: E2eeContentOpen): Promise<Uint8Array>;
+  /** Explicitly archive local originals and require fresh independently approved pairing. */
+  resetIdentity?(input: {
+    workspaceId?: string;
+    resetId: string;
+    confirm: true;
+  }): Promise<{ archive: string | null }>;
+  /** Archive the local CLI machine identity; retain the desktop personal identity. */
+  resetLocalAgent?(input: { workspaceId: string; resetId: string; confirm: true }): Promise<void>;
   recordCreated(input: {
     workspaceId: string;
     genesisHash: string;
@@ -153,6 +198,13 @@ export interface E2eeWorkspaceRuntime {
     observed?: { genesisHash: string; headHash: string; length: number }
   ): Promise<E2eeRuntimeStatus>;
   close(workspaceId: string): Promise<void>;
+  /** Read retained verified identity without granting this window a reader.
+   * The host binds the expected account and releases its temporary read before
+   * returning. Missing on older hosts; callers must not fall back to status. */
+  readIdentity?(input: { accountId: string; workspaceId: string }): Promise<{
+    workspaceId: string;
+    genesisHash: string;
+  }>;
   status(workspaceId: string): Promise<E2eeRuntimeStatus>;
   ingestLedgerRecords(
     workspaceId: string,

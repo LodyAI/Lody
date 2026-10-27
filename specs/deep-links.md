@@ -5,7 +5,7 @@ Translation: current
 
 [中文](deep-links.zh.md)
 
-Conversation references open the exact conversation in the current Lody application. Links opened from another application go to the OS-selected default Lody installation. All versions generate the same resource format. Links identify destinations and do not grant access.
+Conversation references open the exact conversation in the current Lody application. Links opened from another application go to the OS-selected default Lody installation. If a different supported channel already owns the desktop, a channel-neutral destination is handed to that running installation instead. All versions generate the same resource format. Links identify destinations and do not grant access.
 
 ## Addresses and versions
 
@@ -37,7 +37,7 @@ OS URL / product-window link → current installation's renderer queue
 
 Normal in-app clicks remain in the source window. Product-window navigation, new-window links and external-link IPC recognize session resources first and never relaunch the application through the OS for them. Private references on public shares remain inert; public embedded browsers gain no product-navigation authority. Other external links retain the HTTP(S) policy.
 
-OS URLs use existing window lifecycle and preload buffering. Renderer navigation waits for the workspace directory and current workspace to be ready. Explicit destinations encode a concrete tab instead of restoring the last visited tab; after target metadata is ready, existing tab restoration handles closed tabs. A pending session restoration waits for child metadata, expires with a visible failure after 15 seconds, and is cleared when navigation is abandoned. The newest waiting resource destination wins; this is not a durable queue across main-process crashes.
+OS URLs use existing window lifecycle and preload buffering. Renderer navigation waits for the workspace directory and current workspace to be ready. Explicit destinations encode a concrete tab instead of restoring the last visited tab; after target metadata is ready, existing tab restoration handles closed tabs. A pending session restoration waits for child metadata, expires with a visible failure after 15 seconds, and is cleared when navigation is abandoned. The newest waiting resource destination wins; this is not a durable queue across main-process crashes. When another desktop channel owns the process-exclusion lease, the losing launch hands a channel-neutral `session`, `chat/new` or `provider/import` destination to the running installation over that lease before exiting; authentication and other cloud callbacks keep their channel routing. The running installation acknowledges only after it binds launch handling, and a startup that will refuse rejects the handoff.
 
 An unavailable workspace never falls back to the current workspace. Show the failure and explicit actions for other registered versions. For session resources, only a user click hands off to another installation; no automatic permission bypass. OSS queries only local catalogs. Existing session pages own access control, deleted/loading/offline states and archive semantics; links do not automatically unarchive resources. Existing OS intake still uses the main window, without introducing a cross-window workspace directory.
 

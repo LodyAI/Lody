@@ -14,6 +14,7 @@ import {
 } from '@lody/e2ee-core';
 import {
   Bytes,
+  LedgerError,
   hashRecordBytes,
   getCommittedEpochStagingKey,
   hasVerifiedCheckpoint,
@@ -45,9 +46,19 @@ import { makeStreamsUpdateBinding } from '@lody/e2ee-core/adapters/loro-streams'
 
 /** Safe local failures. Raw errors and decrypted material never cross this boundary. */
 export class CliE2eeRuntimeError extends Data.TaggedError('CliE2eeRuntimeError')<{
-  readonly code: 'invalid-input' | 'storage' | 'local-evidence-conflict' | 'closed';
+  readonly code:
+    | 'invalid-input'
+    | 'storage'
+    | 'local-evidence-conflict'
+    | 'closed'
+    | 'local-history-recovery-required'
+    | 'trusted-pin-unavailable';
 }> {}
 const failure = (code: CliE2eeRuntimeError['code']) => new CliE2eeRuntimeError({ code });
+const pinFailure = (error: LocalStoreError) =>
+  error.store === 'LedgerPinStore' && error.reason === 'corrupt'
+    ? failure('trusted-pin-unavailable')
+    : error;
 const hex = (value: Uint8Array) => Buffer.from(value).toString('hex');
 const unhex = (value: string) => {
   if (!/^(?:[0-9a-f]{2})+$/.test(value)) throw failure('invalid-input');
@@ -56,7 +67,21 @@ const unhex = (value: string) => {
 const sql = <A>(work: () => A) =>
   Effect.try({
     try: work,
-    catch: (error) => (error instanceof CliE2eeRuntimeError ? error : failure('storage')),
+    catch: (error) =>
+      error instanceof CliE2eeRuntimeError
+        ? error
+        : failure(
+            error instanceof Error &&
+              'code' in error &&
+              typeof error.code === 'string' &&
+              (/^(?:SQLITE_CORRUPT(?:_.*)?|SQLITE_NOTADB)$/.test(error.code) ||
+                (error.code === 'ERR_SQLITE_ERROR' &&
+                  'errcode' in error &&
+                  typeof error.errcode === 'number' &&
+                  [11, 26].includes(error.errcode & 0xff)))
+              ? 'local-history-recovery-required'
+              : 'storage'
+          ),
   });
 type FeedOrigin = Parameters<typeof LedgerFeed.layer>[0]['origin'];
 type HistoryRow = { position: number; record: Uint8Array; locator: string | null };
@@ -121,9 +146,14 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
   const db = yield* Effect.acquireRelease(
     sql(() => {
       const connection = new DatabaseSync(join(options.directory, 'history.sqlite'));
-      connection.exec(
-        'PRAGMA synchronous=FULL; PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS records(position INTEGER PRIMARY KEY,record BLOB NOT NULL,locator TEXT); CREATE TABLE IF NOT EXISTS cache(id INTEGER PRIMARY KEY CHECK(id=1),name TEXT NOT NULL,origin TEXT)'
-      );
+      try {
+        connection.exec(
+          'PRAGMA synchronous=FULL; PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS records(position INTEGER PRIMARY KEY,record BLOB NOT NULL,locator TEXT); CREATE TABLE IF NOT EXISTS cache(id INTEGER PRIMARY KEY CHECK(id=1),name TEXT NOT NULL,origin TEXT)'
+        );
+      } catch (error) {
+        connection.close();
+        throw error;
+      }
       connection
         .prepare('INSERT OR IGNORE INTO records(position,record) VALUES(0,?)')
         .run(genesisRecord);
@@ -158,9 +188,9 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
       mode: 'create-or-open',
     })
   ).pipe(Layer.provideMerge(base));
-  const local = yield* Layer.buildWithScope(stores, scope);
+  const local = yield* Layer.buildWithScope(stores, scope).pipe(Effect.mapError(pinFailure));
   const pins = Context.get(local, LedgerPinStore);
-  const pin = yield* pins.read();
+  const pin = yield* pins.read().pipe(Effect.mapError(pinFailure));
   const originals = yield* sql(
     () =>
       db
@@ -272,7 +302,19 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
       anchor: genesis,
       records: originals.map((row) => row.record),
       checkpoint: endpoint,
-    });
+    }).pipe(
+      Effect.mapError((error) =>
+        error instanceof LedgerError &&
+        ![
+          'native-unavailable',
+          'upgrade-required',
+          'unknown-version',
+          'unknown-operation',
+        ].includes(error.code)
+          ? failure('local-history-recovery-required')
+          : error
+      )
+    );
     if (pin && !Result.getOrThrow(hasVerifiedCheckpoint(view, pin)))
       return yield* failure('local-evidence-conflict');
     const name = `ledger-feed-${randomUUID()}.sqlite`;
@@ -533,7 +575,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
                 yield* receiver.fetchAndInstall(cursor, 100).pipe(
                   Effect.catchTag('MailboxInstallError', (error) =>
                     Effect.gen(function* () {
-                      if (repair) {
+                      if (repair && error.cryptographicRejection) {
                         yield* repair.enqueue(
                           `rejected:${error.epoch}:${error.frameDigest}`,
                           error.frameDigest

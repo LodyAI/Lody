@@ -1,6 +1,10 @@
+import { createHash, randomUUID } from 'node:crypto';
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import * as encryptedWorkspace from '../src/lib/e2ee/workspace-legacy';
 import {
   LOCAL_E2EE_PAIRING_PATH,
+  LOCAL_E2EE_RESET_PATH,
+  type LocalE2eeResetRequest,
   type LocalE2eePairingRequest,
 } from '@lody/shared/e2ee-local-pairing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -301,12 +305,125 @@ describe('local E2EE pairing authority', () => {
       cleanupOwners: new Map(),
       startupCleanupOwners: new Map(),
       e2eeActivationInFlight: new Map(),
+      e2eeResets: new Map(),
       startWorkspace: async () => {},
       resolveWorkspaceRuntime: async () => ({
         lody: { refreshEncryptedWorkspace: async () => true },
       }),
       ...overrides,
-    }) as { dispatchLocalE2eePairing: (input: LocalE2eePairingRequest) => Promise<unknown> };
+    }) as {
+      dispatchLocalE2eePairing: (input: LocalE2eePairingRequest) => Promise<unknown>;
+      resetLocalE2eeIdentity: (input: LocalE2eeResetRequest) => Promise<{ archive: string | null }>;
+    };
+  it('drains only the selected workspace before whole-directory reset, fences pairing, and replays without stopping a replacement', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'fleet-identity-reset-'));
+    vi.stubEnv('LODY_DATA_DIR', directory);
+    const root = path.join(
+      getLodyDataDir(),
+      'e2ee',
+      createHash('sha256').update('account').digest('hex'),
+      'workspace'
+    );
+    const entered = Promise.withResolvers<void>(),
+      release = Promise.withResolvers<void>();
+    const old = { lody: {} },
+      sibling = { lody: {} };
+    const runtimes = new Map([
+      ['workspace', old],
+      ['sibling', sibling],
+    ]);
+    const waitingForPairing = new Set<string>();
+    let stopped = 0;
+    const instance = target({
+      runtimes,
+      waitingForPairing,
+      retryTimers: new Map(),
+      refreshRuntimeState: () => {},
+      stopWorkspace: async (id: string) => {
+        entered.resolve();
+        await release.promise;
+        runtimes.delete(id);
+        stopped++;
+      },
+    });
+    const reset = {
+      accountId: 'account',
+      machineId: 'machine',
+      workspaceId: 'workspace',
+      resetId: randomUUID(),
+    };
+    try {
+      await fs.mkdir(path.join(root, 'custody'), { recursive: true, mode: 0o700 });
+      await fs.writeFile(path.join(root, 'custody', 'protection'), 'file', { mode: 0o600 });
+      await fs.writeFile(path.join(root, 'original'), 'retained evidence', { mode: 0o600 });
+      const resetting = instance.resetLocalE2eeIdentity(reset);
+      await entered.promise;
+      await expect(instance.dispatchLocalE2eePairing(request)).rejects.toThrow(
+        'e2ee_identity_busy'
+      );
+      expect(await fs.readFile(path.join(root, 'original'), 'utf8')).toBe('retained evidence');
+      expect(runtimes.get('sibling')).toBe(sibling);
+      release.resolve();
+      const result = await resetting;
+      if (!result.archive) throw new Error('expected archive');
+      expect(await fs.readFile(path.join(result.archive, 'original'), 'utf8')).toBe(
+        'retained evidence'
+      );
+      expect(waitingForPairing.has('workspace')).toBe(true);
+      expect(runtimes.get('sibling')).toBe(sibling);
+      const replacement = { lody: {} };
+      runtimes.set('workspace', replacement);
+      waitingForPairing.delete('workspace');
+      expect(await instance.resetLocalE2eeIdentity(reset)).toEqual(
+        expect.objectContaining({ archive: result.archive })
+      );
+      expect(runtimes.get('workspace')).toBe(replacement);
+      expect(waitingForPairing.has('workspace')).toBe(false);
+      expect(stopped).toBe(1);
+    } finally {
+      release.resolve();
+      vi.unstubAllEnvs();
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('validates the separate reset route and does not dispatch another machine', async () => {
+    let accepted = false;
+    const handler = new LocalControlHandler({
+      machineId: 'machine',
+      logger,
+      dispatchSession: async () => [],
+      dispatchProject: async () => ({ ok: false, error: 'unused' }),
+      dispatchE2eeReset: async (message) => {
+        accepted = true;
+        return { ok: true, resetId: message.resetId, archive: null };
+      },
+    });
+    const reset = {
+      accountId: 'account',
+      machineId: 'other-machine',
+      workspaceId: 'workspace',
+      resetId: randomUUID(),
+    };
+    const denied = await handler.handle({
+      path: LOCAL_E2EE_RESET_PATH,
+      rawBody: JSON.stringify(reset),
+      requestId: 1,
+    });
+    expect(denied.status).toBe(403);
+    expect(accepted).toBe(false);
+    const result = await handler.handle({
+      path: LOCAL_E2EE_RESET_PATH,
+      rawBody: JSON.stringify({ ...reset, machineId: 'machine' }),
+      requestId: 2,
+    });
+    expect(result).toEqual({
+      status: 200,
+      payload: { ok: true, resetId: reset.resetId, archive: null },
+    });
+    expect(accepted).toBe(true);
+  });
+
   it('rejects partial-upgrade activation before dispatch and accepts the complete pinned context', async () => {
     let accepted = false;
     const handler = new LocalControlHandler({

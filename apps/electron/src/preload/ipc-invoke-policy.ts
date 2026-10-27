@@ -27,6 +27,10 @@ export function isIpcInvokeChannel(channel: string): boolean {
       'account',
       'prepareLocalAgent',
       'admitLocalAgent',
+      'beginRemoteMachinePairing',
+      'inspectRemoteMachinePairing',
+      'approveRemoteMachinePairing',
+      'cancelRemoteMachinePairing',
       'seal',
       'openContent',
       'contentStreamsToken',
@@ -36,8 +40,14 @@ export function isIpcInvokeChannel(channel: string): boolean {
       'open',
       'close',
       'status',
+      'readIdentity',
+      'resetIdentity',
+      'resetLocalAgent',
       'ingestLedgerRecords',
-      'ledgerView'
+      'ledgerView',
+      'managementState',
+      'updateKeys',
+      'revokeDevice'
     ]).has(match![2]!)
   return group !== undefined && INVOKE_SERVICE_GROUP_VALUES.has(group)
 }

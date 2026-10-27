@@ -1,3 +1,5 @@
+import { openSqliteConnection } from '../../../../../packages/e2ee-core/src/adapters/node-sqlite/store.ts'
+import { existsSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
@@ -26,6 +28,8 @@ import {
   commitEpochKey,
   sealHistoryPacket,
   hashRecordBytes,
+  mailboxDigest,
+  epochDeliveryId,
   prepareJoinRequest,
   prepareDeviceAdmission,
   prepareEpochEnvelope,
@@ -170,6 +174,159 @@ const historyDb = (directory, work) => {
     db.close()
   }
 }
+for (const damage of ['history', 'pin']) {
+  void test(`damaged authoritative ${damage} has a distinct recovery code and preserves originals`, async (t) => {
+    const directory = await fixture(t)
+    let prepared, records
+    await execute(
+      Effect.gen(function* () {
+        const owner = yield* ownerWithHost(directory)
+        prepared = yield* bind(owner)
+        records = yield* makeRecords(owner.custody, prepared, 3)
+        yield* owner.host.open(workspaceId)
+        yield* owner.host.ingestLedgerRecords(
+          workspaceId,
+          page(records, prepared.genesisHashHex, 0)
+        )
+      })
+    )
+    const pinPath = join(directory, 'workspaces', workspaceId, 'ledger-pin.sqlite')
+    const pin = new DatabaseSync(pinPath)
+    const trusted = pin.prepare('SELECT * FROM ledger_pin').all()
+    if (damage === 'pin') pin.exec('UPDATE ledger_pin SET count=0')
+    pin.close()
+    const damaged = records[2].slice()
+    damaged[damaged.length - 1] ^= 1
+    if (damage === 'history')
+      historyDb(directory, (db) =>
+        db.prepare('UPDATE records SET record=? WHERE position=2').run(damaged)
+      )
+    await execute(
+      Effect.gen(function* () {
+        const owner = yield* ownerWithHost(directory)
+        const failed = yield* Effect.result(owner.host.open(workspaceId))
+        assert.equal(
+          failed.failure.code,
+          damage === 'history' ? 'local-history-recovery-required' : 'trusted-pin-unavailable'
+        )
+        const managementFailure = yield* Effect.result(
+          owner.host.manage(workspaceId, { type: 'rotate' }, () => {
+            throw new Error('unusable host must not access remote ports')
+          })
+        )
+        assert.equal(managementFailure.failure.code, failed.failure.code)
+        // The damaged workspace cannot prevent another independent workspace opening.
+        const next = yield* owner.bootstrap.prepareCreation({
+          ...intent,
+          requestId: 'second-recovery-request',
+          slug: 'second'
+        })
+        yield* owner.bootstrap.recordCreated({
+          workspaceId: 'second-workspace',
+          genesisHash: next.genesisHashHex,
+          requestId: 'second-recovery-request'
+        })
+        assert.equal((yield* owner.host.open('second-workspace')).hasCurrentKey, true)
+      })
+    )
+    const after = new DatabaseSync(pinPath)
+    if (damage === 'history')
+      assert.deepEqual(after.prepare('SELECT * FROM ledger_pin').all(), trusted)
+    else assert.equal(after.prepare('SELECT count FROM ledger_pin').get().count, 0)
+    after.close()
+    if (damage === 'history')
+      historyDb(directory, (db) =>
+        assert.deepEqual(
+          new Uint8Array(db.prepare('SELECT record FROM records WHERE position=2').get().record),
+          damaged
+        )
+      )
+  })
+}
+void test('a failed workspace finalizer reports restart, retains its fence and leaves a sibling available', async (t) => {
+  const directory = await fixture(t)
+  const scope = Effect.runSync(Scope.make())
+  const run = (work) => Effect.runPromise(work.pipe(Scope.provide(scope)))
+  const owner = await run(ownerWithHost(directory))
+  await run(bind(owner))
+  await run(owner.host.open(workspaceId))
+  const next = await run(
+    owner.bootstrap.prepareCreation({
+      ...intent,
+      requestId: 'sibling-finalizer-request',
+      slug: 'sibling'
+    })
+  )
+  await run(
+    owner.bootstrap.recordCreated({
+      workspaceId: 'sibling',
+      genesisHash: next.genesisHashHex,
+      requestId: 'sibling-finalizer-request'
+    })
+  )
+  await run(owner.host.open('sibling'))
+  const original = DatabaseSync.prototype.close
+  let retained
+  try {
+    DatabaseSync.prototype.close = function () {
+      retained = this
+      throw new Error('synthetic history close failure')
+    }
+    const failed = await run(Effect.exit(owner.host.closeWorkspace(workspaceId)))
+    DatabaseSync.prototype.close = original
+    assert.equal(Exit.isFailure(failed), true)
+    const blocked = await run(Effect.result(owner.host.open(workspaceId)))
+    assert.equal(blocked.failure.code, 'restart-required')
+    const managementFailure = await run(
+      Effect.result(
+        owner.host.manage(workspaceId, { type: 'rotate' }, () => {
+          throw new Error('failed close must not access remote ports')
+        })
+      )
+    )
+    assert.equal(managementFailure.failure.code, 'restart-required')
+    assert.equal((await run(owner.host.status('sibling'))).hasCurrentKey, true)
+    const retry = await run(Effect.exit(owner.host.closeWorkspace(workspaceId)))
+    assert.equal(Exit.isFailure(retry), true)
+  } finally {
+    DatabaseSync.prototype.close = original
+    if (retained) original.call(retained)
+    await run(Effect.exit(Scope.close(scope, Exit.void)))
+  }
+})
+
+for (const damage of ['history', 'pin']) {
+  void test(`a corrupt ${damage} SQLite image preserves bytes and reports a safe recovery code`, async (t) => {
+    const directory = await fixture(t)
+    await execute(
+      Effect.gen(function* () {
+        const owner = yield* ownerWithHost(directory)
+        yield* bind(owner)
+        yield* owner.host.open(workspaceId)
+      })
+    )
+    const path = join(
+      directory,
+      'workspaces',
+      workspaceId,
+      damage === 'history' ? 'history.sqlite' : 'ledger-pin.sqlite'
+    )
+    const original = Buffer.from('synthetic damaged SQLite image')
+    await writeFile(path, original)
+    await execute(
+      Effect.gen(function* () {
+        const owner = yield* ownerWithHost(directory)
+        const failed = yield* Effect.result(owner.host.open(workspaceId))
+        assert.equal(
+          failed.failure.code,
+          damage === 'history' ? 'local-history-recovery-required' : 'trusted-pin-unavailable'
+        )
+      })
+    )
+    assert.deepEqual(await readFile(path), original)
+  })
+}
+
 void test('binding is immutable, retained reopen asks only for a suffix, and corrupted cache recovers locally', async (t) => {
   const directory = await fixture(t)
   let saved
@@ -449,81 +606,88 @@ void test('overlapping pages compare verified bytes, append only their suffix an
   )
 })
 
-void test('content IPC binding encrypts allowed rooms and isolates a rejected room or corrupt frame', async (t) => {
-  const directory = await fixture(t)
-  await execute(
-    Effect.gen(function* () {
-      const owner = yield* ownerWithHost(directory)
-      yield* bind(owner)
-      yield* owner.host.open(workspaceId)
-      const context = {
-        protocol: 'loro-streams-crdt-payload-protection',
-        version: 2,
-        kind: 'update_batch'
-      }
-      const plaintext = new TextEncoder().encode('CANARY-content-boundary-synthetic')
-      const additionalData = new Uint8Array([17, 22, 3])
-      for (const room of [
-        { kind: 'meta' },
-        { kind: 'doc', docId: 'session' },
-        { kind: 'flock', flockDocId: `${workspaceId}:mf:local` },
-        { kind: 'flock', flockDocId: `${workspaceId}:wf:workspace` }
-      ]) {
-        const sealed = yield* owner.host.seal(workspaceId, {
-          epoch: 0,
-          room,
-          context,
-          plaintext,
-          additionalData
-        })
-        assert.equal(Buffer.from(sealed.sealed).includes(plaintext), false)
-        assert.deepEqual(
-          yield* owner.host.openContent(workspaceId, { room, context, ...sealed, additionalData }),
-          plaintext
-        )
-        const changed = new Uint8Array(sealed.sealed)
-        changed[changed.length - 1] ^= 1
+for (const kind of ['update_batch', 'snapshot'])
+  void test(`content IPC binding encrypts allowed rooms and isolates a rejected room or corrupt frame (${kind})`, async (t) => {
+    const directory = await fixture(t)
+    await execute(
+      Effect.gen(function* () {
+        const owner = yield* ownerWithHost(directory)
+        yield* bind(owner)
+        yield* owner.host.open(workspaceId)
+        const context = {
+          protocol: 'loro-streams-crdt-payload-protection',
+          version: 2,
+          kind,
+          ...(kind === 'snapshot' ? { continuationOffset: 'opaque:100' } : {})
+        }
+        const plaintext = new TextEncoder().encode('CANARY-content-boundary-synthetic')
+        const additionalData = new Uint8Array([17, 22, 3])
+        for (const room of [
+          { kind: 'meta' },
+          { kind: 'doc', docId: 'session' },
+          { kind: 'flock', flockDocId: `${workspaceId}:mf:local` },
+          { kind: 'flock', flockDocId: `${workspaceId}:wf:workspace` }
+        ]) {
+          const sealed = yield* owner.host.seal(workspaceId, {
+            epoch: 0,
+            room,
+            context,
+            plaintext,
+            additionalData
+          })
+          assert.equal(Buffer.from(sealed.sealed).includes(plaintext), false)
+          assert.deepEqual(
+            yield* owner.host.openContent(workspaceId, {
+              room,
+              context,
+              ...sealed,
+              additionalData
+            }),
+            plaintext
+          )
+          const changed = new Uint8Array(sealed.sealed)
+          changed[changed.length - 1] ^= 1
+          assert.equal(
+            Result.isFailure(
+              yield* Effect.result(
+                owner.host.openContent(workspaceId, {
+                  room,
+                  context,
+                  ...sealed,
+                  sealed: changed,
+                  additionalData
+                })
+              )
+            ),
+            true
+          )
+        }
         assert.equal(
           Result.isFailure(
             yield* Effect.result(
-              owner.host.openContent(workspaceId, {
-                room,
+              owner.host.seal(workspaceId, {
+                epoch: 0,
+                room: { kind: 'flock', flockDocId: 'code-index' },
                 context,
-                ...sealed,
-                sealed: changed,
+                plaintext,
                 additionalData
               })
             )
           ),
           true
         )
-      }
-      assert.equal(
-        Result.isFailure(
-          yield* Effect.result(
-            owner.host.seal(workspaceId, {
-              epoch: 0,
-              room: { kind: 'flock', flockDocId: 'code-index' },
-              context,
-              plaintext,
-              additionalData
-            })
-          )
-        ),
-        true
-      )
-      assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, true)
-      const valid = yield* owner.host.seal(workspaceId, {
-        epoch: 0,
-        room: { kind: 'meta' },
-        context,
-        plaintext,
-        additionalData
+        assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, true)
+        const valid = yield* owner.host.seal(workspaceId, {
+          epoch: 0,
+          room: { kind: 'meta' },
+          context,
+          plaintext,
+          additionalData
+        })
+        assert.ok(valid.sealed.length > plaintext.length)
       })
-      assert.ok(valid.sealed.length > plaintext.length)
-    })
-  )
-})
+    )
+  })
 
 void test('obsolete-cache deletion failure preserves the rebuilt feed and subsequent local opens', async (t) => {
   const directory = await fixture(t)
@@ -1936,3 +2100,889 @@ for (const source of ['staging', 'not-a-staging-recipient', 'temporary-io'])
       })
     )
   })
+
+for (const damaged of [false, true, 'header'])
+  void test(`manual management resumes across full rounds and restart; damaged candidate=${damaged}`, async (t) => {
+    const directory = await fixture(t)
+    let prepared, records, view, genesis, target
+    const groups = new Map(),
+      roundIds = [],
+      originals = []
+    let unavailable = true
+    const fullRounds = new Set()
+    await execute(
+      Effect.gen(function* () {
+        const owner = yield* ownerWithHost(directory)
+        prepared = yield* bind(owner)
+        records = [Buffer.from(prepared.genesisRecordHex, 'hex')]
+        genesis = Result.getOrThrow(Bytes.genesisHash(Buffer.from(prepared.genesisHashHex, 'hex')))
+        view = Result.getOrThrow(
+          verifyLedger({
+            anchor: genesis,
+            records,
+            checkpoint: { head: hashRecordBytes(records.at(-1)), length: records.length }
+          })
+        )
+        const signer = yield* owner.custody.openDevice(genesis)
+        const machine = yield* owner.custody.prepareDevice()
+        const command = yield* prepareDeviceAdmission({
+          genesis,
+          membershipId: view.inspectState().owner,
+          signer: machine,
+          encryptionPublicKey: machine.enc,
+          kind: 'machine',
+          machineId: 'synthetic-machine'
+        })
+        const record = yield* signLedgerRecord(
+          Result.getOrThrow(prepareLedgerCommand(view, signer.publicKey, command)),
+          signer
+        )
+        records.push(record)
+        view = Result.getOrThrow(
+          extendLedger(view, [record], { head: hashRecordBytes(record), length: records.length })
+        )
+        target = hex(machine.publicKey.toBytes())
+        yield* owner.custody.discardDevice(machine)
+        yield* owner.host.open(workspaceId)
+        yield* owner.host.ingestLedgerRecords(
+          workspaceId,
+          page(records, prepared.genesisHashHex, 0)
+        )
+      })
+    )
+    const { E2eeStagingCapacityError } = await import('./e2ee-cloud-client.mts')
+    for (const reopened of [false, true, 'install-retry'])
+      await execute(
+        Effect.gen(function* () {
+          const owner = yield* ownerWithHost(directory)
+          yield* owner.host.open(workspaceId)
+          const signer = yield* owner.custody.openDevice(genesis)
+          const mailboxHost = yield* makeSqliteKeyMailbox({
+            path: join(directory, 'management-mailbox.sqlite'),
+            mode: existsSync(join(directory, 'management-mailbox.sqlite')) ? 'open' : 'create',
+            genesis,
+            ledger: () => Effect.succeed(view)
+          })
+          const mailbox = Context.get(
+            yield* Layer.build(referenceKeyMailbox(mailboxHost, signer.publicKey)),
+            KeyMailbox
+          )
+          const ports = () => ({
+            history: () => Effect.succeed(page(records, prepared.genesisHashHex, 0)),
+            mailbox: () => mailbox,
+            log: {
+              read: () =>
+                Effect.succeed({ records, checkpoint: { head: view.head, length: view.length } }),
+              appendCas: (_anchor, expected, record) =>
+                Effect.sync(() => {
+                  assert.equal(view.head.equals(expected.head), true)
+                  view = Result.getOrThrow(
+                    extendLedger(view, [record], {
+                      head: hashRecordBytes(record),
+                      length: view.length + 1
+                    })
+                  )
+                  records = [...records, record]
+                })
+            },
+            staging: (round) => ({
+              stageGroup: (group) =>
+                Effect.suspend(() => {
+                  roundIds.push(round)
+                  originals.push(Buffer.from(group.record))
+                  if (unavailable) return Effect.fail(new Error('staging-offline'))
+                  if (fullRounds.has(round) || fullRounds.size < 2) {
+                    fullRounds.add(round)
+                    return Effect.fail(new E2eeStagingCapacityError(round, 1))
+                  }
+                  groups.set(group.recordHash, group)
+                  return Effect.void
+                }),
+              readGroup: (key) => Effect.succeed(groups.get(key.recordHash) ?? null),
+              deleteGroup: () => Effect.void
+            })
+          })
+          if (!reopened) {
+            assert.equal((yield* owner.host.managementState(workspaceId)).mayRotate, true)
+            yield* owner.host.manage(workspaceId, { type: 'revoke', target }, ports)
+            assert.equal(view.inspectState().devices.has(target), false)
+            assert.equal(view.inspectState().epoch.rotationRequired, true)
+            assert.equal(
+              Result.isFailure(
+                yield* Effect.result(owner.host.manage(workspaceId, { type: 'rotate' }, ports))
+              ),
+              true
+            )
+            assert.equal(view.inspectState().epoch.number, 0)
+            const request = {
+              epoch: 0,
+              room: { kind: 'doc', docId: 'still-usable' },
+              context: {
+                protocol: 'loro-streams-crdt-payload-protection',
+                version: 2,
+                kind: 'update_batch'
+              },
+              plaintext: new Uint8Array([1]),
+              additionalData: new Uint8Array([2])
+            }
+            const sealed = yield* owner.host.seal(workspaceId, request)
+            assert.deepEqual(
+              yield* owner.host.openContent(workspaceId, { ...request, ...sealed }),
+              request.plaintext
+            )
+            assert.equal((yield* owner.host.managementState(workspaceId)).updatePending, true)
+            if (damaged) {
+              const key = (yield* owner.host.managementState(workspaceId)).devices.find(
+                (entry) => entry.self
+              ).key
+              const db = new DatabaseSync(
+                join(directory, 'workspaces', workspaceId, `epoch-candidates-${key}.sqlite`)
+              )
+              try {
+                if (damaged === 'header')
+                  db.prepare('UPDATE epoch_rotation_meta SET publisher=?').run('ff'.repeat(32))
+                else {
+                  /* Damage is injected only after the publication commits below. */
+                }
+              } finally {
+                db.close()
+              }
+            }
+            unavailable = false
+            return
+          }
+          if (damaged === 'header' && reopened === true) {
+            const visible = yield* owner.host.managementState(workspaceId)
+            assert.equal(visible.mayRotate, true)
+            assert.equal(visible.recoveryIssue, 'candidate-unavailable')
+            assert.equal(visible.updatePending, true)
+            assert.equal(
+              Result.isFailure(
+                yield* Effect.result(owner.host.manage(workspaceId, { type: 'rotate' }, ports))
+              ),
+              true
+            )
+            const key = visible.devices.find((entry) => entry.self).key
+            const db = new DatabaseSync(
+              join(directory, 'workspaces', workspaceId, `epoch-candidates-${key}.sqlite`)
+            )
+            try {
+              db.prepare('UPDATE epoch_rotation_meta SET publisher=?').run(key)
+            } finally {
+              db.close()
+            }
+          }
+          if (reopened === true) {
+            // Capacity and installation failures have separate retry paths at the same epoch.
+            assert.equal(
+              Result.isFailure(
+                yield* Effect.result(owner.host.manage(workspaceId, { type: 'rotate' }, ports))
+              ),
+              true
+            )
+            const db = new DatabaseSync(
+              join(directory, 'workspaces', workspaceId, 'installed-keys.sqlite')
+            )
+            try {
+              db.exec(
+                "CREATE TRIGGER fail_rotation_install BEFORE INSERT ON installed_epoch_keys WHEN NEW.epoch=1 BEGIN SELECT RAISE(ABORT,'synthetic SQLITE_BUSY'); END"
+              )
+              assert.equal(
+                Result.isFailure(
+                  yield* Effect.result(owner.host.manage(workspaceId, { type: 'rotate' }, ports))
+                ),
+                true
+              )
+              assert.equal(view.inspectState().epoch.number, 1)
+              assert.equal((yield* owner.host.managementState(workspaceId)).updatePending, true)
+              assert.equal((yield* owner.host.status(workspaceId)).writeEpoch, 0)
+              if (damaged === true) {
+                const key = (yield* owner.host.managementState(workspaceId)).devices.find(
+                  (entry) => entry.self
+                ).key
+                const candidate = new DatabaseSync(
+                  join(directory, 'workspaces', workspaceId, `epoch-candidates-${key}.sqlite`)
+                )
+                try {
+                  candidate.exec("UPDATE epoch_rotation_candidates SET blob=x'00'")
+                } finally {
+                  candidate.close()
+                }
+              }
+            } finally {
+              db.exec('DROP TRIGGER fail_rotation_install')
+              db.close()
+            }
+            return
+          }
+          yield* owner.host.manage(workspaceId, { type: 'rotate' }, ports)
+          assert.equal(view.inspectState().epoch.number, 1)
+          assert.equal(view.inspectState().epoch.rotationRequired, false)
+          assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, true)
+          assert.equal((yield* owner.host.managementState(workspaceId)).updatePending, false)
+          assert.equal(roundIds[0], roundIds[1])
+          assert.equal(new Set(roundIds).size, 3)
+          assert.equal(
+            originals.every((record) => record.equals(originals[0])),
+            true
+          )
+          assert.equal(
+            groups
+              .values()
+              .next()
+              .value.envelopes.some((entry) => entry.recipient === target),
+            false
+          )
+        })
+      )
+  })
+
+void test('revocation bypasses an unstaged candidate but preserves an unknown publication CAS across reopen', async (t) => {
+  for (const failure of ['stage', 'cas']) {
+    const directory = await fixture(t)
+    await execute(
+      Effect.gen(function* () {
+        const owner = yield* ownerWithHost(directory)
+        const prepared = yield* bind(owner)
+        const genesis = Result.getOrThrow(
+          Bytes.genesisHash(Buffer.from(prepared.genesisHashHex, 'hex'))
+        )
+        let records = [Buffer.from(prepared.genesisRecordHex, 'hex')]
+        let view = Result.getOrThrow(
+          verifyLedger({
+            anchor: genesis,
+            records,
+            checkpoint: { head: hashRecordBytes(records[0]), length: 1 }
+          })
+        )
+        const signer = yield* owner.custody.openDevice(genesis)
+        const targets = []
+        for (let index = 0; index < 2; index++) {
+          const machine = yield* owner.custody.prepareDevice()
+          const admission = yield* prepareDeviceAdmission({
+            genesis,
+            membershipId: view.inspectState().owner,
+            signer: machine,
+            encryptionPublicKey: machine.enc,
+            kind: 'machine',
+            machineId: `revocation-fixture-${index}`
+          })
+          const record = yield* signLedgerRecord(
+            Result.getOrThrow(prepareLedgerCommand(view, signer.publicKey, admission)),
+            signer
+          )
+          records.push(record)
+          view = Result.getOrThrow(
+            extendLedger(view, [record], { head: hashRecordBytes(record), length: records.length })
+          )
+          targets.push(hex(machine.publicKey.toBytes()))
+          yield* owner.custody.discardDevice(machine)
+        }
+        yield* owner.host.open(workspaceId)
+        yield* owner.host.ingestLedgerRecords(
+          workspaceId,
+          page(records, prepared.genesisHashHex, 0)
+        )
+        let blocked = false
+        const staged = new Map(),
+          attempts = [],
+          submitted = []
+        const remote = () => ({
+          history: () => Effect.succeed(page(records, prepared.genesisHashHex, 0)),
+          mailbox: () => {
+            throw new Error('this flow installs its own committed candidate')
+          },
+          log: {
+            read: () =>
+              Effect.succeed({ records, checkpoint: { head: view.head, length: view.length } }),
+            appendCas: (_anchor, expected, record) =>
+              Effect.suspend(() => {
+                submitted.push(Buffer.from(record))
+                if (blocked && failure === 'cas')
+                  return Effect.fail(new Error('synthetic unknown CAS result'))
+                assert.equal(view.head.equals(expected.head), true)
+                view = Result.getOrThrow(
+                  extendLedger(view, [record], {
+                    head: hashRecordBytes(record),
+                    length: view.length + 1
+                  })
+                )
+                records = [...records, record]
+                return Effect.void
+              })
+          },
+          staging: () => ({
+            stageGroup: (group) =>
+              Effect.suspend(() => {
+                attempts.push(group)
+                if (blocked && failure === 'stage')
+                  return Effect.fail(new Error('synthetic staging outage'))
+                staged.set(group.recordHash, group)
+                return Effect.void
+              }),
+            readGroup: (key) => Effect.succeed(staged.get(key.recordHash) ?? null),
+            deleteGroup: () => Effect.void
+          })
+        })
+        const managementDirectory = join(directory, 'workspaces', workspaceId)
+        const ownKey = hex(signer.publicKey.toBytes())
+        const snapshot = () => {
+          const candidate = openSqliteConnection(
+            join(managementDirectory, `epoch-candidates-${ownKey}.sqlite`)
+          )
+          const journal = openSqliteConnection(
+            join(managementDirectory, `management-submission-${ownKey}.sqlite`)
+          )
+          try {
+            return {
+              rows: candidate
+                .prepare('SELECT * FROM epoch_rotation_candidates ORDER BY rowid')
+                .all(),
+              pending:
+                journal.prepare('SELECT pending FROM submission_journal').get()?.pending ?? null
+            }
+          } finally {
+            candidate.close()
+            journal.close()
+          }
+        }
+        yield* owner.host.manage(workspaceId, { type: 'revoke', target: targets[0] }, remote)
+        blocked = true
+        assert.equal(
+          Result.isFailure(
+            yield* Effect.result(owner.host.manage(workspaceId, { type: 'rotate' }, remote))
+          ),
+          true
+        )
+        const retained = snapshot()
+        assert.equal(retained.rows.length, 1)
+        assert.equal(retained.pending !== null, failure === 'cas')
+        const original = Buffer.from(retained.rows[0].record)
+        assert.equal(Buffer.from(attempts[0].record).equals(original), true)
+        const point = view.head
+        yield* owner.host.closeWorkspace(workspaceId)
+        yield* owner.host.open(workspaceId)
+        assert.equal(
+          (yield* owner.host.managementState(workspaceId)).devices.find((entry) => entry.self).key,
+          ownKey
+        )
+        const revoke = yield* Effect.result(
+          owner.host.manage(workspaceId, { type: 'revoke', target: targets[1] }, remote)
+        )
+        if (failure === 'stage') {
+          assert.equal(Result.isSuccess(revoke), true)
+          assert.equal(revoke.success, 'Committed')
+          assert.equal(view.inspectState().devices.has(targets[1]), false)
+          assert.equal(view.inspectState().epoch.number, 0)
+          assert.equal(view.inspectState().epoch.rotationRequired, true)
+          assert.equal(attempts.length, 1)
+          assert.deepEqual(snapshot().rows, retained.rows)
+          assert.equal(snapshot().pending, null)
+          const request = {
+            epoch: 0,
+            room: { kind: 'doc', docId: 'revocation-survives-outage' },
+            context: {
+              protocol: 'loro-streams-crdt-payload-protection',
+              version: 2,
+              kind: 'update_batch'
+            },
+            plaintext: new Uint8Array([1]),
+            additionalData: new Uint8Array([2])
+          }
+          const sealed = yield* owner.host.seal(workspaceId, request)
+          assert.deepEqual(
+            yield* owner.host.openContent(workspaceId, { ...request, ...sealed }),
+            request.plaintext
+          )
+          blocked = false
+          assert.equal(
+            yield* owner.host.manage(workspaceId, { type: 'rotate' }, remote),
+            'Committed'
+          )
+          assert.equal(attempts.length, 2)
+          assert.equal(Buffer.from(attempts[1].record).equals(original), false)
+          for (const target of targets)
+            assert.equal(
+              attempts[1].envelopes.some((entry) => entry.recipient === target),
+              false
+            )
+          const rows = snapshot().rows
+          assert.equal(rows[0].outcome, 'Conflict')
+          assert.equal(rows[0].consumed, 1)
+          assert.deepEqual(rows[0].record, retained.rows[0].record)
+          assert.deepEqual(rows[0].envelopes, retained.rows[0].envelopes)
+        } else {
+          assert.equal(Result.isFailure(revoke), true)
+          assert.equal(view.head.equals(point), true)
+          assert.equal(view.inspectState().devices.has(targets[1]), true)
+          assert.deepEqual(snapshot().rows, retained.rows)
+          assert.deepEqual(snapshot().pending, retained.pending)
+          assert.equal(
+            submitted.slice(1).every((record) => record.equals(original)),
+            true
+          )
+          blocked = false
+          assert.equal(
+            yield* owner.host.manage(workspaceId, { type: 'revoke', target: targets[1] }, remote),
+            'Committed'
+          )
+          assert.equal(Buffer.from(records.at(-2)).equals(original), true)
+          assert.equal(view.inspectState().devices.has(targets[1]), false)
+        }
+        assert.equal(view.inspectState().epoch.number, 1)
+        assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, true)
+        assert.equal((yield* owner.host.managementState(workspaceId)).updatePending, false)
+        assert.equal(snapshot().pending, null)
+      })
+    )
+  }
+})
+
+void test('closing during a manual management ledger read aborts outside account locks and releases the host', async (t) => {
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory)
+      yield* bind(owner)
+      yield* owner.host.open(workspaceId)
+      const entered = Promise.withResolvers()
+      let aborted = false
+      const management = Effect.runPromise(
+        Effect.result(
+          owner.host.manage(workspaceId, { type: 'rotate' }, (signal) => ({
+            history: () =>
+              Effect.tryPromise({
+                try: () =>
+                  new Promise((resolve, reject) => {
+                    signal.addEventListener(
+                      'abort',
+                      () => {
+                        aborted = true
+                        reject(new Error('synthetic aborted ledger request'))
+                      },
+                      { once: true }
+                    )
+                    entered.resolve()
+                  }),
+                catch: (error) => error
+              }),
+            log: {
+              read: () => Effect.die('refresh must precede submission'),
+              appendCas: () => Effect.die('no signing')
+            },
+            staging: () => ({
+              stageGroup: () => Effect.die('no stage'),
+              readGroup: () => Effect.succeed(null),
+              deleteGroup: () => Effect.void
+            }),
+            mailbox: () => {
+              throw new Error('no key reception')
+            }
+          }))
+        )
+      )
+      yield* Effect.promise(() =>
+        Promise.race([
+          entered.promise,
+          management.then(() => {
+            throw new Error('management failed before the remote boundary')
+          })
+        ])
+      )
+      yield* owner.host.closeWorkspace(workspaceId)
+      const result = yield* Effect.promise(() => management)
+      assert.equal(aborted, true)
+      assert.equal(Result.isFailure(result), true)
+      assert.equal((yield* owner.host.open(workspaceId)).hasCurrentKey, true)
+    })
+  )
+})
+
+const maintenanceFixture = (directory) =>
+  Effect.gen(function* () {
+    const owner = yield* ownerWithHost(directory)
+    const prepared = yield* bind(owner)
+    yield* owner.host.open(workspaceId)
+    const genesis = Result.getOrThrow(
+      Bytes.genesisHash(Buffer.from(prepared.genesisHashHex, 'hex'))
+    )
+    const record = Buffer.from(prepared.genesisRecordHex, 'hex')
+    let view = Result.getOrThrow(
+      verifyLedger({
+        anchor: genesis,
+        records: [record],
+        checkpoint: { head: hashRecordBytes(record), length: 1 }
+      })
+    )
+    const device = yield* owner.custody.openDevice(genesis)
+    const keys = Context.get(
+      yield* Layer.build(
+        InstalledEpochKeys.layer.pipe(
+          Layer.provideMerge(
+            sqliteInstalledKeyStore({
+              path: join(directory, 'workspaces', workspaceId, 'installed-keys.sqlite'),
+              mode: 'open'
+            })
+          ),
+          Layer.provideMerge(VerifiedLedger.layer),
+          Layer.provideMerge(
+            Layer.mergeAll(
+              desktopE2eePorts(owner.custody, device),
+              Layer.succeed(WorkspaceScope, { genesis }),
+              Layer.succeed(LedgerViewSource, { current: () => Effect.succeed(view) }),
+              Layer.succeed(LedgerPinStore, {
+                read: () => Effect.succeed(null),
+                write: () => Effect.void
+              })
+            )
+          )
+        )
+      ),
+      InstalledEpochKeys
+    )
+    const frame = yield* Effect.acquireUseRelease(
+      keys.read(0),
+      (key) =>
+        prepareEpochEnvelope({
+          context: { genesis, epoch: 0, sender: device.publicKey, recipient: device.publicKey },
+          key,
+          signer: device,
+          ledger: () => Effect.succeed(view)
+        }),
+      (key) => Effect.sync(() => disposeEpochKey(key))
+    )
+    const path = join(directory, 'maintenance-mailbox.sqlite')
+    const backend = yield* makeSqliteKeyMailbox({
+      path,
+      mode: 'create',
+      genesis,
+      ledger: () => Effect.succeed(view)
+    })
+    const mailbox = Context.get(
+      yield* Layer.build(referenceKeyMailbox(backend, device.publicKey)),
+      KeyMailbox
+    )
+    yield* mailbox.put('ab'.repeat(16), frame)
+    return {
+      owner,
+      mailbox,
+      path,
+      frame,
+      device,
+      genesis,
+      prepared,
+      view: () => view,
+      setView: (next) => {
+        view = next
+      }
+    }
+  })
+void test('an unreadable installed blob keeps ledger open and is replaced only by a verified mailbox key', async (t) => {
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const { owner, mailbox } = yield* maintenanceFixture(directory)
+      yield* owner.host.closeWorkspace(workspaceId)
+      const db = new DatabaseSync(
+        join(directory, 'workspaces', workspaceId, 'installed-keys.sqlite')
+      )
+      db.prepare('UPDATE installed_epoch_keys SET blob=? WHERE epoch=0').run(
+        new Uint8Array([1, 2, 3])
+      )
+      db.close()
+      const status = yield* owner.host.open(workspaceId)
+      assert.equal(status.hasCurrentKey, false)
+      assert.equal(status.writeEpoch, null)
+      assert.equal((yield* owner.host.ledgerView(workspaceId)).status.length, 1)
+      yield* owner.host.keyRound(workspaceId, () => mailbox)
+      assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, true)
+    })
+  )
+})
+void test('a rejected envelope is repaired by digest and the following good envelope installs in the same maintenance call', async (t) => {
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const { owner, mailbox, path, frame, device } = yield* maintenanceFixture(directory)
+      const bad = frame.slice()
+      // Force the hostile frame to sort before the good original, deterministically.
+      for (let n = 0; ; n++) {
+        new DataView(bad.buffer).setUint32(bad.length - 4, n)
+        if (mailboxDigest(bad) < mailboxDigest(frame)) break
+      }
+      const digest = mailboxDigest(bad)
+      const db = new DatabaseSync(path)
+      db.prepare('INSERT INTO mailbox_envelopes VALUES(?,?,?,?,?,?)').run(
+        0,
+        hex(device.publicKey.toBytes()),
+        hex(device.publicKey.toBytes()),
+        'cd'.repeat(16),
+        digest,
+        bad
+      )
+      yield* owner.host.keyRound(workspaceId, () => mailbox)
+      assert.equal(db.prepare('SELECT digest FROM mailbox_rejected').get().digest, digest)
+      assert.equal(db.prepare('SELECT count(*) AS n FROM mailbox_reports').get().n, 2)
+      assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, true)
+      db.close()
+    })
+  )
+})
+
+void test('finite rounds retain independent delivery cursors past blocked tasks and ACK terminal results without deleting originals', async (t) => {
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const { owner, mailbox, device } = yield* maintenanceFixture(directory)
+      yield* owner.host.keyRound(workspaceId, () => mailbox)
+      const genesis = Result.getOrThrow(
+        Bytes.genesisHash(Buffer.from((yield* owner.host.status(workspaceId)).genesisHash, 'hex'))
+      )
+      const delivery = Result.getOrThrow(
+        epochDeliveryId({
+          genesis,
+          epoch: 0,
+          sender: device.publicKey,
+          recipient: device.publicKey
+        })
+      )
+      const taskId = (revision) =>
+        mailboxDigest(
+          new TextEncoder().encode(`lody-e2ee/local-distribution-task/v0:${delivery}:${revision}`)
+        )
+      const last = taskId(0)
+      const db = new DatabaseSync(join(directory, 'workspaces', workspaceId, 'distribution.sqlite'))
+      const insert = db.prepare("INSERT INTO distribution_tasks VALUES(?,0,?,?,'Pending',0)")
+      let count = 0
+      for (let revision = 1; count < 501; revision++) {
+        const id = taskId(revision)
+        if (id >= last) continue
+        insert.run(id, hex(device.publicKey.toBytes()), revision)
+        count++
+      }
+      insert.run(last, hex(device.publicKey.toBytes()), 0)
+      yield* owner.host.keyRound(workspaceId, () => mailbox)
+      assert.equal(
+        db.prepare('SELECT phase FROM distribution_tasks WHERE id=?').get(last).phase,
+        'Pending'
+      )
+      yield* owner.host.keyRound(workspaceId, () => mailbox)
+      assert.deepEqual(
+        { ...db.prepare('SELECT phase,consumed FROM distribution_tasks WHERE id=?').get(last) },
+        { phase: 'Observed', consumed: 1 }
+      )
+      assert.equal(
+        db.prepare("SELECT count(*) AS n FROM distribution_tasks WHERE phase='Pending'").get().n,
+        501
+      )
+      db.close()
+      const outbox = new DatabaseSync(join(directory, 'workspaces', workspaceId, 'outbox.sqlite'))
+      const originals = outbox.prepare('SELECT * FROM epoch_delivery').all()
+      assert.equal(originals.length, 1)
+      yield* owner.host.keyRound(workspaceId, () => mailbox)
+      assert.deepEqual(outbox.prepare('SELECT * FROM epoch_delivery').all(), originals)
+      outbox.close()
+    })
+  )
+})
+
+void test('a transient installed-key write failure never rejects the good mailbox envelope and retries after storage recovers', async (t) => {
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const { owner, mailbox, path } = yield* maintenanceFixture(directory)
+      const local = new DatabaseSync(
+        join(directory, 'workspaces', workspaceId, 'installed-keys.sqlite')
+      )
+      local.prepare('UPDATE installed_epoch_keys SET blob=? WHERE epoch=0').run(new Uint8Array([1]))
+      local.exec(
+        "CREATE TRIGGER block_replace BEFORE UPDATE ON installed_epoch_keys BEGIN SELECT RAISE(ABORT,'synthetic write failure'); END"
+      )
+      const failed = yield* Effect.result(owner.host.keyRound(workspaceId, () => mailbox))
+      assert.equal(failed.failure.cryptographicRejection, false)
+      const remote = new DatabaseSync(path)
+      assert.equal(remote.prepare('SELECT count(*) AS n FROM mailbox_rejected').get().n, 0)
+      assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, false)
+      local.exec('DROP TRIGGER block_replace')
+      yield* owner.host.keyRound(workspaceId, () => mailbox)
+      assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, true)
+      remote.close()
+      local.close()
+    })
+  )
+})
+
+void test('desktop reconciliation reaches more than one hundred genuine ledger recipients', async (t) => {
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const f = yield* maintenanceFixture(directory)
+      let view = f.view()
+      const records = [Buffer.from(f.prepared.genesisRecordHex, 'hex')]
+      const membershipId = view
+        .inspectState()
+        .devices.get(hex(f.device.publicKey.toBytes())).membershipId
+      for (let index = 0; index < 105; index++) {
+        const joining = yield* f.owner.custody.prepareDevice()
+        const machineId = `synthetic-recipient-${index}`
+        const possession = yield* prepareDeviceAdmission({
+          genesis: f.genesis,
+          membershipId,
+          encryptionPublicKey: joining.enc,
+          kind: 'machine',
+          machineId,
+          signer: joining
+        })
+        const record = yield* signLedgerRecord(
+          Result.getOrThrow(
+            prepareLedgerCommand(view, f.device.publicKey, {
+              _tag: 'AdmitDevice',
+              kind: 'machine',
+              machineId,
+              signingPublicKey: joining.publicKey,
+              encryptionPublicKey: joining.enc,
+              possessionSignature: possession.possessionSignature
+            })
+          ),
+          f.device
+        )
+        records.push(record)
+        view = Result.getOrThrow(
+          extendLedger(view, [record], { head: hashRecordBytes(record), length: records.length })
+        )
+        yield* f.owner.custody.discardDevice(joining)
+      }
+      f.setView(view)
+      for (let start = 0; start < records.length; start += 64) {
+        yield* f.owner.host.ingestLedgerRecords(
+          workspaceId,
+          page(records, f.prepared.genesisHashHex, start, Math.min(start + 64, records.length))
+        )
+      }
+      yield* f.owner.host.keyRound(workspaceId, () => f.mailbox)
+      const db = new DatabaseSync(f.path)
+      assert.equal(
+        db.prepare('SELECT count(DISTINCT recipient) AS n FROM mailbox_envelopes').get().n,
+        106
+      )
+      db.close()
+      const journal = new DatabaseSync(
+        join(directory, 'workspaces', workspaceId, 'distribution.sqlite')
+      )
+      assert.equal(
+        journal
+          .prepare(
+            "SELECT count(*) AS n FROM distribution_tasks WHERE phase='Observed' AND consumed=1"
+          )
+          .get().n,
+        105
+      )
+      journal.close()
+    })
+  )
+})
+
+for (const senderHint of ['registered', 'unknown']) {
+  for (const laterHonestRow of [false, true]) {
+    void test(`sender hint ${senderHint} cannot reject original bytes and later honest row=${laterHonestRow} stays usable`, async (t) => {
+      const directory = await fixture(t)
+      await execute(
+        Effect.gen(function* () {
+          const f = yield* maintenanceFixture(directory)
+          const joining = yield* f.owner.custody.prepareDevice()
+          const unregistered = yield* f.owner.custody.prepareDevice()
+          const membershipId = f
+            .view()
+            .inspectState()
+            .devices.get(hex(f.device.publicKey.toBytes())).membershipId
+          const admission = yield* signLedgerRecord(
+            Result.getOrThrow(
+              prepareLedgerCommand(
+                f.view(),
+                f.device.publicKey,
+                yield* prepareDeviceAdmission({
+                  genesis: f.genesis,
+                  membershipId,
+                  encryptionPublicKey: joining.enc,
+                  kind: 'machine',
+                  machineId: 'metadata-hint-target',
+                  signer: joining
+                })
+              )
+            ),
+            f.device
+          )
+          const records = [Buffer.from(f.prepared.genesisRecordHex, 'hex'), admission]
+          f.setView(
+            Result.getOrThrow(
+              extendLedger(f.view(), [admission], { head: hashRecordBytes(admission), length: 2 })
+            )
+          )
+          yield* f.owner.host.ingestLedgerRecords(
+            workspaceId,
+            page(records, f.prepared.genesisHashHex, 0)
+          )
+          const local = new DatabaseSync(
+            join(directory, 'workspaces', workspaceId, 'installed-keys.sqlite')
+          )
+          local
+            .prepare('UPDATE installed_epoch_keys SET blob=? WHERE epoch=0')
+            .run(new Uint8Array([1]))
+          local.close()
+          let spoof = true
+          const hostile = {
+            ...f.mailbox,
+            fetch: (epoch, cursor, limit) =>
+              f.mailbox.fetch(epoch, cursor, limit).pipe(
+                Effect.map((p) => ({
+                  ...p,
+                  items: spoof
+                    ? p.items.flatMap((row) => {
+                        const changed = {
+                          ...row,
+                          sender:
+                            senderHint === 'registered'
+                              ? hex(joining.publicKey.toBytes())
+                              : hex(unregistered.publicKey.toBytes())
+                        }
+                        return laterHonestRow ? [changed, row] : [changed]
+                      })
+                    : p.items
+                }))
+              )
+          }
+          yield* Effect.result(f.owner.host.keyRound(workspaceId, () => hostile))
+          const remote = new DatabaseSync(f.path)
+          try {
+            assert.equal(
+              remote
+                .prepare('SELECT count(*) AS n FROM mailbox_rejected WHERE digest=?')
+                .get(mailboxDigest(f.frame)).n,
+              0,
+              'untrusted sender metadata cannot permanently reject the authentic frame digest'
+            )
+            assert.equal(
+              (yield* f.owner.host.status(workspaceId)).hasCurrentKey,
+              laterHonestRow,
+              'a metadata mismatch must not stop the following honest envelope'
+            )
+            spoof = false
+            yield* f.mailbox.put('ab'.repeat(16), f.frame)
+            yield* f.owner.host.keyRound(workspaceId, () => hostile)
+            assert.equal((yield* f.owner.host.status(workspaceId)).hasCurrentKey, true)
+            assert.equal(
+              (yield* f.mailbox.fetch(0, null, 100)).items.some(
+                (row) => mailboxDigest(row.frame) === mailboxDigest(f.frame)
+              ),
+              true
+            )
+          } finally {
+            remote.close()
+            yield* f.owner.custody.discardDevice(joining)
+            yield* f.owner.custody.discardDevice(unregistered)
+          }
+        })
+      )
+    })
+  }
+}

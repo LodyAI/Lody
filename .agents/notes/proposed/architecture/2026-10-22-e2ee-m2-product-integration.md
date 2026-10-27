@@ -2,6 +2,7 @@
 
 Status: proposed
 Translation: current
+
 - Date: 2026-10-22
 - Chinese: [中文](2026-10-22-e2ee-m2-product-integration.zh.md)
 
@@ -10,6 +11,10 @@ Translation: current
 Encrypted workspaces need a complete desktop-to-machine path rather than isolated crypto adapters. The implementation keeps device and document keys in their host owners, opens existing local state without waiting for cloud authentication, and uses device credentials for the optional cloud control plane. Ordinary workspaces retain their existing composition. The owner resolved the integration contracts in the second-round M2 plan. This implementation still requires the end-to-end and real-platform evidence below before M2 acceptance.
 
 ## Boundaries
+
+The snapshot restrictions below describe M2. The
+[PR-17 MVP](2026-10-27-e2ee-native-content-snapshots.md) supersedes that slice
+with signed native content snapshots and explicit replay/trim recovery.
 
 - An encrypted account runtime is lazy. Ordinary workspaces neither open its custody nor construct the E2EE cloud client.
 - Offline identity is only a token-hash/account binding in the existing auth store. It selects local data indefinitely, is cleared on definitive rejection/logout, and grants neither cloud access nor ledger permission. Network uncertainty retains it. The platform keeps its ordinary unauthenticated status, with an uncertainty hint consumed only by E2EE to try native identity after the seven-day bootstrap snapshot expires.
@@ -49,7 +54,6 @@ Backend interfaces must deploy before dependent client merges; public-pointer ad
 Local terminal entry preserves ordinary running/degraded behavior. During aggregate reconnecting it requires a running local agent with completed native startup and the active workspace in its runtime snapshot; another workspace's retry cannot disable that terminal. Missing target runtimes, unavailable processes and incomplete startup remain blocked. Native session authorization is unchanged. Component tests drive actual CLI-state IPC through the daemon hook and dock to terminal-open IPC, including target recovery without remounting.
 
 CLI discovery opts into encrypted candidates explicitly; released clients retain their plaintext-only catalog contract. Unsigned pairing materials may be replaced. Signed materials remain immutable until verified original history proves their exact commit or a competing child at the signed parent; retained-state reopen uses the persisted verified prefix. A new session invalidates old approval and requires new consent. After machine custody loss, per-device runtime stores retain old evidence without attempting to decrypt it under the replacement KEK. Only verified admission and current-key installation allow replacing a same-genesis activation hint. Waiting for pairing creates no startup issue, global offline status or timed retry; list updates do not retry it. Only ENOENT opening an activation/binding file or approved device original enters that wait: other file-open failures retain the original error and existing Fleet retry, so restored file access can recover without activation or restart. Symlink, malformed-file and genesis checks still reject unsafe state. Tests inject file-open failure with real installed keys, then reopen after recovery; fake-clock Fleet tests verify retry reaches a live runtime. Activation binds the verified approved key, releases a different live device before installing its replacement, and retries a retained failed cleanup through its existing owner before starting new work. These changes do not grant cloud or ledger authority from a local hint.
-
 
 Machine startup checks the approved device original before opening custody. A missing
 original waits for pairing without probing the keystore or scheduling Fleet retries;

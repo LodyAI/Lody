@@ -77,8 +77,8 @@ of a physical cleanup. The Convex mutation checks the original signer and delete
 its rows in the same transaction. Missing groups return success without deletion. Other members and other management devices are denied,
 even if they supply a genuine occupied tuple. The server enforces this device
 binding; it does not read Streams or accept `occupied` as ledger authority.
-The honest client additionally requires a genuine committed *different commitment
-at the same epoch* before requesting cleanup. A timeout, age, untrusted host hint or absent record never does. Local
+The honest client additionally requires a genuine committed _different commitment
+at the same epoch_ before requesting cleanup. A timeout, age, untrusted host hint or absent record never does. Local
 results/originals retain their explicit acknowledgement contract.
 
 ## Owners and limits

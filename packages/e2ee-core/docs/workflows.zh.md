@@ -76,6 +76,7 @@ results() / acknowledge(id)   已结束任务保留到确认为止
 
 - 报告是签名的安装声明，不是托管证明。
 - `fetchAndInstall` 在写入任何内容前复制并校验整页；任一安装失败时不返回 `next`。`MailboxInstallError` 指明失败的帧（发送者、`frameDigest`），由应用决定是否请求修复。
+- 邮箱页中的路由无法解析，或 sender/工作区/epoch/收件人提示与信封原件不一致时，仅跳过本次，不登记任务、不拒绝 digest；正常元数据恢复后仍可重试。同页后续信封继续通过完整验签、权限、HPKE、commitment 检查。`processed` 是扫描行数，不是已安装密钥数量；实际安装失败仍不返回 `next`。
 - 只有真实的账本变化才把任务结束为 `Obsolete` 或 `Revoked`。
 
 ## KeyRepair
@@ -118,6 +119,11 @@ _需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`InstalledEpoch
 
 MVP 独立移除在 capability 1 的 `DeclareCapabilities` 命令入账后，使用 `WorkspaceControl.execute({ _tag: "RemoveMember", membershipId })`。它撤销全部设备，保留 epoch 并提示手动换代；`EpochPublisher.publishRemoving` 仍保留独立的 tag8 原子契约。
 
+Candidate 丢失时，只有真实提交或冲突证明后才能对账同一 submission 原件，
+parent 未变化时不能因此发 CAS。正常 receiver 可独立安装已提交密钥；已安装密钥
+允许终态确认，无须重新打开 candidate blob。未发布密钥不得绕过 CandidateProtector，
+未知结果不得重新签署。
+
 ## WorkspaceControl 与密钥轮次
 
 `WorkspaceControl`（_需要 `DeviceIdentity`、`LedgerSubmission`、`LedgerSync`_）在刚刷新的视图上签名普通命令（接纳成员或设备、设置角色、吊销、转移 owner），每条只提交一次。存在待处理或未确认的提交时禁止新的签名；只有本地 feed 已包含提交时观察到的检查点，结果才会被确认。
@@ -140,7 +146,7 @@ MVP 独立移除在 capability 1 的 `DeclareCapabilities` 命令入账后，使
 
 - **Loro / streams-crdt**：`streamsDocumentBinding({ resource, model, writeEpoch })`（`@lody/e2ee-core/adapters/loro-streams`）是 `@loro-dev/streams-crdt` 文档的载荷保护绑定。它封装更新（头部 3）与快照（头部 4，续读 offset 位于签名头部内），并打开读到的内容。签名器、账本视图与密钥分别取自 `DeviceIdentity`、`VerifiedLedger` 与 `InstalledEpochHistory`。
 - **其他传输**：`sealDocument`、`openDocument` 与 `authenticateDocument`（`/protocol`）接收文档密钥、签名器和已验证视图的查询函数。新的封装要求当前写权限及不晚于当前的已验证发布纪元，加密前与签名后各检查一次；待手动换代时仍可使用保留密钥发送；每次执行都重新加密，因此重试必须重发返回的字节。
-- 读取时先认证历史作者再解密：被吊销作者的旧内容仍可打开并归属到原成员（快照之后同样如此），但这不授予当前写权限。
+- 读取时先认证历史作者再解密：被吊销作者的旧内容仍可打开并归属到原成员（账本快照之后同样如此），但这不授予当前写权限。Streams 快照和增量都要求历史账本准入、有效签名、可解 epoch 与 AEAD；读取不要求作者当前仍有效。
 
 ## 投递（分发器内部）
 
@@ -172,3 +178,5 @@ retained 起点包含本调用方导出的完整 v2 状态，以及紧接其后�
 原始凭证的 SHA-256（32）。调用方必须传入可信的会话和 genesis；签名有效不代表设备已入账，
 也不能代替持钥证明。验证沿用严格 Ed25519 规则。创建者的第一台设备不需要这份证明。
 `test/foundation.test.ts` 保存固定签名向量，并检查所有上下文字段被替换时都拒绝。
+
+桌面维护的错误分类、独立分页与终态消费见[收发钥可用性](../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-key-maintenance-availability.zh.md)。`MailboxInstallError.cryptographicRejection` 仅标记信封验证阶段确定的拒绝；本地写入、报告签名和未知原生错误不能授权拒绝信封。

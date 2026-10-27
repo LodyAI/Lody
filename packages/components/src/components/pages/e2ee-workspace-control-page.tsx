@@ -193,6 +193,7 @@ const styles = stylex.create({
 });
 
 const failureMessage: Record<E2eeControlFailure['kind'], string> = {
+  'local-identity': 'e2ee.identity.localFailure',
   network: 'e2ee.control.failure.network',
   auth: 'e2ee.control.failure.auth',
   server: 'e2ee.control.failure.server',
@@ -358,6 +359,8 @@ function eventSentence(t: TFunction, name: ResolveMember, event: LedgerEventSumm
       return t('e2ee.summary.transferOwner', { actor, member: name(event.member) });
     case 'publishEpoch':
       return t('e2ee.summary.publishEpoch', { actor, epoch: event.epoch });
+    case 'removeMember':
+      return t('e2ee.summary.removeMember', { actor, member: name(event.member) });
     case 'removeMemberAndPublishEpoch':
       return t('e2ee.summary.removeMemberAndPublishEpoch', {
         actor,

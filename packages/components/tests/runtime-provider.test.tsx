@@ -1,3 +1,4 @@
+import { notifyE2eeLedgerChanged } from '../src/providers/e2ee-runtime-notifications';
 // @vitest-environment jsdom
 
 import React, { act, StrictMode } from 'react';
@@ -273,6 +274,119 @@ describe('RuntimeProvider warm workspace preparation', () => {
       expect(prepared.disposed).toBe(false);
     }
   );
+
+  it('selects a manually installed key without mailbox I/O and isolates unrelated workspace/account notifications', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    let epoch = 0;
+    const status = () => ({
+      genesisHash: '11'.repeat(32),
+      epoch,
+      hasCurrentKey: true,
+      rotationRequired: false,
+    });
+    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+    environment.e2eeWorkspaces!.runtime = {
+      open: async () => status(),
+      status: async () => status(),
+      refresh: async () => status(),
+      close: async () => {},
+      seal: async (_workspace: string, input: { epoch: number }) => ({
+        header: new Uint8Array([3]),
+        sealed: new Uint8Array([input.epoch]),
+      }),
+    } as unknown as E2eeWorkspaceRuntime;
+    await render();
+    const content = vi.mocked(createWorkspaceRuntime).mock.calls.at(-1)![0].content!;
+    if (content.mode !== 'protected') throw new Error('expected encrypted content');
+    const room = content.resolve({ kind: 'doc', docId: 'preserved-room' });
+    if (room?.mode !== 'protected') throw new Error('expected encrypted room');
+    const request = {
+      context: {
+        protocol: 'loro-streams-crdt-payload-protection',
+        version: 2,
+        kind: 'update_batch',
+      } as const,
+      plaintext: new Uint8Array([1]),
+      additionalData: () => new Uint8Array([2]),
+    };
+    expect((await room.config.provider.seal(request)).sealed).toEqual(new Uint8Array([0]));
+    epoch = 1;
+    environment.e2eeWorkspaces!.runtime!.refresh = async () => {
+      throw new Error('unrelated mailbox outage');
+    };
+    await act(async () => {
+      notifyE2eeLedgerChanged('another-account', 'local:workspace');
+      notifyE2eeLedgerChanged('local:user', 'another-workspace');
+    });
+    expect((await room.config.provider.seal(request)).sealed).toEqual(new Uint8Array([0]));
+    await act(async () => notifyE2eeLedgerChanged('local:user', 'local:workspace'));
+    expect((await room.config.provider.seal(request)).sealed).toEqual(new Uint8Array([1]));
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    expect(prepared.disposed).toBe(false);
+  });
+
+  it('shows automatic snapshot recovery while retaining the workspace, then clears it after a valid read', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    let valid = false;
+    const status = {
+      genesisHash: '11'.repeat(32),
+      epoch: 0,
+      hasCurrentKey: true,
+      rotationRequired: false,
+    };
+    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+    environment.e2eeWorkspaces!.runtime = {
+      open: async () => status,
+      refresh: async () => status,
+      status: async () => status,
+      openContent: async () => {
+        if (!valid) throw new Error('snapshot rejected');
+        return new Uint8Array([7]);
+      },
+      contentStreamsToken: async () => ({}),
+      close: async () => {},
+    } as unknown as E2eeWorkspaceRuntime;
+    await render();
+    const content = vi.mocked(createWorkspaceRuntime).mock.calls.at(-1)![0].content;
+    if (content.mode !== 'protected') throw new Error('expected protected content');
+    const room = content.resolve({ kind: 'meta' });
+    if (room.mode !== 'protected') throw new Error('expected protected room');
+    const context = {
+      protocol: 'loro-streams-crdt-payload-protection' as const,
+      version: 2 as const,
+      kind: 'snapshot' as const,
+      continuationOffset: '000001',
+    };
+    const request = {
+      context,
+      header: new Uint8Array([4]),
+      sealed: new Uint8Array([1]),
+      additionalData: new Uint8Array([2]),
+    };
+    await act(async () => {
+      await expect(room.config.provider.open(request)).rejects.toThrow('snapshot rejected');
+      content.snapshotUpload.onSnapshotRecovery!(
+        'https://streams.invalid/ds/encrypted/local%3Aworkspace%3Ameta',
+        true
+      );
+    });
+    expect(container.querySelector('[role="status"]')?.textContent).toBe(
+      'e2ee.content.snapshotRecoveryPending'
+    );
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    valid = true;
+    await act(async () => {
+      await room.config.provider.open(request);
+      content.snapshotUpload.onSnapshotRecovery!(
+        'https://streams.invalid/ds/encrypted/local%3Aworkspace%3Ameta',
+        false
+      );
+    });
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    expect(prepared.disposed).toBe(false);
+  });
 
   it('installs a missing current key at cold open before any content sessions exist', async () => {
     ordinaryCloud();
@@ -666,6 +780,22 @@ describe('RuntimeProvider warm workspace preparation', () => {
       }
     }
   );
+
+  it('retains an encrypted identity failure and its workspace ID when the listing has no encryption hint', async () => {
+    ordinaryCloud();
+    retainWorkspaceModeProof(localStorage, 'local:user', 'local', {
+      workspaceId: 'local:workspace',
+      contentMode: 'plaintext',
+      contentModeVersion: 1,
+    });
+    localStorage.setItem('lody-e2ee-known-mode:local%3Auser:local%3Aworkspace', '11'.repeat(32));
+    await render();
+    expect(store.get(workspaceRuntimeInitFailureAtom)).toMatchObject({
+      errorType: 'E2eeLocalEvidenceConflictError',
+      modeAdmission: { knownEncrypted: true, workspaceId: 'local:workspace' },
+    });
+    expect(store.get(runtimeAtom)).toBeNull();
+  });
 
   it('waits for the same account to authenticate, then preserves the runtime through auth refresh', async () => {
     ordinaryCloud();

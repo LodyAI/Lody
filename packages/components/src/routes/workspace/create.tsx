@@ -210,6 +210,7 @@ function CreateWorkspaceAuthed({
       if (event.key !== null && !event.key.startsWith('lody-e2ee-pending-creation:')) return;
       try {
         setPendingRequests(listPendingE2eeWorkspaces(localStorage, accountId));
+        setIntentReadFailed(false);
       } catch {
         setIntentReadFailed(true);
       }
@@ -217,9 +218,9 @@ function CreateWorkspaceAuthed({
     window.addEventListener('storage', refresh);
     return () => window.removeEventListener('storage', refresh);
   }, [accountId]);
-  // Unreadable saved encrypted requests block creation only for a user who has
-  // encrypted creation on. Otherwise they are treated as no saved requests:
-  // regular creation never shows encryption copy or waits on encrypted storage.
+  // Individual unreadable intents stay isolated in storage. A failure to read
+  // storage itself still blocks encrypted creation because intent durability
+  // cannot be established.
   const intentBlocked = intentReadFailed && creationEnabled;
 
   const hasExistingWorkspaces = Boolean(organizations && organizations.length > 0);
@@ -434,6 +435,7 @@ function CreateWorkspaceAuthed({
         // response reuses these exact fields after reload, including its slug.
         savePendingE2eeWorkspace(localStorage, intent);
         setPendingRequests(listPendingE2eeWorkspaces(localStorage, accountId));
+        setIntentReadFailed(false);
         setPendingCreation(intent);
         const result = await createPreparedE2eeWorkspace(port, localStorage, intent);
         if (accountRef.current !== accountId) return;
