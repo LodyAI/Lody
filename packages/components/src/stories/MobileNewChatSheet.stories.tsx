@@ -17,6 +17,7 @@ import {
   type ChatComposerImageItem,
 } from '@/components/chat/chat-composer';
 import { GitHubOwnerAvatarIcon } from '@/components/chat/unified-project-selector';
+import { MOBILE_NEW_CHAT_PROMPT_ID } from '@/components/chat/submission/use-composer-navigation-focus';
 import {
   AGENT_ROLE_VERSION,
   getAgentConfigRoomId,
@@ -335,7 +336,7 @@ export function InlinePageReview({
   initialProject?: string;
   initialText?: string;
   initialModel?: string;
-  onSend?: (text: string, model: string) => void;
+  onSend?: (text: string, model: string, preserveFocus: boolean) => void;
   submissionPending?: boolean;
   withAttachments?: boolean;
   initialRole?: boolean;
@@ -552,8 +553,10 @@ export function InlinePageReview({
         <ChatComposer
           variant="session"
           promptRef={promptRef}
+          promptId={MOBILE_NEW_CHAT_PROMPT_ID}
           promptValue={submissionPending ? '' : prompt}
           promptDisabled={submissionPending}
+          preservePromptFocus
           onPromptChange={setPrompt}
           promptPlaceholder="Message, @files, /commands"
           promptRows={2}
@@ -621,9 +624,9 @@ export function InlinePageReview({
               shape="pill"
               aria-label="Send"
               onClick={() => {
-                promptRef.current?.blur();
-                onSend?.(prompt, model);
+                onSend?.(prompt, model, promptRef.current === document.activeElement);
               }}
+              onMouseDown={(event) => event.preventDefault()}
               disabled={
                 submissionPending ||
                 !prompt.trim() ||

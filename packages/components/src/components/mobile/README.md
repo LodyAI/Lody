@@ -46,7 +46,11 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
   native keyboard through the same composer shell (keyboard margin, safe-area inset and
   transition) used by ongoing sessions. First send retains this page until navigation
   reaches the session, then waits for its presentation acknowledgement before
-  dismissing new chat. Entrance suppression persists through delayed portal mounts
+  dismissing new chat. Pending sends preserve the focused textarea, blocking edits
+  without disabling it. The destination claims an existing new-chat focus in its
+  layout effect before source removal; native iOS also checks the keyboard-height
+  signal so manual dismissal is respected. Entry/completion never open a keyboard.
+  Entrance suppression persists through delayed portal mounts
   and same-entry URL replacements; later visits and Back retain their animation. The existing
   project and agent selection handlers retain draft and scope semantics. The
   project list mixes all sources using the desktop recency/name/id comparator,

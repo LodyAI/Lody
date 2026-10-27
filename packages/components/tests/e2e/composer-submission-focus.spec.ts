@@ -1124,3 +1124,58 @@ test('mobile send retains its page through delayed presentation and later URL co
     );
   }
 });
+
+for (const dismiss of ['none', 'blur', 'native-hide'] as const) {
+  test(`mobile first send transfers an open keyboard without reopening a dismissed one (dismiss=${dismiss})`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.addInitScript(() => {
+      Object.defineProperty(window, '__LODY_NATIVE__', { value: true, configurable: true });
+      Object.defineProperty(navigator, 'userAgent', { value: 'iPhone Mobile', configurable: true });
+    });
+    await page.goto(
+      '/iframe.html?id=mobile-newchattransition--deferred-send-in-place&viewMode=story'
+    );
+    const source = page.locator('#chat-prompt-mobile-sheet');
+    await source.focus();
+    // Model the native keyboard signal from focus ownership rather than holding
+    // a constant height through a blur (which hid the original regression).
+    await page.evaluate(() => {
+      const sync = () =>
+        document.documentElement.style.setProperty(
+          '--native-keyboard-height',
+          document.activeElement?.matches('textarea[data-lody-composer-input]') ? '300px' : '0px'
+        );
+      document.addEventListener('focusin', sync);
+      document.addEventListener('focusout', () => queueMicrotask(sync));
+      sync();
+    });
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(source).toBeFocused();
+    await expect(source).not.toHaveAttribute('disabled');
+    await expect(source).toHaveValue('');
+    await page.keyboard.type('must not replace the submitted draft');
+    await expect(source).toHaveValue('');
+    if (dismiss === 'blur') await source.evaluate((node: HTMLTextAreaElement) => node.blur());
+    if (dismiss === 'native-hide') {
+      await page.evaluate(() =>
+        document.documentElement.style.setProperty('--native-keyboard-height', '0px')
+      );
+      await expect(source).toBeFocused();
+    }
+    await page.evaluate(() => window.dispatchEvent(new Event('storybook:session-ready')));
+    const destination = page.locator('textarea[data-lody-composer-input]');
+    await expect(destination).toHaveCount(1);
+    if (dismiss !== 'none') await expect(destination).not.toBeFocused();
+    else await expect(destination).toBeFocused();
+    await expect(page.locator('html')).toHaveCSS(
+      '--native-keyboard-height',
+      dismiss !== 'none' ? '0px' : '300px'
+    );
+    if (dismiss === 'none') {
+      await page.keyboard.type('Continue without reopening the keyboard');
+      await expect(destination).toHaveValue('Continue without reopening the keyboard');
+    }
+  });
+}

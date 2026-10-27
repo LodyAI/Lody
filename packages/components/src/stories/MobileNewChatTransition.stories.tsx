@@ -16,6 +16,7 @@ import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 import {
   getSessionCreationNavigation,
   useMobileComposerPresentation,
+  useComposerNavigationFocus,
 } from '@/components/chat/submission/use-composer-navigation-focus';
 import { Drawer, DrawerContent, DrawerTitle } from '@/ui/drawer';
 import { VaulDrawerBody } from '@/components/mobile/vaul-drawer-edge-back-zone';
@@ -26,6 +27,7 @@ function TransitionSurface({ deferred = false }: { deferred?: boolean }) {
   const router = useRouter();
   const params = useParams({ strict: false }) as { sessionId?: string };
   const presentation = useMobileComposerPresentation(params.sessionId);
+  const claimNavigationFocus = useComposerNavigationFocus(params.sessionId ?? '');
   const [ready, setReady] = useState(!deferred);
   const [presentedSession, setPresentedSession] = useState<string>();
   const { onPresented } = presentation;
@@ -59,9 +61,11 @@ function TransitionSurface({ deferred = false }: { deferred?: boolean }) {
         <InlinePageReview
           initialText="请检查移动端发送消息的布局。"
           submissionPending={Boolean(sent)}
-          onSend={(text, model) => {
+          onSend={(text, model, preserveFocus) => {
             setSent({ text, model });
-            void router.navigate(getSessionCreationNavigation('storybook', 'created', true));
+            void router.navigate(
+              getSessionCreationNavigation('storybook', 'created', true, preserveFocus)
+            );
           }}
         />
       )}
@@ -88,6 +92,7 @@ function TransitionSurface({ deferred = false }: { deferred?: boolean }) {
               <DrawerTitle className="sr-only">Conversation</DrawerTitle>
               <VaulDrawerBody topInset="3rem">
                 <SessionConversationStoryHarness
+                  claimNavigationFocus={claimNavigationFocus}
                   onPresented={acknowledge}
                   state="idle"
                   frame="mobile"

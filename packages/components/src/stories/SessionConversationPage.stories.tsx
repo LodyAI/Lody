@@ -1638,12 +1638,14 @@ function StoryComposer({
   onSendMessage,
   initialInputText = 'Tighten the mobile spacing after the permission flow is stable.',
   modelLabel,
+  claimNavigationFocus,
 }: {
   session: SessionMeta;
   isAgentBusy: boolean;
   onSendMessage?: ComponentProps<typeof SessionChatInputArea>['onSendMessage'];
   initialInputText?: string;
   modelLabel?: string;
+  claimNavigationFocus?: () => boolean;
 }) {
   const baseOptions = session.agentType === 'deepseek' ? readingSelectorOptions : selectorOptions;
   const options = modelLabel
@@ -1664,6 +1666,7 @@ function StoryComposer({
 
   return (
     <SessionChatInputArea
+      claimNavigationFocus={claimNavigationFocus}
       // The info bar above owns this gap, as on the session page.
       hideTopSpacer
       session={session}
@@ -1870,6 +1873,7 @@ export function SessionConversationStoryHarness({
   firstUserMessage,
   onPresented,
   composerModelLabel,
+  claimNavigationFocus,
 }: {
   state: PageState;
   frame: DeviceFrame;
@@ -1889,6 +1893,7 @@ export function SessionConversationStoryHarness({
   firstUserMessage?: string;
   onPresented?: () => void;
   composerModelLabel?: string;
+  claimNavigationFocus?: () => boolean;
   /** Mirrors the Settings > Appearance "Full width" switch. */
   wide?: boolean;
 }) {
@@ -2314,6 +2319,7 @@ export function SessionConversationStoryHarness({
                                   }
                                 />
                                 <StoryComposer
+                                  claimNavigationFocus={claimNavigationFocus}
                                   session={session}
                                   isAgentBusy={isWorking}
                                   modelLabel={composerModelLabel}

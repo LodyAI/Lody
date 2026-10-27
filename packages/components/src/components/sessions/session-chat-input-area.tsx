@@ -59,6 +59,7 @@ import {
 import type { CombinedMentionTextareaHandle } from '@/components/mentions/combined-mention-textarea';
 import type { AttachmentAddMenuMcp } from '@/components/chat/attachment-add-menu';
 import { useComposerSubmission } from '@/components/chat/submission/use-composer-submission';
+import { focusComposerAfterNavigation } from '@/components/chat/submission/use-composer-navigation-focus';
 import { MobileSessionRunConfig } from '@/components/mobile/mobile-session-run-config';
 import { useRunConfigFace } from '@/components/mobile/mobile-run-config-button';
 import {
@@ -630,9 +631,8 @@ export const SessionChatInputArea = memo(
     const isArchived = session.isArchived === true;
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     useLayoutEffect(() => {
-      if (claimNavigationFocus?.() && !usesMobileKeyboardAction) {
-        textareaRef.current?.focus({ preventScroll: true });
-      }
+      if (claimNavigationFocus?.())
+        focusComposerAfterNavigation(textareaRef.current, usesMobileKeyboardAction);
     }, [claimNavigationFocus, usesMobileKeyboardAction]);
     const agentRoleTurnSelectionRef = useRef<SessionTurnAgentRoleSelection>(undefined);
     const selectedAgentRoleRef = useRef<AgentRole | undefined>(undefined);
@@ -1736,7 +1736,7 @@ export const SessionChatInputArea = memo(
           comments: commentReferencesRef.current,
           annotations: visualAnnotationReferencesRef.current,
         };
-        const submission = beginSubmission({ dismissKeyboard: usesMobileKeyboardAction });
+        const submission = beginSubmission({ restoreFocusOnComplete: !usesMobileKeyboardAction });
         if (!submission) return;
         try {
           const images = pendingImages;
@@ -2268,6 +2268,7 @@ export const SessionChatInputArea = memo(
         onClick={() => {
           void sendMessage();
         }}
+        onMouseDown={(event) => event.preventDefault()}
         disabled={!hasSendableContent || isSendActionDisabled}
         aria-label={
           isExternalHistoryRefreshing && externalHistorySyncLabel
@@ -2317,6 +2318,7 @@ export const SessionChatInputArea = memo(
         promptPlaceholder={promptPlaceholder}
         compactPlaceholderName={compactPlaceholderName}
         promptDisabled={submissionPending || isArchived}
+        preservePromptFocus={usesMobileKeyboardAction && submissionPending && !isArchived}
         promptRows={2}
         promptEnterKeyHint={promptEnterKeyHint}
         commentReferenceItems={submissionPending ? [] : commentReferences}

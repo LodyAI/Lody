@@ -224,7 +224,10 @@ import { wrapPastedTextChipLabel } from '@/components/mentions/mention-chips';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { ChatLandingView, type ChatLandingHintType } from './chat-landing-view';
 import { HomeDashboardHost } from './home/home-dashboard-host';
-import { getSessionCreationNavigation } from './submission/use-composer-navigation-focus';
+import {
+  getSessionCreationNavigation,
+  MOBILE_NEW_CHAT_PROMPT_ID,
+} from './submission/use-composer-navigation-focus';
 import { BranchSelector } from './chat-landing-selectors';
 import { composerSurface } from '@/components/shared/composer-surface';
 import {
@@ -3173,9 +3176,6 @@ function WorkspaceChatLanding({
     try {
       setSubmitting(true);
       setComposerStatus(null);
-      // Match the session composer's mobile send: dismiss the keyboard once,
-      // while the controlled draft stays available if creation is rejected.
-      if (usesMobileKeyboardAction) promptTextareaRef.current?.blur();
 
       let project: ProjectRef | undefined;
       let repoFullNameForMentions: string | undefined;
@@ -3503,7 +3503,12 @@ function WorkspaceChatLanding({
       // The mobile host acknowledges its committed session surface before
       // dismissing the new-chat page; navigation may resolve before portals paint.
       await navigate(
-        getSessionCreationNavigation(workspaceSlug, sessionId, usesMobileKeyboardAction)
+        getSessionCreationNavigation(
+          workspaceSlug,
+          sessionId,
+          usesMobileKeyboardAction,
+          promptTextareaRef.current != null && promptTextareaRef.current === document.activeElement
+        )
       );
     } catch (error) {
       capturePostHogEvent(postHog, 'session/start_failed', {
@@ -6399,7 +6404,7 @@ function WorkspaceChatLanding({
             mentionSource={mentionSource}
             availableCommands={availableCommands}
             skillAgent={skillAgent}
-            promptId="chat-prompt-mobile-sheet"
+            promptId={MOBILE_NEW_CHAT_PROMPT_ID}
             promptRef={promptTextareaRef}
             promptValue={submitting ? '' : prompt}
             onPromptChange={setPrompt}
@@ -6410,6 +6415,7 @@ function WorkspaceChatLanding({
             promptPlaceholder={promptPlaceholder}
             compactPlaceholderName={activeAgentRole?.name ?? selectedConfig?.name ?? null}
             promptDisabled={submitting}
+            preservePromptFocus={usesMobileKeyboardAction}
             promptRows={2}
             maxRows={11}
             promptEnterKeyHint={promptEnterKeyHint}
@@ -6440,6 +6446,7 @@ function WorkspaceChatLanding({
                 onClick={() => {
                   void handleSubmit();
                 }}
+                onMouseDown={(event) => event.preventDefault()}
                 disabled={submitDisabled}
                 aria-label={submitDisabled ? t('chat.submitting') : t('chat.send')}
                 /* Match the in-session mobile composer send face: solid

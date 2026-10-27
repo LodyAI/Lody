@@ -42,7 +42,7 @@ export function useComposerSubmission(
   }, [scope, state]);
 
   const beginSubmission = useCallback(
-    ({ dismissKeyboard }: { dismissKeyboard: boolean }): Submission | null => {
+    ({ restoreFocusOnComplete }: { restoreFocusOnComplete: boolean }): Submission | null => {
       // The submission token also covers two submissions in the same React batch.
       if (scope.submission) return null;
       const input = inputRef.current;
@@ -65,7 +65,7 @@ export function useComposerSubmission(
         window?.removeEventListener('blur', relinquishFocus);
       };
       const restoreFocus = () => {
-        if (!dismissKeyboard && !focusRelinquished)
+        if (restoreFocusOnComplete && !focusRelinquished)
           inputRef.current?.focus({ preventScroll: true });
       };
       const submission: Submission = {
@@ -83,9 +83,7 @@ export function useComposerSubmission(
         },
       };
       scope.submission = submission;
-      if (dismissKeyboard) {
-        input.blur();
-      } else {
+      if (restoreFocusOnComplete) {
         document.addEventListener('focusin', onFocus, true);
         document.addEventListener('pointerdown', onPointerDown, true);
         window?.addEventListener('blur', relinquishFocus);

@@ -129,6 +129,8 @@ export interface ChatComposerProps {
   /** Agent or role name for the compact-width placeholder ("Work with {{name}}"). */
   compactPlaceholderName?: string | null;
   promptDisabled?: boolean;
+  /** Block pending edits without disabling the focused mobile input/keyboard. */
+  preservePromptFocus?: boolean;
   promptRows?: number;
   /** Focus the prompt as soon as this composer mounts (new-chat sheet). */
   promptAutoFocus?: boolean;
@@ -265,6 +267,7 @@ export function ChatComposer({
   promptPlaceholder,
   compactPlaceholderName,
   promptDisabled = false,
+  preservePromptFocus = false,
   promptRows = 3,
   promptAutoFocus = false,
   promptEnterKeyHint,
@@ -309,6 +312,27 @@ export function ChatComposer({
   maxRows = 12,
   focusOnContainerClick = false,
 }: ChatComposerProps) {
+  const promptInputProps = {
+    disabled: promptDisabled && !preservePromptFocus,
+    'aria-disabled': promptDisabled || undefined,
+    onValueChange: (value: string) => {
+      if (!promptDisabled) onPromptChange(value);
+    },
+    onBeforeInput: (event: React.FormEvent<HTMLTextAreaElement>) => {
+      if (promptDisabled) event.preventDefault();
+    },
+    onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (promptDisabled) {
+        if (event.key !== 'Tab') event.preventDefault();
+        return;
+      }
+      onPromptKeyDown?.(event);
+    },
+    onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => {
+      if (promptDisabled) event.preventDefault();
+      else onPromptPaste?.(event);
+    },
+  };
   const { t, i18n } = useTranslation();
   const shortcutsAllowed = useWorkspaceFeature('shortcuts');
   const shortcutsEnabled = variant !== 'dialog' && shortcutsAllowed;
@@ -1051,7 +1075,7 @@ export function ChatComposer({
                 skillAgent={skillAgent}
                 currentSessionId={currentSessionId}
                 value={promptValue}
-                onValueChange={onPromptChange}
+                {...promptInputProps}
                 externalMentions={pastedTextMentions}
                 onExternalMentionsChange={handlePastedTextMentionsChange}
                 onMentionClick={handleMentionClick}
@@ -1060,10 +1084,7 @@ export function ChatComposer({
                 persistedMentions={persistedMentions}
                 draftKey={draftKey}
                 mentionActionsRef={mentionActionsRef}
-                onKeyDown={onPromptKeyDown}
-                onPaste={onPromptPaste}
                 onCopy={handlePromptCopy}
-                disabled={promptDisabled}
                 rows={effectivePromptRows}
                 enterKeyHint={promptEnterKeyHint}
                 placeholder={resolvedPromptPlaceholder}
@@ -1160,7 +1181,7 @@ export function ChatComposer({
               skillAgent={skillAgent}
               currentSessionId={currentSessionId}
               value={promptValue}
-              onValueChange={onPromptChange}
+              {...promptInputProps}
               externalMentions={pastedTextMentions}
               onExternalMentionsChange={handlePastedTextMentionsChange}
               onMentionClick={handleMentionClick}
@@ -1169,10 +1190,7 @@ export function ChatComposer({
               persistedMentions={persistedMentions}
               draftKey={draftKey}
               mentionActionsRef={mentionActionsRef}
-              onKeyDown={onPromptKeyDown}
-              onPaste={onPromptPaste}
               onCopy={handlePromptCopy}
-              disabled={promptDisabled}
               rows={effectivePromptRows}
               enterKeyHint={promptEnterKeyHint}
               placeholder={resolvedPromptPlaceholder}

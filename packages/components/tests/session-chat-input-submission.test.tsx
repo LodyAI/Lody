@@ -1163,7 +1163,7 @@ describe('SessionChatInputArea submission feedback', () => {
       await submit('button');
       expect(textarea.disabled).toBe(false);
       expect(textarea.value).toBe('focus regression draft');
-      expect(document.activeElement === textarea).toBe(!mobile);
+      expect(document.activeElement).toBe(textarea);
     }
   );
 
@@ -1183,7 +1183,7 @@ describe('SessionChatInputArea submission feedback', () => {
       }
     }
     it.each(['keyboard', 'button'] as const)(
-      `never refocuses ${mobilePlatform} after %s submission succeeds or fails`,
+      `preserves the focused ${mobilePlatform} input during %s submission`,
       async (source) => {
         setMobilePlatform();
         for (const accepted of [false, true]) {
@@ -1191,14 +1191,27 @@ describe('SessionChatInputArea submission feedback', () => {
           const textarea = await renderComposer({ onSendMessage: () => acceptance.promise });
           textarea.focus();
           await submit(source);
-          expect(document.activeElement).not.toBe(textarea);
+          expect(textarea.disabled).toBe(false);
+          expect(textarea.value).toBe('');
+          expect(document.activeElement).toBe(textarea);
           await act(async () => acceptance.resolve(accepted));
           expect(textarea.disabled).toBe(false);
           expect(textarea.value).toBe(accepted ? '' : 'focus regression draft');
-          expect(document.activeElement).not.toBe(textarea);
+          expect(document.activeElement).toBe(textarea);
         }
       }
     );
+    it(`does not reclaim ${mobilePlatform} focus after an explicit keyboard dismissal`, async () => {
+      setMobilePlatform();
+      const acceptance = deferredBoolean();
+      const textarea = await renderComposer({ onSendMessage: () => acceptance.promise });
+      textarea.focus();
+      await submit('keyboard');
+      textarea.blur();
+      await act(async () => acceptance.resolve(false));
+      expect(textarea.value).toBe('focus regression draft');
+      expect(document.activeElement).not.toBe(textarea);
+    });
     it(`consumes a navigation request without focusing on ${mobilePlatform}`, async () => {
       setMobilePlatform();
       let pending = true;
