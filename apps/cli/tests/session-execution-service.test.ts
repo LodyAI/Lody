@@ -1,3 +1,4 @@
+import { AcpStartupProcessError } from '../src/agent/acp-startup-monitor';
 import * as quotaRunner from '../src/agent/acp-runner';
 import { ProviderQuotaRefreshCache } from '../src/session/provider-quota-refresh-cache';
 import { createSessionBackend } from '@/session/session-backend';
@@ -6227,6 +6228,20 @@ describe('SessionExecutionService', () => {
       expectedReason: 'agent_disconnected',
       expectedMessage: 'The agent process disconnected unexpectedly. Please try again.',
       expectedTerminateForce: true,
+    },
+    {
+      name: 'startup transport failure with npm diagnostics',
+      error: new AcpStartupProcessError({
+        sessionId: 'synthetic-startup',
+        command: 'npx',
+        args: [],
+        stderrTail: 'npm error EBADDEVENGINES: requires Node >=22.23.4',
+        cause: new Error('ACP connection closed'),
+      }),
+      stage: 'agent-start',
+      expectedReason: 'turn_pre_prompt_failed',
+      expectedMessage:
+        'Starting the agent failed: [ACP_STARTUP_FAILED] ACP agent process failed before startup completed (command=npx): ACP connection closed; stderr tail: npm error EBADDEVENGINES: requires Node >=22.23.4',
     },
     {
       name: 'ordinary non-ACP failure',

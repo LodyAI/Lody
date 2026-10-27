@@ -80,7 +80,7 @@
   machines publish `['dotlodyPath']`; frontends derive them.
 - `sandbox.spawn` returning OUTPUT requires `captureOutput: true` and a 4 MiB buffer cap;
   ACP stdio does not capture.
-- Session start failures: [rules](README.md#start-failures).
+- Keep startup stderr: [rules](README.md#start-failures).
 - Shutdown: `cleanUp({ keepWorkspaceDocumentOpen: true })`, MessageHandler's final flush,
   then `cleanUp()`; never close the doc first.
 

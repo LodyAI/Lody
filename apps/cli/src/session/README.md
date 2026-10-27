@@ -385,6 +385,11 @@ is bound. A failure is recorded as `<step> failed: <message>`, using
 `session-start-stage.ts`, so the user sees where start-up stopped. Authentication failures
 keep their own message. The error itself is never wrapped: the restore and create paths
 classify it by identity to choose sign-in, the history-replay fallback or a generic failure.
+During ACP startup, a plain transport-close error retains the monitor's observed
+process failure, or its already buffered stderr when stdout closes before the exit
+event. Typed startup failures bypass generic disconnect classification, so the
+start-step notice carries their diagnostics. Protocol errors and cancellation keep
+their original identity; no extra wait or retry is introduced.
 When a start fails, cleanup terminates the partial Session and releases its credentials.
 Each cleanup failure is logged, and the original error is rethrown. These are rules:
 never wrap the start error, and never let cleanup replace it. Failure text uses
