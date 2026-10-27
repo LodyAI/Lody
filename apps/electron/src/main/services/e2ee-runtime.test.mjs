@@ -2383,7 +2383,8 @@ void test('revocation bypasses an unstaged candidate but preserves an unknown pu
           workspaceId,
           page(records, prepared.genesisHashHex, 0)
         )
-        let blocked = false
+        let blocked = false,
+          stagingUnavailable = false
         const staged = new Map(),
           attempts = [],
           submitted = []
@@ -2415,12 +2416,15 @@ void test('revocation bypasses an unstaged candidate but preserves an unknown pu
             stageGroup: (group) =>
               Effect.suspend(() => {
                 attempts.push(group)
-                if (blocked && failure === 'stage')
+                if (stagingUnavailable || (blocked && failure === 'stage'))
                   return Effect.fail(new Error('synthetic staging outage'))
                 staged.set(group.recordHash, group)
                 return Effect.void
               }),
-            readGroup: (key) => Effect.succeed(staged.get(key.recordHash) ?? null),
+            readGroup: (key) =>
+              stagingUnavailable
+                ? Effect.fail(new Error('synthetic staging read outage'))
+                : Effect.succeed(staged.get(key.recordHash) ?? null),
             deleteGroup: () => Effect.void
           })
         })
@@ -2459,6 +2463,7 @@ void test('revocation bypasses an unstaged candidate but preserves an unknown pu
         assert.equal(retained.pending !== null, failure === 'cas')
         const original = Buffer.from(retained.rows[0].record)
         assert.equal(Buffer.from(attempts[0].record).equals(original), true)
+        if (failure === 'cas') stagingUnavailable = true
         const point = view.head
         yield* owner.host.closeWorkspace(workspaceId)
         yield* owner.host.open(workspaceId)
@@ -2512,6 +2517,7 @@ void test('revocation bypasses an unstaged candidate but preserves an unknown pu
           assert.deepEqual(rows[0].record, retained.rows[0].record)
           assert.deepEqual(rows[0].envelopes, retained.rows[0].envelopes)
         } else {
+          assert.equal(attempts.length, 1, 'pending publication resumes without staging again')
           assert.equal(Result.isFailure(revoke), true)
           assert.equal(view.head.equals(point), true)
           assert.equal(view.inspectState().devices.has(targets[1]), true)
