@@ -1,6 +1,6 @@
 import { runtimeInitializingAtom } from '@/atoms/control-connection';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { usePlatform } from '@lody/platform/react';
@@ -22,6 +22,8 @@ import {
   E2eeLocalEvidenceConflictError,
   E2eeLocalEvidenceCorruptError,
   repairUnreadableE2eeCaches,
+  recoverE2eeWorkspaceIdentity,
+  readWorkspaceModeEvidence,
 } from '@/lib/e2ee-workspace-storage';
 
 function admissionFailureHelp(errorType: string): string {
@@ -66,13 +68,26 @@ export function WorkspaceAdmissionGate({
   const user = useAtomValue(userAtom);
   const runtime = useAtomValue(runtimeAtom);
   const initializing = useAtomValue(runtimeInitializingAtom);
-  const encrypted = Boolean(mode?.descriptor && 'contentMode' in mode.descriptor && mode.descriptor.contentMode === 'e2ee');
+  const encrypted = Boolean(
+    mode?.descriptor && 'contentMode' in mode.descriptor && mode.descriptor.contentMode === 'e2ee'
+  );
   const e2eeAccountId = useE2eeAccountId(encrypted);
   const accountId = user?.id ?? (encrypted ? e2eeAccountId : null);
   const failure = useAtomValue(workspaceRuntimeInitFailureAtom);
   const retryAdmission = useSetAtom(workspaceModeAdmissionRetryAtom);
   const encryptedCreationEnabled = useAtomValue(e2eeWorkspaceCreationFeatureEnabledAtom);
   const { t } = useTranslation();
+  const recoveryScope = JSON.stringify([accountId, workspaceName, failure]);
+  const currentScope = useRef<string | null>(recoveryScope);
+  currentScope.current = recoveryScope;
+  const [recheckScope, setRecheckScope] = useState<string | null>(null);
+  const recovering = useRef(false);
+  useEffect(
+    () => () => {
+      if (currentScope.current === recoveryScope) currentScope.current = null;
+    },
+    [recoveryScope]
+  );
   if (!platform.e2eeWorkspaces) return children;
   if (!mode || mode.workspaceSlug !== workspaceName || mode.accountId !== accountId) {
     if (failure?.workspaceSlug !== workspaceName) {
@@ -92,15 +107,44 @@ export function WorkspaceAdmissionGate({
         title={encryption ? t('e2ee.mode.failed') : t('workspace.route.openErrorTitle')}
         description={
           encryption
-            ? t(admissionFailureHelp(failure.errorType))
+            ? t(
+                recheckScope === recoveryScope
+                  ? 'e2ee.mode.identityRecheckHelp'
+                  : admissionFailureHelp(failure.errorType)
+              )
             : t('workspace.route.openErrorDescription')
         }
         onRetry={() => {
-          // Unreadable optional caches cannot help any later attempt. Sticky
-          // encrypted evidence and conflicting records are never removed here.
-          if (failure.errorType === E2eeLocalEvidenceCorruptError.name && user?.id)
-            repairUnreadableE2eeCaches(localStorage, user.id);
-          retryAdmission((value) => value + 1);
+          if (recovering.current) return;
+          const identityFailure =
+            failure.errorType === E2eeLocalEvidenceCorruptError.name ||
+            failure.errorType === E2eeLocalEvidenceConflictError.name;
+          const workspaceId = failure.modeAdmission?.workspaceId;
+          const native = platform.e2eeWorkspaces?.runtime;
+          const isCurrent = () => currentScope.current === recoveryScope;
+          recovering.current = true;
+          void (async () => {
+            try {
+              if (identityFailure && user?.id) {
+                // Optional cache repair cannot remove sticky identity evidence.
+                repairUnreadableE2eeCaches(localStorage, user.id);
+                if (native && workspaceId)
+                  await recoverE2eeWorkspaceIdentity({
+                    storage: localStorage,
+                    accountId: user.id,
+                    workspaceId,
+                    runtime: native,
+                    isCurrent,
+                  });
+                else if (workspaceId) readWorkspaceModeEvidence(localStorage, user.id, workspaceId);
+              }
+              if (isCurrent()) retryAdmission((value) => value + 1);
+            } catch {
+              if (isCurrent()) setRecheckScope(recoveryScope);
+            } finally {
+              recovering.current = false;
+            }
+          })();
         }}
       />
     );
@@ -110,9 +154,30 @@ export function WorkspaceAdmissionGate({
     'contentMode' in mode.descriptor &&
     mode.descriptor.contentMode === 'e2ee'
   ) {
-    if (runtime?.workspaceId === mode.workspaceId && runtime.accountId === mode.accountId && runtime.contentMode === 'e2ee') return children;
-    if (initializing) return <BlockingWaitPlaceholder gate="workspace_admission" variant="boot" title={t('workspace.route.loadingTitle')} description={t('workspace.route.loadingDescription')} />;
-    if (platform.e2eeWorkspaces.runtime) return <RouteMessage gate={null} title={t('e2ee.access.waitingKey.title')} description={t('e2ee.access.waitingKey.description')} onRetry={() => retryAdmission(value => value + 1)} />;
+    if (
+      runtime?.workspaceId === mode.workspaceId &&
+      runtime.accountId === mode.accountId &&
+      runtime.contentMode === 'e2ee'
+    )
+      return children;
+    if (initializing)
+      return (
+        <BlockingWaitPlaceholder
+          gate="workspace_admission"
+          variant="boot"
+          title={t('workspace.route.loadingTitle')}
+          description={t('workspace.route.loadingDescription')}
+        />
+      );
+    if (platform.e2eeWorkspaces.runtime)
+      return (
+        <RouteMessage
+          gate={null}
+          title={t('e2ee.access.waitingKey.title')}
+          description={t('e2ee.access.waitingKey.description')}
+          onRetry={() => retryAdmission((value) => value + 1)}
+        />
+      );
     return (
       <BootNavigate
         to="/workspace/e2ee/$workspaceId"

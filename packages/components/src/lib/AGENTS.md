@@ -1,8 +1,6 @@
 # Shared UI helpers and file surfaces
 
-Rules bind callers too.
-Background: [components](../../../../.agents/docs/components-package.md),
-[files](../../../../.agents/docs/components-file-paths.md).
+Rules bind callers too. [Background](../../../../.agents/docs/components-package.md).
 
 - Send/RPC await local commits, never Repo flush. Save `humanInputReceipts` before activation; RPC is redundant.
 - Retry immutable Roost input; absent receipts stay unknown. Cache/refresh keeps
@@ -21,6 +19,9 @@ Background: [components](../../../../.agents/docs/components-package.md),
   Push events/one-way sends stay in `@lody/shared/electron-ipc`.
 
 ## Crash recovery and diagnostics
+
+- Restore damaged E2EE markers from native verified identity only; archive originals.
+  Keep valid conflicts and isolate bad creation intents.
 
 - `ErrorBoundary`'s fallback shows the real error and one-click full-report copy on every
   build, details visible (`showErrorDetails` opts out); `error-boundary-report.ts` builds it.

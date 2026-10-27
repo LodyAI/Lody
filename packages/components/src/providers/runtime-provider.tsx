@@ -57,6 +57,7 @@ import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import type { WorkspaceAdmissionDescriptor } from '@lody/cloud-api';
 import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspace-mark';
 import {
+  E2eeLocalEvidenceCorruptError,
   hasEncryptedEvidenceForAnyAccount,
   hasPendingE2eeCreationForSlug,
   isWorkspaceModeStorageKey,
@@ -344,6 +345,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   // (new encrypted evidence, unreadable evidence, retry) change effect keys.
   const savedModeRef = useRef(savedMode);
   savedModeRef.current = savedMode;
+  // Recovery lookup only; native independently verifies this cached/listed ID.
+  const recoveryWorkspaceIdRef = useRef(workspaceId ?? cachedId);
+  recoveryWorkspaceIdRef.current = workspaceId ?? cachedId;
   const knownEncryptedRef = useRef(knownEncrypted);
   knownEncryptedRef.current = knownEncrypted;
   const savedModeErrorType = savedMode.error ? describeErrorType(savedMode.error) : null;
@@ -448,7 +452,13 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const modeAdmissionFailure = (error: unknown) => ({
       workspaceSlug: workspaceSlug!,
       errorType: describeErrorType(error),
-      modeAdmission: { knownEncrypted: knownEncryptedRef.current },
+      modeAdmission: {
+        knownEncrypted: knownEncryptedRef.current ||
+          (error instanceof E2eeLocalEvidenceCorruptError &&
+            ['Invalid genesis pin', 'Invalid encrypted evidence'].includes(error.message)),
+        ...((effectiveWorkspaceId ?? recoveryWorkspaceIdRef.current)
+          ? { workspaceId: (effectiveWorkspaceId ?? recoveryWorkspaceIdRef.current)! } : {}),
+      },
     });
     // A restart of the same account/workspace (local-agent toggle, retry) keeps
     // the last verified mode so the workspace tree does not unmount and flash.

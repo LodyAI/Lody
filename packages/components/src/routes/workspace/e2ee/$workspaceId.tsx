@@ -19,6 +19,8 @@ import {
 } from '@/lib/e2ee-ledger-history';
 import {
   readE2eeGenesisPin,
+  readWorkspaceModeEvidence,
+  recoverE2eeWorkspaceIdentity,
   repairUnreadableE2eeCaches,
   resetObservedLedgerProgress,
   retainEncryptedWorkspaceMode,
@@ -95,6 +97,18 @@ function WorkspaceControlRoute() {
       try {
         if (port.runtime) {
           const runtime = port.runtime;
+          try {
+            readWorkspaceModeEvidence(localStorage, accountId, workspaceId);
+          } catch {
+            repairUnreadableE2eeCaches(localStorage, accountId);
+            await recoverE2eeWorkspaceIdentity({
+              storage: localStorage,
+              accountId,
+              workspaceId,
+              runtime,
+              isCurrent: () => !disposed && scopeRef.current === scope,
+            });
+          }
           const pin = readE2eeGenesisPin(localStorage, accountId, workspaceId);
           let status;
           try {

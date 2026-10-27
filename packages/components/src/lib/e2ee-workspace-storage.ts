@@ -73,11 +73,17 @@ export function listPendingE2eeWorkspaces(
     if (!key?.startsWith(prefix)) continue;
     const raw = storage.getItem(key);
     if (raw === null) continue;
-    const pending = parsePending(raw, accountId);
-    const previous = results.get(pending.requestId);
-    if (previous && (previous.name !== pending.name || previous.slug !== pending.slug))
-      throw corrupt('Conflicting creation intent');
-    results.set(pending.requestId, pending);
+    try {
+      const pending = parsePending(raw, accountId);
+      // A request owns exactly its canonical key. A damaged alias must not
+      // resume or shadow another request, nor poison the account's whole list.
+      if (key !== pendingKey(pending)) continue;
+      results.set(pending.requestId, pending);
+    } catch (error) {
+      if (!(error instanceof E2eeLocalEvidenceCorruptError)) throw error;
+      // Keep the original key and bytes for reconciliation. Only this entry
+      // is unavailable; other requests and new request IDs remain usable.
+    }
   }
   return [...results.values()].sort((a, b) => a.requestId.localeCompare(b.requestId));
 }
@@ -577,4 +583,75 @@ export function resetObservedLedgerProgress(
   const keys = keysWithPrefix(storage, observedPrefix(accountId, workspaceId));
   for (const key of keys) storage.removeItem(key);
   return keys.length;
+}
+
+/** Rebuild unreadable renderer identity markers only from the host's independently
+ * retained, verified ledger. Readable conflicting evidence is never replaced.
+ * The host owns/reuses its status reader; this does not create or re-pair identity.
+ */
+export async function recoverE2eeWorkspaceIdentity(input: {
+  storage: Storage;
+  accountId: string;
+  workspaceId: string;
+  runtime: Pick<import('@lody/platform').E2eeWorkspaceRuntime, 'account' | 'status'>;
+  isCurrent: () => boolean;
+}): Promise<void> {
+  const { storage, accountId, workspaceId, runtime, isCurrent } = input;
+  if (!isCurrent() || (await runtime.account())?.userId !== accountId)
+    throw conflict('Workspace identity must be checked again');
+  const status = await runtime.status(workspaceId);
+  if (
+    (await runtime.account())?.userId !== accountId ||
+    !isCurrent() ||
+    status.workspaceId !== workspaceId ||
+    !/^[0-9a-f]{64}$/.test(status.genesisHash)
+  )
+    throw conflict('Workspace identity must be checked again');
+  const hash = status.genesisHash;
+  const damaged: { key: string; raw: string }[] = [];
+  for (const key of [pinKey(accountId, workspaceId), knownEncryptedKey(accountId, workspaceId)]) {
+    const raw = storage.getItem(key);
+    if (raw === null) continue;
+    if (/^[0-9a-f]{64}$/.test(raw)) {
+      if (raw !== hash) throw conflict('Workspace mode conflicts with encrypted evidence');
+    } else damaged.push({ key, raw });
+  }
+  // Even if a sticky field is unreadable, a readable proof still constrains the
+  // identity. Do not delete an ordinary proof or a different encrypted genesis.
+  const rawProof = storage.getItem(modeKey(accountId, workspaceId));
+  if (rawProof !== null) {
+    let saved: { accountId?: unknown; descriptor?: WorkspaceAdmissionDescriptor } | null = null;
+    try {
+      saved = JSON.parse(rawProof);
+      if (saved?.descriptor) validateDescriptor(saved.descriptor);
+    } catch {
+      saved = null; // Optional unreadable proof is handled by cache repair below.
+    }
+    if (
+      saved?.descriptor &&
+      saved.accountId === accountId &&
+      saved.descriptor.workspaceId === workspaceId
+    ) {
+      const descriptor = saved.descriptor;
+      if (
+        !('contentMode' in descriptor) ||
+        descriptor.contentMode !== 'e2ee' ||
+        descriptor.genesisHash !== hash
+      )
+        throw conflict('Workspace mode conflicts with encrypted evidence');
+    }
+  }
+  for (const point of observedCheckpoints(storage, accountId, workspaceId)) {
+    if (point.genesisHash !== hash) throw conflict('Conflicting observed genesis');
+  }
+  // Save every original before replacing any marker. Quota/permission failures
+  // leave the originals in place. Archives are outside ordinary cache cleanup.
+  for (const original of damaged) {
+    const key = `lody-e2ee-evidence-archive:${crypto.randomUUID()}`;
+    const raw = JSON.stringify(original);
+    storage.setItem(key, raw);
+    if (storage.getItem(key) !== raw) throw corrupt('Identity archive could not be saved');
+  }
+  for (const original of damaged) storage.setItem(original.key, hash);
+  repairUnreadableE2eeCaches(storage, accountId);
 }
