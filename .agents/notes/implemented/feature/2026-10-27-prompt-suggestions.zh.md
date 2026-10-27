@@ -47,8 +47,8 @@ Claude 协商后开启 SDK `promptSuggestions`，但尊重 provider 选项的显
 - 通知只供参考，可以晚于 prompt 完成或新输入，不进入助手正文、不自动作为用户输入。
   没有历史／读取／重试 API，也不保证每轮必有事件；SDK 抑制生成不等于失败。
 - 根 pnpm 工作区已有 `acp-extension-core: workspace:*` override，本地消费者使用本次
-  源码。adapter 独立 npm 依赖尚不含新增 Core 导出，独立发布前须先发布 Core，再更新
-  adapter 的依赖锁定和 lockfile。集成 PR 锁定供审查的源码提交；包版本、运行时版本和发布保持不变。
+  源码。Core 0.3.0 已发布，两个 adapter 均精确依赖 `acp-extension-core@0.3.0`，
+  npm 生成的 lockfile 包含对应注册表校验值。根 lockfile 因 workspace 覆盖不变。集成 PR 锁定供审查的源码提交；包版本、运行时版本和发布保持不变。
 - 后续产品方向仍是 composer hint，Tab 接受为可编辑草稿但不自动发送。独立 ephemeral
   最新状态同步适合此场景；现有 `presence` 心跳通道不能承载建议文本。此次没有实现或
   验证 UI／同步。
@@ -75,3 +75,5 @@ Core build/typecheck 与全部 10 项测试通过。adapter 测试覆盖未协�
 会丢失 Codex 语义。用户选择宽松参考性交付，不继续调查 Claude 的跨轮来源关联。
 
 创建 PR 时重新尝试了主仓 `pnpm check`／`pnpm format` 和 Claude `npm run check`；工作区依赖缺失、原有依赖软链接目标已不可用，因此未能重跑。上面的定向验证在环境变化之前通过。
+
+Core 0.3.0 依赖更新在干净的独立克隆中通过 `npm ci` 验证，使用 npm 发布包：Codex 类型检查（含示例）、构建和 11 项定向测试通过；Claude 构建、完整 `npm run check` 和 699 项定向测试通过（10 项跳过）。主仓检查仍受工作区依赖缺失阻塞。

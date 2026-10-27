@@ -36,7 +36,7 @@ Claude negotiation enables SDK `promptSuggestions` unless provider options expli
 
 - The user accepted potentially stale suggestions. `sourceTurnId` stays absent for Claude; no `validForTurnId` or synthetic turn binding is introduced. A message UUID is not a source turn.
 - Notifications are advisory, can follow prompt completion or newer input, and never enter assistant text or automatically become user input. No history/read/retry API or per-turn delivery guarantee is implied. SDK suppression is not a failure.
-- The root pnpm workspace already overrides Core to `workspace:*`; local consumers use this source. Standalone adapter npm pins do not yet include the new Core exports. Publish Core, then update adapter pins and lockfiles before standalone release. The integration PR pins the reviewed source commits; package versions, runtime pins and publication remain unchanged.
+- The root pnpm workspace already overrides Core to `workspace:*`; local consumers use this source. Core 0.3.0 is published. Both adapters now pin `acp-extension-core` to `0.3.0`, with npm-generated lockfiles and registry integrity hashes. The root lockfile remains unchanged because its override still resolves Core to the workspace. The integration PR pins the reviewed source commits; package versions, runtime pins and publication remain unchanged.
 - The proposed product direction remains a composer hint accepted by Tab into an editable draft, without auto-submit. Independent ephemeral latest-state synchronization is appropriate; the existing `presence` heartbeat channel must not carry suggestion text. This UI/synchronization direction was not implemented or tested.
 
 ## Verification
@@ -44,6 +44,8 @@ Claude negotiation enables SDK `promptSuggestions` unless provider options expli
 Core build/typecheck and all 10 Core tests passed. Adapter tests cover absent/unknown negotiation, successful generation opt-in and explicit opt-out, native text/null/failure preservation, session ownership and native-to-ACP identity, post-prompt delivery, and a rejected late Claude notification while another prompt continues. Codex covers both ACP versions. Final offline suites: Claude 1,172 passed / 11 skipped; Codex 98 passed. Both adapter builds, Codex typecheck, and changed Claude files lint/format checks passed using Node 24.22.1.
 
 Two Claude initialization snapshots were updated only for the new capability. The broader suite exposed nine existing v2 task actor snapshots; `bash-background` reproduces with the unchanged adapter source. Full default adapter test runs were stopped after existing real-runtime cases attempted network access and Codex authentication failed. Real-model generation and suppression remain unverified. PR preparation also attempted root `pnpm check`/`pnpm format` and Claude `npm run check`; missing workspace dependencies and now-unavailable dependency symlinks prevented those reruns. The successful targeted checks above preceded that environment change. Root documentation checks retain existing missing-submodule link failures; no new note-link errors were introduced (40 baseline errors remain).
+
+The Core 0.3.0 dependency update was verified in clean standalone clones using `npm ci` against the published package: Codex typecheck (including examples), build and 11 targeted tests passed; Claude build, full `npm run check` and 699 targeted tests passed (10 skipped). Root checks remain blocked by missing workspace dependencies.
 
 ## Evidence
 
