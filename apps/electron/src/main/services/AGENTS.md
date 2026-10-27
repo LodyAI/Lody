@@ -102,7 +102,7 @@ Fence opens/late D03 registration by identity/generation; pin D03 before signing
 Lazy custody; no network under locks; drain native work before release.
 Keep verification/storage errors owner-local; malformed input keeps readers.
 Originals precede feed/pin; compare overlaps, retain checkpoints, await history.
-Conflicts refuse fallback; availability may use pinned renderer reads.
+Conflicts refuse fallback. Failed close retains its writer fence; report restart-required.
 Fixed cloud refs; authenticate/bound/abort requests; disposal fences late calls.
 Retain uncertain bytes; raw/SDK causes stay in main, never IPC/telemetry.
 Verified readback beats lost ACKs; cleanup retains admission.

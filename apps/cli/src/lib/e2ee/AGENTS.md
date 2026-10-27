@@ -20,6 +20,7 @@
 - Resume first Windows ACL setup only in an empty custody directory; otherwise validate only.
 - `runtime.ts` composes Feed/VerifiedLedger, installed keys and optional receiver.
   Open/status are offline; cloud requests stay in cloud-cli-port.
+  Report damaged history/pins distinctly; never reset trusted pins from remote hints.
 - Journal originals before feed/pin advancement. Rebase after 64 more records, core pin
   first. Retired cache cleanup cannot fail local open.
 - No plaintext RPC, presence, attachments or scheduled automation on encrypted workspaces
