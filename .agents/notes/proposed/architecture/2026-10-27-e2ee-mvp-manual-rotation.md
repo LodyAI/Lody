@@ -2,6 +2,7 @@
 
 Status: proposed
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1956
 
 [中文](2026-10-27-e2ee-mvp-manual-rotation.zh.md)
 
