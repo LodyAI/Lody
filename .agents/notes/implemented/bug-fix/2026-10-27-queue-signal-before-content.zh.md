@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#1933](https://github.com/LodyAI/Lody/pull/1933)
+
 [English](2026-10-27-queue-signal-before-content.md)
 
 ## 摘要
