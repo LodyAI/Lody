@@ -48,7 +48,7 @@ drag-start zone, which is why nothing else may mount one.
 
 The session is already a body-portal Vaul drawer at `z-50`. A second body-level
 `fixed z-50` surface — for example a Browser panel rendered with
-`createPortal(document.body)` — therefore lands *under* the conversation, invisible
+`createPortal(document.body)` — therefore lands _under_ the conversation, invisible
 until the session drawer closes and then flashing. Nesting the Browser drawer is
 what keeps it above.
 
@@ -56,6 +56,12 @@ The Files drawer nests the two families: `MobileProjectFileBrowser` mounts its o
 `MobileEdgeBackSwipeZone` at z-60 while inside a folder, so an edge swipe pops one
 directory level, and only the root swipe reaches Vaul's z-30 strip and closes the
 drawer. Those two z values are load-bearing against each other.
+
+The Files drawer (`mobile-session-files-drawer.tsx`) stays open when a file is
+opened from it. The session's file viewer drawer is a later body portal on the same
+`z-50` rung, so it stacks above, and closing it reveals the folder the file came
+from. Closing the Files drawer first would unmount the browser and drop its folder
+stack, so Back would fall through to the conversation.
 
 Body portals inside a drawer can lose touch and scroll entirely, because
 Radix/Vaul's modal layer treats them as outside the drawer — hence the preference
@@ -113,7 +119,7 @@ rather than drawing both a status indicator and a chevron in the one node slot.
 
 ## Session sheets, viewers, and the frosted header
 
-The tab sheet is the only surface that can say a *background* tab is waiting on
+The tab sheet is the only surface that can say a _background_ tab is waiting on
 approval while another tab is on screen, which is why the status type — not just
 presence — travels through the derived atom and why `requestPermission` outranks
 the spinner. The header badge stays two-state because a dot can only differ by

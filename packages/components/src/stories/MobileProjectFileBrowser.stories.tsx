@@ -108,7 +108,7 @@ function FileBrowserHarness({
   provider,
   message,
   projectName,
-  /* Stands in for `session-detail.tsx`'s mobile Files drawer, which owns a
+  /* Stands in for `MobileSessionFilesDrawer`, whose session host owns a
      viewer and takes over `onOpenFile` instead of letting the browser
      preview in place. */
   onOpenFile,

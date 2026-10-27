@@ -51,7 +51,7 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
   `if (isMobile)`: `mobile-session-tab-sheet.tsx` (the 💬 `MobileSessionTabButton`
   with its accent unread dot opens the tab switcher — grouped cards, Conversations
   rows reading `[hand|spinner|accent unread dot|empty] title [Main chip]
-  relative-time`, a collapsed `Archived (N)` disclosure whose rows restore and
+relative-time`, a collapsed `Archived (N)` disclosure whose rows restore and
   switch, then a Viewers card of Files/file/diff/PR/browser) and
   `mobile-session-menu-sheet.tsx` (the `…` button: machine/branch info, optional
   Owner row, Find/Fork/Rename/Copy/Archive).
@@ -59,6 +59,8 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
   conversation. Session HTML opens in preview with an eye toggle for source;
   WebKit uses the shared script-free HTML/CSS preview. The project file browser
   also previews complete HTML by default with the same source toggle.
+  `mobile-session-files-drawer.tsx` — the session's Files drawer around
+  `MobileProjectFileBrowser`; it stays open beneath the file viewer it opens.
   `glass-icon-button.tsx` — the frosted header's `GlassIconButton`
   (canvas-drawn glass disc; story `MobileFrostedHeader.stories.tsx`).
 
@@ -66,7 +68,7 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
 
 - `mobile-session-run-config.tsx` (the one shared control),
   `mobile-run-config-button.tsx` (collapsed face: `[agent icon] model · reasoning ·
-  [mode face] · plan/fast`), `mobile-run-config-sheet.tsx`
+[mode face] · plan/fast`), `mobile-run-config-sheet.tsx`
   (Role/Agent/Model/Interaction/Reasoning/Permission/Plan/Fast rows plus
   provider-defined selects, all through coordinated inline pickers),
   `permission-mode-face.tsx` (classified by `@lody/shared`

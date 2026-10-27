@@ -169,6 +169,7 @@ import type {
 } from '@/components/mobile/mobile-session-menu-sheet';
 import { SessionShareMobileMenu } from '@/components/sharing/session-share-mobile-menu';
 import { MobileFileViewerDrawer } from '@/components/mobile/mobile-file-viewer-drawer';
+import { MobileSessionFilesDrawer } from '@/components/mobile/mobile-session-files-drawer';
 import { GlassIconButton } from '@/components/mobile/glass-icon-button';
 import { toast } from '@/lib/toast';
 
@@ -184,10 +185,6 @@ import { deletePrCacheEntriesForSession } from '@/lib/github-pr-cache';
 import { FileTreeView } from './components/file-tree-view';
 import { useSessionFileActions } from '@/hooks/use-session-file-actions';
 import { SessionFileActionsMenu } from './session-file-actions-menu';
-import {
-  MobileProjectFileBrowser,
-  type MobileProjectFileBrowserHandle,
-} from '@/components/files/mobile-project-file-browser';
 import { buildSessionLink } from '@lody/shared/session-link';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import { useDesktopTabCloser } from '@/lib/desktop-tab-or-window-close';
@@ -477,9 +474,9 @@ const EMPTY_VIEWER_TAB_SAVE_STATE: ViewerTabSaveState = {
   copyMarkdownRequestSeq: 0,
 };
 
-/* Top inset for mobile full-screen drawer edge-swipe strips (PR / Browser /
-   Files). Sized for the tallest fixed header (`pr-tab-view.tsx` /
-   Files header at `3.5rem + safe-area-top`) so the strip never covers a
+/* Top inset for mobile full-screen drawer edge-swipe strips (PR / Browser).
+   Sized for the tallest fixed header (`pr-tab-view.tsx`, `3.5rem +
+   safe-area-top`, like the Files drawer's) so the strip never covers a
    back control; shorter bars (browser toolbar) simply get a small gap. */
 const MOBILE_DRAWER_HEADER_INSET = 'calc(3.5rem + var(--safe-area-top))';
 
@@ -575,38 +572,6 @@ const detailStyles = stylex.create({
     fontSize: '0.875rem',
     lineHeight: '1.25rem',
     color: 'hsl(var(--muted-foreground))',
-  },
-  columnFill: {
-    display: 'flex',
-    height: '100%',
-    flexDirection: 'column',
-  },
-  mobileDrawerHeader: {
-    display: 'flex',
-    height: 'calc(3.5rem + var(--safe-area-top))',
-    flexShrink: 0,
-    alignItems: 'center',
-    gap: space[2],
-    borderBottomWidth: '1px',
-    borderBottomStyle: 'solid',
-    borderBottomColor: 'hsl(var(--border))',
-    paddingInline: space[3],
-    paddingTop: 'var(--safe-area-top)',
-  },
-  mobileTitle: {
-    minWidth: 0,
-    flex: 1,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    fontSize: '0.875rem',
-    lineHeight: '1.25rem',
-    fontWeight: 500,
-  },
-  relativeFill: {
-    position: 'relative',
-    minHeight: 0,
-    flex: 1,
   },
   conversationTopInset: (inset: string) => ({
     '--conversation-top-inset': inset,
@@ -1165,7 +1130,6 @@ const SessionDetail = ({
   const [mobileFilesBrowserOpen, setMobileFilesBrowserOpen] = useState(false);
   const [mobileFileViewerTabId, setMobileFileViewerTabId] = useState<string | null>(null);
   const [mobileFileViewerOpen, setMobileFileViewerOpen] = useState(false);
-  const mobileFilesBrowserRef = useRef<MobileProjectFileBrowserHandle>(null);
   const [localStateSessionId, setLocalStateSessionId] = useState(sessionId);
   const [commentReferenceKeysBySession, setCommentReferenceKeysBySession] = useState<
     Record<string, string[]>
@@ -6612,78 +6576,18 @@ const SessionDetail = ({
               </MobileFileViewerDrawer>
             );
           })}
-        {/* Mobile Files full-screen drawer — the counterpart of the desktop
-           Files side panel, which the mobile branch never renders. Opened from
-           the tab sheet's Files viewer entry.
-
-           Back layering (deliberate, and it falls out of the z-indexes): inside
-           a folder the browser mounts its own edge zone at z-60, so an edge
-           swipe pops one directory level; at the root it mounts none, leaving
-           only `VaulDrawerBody`'s z-30 strip, so the same gesture closes the
-           drawer. That is the iOS drill-out order — keep the two z values apart
-           if either zone moves.
-
-           Files open through `handleOpenFile` (the browser's `onOpenFile`
+        {/* Files open through `handleOpenFile` (the browser's `onOpenFile`
            delegate) rather than the browser's built-in preview, so a file
            reached from the tree lands in the same viewer tab — with save, LSP
            and tab persistence — as one tapped in the conversation. */}
-        <Drawer
-          direction="right"
-          repositionInputs={isNativeAppShell()}
+        <MobileSessionFilesDrawer
           open={mobileFilesBrowserOpen}
           onOpenChange={setMobileFilesBrowserOpen}
-        >
-          <DrawerContent
-            className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
-            data-sidebar-swipe-open-disabled
-          >
-            <DrawerTitle className={stylex.props(detailStyles.srOnly).className}>
-              {t('sessions.detailTabs.files', 'Files')}
-            </DrawerTitle>
-            <VaulDrawerBody topInset={MOBILE_DRAWER_HEADER_INSET}>
-              <div {...stylex.props(detailStyles.columnFill)}>
-                <header {...stylex.props(detailStyles.mobileDrawerHeader)}>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    icon
-                    className={getSessionDetailTouchIconButtonClassName('-ml-1')}
-                    /* Same order as the edge swipe: pop a directory level
-                       first, close the drawer only at the root. */
-                    onClick={() => {
-                      if (mobileFilesBrowserRef.current?.canGoBack()) {
-                        mobileFilesBrowserRef.current.goBack();
-                        return;
-                      }
-                      setMobileFilesBrowserOpen(false);
-                    }}
-                    aria-label={t('common.back', 'Back')}
-                  >
-                    <ArrowLeft {...stylex.props(detailStyles.icon16)} />
-                  </Button>
-                  <span {...stylex.props(detailStyles.mobileTitle)}>
-                    {t('sessions.detailTabs.files', 'Files')}
-                  </span>
-                </header>
-                <div {...stylex.props(detailStyles.relativeFill)}>
-                  <MobileProjectFileBrowser
-                    ref={mobileFilesBrowserRef}
-                    provider={activeSessionFileProvider}
-                    pending={activeSessionFileProviderPending}
-                    message={activeSessionFileProviderMessage}
-                    onOpenFile={(filePath) => {
-                      setMobileFilesBrowserOpen(false);
-                      handleOpenIndexedFile(filePath);
-                    }}
-                    /* No bottom tab bar over this drawer — only the safe area
-                       needs clearing. */
-                    bottomTabBarVisible={false}
-                  />
-                </div>
-              </div>
-            </VaulDrawerBody>
-          </DrawerContent>
-        </Drawer>
+          provider={activeSessionFileProvider}
+          pending={activeSessionFileProviderPending}
+          message={activeSessionFileProviderMessage}
+          onOpenFile={handleOpenIndexedFile}
+        />
         {/* Mobile PR full-screen drawer. Edge-only interactive back: Vaul drives
            the drag but only from the left-edge zone (the body is wrapped in
            `data-vaul-no-drag`), so PR diffs scroll horizontally without dragging
