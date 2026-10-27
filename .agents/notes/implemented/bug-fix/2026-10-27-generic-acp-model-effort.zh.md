@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1968
 Language: [English](2026-10-27-generic-acp-model-effort.md)
 
 ## 摘要
