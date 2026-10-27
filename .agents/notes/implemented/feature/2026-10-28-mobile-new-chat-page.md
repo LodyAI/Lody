@@ -90,15 +90,31 @@ This preserves the shared renderer and current page ownership instead of adding
 a second editor host or moving focused DOM between containers. The destination
 still mounts its session UI; native smoothness needs a new device pass.
 
+## Default project on a fresh mobile conversation
+
+Home no longer forces the composer into the no-project context. Successful local
+admission records `lastUsedProject` in the existing workspace-scoped, device-local
+landing defaults. Normal context/agent persistence preserves this separate field,
+so browsing or a canceled/rejected draft cannot replace the last accepted target.
+An empty home-launched composer restores it through the existing project handler;
+local targets also restore their owning machine and clear an incompatible Role.
+Explicit project-page entry and existing drafts retain their current selection.
+
+Restoration waits for relevant catalogs, runs once before paint when ready, and
+is canceled if the user changes machine/project or closes the page. Exact visible
+identity is required: a deleted or unavailable target becomes no project. An
+explicit last-used no-project choice remains none. On older installs without this
+field, the existing recent-use ordering supplies an available fallback.
+
 ## Verification and limits
 
 - Focused project/target/workspace/config/submission and desktop comparator suites:
-  116 passing tests, including the existing avatar cache, project filtering and
+  146 passing tests, including the existing avatar cache, project filtering and
   comparator boundaries.
-- Thirteen Chromium scenarios cover both themes, 320–430px phone widths, a fixed
+- Seventeen Chromium scenarios cover both themes, 320–430px phone widths, a fixed
   simulated 300px keyboard, delayed presentation, later URL correction and
-  GitHub avatar pending/success/error states; five WebKit cases cover automatic dismissal,
-  resumed input and safe-area interpolation. First-send cases observe 45 frames
+  GitHub avatar pending/success/error states; nine WebKit cases cover automatic dismissal,
+  resumed input, safe-area interpolation and project restoration. First-send cases observe 45 frames
   with identical composer bounds, model text/weight and no entrance movement.
 - Package typecheck, changed-file formatting/lint and artboard layout checks pass.
   Root documentation validation is limited by links into uninitialized ACP
@@ -106,8 +122,8 @@ still mounts its session UI; native smoothness needs a new device pass.
 - Stories explicitly force the mobile layout family and use real components
   with synthetic workspace/acceptance data. The gallery includes project types,
   opened pickers, shared run-config Sheet, attachments, long text and short phones.
-- iOS Debug `0.107.2 (20261028.5)` was built, signed, installed and launched on
-  the physical test device. The isolated build retains the previous device build
-  dependency baseline; all five product files edited in this follow-up match
+- iOS Debug `0.107.2 (20261028.6)` was built, signed and installed on
+  the physical test device; iOS refused automatic launch because it was locked. The isolated build retains the previous device build
+  dependency baseline; all four product files edited in the default-project follow-up match
   the working tree byte-for-byte. Installation and simulated geometry do not establish
   acceptance of native keyboard timing or the felt first-send transition.

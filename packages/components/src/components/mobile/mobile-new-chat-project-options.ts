@@ -1,6 +1,7 @@
 import { compareUnifiedProjectOptions } from '../chat/chat-landing-derived';
 import type { UnifiedProjectSelection } from '../chat/unified-project-selector';
 import type { MachineId } from '@lody/shared';
+import type { ChatLandingDefaults } from '@/lib/chat-landing-defaults';
 import type {
   MobileProjectFolder,
   MobileProjectGroup,
@@ -57,6 +58,34 @@ export type MobileProjectOption = {
   lastUsedAt?: number;
   selection: Exclude<UnifiedProjectSelection, { kind: 'none' }>;
 };
+
+/** Remembered intent wins; older installs can recover from existing usage ranks. */
+export function resolveMobileNewChatDefaultProject(
+  remembered: ChatLandingDefaults['lastUsedProject'],
+  options: readonly MobileProjectOption[]
+): UnifiedProjectSelection {
+  if (remembered?.kind === 'none') return remembered;
+  const available = options.filter((option) => !option.disabledReason);
+  const match = remembered
+    ? available.find((option) => {
+        const selection = option.selection;
+        return (
+          selection.kind === remembered.kind &&
+          (selection.kind === 'github' && remembered.kind === 'github'
+            ? selection.repoFullName === remembered.repoFullName
+            : selection.kind === 'local' && remembered.kind === 'local'
+              ? selection.machineId === remembered.machineId &&
+                selection.localProjectId === remembered.localProjectId
+              : selection.kind === 'group' && remembered.kind === 'group'
+                ? selection.projectId === remembered.projectId
+                : false)
+        );
+      })
+    : [...available]
+        .sort(compareUnifiedProjectOptions)
+        .find((option) => option.lastUsedAt !== undefined);
+  return match?.selection ?? { kind: 'none' };
+}
 
 /** One recent-first list across all sources, using the desktop tie breakers. */
 export function getMobileProjectOptions(

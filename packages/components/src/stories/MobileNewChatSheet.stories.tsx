@@ -16,7 +16,11 @@ import {
   type ChatComposerFileItem,
   type ChatComposerImageItem,
 } from '@/components/chat/chat-composer';
-import { GitHubOwnerAvatarIcon } from '@/components/chat/unified-project-selector';
+import {
+  GitHubOwnerAvatarIcon,
+  type UnifiedProjectSelection,
+} from '@/components/chat/unified-project-selector';
+import { readChatLandingDefaults, recordChatLandingProjectUse } from '@/lib/chat-landing-defaults';
 import { MOBILE_NEW_CHAT_PROMPT_ID } from '@/components/chat/submission/use-composer-navigation-focus';
 import {
   AGENT_ROLE_VERSION,
@@ -45,7 +49,10 @@ import {
   MobileInlinePicker,
   MobileInlinePickerCoordinator,
 } from '@/components/mobile/mobile-inline-picker';
-import { getMobileProjectOptions } from '@/components/mobile/mobile-new-chat-project-options';
+import {
+  getMobileProjectOptions,
+  resolveMobileNewChatDefaultProject,
+} from '@/components/mobile/mobile-new-chat-project-options';
 import { MobileNewChatSheet } from '@/components/mobile/mobile-new-chat-sheet';
 import type {
   MobileProjectFolder,
@@ -336,7 +343,12 @@ export function InlinePageReview({
   initialProject?: string;
   initialText?: string;
   initialModel?: string;
-  onSend?: (text: string, model: string, preserveFocus: boolean) => void;
+  onSend?: (
+    text: string,
+    model: string,
+    preserveFocus: boolean,
+    project: UnifiedProjectSelection
+  ) => void;
   submissionPending?: boolean;
   withAttachments?: boolean;
   initialRole?: boolean;
@@ -624,7 +636,22 @@ export function InlinePageReview({
               shape="pill"
               aria-label="Send"
               onClick={() => {
-                onSend?.(prompt, model, promptRef.current === document.activeElement);
+                onSend?.(
+                  prompt,
+                  model,
+                  promptRef.current === document.activeElement,
+                  project === 'none'
+                    ? { kind: 'none' }
+                    : projectGroup
+                      ? { kind: 'group', projectId: projectGroup.projectId }
+                      : localProject
+                        ? {
+                            kind: 'local',
+                            machineId: localProject.machineId,
+                            localProjectId: localProject.localProjectId,
+                          }
+                        : { kind: 'github', repoFullName: project }
+                );
               }}
               onMouseDown={(event) => event.preventDefault()}
               disabled={
@@ -721,4 +748,51 @@ export const InlinePageManyBranches: Story = {
   name: 'Inline page many local branches',
   args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
   render: () => <InlinePageReview initialLocalWorktree manyBranches />,
+};
+
+/** Synthetic home/acceptance; real page, selectors and persisted target resolver. */
+function RememberedProjectReview() {
+  const [open, setOpen] = useState(false);
+  const [target, setTarget] = useState('none');
+  return open ? (
+    <InlinePageReview
+      initialProject={target}
+      onSend={(_text, _model, _focus, project) => {
+        recordChatLandingProjectUse('storybook-last-project', project);
+        setOpen(false);
+      }}
+    />
+  ) : (
+    <Button
+      onClick={() => {
+        const selection = resolveMobileNewChatDefaultProject(
+          readChatLandingDefaults('storybook-last-project')?.lastUsedProject,
+          getMobileProjectOptions({
+            folders: projectFolders,
+            repositories: projectRepos,
+            groups: projectGroups,
+            machineId: 'spikes' as MachineId,
+            query: '',
+          })
+        );
+        setTarget(
+          selection.kind === 'github'
+            ? selection.repoFullName
+            : selection.kind === 'local'
+              ? selection.localProjectId
+              : selection.kind === 'group'
+                ? `group:${selection.projectId}`
+                : 'none'
+        );
+        setOpen(true);
+      }}
+    >
+      New conversation
+    </Button>
+  );
+}
+export const RememberedProject: Story = {
+  name: 'Restore last sent project',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <RememberedProjectReview />,
 };

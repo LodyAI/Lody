@@ -100,10 +100,11 @@ before touching gestures.
 - New-chat scopes agents via `allowedMachineIds` from the selected machine and
   leaves agent unlocked; in-session locks it after turns. No fast/plan toggles
   on new-chat.
-- New chat: machine/project/Git worktree+branch; reuse session shell/Sheet.
-  Projects: folder/group icons, GitHub owner avatars, recency/name/id order.
-  Explain Role clearing on machine change. Wait for session presentation before
-  closing new chat; disable entrance through later renders. Back animates.
+- New chat: session shell/Sheet; machine/project/worktree+branch.
+  Home restores last-sent target; project entry/drafts win.
+  Group/folder icons, GitHub avatars; recency/name/id order.
+  Explain Role clearing on machine change. Hide after session presents;
+  suppress entrance across renders. Back animates.
   [Details](README.md#sheets-and-session-surfaces).
 - `mobile-inline-picker.tsx` stays keyboard-operable (↑/↓/Enter/Esc, desktop
   search autofocus on `pointer: fine`) and virtualizes lists >40 options. Its

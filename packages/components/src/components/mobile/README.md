@@ -60,7 +60,13 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
   with a pinned “No project selected” option. Groups and local folders use type icons;
   GitHub rows and the selected value share the desktop owner avatar, falling back to
   the GitHub icon while loading or on failure. GitHub rows omit repository descriptions.
-  Search preserves this order.
+  Search preserves this order. Home opens an empty draft with the last accepted
+  project, saved per workspace/device independently of browsing defaults.
+  Explicit project-page entry and an existing draft keep their selection. A local
+  target restores its machine too; an incompatible Role is cleared through the
+  existing machine handler. Deleted/unavailable targets become no project. Older
+  installs without a saved target use existing available-project usage ranks.
+  Restoration waits for catalogs and is canceled by manual machine/project choice.
   [Decision and evidence](../../../../../.agents/notes/implemented/feature/2026-10-28-mobile-new-chat-page.md).
 - Bottom sheets: `mobile-workspace-switcher-sheet.tsx`, `mobile-create-workspace-sheet.tsx`,
   `mobile-delete-workspace-sheet.tsx`, `mobile-worktree-config-sheet.tsx`,

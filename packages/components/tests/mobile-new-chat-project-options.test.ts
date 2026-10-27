@@ -3,6 +3,7 @@ import type { LocalProjectId, MachineId } from '@lody/shared';
 import {
   filterMobileProjectOptions,
   getMobileProjectOptions,
+  resolveMobileNewChatDefaultProject,
 } from '@/components/mobile/mobile-new-chat-project-options';
 import type {
   MobileProjectFolder,
@@ -164,5 +165,54 @@ describe('getMobileProjectOptions', () => {
     expect(
       result.filter((option) => option.selection.kind === 'local').map((option) => option.label)
     ).toEqual(['loro']);
+  });
+});
+
+describe('mobile new-chat default target', () => {
+  const options = () =>
+    getMobileProjectOptions({ folders, repositories, groups, machineId: spikes, query: '' });
+  it('prefers the remembered repo over the more recently ranked group', () => {
+    const selection = { kind: 'github', repoFullName: 'loro-dev/lody' } as const;
+    expect(resolveMobileNewChatDefaultProject(selection, options())).toEqual(selection);
+  });
+  it('keeps an explicit no-project choice', () => {
+    expect(resolveMobileNewChatDefaultProject({ kind: 'none' }, options())).toEqual({
+      kind: 'none',
+    });
+  });
+  it.each(['local', 'group'] as const)('restores the exact %s identity', (kind) => {
+    const selection = options().find((option) => option.selection.kind === kind)!.selection;
+    expect(resolveMobileNewChatDefaultProject(selection, options())).toEqual(selection);
+  });
+  it('does not substitute a similarly named folder on another machine', () => {
+    expect(
+      resolveMobileNewChatDefaultProject(
+        { kind: 'local', machineId: 'deleted-machine', localProjectId: folders[0]!.localProjectId },
+        options()
+      )
+    ).toEqual({ kind: 'none' });
+  });
+  it('falls back to no project for deleted or unavailable remembered targets', () => {
+    expect(
+      resolveMobileNewChatDefaultProject({ kind: 'github', repoFullName: 'gone/repo' }, options())
+    ).toEqual({ kind: 'none' });
+    const group = options().find((option) => option.selection.kind === 'group')!;
+    expect(
+      resolveMobileNewChatDefaultProject(group.selection, [
+        { ...group, disabledReason: 'Unavailable' },
+      ])
+    ).toEqual({ kind: 'none' });
+  });
+  it('uses existing recent usage when upgrading without a remembered target', () => {
+    const available = options();
+    expect(resolveMobileNewChatDefaultProject(undefined, available)).toEqual(
+      available[0]!.selection
+    );
+    expect(
+      resolveMobileNewChatDefaultProject(
+        undefined,
+        available.map((option) => ({ ...option, lastUsedAt: undefined }))
+      )
+    ).toEqual({ kind: 'none' });
   });
 });

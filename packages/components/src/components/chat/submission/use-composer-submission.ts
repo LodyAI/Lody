@@ -37,12 +37,15 @@ export function useComposerSubmission(
   }, [scope]);
 
   useLayoutEffect(() => {
-    if (state?.scope !== scope || state.pending) return;
-    state.restoreFocus();
-    scope.submission?.dispose();
-    scope.submission = null;
-    if (state.dismissKeyboard && inputRef.current)
-      return dismissComposerKeyboardAfterPaint(inputRef.current);
+    let cleanup: (() => void) | undefined;
+    if (state?.scope === scope && !state.pending) {
+      state.restoreFocus();
+      scope.submission?.dispose();
+      scope.submission = null;
+      if (state.dismissKeyboard && inputRef.current)
+        cleanup = dismissComposerKeyboardAfterPaint(inputRef.current);
+    }
+    return cleanup;
   }, [scope, state, inputRef]);
 
   const beginSubmission = useCallback(

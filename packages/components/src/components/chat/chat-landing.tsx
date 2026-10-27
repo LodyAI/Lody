@@ -136,6 +136,7 @@ import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope'
 import {
   getChatLandingAgentSelectionsForMachine,
   readChatLandingDefaults,
+  recordChatLandingProjectUse,
   resolvePreferredChatLandingAgentSelection,
 } from '@/lib/chat-landing-defaults';
 import {
@@ -351,7 +352,10 @@ import {
   MobileInlinePicker,
   MobileInlinePickerCoordinator,
 } from '@/components/mobile/mobile-inline-picker';
-import { getMobileProjectOptions } from '@/components/mobile/mobile-new-chat-project-options';
+import {
+  getMobileProjectOptions,
+  resolveMobileNewChatDefaultProject,
+} from '@/components/mobile/mobile-new-chat-project-options';
 import { MobileSessionRunConfig } from '@/components/mobile/mobile-session-run-config';
 import { resolveMobileNewChatTargetLabel } from '@/components/mobile/mobile-new-chat-target';
 import { MobileWorkspaceSwitcherSheet } from '@/components/mobile/mobile-workspace-switcher-sheet';
@@ -1167,6 +1171,7 @@ function WorkspaceChatLanding({
   }, []);
   /* The new-chat page sits over the mounted home or project screen. */
   const [mobileNewChatOpen, setMobileNewChatOpen] = useState(false);
+  const [restoreMobileProject, setRestoreMobileProject] = useState(false);
   const [mobileCreatedSessionId, setMobileCreatedSessionId] = useState<string | null>(null);
   useLayoutEffect(() => {
     if (mobileCreatedSessionId && mobilePresentedSessionId === mobileCreatedSessionId) {
@@ -3334,7 +3339,10 @@ function WorkspaceChatLanding({
         pendingHistoryEntry,
         attachments
       );
-      if (mobileNewChatOpen) setMobileCreatedSessionId(sessionId);
+      if (mobileNewChatOpen) {
+        setMobileCreatedSessionId(sessionId);
+        setRestoreMobileProject(false);
+      }
       // Admission owns the snapshot now; later preference/navigation failures must not resend it.
       setPrompt('');
       clearPastedTextDrafts();
@@ -3344,6 +3352,7 @@ function WorkspaceChatLanding({
       if (!historyEntry || typeof historyEntry !== 'object' || !('id' in historyEntry)) {
         throw new Error(`Initial session history missing entry id (sessionId=${sessionId})`);
       }
+      recordChatLandingProjectUse(workspaceId, desktopProjectSelection);
       persistAgentSessionDefaults(selectedAgent.agentId, {
         modeId: modeOptions.length > 0 ? selectedModeId : null,
         modelId: modelOptions.length > 0 ? selectedModelId : null,
@@ -4224,6 +4233,55 @@ function WorkspaceChatLanding({
       })),
     [desktopProjectGroupOptions]
   );
+
+  useLayoutEffect(() => {
+    if (!restoreMobileProject || !mobileNewChatOpen || submitting || !workspaceId || !defaultsReady)
+      return;
+    if (visibleLocalProjectsLoading || visibleMachinesLoading || !docMetaCacheReady) return;
+    const remembered = readChatLandingDefaults(workspaceId)?.lastUsedProject;
+    if (
+      (!remembered || remembered.kind === 'github') &&
+      !repositoriesReady &&
+      repositories === undefined
+    )
+      return;
+    const options = getMobileProjectOptions({
+      folders: mobileProjectFolders,
+      repositories: mobileProjectRepos,
+      groups: mobileProjectGroups,
+      machineId:
+        remembered?.kind === 'local'
+          ? (remembered.machineId as MachineId)
+          : mobileProjectSelectedMachineId,
+      query: '',
+    });
+    setRestoreMobileProject(false);
+    const selection = resolveMobileNewChatDefaultProject(remembered, options);
+    if (selection.kind === 'local' && selection.machineId !== mobileProjectSelectedMachineId) {
+      if (activeAgentRole) handleAgentRoleSelect(null);
+      handleMachineChange(selection.machineId);
+    }
+    handleDesktopProjectChange(selection);
+  }, [
+    restoreMobileProject,
+    mobileNewChatOpen,
+    submitting,
+    workspaceId,
+    defaultsReady,
+    visibleLocalProjectsLoading,
+    visibleMachinesLoading,
+    docMetaCacheReady,
+    repositoriesReady,
+    repositories,
+    mobileProjectFolders,
+    mobileProjectRepos,
+    mobileProjectGroups,
+    mobileProjectSelectedMachineId,
+    handleDesktopProjectChange,
+    activeAgentRole,
+    handleAgentRoleSelect,
+    handleMachineChange,
+  ]);
 
   const mobileSheetSelectedProjectName = useMemo(() => {
     if (desktopProjectSelection.kind === 'group') {
@@ -6304,6 +6362,7 @@ function WorkspaceChatLanding({
                 : undefined),
           }))}
           onChange={(id) => {
+            setRestoreMobileProject(false);
             if (id !== mobileProjectSelectedMachineId) {
               if (activeAgentRole) handleAgentRoleSelect(null);
               handleMachineChange(id);
@@ -6323,6 +6382,7 @@ function WorkspaceChatLanding({
           value={mobileInlineProjectValue}
           options={mobileInlineProjects}
           onChange={(value) => {
+            setRestoreMobileProject(false);
             const item = mobileInlineProjects.find((entry) => entry.value === value);
             if (value === '__add_local__') handleAddLocalProject();
             else if (value === '__connect_github__') handleConnectGitRepo();
@@ -6467,7 +6527,10 @@ function WorkspaceChatLanding({
       open={mobileNewChatOpen}
       onOpenChange={(open) => {
         setMobileNewChatOpen(open);
-        if (!open) setMobileCreatedSessionId(null);
+        if (!open) {
+          setMobileCreatedSessionId(null);
+          setRestoreMobileProject(false);
+        }
       }}
       {...mobileNewChatSheetContentProps}
     />
@@ -6531,7 +6594,10 @@ function WorkspaceChatLanding({
              sheet reads the current project context from chat-landing
              state, so it lands preselected without needing extra
              props. */
-          onNewChat={() => setMobileNewChatOpen(true)}
+          onNewChat={() => {
+            setRestoreMobileProject(false);
+            setMobileNewChatOpen(true);
+          }}
           showArchived={mobileProjectShowArchived}
           onShowArchivedToggle={() => setMobileProjectShowArchived((prev) => !prev)}
           /* The Files tab shares the project header: it renders the
@@ -6802,9 +6868,9 @@ function WorkspaceChatLanding({
              home screen behind the overlay so the user can cancel and
              return to the project / chat list without navigation. */
           onNewChat={() => {
-            if (selectedMobileHomeTab === 'chat') {
-              setContextType('chat');
-            }
+            setRestoreMobileProject(
+              !prompt.trim() && imageItems.length === 0 && fileItems.length === 0
+            );
             setMobileNewChatOpen(true);
           }}
           showArchived={mobileHomeShowArchived}

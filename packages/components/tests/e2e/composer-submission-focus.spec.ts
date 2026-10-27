@@ -1246,3 +1246,29 @@ test('mobile first send keeps the keyboard if the user starts the next draft bef
   await page.keyboard.type('A new draft');
   await expect(destination).toHaveValue('A new draft');
 });
+
+for (const project of ['loro-dev/lody', 'blog', 'Loro stack', 'No project selected']) {
+  test(`mobile new conversation restores last sent project ${project} after reopening and reload`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/iframe.html?id=mobile-mobilenewchatsheet--remembered-project&viewMode=story');
+    await page.getByRole('button', { name: 'New conversation', exact: true }).click();
+    await page.getByRole('button', { name: 'Project', exact: true }).click();
+    await page
+      .getByRole('listbox', { name: 'Project', exact: true })
+      .getByRole('option')
+      .filter({ has: page.getByText(project, { exact: true }) })
+      .getByRole('button')
+      .click();
+    await page
+      .locator('textarea[data-lody-composer-input]')
+      .fill('Synthetic project restoration test');
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
+    await page.getByRole('button', { name: 'New conversation', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Project', exact: true })).toHaveText(project);
+    await page.reload();
+    await page.getByRole('button', { name: 'New conversation', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Project', exact: true })).toHaveText(project);
+  });
+}
