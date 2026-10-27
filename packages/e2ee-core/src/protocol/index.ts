@@ -69,6 +69,16 @@ export {
   type SealedEpochHpke,
 } from '../internal/crypto/hpke';
 
+// Purpose-specific opaque content primitives; no realtime authority or body profile.
+export {
+  sealPresenceContent,
+  openPresenceContent,
+  sealRpcRequestContent,
+  openRpcRequestContent,
+  sealRpcResponseContent,
+  openRpcResponseContent,
+} from '../internal/content/realtime';
+
 // Documents
 export {
   sealDocument,

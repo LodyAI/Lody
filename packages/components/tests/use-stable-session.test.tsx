@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
     } as unknown,
     error: null as Error | null,
     isPending: false,
+    isRefetching: false,
     refetch: vi.fn(),
   },
   getSession: vi.fn(),
@@ -51,6 +52,7 @@ describe('useStableSessionInternal', () => {
     };
     mocks.session.error = null;
     mocks.session.isPending = false;
+    mocks.session.isRefetching = false;
     mocks.session.refetch.mockReset();
     mocks.session.refetch.mockResolvedValue(undefined);
     mocks.getSession.mockReset();
@@ -100,6 +102,33 @@ describe('useStableSessionInternal', () => {
     await act(async () => vi.advanceTimersByTimeAsync(300));
 
     expect(mocks.session.refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not sign out while a slow startup session retry is still in flight', async () => {
+    // Desktop restart behind a proxy: no user has resolved yet, the first
+    // check times out, and the retry takes longer than the retry backoff.
+    // The Electron store clears `error` while a refetch is running.
+    mocks.session.data = undefined;
+    mocks.session.error = new Error('getSession network call timed out after 5000ms');
+
+    await act(async () => root.render(<Consumer />));
+    await act(async () => vi.advanceTimersByTimeAsync(300));
+    expect(mocks.session.refetch).toHaveBeenCalledTimes(1);
+
+    mocks.session.error = null;
+    mocks.session.isRefetching = true;
+    await act(async () => root.render(<Consumer />));
+    await act(async () => vi.advanceTimersByTimeAsync(10_000));
+
+    expect(current?.confirmedUnauthenticated).toBe(false);
+    expect(current?.isPending).toBe(true);
+
+    mocks.session.data = { session: { id: 'current-session' }, user: { id: 'user-1' } };
+    mocks.session.isRefetching = false;
+    await act(async () => root.render(<Consumer />));
+
+    expect(current?.confirmedUnauthenticated).toBe(false);
+    expect(current?.data).toEqual(mocks.session.data);
   });
 
   it('records a failing session check for the recovery screen, and clears it on success', async () => {

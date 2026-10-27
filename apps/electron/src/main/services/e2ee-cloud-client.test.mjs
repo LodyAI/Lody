@@ -330,3 +330,74 @@ void test('closing one workspace aborts its mailbox without retiring another wor
     )
   )
 })
+
+void test('personal join keeps exact originals across lost acknowledgements and accepts the supported invitation size', async () => {
+  const join = {
+    workspaceId: 'workspace',
+    pairingSessionId: 'aa'.repeat(16),
+    genesisHash: target.genesis,
+    signingPublicKey: sender,
+    credentialHash: 'bb'.repeat(32),
+    requestHex: 'aabb'
+  }
+  const session = { ...join, accountId: 'account', status: 'pending' }
+  let saved = null
+  let loseAck = true
+  const invitationHex = 'ab'.repeat(3 * 1024 * 1024)
+  const fetch = async (_url, init) => {
+    const {
+      path,
+      args: [args]
+    } = JSON.parse(init.body)
+    if (path === 'e2eeJoinMailbox:begin') {
+      assert.equal(args.requestHex, 'aabb')
+      if (saved) assert.deepEqual(args, saved)
+      saved = args
+      if (loseAck) {
+        loseAck = false
+        throw new Error('synthetic-private-pairing-cause')
+      }
+      return response(session)
+    }
+    if (path === 'e2eeJoinMailbox:claim')
+      return response({ ...session, status: 'published', publisher: sender, invitationHex })
+    throw new Error('unapproved endpoint')
+  }
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* build(fetch)
+        const pending = client.joinBegin(join)
+        join.requestHex = 'ffff'
+        assert.ok(Result.isFailure(yield* Effect.result(pending)))
+        assert.equal((yield* pending).requestHex, 'aabb')
+        assert.equal(
+          (yield* client.joinClaim({
+            workspaceId: join.workspaceId,
+            pairingSessionId: join.pairingSessionId
+          })).invitationHex,
+          invitationHex
+        )
+      })
+    )
+  )
+})
+
+void test('D03 narrow registration accepts no client-selected identity and validates the response', async () => {
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* build(async (_url, init) => {
+          const { path, args } = JSON.parse(init.body)
+          assert.equal(path, 'e2eeWorkspaces:accountIdentity')
+          assert.deepEqual(args, [{}])
+          return response({ accountId: 'synthetic-account', cryptoUserId: 'aa'.repeat(32) })
+        })
+        assert.deepEqual(yield* client.accountIdentity(), {
+          accountId: 'synthetic-account',
+          cryptoUserId: 'aa'.repeat(32)
+        })
+      })
+    )
+  )
+})

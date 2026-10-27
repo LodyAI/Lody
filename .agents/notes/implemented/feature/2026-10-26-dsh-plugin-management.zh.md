@@ -17,7 +17,10 @@ Translation: current
 
 持久化 Provider 必须属于执行机器且类型为 builtin DeepSeek。请求只携带 Provider ID 和
 有界的注册表包名，不接受启动参数、路径、环境变量或替代 home。接口禁止修改固定运行时包及
-Lody host bundle。本地设置使用本地 Machine RPC，远程设置复用现有 workspace 传输。
+Lody host bundle。本机设置通过本地 Machine RPC 修改插件；远程 workspace 传输仅允许列表读取。
+共享工作区流无法认证机器所有者身份，因此服务端在调用 Provider 服务前拒绝安装、升级和卸载。
+客户端同样拒绝远程修改，界面提示在所属机器的 Lody 中操作。包名校验和安装环境凭据隔离
+不能授权插件后续使用 Provider 凭据执行代码。
 `dshPlugins: 1` 同时控制路由和界面；新 Provider 必须先保存，离线机器不启用操作。
 
 现有固定版本 npx/Node 启动器运行 `dsh plugin --profile lody-acp`，插件操作额外在同一
@@ -43,13 +46,13 @@ Legacy 文件锁边界执行。Promise 启动准备位于该原生单元之外�
 ## 证据与限制
 
 行为测试覆盖并发启动及适配器升级后清单、workspace 和锁文件保留，损坏配置，包写入互斥，
-安装、升级及卸载结果，失败写入恢复，严格 RPC 输入，远程分发及界面成功与失败状态。
+安装、升级及卸载结果，失败写入恢复，严格 RPC 输入，远程只读分发、拒绝远程修改并保持列表不变，以及界面成功与失败状态。
 沿用现有 Provider 和 Machine RPC 测试作为所属覆盖。macOS 上固定 DSH 0.2.1-rc.2 的真实冒烟已验证合成 bundle 的原生安装、自动注册和卸载，
 并确认原有 host 层保留；未使用 API 凭据或模型请求，不作为依赖网络的单元测试。
 Windows 和打包 Electron 的安装仍需平台冒烟验证。
 
-提交前的 `pnpm check` 通过类型与 lint 阶段，616 个组件测试文件全部通过。
-CLI 检查发现能力清单断言遗漏（已补齐），以及原生 Git 递归子模块测试报
-`context_unreadable`；该传输模块不在本次改动范围。不能宣称全量检查通过。
-插件定向测试、静态边界及文档检查通过。更早一次运行出现的 V8/Wasm 代码回收
-SIGTRAP 未在提交前检查中复现。
+合入 main 并限制远程操作后，`pnpm check` 通过类型与 lint 阶段，617 个组件测试文件全部通过。
+CLI 通过 334 个文件、跳过 1 个；原生 Git 递归子模块测试仍报 `context_unreadable`，
+该传输模块不在本次改动范围，不能宣称全量检查通过。
+组件定向测试 98 项通过；RPC 测试 161 项通过、3 项跳过。
+格式化、静态边界及文档检查通过。

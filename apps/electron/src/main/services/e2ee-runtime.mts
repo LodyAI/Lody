@@ -1,4 +1,6 @@
+import { rememberDesktopE2eeFailure } from './e2ee-diagnostics.mjs'
 import { randomUUID } from 'node:crypto'
+import { makeDesktopPersonalPairing } from './e2ee-personal-pairing.mjs'
 import { makeDesktopLocalPairing } from './e2ee-local-pairing.mjs'
 import type { LocalE2eePrepareResponse } from '@lody/shared/e2ee-local-pairing'
 import { mkdir, unlink } from 'node:fs/promises'
@@ -24,6 +26,7 @@ import {
   hasVerifiedCheckpoint,
   restoreVerifiedState,
   verifyLedgerEffect,
+  extendLedgerEffect,
   type RetainedLedgerState
 } from '@lody/e2ee-core/protocol'
 import {
@@ -75,7 +78,10 @@ const unhex = (value: string) => {
 function sql<A>(work: () => A) {
   return Effect.try({
     try: work,
-    catch: (error) => (error instanceof DesktopE2eeRuntimeError ? error : fail('storage'))
+    catch: (error) => {
+      rememberDesktopE2eeFailure('runtime-sql', error)
+      return error instanceof DesktopE2eeRuntimeError ? error : fail('storage')
+    }
   })
 }
 const boundary = <A, E, R>(work: Effect.Effect<A, E, R>) =>
@@ -86,6 +92,7 @@ const boundary = <A, E, R>(work: Effect.Effect<A, E, R>) =>
         (error as { code?: string; reason?: string })?.code ??
         (error as { reason?: string })?.reason
       if (reason === 'missing-binding') return fail('missing-binding')
+      if (reason === 'conflict') return fail('conflict')
       return fail(
         reason === 'local-evidence-conflict' || reason === 'rollback'
           ? 'local-evidence-conflict'
@@ -140,6 +147,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
       {
         scope: Scope.Closeable
         pairing: ReturnType<typeof makeDesktopLocalPairing>
+        personalPairing: ReturnType<typeof makeDesktopPersonalPairing>
         status: () => Effect.Effect<E2eeRuntimeStatus, unknown>
         ledgerView: () => Effect.Effect<E2eeRuntimeLedgerView, unknown>
         observe: (checkpoint: ObservedCheckpoint) => Effect.Effect<void, unknown>
@@ -170,6 +178,14 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
       }
       const creation = yield* options.bootstrap.creationFor(workspaceId)
       const genesis = yield* Effect.fromResult(Bytes.genesisHash(unhex(creation.genesisHash)))
+      const invitation = creation.invitation
+      const initialOrigin: Parameters<typeof LedgerFeed.layer>[0]['origin'] = invitation
+        ? { kind: 'snapshot', snapshot: invitation.snapshot }
+        : { kind: 'genesis', record: creation.record }
+      const initialPoint = invitation
+        ? { head: invitation.view.head, length: invitation.view.length }
+        : { head: hashRecordBytes(creation.record), length: 1 }
+      const initialCount = initialPoint.length
       const directory = join(options.directory, 'workspaces', workspaceId)
       yield* Effect.tryPromise({
         try: () => mkdir(directory, { recursive: true, mode: 0o700 }),
@@ -226,17 +242,38 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             .prepare('SELECT position,record,locator FROM records ORDER BY position')
             .all() as unknown as HistoryRow[]
         const originals = yield* sql(rows)
-        const endpoint = {
-          head: hashRecordBytes(originals[originals.length - 1]!.record),
-          length: originals.length
-        }
+        const suffix = originals.filter((row) => row.position >= initialCount)
+        if (suffix.some((row, index) => row.position !== initialCount + index))
+          return yield* fail('corrupt')
+        const endpoint = suffix.length
+          ? { head: hashRecordBytes(suffix.at(-1)!.record), length: suffix.at(-1)!.position + 1 }
+          : initialPoint
+        const replayOriginals = (): Effect.Effect<
+          import('@lody/e2ee-core/protocol').LedgerView,
+          unknown
+        > =>
+          invitation
+            ? extendLedgerEffect(
+                invitation.view,
+                rows()
+                  .filter((row) => row.position >= initialCount)
+                  .map((row) => row.record),
+                endpoint
+              )
+            : verifyLedgerEffect({
+                anchor: genesis,
+                records: rows().map((row) => row.record),
+                checkpoint: endpoint
+              })
         const currentLocator = () => {
           const row = db
             .prepare(
               'SELECT locator FROM records WHERE locator IS NOT NULL ORDER BY position DESC LIMIT 1'
             )
             .get()
-          return typeof row?.locator === 'string' ? row.locator : null
+          return typeof row?.locator === 'string'
+            ? row.locator
+            : (invitation?.snapshot.offset ?? null)
         }
         // Core calls append only after authenticating the complete page. Persist
         // its originals first so a crash can never leave the pin ahead of them.
@@ -315,16 +352,16 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         const cache = yield* sql(() =>
           db.prepare('SELECT name,origin FROM cache WHERE id=1').get()!
         )
-        let compactedAt = 1
+        let compactedAt = initialCount
         let cachedScope: Scope.Closeable | undefined
         const cached = yield* Effect.result(
           Effect.gen(function* () {
             const origin = yield* sql(() =>
               typeof cache.origin === 'string'
                 ? restoreOrigin(JSON.parse(cache.origin))
-                : { kind: 'genesis' as const, record: creation.record }
+                : initialOrigin
             )
-            compactedAt = origin.kind === 'retained' ? origin.state.length : 1
+            compactedAt = origin.kind === 'retained' ? origin.state.length : initialCount
             // A retained cache ahead of the independent pin is invalid, never new authority.
             if (origin.kind === 'retained' && (!pin || pin.length < origin.state.length))
               return yield* fail('corrupt')
@@ -349,13 +386,9 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         if (Result.isSuccess(cached)) feed = cached.success
         else {
           if (cachedScope) yield* Scope.close(cachedScope, Exit.void)
-          compactedAt = 1
+          compactedAt = initialCount
           // Cache is disposable; prove the original history and pin before replacing it.
-          const view = yield* verifyLedgerEffect({
-            anchor: genesis,
-            records: originals.map((row) => row.record),
-            checkpoint: endpoint
-          })
+          const view = yield* replayOriginals()
           if (pin && view.length >= pin.length) {
             const contains = yield* Effect.fromResult(hasVerifiedCheckpoint(view, pin))
             if (!contains) return yield* fail('local-evidence-conflict')
@@ -375,14 +408,10 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             }
           }
           const name = `ledger-feed-${randomUUID()}.sqlite`
-          const opened = yield* openFeed(
-            name,
-            { kind: 'genesis', record: creation.record },
-            { head: hashRecordBytes(creation.record), length: 1 }
-          )
+          const opened = yield* openFeed(name, initialOrigin, initialPoint)
           feed = opened.feed
           let chunk: Uint8Array[] = []
-          for (const row of originals) {
+          for (const row of invitation ? suffix : originals) {
             chunk.push(row.record)
             if (row.locator !== null) {
               const before = yield* feed.current()
@@ -398,7 +427,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               chunk = []
             }
           }
-          if (chunk.length > 0 && originals.length !== 1) return yield* fail('corrupt')
+          if (chunk.length > 0 && (invitation || originals.length !== 1))
+            return yield* fail('corrupt')
           yield* sql(() => db.prepare('UPDATE cache SET name=?,origin=NULL WHERE id=1').run(name))
           // Only the replaced, verified-disposable feed is collected. Originals and pins remain.
           if (
@@ -407,9 +437,9 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           ) {
             yield* Effect.tryPromise({
               try: async () => {
-                for (const suffix of ['', '-wal', '-shm'])
+                for (const sidecar of ['', '-wal', '-shm'])
                   await (options.removeObsoleteCache ?? unlink)(
-                    join(directory, cache.name as string) + suffix
+                    join(directory, cache.name as string) + sidecar
                   ).catch((error) => {
                     if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
                       console.warn('[E2EE] Cache cleanup pending', {
@@ -441,11 +471,19 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             let contains = Result.getOrThrow(hasVerifiedCheckpoint(current, point))
             if (!contains) {
               const proofRecords = yield* sql(rows)
-              const replayed = yield* verifyLedgerEffect({
-                anchor: genesis,
-                records: proofRecords.map((row) => row.record),
-                checkpoint: { head: current.head, length: current.length }
-              })
+              const replayed = yield* invitation
+                ? extendLedgerEffect(
+                    invitation.view,
+                    proofRecords
+                      .filter((row) => row.position >= initialCount)
+                      .map((row) => row.record),
+                    { head: current.head, length: current.length }
+                  )
+                : verifyLedgerEffect({
+                    anchor: genesis,
+                    records: proofRecords.map((row) => row.record),
+                    checkpoint: { head: current.head, length: current.length }
+                  })
               contains = Result.getOrThrow(hasVerifiedCheckpoint(replayed, point))
             }
             if (!contains) return yield* fail('local-evidence-conflict')
@@ -490,6 +528,17 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             current: () => verified.current()
           })
         )
+        const personalPairing = yield* sql(() =>
+          makeDesktopPersonalPairing({
+            db,
+            workspaceId,
+            genesis,
+            genesisRecord: creation.record,
+            signer: device,
+            current: () => verified.current(),
+            offset: () => Effect.map(feed.current(), (state) => state.offset)
+          })
+        )
         const keysLayer = InstalledEpochKeys.layer.pipe(
           Layer.provideMerge(Layer.succeed(InstalledKeyStore, installedStore)),
           Layer.provideMerge(Layer.succeed(VerifiedLedger, verified)),
@@ -498,8 +547,10 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         const keysContext = yield* Layer.buildWithScope(keysLayer, scope)
         const keys = Context.get(keysContext, InstalledEpochKeys)
         // insertIfAbsent preserves the creation's original protected key; never repair it.
-        yield* installedStore.insertIfAbsent(0, creation.epochBlob)
-        if (!pending((yield* feed.current()).view)) yield* keys.check(0)
+        if (creation.epochBlob) {
+          yield* installedStore.insertIfAbsent(0, creation.epochBlob)
+          if (!pending((yield* feed.current()).view)) yield* keys.check(0)
+        }
         const historyContext = yield* Layer.buildWithScope(
           InstalledEpochHistory.layer.pipe(
             Layer.provide(Layer.succeed(VerifiedLedger, verified)),
@@ -713,7 +764,12 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           const state = yield* feed.current()
           const exported = yield* Effect.fromResult(exportVerifiedState(state.view))
           const recordsHex = yield* sql(() => rows().map((row) => hex(row.record)))
-          return { status: current, stateHex: hex(exported.bytes), recordsHex }
+          return {
+            status: current,
+            stateHex: hex(exported.bytes),
+            recordsHex,
+            recordPositions: yield* sql(() => rows().map((row) => row.position))
+          }
         })
         const ingest = Effect.fnUntraced(function* (page: E2eeWorkspaceHistoryPage) {
           const state = yield* feed.current()
@@ -725,6 +781,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             !Number.isSafeInteger(page.startIndex) ||
             page.startIndex < 0 ||
             page.startIndex > start ||
+            (invitation !== undefined && page.startIndex < initialCount) ||
             !Array.isArray(page.recordsHex) ||
             page.recordsHex.length > 64 ||
             !Number.isSafeInteger(page.checkpoint?.length) ||
@@ -788,9 +845,11 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                 .get(page.checkpoint.length - 1)
             )
             if (
-              !known ||
-              hex(hashRecordBytes(known.record as Uint8Array).toBytes()) !==
-                page.checkpoint.headHash
+              page.checkpoint.length === initialCount
+                ? hex(initialPoint.head.toBytes()) !== page.checkpoint.headHash
+                : !known ||
+                  hex(hashRecordBytes(known.record as Uint8Array).toBytes()) !==
+                    page.checkpoint.headHash
             )
               return yield* fail('local-evidence-conflict')
           }
@@ -838,6 +897,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         return {
           scope,
           pairing,
+          personalPairing,
           status,
           ledgerView,
           ingest,
@@ -853,7 +913,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
       const result = yield* Effect.result(make)
       if (Result.isFailure(result)) {
         yield* Scope.close(scope, Exit.void)
-        return yield* result.failure
+        return yield* Effect.fail(result.failure)
       }
       entries.set(workspaceId, result.success)
       return result.success
@@ -924,8 +984,50 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
       )
     }
     return {
+      personalPairingOffer: (workspaceId: string) =>
+        run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.personalPairing.offer())),
+      cancelPersonalPairing: (workspaceId: string, session: string) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.personalPairing.cancel(session)
+          )
+        ),
+      retirePersonalPairing: (workspaceId: string, session: string) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.personalPairing.retire(session)
+          )
+        ),
+      previewPersonalAdmission: (workspaceId: string, requestHex: string) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.personalPairing.preview(requestHex)
+          )
+        ),
+      preparePersonalAdmission: (workspaceId: string, requestHex: string) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.personalPairing.approve(requestHex)
+          )
+        ),
+      personalInvitation: (workspaceId: string, session: string) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.personalPairing.invitation(session)
+          )
+        ),
       localPairingContext: (workspaceId: string) =>
         withPairing(workspaceId, (pairing) => pairing.context()),
+      retireSupersededLocalPairing: (
+        workspaceId: string,
+        session: string,
+        retainFailure: (error: unknown) => void
+      ) =>
+        withPairing(workspaceId, (pairing) =>
+          pairing
+            .retireSuperseded(session)
+            .pipe(Effect.tapError((error) => Effect.sync(() => retainFailure(error))))
+        ),
       stageLocalPairing: (workspaceId: string, material: LocalE2eePrepareResponse) =>
         withPairing(workspaceId, (pairing) => pairing.stage(material)),
       approveLocalPairing: (workspaceId: string, session: string) =>

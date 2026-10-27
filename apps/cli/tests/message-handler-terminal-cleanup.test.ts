@@ -10,6 +10,11 @@ import type { SessionActivePresenceControllerLegacy } from '../src/lib/loro/sess
 
 import {
   getMachineRoomId,
+  getWorkspaceFlockDocId,
+  workspaceFlockKeys,
+  type WorkspaceProject,
+  type ProjectId,
+  type ProjectMemberId,
   getSessionRoomId,
   machineFlockKeys,
   SessionStatusFactory,
@@ -79,6 +84,8 @@ type MessageHandlerInternals = {
 };
 
 function createHarness(options?: {
+  workspaceProjects?: WorkspaceProject[];
+  catalogReady?: () => Promise<boolean>;
   history?: SessionEntry[];
   sessionId?: SessionId;
   childSessionIds?: SessionId[];
@@ -168,12 +175,16 @@ function createHarness(options?: {
           : []
       ),
     })),
-    openFlockDoc: vi.fn(async () => ({
+    openFlockDoc: vi.fn(async (docId: string) => ({
       flock: {
         scan: (query?: { prefix?: readonly unknown[] }) =>
-          machineFlockRows.filter((row) =>
-            (query?.prefix ?? []).every((part, index) => row.key[index] === part)
-          ),
+          (docId === getWorkspaceFlockDocId('workspace-1' as WorkspaceId)
+            ? (options?.workspaceProjects ?? []).map((project) => ({
+                key: workspaceFlockKeys.project(project.id),
+                value: project,
+              }))
+            : machineFlockRows
+          ).filter((row) => (query?.prefix ?? []).every((part, index) => row.key[index] === part)),
         set: flockSet,
         delete: flockDelete,
         commit: flockCommit,
@@ -190,6 +201,7 @@ function createHarness(options?: {
   };
   const presenceEntries = new Map<SessionId, unknown>();
   const workspaceDocument = {
+    catalogBaselineReady: options?.catalogReady ?? (async () => true),
     publishSessionPresence: (id: SessionId, _machine: unknown, status: unknown) => {
       presenceEntries.set(id, status);
     },
@@ -685,77 +697,206 @@ describe('MessageHandler terminal cleanup', () => {
     expect(handler.store.has(sessionId)).toBe(false);
   });
 
-  it('archives root and child sessions before removing their local project', async () => {
-    const localProjectId = 'local-project-remove' as LocalProjectId;
-    const rootSessionId = 'session-project-root' as SessionId;
-    const childSessionId = 'session-project-child' as SessionId;
-    const project = { kind: 'local', localProjectId } as const;
-    const sessionMetas = [
-      {
-        id: rootSessionId,
-        machineId: 'machine-1',
-        createdAt: '2026-01-01T00:00:00.000Z',
-        userId: 'user-1',
-        cliType: 'codex',
-        agentType: 'codex',
-        status: SessionStatusFactory.running(),
-        project,
-      },
-      {
-        id: childSessionId,
-        machineId: 'machine-1',
-        createdAt: '2026-01-01T00:00:00.000Z',
-        userId: 'user-1',
-        cliType: 'codex',
-        agentType: 'codex',
-        status: SessionStatusFactory.running(),
-        project,
-        parentSessionId: rootSessionId,
-      },
-    ] as SessionMeta[];
-    const localProjectKey = machineFlockKeys.localProject(localProjectId);
-    const { handler, events, machineFlockRows, getSessionMeta, isSessionActive } = createHarness({
-      sessionId: rootSessionId,
-      childSessionIds: [childSessionId],
-      sessionMetas,
-      activeSessionIds: [rootSessionId, childSessionId],
-      includeLegacySessionDeleteRequest: false,
-      machineFlockRows: [
-        {
-          key: localProjectKey,
-          value: {
-            id: localProjectId,
-            name: 'Project',
-            rootPath: '/repo',
-            createdAtMs: 1,
+  it.each(['local', 'github', 'session'] as const)(
+    'retains a registration and running sessions referenced by %s',
+    async (kind) => {
+      const localProjectId = 'retained-project' as LocalProjectId;
+      const sessionId = 'retained-session' as SessionId;
+      const localSource = { kind: 'local' as const, machineId: 'machine-1', localProjectId };
+      const group = {
+        v: 1,
+        id: '00000000-0000-4000-8000-000000000001' as ProjectId,
+        name: 'Group',
+        ownerUserId: 'user-1',
+        createdAtMs: 1,
+        revision: 1,
+        members: [
+          {
+            id: 'member-1' as ProjectMemberId,
+            source:
+              kind === 'github'
+                ? { kind: 'github', repoFullName: 'team/repo', preferLocal: true }
+                : localSource,
+            placement: { kind: 'root', dir: 'repo' },
           },
-        },
+        ],
+      } as WorkspaceProject;
+      const session = {
+        id: sessionId,
+        machineId: 'machine-1',
+        createdAt: '2026-01-01T00:00:00Z',
+        status: SessionStatusFactory.running(),
+        project: { kind: 'local', localProjectId },
+        ...(kind === 'session'
+          ? {
+              projectRun: {
+                id: group.id,
+                name: group.name,
+                root: '/group',
+                members: {
+                  member: {
+                    o: 0,
+                    src: { kind: 'github', repoFullName: 'team/repo', preferLocal: true },
+                    repositoryCheckout: localSource,
+                    placement: { kind: 'root', dir: 'repo' },
+                    path: '/repo',
+                    base: 'main',
+                  },
+                },
+              },
+            }
+          : {}),
+      } as SessionMeta;
+      const key = machineFlockKeys.localProject(localProjectId);
+      const { handler, machineFlockRows, getSessionMeta, isSessionActive } = createHarness({
+        sessionId,
+        sessionMetas: [session],
+        activeSessionIds: [sessionId],
+        workspaceProjects: kind === 'session' ? [] : [group],
+        machineFlockRows: [
+          {
+            key,
+            value: {
+              id: localProjectId,
+              name: 'Repo',
+              rootPath: '/repo',
+              createdAtMs: 1,
+              githubRepoFullName: 'team/repo',
+              standaloneVisible: true,
+            },
+          },
+        ],
+      });
+      await handler.deleteLocalProjectResources(localProjectId, { v: 1, requestedAt: 2 });
+      expect(
+        machineFlockRows.find((row) => JSON.stringify(row.key) === JSON.stringify(key))?.value
+      ).toMatchObject({
+        id: localProjectId,
+        standaloneVisible: false,
+        githubRepoFullName: 'team/repo',
+      });
+      expect(getSessionMeta(sessionId)?.isArchived).not.toBe(true);
+      expect(isSessionActive(sessionId)).toBe(true);
+    }
+  );
+
+  it('does not delete or archive when the project catalog cannot be read', async () => {
+    const localProjectId = 'catalog-unavailable' as LocalProjectId;
+    const key = machineFlockKeys.localProject(localProjectId);
+    const { handler, machineFlockRows } = createHarness({
+      catalogReady: async () => false,
+      machineFlockRows: [
+        { key, value: { id: localProjectId, name: 'Repo', rootPath: '/repo', createdAtMs: 1 } },
       ],
     });
-    await handler.deleteLocalProjectResources(localProjectId, { v: 1, requestedAt: 2 });
-
-    expect(getSessionMeta(rootSessionId)).toMatchObject({
-      isArchived: true,
-      status: SessionStatusFactory.idle(),
-    });
-    expect(getSessionMeta(childSessionId)).toMatchObject({
-      isArchived: true,
-      status: SessionStatusFactory.idle(),
-    });
-    expect(isSessionActive(rootSessionId)).toBe(false);
-    expect(isSessionActive(childSessionId)).toBe(false);
-
-    const projectDeleteEvent = `flock-delete:${JSON.stringify(localProjectKey)}`;
-    const projectDeleteIndex = events.indexOf(projectDeleteEvent);
-    expect(projectDeleteIndex).toBeGreaterThan(-1);
-    expect(events.indexOf(`meta:${getSessionRoomId(rootSessionId)}:archived`)).toBeLessThan(
-      projectDeleteIndex
-    );
-    expect(events.indexOf(`meta:${getSessionRoomId(childSessionId)}:archived`)).toBeLessThan(
-      projectDeleteIndex
-    );
-    expect(machineFlockRows).not.toContainEqual(expect.objectContaining({ key: localProjectKey }));
+    await expect(
+      handler.deleteLocalProjectResources(localProjectId, { v: 1, requestedAt: 2 })
+    ).rejects.toThrow('Project catalog is not ready');
+    expect(
+      machineFlockRows.find((row) => JSON.stringify(row.key) === JSON.stringify(key))?.value
+    ).toMatchObject({ id: localProjectId });
   });
+
+  it.each(['none', 'other-machine', 'managed-clone'] as const)(
+    'archives unreferenced local-project sessions with %s catalog entries',
+    async (references) => {
+      const localProjectId = 'local-project-remove' as LocalProjectId;
+      const rootSessionId = 'session-project-root' as SessionId;
+      const childSessionId = 'session-project-child' as SessionId;
+      const project = { kind: 'local', localProjectId } as const;
+      const sessionMetas = [
+        {
+          id: rootSessionId,
+          machineId: 'machine-1',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          userId: 'user-1',
+          cliType: 'codex',
+          agentType: 'codex',
+          status: SessionStatusFactory.running(),
+          project,
+        },
+        {
+          id: childSessionId,
+          machineId: 'machine-1',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          userId: 'user-1',
+          cliType: 'codex',
+          agentType: 'codex',
+          status: SessionStatusFactory.running(),
+          project,
+          parentSessionId: rootSessionId,
+        },
+      ] as SessionMeta[];
+      const localProjectKey = machineFlockKeys.localProject(localProjectId);
+      const { handler, events, machineFlockRows, getSessionMeta, isSessionActive } = createHarness({
+        workspaceProjects:
+          references === 'none'
+            ? []
+            : [
+                {
+                  v: 1,
+                  id: '00000000-0000-4000-8000-000000000002' as ProjectId,
+                  name: 'Other project',
+                  ownerUserId: 'user-1',
+                  createdAtMs: 1,
+                  revision: 1,
+                  members: [
+                    {
+                      id: 'repo' as ProjectMemberId,
+                      source:
+                        references === 'other-machine'
+                          ? { kind: 'local', machineId: 'other-machine', localProjectId }
+                          : { kind: 'github', repoFullName: 'team/repo' },
+                      placement: { kind: 'root', dir: 'repo' },
+                    },
+                  ],
+                } as WorkspaceProject,
+              ],
+        sessionId: rootSessionId,
+        childSessionIds: [childSessionId],
+        sessionMetas,
+        activeSessionIds: [rootSessionId, childSessionId],
+        includeLegacySessionDeleteRequest: false,
+        machineFlockRows: [
+          {
+            key: localProjectKey,
+            value: {
+              id: localProjectId,
+              name: 'Project',
+              githubRepoFullName: 'team/repo',
+              rootPath: '/repo',
+              createdAtMs: 1,
+            },
+          },
+        ],
+      });
+      await handler.deleteLocalProjectResources(localProjectId, { v: 1, requestedAt: 2 });
+
+      expect(getSessionMeta(rootSessionId)).toMatchObject({
+        isArchived: true,
+        status: SessionStatusFactory.idle(),
+      });
+      expect(getSessionMeta(childSessionId)).toMatchObject({
+        isArchived: true,
+        status: SessionStatusFactory.idle(),
+      });
+      expect(isSessionActive(rootSessionId)).toBe(false);
+      expect(isSessionActive(childSessionId)).toBe(false);
+
+      const projectDeleteEvent = `flock-delete:${JSON.stringify(localProjectKey)}`;
+      const projectDeleteIndex = events.indexOf(projectDeleteEvent);
+      expect(projectDeleteIndex).toBeGreaterThan(-1);
+      expect(events.indexOf(`meta:${getSessionRoomId(rootSessionId)}:archived`)).toBeLessThan(
+        projectDeleteIndex
+      );
+      expect(events.indexOf(`meta:${getSessionRoomId(childSessionId)}:archived`)).toBeLessThan(
+        projectDeleteIndex
+      );
+      expect(machineFlockRows).not.toContainEqual(
+        expect.objectContaining({ key: localProjectKey })
+      );
+    }
+  );
 
   it('stops an archived active child session whose parent is already archived', async () => {
     const localProjectId = 'local-project-orphan-child' as LocalProjectId;

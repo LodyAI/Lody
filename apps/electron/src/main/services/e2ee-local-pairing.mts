@@ -19,7 +19,8 @@ import type { E2eeAppendRecordRequest } from '@lody/cloud-api'
 
 const hex = (value: Uint8Array) => Buffer.from(value).toString('hex')
 const raw = (value: string) => new Uint8Array(Buffer.from(value, 'hex'))
-const failure = (code: string) => Object.assign(new Error(`e2ee_${code}`), { code })
+const failure = (code: string, cause?: unknown) =>
+  Object.assign(new Error(`e2ee_${code}`, { cause }), { code })
 type PairingRow = {
   session: string
   material: string | null
@@ -48,12 +49,14 @@ export function makeDesktopLocalPairing(input: {
         typeof error.code === 'string' &&
         ['conflict', 'corrupt', 'invalid-input', 'local-evidence-conflict'].includes(error.code)
           ? error
-          : failure('storage')
+          : failure('storage', error)
     })
   }
   input.db.exec(
     'CREATE TABLE IF NOT EXISTS local_pairing(id INTEGER PRIMARY KEY CHECK(id=1), session TEXT NOT NULL, material TEXT, request_id TEXT, record BLOB)'
   )
+  // Only empty unsigned attempts enter this archive. Machine originals remain in CLI.
+  input.db.exec('CREATE TABLE IF NOT EXISTS retired_local_pairings(session TEXT PRIMARY KEY)')
   const read = () =>
     input.db.prepare('SELECT * FROM local_pairing WHERE id=1').get() as PairingRow | undefined
   const membership = (view: LedgerView) => {
@@ -157,8 +160,45 @@ export function makeDesktopLocalPairing(input: {
       genesisHash: hex(input.genesis.toBytes()),
       genesisRecordHex: hex(input.genesisRecord),
       membershipId,
+      frontendSigningPublicKey: hex(input.signer.publicKey.toBytes()),
       pairingSessionId: row.session
     }
+  })
+  const retireSuperseded = Effect.fnUntraced(function* (session: string) {
+    yield* input.current()
+    return yield* sql(() => {
+      input.db.exec('BEGIN IMMEDIATE')
+      try {
+        const row = read()
+        if (
+          !row ||
+          row.session !== session ||
+          row.material !== null ||
+          row.record !== null ||
+          row.request_id !== null
+        )
+          throw failure('conflict')
+        input.db
+          .prepare('INSERT OR IGNORE INTO retired_local_pairings(session) VALUES(?)')
+          .run(session)
+        input.db
+          .prepare('UPDATE local_pairing SET session=? WHERE id=1 AND session=?')
+          .run(randomBytes(16).toString('hex'), session)
+        input.db.exec('COMMIT')
+      } catch (cause) {
+        try {
+          input.db.exec('ROLLBACK')
+        } catch (cleanup) {
+          throw failure(
+            'storage',
+            new AggregateError([cause, cleanup], 'pairing retirement and rollback failed', {
+              cause
+            })
+          )
+        }
+        throw cause
+      }
+    })
   })
   const stage = Effect.fnUntraced(function* (response: LocalE2eePrepareResponse) {
     const parsed = LocalE2eePrepareResponseSchema.safeParse(response)
@@ -230,10 +270,12 @@ export function makeDesktopLocalPairing(input: {
       }
       return {
         machineId: checked.value.machineId,
+        pairingSessionId: row.session,
+        frontendSigningPublicKey: hex(input.signer.publicKey.toBytes()),
         genesisHash: hex(input.genesis.toBytes()),
         signingPublicKey: checked.value.signingPublicKey
       }
     })
   })
-  return { context, stage, approve, confirmed }
+  return { context, retireSuperseded, stage, approve, confirmed }
 }

@@ -1228,6 +1228,7 @@ export type AgentConfigDialogProps = {
   onRefreshCapabilities: (args: RefreshArgs) => Promise<MachineAcpCapabilitiesRefreshResponse>;
   onDshPlugins?: (machineId: MachineId, request: DshPluginsRequest) => Promise<DshPluginsResponse>;
   dshPluginsAvailable?: boolean;
+  dshPluginMutationsAllowed?: boolean;
   onScanPiExtensions?: (args: {
     machineId: MachineId;
     configId?: AgentConfigId;
@@ -1530,6 +1531,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     onScanPiExtensions,
     onDshPlugins,
     dshPluginsAvailable,
+    dshPluginMutationsAllowed,
     onCheckBinaryStatus,
     onInstallBinary,
     onManagedRuntimeSelected,
@@ -2947,6 +2949,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 MACHINE_PROTOCOL_CAPABILITIES.dshPlugins
               )}
               available={dshPluginsAvailable}
+              allowMutations={dshPluginMutationsAllowed}
               onRequest={onDshPlugins ? (request) => onDshPlugins(machine.id, request) : undefined}
             />
           ) : null}

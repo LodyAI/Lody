@@ -1,4 +1,7 @@
-import { memo, useCallback, useState } from 'react';
+import { memo, useCallback, useState, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { ArrowLeftRight } from 'lucide-react';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { useTranslation } from 'react-i18next';
 import { formatDistance, type Locale } from 'date-fns';
 import { enUS } from 'date-fns/locale/en-US';
@@ -63,7 +66,6 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
 }: SessionUsagePopoverProps) {
   const { t, i18n } = useTranslation();
   const [isForecastOpen, setIsForecastOpen] = useState(false);
-  const locale: Locale = i18n.language?.startsWith('zh') ? zhCN : enUS;
   const intlLocale = toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language);
   const context = getContextWindowUsageData(contextWindowUsage);
   const rateLimit = resolveAgentRateLimitForModel({
@@ -91,19 +93,6 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
     rateLimit?.limits.limitName?.trim() ||
     modelId?.trim() ||
     t('sessions.usage.modelFallback', 'Model usage');
-
-  const formatReset = useCallback(
-    (resetAtEpochSeconds: number | null | undefined): string | null => {
-      if (!resetAtEpochSeconds) return null;
-      const epochMs = resetAtEpochSeconds * 1_000;
-      const distance = formatDistance(new Date(epochMs), new Date(getServerNow()), {
-        addSuffix: true,
-        locale,
-      });
-      return t('machines.rateLimits.resetsAt', 'Resets {{time}}', { time: distance });
-    },
-    [locale, t]
-  );
 
   const formatWindowLabel = useCallback(
     (windowDurationSeconds: number | null): string => {
@@ -210,7 +199,11 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
                       t
                     )}
                     value={window.usedPercent}
-                    detail={formatReset(window.resetsAtEpochSeconds)}
+                    detail={
+                      window.resetsAtEpochSeconds ? (
+                        <ResetTime epochSeconds={window.resetsAtEpochSeconds} />
+                      ) : null
+                    }
                   />
                 ))
               ) : (
@@ -320,7 +313,7 @@ function UsageMeter({
 }: {
   label: string;
   value: number;
-  detail?: string | null;
+  detail?: ReactNode;
 }) {
   const { t } = useTranslation();
   const roundedValue = Math.round(value);
@@ -345,6 +338,55 @@ function UsageMeter({
           {detail}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+const resetTimeStyles = stylex.create({
+  row: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[1],
+  },
+  text: {
+    minWidth: 0,
+    whiteSpace: 'normal',
+  },
+});
+
+function ResetTime({ epochSeconds }: { epochSeconds: number }) {
+  const { t, i18n } = useTranslation();
+  const [absolute, setAbsolute] = useState(false);
+  const locale: Locale = i18n.language?.startsWith('zh') ? zhCN : enUS;
+  const date = new Date(epochSeconds * 1_000);
+  const time = absolute
+    ? new Intl.DateTimeFormat(toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language), {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      }).format(date)
+    : formatDistance(date, new Date(getServerNow()), { addSuffix: true, locale });
+  const resetTime = locale === zhCN && /^\d/.test(time) ? ` ${time}` : time;
+  const toggleLabel = absolute
+    ? t('sessions.usage.showRelativeTime', 'Show relative time')
+    : t('sessions.usage.showAbsoluteTime', 'Show absolute time');
+
+  return (
+    <div {...stylex.props(resetTimeStyles.row)}>
+      <span {...stylex.props(resetTimeStyles.text)}>
+        {t('machines.rateLimits.resetsAt', 'Resets {{time}}', { time: resetTime })}
+      </span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="mini"
+        icon
+        aria-label={toggleLabel}
+        title={toggleLabel}
+        onClick={() => setAbsolute((value) => !value)}
+      >
+        <ArrowLeftRight size={12} aria-hidden="true" />
+      </Button>
     </div>
   );
 }

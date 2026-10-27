@@ -1325,6 +1325,14 @@ export class LoroStreamsMachineRpcServer {
           return;
         }
         case 'machine/dsh-plugins': {
+          // Workspace streams do not authenticate a machine-owner identity.
+          if (request.params.action !== 'list') {
+            await this.appendResultResponse(request.replyTo, request.id, request.method, {
+              success: false,
+              error: 'Manage DSH plugins from Lody on the machine that owns this Provider.',
+            });
+            return;
+          }
           const response = this.deps.manageDshPlugins
             ? await this.deps.manageDshPlugins(request.params)
             : {

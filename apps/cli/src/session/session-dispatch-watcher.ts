@@ -1890,6 +1890,11 @@ export class SessionDispatchWatcher {
     if (updatedAt <= (meta.messageQueueCheckedAt ?? 0)) {
       return;
     }
+    // A row that could not be promoted yet keeps the signal open, so the session
+    // stays watched and a later change retries it instead of stranding it.
+    if ((await sessionDoc.getMessageQueue()).length > 0) {
+      return;
+    }
     await this.deps.workspaceDocument.repo.upsertDocMeta(sessionDoc.roomId, {
       messageQueueCheckedAt: updatedAt,
     } satisfies Partial<SessionMeta>);

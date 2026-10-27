@@ -1,10 +1,10 @@
 import {
   LOCAL_E2EE_PAIRING_PATH,
-  LocalE2eePrepareResponseSchema,
+  LocalE2eePrepareReplySchema,
   LocalE2eeActivateResponseSchema,
   type LocalE2eePrepareRequest,
   type LocalE2eeActivateRequest,
-  type LocalE2eePrepareResponse,
+  type LocalE2eePrepareReply,
   type LocalE2eeActivateResponse,
 } from '../e2ee-local-pairing';
 import {
@@ -184,7 +184,7 @@ export type LocalControlClientService = {
   e2eePrepare: (
     message: LocalE2eePrepareRequest,
     options?: LocalIpcRequestOptions
-  ) => Effect.Effect<LocalE2eePrepareResponse, IpcError>;
+  ) => Effect.Effect<LocalE2eePrepareReply, IpcError>;
   e2eeActivate: (
     message: LocalE2eeActivateRequest,
     options?: LocalIpcRequestOptions
@@ -958,8 +958,8 @@ function makeControlClient(
           options?.timeoutMs ?? DEFAULT_LOCAL_CONTROL_TIMEOUT_MS
         ),
         ({ response, payload }) =>
-          parseJsonBody<LocalE2eePrepareResponse>(
-            LocalE2eePrepareResponseSchema,
+          parseJsonBody<LocalE2eePrepareReply>(
+            LocalE2eePrepareReplySchema,
             () => 'e2ee_pairing_unavailable'
           )(response, payload)
       ),

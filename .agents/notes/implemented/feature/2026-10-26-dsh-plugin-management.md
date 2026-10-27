@@ -21,8 +21,13 @@ are not detected. The RPC update operation remains supported. Skills are outside
 The persisted Provider must belong to the execution machine and use builtin DeepSeek.
 Requests contain its ID and a bounded registry package spec, never launch arguments,
 paths, environment or a replacement home. Runtime packages and Lody host bundles cannot
-be changed through this API. Local settings use local Machine RPC; remote settings reuse
-the existing workspace transport. `dshPlugins: 1` gates both routes and the UI. New
+be changed through this API. Local settings use local Machine RPC for mutations; remote settings reuse
+the existing workspace transport for listing only. Workspace streams cannot authenticate
+a machine-owner identity, so their server rejects install/update/remove before invoking
+the Provider service. The client also rejects remote mutations and the UI explains that
+installation/removal must be performed in Lody on the owning machine. Package syntax
+validation and an installer environment without secrets cannot authorize future plugin
+execution with Provider credentials. `dshPlugins: 1` gates both routes and the UI. New
 Providers must be saved first; offline machines do not expose enabled operations.
 
 The existing pinned npx/Node launcher runs `dsh plugin --profile lody-acp`; plugin
@@ -59,15 +64,15 @@ lock, so stop Lody before managing this profile outside its UI.
 Behavioral tests cover manifest/workspace/lockfile preservation across concurrent starts
 and adapter upgrades, malformed configuration, serialization with package writes,
 installation/update/removal inventories, failed-writer restoration, strict RPC inputs,
-remote dispatch and UI success/failure states. Existing provider and Machine RPC suites
+remote read-only dispatch, rejected remote mutations with unchanged inventory, and UI success/failure states. Existing provider and Machine RPC suites
 remain the owning coverage. A macOS smoke with pinned DSH 0.2.1-rc.2 verified native installation, automatic bundle
 registration and removal of an isolated synthetic plugin while retaining the host layer.
 It used no API credentials or model requests and is not a network-dependent unit test.
 Windows and packaged Electron installation require platform smoke verification.
 
-The submission `pnpm check` passed type/lint stages and all 616 component test files.
-CLI validation exposed a missing capability expectation (corrected) and a native Git
-recursive-submodule fixture failure with `context_unreadable`; that transport is outside
-this change. Full green validation is not claimed. Targeted plugin suites, static
-boundary checks and documentation checks pass. An earlier run also hit a V8/Wasm
-code-reclamation SIGTRAP, which did not recur in the submission run.
+After merging main and restricting remote operations, `pnpm check` passed type/lint
+stages and all 617 component test files. CLI validation passed 334 files, skipped one,
+and failed the native Git recursive-submodule fixture with `context_unreadable`;
+that transport is outside this change. Full green validation is not claimed.
+The focused component suites pass 98 tests; RPC suites pass 161 with 3 skipped.
+Formatting, static boundary checks and documentation checks pass.

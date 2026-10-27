@@ -139,6 +139,9 @@ const action = <Reference extends FunctionReference<'action'>>(
  */
 export const cloudOperations = {
   e2eeWorkspaces: {
+    memberProfiles: query<ConvexApi['e2eeWorkspaces']['memberProfiles']>(
+      'e2eeWorkspaces:memberProfiles'
+    ),
     create: action<ConvexApi['e2eeWorkspaces']['create']>('e2eeWorkspaces:create'),
     describe: query<ConvexApi['e2eeWorkspaces']['describe']>('e2eeWorkspaces:describe'),
     history: action<ConvexApi['e2eeWorkspaces']['history']>('e2eeWorkspaces:history'),

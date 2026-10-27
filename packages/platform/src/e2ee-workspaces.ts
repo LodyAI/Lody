@@ -3,6 +3,9 @@ import type {
   E2eeWorkspaceCreateResult,
   E2eeWorkspaceHistoryPage,
   E2eeWorkspaceHistoryRequest,
+  E2eePersonalPairingOffer,
+  E2eeWorkspaceMemberProfilesRequest,
+  E2eeWorkspaceMemberProfiles,
   WorkspaceAdmissionDescriptor,
 } from '@lody/cloud-api';
 
@@ -30,6 +33,10 @@ export interface E2eeWorkspacePrepared extends E2eeWorkspacePrepareInput {
  */
 export interface PlatformE2eeWorkspaces {
   readonly runtime?: E2eeWorkspaceRuntime;
+  /** Optional display directory. Names/images never establish permission, keys or identity pins. */
+  readonly memberProfiles?: (
+    input: E2eeWorkspaceMemberProfilesRequest
+  ) => Promise<E2eeWorkspaceMemberProfiles>;
   /** Absent when this platform has no installed, persistent key-custody adapter.
    * A failed/unknown creation preserves its original local intent for reconciliation.
    */
@@ -73,9 +80,43 @@ export interface E2eeRuntimeLedgerView {
   readonly status: E2eeRuntimeStatus;
   readonly stateHex: string;
   readonly recordsHex: readonly string[];
+  /** Absolute ledger positions; a snapshot-origin host need not hold the prefix. */
+  readonly recordPositions?: readonly number[];
 }
 /** Desktop-only purpose-limited IPC; opening an existing workspace never creates an identity. */
 export interface E2eeWorkspaceRuntime {
+  personalPairingOffer?(workspaceId: string): Promise<E2eePersonalPairingOffer>;
+  preparePersonalJoin?(
+    offer: E2eePersonalPairingOffer
+  ): Promise<{ pairingSessionId: string; signingPublicKey: string; status: string }>;
+  /** Query only the host's retained local request; never creates a session. */
+  pendingPersonalJoin?(workspaceId: string): Promise<{
+    pairingSessionId: string;
+    signingPublicKey?: string;
+    offer: E2eePersonalPairingOffer;
+  } | null>;
+  inspectPersonalJoin?(
+    workspaceId: string,
+    pairingSessionId: string
+  ): Promise<{
+    pairingSessionId: string;
+    signingPublicKey: string;
+    encryptionPublicKey: string;
+    credentialHash: string;
+    protection: 'os-keystore';
+  }>;
+  approvePersonalJoin?(
+    workspaceId: string,
+    pairingSessionId: string
+  ): Promise<{ admitted: true; invitationPublished: boolean }>;
+  claimPersonalJoin?(
+    workspaceId: string,
+    pairingSessionId: string
+  ): Promise<{ ready: boolean; status: string }>;
+  cancelPersonalJoin?(
+    workspaceId: string,
+    pairingSessionId: string
+  ): Promise<{ status: 'cancelled' }>;
   /** Local identity only; never authorizes a cloud request. */
   account(options?: {
     token?: string;

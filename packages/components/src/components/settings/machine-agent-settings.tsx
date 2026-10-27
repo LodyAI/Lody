@@ -1267,6 +1267,7 @@ export function MachineAgentSettings({
             : undefined
         }
         dshPluginsAvailable={onlineMachineIds.has(dialogMachine.id)}
+        dshPluginMutationsAllowed={dialogMachine.id === localMachineId}
         onScanPiExtensions={
           runtime
             ? ({ machineId, configId }) =>

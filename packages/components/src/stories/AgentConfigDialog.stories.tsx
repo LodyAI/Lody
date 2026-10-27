@@ -656,6 +656,7 @@ export const DshPluginManagement: Story = {
   render: () => (
     <DshPluginsField
       configId="synthetic-provider"
+      allowMutations
       supported
       onRequest={async (request) =>
         request.action === 'update'
@@ -676,4 +677,17 @@ export const DshPluginManagement: Story = {
 };
 export const DshPluginsUnsupported: Story = {
   render: () => <DshPluginsField configId="synthetic-provider" supported={false} />,
+};
+
+export const DshPluginsRemote: Story = {
+  render: () => (
+    <DshPluginsField
+      configId="synthetic-provider"
+      supported
+      onRequest={async () => ({
+        success: true,
+        plugins: [{ name: 'example-plugin', version: '1.0.0', active: true }],
+      })}
+    />
+  ),
 };

@@ -139,6 +139,7 @@ import {
   REGISTRY_ACP_AGENTS,
   type RegistryAcpAgent,
   type ReplayPromptResult,
+  resolveActiveAssistantTurnId,
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
   resolveSessionAuthoredText,
@@ -179,6 +180,8 @@ import {
 import type { MachineAccessVerification } from './session-access-retry';
 import { createSessionBackend, getSteerOperationId, type SessionBackend } from './session-backend';
 import {
+  findLastHistoryEntry,
+  isActivationAwaitingHistory,
   resolveDispatchAcpSessionId,
   resolveResumableAcpSessionId,
 } from './session-dispatch-logic';
@@ -211,6 +214,8 @@ type FinalizeTurnContext = {
 };
 
 const TURN_FINALIZATION_STAGE_WARN_MS = 5_000;
+/** Trailing history rows searched for the last assistant turn and its user input. */
+const DEAD_TURN_SCAN_ROWS = 64;
 /** Log, never fail, a yielded turn's finalization that is still running at release. */
 const YIELDED_FINALIZATION_SLOW_WARNING = '5 seconds';
 // Renderer, local IPC, and Machine RPC wait at most 300s for the complete
@@ -4216,6 +4221,15 @@ export class SessionExecutionService {
         }
       }
     } catch (cause) {
+      // Both pre-prompt exits below settle the user input without running it,
+      // so the entry a crashed run left open has no owner: close it with them.
+      const closeLeftoverEntry = () =>
+        this.closeDeadAssistantTurn(sessionId, { turnId, requireSettledUserTurn: true }).catch(
+          (closeCause: unknown) =>
+            this.deps.logger.warn(
+              `[${sessionId}] Failed to close leftover turn ${turnId}: ${formatErrorMessage(closeCause)}`
+            )
+        );
       try {
         // A rejected begin acquired nothing. Its deterministic ID can match an
         // older blocked execution, which only the recovery owner may release.
@@ -4251,6 +4265,7 @@ export class SessionExecutionService {
         // unrelated queued input is also untouched.
         if (inboxInput)
           await inbox!.abandonInput(this.deps.workspaceId, sessionId, inboxInput.inputId, true);
+        await closeLeftoverEntry();
         span.end({ outcome: 'inbox-blocked' });
         throw cause;
       }
@@ -4269,6 +4284,7 @@ export class SessionExecutionService {
               `[${sessionId}] Failed to retire ended Inbox input ${userTurnId}: ${formatErrorMessage(retireCause)}`
             )
         );
+        await closeLeftoverEntry();
         span.end({ outcome: 'inbox-input-ended' });
         return 'inbox-input-ended';
       }
@@ -7201,6 +7217,74 @@ export class SessionExecutionService {
     ];
   }
 
+  private liveTurnId(sessionId: SessionId): string | undefined {
+    return (
+      this.deps.getActiveTurnId(sessionId) ??
+      this.currentTurnBySession.get(sessionId) ??
+      this.turnRuntimeBySession.get(sessionId)?.turnId
+    );
+  }
+
+  /**
+   * Ends the last assistant turn when no execution on this daemon owns it, so it
+   * cannot keep the session busy. With `requireSettledUserTurn`, a `processing`
+   * input is left alone: it still owes its crash-recovery run on the same entry.
+   */
+  async closeDeadAssistantTurn(
+    sessionId: SessionId,
+    options: { turnId?: string; requireSettledUserTurn: boolean }
+  ): Promise<boolean> {
+    if (this.liveTurnId(sessionId) != null) return false;
+    // The lease excludes turn starts; ownership is rechecked after the read.
+    const releaseConflict = this.tryAcquireSessionRewriteConflictLease(sessionId);
+    if (!releaseConflict) return false;
+    try {
+      const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const backend = await createSessionBackend(sessionDoc);
+      const count = await backend.readHistoryCount();
+      const rows = (
+        await backend.readHistoryDirectory(Math.max(0, count - DEAD_TURN_SCAN_ROWS), count)
+      ).flatMap((row) => (row.scalars ? [row.scalars] : []));
+      const turnId = resolveActiveAssistantTurnId(rows);
+      if (
+        turnId === undefined ||
+        (options.turnId !== undefined && options.turnId !== turnId) ||
+        this.liveTurnId(sessionId) != null
+      ) {
+        return false;
+      }
+      const userTurnId = findLastHistoryEntry(rows, turnId)?.userTurnId;
+      const userSettled =
+        userTurnId !== undefined && !isActivationAwaitingHistory(rows, userTurnId);
+      if (options.requireSettledUserTurn && !userSettled) return false;
+
+      this.deps.logger.debug(`[${sessionId}] Closing assistant turn ${turnId}: no runtime owns it`);
+      this.deps.clearSessionActivePresence(sessionId);
+      // Settle the input before the entry turns terminal, as an ordinary Stop does.
+      // Pointers move only when they still name this input, never a newer one.
+      if (userTurnId && !userSettled) {
+        await this.setTerminalUserTurnStatus(sessionId, sessionDoc, userTurnId, 'canceled');
+        const meta = await this.getSessionMeta(sessionId);
+        if (meta?.processingUserMsgId === userTurnId || meta?.latestUserMsgId === userTurnId) {
+          await this.upsertSessionMeta(sessionId, {
+            lastHandledUserMsgId: userTurnId,
+            ...(meta.processingUserMsgId === userTurnId ? { processingUserMsgId: undefined } : {}),
+          });
+        }
+      }
+      await backend.applyHistoryAction({
+        kind: 'finish-assistant',
+        turnId,
+        endedAt: getServerNow(),
+        force: true,
+      });
+      await sessionDoc.setStatus(SessionStatusFactory.idle());
+      return true;
+    } finally {
+      releaseConflict();
+    }
+  }
+
   async cancelSession(
     message: SessionCancelRequestValidated,
     options: {
@@ -7263,72 +7347,15 @@ export class SessionExecutionService {
           return { success: true };
         }
       }
-      // Stale repair mutates session-wide presence and history, so it must not
-      // overlap a newer turn or another durable rewrite. Hold the conflict lease
-      // across the awaited history read and recheck live ownership before
-      // cleaning up: a turn that starts while getHistory() is awaited must keep
-      // its presence and dispatch metadata.
-      if (currentTurnId == null) {
-        const releaseConflict = this.tryAcquireSessionRewriteConflictLease(sessionId);
-        if (releaseConflict) {
-          try {
-            const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
-            const liveTurnId =
-              this.deps.getActiveTurnId(sessionId) ??
-              this.currentTurnBySession.get(sessionId) ??
-              this.turnRuntimeBySession.get(sessionId)?.turnId;
-            if (liveTurnId == null) {
-              const backend = await createSessionBackend(
-                sessionDoc,
-                await sessionDoc.getMetaState()
-              );
-              const history = await backend.readHistory();
-              const hasUnfinishedRequestedTurn = history.some(
-                (entry) =>
-                  entry.id === turnId &&
-                  entry.role === 'assistant' &&
-                  entry.finished !== true &&
-                  typeof entry.endedAt !== 'number' &&
-                  entry.items?.some(
-                    (item) =>
-                      item.type === 'tool_call' &&
-                      item.activityKind === 'context_compaction' &&
-                      (item.status === 'pending' || item.status === 'in_progress')
-                  ) === true
-              );
-              if (hasUnfinishedRequestedTurn) {
-                this.deps.logger.debug(
-                  `[${sessionId}] Finalizing stale unfinished turn ${turnId} after stop request found no live runtime`
-                );
-                this.deps.clearSessionActivePresence(sessionId);
-                const finishBackend = await createSessionBackend(
-                  sessionDoc,
-                  await sessionDoc.getMetaState()
-                );
-                await finishBackend.applyHistoryAction({
-                  kind: 'finish-assistant',
-                  turnId,
-                  endedAt: getServerNow(),
-                  force: true,
-                });
-
-                await this.finalizeCancelledTurn({
-                  sessionId,
-                  sessionDoc,
-                  turnId,
-                  reportTurnError: false,
-                });
-                return { success: true };
-              }
-            }
-          } finally {
-            releaseConflict();
-          }
-        }
+      // Stop always ends the turn the user sees: with no execution here, the
+      // unfinished entry is closed instead of ignored.
+      if (await this.closeDeadAssistantTurn(sessionId, { turnId, requireSettledUserTurn: false })) {
+        this.refreshCodeCollabSharedStateAfterTurn(sessionId);
+      } else {
+        this.deps.logger.debug(
+          `[${sessionId}] Ignoring stop request for stale turn ${turnId} (current=${currentTurnId ?? 'none'})`
+        );
       }
-      this.deps.logger.debug(
-        `[${sessionId}] Ignoring stop request for stale turn ${turnId} (current=${currentTurnId ?? 'none'})`
-      );
       await this.clearCancelRequest(sessionId);
       this.clearTurnCancellation(sessionId, turnId);
       return { success: true };

@@ -495,11 +495,59 @@ describe('createWorkspaceMachineRpcFacade', () => {
       success: true,
       plugins: [{ name: 'synthetic-plugin', version: '1.0.0', active: true }],
     });
+    expect(
+      await facade.requestDshPlugins(localMachineId, {
+        configId: 'dsh',
+        action: 'install',
+        package: 'synthetic-plugin',
+      })
+    ).toEqual({
+      success: true,
+      plugins: [{ name: 'synthetic-plugin', version: '1.0.0', active: true }],
+    });
     failed = true;
     expect(await facade.requestDshPlugins(localMachineId, request)).toEqual({
       success: false,
       error: 'Local installation failed',
     });
+  });
+
+  it('keeps remote DSH inventory readable and rejects every remote mutation', async () => {
+    const inventory = {
+      success: true as const,
+      plugins: [{ name: 'synthetic-plugin', version: '1.0.0', active: true }],
+    };
+    let remoteInventory = inventory;
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineProtocolCapabilities: async () => ({ dshPlugins: 1 }),
+      getMachineRpcClient: async () =>
+        ({
+          requestDshPlugins: async (request: { action: string }) => {
+            if (request.action !== 'list') remoteInventory = { success: true, plugins: [] };
+            return remoteInventory;
+          },
+        }) as any,
+    });
+    for (const action of ['install', 'update', 'remove'] as const) {
+      expect(
+        await facade.requestDshPlugins(remoteMachineId, {
+          configId: 'dsh',
+          action,
+          package: 'synthetic-plugin',
+        })
+      ).toMatchObject({
+        success: false,
+        error: expect.stringContaining('machine that owns this Provider'),
+      });
+    }
+    expect(
+      await facade.requestDshPlugins(remoteMachineId, { configId: 'dsh', action: 'list' })
+    ).toEqual(inventory);
   });
 
   it('keeps Pi discovery success and failure on the local machine route', async () => {

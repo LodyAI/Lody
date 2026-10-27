@@ -38,8 +38,8 @@
   only the native ledger/key receiver, checks a verified current key, closes that
   temporary owner, then writes `activation.json`. Fleet can now attach rooms.
   The marker grants no authority and is checked against genesis/device identity;
-  existing activated workspaces can reopen locally without network. Concurrent
-  activation requests join per workspace, and Fleet shutdown drains them before
+  existing activated workspaces can reopen locally without network. Identical concurrent
+  activation intents join per workspace, and Fleet shutdown drains them before
   closing its cloud port.
 
 - Fleet must not construct/register the PR poller for encrypted workspaces. It owns
@@ -56,6 +56,23 @@
 - Keep runtime key journals under the signing public key, so custody loss cannot reuse old KEK blobs. Retain old evidence. A same-genesis activation hint may follow a replacement key only after verified admission and installation; waiting for pairing is normal, without startup issue/timer or global offline status. Activation binds the approved key and drains a different live identity; retained cleanup uses its retry owner.
 - Only ENOENT opening an activation/binding file or the machine device original means waiting for pairing. Check the original before initializing custody; a stale activation hint cannot justify a new keyring probe. Other file-open failures retain their original error and Fleet retry; never cache transient storage failures as missing pairing.
 - A ledger ingest storage failure fences writes until a successful verified refresh. Streams write retries do not reconnect healthy readers, so the next seal coalesces one refresh for that storage failure. Validation/conflict failures stay fenced until an explicit normal refresh succeeds; do not auto-recover them through seal.
+
+## Local machine pairing
+
+- `pairing-journal.ts` retains immutable frontend/session proofs and admission originals
+  before key receipt. Verify full original history and current same-member personal
+  authority. New sessions need explicit consent; preserve the original signer, keys and
+  credential. Latest-session preflight precedes Fleet ownership changes; late sessions fail.
+- Publish preparation ownership before replacement originals, then publish material and
+  current identity atomically. A same-scope fresh session can take an unpublished
+  creating generation atomically: old creating=-1, new creating=1, no original-byte
+  edits. Account/machine/workspace/genesis/member must match; superseded sessions
+  cannot publish or retake. Reuse custody originals; surviving old credentials
+  forbid device replacement. Ledger-only owners cannot receive keys.
+  Same-identity retries keep healthy owners; only identical intents share a flight.
+  Local cancellation never guesses remote settlement.
+- Trusted OS-user socket only; partial upgrades fail closed. No remote authentication is implied. See the
+  [pairing note](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-machine-pairing-journal.md).
 
 ## Catalog and Fleet containment
 
@@ -75,3 +92,5 @@
   clears it. The in-memory unavailable flag derives from this marker, never from
   an unknown field in the ordinary v1 file; stale sidecar rows cannot bootstrap.
   Fleet retains its bounded retry and pending signature until that receipt is healthy.
+
+A precise same-context `creating=-1` reply is `prepare-superseded` on the same-user socket. Other failures stay failures. Main may archive only the matching all-null unsigned desktop attempt before fresh consent; CLI originals remain retained.

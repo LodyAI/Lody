@@ -43,6 +43,7 @@
 | 内容格式 | `encodeDocumentContext`, `encodeContentContext`, `encodeContentHeader`, `contentKeyInfo`, `contentHkdfSalt`, `contentAad`, `contentSigningBytes`, `inspectContentFrame`, `DocumentScope`, `ContentScope`, `ContentPurpose`, `ContentHeader`, `ContentMetadata` |
 | 文档 | `sealDocument`, `openDocument`, `authenticateDocument`, `admitDocument`, `deriveDocumentKey`, `scopedDocumentKey`, `importDocumentKey`, `exportDocumentKey`, `disposeDocumentKey`, `DocumentKey` |
 | 内容加密 | `deriveContentKey`, `disposeContentKey`, `sealContentAead`, `openContentAead`, `ContentKey`, `SealedContentAead` |
+| 实时内容原语 | `sealPresenceContent`, `openPresenceContent`, `sealRpcRequestContent`, `openRpcRequestContent`, `sealRpcResponseContent`, `openRpcResponseContent` |
 | 纪元 HPKE | `epochHpkeAad`, `sealEpochKeyHpke`, `openEpochKeyHpke`, `HpkePrimitiveError`, `EpochHpkeContext`, `SealedEpochHpke` |
 | 记录 | `decodeRecord`, `hashRecordBytes`, `recordSigningBytes`, `joinRequestSigningBytes`, `possessionSigningBytes`, `DecodedRecord`, `RecordBody`, `Operation`, `JoinRequest`, `Role`, `DeviceKind`, `LedgerError`, `LedgerErrorCode` |
 | 重放与视图 | `verifyLedger`, `verifyLedgerEffect`, `extendLedger`, `extendLedgerEffect`, `requireLedgerContinuation`, `hasVerifiedRecordHash`, `hasVerifiedCheckpoint`, `contentPermissions`, `epochHistoryPacket`, `epochPublicationRecord`, `LedgerView`, `LedgerCheckpoint`, `LedgerState`, `Member`, `Device`, `ContentPermissions`, `EpochHistoryPacket`, `HistoricalContentAuthor` |

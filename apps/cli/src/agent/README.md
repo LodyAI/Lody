@@ -147,7 +147,9 @@ content-addressed Lody bundle, the user-owned `cordis.patch.yml`, and a final ho
 Startup reconciles only the base/host bundle entries, preserving user dependencies,
 other package-manager fields and user bundle order. User `pnpm-workspace.yaml`,
 lockfiles and patches survive startup and upgrades. Saved Provider details expose
-registry-package install/list/remove through `dshPlugins: 1`. Updates remain supported
+registry-package install/list/remove through `dshPlugins: 1` on the owning machine.
+Remote workspace RPC permits listing only and rejects all plugin mutations because it
+cannot authenticate machine-owner consent. Updates remain supported
 by RPC, but the update button is hidden until version availability is surfaced. The daemon runs
 the pinned DSH CLI with a pinned pnpm, without Provider API credentials. Startup and
 UI package operations share a Provider-home file lock. Ordinary failures restore

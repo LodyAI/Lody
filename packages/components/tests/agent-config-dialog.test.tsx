@@ -251,6 +251,7 @@ describe('AgentConfigDialog', () => {
       root?.render(
         <DshPluginsField
           configId="dsh-provider"
+          allowMutations
           supported
           onRequest={async (request) => {
             if (request.configId !== 'dsh-provider') throw new Error('Wrong provider');
@@ -303,6 +304,34 @@ describe('AgentConfigDialog', () => {
     });
     expect(container?.textContent).toContain('No user plugins installed');
     expect(container?.textContent).not.toContain('synthetic-plugin');
+  });
+
+  it('shows remote DSH inventory without enabling plugin mutations', async () => {
+    await act(async () => {
+      root?.render(
+        <DshPluginsField
+          configId="remote-dsh"
+          supported
+          onRequest={async () => ({
+            success: true,
+            plugins: [{ name: 'remote-plugin', version: '1.0.0', active: true }],
+          })}
+        />
+      );
+    });
+    const button = (text: string) =>
+      Array.from(document.querySelectorAll('button')).find((node) => node.textContent === text)!;
+    await act(async () => {
+      button('DSH plugins').click();
+    });
+    await act(async () => {
+      button('Refresh list').click();
+    });
+    expect(container?.textContent).toContain('remote-plugin');
+    expect(container?.textContent).toContain('Remote access can only refresh the list');
+    expect(button('Install').disabled).toBe(true);
+    expect(button('Uninstall').disabled).toBe(true);
+    expect(button('Refresh list').disabled).toBe(false);
   });
 
   it('preserves managed Codex identity and disables editing on a downgraded machine', async () => {

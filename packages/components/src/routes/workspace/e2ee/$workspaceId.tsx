@@ -1,12 +1,17 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { usePlatform, usePlatformSession } from '@lody/platform/react';
 import type { WorkspaceModeDescriptor } from '@lody/cloud-api';
 import { setWorkspaceContextAtom } from '@/atoms';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
-import { E2eeWorkspaceControlPage } from '@/components/pages/e2ee-workspace-control-page';
+import { E2eePersonalPairing } from '@/components/pages/e2ee-personal-pairing';
+import { E2eeLedgerAudit } from '@/components/pages/e2ee-ledger-audit';
+import {
+  E2eeWorkspaceControlPage,
+  type E2eeMemberProfile,
+} from '@/components/pages/e2ee-workspace-control-page';
 import {
   appendLedgerHistory,
   hostLedgerHistory,
@@ -36,17 +41,6 @@ function WorkspaceControlRoute() {
   const { t } = useTranslation();
   const session = usePlatformSession();
   const accountId = useE2eeAccountId();
-  const user = session.status === 'authenticated' ? session.user : null;
-  const you = useMemo(
-    () =>
-      user
-        ? {
-            name: [user.name, user.email].find((value) => value != null && value !== '') ?? user.id,
-            image: user.image ?? null,
-          }
-        : undefined,
-    [user]
-  );
   const port = platform.e2eeWorkspaces;
   const navigate = useNavigate();
   const clearWorkspace = useSetAtom(setWorkspaceContextAtom);
@@ -222,6 +216,34 @@ function WorkspaceControlRoute() {
       if (readOwner.current === owner) readOwner.current = null;
     };
   }, [scope, identity, port, workspaceId, accountId]);
+  // Directory availability never delays or invalidates verified ledger history.
+  const [directory, setDirectory] = useState<{
+    scope: string;
+    profiles: ReadonlyMap<string, E2eeMemberProfile>;
+  } | null>(null);
+  const authenticated = session.status === 'authenticated' && session.user.id === accountId;
+  useEffect(() => {
+    let disposed = false;
+    setDirectory(null);
+    if (!authenticated || !port?.memberProfiles) return undefined;
+    void port.memberProfiles({ workspaceId }).then(
+      (result) => {
+        if (disposed || result.workspaceId !== workspaceId) return;
+        const profiles = new Map<string, E2eeMemberProfile>();
+        for (const profile of result.profiles) {
+          if (typeof profile.name === 'string' && profile.name.trim() !== '')
+            profiles.set(profile.cryptoUserId, { name: profile.name, image: profile.image });
+        }
+        setDirectory({ scope, profiles });
+      },
+      () => {
+        // Labels are optional. Failed directory reads leave verified IDs/ordinals visible.
+      }
+    );
+    return () => {
+      disposed = true;
+    };
+  }, [scope, authenticated, port, workspaceId]);
   const current = state.identity === identity ? state : null;
   const loadMore = async () => {
     const owner = readOwner.current;
@@ -303,7 +325,9 @@ function WorkspaceControlRoute() {
         loading={!current || current.loading || current.scope !== scope}
         failure={current?.failure ?? null}
         unavailable={!port || !accountId}
-        you={you}
+        memberProfiles={
+          authenticated && directory?.scope === scope ? directory.profiles : undefined
+        }
         diagnostics={diagnostics}
         onRepairLocal={() => {
           if (!accountId) return;
@@ -322,7 +346,25 @@ function WorkspaceControlRoute() {
         onBack={() => {
           void navigate({ to: '/workspace/create', search: { allowExisting: true } });
         }}
-      />
+      >
+        {port?.runtime && accountId && (
+          <E2eePersonalPairing
+            key={identity}
+            workspaceId={workspaceId}
+            runtime={port.runtime}
+            canApprove={Boolean(current?.history?.locallyPinned)}
+            onJoined={refresh}
+          />
+        )}
+        {port && current?.history?.locallyPinned && (
+          <E2eeLedgerAudit
+            key={identity + ':audit'}
+            workspaceId={workspaceId}
+            history={current.history}
+            read={port.history}
+          />
+        )}
+      </E2eeWorkspaceControlPage>
     </>
   );
 }

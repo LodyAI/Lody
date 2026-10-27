@@ -1,3 +1,8 @@
+import {
+  getWorkspaceFlockDocId,
+  listWorkspaceProjects,
+  readWorkspaceFlockRowsFromFlock,
+} from '@lody/shared';
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import { encodeSessionFilePath, resolveSessionPullRequests } from '@lody/shared';
 import type { SessionFileRoot } from '@lody/shared';
@@ -231,7 +236,7 @@ import { formatErrorMessage } from '@/utils/format-error';
 import { startTraceSpan, traceAsync } from '@/utils/trace-span';
 import { getCliHttpFetch } from '@/utils/http-transport';
 import { prepareCliStreamsGatewayBaseUrl } from './loro/streams-access';
-import { readTimeoutEnv, withTimeout } from './loro/timeout-utils';
+import { readTimeoutEnv, withTimeout, SYNC_CONFIRMATION_TIMEOUT_MS } from './loro/timeout-utils';
 import {
   copyIntoSessionFileBlobStore,
   getDraftSessionFileBlobMaxAgeMs,
@@ -373,6 +378,7 @@ import {
 import {
   readMachineLocalProjects,
   removeMachineLocalProject,
+  isLocalProjectReferenced,
   resolveWorkspaceLocalProject,
   resolveWorkspaceLocalProjectRootPath,
   resolveWorkspaceLocalProjectRootPathWithRetry,
@@ -4445,6 +4451,36 @@ export class MessageHandler {
         `[local-project] Skipping stale delete request for ${localProjectId}; project was created after the request`
       );
       return undefined;
+    }
+
+    if (existingProject) {
+      const catalogId = getWorkspaceFlockDocId(this.workspaceId);
+      // Borrow the daemon's retained catalog reader, including local-only readiness.
+      // A missing baseline is not an empty list of references.
+      if (
+        !(await this.workspaceDocument.catalogBaselineReady(
+          catalogId,
+          SYNC_CONFIRMATION_TIMEOUT_MS
+        ))
+      ) {
+        throw new Error('Project catalog is not ready');
+      }
+      const catalog = await this.workspaceDocument.repo.openFlockDoc(catalogId);
+      const projects = listWorkspaceProjects(readWorkspaceFlockRowsFromFlock(catalog.flock));
+      const sessions = (await listAliveSessionMetas(this.workspaceDocument)).map(
+        ({ meta }) => meta
+      );
+      if (isLocalProjectReferenced(existingProject, this.machineId, projects, sessions)) {
+        await upsertMachineLocalProject(
+          this.workspaceDocument.repo,
+          this.workspaceId,
+          this.machineId,
+          existingProject,
+          undefined,
+          { sync: this.workspaceDocument, reason: 'local-project-unlink', standaloneVisible: false }
+        );
+        return undefined;
+      }
     }
 
     await this.archiveLocalProjectSessions(localProjectId);
@@ -9732,6 +9768,13 @@ export class MessageHandler {
             name: existingProject?.name ?? preparedProject.name,
             rootPath: existingProject?.rootPath ?? preparedProject.rootPath,
             alreadyRegistered: existingProject !== null,
+            ...(request.inspect
+              ? {
+                  inspection: await worktreeGitLegacy.probeLocalProjectMember(
+                    preparedProject.rootPath
+                  ),
+                }
+              : {}),
           },
         };
       }
@@ -9804,7 +9847,12 @@ export class MessageHandler {
         lastOpenedAtMs: nowMs,
       },
       nowMs,
-      { sync: this.workspaceDocument, reason: 'local-project-add', refreshGitHubRemote: true }
+      {
+        sync: this.workspaceDocument,
+        reason: 'local-project-add',
+        refreshGitHubRemote: true,
+        standaloneVisible: true,
+      }
     );
   }
 

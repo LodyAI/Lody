@@ -1518,6 +1518,12 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           ? DshPluginsResponseSchema.parse(response.result)
           : { success: false, error: response.error };
       }
+      if (params.action !== 'list') {
+        return {
+          success: false,
+          error: 'Manage DSH plugins from Lody on the machine that owns this Provider.',
+        };
+      }
       if (plane === null) return { success: false, error: 'Machine RPC routing is not available.' };
       return (
         (await (await getMachineRpcClient(machineId)).requestDshPlugins(params)) ?? {

@@ -64,13 +64,20 @@ export async function resolveProjectFileRoots(
   return roots;
 }
 
-/** Preserve real entries on collision. Never follow or recursively remove a member link. */
+/**
+ * Preserve real entries on collision. Never follow or recursively remove a member link.
+ *
+ * A Provider that takes additional directories needs no link, but a correct one
+ * is kept: child tabs share the main directory, and a sibling whose Provider
+ * lacks additional directories reaches the member only through it. Returns
+ * whether the member is reachable through the link afterwards.
+ */
 export async function reconcileProjectMemberLink(
   main: string,
   name: string,
   target: string,
   additional: boolean
-): Promise<void> {
+): Promise<boolean> {
   if (!name || name === '.' || name === '..' || name.includes('/') || name.includes('\\'))
     throw new Error('Invalid project group member directory');
   const canonicalTarget = await realpath(target);
@@ -79,7 +86,7 @@ export async function reconcileProjectMemberLink(
   const link = path.join(main, name);
   const current = await readEntry(link);
   if (current && !current.isSymbolicLink()) {
-    if (additional) return;
+    if (additional) return false;
     throw new Error('Project group member directory conflicts with a real entry');
   }
   if (current) {
@@ -89,24 +96,24 @@ export async function reconcileProjectMemberLink(
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
-    if (correct && !additional) return;
+    if (correct) return true;
     try {
       await unlink(link);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
   }
-  if (!additional) {
-    try {
-      await symlink(canonicalTarget, link, process.platform === 'win32' ? 'junction' : 'dir');
-    } catch (error) {
-      if (
-        (error as NodeJS.ErrnoException).code !== 'EEXIST' ||
-        (await realpath(link)) !== canonicalTarget
-      )
-        throw error;
-    }
+  if (additional) return false;
+  try {
+    await symlink(canonicalTarget, link, process.platform === 'win32' ? 'junction' : 'dir');
+  } catch (error) {
+    if (
+      (error as NodeJS.ErrnoException).code !== 'EEXIST' ||
+      (await realpath(link)) !== canonicalTarget
+    )
+      throw error;
   }
+  return true;
 }
 
 /** Archive removes only known links; unknown symlinks prevent recursive group cleanup. */

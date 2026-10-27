@@ -92,7 +92,7 @@ and the `file/preview` namespace are in
   cancel/code/form replies carry only the established authentication request and
   interaction ids. Do not reintroduce caller-supplied `customAcp`, `env`, or runtime
   overrides on Workspace Machine RPC: that transport cannot authorize a caller to
-  choose a command for the target daemon.
+  choose commands or mutate executable plugins on the target daemon.
 - Code Collab v2 file/LSP methods are ordinary `code-collab/*` Machine RPC methods
   (`open-text`, `refresh-text`, `save-text`, `init-directory`, `open-current-diff`,
   `open-turn-diff`, `lsp-definition`, `lsp-references`). They carry workspace-relative

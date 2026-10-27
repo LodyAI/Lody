@@ -27,11 +27,13 @@ export function DshPluginsField({
   onRequest,
   supported,
   available = true,
+  allowMutations = false,
 }: {
   configId: string;
   onRequest?: (request: DshPluginsRequest) => Promise<DshPluginsResponse>;
   supported: boolean;
   available?: boolean;
+  allowMutations?: boolean;
 }) {
   const { t } = useTranslation();
   const [plugins, setPlugins] = useState<DshPlugin[]>();
@@ -43,6 +45,7 @@ export function DshPluginsField({
   const enabled = supported && available && !!onRequest;
   const run = async (request: DshPluginsRequest) => {
     if (!enabled || pending.current || !onRequest) return;
+    if (request.action !== 'list' && !allowMutations) return;
     if (
       request.action === 'install' &&
       !DshPluginPackageSpecSchema.safeParse(request.package).success
@@ -77,19 +80,22 @@ export function DshPluginsField({
         {supported && !available && (
           <FormMessage tone="warning">{t('dshPlugins.offline')}</FormMessage>
         )}
+        {supported && !allowMutations && (
+          <FormMessage tone="warning">{t('dshPlugins.localOnly')}</FormMessage>
+        )}
         <div {...stylex.props(styles.row)}>
           <div {...stylex.props(styles.input)}>
             <Input
               aria-label={t('dshPlugins.package')}
               placeholder={t('dshPlugins.placeholder')}
               value={spec}
-              disabled={!enabled || busy}
+              disabled={!enabled || !allowMutations || busy}
               onChange={(event) => setSpec(event.target.value)}
             />
           </div>
           <Button
             size="small"
-            disabled={!enabled || busy || !spec.trim()}
+            disabled={!enabled || !allowMutations || busy || !spec.trim()}
             onClick={() => void run({ configId, action: 'install', package: spec.trim() })}
           >
             {t('dshPlugins.install')}
@@ -118,7 +124,7 @@ export function DshPluginsField({
             <Button
               size="small"
               variant="ghost"
-              disabled={!enabled || busy}
+              disabled={!enabled || !allowMutations || busy}
               onClick={() => void run({ configId, action: 'remove', package: plugin.name })}
             >
               {t('dshPlugins.remove')}

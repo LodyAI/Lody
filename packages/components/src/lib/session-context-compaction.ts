@@ -15,32 +15,18 @@ export const isSessionContextCompacting = (
 };
 
 export type CanStopAgentOptions = {
-  isContextCompacting: boolean;
-  isSessionActive: boolean;
   activeAssistantTurnId: string | null;
   isGoalActive: boolean;
   canPauseGoal: boolean;
 };
 
 /**
- * Whether the session Stop control should be exposed.
- *
- * The compaction branch is gated on a cancellable assistant turn: when a
- * pending/in-progress compaction marker remains in history but its assistant
- * entry is already finished (restart, interrupted notification stream),
- * `isContextCompacting` is true while `activeAssistantTurnId` is null. In that
- * state Stop would be shown but `handleStop` rejects the click as
- * `missing_active_turn`, leaving an idle session with a permanently
- * nonfunctional Stop button. Only expose Stop during compaction when there is
- * a turn to cancel.
+ * Stop is exposed exactly while the last assistant turn is unfinished (or a goal
+ * can be paused), never from live activity: a turn whose agent died stays
+ * stoppable, and the daemon closes it.
  */
 export const canStopAgentEnabled = ({
-  isContextCompacting,
-  isSessionActive,
   activeAssistantTurnId,
   isGoalActive,
   canPauseGoal,
-}: CanStopAgentOptions): boolean =>
-  (isContextCompacting && activeAssistantTurnId != null) ||
-  (isSessionActive && activeAssistantTurnId != null) ||
-  (isGoalActive && canPauseGoal);
+}: CanStopAgentOptions): boolean => activeAssistantTurnId != null || (isGoalActive && canPauseGoal);

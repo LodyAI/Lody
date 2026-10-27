@@ -216,6 +216,13 @@ and wait behind earlier input under the same lease. Unprepared attachments remai
 in the existing memory queue. Cache recovery preserves saved input; full reset
 may delete it. See the [owning decision](../notes/proposed/architecture/2026-10-13-backend-independent-send-acceptance.md).
 
+An unresolved input holds every later input of its conversation, in every window,
+because they share storage and the session lease. The client log records this
+without input content: `session_input.stalled` (input ID, state, failed stage,
+error, count waiting behind it; once per distinct state), `session_input.slow`
+(a lease or owner step still unsettled after 15 s, not interrupted) and
+`session_input.resolved` when an earlier stall is confirmed.
+
 ## File preview versus Code Collab
 
 File routing, cache, and caller contracts live in
@@ -310,3 +317,23 @@ The parser also normalizes `scheduled_reset` independently of `active_watch`. Bo
 points and the dialog prioritize an announced schedule over the forecast probability.
 The local scheduled time is optional; crossing it shows pending execution confirmation.
 See the [API compatibility decision](../notes/implemented/bug-fix/2026-10-02-codex-scheduled-reset.md).
+
+
+## Direct folder project creation
+
+The Project editor uses the shared directory browser to prepare local folders
+without writing catalog rows. Its draft keeps the canonical path and daemon
+inspection; saving revalidates those selections, registers missing directories,
+and then persists the complete Project. The `projectFolderSelection` capability
+keeps older daemons on the existing-source path. GitHub-backed directories retain
+portable repository-member semantics.
+
+Machine-local registrations carry optional `standaloneVisible` (legacy default:
+true). Lists use the standalone projection; member sources, repository-copy
+selection and session access use all accessible registrations. Explicit Add
+promotes the same identity. Settings deletion directly submits the existing durable
+command without a confirmation surface. The daemon retains registrations needed by
+Project members or existing group runs and disables standalone display; otherwise
+it runs normal deletion. Dependency checks stay internal. Cleanup-result notifications
+remain available for earlier commands that explicitly requested cleanup. Behavior and scope:
+[Spec](../../specs/multi-repo-projects.md#direct-folder-selection-and-standalone-visibility).
