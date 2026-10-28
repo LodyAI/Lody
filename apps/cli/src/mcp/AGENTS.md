@@ -67,10 +67,12 @@ Parent instructions apply. Background: [README.md](README.md).
   syncs unless `--offline`. Use active Turn identity and `canReadAgentRole`;
   explicit creation keeps its separate grant contract. Keep unavailable readable Roles,
   three-state presence and credential allowlists.
-- MCP defaults use the daemon's local workspace snapshot even before its first remote
-  baseline; freeze the resolved IDs at acceptance. Session startup may use complete
-  local selected rows with a config warning while cold. Missing selected rows retain
-  retryable `SYNC_UNAVAILABLE`; request waits never stop the shared reader.
+- MCP defaults first wait up to one second for the daemon reader's baseline. On timeout,
+  only a persisted remote checkpoint for that workspace Flock permits cached defaults;
+  business rows alone are insufficient because they can be authored locally. Without
+  evidence, return retryable `SYNC_UNAVAILABLE` before accepting an Operation. Freeze
+  accepted IDs. Explicit selections bypass defaults. Session startup keeps complete
+  local selected rows with a warning; cold missing rows fail. Waits never stop the reader.
 - Directory cursors bind resource, workspace, user and filters. Operations additionally
   bind requester Session and query only that user's machine-local rows; list replies
   contain no canonical prompt or assistant output. See

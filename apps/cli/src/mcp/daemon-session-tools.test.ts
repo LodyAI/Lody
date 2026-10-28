@@ -39,6 +39,7 @@ import * as sessionCommands from '@/commands/session';
 import { createResourceDiscovery } from '@/lib/resource-discovery-runtime';
 import { waitForMcpCatalogBaseline } from '@/lib/workspace-mcp-store';
 import { loadSessionMcpCatalog } from '@/agent/session-mcp-resolver';
+import { LodyOperationStore, getLodyOperationStorePath } from '@/orchestration/operation-store';
 import { createSessionBackend } from '@/session/session-backend';
 import { LocalControlHandler } from '@/lib/local-control-handler';
 import { LoroDocumentManager } from '@/lib/loro/doc';
@@ -121,6 +122,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
 
   afterEach(async () => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
     await manager.cleanUp({ fast: true });
     await presenceApplication.closeLegacy();
     process.env = originalEnv;
@@ -143,6 +145,80 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     machineId,
     machineName: 'Daemon',
   });
+
+  function createEnvironment() {
+    return createLocalSessionCommandEnvironment({
+      manager,
+      workspaceId,
+      machineId,
+      machineName: 'Daemon',
+      userId: ownerUserId,
+      host: {
+        readInvocation: (invocationSessionId) => ({
+          type: 'session/active-invocation-context',
+          active: true,
+          sessionId: invocationSessionId,
+          requesterUserId: ownerUserId,
+          sourceTurnId: 'synthetic-turn',
+          inputConfig: { cliType: 'custom', agentType: 'claude' },
+        }),
+        readLiveStatus: async () => {
+          throw new Error('No live-status query');
+        },
+        cancelSession: async () => {
+          throw new Error('No cancellation');
+        },
+        dispatchSession: async () => {},
+      },
+    });
+  }
+
+  async function settleCatalogWait<T>(
+    run: () => Promise<T>,
+    duringWait?: () => Promise<void>
+  ): Promise<T> {
+    const started = testSignal();
+    const ready = manager.catalogBaselineReady.bind(manager);
+    const observer = vi.spyOn(manager, 'catalogBaselineReady').mockImplementation((id, timeout) => {
+      const result = ready(id, timeout);
+      if (timeout > 0) started.resolve();
+      return result;
+    });
+    const outcome = run().then(
+      (value) => () => value,
+      (error: unknown) => () => {
+        throw error;
+      }
+    );
+    try {
+      const waiting = await Promise.race([
+        started.promise.then(() => true),
+        outcome.then(() => false),
+      ]);
+      // A batch validates its items sequentially; each owns a one-second waiter.
+      if (waiting) {
+        await duringWait?.();
+        await vi.advanceTimersByTimeAsync(duringWait ? 0 : 3_000);
+      }
+      return (await outcome)();
+    } finally {
+      observer.mockRestore();
+    }
+  }
+
+  async function persistRemoteCatalogReceipt() {
+    const docId = getWorkspaceFlockDocId(workspaceId);
+    const { flock } = await manager.repo.openFlockDoc(docId);
+    await manager.repo.persistFlockDocNow(docId, flock);
+    // Inject at the real SDK cursor persistence boundary; the real Streams
+    // composition test separately verifies only remote receipt creates this.
+    await manager.repo.getReplicaCheckpointStore({ kind: 'flock', flockDocId: docId, flock }).save({
+      streamUrl: 'https://streams.synthetic.invalid/catalog',
+      nextOffset: '42',
+      serverLowerBoundVersion: {},
+      updatedAtMs: 1,
+    });
+  }
 
   async function seedRoles() {
     const agentConfigId = await manager.createAgentConfig('custom', 'claude', machineId, 'Agent');
@@ -240,6 +316,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
           updatedAt: 1,
         });
       }
+      await persistRemoteCatalogReceipt();
       await manager.repo.flush();
       await manager.cleanUp({ fast: true });
       manager = await LoroDocumentManager.create(workspaceId, ownerUserId, createSilentLogger(), {
@@ -247,18 +324,22 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
         streamsTokens: {} as never,
       });
       daemon.manager = manager;
+      vi.useFakeTimers();
+      expect(manager.hasPersistedWorkspaceCatalog()).toBe(true);
       expect(await manager.catalogBaselineReady(getWorkspaceFlockDocId(workspaceId), 0)).toBe(
         false
       );
       const agentConfig = await manager.getAgentConfigById(agentConfigId);
       if (!agentConfig) throw new Error('Missing persisted Agent config');
-      const selected = await runWithDaemonWorkspace(daemon, () =>
-        sessionCommands.resolveEffectiveSessionCreateDispatchConfig({
-          manager,
-          workspaceId,
-          agentConfig,
-          dispatchConfig: {},
-        })
+      const selected = await settleCatalogWait(() =>
+        runWithDaemonWorkspace(daemon, () =>
+          sessionCommands.resolveEffectiveSessionCreateDispatchConfig({
+            manager,
+            workspaceId,
+            agentConfig,
+            dispatchConfig: {},
+          })
+        )
       );
       expect(selected.mcpServerIds).toEqual(configured ? [id] : []);
       const project = { kind: 'github' as const, repoFullName: 'synthetic/repo', branch: 'main' };
@@ -267,14 +348,16 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       const defaults = await manager.repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId));
       defaults.flock.set(workspaceFlockKeys.projectMcpDefault(projectKey), { ids: [] });
       defaults.flock.commit();
-      const projectDefault = await runWithDaemonWorkspace(daemon, () =>
-        sessionCommands.resolveEffectiveSessionCreateDispatchConfig({
-          manager,
-          workspaceId,
-          agentConfig,
-          project,
-          dispatchConfig: {},
-        })
+      const projectDefault = await settleCatalogWait(() =>
+        runWithDaemonWorkspace(daemon, () =>
+          sessionCommands.resolveEffectiveSessionCreateDispatchConfig({
+            manager,
+            workspaceId,
+            agentConfig,
+            project,
+            dispatchConfig: {},
+          })
+        )
       );
       expect(projectDefault.mcpServerIds).toEqual([]);
       const frozen = await runWithDaemonWorkspace(daemon, () =>
@@ -297,30 +380,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
         })
       );
       expect(explicit.mcpServerIds).toEqual([]);
-      const environment = createLocalSessionCommandEnvironment({
-        manager,
-        workspaceId,
-        machineId,
-        machineName: 'Daemon',
-        userId: ownerUserId,
-        host: {
-          readInvocation: (requestSessionId) => ({
-            type: 'session/active-invocation-context',
-            active: true,
-            sessionId: requestSessionId,
-            requesterUserId: ownerUserId,
-            sourceTurnId: 'synthetic-turn',
-            inputConfig: { cliType: 'custom', agentType: 'claude' },
-          }),
-          readLiveStatus: async () => {
-            throw new Error('No live-status query');
-          },
-          cancelSession: async () => {
-            throw new Error('No cancellation');
-          },
-          dispatchSession: async () => {},
-        },
-      });
+      const environment = createEnvironment();
       vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
       const item = { prompt: 'Review synthetic code.', machineId, agentConfigId };
       const create = () =>
@@ -333,7 +393,7 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
               : { operationId: 'cold-defaults', items: [item, item] }
           )
         );
-      const recovered = await create();
+      const recovered = await settleCatalogWait(create);
       expect(JSON.parse(recovered.content[0]?.text ?? '{}')).toMatchObject({
         id: 'cold-defaults',
         state: 'active',
@@ -345,6 +405,159 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       expect(await manager.catalogBaselineReady(getWorkspaceFlockDocId(workspaceId), 0)).toBe(
         false
       );
+    }
+  );
+
+  it.each(['lody_session_create', 'lody_session_create_many'] as const)(
+    'rejects %s with no remote history before acceptance and recovers the same request after catch-up',
+    async (tool) => {
+      const agentConfigId = await manager.createAgentConfig('custom', 'claude', machineId, 'Agent');
+      await manager.repo.flush();
+      await manager.cleanUp({ fast: true });
+      manager = await LoroDocumentManager.create(workspaceId, ownerUserId, createSilentLogger(), {
+        keepWorkspaceCatalogJoined: true,
+        streamsTokens: {} as never,
+      });
+      daemon.manager = manager;
+      const environment = createEnvironment();
+      vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
+      vi.useFakeTimers();
+      const item = { prompt: 'Review synthetic code.', machineId, agentConfigId };
+      const create = (explicit = false) =>
+        runWithSessionCommandEnvironment(environment, () =>
+          executeDaemonSessionTool(
+            context(),
+            tool,
+            tool === 'lody_session_create'
+              ? {
+                  operationId: explicit ? 'explicit-none' : 'fresh-defaults',
+                  ...item,
+                  ...(explicit ? { mcpServerIds: [] } : {}),
+                }
+              : {
+                  operationId: explicit ? 'explicit-none' : 'fresh-defaults',
+                  items: [item, item].map((entry) => ({
+                    ...entry,
+                    ...(explicit ? { mcpServerIds: [] } : {}),
+                  })),
+                }
+          )
+        );
+      expect(manager.hasPersistedWorkspaceCatalog()).toBe(false);
+      const failed = await settleCatalogWait(create);
+      expect(JSON.parse(failed.content[0]?.text ?? '{}')).toMatchObject({
+        ok: false,
+        error: { code: 'SYNC_UNAVAILABLE', retryable: true },
+      });
+      const operations = await runWithSessionCommandEnvironment(environment, () =>
+        executeDaemonSessionTool(context(), 'lody_operation_list', {})
+      );
+      expect(JSON.parse(operations.content[0]?.text ?? '{}')).toMatchObject({ items: [] });
+      const localAgent = await manager.getAgentConfigById(agentConfigId);
+      if (!localAgent) throw new Error('Missing Agent');
+      // Schedule's daemon IPC entry has a reader owner but no Session ALS.
+      await expect(
+        settleCatalogWait(() =>
+          sessionCommands.resolveEffectiveSessionCreateDispatchConfig({
+            manager,
+            workspaceId,
+            agentConfig: localAgent,
+            dispatchConfig: {},
+          })
+        )
+      ).rejects.toMatchObject({ _tag: 'WorkspaceSyncUnavailableError' });
+      // Schedule create/edit use this same validation before repository.save.
+      await expect(
+        settleCatalogWait(() =>
+          runWithSessionCommandEnvironment(environment, () =>
+            sessionCommands.validateSessionCreateOptions({
+              manager,
+              auth: environment.auth,
+              workspace: { id: workspaceId, name: 'Synthetic' },
+              options: {
+                machine: machineId,
+                agentConfig: agentConfigId,
+                currentSessionId: sessionId,
+              },
+              skipMachineAvailabilityCheck: true,
+            })
+          )
+        )
+      ).rejects.toMatchObject({ _tag: 'WorkspaceSyncUnavailableError' });
+
+      // Locally authored rows cannot turn unknown remote defaults into known absence.
+      await seedRoles();
+      expect(manager.hasPersistedWorkspaceCatalog()).toBe(false);
+      const stillUnknown = await settleCatalogWait(create);
+      expect(JSON.parse(stillUnknown.content[0]?.text ?? '{}')).toMatchObject({
+        error: { code: 'SYNC_UNAVAILABLE', retryable: true },
+      });
+      expect(JSON.parse((await create(true)).content[0]?.text ?? '{}')).toMatchObject({
+        id: 'explicit-none',
+        state: 'active',
+      });
+      const host = await LoroRepo.create({});
+      try {
+        const docId = getWorkspaceFlockDocId(workspaceId);
+        const remote = await host.openFlockDoc(docId);
+        const id = 'remote-default-mcp' as McpServerId;
+        writeWorkspaceMcpServerToFlock(remote.flock, {
+          id,
+          name: 'Remote default',
+          transport: 'stdio',
+          connection: { transport: 'stdio', command: 'synthetic-command' },
+          enabledByDefault: true,
+          createdAt: 1,
+          updatedAt: 1,
+        });
+        const network = makePromiseRepoNetwork();
+        await host.addTransport('streams', network.transport());
+        const room = await host.joinFlockDocRoom(docId);
+        const recovered = await settleCatalogWait(create, async () => {
+          await vi.advanceTimersByTimeAsync(200);
+          await manager.repo.addTransport('streams', network.transport());
+        });
+        expect(await manager.catalogBaselineReady(docId, 0)).toBe(true);
+        expect(JSON.parse(recovered.content[0]?.text ?? '{}')).toMatchObject({
+          id: 'fresh-defaults',
+          state: 'active',
+          items: Array.from({ length: tool === 'lody_session_create' ? 1 : 2 }, () => ({
+            inputDurable: true,
+          })),
+        });
+        const agentConfig = await manager.getAgentConfigById(agentConfigId);
+        if (!agentConfig) throw new Error('Missing Agent');
+        const selected = await runWithDaemonWorkspace(daemon, () =>
+          sessionCommands.resolveEffectiveSessionCreateDispatchConfig({
+            manager,
+            workspaceId,
+            agentConfig,
+            dispatchConfig: {},
+          })
+        );
+        expect(selected.mcpServerIds).toEqual([id]);
+        const operationStore = new LodyOperationStore(
+          getLodyOperationStorePath(machineId),
+          undefined,
+          { maintenance: false }
+        );
+        try {
+          expect(
+            operationStore.get(sessionId, 'fresh-defaults').frozenContinuationConfig
+              .targetDispatchConfigs
+          ).toEqual(
+            Array.from({ length: tool === 'lody_session_create' ? 1 : 2 }, () =>
+              expect.objectContaining({ mcpServerIds: [id] })
+            )
+          );
+        } finally {
+          operationStore.close();
+        }
+
+        room.unsubscribe();
+      } finally {
+        await host.destroy();
+      }
     }
   );
 

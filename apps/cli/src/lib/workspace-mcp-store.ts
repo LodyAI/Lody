@@ -29,6 +29,29 @@ export async function waitForMcpCatalogBaseline(
   }
 }
 
+/** Defaults may use an old remote snapshot, but never infer absence from a new replica. */
+export async function waitForMcpDefaultCatalog(
+  manager: Parameters<typeof waitForMcpCatalogBaseline>[0] & {
+    hasPersistedWorkspaceCatalog(): boolean;
+  },
+  workspaceId: WorkspaceId
+): Promise<void> {
+  try {
+    await waitForMcpCatalogBaseline(manager, workspaceId);
+  } catch (error) {
+    if (!(error instanceof WorkspaceSyncUnavailableError)) throw error;
+    try {
+      if (manager.hasPersistedWorkspaceCatalog()) return;
+    } catch (cause) {
+      throw new WorkspaceSyncUnavailableError({
+        message: 'Workspace MCP catalog history could not be read.',
+        cause,
+      });
+    }
+    throw error;
+  }
+}
+
 export type McpCatalogWriteResult = {
   changed: boolean;
   synced: boolean;
