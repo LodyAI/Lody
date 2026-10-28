@@ -51,22 +51,24 @@ wins. For the MVP, use **encrypted Streams RPC → encrypted history/Meta durabl
 dispatch** as the final fallback. Keep that durable path available when Streams
 RPC fails; it must reach the same actual-start claim, not a second execution path.
 Iroh is a later acceleration layer, outside the MVP. Ordinary workspaces keep
-their existing behavior. No encrypted route may fall back to plaintext.
+their existing behavior. RPC and durable content never fall back to plaintext;
+MVP presence is the separately approved minimal plaintext metadata channel below.
 
 **This concrete byte revision remains draft.** The owner approved both format
 choices below on **2026-10-28**: the 1 MiB RPC limit includes content v0's
 143-byte overhead, and
 RPC resources use canonical unpadded base64url of the ledger machineId bytes.
-The body layout follows the unmerged PR-25 candidate at
+The RPC body layout follows PR-25, merged as
+`c7b3c71512e2bdf26b14817fc8ff56cbd730f509`, with source pinned at
 `daee5751fde6698e50960ca6a5627191c887e297`; that code is evidence of candidate
 bytes, not final Spec approval or a shipped realtime capability.
 
 ### Shared content frame and resource bytes
 
-Each realtime message carries exactly one content v0 frame:
+Each encrypted RPC message carries exactly one content v0 frame:
 `header39 || nonce24 || ciphertext || tag16 || signature64`. Derive with the
 existing `deriveContentKey`: pinned genesis, current epoch, `docEpoch=0`, purpose
-7/8/9 and the exact resource. Purpose is authenticated despite being absent from
+8/9 and the exact resource. Purpose is authenticated despite being absent from
 the header. Use no extra content additionalData in this profile. Request,
 response, presence and document leaves never substitute for each other.
 Transport metadata supplies no authority; the host separately checks the fixed
@@ -88,11 +90,49 @@ valid ledger ID has exactly one lossless resource spelling, including IDs longer
 than 128 bytes or containing non-ASCII characters. A decoded name alone grants
 no machine authority. This resource codec is absent from PR-25's body codec.
 
-Presence uses `presence:<roomId>` with roomId restricted to 1..128 bytes in
-`0x21..0x7e`, concatenated literally without URL normalization. This room bound
-does not restrict the ledger machineId or its encoded RPC resource.
+### MVP presence: minimal plaintext (owner approved 2026-10-28)
 
-### Body bytes and limits
+Encrypted workspaces use the existing plaintext `presence` ephemeral channel
+with its **90-second TTL** (`LODY_PRESENCE_TTL_MS = 90_000`), not encrypted
+presence. Keep the existing 30-second heartbeat and bounded publication rules.
+These IDs, state enums and timestamps are metadata the service can infer from
+connections, traffic and accounts; encrypting them offers little additional
+privacy while adding complexity and availability risk. This is the selected
+metadata disclosure, not a plaintext fallback for RPC or document content.
+
+Before any encrypted-workspace presence publication, construct a new record by
+this **closed allowlist**, including its nested status fields:
+
+| Record kind       | Allowed fields                                                        |
+| ----------------- | --------------------------------------------------------------------- |
+| `machine`         | `kind`, `machineId`, `instanceId`, `updatedAt`                        |
+| `session`         | `kind`, `sessionId`, `machineId`, `instanceId`, `status`, `updatedAt` |
+| `session-viewing` | `kind`, `userId`, `instanceId`, `sessionId`, `since`, `updatedAt`     |
+
+`kind` is one of the three literal tags above. Session `status` contains only
+`type` = `running` / `requestPermission` / `initializing`, plus the existing
+optional enum fields: `activity` = `image_generation`, `phase` = `finalizing`,
+and `stage` = `git-clone` / `managed-runtime` / `acp` / `resuming`, where valid
+for that status type. IDs must remain actual existing identifiers, not labels
+or text carriers; `since` and `updatedAt` are validated timestamps.
+
+**Strip every unlisted field before it enters the local ephemeral store or any
+local/cloud presence publisher.** In particular, never publish `status.detail`,
+free-text progress/errors, machine/user/session names, titles, paths, commands,
+prompts or content snippets. A length limit or read-side stripping is insufficient:
+the plaintext must already be filtered before transmission. Preserve existing
+room/account access checks, freshness and online/offline/unknown semantics;
+presence grants no execution authority, enters no journal/history, and a malformed
+entry cannot block unrelated documents. Ordinary-workspace payloads are unchanged.
+
+**Encrypted presence is outside the MVP.** Purpose 7 seal/open primitives and the
+presence body codec merged by [#1990](https://github.com/LodyAI/Lody/pull/1990)
+are **reserved, unused by the MVP**. Their 64 KiB body and ≤60-second encrypted-body
+TTL belong only to that reserved codec; they are not MVP presence limits and must
+not replace the existing 90-second TTL. No `presence:<roomId>` content resource or
+purpose-7 frame is sent by the MVP. RPC continues to use purposes 8/9 unchanged.
+
+### RPC body bytes and limits
 
 Bodies use fixed fields, not an outer JSON object. Integers are unsigned big
 endian; u64 values must be at most `2^53-1`. `text16` is a u16 byte length and
@@ -101,33 +141,29 @@ exact opaque bytes. Reject truncation, trailing bytes, unknown tags, invalid
 text/integers and size limits before allocation/copying. Decoded byte fields
 own their storage, including for offset Buffer inputs.
 
-| Purpose    | Plaintext field order                                                                      | Limit                                                                       |
-| ---------- | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
-| 8 request  | `version:u8=0, requestId:16, expiresAt:u64, method:text16, params:bytes32`                 | Complete sealed frame ≤1,048,576 bytes; method 1..128 bytes in `0x21..0x7e` |
-| 9 response | `version:u8=0, requestId:16, requestDigest:32, kind:u8, sequence:u32, payload:bytes32`     | Each complete sealed frame ≤1,048,576 bytes                                 |
-| 7 presence | `version:u8=0, incarnation:16, sequence:u32, issuedAt:u64, expiresAt:u64, payload:bytes32` | Plaintext body ≤65,536 bytes; TTL ≤60,000 ms                                |
+| Purpose    | Plaintext field order                                                                  | Limit                                                                       |
+| ---------- | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| 8 request  | `version:u8=0, requestId:16, expiresAt:u64, method:text16, params:bytes32`             | Complete sealed frame ≤1,048,576 bytes; method 1..128 bytes in `0x21..0x7e` |
+| 9 response | `version:u8=0, requestId:16, requestDigest:32, kind:u8, sequence:u32, payload:bytes32` | Each complete sealed frame ≤1,048,576 bytes                                 |
 
 **RPC limit choice — owner approved (2026-10-28):** body size is at most **1,048,433 bytes**
 (`1,048,576 - 143`), not 1 MiB plus content overhead. Request body size is
 `31 + methodBytes + paramsBytes`; response body size is `58 + payloadBytes`.
-Presence body size is `41 + payloadBytes`; its separate 64 KiB body limit gives
-a complete content frame of at most 65,679 bytes. Transport envelopes are outside
-these content-frame bounds. Generic document content limits do not change.
+Transport envelopes are outside these RPC content-frame bounds. Generic document
+content limits do not change.
 
 Response kind is exactly 0 progress, 1 final success, or 2 final error. A final
 error's entire payload is `code:text16, detail:bytes32`, **without another version
 byte**. Code is 1..64 ASCII letters, digits, `_` or `-`; payload size is
 `6 + codeBytes + detailBytes` and at most 1,048,375 bytes, leaving the response's
 58-byte prefix inside the RPC body bound. Both response encoding and decoding
-validate this nested error layout. Empty params, success/progress payloads,
-error detail and presence payload are permitted by the body codec; the method
-or presence schema applies its own requirements after authentication.
+validate this nested error layout. Empty params, success/progress payloads
+and error detail are permitted by the RPC body codec; the method schema applies
+its own requirements after authentication.
 
-Request IDs and presence incarnations are host-generated secure random 16-byte
-values. Timestamps are nonnegative Unix UTC milliseconds. Expired means
-`now >= expiresAt`; presence additionally requires `issuedAt <= now < expiresAt`
-and `0 < expiresAt - issuedAt <= 60_000`. The codec checks the TTL arithmetic,
-not current time, room, replay state, permissions or request freshness.
+Request IDs are host-generated secure random 16-byte values. RPC timestamps are
+nonnegative Unix UTC milliseconds. Expired means `now >= expiresAt`. The RPC body
+codec does not check current time, replay state, permissions or request freshness.
 
 Method params, success/progress and error details remain exact opaque bytes for
 the authorized method codec; JSON methods use their explicit UTF-8 JSON codec,
@@ -278,18 +314,21 @@ Timeouts cannot steal ownership.
 results, responses nor deduplication evidence, and never makes an ID reusable.
 Later bounded retention needs an approved policy for result consumption, uncertain
 work, durable retired IDs and backup rollback. Until then, exhausted capacity
-rejects new work without evicting evidence. Presence is ephemeral, never journaled
-or copied into history; reject cross-room, forged, future-issued, expired and
-oversized presence before state changes. Replay state is scoped to the expected
-sender/incarnation lifetime; bad presence cannot stop unrelated documents.
+rejects new work without evicting evidence. MVP presence follows the separate
+minimal-plaintext allowlist and 90-second ephemeral channel contract above.
 
 ### Revision evidence and limits
 
 The [public source audit](../.agents/notes/proposed/architecture/2026-10-26-e2ee-realtime-contract.md#source-audit-and-integration-boundary)
 pins merged primitives, machine binding and schema-3 journal to public main
 `76a4f28e8f22c0b405e57b731fb0a1e49c42d8a3`. Candidate body bytes and independent
-vectors are pinned to [PR-25 source](https://github.com/LodyAI/Lody/blob/daee5751fde6698e50960ca6a5627191c887e297/packages/loro-streams-rpc/src/e2ee-wire.ts)
+vectors from merged #1990 are pinned to [PR-25 source](https://github.com/LodyAI/Lody/blob/daee5751fde6698e50960ca6a5627191c887e297/packages/loro-streams-rpc/src/e2ee-wire.ts)
 and its [vectors](https://github.com/LodyAI/Lody/blob/daee5751fde6698e50960ca6a5627191c887e297/packages/loro-streams-rpc/tests/fixtures/e2ee-wire-v0.json).
+Existing presence fields and 90-second TTL are defined in
+[shared presence](../packages/shared/src/presence.ts) and the
+[channel contract](loro-ephemeral-presence-channel.md). Its general schema still
+allows free-text `status.detail`; the encrypted-workspace publish allowlist is
+an integration requirement, not behavior established by this documentation.
 Resource encoding, authenticated transport/freshness, sender outbox, actual
 execution and durable fallback wiring, result-query authorization, iroh custody,
 installed-platform and latency acceptance are not established by those subsets.

@@ -37,18 +37,20 @@ info `lody-e2ee/hpke-epoch/v1\0` 与账本规范四字段 AAD。只把 32 字节
 远程执行无论从哪条路径到达，都必须使用相同权限和执行证据。MVP 采用**加密 Streams
 RPC → 加密 history/Meta 持久派发最终回退**。Streams RPC 失效时必须保留持久路径，
 并进入同一个实际启动 claim，不能形成第二条执行入口。Iroh 为后续加速层，不在 MVP
-中。普通工作区保持原行为；加密路径不能回退到明文。
+中。普通工作区保持原行为；RPC 和持久内容不回退明文，MVP presence 是下文单独
+批准的最小明文元数据通道。
 
 **本具体字节修订仍为 draft。** 下文两点已获 **owner 于 2026-10-28 批准**：RPC 的
-1 MiB 包含 content v0 的 143 字节开销；RPC 资源使用账本 machineId 字节的规范无填充 base64url。正文布局
-对齐未合入 PR-25 的 `daee5751fde6698e50960ca6a5627191c887e297`；候选代码只是
-具体字节证据，不代表完整 Spec 批准或已上线实时能力。
+1 MiB 包含 content v0 的 143 字节开销；RPC 资源使用账本 machineId 字节的规范
+无填充 base64url。RPC 正文布局对齐已合入 PR-25（merge
+`c7b3c71512e2bdf26b14817fc8ff56cbd730f509`），源码钉在
+`daee5751fde6698e50960ca6a5627191c887e297`；候选代码只是具体字节证据，不代表完整 Spec 批准或已上线实时能力。
 
 ### 共用内容帧与资源字节
 
-每条实时消息携带一份完整 content v0：
+每条加密 RPC 消息携带一份完整 content v0：
 `header39 || nonce24 || ciphertext || tag16 || signature64`。复用
-`deriveContentKey`，绑定钉住的 genesis、当前 epoch、`docEpoch=0`、用途 7/8/9
+`deriveContentKey`，绑定钉住的 genesis、当前 epoch、`docEpoch=0`、用途 8/9
 和精确资源。本 profile 不用额外 content additionalData。用途虽不在包头里仍受认证；
 请求、响应、presence 和文档派生叶不能互换。传输元数据不产生权限；宿主另行核对固定
 的 genesis／工作区对应关系和独立可信的目标／签名者。
@@ -66,39 +68,68 @@ encodedMachineId 是账本 machineId 的精确严格 UTF-8 字节按 RFC 4648 �
 因此每个合法账本 ID 都只有一种无损资源写法，包含非 ASCII 或超过 128 字节的 ID
 也能表示。解码名称本身不授予机器权限。PR-25 正文 codec 尚未实现此资源编码。
 
-Presence 使用 `presence:<roomId>`；roomId 限 1..128 字节的 `0x21..0x7e`，原样
-拼接，不做 URL 归一化。房间上限不限制账本 machineId 或其编码后的 RPC 资源。
+### MVP presence：最小明文（owner 已批准，2026-10-28）
 
-### 正文字节与上限
+加密工作区沿用现有明文 `presence` 临时通道和 **90 秒 TTL**
+（`LODY_PRESENCE_TTL_MS = 90_000`），不做加密 presence。保留现有 30 秒心跳和
+有界发布规则。这些 ID、状态枚举和时间戳是服务端可从连接、流量和账号推断的元数据；
+加密收益小，却增加复杂度和可用性风险。这是明确选择公开的元数据范围，不是 RPC 或
+文档内容的明文回退。
+
+加密工作区每次发布 presence 前，按以下**封闭白名单**重新构造记录，包括嵌套 status：
+
+| 记录 kind         | 允许字段                                                              |
+| ----------------- | --------------------------------------------------------------------- |
+| `machine`         | `kind`, `machineId`, `instanceId`, `updatedAt`                        |
+| `session`         | `kind`, `sessionId`, `machineId`, `instanceId`, `status`, `updatedAt` |
+| `session-viewing` | `kind`, `userId`, `instanceId`, `sessionId`, `since`, `updatedAt`     |
+
+kind 只能是上述三个固定标签。session 的 status 只包含 type 枚举
+`running` / `requestPermission` / `initializing`，以及原状态类型允许的可选枚举：
+activity 为 `image_generation`，phase 为 `finalizing`，stage 为
+`git-clone` / `managed-runtime` / `acp` / `resuming`。ID 必须是真实既有标识，不能
+用来承载名称或文本；since 与 updatedAt 是经验证的时间戳。
+
+**任何本地临时 store 或本地／云端 presence 发布入口收到数据前，先去掉所有不在
+白名单中的字段。** 特别是不发布 status.detail、自由文本进度／错误、机器／用户／
+session 名称、标题、路径、命令、prompt 或内容片段。限制长度或只在读取侧去字段
+都不够；发送前明文就必须过滤完成。保留既有房间／账号访问检查、新鲜度和
+online/offline/unknown 语义。Presence 不授予执行权，不进 journal/history；坏条目
+不阻断无关文档。普通工作区 payload 不变。
+
+**加密 presence 不在 MVP。** 用途 7 的 seal/open 原语及
+[#1990](https://github.com/LodyAI/Lody/pull/1990) 已合入的 presence 正文 codec
+均为**预留、MVP 不使用**。其 64 KiB 正文和 ≤60 秒加密正文 TTL 只属于预留 codec，
+不是 MVP presence 上限，也不能取代现有 90 秒 TTL。MVP 不发送
+`presence:<roomId>` 内容资源或用途 7 帧。RPC 继续使用用途 8/9，不变。
+
+### RPC 正文字节与上限
 
 正文使用固定字段，不是外层 JSON。整数无符号、大端；u64 不超过 `2^53-1`。
 `text16` 是 u16 字节长度加精确 ASCII 字节（严格 UTF-8 的子集）；`bytes32` 是 u32
 字节长度加原始不透明字节。分配／复制前检查截断、尾随字节、未知标签、非法文本／
 整数和大小上限。解码字节字段拥有独立存储，偏移 Buffer 输入也一样。
 
-| 用途       | 明文字段顺序                                                                               | 上限                                                             |
-| ---------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
-| 8 请求     | `version:u8=0, requestId:16, expiresAt:u64, method:text16, params:bytes32`                 | 完整封装帧 ≤1,048,576 字节；method 为 1..128 字节的 `0x21..0x7e` |
-| 9 响应     | `version:u8=0, requestId:16, requestDigest:32, kind:u8, sequence:u32, payload:bytes32`     | 每个完整封装帧 ≤1,048,576 字节                                   |
-| 7 presence | `version:u8=0, incarnation:16, sequence:u32, issuedAt:u64, expiresAt:u64, payload:bytes32` | 明文正文 ≤65,536 字节；TTL ≤60,000 ms                            |
+| 用途   | 明文字段顺序                                                                           | 上限                                                             |
+| ------ | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| 8 请求 | `version:u8=0, requestId:16, expiresAt:u64, method:text16, params:bytes32`             | 完整封装帧 ≤1,048,576 字节；method 为 1..128 字节的 `0x21..0x7e` |
+| 9 响应 | `version:u8=0, requestId:16, requestDigest:32, kind:u8, sequence:u32, payload:bytes32` | 每个完整封装帧 ≤1,048,576 字节                                   |
 
 **RPC 上限选择——owner 已批准（2026-10-28）：** 正文最多 **1,048,433 字节**（`1,048,576 - 143`），
 不是 1 MiB 另加内容帧开销。请求正文大小是 `31 + methodBytes + paramsBytes`；响应
-正文是 `58 + payloadBytes`。Presence 正文为 `41 + payloadBytes`，独立的 64 KiB
-正文上限对应完整内容帧最多 65,679 字节。传输外层封装不计入上述内容帧上限；通用
-文档内容上限不变。
+正文是 `58 + payloadBytes`。传输外层封装不计入上述 RPC 内容帧上限；通用文档
+内容上限不变。
 
 响应 kind 精确为 0 progress、1 最终成功、2 最终错误。最终错误的整个 payload 是
 `code:text16, detail:bytes32`，**不另加 version 字节**。code 限 1..64 个 ASCII
 字母、数字、`_` 或 `-`；payload 大小为 `6 + codeBytes + detailBytes`，最多
 1,048,375 字节，为 RPC 正文内的 58 字节响应前缀留出空间。响应编码和解码都验证此
-嵌套错误布局。正文 codec 允许空 params、成功／progress payload、错误 detail 和
-presence payload；认证后由方法或 presence schema 再检查各自要求。
+嵌套错误布局。RPC 正文 codec 允许空 params、成功／progress payload 和错误 detail；
+认证后由方法 schema 再检查各自要求。
 
-请求 ID 与 presence incarnation 由宿主安全随机生成 16 字节。时间戳为非负 Unix
-UTC 毫秒。`now >= expiresAt` 即过期；presence 另要求 `issuedAt <= now < expiresAt`
-且 `0 < expiresAt - issuedAt <= 60_000`。codec 检查 TTL 算术，不检查当前时间、
-房间、重放状态、权限或请求新鲜度。
+请求 ID 由宿主安全随机生成 16 字节。RPC 时间戳为非负 Unix UTC 毫秒，
+`now >= expiresAt` 即过期。RPC 正文 codec 不检查当前时间、重放状态、权限或请求
+新鲜度。
 
 方法 params、成功／progress 和错误 detail 保留为授权方法 codec 使用的精确不透明
 字节；JSON 方法显式采用自己的 UTF-8 JSON codec，计算摘要不重新序列化。二进制
@@ -202,17 +233,19 @@ journal 错误只阻断依赖它的工作；保留证据和原 cause，I/O 恢�
 
 **不自动回收：** 过期或确认不删除原件、结果、响应或去重证据，也不使 ID 可复用。
 后续有限留存须批准结果消费、不确定操作、持久退役 ID 和备份回滚政策。在此之前容量
-耗尽拒绝新工作，不驱逐证据。Presence 为临时状态，不进 journal 或 history；状态
-更新前拒绝跨房间、伪造、未来签发、过期和超大帧。重放状态按预期发送者／incarnation
-生命期隔离；坏 presence 不阻断无关文档。
+耗尽拒绝新工作，不驱逐证据。MVP presence 遵循上文独立的最小明文白名单和
+90 秒临时通道契约。
 
 ### 修订证据与限制
 
 [公开源码审计](../.agents/notes/proposed/architecture/2026-10-26-e2ee-realtime-contract.zh.md#源码审计与接线边界)
 将已合入原语、机器绑定和 schema-3 journal 钉在公开 main
-`76a4f28e8f22c0b405e57b731fb0a1e49c42d8a3`。候选正文字节与独立向量钉在
+`76a4f28e8f22c0b405e57b731fb0a1e49c42d8a3`。已合入 #1990 的正文字节与独立向量钉在
 [PR-25 源码](https://github.com/LodyAI/Lody/blob/daee5751fde6698e50960ca6a5627191c887e297/packages/loro-streams-rpc/src/e2ee-wire.ts)
 和[向量](https://github.com/LodyAI/Lody/blob/daee5751fde6698e50960ca6a5627191c887e297/packages/loro-streams-rpc/tests/fixtures/e2ee-wire-v0.json)。
+现有 presence 字段和 90 秒 TTL 见[共享 presence](../packages/shared/src/presence.ts)
+与[通道契约](loro-ephemeral-presence-channel.zh.md)。其通用 schema 仍允许自由文本
+status.detail；加密工作区发布白名单是接线要求，不是本次文档已经实现的行为。
 这些子集不证明资源编码、认证传输／新鲜度、发送 outbox、实际执行及持久回退接线、
 结果查询授权、iroh 托管、安装平台或延迟验收。两个格式点已于 2026-10-28 获 owner
 批准；完整 Spec 保持 draft，等待独立 PR-25／wire 一致性审查及之后 owner 对最终
