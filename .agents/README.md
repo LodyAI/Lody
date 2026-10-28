@@ -16,8 +16,8 @@ Specs and Agent Notes follow the bilingual policy below.
 
 ## Where content goes
 
-An `AGENTS.md` that outgrows 8 KiB is not a formatting problem; it is content in
-the wrong place. Route it rather than delete it:
+An `AGENTS.md` that outgrows its word ceiling is not a formatting problem; it is
+content in the wrong place. Route it rather than delete it:
 
 | Content                                              | Home                              | Why there                                                                 |
 | ---------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------- |
@@ -43,16 +43,47 @@ ancestor. Name caller behavior as well as owner files: a rule about a catalog al
 binds its UI and dispatch consumers. A bare background link is not a required-read
 trigger. Check every affected caller before removing the ancestor's full definition.
 
-When simplifying instructions, compare the bytes of the ancestor chain for typical
+When simplifying instructions, compare the words of the ancestor chain for typical
 source paths, as well as individual file sizes. Count each `AGENTS.md` once, without
 its `CLAUDE.md` alias. Report conditional topic reads separately: relocating a rule
 reduces unrelated tasks' input, but does not remove relevant tasks' reading duties.
 These measurements are diagnostic, not an additional approval or size gate.
 
-The gate rejects an `AGENTS.md` at 8192 bytes, and warns above 7000 without
-failing. Aim for the warning threshold, not the gate: a file that lands 30 bytes
-under the limit breaks for whoever adds the next sentence, and that is rarely the
-person who left it there. Route a topic out instead of trimming words.
+### Word ceilings
+
+[`scripts/docs/agents-budgets.json`](../scripts/docs/agents-budgets.json) holds a
+default word ceiling for every `AGENTS.md` and per-file overrides. The check fails
+a file above its ceiling and warns from 90% of it. When the gate goes red, in order:
+
+1. **Relocate** a topic that belongs in a child scope, a README, `.agents/docs/`
+   or a note, leaving the one-line rule and a link.
+2. **Condense** only where a rule survives intact. Compressing full sentences
+   into fragments to buy words is the failure mode the ceiling exists to prevent:
+   a rule nobody can read without the PR that wrote it is not a rule.
+3. **Raise** the ceiling in the manifest when the content genuinely needs the
+   space, and justify the manifest diff in the PR. A ceiling that is too low is a
+   budget bug, not a reason to delete a rule.
+
+Ceilings are guardrails, not reduction targets. Keep headroom for the next
+sentence; a file that lands a few words under the ceiling breaks for whoever
+edits it next.
+
+## What not to write
+
+Hunt these in any document before submitting; the status command warns about
+some of them in changed notes:
+
+- A rule duplicated across documents: keep one home and link the rest.
+- Implementation-status annotations in prose or diagrams ("implemented!",
+  "future: …"): status rots; the repository layout carries it.
+- Hand-restated catalogs, inventories of tests or files, or JSDoc restated in prose
+  when source or a generator is authoritative.
+- Reasoning transcripts: step-by-step implementation narration, test walkthroughs,
+  resolved temporary errors, run results, environment notes. Keep the resulting
+  contract, measurement or rationale; delete the path used to derive it.
+- Proposal language in an implemented note: "should", plans, acceptance checklists.
+- Emphasis inflation: bold, capitals or "critically" everywhere means nothing
+  stands out.
 
 ## Current work
 
@@ -62,12 +93,17 @@ pnpm run docs check
 ```
 
 Status is derived from existing files: draft/outdated Specs, proposed notes,
-pending/stale translations, and topics needing SHA review. Do not maintain a
+pending/stale translations, active notes citing repository paths that no longer
+exist (`staleReferences`), and topics needing SHA review. Do not maintain a
 separate global INDEX or TODO. Both commands are read-only. Check reports invalid
-metadata, repository Markdown links (including archives), oversized `AGENTS.md`
-files, and stale or broken registered topics. Warnings, including an `AGENTS.md`
-nearing the size gate, are reported separately and never fail the check. Errors in one topic do not hide others. Pending
-translation or Spec approval alone does not fail the check.
+metadata, repository Markdown links (including archives), `AGENTS.md` files over
+their word ceiling, `Supersedes` targets that are not archived, and stale or
+broken registered topics. Note hygiene gates (proposal-era headings in an
+implemented note, run-log phrases) apply only to notes the task changed, against
+`--base` in CI and `HEAD` locally; earlier records are not reopened. Warnings,
+including an `AGENTS.md` nearing its ceiling and run-log phrases, are reported
+separately and never fail the check. Errors in one topic do not hide others.
+Pending translation or Spec approval alone does not fail the check.
 
 The Node implementation awaits asynchronous Git subprocesses, preserving binary
 blob and NUL-separated path output. Imported command/report functions return
@@ -116,10 +152,11 @@ Translation cannot approve a Spec, and the tool does not assess translation accu
    the owning README for implementation behavior and directory navigation. Non-trivial work adds or updates
    an Agent Note in the same PR under the [note rules](notes/AGENTS.md#when-to-write);
    design-only work records its conclusions without inventing a PR.
-2. Search earlier decisions before writing a note. Identify additions, partial
-   replacements, and full replacements. Update current conclusions in Specs, `.agents/docs/`,
-   or owning READMEs so the next agent need not reconstruct history. Link adequate
-   existing explanations.
+2. Run the [supersession check](notes/AGENTS.md#supersession) before writing a
+   note: update the owning note, archive fully superseded ones, cross-link partial
+   replacements. Update current conclusions in Specs, `.agents/docs/`, or owning
+   READMEs so the next agent need not reconstruct history. When the diff moves or
+   renames something an implemented note cites, update that fact in the note.
 3. Check existing invariants when identifying risk. Explain violations; propose
    evidence-backed changes to the nearest `AGENTS.md` when a rule is missing.
    Humans confirm important intent. Do not add a parallel risk inventory.

@@ -12,7 +12,7 @@ PR: https://github.com/LodyAI/Lody/pull/473
 
 ## 决定与此前工作的关系
 
-本次实施规则归属整理和文字精简，不改变产品意图。它细化[文档维护提案](../../proposed/process/2026-09-05-human-reviewed-spec-maintenance.zh.md)中的内容归属，不批准整个提案或任何 Spec，并保留[明确 Note 触发条件](2026-09-07-explicit-agent-note-triggers.zh.md)所要求的根级 Spec/Note 提醒。
+本次实施规则归属整理和文字精简，不改变产品意图。它细化[文档维护提案](../../proposed/process/2026-09-05-human-reviewed-spec-maintenance.zh.md)中的内容归属，不批准整个提案或任何 Spec，并保留[明确 Note 触发条件](../../archived/process/2026-09-07-explicit-agent-note-triggers.zh.md)所要求的根级 Spec/Note 提醒。
 
 约束仍在 `AGENTS.md`，解释放在 `.agents/docs/`。跨目录契约由共同父级说明什么行为变更必须阅读契约，包括定义目录外的 UI/CLI 调用方。已有 UI 几何、执行同意、持久化、隐私和 P0/P1 审查要求均保留。没有新增审批门槛、生成索引或运行时改动。
 
@@ -34,6 +34,8 @@ PR: https://github.com/LodyAI/Lody/pull/473
 ## 测量与方案取舍
 
 字节数对比 Git 管理的基线 `AGENTS.md` 与当前未忽略的文件，每份只计一次，不重复计算 `CLAUDE.md`。祖先链是从根到指定源码目录的各级 `AGENTS.md` 大小之和。
+
+更正（2026-10-28）：此处提到的字节上限和 7,000 字节警告阈值已改为词数上限，见[note 记忆维护](2026-10-28-agent-note-memory-hygiene.zh.md)。上文的字节数仍是本次改动的测量结果。
 
 | 范围 | 修改前 | 修改后 |
 | --- | ---: | ---: |
