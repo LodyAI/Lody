@@ -289,7 +289,7 @@ describe('owner-signed complete machine sharing policies', () => {
 
   it('rechecks signer revocation and never falls back to an older allow policy', async () => {
     const f = await fixture(),
-      original = await f.seal();
+      original = await f.seal({ ...f.policy, projects: ['project-a', 'project-z'] });
     const verified = ok(f.open(original));
     await f.command({ _tag: 'RevokeDevice', target: f.owner.publicKey }, f.second.signer);
     expect(f.authorize(verified)).toEqual({ allowed: false, reason: 'policy-signer-ineligible' });
@@ -311,14 +311,55 @@ describe('owner-signed complete machine sharing policies', () => {
       allowed: false,
       reason: 'policy-unverified',
     });
+    const historyInput = {
+      ledger: f.current(),
+      binding: f.binding,
+      epoch: 0,
+      documentKey: f.key,
+      frame: original,
+      expectedHead: verified.head,
+      previous: null,
+    };
+    const history = ok(P.readMachineSharingHistoryStep(historyInput));
+    expect(history).toEqual({
+      _tag: 'MachineSharingHistoryStep',
+      head: verified.head,
+      policy: { ...f.policy, projects: ['project-a', 'project-z'] },
+    });
+    expect(f.authorize(history as unknown as P.VerifiedMachineSharingPolicy)).toEqual({
+      allowed: false,
+      reason: 'policy-unverified',
+    });
+    const retained = ok(P.restoreVerifiedState(ok(P.exportVerifiedState(f.current()))));
+    expect(ok(P.readMachineSharingHistoryStep({ ...historyInput, ledger: retained }))).toEqual(
+      history
+    );
+    expect(
+      Result.isFailure(
+        P.readMachineSharingHistoryStep({
+          ...historyInput,
+          binding: { ...f.binding, workspaceId: 'wrong-workspace' },
+        })
+      )
+    ).toBe(true);
+    expect(
+      Result.isFailure(
+        P.readMachineSharingHistoryStep({
+          ...historyInput,
+          expectedHead: { ...verified.head, digest: 'ff'.repeat(32) },
+        })
+      )
+    ).toBe(true);
     const next = {
-      ...f.policy,
-      revision: 2,
-      previousDigest: ok(P.machineSharingDigest(original)),
+      ...history.policy,
+      revision: history.head.revision + 1,
+      previousDigest: history.head.digest,
+      requestId: '32'.repeat(16),
       signer: hex(f.second.publicKey),
     };
     const current = ok(f.open(await f.seal(next, f.second.signer), verified.head, 2));
     expect(f.authorize(current).allowed).toBe(true);
+    expect(current.inspect().projects).toEqual(['project-a', 'project-z']);
   });
 
   it('rejects a retired machine key while preserving policy across same-member replacement', async () => {
@@ -530,6 +571,19 @@ describe('owner-signed complete machine sharing policies', () => {
         signer === f.bob.signer ? 'policy-binding-mismatch' : 'policy-signer-ineligible'
       );
       expect(Result.isFailure(admitMachineSharingFrame({ ...input, frame: forged }))).toBe(true);
+      expect(
+        Result.isFailure(
+          P.readMachineSharingHistoryStep({
+            ledger: f.current(),
+            binding: f.binding,
+            epoch: 0,
+            documentKey: f.key,
+            frame: forged,
+            previous: null,
+            expectedHead: { revision: 1, digest: ok(P.machineSharingDigest(forged)) },
+          })
+        )
+      ).toBe(true);
     }
     await f.command({ _tag: 'RevokeDevice', target: f.owner.publicKey }, f.second.signer);
     expect(failure(admitMachineSharingFrame({ ...input, ledger: f.current() }))).toBe(

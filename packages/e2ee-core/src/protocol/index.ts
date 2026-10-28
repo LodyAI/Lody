@@ -88,6 +88,7 @@ export {
   machineSharingDigest,
   sealMachineSharingPolicy,
   openMachineSharingPolicy,
+  readMachineSharingHistoryStep,
   verifyMachineSharingHistoryStep,
   authorizeMachineExecution,
   type MachineSharingBinding,
@@ -95,6 +96,7 @@ export {
   type MachineSharingChange,
   type MachineSharingPolicy,
   type MachineSharingHead,
+  type MachineSharingHistoryStep,
   type VerifiedMachineSharingPolicy,
   type MachineExecutionDecision,
 } from '../internal/machine-sharing';
