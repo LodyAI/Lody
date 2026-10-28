@@ -9,6 +9,8 @@ import {
   type ScheduleRecurrence,
   type ScheduleTrigger,
   type ScheduleWeekday,
+  type ScheduleRegistryRow,
+  type ScheduleRuntimeRow,
 } from '@lody/shared';
 
 /**
@@ -209,39 +211,162 @@ export function formatUpcoming(at: number, timeZone: string, now: number, locale
   return `${prefix} ${time}`;
 }
 
-export type ScheduleStatusTone = 'active' | 'attention' | 'muted' | 'progress';
-export type ScheduleStatus = { label: string; tone: ScheduleStatusTone };
+export type ScheduleStatusTone = 'normal' | 'muted' | 'progress' | 'attention';
+/** Glyph beside a status that needs a second look; the happy path has none. */
+export type ScheduleStatusIcon = 'due' | 'paused' | 'attention' | 'sent' | 'cancelled';
+/**
+ * What a schedule is doing, in words: a main line and an optional detail.
+ * Colour and a glyph only mark states that need a look, so the list needs no
+ * legend.
+ */
+export type ScheduleStatus = {
+  label: string;
+  detail?: string;
+  tone: ScheduleStatusTone;
+  icon?: ScheduleStatusIcon;
+  /** Finished for good: a sent, cancelled or failed message, a Once task that ran. */
+  ended: boolean;
+  /** Bucket for the list's status filter. */
+  group: 'running' | 'paused' | 'attention' | 'ended';
+};
 
 /**
- * The one status a row shows. Paused wins over every queue state, because a
- * paused schedule's leftover runtime row is history, not a live plan.
+ * The one status every surface shows. Paused wins over every queue state,
+ * because a paused schedule's leftover runtime row is history, not a live plan.
  */
-export function describeStatus(
+export function describeScheduleState(
   t: TFunction,
-  enabled: boolean,
-  queueState?: 'due' | 'waiting_for_agent' | 'retrying' | 'blocked',
-  messageState?: 'pending' | 'sent' | 'cancelled' | 'failed'
+  row: Pick<ScheduleRegistryRow, 'enabled' | 'trigger' | 'scheduledMessage'>,
+  runtime: ScheduleRuntimeRow | undefined,
+  options: { timeZone: string; now: number; locale?: string }
 ): ScheduleStatus {
-  if (messageState) {
-    if (messageState === 'sent') return { label: t('scheduledMessage.sent'), tone: 'muted' };
-    if (messageState === 'cancelled')
-      return { label: t('scheduledMessage.cancelled'), tone: 'muted' };
-    if (messageState === 'failed')
-      return { label: t('scheduledMessage.failed'), tone: 'attention' };
-    return {
-      label: enabled
-        ? t('scheduledMessage.pending', { count: 1 })
-        : t('scheduledMessage.cancelPending'),
-      tone: 'progress',
-    };
+  const { timeZone, now, locale } = options;
+  const at = (value: number) => formatUpcoming(value, timeZone, now, locale);
+  const blockedDetail = runtime?.blockedCode
+    ? t(`schedules.errors.${runtime.blockedCode}`, '')
+    : undefined;
+  if (row.scheduledMessage) {
+    const planned = row.trigger.kind === 'once' ? Date.parse(row.trigger.at) : undefined;
+    switch (runtime?.messageState ?? 'pending') {
+      case 'sent':
+        return {
+          label: t('schedules.status.sent', 'Sent'),
+          detail: runtime?.lastDispatch ? at(runtime.lastDispatch.dispatchedAt) : undefined,
+          tone: 'muted',
+          icon: 'sent',
+          ended: true,
+          group: 'ended',
+        };
+      case 'cancelled':
+        return {
+          label: t('schedules.status.cancelled', 'Cancelled'),
+          detail:
+            planned !== undefined
+              ? t('schedules.status.wasPlanned', 'Was due {{time}}', { time: at(planned) })
+              : undefined,
+          tone: 'muted',
+          icon: 'cancelled',
+          ended: true,
+          group: 'ended',
+        };
+      case 'failed':
+        return {
+          label: t('schedules.status.notSent', 'Not sent'),
+          detail: blockedDetail || undefined,
+          tone: 'attention',
+          icon: 'attention',
+          ended: true,
+          group: 'ended',
+        };
+      default:
+        if (!row.enabled)
+          return {
+            label: t('schedules.status.cancelling', 'Cancelling…'),
+            tone: 'muted',
+            ended: false,
+            group: 'paused',
+          };
+        return {
+          label:
+            planned !== undefined
+              ? t('schedules.status.sendsAt', 'Sends {{time}}', { time: at(planned) })
+              : t('schedules.status.waiting', 'Waiting to send'),
+          tone: 'normal',
+          ended: false,
+          group: 'running',
+        };
+    }
   }
-  if (!enabled) return { label: t('schedules.paused', 'Paused'), tone: 'muted' };
-  if (queueState === 'blocked')
-    return { label: t('schedules.state.blocked', 'Needs attention'), tone: 'attention' };
-  if (queueState === 'retrying')
-    return { label: t('schedules.state.retrying', 'Retrying dispatch'), tone: 'attention' };
-  if (queueState === 'due') return { label: t('schedules.state.due', 'Due'), tone: 'progress' };
-  if (queueState === 'waiting_for_agent')
-    return { label: t('schedules.state.waiting_for_agent', 'Waiting for Agent'), tone: 'progress' };
-  return { label: t('schedules.enabled', 'Enabled'), tone: 'active' };
+  if (!row.enabled)
+    return {
+      label: t('schedules.paused', 'Paused'),
+      tone: 'muted',
+      icon: 'paused',
+      ended: false,
+      group: 'paused',
+    };
+  if (runtime?.queueState === 'blocked')
+    return {
+      label: t('schedules.state.blocked', 'Needs attention'),
+      detail: blockedDetail || undefined,
+      tone: 'attention',
+      icon: 'attention',
+      ended: false,
+      group: 'attention',
+    };
+  if (runtime?.queueState === 'retrying')
+    return {
+      label: t('schedules.state.retrying', 'Retrying dispatch'),
+      tone: 'attention',
+      icon: 'attention',
+      ended: false,
+      group: 'attention',
+    };
+  const next = runtime?.nextScheduledAt;
+  if (runtime?.queueState === 'due' || runtime?.queueState === 'waiting_for_agent')
+    return {
+      label:
+        runtime.queueState === 'due'
+          ? t('schedules.state.due', 'Due')
+          : t('schedules.state.waiting_for_agent', 'Waiting for Agent'),
+      detail: next != null ? at(next) : undefined,
+      tone: 'progress',
+      icon: 'due',
+      ended: false,
+      group: 'running',
+    };
+  const last = runtime?.lastDispatch;
+  if (row.trigger.kind === 'manual')
+    return {
+      label: t('schedules.status.manual', 'Run manually'),
+      detail: last
+        ? t('schedules.status.lastRan', 'Last ran {{time}}', { time: at(last.dispatchedAt) })
+        : undefined,
+      tone: 'muted',
+      ended: false,
+      group: 'running',
+    };
+  if (next != null)
+    return {
+      label: t('schedules.status.runsAt', 'Runs {{time}}', { time: at(next) }),
+      tone: 'normal',
+      ended: false,
+      group: 'running',
+    };
+  if (row.trigger.kind === 'once' && last)
+    return {
+      label: t('schedules.status.done', 'Done'),
+      detail: at(last.dispatchedAt),
+      tone: 'muted',
+      icon: 'sent',
+      ended: true,
+      group: 'ended',
+    };
+  return {
+    label: t('schedules.notScheduledYet', 'Not scheduled yet'),
+    detail: t('schedules.awaitingMachine', 'Waiting for the machine to check the schedule'),
+    tone: 'muted',
+    ended: false,
+    group: 'running',
+  };
 }
