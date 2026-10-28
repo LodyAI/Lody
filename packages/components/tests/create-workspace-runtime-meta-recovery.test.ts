@@ -2476,7 +2476,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
         runtime.requestFilePreview('machine-1' as MachineId, {} as never)
       ).resolves.toMatchObject({
         status: 'error',
-        message: 'Encrypted workspaces do not yet support remote machine operations.',
+        message: 'e2ee_rpc_unavailable',
       });
       await expect(runtime.acquireScheduleStore('schedule-1')).rejects.toThrow(
         'Encrypted workspaces do not yet support scheduled messages.'

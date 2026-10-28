@@ -40,6 +40,14 @@ export class MachineRuntime {
     if (!this.options.handlerConfig.encryptedWorkspace) throw new Error('e2ee_rpc_unavailable');
     return this.requireHandler().offerEncryptedRpcTurn(input);
   }
+  async readEncryptedQuery(
+    input: import('@lody/shared/e2ee-rpc').E2eeQueryInput,
+    expiresAt: number,
+    signal: AbortSignal
+  ) {
+    if (!this.options.handlerConfig.encryptedWorkspace) throw new Error('e2ee_rpc_unavailable');
+    return this.requireHandler().readEncryptedQuery(input, expiresAt, signal);
+  }
   private handler: MessageHandler | null = null;
   private sessionManager: SessionManager | null = null;
   private readonly messageProcessor: MessageProcessor;

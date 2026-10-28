@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { join } from 'node:path';
-import { Deferred, Effect, Fiber } from 'effect';
+import { Clock, Deferred, Effect, Fiber } from 'effect';
 import { it as effectIt } from '@effect/vitest';
 import { TestClock } from 'effect/testing';
 import {
@@ -11,7 +11,7 @@ import type { LoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
 import { encryptedRpcFixture } from '../../../../../packages/loro-streams-rpc/tests/fixtures/e2ee-native-fixture';
 import { RealtimeJournal } from './realtime-journal';
 import { makeEncryptedAgentExecution } from './agent-execution';
-import { makeEncryptedRpcReceiver } from './realtime-rpc';
+import { makeEncryptedRpcReceiver, makeEncryptedQueryReceiver } from './realtime-rpc';
 
 const fixtures: ReturnType<typeof encryptedRpcFixture>[] = [];
 afterEach(() => {
@@ -328,5 +328,113 @@ effectIt.effect(
         })
       );
       expect(streams.activeReads()).toBe(0);
+    })
+);
+
+effectIt.effect(
+  'delivers a paged encrypted query through the real method client/server without a journal',
+  () =>
+    Effect.gen(function* () {
+      const f = encryptedRpcFixture();
+      fixtures.push(f);
+      const clock = yield* Clock.Clock;
+      const run = <A, E>(effect: Effect.Effect<A, E>) =>
+        Effect.runPromise(effect.pipe(Effect.provideService(Clock.Clock, clock)));
+      const streams = memoryStreams();
+      const { LoroStreamsMachineRpcServer, LoroStreamsMachineRpcClient } = yield* Effect.promise(
+        () => import('@lody/loro-streams-rpc')
+      );
+      const outcome = {
+        status: 'ok' as const,
+        path: 'synthetic.txt',
+        digest: `sha256:${'a'.repeat(64)}`,
+        text: {
+          encoding: 'plain' as const,
+          text: 'PRIVATE_READ_CANARY'.repeat(70000),
+          rawBytes: 18 * 70000,
+        },
+      };
+      const server = new LoroStreamsMachineRpcServer({
+        workspaceId: f.workspaceId as never,
+        machineId: f.machineId as never,
+        logger: { warn: () => {} },
+        now: () => 0,
+        getMachineStatus: async () => {
+          throw new Error('unused');
+        },
+        refreshMachineAcpCapabilities: async () => {
+          throw new Error('must not launch');
+        },
+        resolveCodeCollabOwnerSessionId: async () => 'synthetic-session',
+        openCodeCollabText: async () => outcome,
+      });
+      const receive = yield* makeEncryptedQueryReceiver({
+        workspaceId: f.workspaceId,
+        machineId: f.machineId,
+        native: f.receiver,
+        authorize: () => Effect.succeed({ _tag: 'Authorized' }),
+        isOpen: () => true,
+        client: streams.client,
+        query: (input, expiresAt, signal) => server.readQuery(input, expiresAt, signal),
+      });
+      yield* makeEncryptedRpcListener({
+        workspaceId: f.workspaceId,
+        machineId: f.machineId,
+        client: streams.client,
+        receive,
+      });
+      const channel = yield* makeEncryptedStreamsRpc<
+        import('@lody/shared/e2ee-rpc').E2eeQueryInput,
+        import('@lody/shared/e2ee-rpc').E2eeQueryResult
+      >({
+        workspaceId: f.workspaceId,
+        requesterDevice: Buffer.from(f.ledger.owner.raw).toString('hex'),
+        client: streams.client,
+        acceptResponse: (original, input, frame) =>
+          run(f.sender.acceptQueryResponse(original.targetMachineId, input, frame)),
+      });
+      const client = new LoroStreamsMachineRpcClient({
+        workspaceId: f.workspaceId,
+        machineId: f.machineId,
+        encryptedQuery: async (method, params) => {
+          const input = {
+            queryId: 'integrated-query',
+            method: method as 'code-collab/open-text',
+            params,
+          };
+          const original = await run(f.sender.prepareQuery(f.machineId, input));
+          return run(channel.send(original, input, 60000));
+        },
+      });
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          client.stop();
+          server.stop();
+        })
+      );
+      const read = yield* Effect.promise(() =>
+        client.requestCodeCollabOpenText({
+          sessionId: 'synthetic-session',
+          path: 'synthetic.txt',
+          timeoutMs: 60000,
+        })
+      );
+      expect(read).toEqual(outcome);
+      expect(JSON.stringify(streams.writes)).not.toContain('PRIVATE_READ_CANARY');
+      const before = streams.writes.length;
+      const denied = yield* Effect.promise(() =>
+        client
+          .requestMachineRestart({
+            requesterUserId: 'synthetic',
+            requestId: 'blocked',
+            requestToken: 'blocked',
+          })
+          .then(
+            () => false,
+            () => true
+          )
+      );
+      expect(denied).toBe(true);
+      expect(streams.writes.length).toBe(before);
     })
 );

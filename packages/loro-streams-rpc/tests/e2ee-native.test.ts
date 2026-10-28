@@ -22,6 +22,96 @@ afterEach(() => {
 });
 
 describe('trusted-host encrypted dispatch originals', () => {
+  it('retains signed read-query originals and final responses without an execution journal', async () => {
+    const f = fixture();
+    const input = { queryId: 'synthetic-query', method: 'machine/status' as const, params: {} };
+    const original = await Effect.runPromise(f.sender.prepareQuery(f.machineId, input));
+    expect(await Effect.runPromise(f.native('owner').prepareQuery(f.machineId, input))).toEqual(
+      original
+    );
+    const opened = await Effect.runPromise(f.receiver.openQuery(f.machineId, original.frameHex));
+    await Effect.runPromise(f.receiver.retainQueryRequest(f.machineId, opened));
+    await Effect.runPromise(f.receiver.retainQueryRequest(f.machineId, opened));
+    await expect(
+      Effect.runPromise(
+        f.receiver.retainQueryRequest(f.machineId, {
+          ...opened,
+          frame: Uint8Array.from([...opened.frame, 0]),
+        })
+      )
+    ).rejects.toThrow();
+    const response = await Effect.runPromise(
+      f.receiver.queryResponse(f.machineId, opened, {
+        result: { synthetic: 'PRIVATE_QUERY_CANARY' },
+      })
+    );
+    const frame = Buffer.from(response[0]!).toString('hex');
+    expect(response[0]!.length).toBeLessThanOrEqual(1048576);
+    expect(Buffer.from(response[0]!).includes(Buffer.from('PRIVATE_QUERY_CANARY'))).toBe(false);
+    expect(
+      await Effect.runPromise(f.sender.acceptQueryResponse(f.machineId, input, frame))
+    ).toEqual({ result: { synthetic: 'PRIVATE_QUERY_CANARY' } });
+    expect(
+      await Effect.runPromise(
+        f.native('phone').queryResponse(f.machineId, opened, { result: 'changed' })
+      )
+    ).toEqual(response);
+    await expect(
+      Effect.runPromise(
+        f.sender.prepareQuery(f.machineId, { ...input, method: 'machine/restart' as never })
+      )
+    ).rejects.toThrow();
+    await expect(
+      Effect.runPromise(
+        f.sender.prepareQuery(f.machineId, {
+          queryId: 'forbidden-memory-write',
+          method: 'machine/memory',
+          params: {
+            action: 'create',
+            providerId: 'synthetic',
+            input: { name: 'synthetic', path: '/synthetic' },
+          },
+        })
+      )
+    ).rejects.toThrow();
+  });
+
+  it('pages an oversized result, waits through missing/out-of-order pages, and preserves exact retry bytes', async () => {
+    const f = fixture();
+    const input = { queryId: 'paged-query', method: 'machine/status' as const, params: {} };
+    const original = await Effect.runPromise(f.sender.prepareQuery(f.machineId, input));
+    const request = await Effect.runPromise(f.receiver.openQuery(f.machineId, original.frameHex));
+    const result = { result: { text: '合成'.repeat(300000) } };
+    const frames = await Effect.runPromise(f.receiver.queryResponse(f.machineId, request, result));
+    expect(frames.length).toBeGreaterThan(1);
+    for (const frame of frames) expect(frame.length).toBeLessThanOrEqual(1048576);
+    const accept = (index: number) =>
+      Effect.runPromise(
+        f.sender.acceptQueryResponse(
+          f.machineId,
+          input,
+          Buffer.from(frames[index]!).toString('hex')
+        )
+      );
+    expect(await accept(frames.length - 1)).toBeNull();
+    for (let index = 0; index < frames.length - 2; index++) expect(await accept(index)).toBeNull();
+    expect(await accept(frames.length - 2)).toEqual(result);
+    expect(
+      await Effect.runPromise(
+        f.native('phone').queryResponse(f.machineId, request, { result: 'replacement' })
+      )
+    ).toEqual(frames);
+    const reopened = f.native('owner');
+    expect(
+      await Effect.runPromise(
+        reopened.acceptQueryResponse(f.machineId, input, Buffer.from(frames[0]!).toString('hex'))
+      )
+    ).toEqual(result);
+    await expect(
+      Effect.runPromise(f.sender.prepareQuery('different-machine', input))
+    ).rejects.toThrow();
+  });
+
   it('persists an original before returning it and reopens exact ID/ciphertext without re-signing', async () => {
     const f = fixture();
     const first = await Effect.runPromise(f.sender.prepareDispatch(f.machineId, f.input));

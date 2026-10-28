@@ -291,7 +291,8 @@ export class Lody {
     await this.encryptedWorkspace?.startRpc(
       this.machineId,
       (input) => this.runtime.offerEncryptedRpcTurn(input),
-      (event) => this.logger.debug('[e2ee-rpc-timing]', event)
+      (event) => this.logger.debug('[e2ee-rpc-timing]', event),
+      (input, expiresAt, signal) => this.runtime.readEncryptedQuery(input, expiresAt, signal)
     );
     this.documentManager.ensureMachineFlockDocJoined(this.machineId, { reason: 'lody-start' });
   }

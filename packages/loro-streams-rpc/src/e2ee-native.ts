@@ -1,3 +1,4 @@
+import { makeE2eeReadQueries } from './e2ee-query-native';
 import { createHash, randomBytes } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { Clock, Effect, type Scope } from 'effect';
@@ -120,9 +121,18 @@ export function makeE2eeRpcNative(options: {
       opened.plaintext.fill(0);
     }
   });
+  const requireDispatchWriter = Effect.fnUntraced(function* () {
+    const state = (yield* options.ledger()).inspectState();
+    const device = state.devices.get(options.requesterDevice);
+    const member = device && state.members.get(hex(device.membershipId.toBytes()));
+    if (!device || device.kind === 'recovery' || !member || member.role === 'guest')
+      return yield* Effect.fail(new Error('e2ee_rpc_denied'));
+    return undefined;
+  });
   const prepareDispatch = (machineId: string, input: E2eeDispatchInput) =>
     Effect.scoped(
       Effect.gen(function* () {
+        yield* requireDispatchWriter();
         const args = yield* attempt(() => normalizeInput(input));
         const signer = yield* targetSigner(machineId);
         let saved = yield* attempt(() => options.originals.read('sent', key(args)));
@@ -155,6 +165,7 @@ export function makeE2eeRpcNative(options: {
           !isDeepStrictEqual(checked.args, args)
         )
           return yield* Effect.fail(new Error('e2ee_rpc_intent_conflict'));
+        yield* requireDispatchWriter();
         return {
           requestId: checked.requestId,
           targetMachineId: machineId,
@@ -214,6 +225,7 @@ export function makeE2eeRpcNative(options: {
       })
     );
   return {
+    ...makeE2eeReadQueries(options, targetSigner),
     /** Terminal native store cleanup; failed owners remain available for another close attempt. */
     close: () => attempt(() => options.originals.close()),
     prepareDispatch,

@@ -49,6 +49,8 @@ export function isIpcInvokeChannel(channel: string): boolean {
       'cancelRemoteMachinePairing',
       'seal',
       'openContent',
+      'prepareQuery',
+      'acceptQueryResponse',
       'prepareDispatch',
       'acceptDispatchResponse',
       'contentStreamsToken',

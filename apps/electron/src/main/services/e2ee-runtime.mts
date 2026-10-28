@@ -1503,6 +1503,27 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.seal(input))),
       openContent: (workspaceId: string, input: E2eeContentOpen) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.openContent(input))),
+      prepareQuery: (
+        workspaceId: string,
+        targetMachineId: string,
+        input: import('@lody/shared/e2ee-rpc').E2eeQueryInput
+      ) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.rpc.prepareQuery(targetMachineId, input)
+          )
+        ),
+      acceptQueryResponse: (
+        workspaceId: string,
+        targetMachineId: string,
+        input: import('@lody/shared/e2ee-rpc').E2eeQueryInput,
+        frameHex: string
+      ) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.rpc.acceptQueryResponse(targetMachineId, input, frameHex)
+          )
+        ),
       prepareDispatch: (workspaceId: string, targetMachineId: string, input: E2eeDispatchInput) =>
         run(
           Effect.flatMap(openWorkspace(workspaceId), (entry) =>

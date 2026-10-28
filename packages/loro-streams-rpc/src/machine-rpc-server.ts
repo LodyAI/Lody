@@ -1,3 +1,5 @@
+import { LoroStreamsRpcResponseSchema } from './rpc';
+import { isE2eeReadQuery, type E2eeQueryInput, type E2eeQueryResult } from '@lody/shared/e2ee-rpc';
 import {
   FileDownloadRequestSchema,
   type FileDownloadRequest,
@@ -344,7 +346,7 @@ type RpcServerDeps = {
   };
   workspaceId: WorkspaceId;
   machineId: MachineId;
-  streamClient: LoroStreamsJsonStreamClient;
+  streamClient?: LoroStreamsJsonStreamClient;
   now?: () => number;
   rpcVersion?: string;
   retentionSeconds?: number;
@@ -618,7 +620,7 @@ export class LoroStreamsMachineRpcServer {
       `[rpc-server:${this.deps.machineId}] ensuring request stream ${this.requestStreamId} for workspace ${this.deps.workspaceId} (retentionSeconds=${retention})`
     );
     try {
-      await this.deps.streamClient.ensureJsonStream(this.requestStreamId, retention);
+      await this.streamClient.ensureJsonStream(this.requestStreamId, retention);
     } catch (error) {
       const elapsedMs = Date.now() - startedAt;
       const logError = this.deps.logger.error ?? this.deps.logger.warn;
@@ -651,7 +653,7 @@ export class LoroStreamsMachineRpcServer {
   private async runLoop(): Promise<void> {
     while (!this.stopped) {
       try {
-        await this.deps.streamClient.readJsonLive(
+        await this.streamClient.readJsonLive(
           this.requestStreamId,
           this.requestState,
           async (batch) => {
@@ -680,7 +682,7 @@ export class LoroStreamsMachineRpcServer {
             this.deps.logger.warn(
               `[rpc-server:${this.deps.machineId}] request stream returned 404; recreating ${this.requestStreamId}`
             );
-            await this.deps.streamClient.ensureJsonStream(
+            await this.streamClient.ensureJsonStream(
               this.requestStreamId,
               this.deps.retentionSeconds ?? LORO_STREAMS_RPC_RETENTION_SECONDS
             );
@@ -971,7 +973,73 @@ export class LoroStreamsMachineRpcServer {
     }
   }
 
-  private async handleRequest(request: LoroStreamsRpcRequest): Promise<void> {
+  /** Authenticated native read entry; it cannot start the ordinary network listener. */
+  async readQuery(
+    input: E2eeQueryInput,
+    expiresAt: number,
+    signal: AbortSignal
+  ): Promise<E2eeQueryResult> {
+    if (!isE2eeReadQuery(input.method, input.params)) throw new Error('e2ee_query_method');
+    const request = LoroStreamsRpcRequestSchema.parse({
+      jsonrpc: '2.0',
+      id: input.queryId,
+      rpcVersion: '1',
+      machineId: this.deps.machineId,
+      workspaceId: this.deps.workspaceId,
+      replyTo: 'native-query',
+      sentAt: 0,
+      expiresAt,
+      method: input.method,
+      params: input.params,
+    });
+    let result: E2eeQueryResult | undefined;
+    await this.handleRequest(
+      request,
+      async (payload) => {
+        const response = LoroStreamsRpcResponseSchema.parse(payload);
+        result = response.error
+          ? {
+              error: {
+                code: response.error.code,
+                message: 'Encrypted machine query failed.',
+                ...(response.error.data === undefined ? {} : { data: response.error.data }),
+              },
+            }
+          : { result: response.result };
+      },
+      signal
+    );
+    return (
+      result ?? {
+        error: { code: 'e2ee_query_expired', message: 'Query expired or was cancelled.' },
+      }
+    );
+  }
+
+  private get streamClient(): LoroStreamsJsonStreamClient {
+    if (!this.deps.streamClient) throw new Error('Network RPC unavailable');
+    return this.deps.streamClient;
+  }
+
+  private async handleRequest(
+    request: LoroStreamsRpcRequest,
+    reply?: (payload: unknown) => Promise<void>,
+    signal = this.stopController.signal
+  ): Promise<void> {
+    const appendResultResponse = (
+      replyTo: string,
+      requestId: string,
+      method: LoroStreamsRpcMethod,
+      result: Parameters<LoroStreamsMachineRpcServer['appendResultResponse']>[3],
+      options?: Parameters<LoroStreamsMachineRpcServer['appendResultResponse']>[4]
+    ) => this.appendResultResponse(replyTo, requestId, method, result, options, reply);
+    const appendErrorResponse = (
+      replyTo: string,
+      requestId: string,
+      method: LoroStreamsRpcMethod,
+      error: Parameters<LoroStreamsMachineRpcServer['appendErrorResponse']>[3],
+      options?: Parameters<LoroStreamsMachineRpcServer['appendErrorResponse']>[4]
+    ) => this.appendErrorResponse(replyTo, requestId, method, error, options, reply);
     let codeCollabOwnerSessionId: string | undefined;
     let historyOperationStarted = false;
     let replayedRejection = false;
@@ -1005,24 +1073,24 @@ export class LoroStreamsMachineRpcServer {
       switch (request.method) {
         case 'machine/status': {
           const response = await this.deps.getMachineStatus();
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
         case 'machine/preview-control': {
           if (!this.deps.getPreviewControl) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Preview control is not available on this machine.',
             });
             return;
           }
           const response = await this.deps.getPreviewControl();
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
         case 'machine/ping': {
           if (!this.deps.pingMachine) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Machine ping is not available on this machine.',
             });
@@ -1031,12 +1099,12 @@ export class LoroStreamsMachineRpcServer {
           const response = await this.deps.pingMachine({
             requestId: request.params.requestId,
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
         case 'machine/restart': {
           if (!this.deps.restartMachine) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Machine restart is not available on this machine.',
             });
@@ -1055,7 +1123,7 @@ export class LoroStreamsMachineRpcServer {
         }
         case 'machine/upgrade': {
           if (!this.deps.upgradeMachine) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Machine upgrade is not available on this machine.',
             });
@@ -1079,7 +1147,7 @@ export class LoroStreamsMachineRpcServer {
           const response = await this.deps.refreshMachineProviderRateLimits(
             request.params.configId as AgentConfigId
           );
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
         case 'machine/acp-capabilities-refresh': {
@@ -1093,12 +1161,7 @@ export class LoroStreamsMachineRpcServer {
                 .then(() =>
                   controller.signal.aborted
                     ? undefined
-                    : this.appendResultResponse(
-                        request.replyTo,
-                        request.id,
-                        request.method,
-                        progress
-                      )
+                    : appendResultResponse(request.replyTo, request.id, request.method, progress)
                 )
                 .catch(() => undefined);
             };
@@ -1110,12 +1173,7 @@ export class LoroStreamsMachineRpcServer {
             });
             await progressWrites;
             if (!controller.signal.aborted) {
-              await this.appendResultResponse(
-                request.replyTo,
-                request.id,
-                request.method,
-                response
-              );
+              await appendResultResponse(request.replyTo, request.id, request.method, response);
             }
             return;
           } catch (error) {
@@ -1133,7 +1191,7 @@ export class LoroStreamsMachineRpcServer {
         }
         case 'machine/acp-authenticate': {
           if (!this.deps.authenticateMachineAcp) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'ACP authentication is not available on this machine.',
             });
@@ -1164,7 +1222,7 @@ export class LoroStreamsMachineRpcServer {
                 : progress;
             progressWrites = progressWrites
               .then(() =>
-                this.appendResultResponse(request.replyTo, request.id, request.method, safeProgress)
+                appendResultResponse(request.replyTo, request.id, request.method, safeProgress)
               )
               .catch(() => undefined);
           };
@@ -1262,7 +1320,7 @@ export class LoroStreamsMachineRpcServer {
               throw new Error('ACP authentication is not available on this machine.');
             }
             await progressWrites;
-            await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+            await appendResultResponse(request.replyTo, request.id, request.method, response);
             return;
           } finally {
             if (isStart) {
@@ -1274,7 +1332,7 @@ export class LoroStreamsMachineRpcServer {
         }
         case 'machine/acp-binary-status': {
           if (!this.deps.getMachineAcpBinaryStatus) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'ACP binary status is not available on this machine.',
             });
@@ -1283,12 +1341,12 @@ export class LoroStreamsMachineRpcServer {
           const response = await this.deps.getMachineAcpBinaryStatus({
             agentType: request.params.agentType,
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
         case 'machine/acp-binary-install': {
           if (!this.deps.installMachineAcpBinary) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'ACP binary install is not available on this machine.',
             });
@@ -1298,7 +1356,7 @@ export class LoroStreamsMachineRpcServer {
           const appendProgress = (progress: MachineAcpBinaryProgressMessage) => {
             progressWrites = progressWrites
               .then(() =>
-                this.appendResultResponse(request.replyTo, request.id, request.method, progress)
+                appendResultResponse(request.replyTo, request.id, request.method, progress)
               )
               .catch(() => undefined);
           };
@@ -1307,7 +1365,7 @@ export class LoroStreamsMachineRpcServer {
             onAcpBinaryProgress: appendProgress,
           });
           await progressWrites;
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
         case 'machine/memory': {
@@ -1319,12 +1377,12 @@ export class LoroStreamsMachineRpcServer {
                 memories: [],
                 error: 'Memory providers are unavailable',
               };
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
         case 'machine/pi-extensions': {
           if (!this.deps.listMachinePiExtensions) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Pi extension listing is not available on this machine.',
             });
@@ -1333,12 +1391,12 @@ export class LoroStreamsMachineRpcServer {
           const response = await this.deps.listMachinePiExtensions({
             configId: request.params.configId as AgentConfigId | undefined,
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
         case 'machine/bug-report': {
           if (!this.deps.submitBugReport) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Bug report is not available on this machine.',
             });
@@ -1350,12 +1408,12 @@ export class LoroStreamsMachineRpcServer {
             requestToken: request.params.requestToken,
             ...(request.params.clientLog ? { clientLog: request.params.clientLog } : {}),
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
         case 'session/cancel': {
           if (!this.deps.cancelSession) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Session cancel is not available on this machine.',
             });
@@ -1370,12 +1428,12 @@ export class LoroStreamsMachineRpcServer {
               ? {}
               : { pauseInbox: request.params.pauseInbox }),
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
         case 'session/live-status': {
           if (!this.deps.getSessionLiveStatus) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Session live status is not available on this machine.',
             });
@@ -1384,12 +1442,12 @@ export class LoroStreamsMachineRpcServer {
           const response = await this.deps.getSessionLiveStatus({
             sessionId: request.params.sessionId as SessionId,
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
         case 'session/steer': {
           if (!this.deps.steerSession) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Session steer is not available on this machine.',
             });
@@ -1397,7 +1455,7 @@ export class LoroStreamsMachineRpcServer {
           }
           const inputConfig = normalizeSessionTurnInputConfig(request.params.inputConfig);
           if (!inputConfig) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.internalError,
               message: 'Steer input config could not be parsed.',
             });
@@ -1411,12 +1469,12 @@ export class LoroStreamsMachineRpcServer {
             timestamp: request.params.timestamp,
             inputConfig,
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
         case 'session/goal': {
           if (!this.deps.controlSessionGoal) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Session goal control is not available on this machine.',
             });
@@ -1428,12 +1486,12 @@ export class LoroStreamsMachineRpcServer {
             ...(request.params.objective ? { objective: request.params.objective } : {}),
             userId: request.params.userId,
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
         case 'session/terminate': {
           if (!this.deps.terminateSession) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Session terminate is not available on this machine.',
             });
@@ -1442,12 +1500,12 @@ export class LoroStreamsMachineRpcServer {
           const response = await this.deps.terminateSession({
             sessionId: request.params.sessionId as SessionId,
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
         case 'session/fork': {
           if (!this.deps.forkSession) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Session fork is not available on this machine.',
             });
@@ -1461,12 +1519,12 @@ export class LoroStreamsMachineRpcServer {
             targetContext: request.params.targetContext,
             targetPlacement: request.params.targetPlacement,
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
         case 'session/edit-and-resend': {
           if (!this.deps.editAndResendSession) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Session edit and resend is not available on this machine.',
             });
@@ -1474,7 +1532,7 @@ export class LoroStreamsMachineRpcServer {
           }
           const inputConfig = normalizeSessionTurnInputConfig(request.params.inputConfig);
           if (!inputConfig) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.internalError,
               message: 'Edit and resend input config could not be parsed.',
             });
@@ -1484,12 +1542,12 @@ export class LoroStreamsMachineRpcServer {
             ...request.params,
             inputConfig,
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
         case 'session/dispatch-turn': {
           if (!this.deps.dispatchSessionTurn) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Session turn dispatch is not available on this machine.',
             });
@@ -1497,7 +1555,7 @@ export class LoroStreamsMachineRpcServer {
           }
           const inputConfig = normalizeSessionTurnInputConfig(request.params.inputConfig);
           if (!inputConfig) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.internalError,
               message: 'Dispatch turn input config could not be parsed.',
             });
@@ -1511,31 +1569,31 @@ export class LoroStreamsMachineRpcServer {
             inputOrigin: request.params.inputOrigin,
             inputConfig,
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
         case 'session/prepare': {
           if (!this.deps.prepareSession) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Session preparation is not available on this machine.',
             });
             return;
           }
           const response = await this.deps.prepareSession(request.params);
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
         case 'session/prepare-cancel': {
           if (!this.deps.cancelSessionPreparation) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Session preparation cancellation is not available on this machine.',
             });
             return;
           }
           const response = await this.deps.cancelSessionPreparation(request.params);
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
         case 'session/history-read':
@@ -1552,9 +1610,9 @@ export class LoroStreamsMachineRpcServer {
               'History observation method mismatch'
             );
           await this.verifySessionHistoryOwnerSession(decoded.ownerSessionId, params.sessionId);
-          if (this.stopController.signal.aborted || request.expiresAt <= this.now()) return;
+          if (signal.aborted || request.expiresAt <= this.now()) return;
           if (!this.deps.readSessionHistory) {
-            await this.appendErrorResponse(
+            await appendErrorResponse(
               request.replyTo,
               request.id,
               request.method,
@@ -1579,7 +1637,7 @@ export class LoroStreamsMachineRpcServer {
               sessionId: params.sessionId,
               checkpoint: query.checkpoint,
               waitMs: Math.min(query.waitMs, Math.max(0, request.expiresAt - this.now() - 1000)),
-              signal: this.stopController.signal,
+              signal: signal,
             });
             if (this.stopped || request.expiresAt <= this.now()) return;
             query = {
@@ -1597,12 +1655,12 @@ export class LoroStreamsMachineRpcServer {
             response = await this.deps.readSessionHistory({
               sessionId: params.sessionId as SessionId,
               query,
-              signal: this.stopController.signal,
+              signal: signal,
             });
           } finally {
             if (readPermit) this.requestConcurrency.release();
           }
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response, {
+          await appendResultResponse(request.replyTo, request.id, request.method, response, {
             codeCollabOwnerSessionId,
           });
           return;
@@ -1612,9 +1670,9 @@ export class LoroStreamsMachineRpcServer {
           codeCollabOwnerSessionId = decoded.ownerSessionId;
           const params = SessionHistoryWriteRpcPayloadSchema.parse(decoded.payload);
           await this.verifySessionHistoryOwnerSession(decoded.ownerSessionId, params.sessionId);
-          if (this.stopController.signal.aborted || request.expiresAt <= this.now()) return;
+          if (signal.aborted || request.expiresAt <= this.now()) return;
           if (!this.deps.writeSessionHistory) {
-            await this.appendErrorResponse(
+            await appendErrorResponse(
               request.replyTo,
               request.id,
               request.method,
@@ -1632,7 +1690,7 @@ export class LoroStreamsMachineRpcServer {
             operation: params.operation,
             payload: params.payload,
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response, {
+          await appendResultResponse(request.replyTo, request.id, request.method, response, {
             codeCollabOwnerSessionId,
           });
           return;
@@ -1643,7 +1701,7 @@ export class LoroStreamsMachineRpcServer {
           const params = CodeCollabV2OpenTextRequestSchema.parse(decoded.payload);
           await this.verifyCodeCollabV2OwnerSession(decoded.ownerSessionId, params.sessionId);
           if (!this.deps.openCodeCollabText) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Code Collab open-text is not available on this machine.',
             });
@@ -1653,7 +1711,7 @@ export class LoroStreamsMachineRpcServer {
             sessionId: params.sessionId as SessionId,
             path: params.path,
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response, {
+          await appendResultResponse(request.replyTo, request.id, request.method, response, {
             codeCollabOwnerSessionId: decoded.ownerSessionId,
           });
           return;
@@ -1664,7 +1722,7 @@ export class LoroStreamsMachineRpcServer {
           const params = CodeCollabV2RefreshTextRequestSchema.parse(decoded.payload);
           await this.verifyCodeCollabV2OwnerSession(decoded.ownerSessionId, params.sessionId);
           if (!this.deps.refreshCodeCollabText) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Code Collab refresh-text is not available on this machine.',
             });
@@ -1675,7 +1733,7 @@ export class LoroStreamsMachineRpcServer {
             path: params.path,
             digest: params.digest,
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response, {
+          await appendResultResponse(request.replyTo, request.id, request.method, response, {
             codeCollabOwnerSessionId: decoded.ownerSessionId,
           });
           return;
@@ -1686,7 +1744,7 @@ export class LoroStreamsMachineRpcServer {
           const params = CodeCollabV2SaveTextRequestSchema.parse(decoded.payload);
           await this.verifyCodeCollabV2OwnerSession(decoded.ownerSessionId, params.sessionId);
           if (!this.deps.saveCodeCollabText) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Code Collab save-text is not available on this machine.',
             });
@@ -1700,7 +1758,7 @@ export class LoroStreamsMachineRpcServer {
             text: params.text,
             ...(params.format === undefined ? {} : { format: params.format }),
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response, {
+          await appendResultResponse(request.replyTo, request.id, request.method, response, {
             codeCollabOwnerSessionId: decoded.ownerSessionId,
           });
           return;
@@ -1711,7 +1769,7 @@ export class LoroStreamsMachineRpcServer {
           const params = CodeCollabV2OpenCurrentDiffRequestSchema.parse(decoded.payload);
           await this.verifyCodeCollabV2OwnerSession(decoded.ownerSessionId, params.sessionId);
           if (!this.deps.openCodeCollabCurrentDiff) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Code Collab open-current-diff is not available on this machine.',
             });
@@ -1722,7 +1780,7 @@ export class LoroStreamsMachineRpcServer {
             path: params.path,
             ...(params.scope === undefined ? {} : { scope: params.scope }),
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response, {
+          await appendResultResponse(request.replyTo, request.id, request.method, response, {
             codeCollabOwnerSessionId: decoded.ownerSessionId,
           });
           return;
@@ -1733,7 +1791,7 @@ export class LoroStreamsMachineRpcServer {
           const params = CodeCollabV2OpenAllChangesDiffRequestSchema.parse(decoded.payload);
           await this.verifyCodeCollabV2OwnerSession(decoded.ownerSessionId, params.sessionId);
           if (!this.deps.openCodeCollabAllChangesDiff) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Code Collab open-all-changes-diff is not available on this machine.',
             });
@@ -1744,7 +1802,7 @@ export class LoroStreamsMachineRpcServer {
             ...(params.focusPath === undefined ? {} : { focusPath: params.focusPath }),
             ...(params.scope === undefined ? {} : { scope: params.scope }),
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response, {
+          await appendResultResponse(request.replyTo, request.id, request.method, response, {
             codeCollabOwnerSessionId: decoded.ownerSessionId,
           });
           return;
@@ -1755,7 +1813,7 @@ export class LoroStreamsMachineRpcServer {
           const params = CodeCollabV2OpenTurnDiffRequestSchema.parse(decoded.payload);
           await this.verifyCodeCollabV2OwnerSession(decoded.ownerSessionId, params.sessionId);
           if (!this.deps.openCodeCollabTurnDiff) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Code Collab open-turn-diff is not available on this machine.',
             });
@@ -1766,7 +1824,7 @@ export class LoroStreamsMachineRpcServer {
             turnId: params.turnId,
             path: params.path,
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response, {
+          await appendResultResponse(request.replyTo, request.id, request.method, response, {
             codeCollabOwnerSessionId: decoded.ownerSessionId,
           });
           return;
@@ -1777,7 +1835,7 @@ export class LoroStreamsMachineRpcServer {
           const params = CodeCollabV2InitDirectoryRequestSchema.parse(decoded.payload);
           await this.verifyCodeCollabV2OwnerSession(decoded.ownerSessionId, params.sessionId);
           if (!this.deps.initCodeCollabDirectory) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Code Collab init-directory is not available on this machine.',
             });
@@ -1787,7 +1845,7 @@ export class LoroStreamsMachineRpcServer {
             sessionId: params.sessionId as SessionId,
             path: params.path,
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response, {
+          await appendResultResponse(request.replyTo, request.id, request.method, response, {
             codeCollabOwnerSessionId: decoded.ownerSessionId,
           });
           return;
@@ -1798,7 +1856,7 @@ export class LoroStreamsMachineRpcServer {
           const params = CodeCollabV2LspRpcParamsSchema.parse(decoded.payload);
           await this.verifyCodeCollabV2OwnerSession(decoded.ownerSessionId, params.sessionId);
           if (!this.deps.getCodeCollabLspDefinition) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Code Collab LSP definition is not available on this machine.',
             });
@@ -1811,7 +1869,7 @@ export class LoroStreamsMachineRpcServer {
             ...(params.line === undefined ? {} : { line: params.line }),
             ...(params.character === undefined ? {} : { character: params.character }),
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response, {
+          await appendResultResponse(request.replyTo, request.id, request.method, response, {
             codeCollabOwnerSessionId: decoded.ownerSessionId,
           });
           return;
@@ -1822,7 +1880,7 @@ export class LoroStreamsMachineRpcServer {
           const params = CodeCollabV2LspRpcParamsSchema.parse(decoded.payload);
           await this.verifyCodeCollabV2OwnerSession(decoded.ownerSessionId, params.sessionId);
           if (!this.deps.getCodeCollabLspReferences) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Code Collab LSP references is not available on this machine.',
             });
@@ -1835,7 +1893,7 @@ export class LoroStreamsMachineRpcServer {
             ...(params.line === undefined ? {} : { line: params.line }),
             ...(params.character === undefined ? {} : { character: params.character }),
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response, {
+          await appendResultResponse(request.replyTo, request.id, request.method, response, {
             codeCollabOwnerSessionId: decoded.ownerSessionId,
           });
           return;
@@ -1848,7 +1906,7 @@ export class LoroStreamsMachineRpcServer {
           const response: FileDownloadResponse = this.deps.downloadFileChunk
             ? await this.deps.downloadFileChunk(params)
             : { status: 'error', code: 'unsupported_protocol' };
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response, {
+          await appendResultResponse(request.replyTo, request.id, request.method, response, {
             codeCollabOwnerSessionId: decoded.ownerSessionId,
           });
           return;
@@ -1867,14 +1925,14 @@ export class LoroStreamsMachineRpcServer {
                 message: 'File preview is not available on this machine.',
                 path: params.path,
               });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response, {
+          await appendResultResponse(request.replyTo, request.id, request.method, response, {
             codeCollabOwnerSessionId: decoded.ownerSessionId,
           });
           return;
         }
         case 'session/preview-create': {
           if (!this.deps.createSessionPreview) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Session preview creation is not available on this machine.',
             });
@@ -1888,7 +1946,7 @@ export class LoroStreamsMachineRpcServer {
             approval: request.params.approval,
             restart: request.params.restart,
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
         case 'ios-simulator/control': {
@@ -1912,12 +1970,12 @@ export class LoroStreamsMachineRpcServer {
             ...response,
             preview: response.preview ? { ...preview, viewerUrlEnvelope } : undefined,
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, wire);
+          await appendResultResponse(request.replyTo, request.id, request.method, wire);
           return;
         }
         case 'session/preview-status': {
           if (!this.deps.getSessionPreviewStatus) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Preview status is not available on this machine.',
             });
@@ -1927,12 +1985,12 @@ export class LoroStreamsMachineRpcServer {
             ...request.params,
             sessionId: request.params.sessionId as SessionId,
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
         case 'session/preview-revoke': {
           if (!this.deps.revokeSessionPreview) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Session preview revocation is not available on this machine.',
             });
@@ -1944,12 +2002,12 @@ export class LoroStreamsMachineRpcServer {
             proof: request.params.proof,
             reason: request.params.reason,
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
         case 'project/probe-local-member': {
           if (!this.deps.probeLocalProjectMember) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Project group member probing is not available on this machine.',
             });
@@ -1959,12 +2017,12 @@ export class LoroStreamsMachineRpcServer {
             localProjectId: request.params.localProjectId as LocalProjectId,
             requestedByUserId: request.params.requestedByUserId,
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, result);
+          await appendResultResponse(request.replyTo, request.id, request.method, result);
           return;
         }
         case 'local-project/git-state': {
           if (!this.deps.getLocalProjectGitState) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Local project Git state is not available on this machine.',
             });
@@ -1974,12 +2032,12 @@ export class LoroStreamsMachineRpcServer {
             localProjectId: request.params.localProjectId as LocalProjectId,
             requestedByUserId: request.params.requestedByUserId,
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
         case 'local-project/control': {
           if (!this.deps.dispatchLocalProjectControl) {
-            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            await appendErrorResponse(request.replyTo, request.id, request.method, {
               code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
               message: 'Local project control is not available on this machine.',
             });
@@ -1988,13 +2046,13 @@ export class LoroStreamsMachineRpcServer {
           const response = await this.deps.dispatchLocalProjectControl(
             request.params.request as LocalProjectControlRequest
           );
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
       }
     } catch (error) {
       if (
-        this.stopController.signal.aborted &&
+        signal.aborted &&
         (request.method === 'session/history-read' ||
           request.method === 'session/history-watch' ||
           request.method === 'session/history-write')
@@ -2032,7 +2090,7 @@ export class LoroStreamsMachineRpcServer {
         }
       }
       const message = failure instanceof Error ? failure.message : String(failure);
-      if (isHistoryRequest(request) && this.stopController.signal.aborted) return;
+      if (isHistoryRequest(request) && signal.aborted) return;
       if (failure instanceof LoroStreamsRpcHandlerError) {
         this.deps.logger.warn(
           `[rpc-server:${this.deps.machineId}] request rejected ${JSON.stringify({
@@ -2048,7 +2106,7 @@ export class LoroStreamsMachineRpcServer {
         : request.method === 'file/preview' || request.method === 'file/download-chunk'
           ? toFilePreviewRpcError(failure, message)
           : null;
-      await this.appendErrorResponse(
+      await appendErrorResponse(
         request.replyTo,
         request.id,
         request.method,
@@ -2195,13 +2253,14 @@ export class LoroStreamsMachineRpcServer {
       | ProjectProbeLocalMemberResult
       | LocalProjectGitStateRpcResponse
       | LocalProjectControlResponse,
-    options: { readonly codeCollabOwnerSessionId?: string } = {}
+    options: { readonly codeCollabOwnerSessionId?: string } = {},
+    response?: (payload: unknown) => Promise<void>
   ): Promise<void> {
     const wireResult =
       options.codeCollabOwnerSessionId === undefined
         ? result
         : await encryptCodeCollabV2RpcPayload(options.codeCollabOwnerSessionId, result);
-    await this.appendResponse(replyTo, {
+    await (response ?? ((payload: unknown) => this.appendResponse(replyTo, payload)))({
       jsonrpc: JSON_RPC_VERSION,
       id: requestId,
       method,
@@ -2219,7 +2278,8 @@ export class LoroStreamsMachineRpcServer {
       message: string;
       data?: unknown;
     },
-    options: { readonly codeCollabOwnerSessionId?: string } = {}
+    options: { readonly codeCollabOwnerSessionId?: string } = {},
+    response?: (payload: unknown) => Promise<void>
   ): Promise<void> {
     const wireError =
       options.codeCollabOwnerSessionId === undefined || error.data === undefined
@@ -2228,7 +2288,7 @@ export class LoroStreamsMachineRpcServer {
             ...error,
             data: await encryptCodeCollabV2RpcPayload(options.codeCollabOwnerSessionId, error.data),
           };
-    await this.appendResponse(replyTo, {
+    await (response ?? ((payload: unknown) => this.appendResponse(replyTo, payload)))({
       jsonrpc: JSON_RPC_VERSION,
       id: requestId,
       method,
@@ -2250,15 +2310,15 @@ export class LoroStreamsMachineRpcServer {
     const maxAttempts = 3;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
-        await this.deps.streamClient.appendJson(replyTo, payload);
+        await this.streamClient.appendJson(replyTo, payload);
         return;
       } catch (error) {
         if (error instanceof LoroStreamsGatewayError && error.status === 404) {
-          await this.deps.streamClient.ensureJsonStream(
+          await this.streamClient.ensureJsonStream(
             replyTo,
             this.deps.retentionSeconds ?? LORO_STREAMS_RPC_RETENTION_SECONDS
           );
-          await this.deps.streamClient.appendJson(replyTo, payload);
+          await this.streamClient.appendJson(replyTo, payload);
           return;
         }
         const retryable = !(error instanceof LoroStreamsGatewayError) || error.status >= 500;

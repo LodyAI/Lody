@@ -117,6 +117,58 @@ export function createDesktopE2eeContent(input: {
       )
     ),
   };
+  const makeTokenProvider = (signal: AbortSignal, rpcOnly = false) => {
+    const token = createLoroStreamsTokenProviderLegacy({
+      // All requests terminate in the native capability below. This URL is
+      // just the existing token kernel's local route identity.
+      endpoint: `https://e2ee.invalid/${rpcOnly ? 'rpc-token' : 'content-token'}/${transition.epoch()}`,
+      workspaceId: input.workspaceId,
+      authToken: input.authToken,
+      fetchImpl: async (_url, init) => {
+        const requestSignal = init?.signal ? AbortSignal.any([signal, init.signal]) : signal;
+        requestSignal.throwIfAborted();
+        const request = LoroStreamsTokenRequestSchema.parse(JSON.parse(String(init?.body)));
+        if (request.workspaceId !== input.workspaceId)
+          throw new Error('e2ee_content_configuration');
+        const response = await (
+          rpcOnly
+            ? input.runtime.contentStreamsToken(
+                input.workspaceId,
+                request.rejectedToken,
+                undefined,
+                true
+              )
+            : input.runtime.contentStreamsToken(input.workspaceId, request.rejectedToken)
+        ).catch((error) => {
+          observeRemoval(error);
+          throw error;
+        });
+        requestSignal.throwIfAborted();
+        if (
+          !response.bucketId ||
+          response.bucketId === 'lody' ||
+          !response.gatewayBaseUrl ||
+          response.expiresIn > 900
+        )
+          throw new Error('e2ee_content_configuration');
+        if (bucketId && bucketId !== response.bucketId)
+          throw new Error('e2ee_content_configuration');
+        bucketId = response.bucketId;
+        return new Response(JSON.stringify(response), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      },
+    });
+    tokens.add(token);
+    return {
+      ...token,
+      close: async () => {
+        await token.close();
+        tokens.delete(token);
+      },
+    };
+  };
   return {
     content,
     updateStatus,
@@ -125,6 +177,19 @@ export function createDesktopE2eeContent(input: {
     needsUpdate: transition.needsUpdate,
     close: transition.close,
     e2ee: {
+      prepareQuery: (machineId: string, args: import('@lody/shared/e2ee-rpc').E2eeQueryInput) => {
+        if (!input.runtime.prepareQuery) return Promise.reject(new Error('e2ee_rpc_unavailable'));
+        return input.runtime.prepareQuery(input.workspaceId, machineId, args);
+      },
+      acceptQueryResponse: (
+        machineId: string,
+        args: import('@lody/shared/e2ee-rpc').E2eeQueryInput,
+        frame: string
+      ) => {
+        if (!input.runtime.acceptQueryResponse)
+          return Promise.reject(new Error('e2ee_rpc_unavailable'));
+        return input.runtime.acceptQueryResponse(input.workspaceId, machineId, args, frame);
+      },
       prepareDispatch: (
         machineId: string,
         args: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
@@ -143,51 +208,8 @@ export function createDesktopE2eeContent(input: {
         return input.runtime.acceptDispatchResponse(input.workspaceId, machineId, args, frame);
       },
       bucketId: () => bucketId,
-      createTokenProvider: (signal: AbortSignal) => {
-        const token = createLoroStreamsTokenProviderLegacy({
-          // All requests terminate in the native capability below. This URL is
-          // just the existing token kernel's local route identity.
-          endpoint: `https://e2ee.invalid/content-token/${transition.epoch()}`,
-          workspaceId: input.workspaceId,
-          authToken: input.authToken,
-          fetchImpl: async (_url, init) => {
-            const requestSignal = init?.signal ? AbortSignal.any([signal, init.signal]) : signal;
-            requestSignal.throwIfAborted();
-            const request = LoroStreamsTokenRequestSchema.parse(JSON.parse(String(init?.body)));
-            if (request.workspaceId !== input.workspaceId)
-              throw new Error('e2ee_content_configuration');
-            const response = await input.runtime
-              .contentStreamsToken(input.workspaceId, request.rejectedToken)
-              .catch((error) => {
-                observeRemoval(error);
-                throw error;
-              });
-            requestSignal.throwIfAborted();
-            if (
-              !response.bucketId ||
-              response.bucketId === 'lody' ||
-              !response.gatewayBaseUrl ||
-              response.expiresIn > 900
-            )
-              throw new Error('e2ee_content_configuration');
-            if (bucketId && bucketId !== response.bucketId)
-              throw new Error('e2ee_content_configuration');
-            bucketId = response.bucketId;
-            return new Response(JSON.stringify(response), {
-              status: 200,
-              headers: { 'content-type': 'application/json' },
-            });
-          },
-        });
-        tokens.add(token);
-        return {
-          ...token,
-          close: async () => {
-            await token.close();
-            tokens.delete(token);
-          },
-        };
-      },
+      createTokenProvider: (signal: AbortSignal) => makeTokenProvider(signal),
+      createRpcTokenProvider: (signal: AbortSignal) => makeTokenProvider(signal, true),
     },
   };
 }

@@ -202,6 +202,65 @@ describe('CloudPlatformProvider', () => {
     }
   });
 
+  it('routes read queries through the mounted cloud provider, real IPC proxy and preload', async () => {
+    fixture.electron = true;
+    fixture.usePreload = true;
+    window.ipc = ipcBridge;
+    refetch('Encrypted');
+    const input = { queryId: 'query-a', method: 'machine/status' as const, params: {} };
+    const original = {
+      requestId: '22'.repeat(16),
+      targetMachineId: 'machine-a',
+      requesterDevice: '11'.repeat(32),
+      frameHex: '33'.repeat(143),
+      expiresAt: 100000,
+    };
+    const result = { result: { type: 'machine/status', synthetic: true } };
+    fixture.invoke = async (channel, ...args) => {
+      if (channel === 'e2ee.prepareQuery') {
+        expect(args).toEqual(['workspace-a', 'machine-a', input]);
+        return original;
+      }
+      if (channel === 'e2ee.acceptQueryResponse') {
+        expect(args).toEqual(['workspace-a', 'machine-a', input, '44'.repeat(143)]);
+        return result;
+      }
+      if (channel === 'e2ee.contentStreamsToken') {
+        expect(args).toEqual(['workspace-a', undefined, undefined, true]);
+        return {
+          token: 'synthetic-rpc-only',
+          bucketId: 'synthetic-encrypted-content',
+          gatewayBaseUrl: 'https://streams.example.test',
+          expiresIn: 900,
+          expiresAt: Date.now() + 900000,
+        };
+      }
+      throw new Error(`unexpected IPC invocation: ${channel}`);
+    };
+    await render();
+    const access = createDesktopE2eeContent({
+      runtime: seen.at(-1)!.e2eeWorkspaces!.runtime!,
+      workspaceId: 'workspace-a',
+      genesisHash: 'aa'.repeat(32),
+      epoch: 0,
+      authToken: () => 'synthetic-account-token',
+    });
+    try {
+      expect(await access.e2ee.prepareQuery('machine-a', input)).toEqual(original);
+      expect(await access.e2ee.acceptQueryResponse('machine-a', input, '44'.repeat(143))).toEqual(
+        result
+      );
+      const rpcToken = access.e2ee.createRpcTokenProvider(new AbortController().signal);
+      try {
+        expect(await rpcToken.getToken()).toBe('synthetic-rpc-only');
+      } finally {
+        await rpcToken.close();
+      }
+    } finally {
+      await access.close();
+    }
+  });
+
   it('keeps ordinary access unauthenticated while E2EE opens with an expired snapshot and retained bearer after network retries fail', async () => {
     fixture.electron = true;
     refetch('Encrypted');

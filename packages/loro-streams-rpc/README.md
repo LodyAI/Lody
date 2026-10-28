@@ -38,7 +38,7 @@ request does not stop the workspace. Originals and execution evidence are not
 automatically collected. See the [implementation decision and validation limits](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-streams-dispatch.md).
 
 The pure codecs in `src/e2ee-wire.ts` also define nested error and presence
-bodies; those codecs do not enable additional RPC methods or presence transport.
+bodies. Encrypted read queries use the host integration below; the reserved encrypted presence codec remains unused.
 
 ## Request deadlines
 
@@ -79,3 +79,22 @@ pnpm test:integration
 
 The integration command starts a local server through `loro dev --db-path ...` and
 then runs the transport tests against it.
+
+## Encrypted read queries
+
+Encrypted workspaces route existing machine reads through the same purpose-8/9 channel.
+The closed method/action allowlist lives in `@lody/shared/e2ee-rpc`; mutations stay disabled.
+Hosts authenticate current readers and the target machine's ledger membership, and target
+responses must carry that machine device's signature. Reads never claim an execution journal.
+
+JSON outcomes are paged into at most 32 signed frames carrying 512 KiB of result bytes each;
+every sealed frame stays below 1 MiB. Missing pages remain incomplete, including when the
+terminal page arrives first. An outcome above 16 MiB returns an explicit truncated/too-large
+error and requires a smaller application page or range. The complete ciphertext outcome is
+saved before publication, and retries reuse those exact frames.
+
+RPC token providers are separate from document providers. `rpcOnly: true` grants read,
+create and append only under `<workspace>:e2ee-rpc:`, including for Guests; it grants no
+document/snapshot writes. This requires the matching optional-cloud backend change.
+Ordinary workspaces retain their existing transport and codecs. See the
+[read-query decision](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-read-queries.md).

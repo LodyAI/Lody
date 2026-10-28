@@ -1386,7 +1386,8 @@ export class E2eeIpc extends IpcService {
   async contentStreamsToken(
     workspaceId: string,
     rejectedToken?: string,
-    requestSnapshotFor?: string
+    requestSnapshotFor?: string,
+    rpcOnly?: true
   ) {
     const id = sender()
     const access = await withDesktopE2eeAccount(
@@ -1410,7 +1411,8 @@ export class E2eeIpc extends IpcService {
         workspaceId,
         credential: access.credential,
         ...(rejectedToken ? { rejectedToken } : {}),
-        ...(requestSnapshotFor ? { requestSnapshotFor } : {})
+        ...(requestSnapshotFor ? { requestSnapshotFor } : {}),
+        ...(rpcOnly === true ? { rpcOnly: true } : {})
       })
     ).catch((error) => {
       if (error instanceof E2eeMemberRemovedError) return this.removeLocalWorkspace(access)
@@ -1442,6 +1444,39 @@ export class E2eeIpc extends IpcService {
       (owner) =>
         owner.readers.get(workspaceId)?.has(id)
           ? owner.host.openContent(workspaceId, input)
+          : Effect.fail(new Error('e2ee_not_open')),
+      workspaceId,
+      false
+    )
+  }
+  @IpcMethod()
+  async prepareQuery(
+    workspaceId: string,
+    targetMachineId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeQueryInput
+  ) {
+    const id = sender()
+    return withDesktopE2eeAccount(
+      (owner) =>
+        owner.readers.get(workspaceId)?.has(id)
+          ? owner.host.prepareQuery(workspaceId, targetMachineId, input)
+          : Effect.fail(new Error('e2ee_not_open')),
+      workspaceId,
+      false
+    )
+  }
+  @IpcMethod()
+  async acceptQueryResponse(
+    workspaceId: string,
+    targetMachineId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeQueryInput,
+    frameHex: string
+  ) {
+    const id = sender()
+    return withDesktopE2eeAccount(
+      (owner) =>
+        owner.readers.get(workspaceId)?.has(id)
+          ? owner.host.acceptQueryResponse(workspaceId, targetMachineId, input, frameHex)
           : Effect.fail(new Error('e2ee_not_open')),
       workspaceId,
       false

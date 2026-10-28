@@ -214,7 +214,8 @@ export interface E2eeWorkspaceRuntime {
   contentStreamsToken(
     workspaceId: string,
     rejectedToken?: string,
-    requestSnapshotFor?: string
+    requestSnapshotFor?: string,
+    rpcOnly?: true
   ): Promise<import('@lody/cloud-api').E2eeContentToken>;
   seal(
     workspaceId: string,
@@ -234,6 +235,19 @@ export interface E2eeWorkspaceRuntime {
     input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput,
     frameHex: string
   ): Promise<import('@lody/shared/e2ee-rpc').E2eeDispatchAck>;
+  /** Prepare an allowlisted read with native request identity, target binding and retained ciphertext. */
+  prepareQuery?(
+    workspaceId: string,
+    targetMachineId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeQueryInput
+  ): Promise<import('@lody/shared/e2ee-rpc').E2eePreparedDispatch>;
+  /** Retain target-signed response pages; null means an incomplete result, never success. */
+  acceptQueryResponse?(
+    workspaceId: string,
+    targetMachineId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeQueryInput,
+    frameHex: string
+  ): Promise<import('@lody/shared/e2ee-rpc').E2eeQueryResult | null>;
   /** Explicitly archive local originals and require fresh independently approved pairing. */
   resetIdentity?(input: {
     workspaceId?: string;

@@ -71,15 +71,18 @@ const readOwned = (
 /** One scoped shared response reader, with independently bounded pending calls.
  * Native verification runs before a receipt can settle a waiter. A timeout leaves
  * the saved original and durable dispatch intact, and never resends a new intent. */
-export const makeEncryptedStreamsRpc = Effect.fnUntraced(function* (options: {
+export const makeEncryptedStreamsRpc = Effect.fnUntraced(function* <
+  Input extends object = E2eeDispatchInput,
+  Output = E2eeDispatchAck,
+>(options: {
   workspaceId: string;
   requesterDevice: string;
   client: LoroStreamsJsonStreamClient;
   acceptResponse: (
     prepared: E2eePreparedDispatch,
-    input: E2eeDispatchInput,
+    input: Input,
     frame: string
-  ) => Promise<E2eeDispatchAck>;
+  ) => Promise<Output | null>;
   trace?: (event: E2eeRpcTiming) => void;
 }) {
   const scope = yield* Effect.scope;
@@ -88,8 +91,8 @@ export const makeEncryptedStreamsRpc = Effect.fnUntraced(function* (options: {
     string,
     {
       prepared: E2eePreparedDispatch;
-      input: E2eeDispatchInput;
-      result: Deferred.Deferred<E2eeDispatchAck>;
+      input: Input;
+      result: Deferred.Deferred<Output>;
     }
   >();
   const state: LoroJsonStreamState = { nextOffset: '0' };
@@ -111,22 +114,26 @@ export const makeEncryptedStreamsRpc = Effect.fnUntraced(function* (options: {
             try: () => options.acceptResponse(call.prepared, call.input, envelope.frame),
             catch: () => new Error('e2ee_rpc_response_invalid'),
           }).pipe(Effect.result);
-          if (verified._tag === 'Success' && !closed && pending.get(envelope.id) === call)
+          if (
+            verified._tag === 'Success' &&
+            verified.success !== null &&
+            !closed &&
+            pending.get(envelope.id) === call
+          )
             yield* Deferred.succeed(call.result, verified.success);
         }
       }),
       scope
     );
-  const trace = (
-    stage: E2eeRpcTiming['stage'],
-    prepared: E2eePreparedDispatch,
-    input: E2eeDispatchInput
-  ) => {
+  const trace = (stage: E2eeRpcTiming['stage'], prepared: E2eePreparedDispatch, input: Input) => {
     try {
       options.trace?.({
         stage,
         requestId: prepared.requestId,
-        userTurnId: input.userTurnId,
+        userTurnId:
+          'userTurnId' in input && typeof input.userTurnId === 'string'
+            ? input.userTurnId
+            : undefined,
         at: Date.now(),
       });
     } catch {
@@ -174,7 +181,7 @@ export const makeEncryptedStreamsRpc = Effect.fnUntraced(function* (options: {
   );
   return {
     /** Receipt timeout is an acceleration budget; the caller always keeps durable dispatch active. */
-    send: (prepared: E2eePreparedDispatch, input: E2eeDispatchInput, timeoutMs = 800) =>
+    send: (prepared: E2eePreparedDispatch, input: Input, timeoutMs = 800) =>
       Effect.gen(function* () {
         if (
           closed ||
@@ -183,7 +190,7 @@ export const makeEncryptedStreamsRpc = Effect.fnUntraced(function* (options: {
           pending.has(prepared.requestId)
         )
           return null;
-        const result = yield* Deferred.make<E2eeDispatchAck>();
+        const result = yield* Deferred.make<Output>();
         const call = { prepared, input, result };
         return yield* Effect.acquireUseRelease(
           Effect.sync(() => {

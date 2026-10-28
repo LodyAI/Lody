@@ -804,6 +804,16 @@ export class MessageHandler {
   private localProjectControlService: LocalProjectControlService;
   private localWorkspaceCatalog: LocalWorkspaceCatalogService;
   private machineRpcServer: LoroStreamsMachineRpcServer | null = null;
+  private encryptedQueryServer: LoroStreamsMachineRpcServer | null = null;
+
+  async readEncryptedQuery(
+    input: import('@lody/shared/e2ee-rpc').E2eeQueryInput,
+    expiresAt: number,
+    signal: AbortSignal
+  ) {
+    if (!this.encryptedQueryServer) throw new Error('e2ee_rpc_unavailable');
+    return this.encryptedQueryServer.readQuery(input, expiresAt, signal);
+  }
   private machineRpcTokenProvider: LoroStreamsTokenProviderLegacy | null = null;
   private machineRpcGatewayBaseUrl: string | null = null;
   private machineRpcServerStartPromise: Promise<void> | null = null;
@@ -2471,10 +2481,13 @@ export class MessageHandler {
     }
   }
 
-  private async getLocalProjectGitStateForRpc(args: {
-    localProjectId: LocalProjectId;
-    requestedByUserId: string;
-  }): Promise<LocalProjectGitStateRpcResponse> {
+  private async getLocalProjectGitStateForRpc(
+    args: {
+      localProjectId: LocalProjectId;
+      requestedByUserId: string;
+    },
+    verifiedOwner = false
+  ): Promise<LocalProjectGitStateRpcResponse> {
     const failure = (error: string, message: string): LocalProjectGitStateRpcResponse => ({
       type: 'local-project/git-state_response',
       machineId: this.machineId,
@@ -2485,20 +2498,24 @@ export class MessageHandler {
       message,
     });
 
-    let access: Awaited<ReturnType<CloudPort['access']['verifyMachineAccess']>>;
-    try {
-      access = await this.cloudPort.access.verifyMachineAccess({
-        workspaceId: this.workspaceId,
-        machineId: this.machineId,
-        requesterUserId: args.requestedByUserId,
-        localProjectId: args.localProjectId,
-      });
-    } catch (error) {
-      return failure('access_check_failed', formatErrorMessage(error));
-    }
+    // The encrypted server is reachable only after signed same-member read authorization.
+    // Ordinary/local callers retain their existing account/project access check.
+    if (!verifiedOwner) {
+      let access: Awaited<ReturnType<CloudPort['access']['verifyMachineAccess']>>;
+      try {
+        access = await this.cloudPort.access.verifyMachineAccess({
+          workspaceId: this.workspaceId,
+          machineId: this.machineId,
+          requesterUserId: args.requestedByUserId,
+          localProjectId: args.localProjectId,
+        });
+      } catch (error) {
+        return failure('access_check_failed', formatErrorMessage(error));
+      }
 
-    if (!access.allowed) {
-      return failure('access_denied', access.reason);
+      if (!access.allowed) {
+        return failure('access_denied', access.reason);
+      }
     }
 
     const rootPath = await resolveWorkspaceLocalProjectRootPathWithRetry(
@@ -2871,7 +2888,9 @@ export class MessageHandler {
       workspaceDocument: this.workspaceDocument,
     });
     this.codeCollabV2Service = new CodeCollabV2Service({
+      readOnly: config.encryptedWorkspace,
       observeWorkspaceGit: async ({ ownerSessionId, workspaceRoot }) => {
+        if (config.encryptedWorkspace) return;
         await workspaceGitService.syncLocalWorkspace(ownerSessionId, workspaceRoot);
       },
       resolveWorkspace: this.resolveCodeCollabV2Workspace,
@@ -3234,27 +3253,31 @@ export class MessageHandler {
       },
     });
     const streamsTokens = config.encryptedWorkspace ? null : this.cloudPort.streamsTokens;
-    if (streamsTokens) {
+    if (streamsTokens || config.encryptedWorkspace) {
       const cliHttpFetch = getCliHttpFetch({ logger: this.logger });
       const rpcConnectTimeoutMs = readTimeoutEnv('LODY_LORO_RPC_CONNECT_TIMEOUT_MS', 30_000);
       this.logger.debug(
         `[rpc-server:${this.machineId}] using Loro Streams RPC connect timeout ${rpcConnectTimeoutMs}ms`
       );
-      const streamsTokenProvider = streamsTokens.createTokenProviderLegacy({
+      const streamsTokenProvider = streamsTokens?.createTokenProviderLegacy({
         workspaceId: this.workspaceId,
       });
-      this.machineRpcTokenProvider = streamsTokenProvider;
-      const jsonStreamClient = createLoroStreamsJsonStreamClient({
-        bucketId: LORO_STREAMS_BUCKET_ID,
-        getToken: async () => await streamsTokenProvider.getToken(),
-        getBaseUrl: () =>
-          streamsTokenProvider.getGatewayBaseUrl() ?? this.machineRpcGatewayBaseUrl ?? undefined,
-        fetchImpl: cliHttpFetch,
-        timeout: {
-          connectTimeoutMs: rpcConnectTimeoutMs,
-        },
-      });
-      this.machineRpcServer = new LoroStreamsMachineRpcServer({
+      this.machineRpcTokenProvider = streamsTokenProvider ?? null;
+      const jsonStreamClient = streamsTokenProvider
+        ? createLoroStreamsJsonStreamClient({
+            bucketId: LORO_STREAMS_BUCKET_ID,
+            getToken: async () => await streamsTokenProvider.getToken(),
+            getBaseUrl: () =>
+              streamsTokenProvider.getGatewayBaseUrl() ??
+              this.machineRpcGatewayBaseUrl ??
+              undefined,
+            fetchImpl: cliHttpFetch,
+            timeout: {
+              connectTimeoutMs: rpcConnectTimeoutMs,
+            },
+          })
+        : undefined;
+      const queryServer = new LoroStreamsMachineRpcServer({
         logger: this.logger,
         workspaceId: this.workspaceId,
         machineId: this.machineId,
@@ -3558,24 +3581,31 @@ export class MessageHandler {
           });
         },
         probeLocalProjectMember: async ({ localProjectId, requestedByUserId }) => {
-          const access = await this.cloudPort.access.verifyMachineAccess({
-            workspaceId: this.workspaceId,
-            machineId: this.machineId,
-            requesterUserId: requestedByUserId,
-            localProjectId,
-          });
-          if (!access.allowed) throw new Error('Project group member access denied');
+          if (!config.encryptedWorkspace) {
+            const access = await this.cloudPort.access.verifyMachineAccess({
+              workspaceId: this.workspaceId,
+              machineId: this.machineId,
+              requesterUserId: requestedByUserId,
+              localProjectId,
+            });
+            if (!access.allowed) throw new Error('Project group member access denied');
+          }
           return this.probeProjectLocalMember(localProjectId);
         },
         getLocalProjectGitState: async ({ localProjectId, requestedByUserId }) =>
-          await this.getLocalProjectGitStateForRpc({
-            localProjectId,
-            requestedByUserId,
-          }),
+          await this.getLocalProjectGitStateForRpc(
+            {
+              localProjectId,
+              requestedByUserId,
+            },
+            config.encryptedWorkspace
+          ),
         dispatchLocalProjectControl: async (request) =>
           await this.dispatchLocalProjectControlViaRpc(request),
         onFatalAuthFailure: (error) => this.onFatalAuthFailure?.(error),
       });
+      if (config.encryptedWorkspace) this.encryptedQueryServer = queryServer;
+      else this.machineRpcServer = queryServer;
     } else {
       this.logger.debug('Streams RPC disabled: cloud Streams port unavailable');
     }
@@ -10296,6 +10326,7 @@ export class MessageHandler {
     this.sessionFileBackfillStopped = true;
     this.cancelPendingPermissionRequests();
     this.machineRpcServer?.stop();
+    this.encryptedQueryServer?.stop();
     this.sessionDispatchWatcher.stop();
     this.codeCollabV2Service.dispose();
     for (const handle of this.sessionLifecycleWatchHandles) handle.unsubscribe();

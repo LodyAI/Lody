@@ -7,8 +7,9 @@ Machine RPC contracts: [transport map](../../.agents/docs/rpc-loro-streams-rpc.m
 
 ## Invariants
 
-- Encrypted dispatch retains exact frames across retry/fallback. Receipt ACK never
-  completes the shared execution claim. [Ownership/close](README.md#encrypted-dispatch).
+- Encrypted RPC retains exact frames. Reads require read authority, same-member
+  machines and bounded signed pages; no execution journal. Missing pages never
+  complete. Receipt ACKs never finish execution claims. [Contract](README.md#encrypted-read-queries).
 - Request stream ids are workspace/machine scoped:
   `getLoroMachineRpcRequestStreamId(workspaceId, machineId)` returns
   `<workspaceId>:rpc:req:<machineId>`.
