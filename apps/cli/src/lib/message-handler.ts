@@ -45,7 +45,6 @@ import { handleMemoryProviderRequest } from './memory-providers';
 import { readMessageAuthor } from '@lody/shared';
 import { resolveSessionMessageAuthor } from '@/session/message-author';
 import { IosSimulatorService } from '@/ios-simulator/service';
-import { listMcpTools } from '@/mcp/list-mcp-tools';
 import { TurnTokenUsageLedger, turnTokenUsageFromUpdate } from './usage/turn-token-usage';
 import os from 'os';
 import fs from 'fs';
@@ -6886,7 +6885,20 @@ export class MessageHandler {
         return this.probeProjectLocalMember(request.params.localProjectId as LocalProjectId);
       }
       case 'mcp/list-tools':
-        return await listMcpTools(request.params.server);
+      case 'mcp/authentication': {
+        if (
+          request.workspaceId !== this.workspaceId ||
+          request.machineId !== this.machineId ||
+          request.ownerSessionId
+        )
+          throw new Error('MCP local authentication scope mismatch.');
+        return request.method === 'mcp/list-tools'
+          ? await this.sessionManager.mcpAuthentication.listTools(
+              request.params.server,
+              request.params.requesterUserId
+            )
+          : await this.sessionManager.mcpAuthentication.request(request);
+      }
       case 'session/call-tool': {
         const { sessionId, name, arguments: args } = request.params;
         if (

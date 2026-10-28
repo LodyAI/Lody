@@ -971,6 +971,57 @@ describe('local MCP discovery routing', () => {
     createdAt: 1,
     updatedAt: 1,
   };
+  it.each(['local', 'cloud', 'unsupported'] as const)(
+    'keeps authentication configuration on the supported local route (%s)',
+    async (route) => {
+      const sent: unknown[] = [];
+      vi.stubGlobal('window', {
+        __LODY_ELECTRON__: true,
+        ipc: {
+          invoke: async (_channel: string, request: unknown) => {
+            sent.push(request);
+            return {
+              ok: true,
+              result: { type: 'mcp/authentication', status: 'authorized', hasCredentials: true },
+            };
+          },
+        },
+      });
+      const facade = createWorkspaceMachineRpcFacade({
+        workspaceId,
+        getMachineProtocolCapabilities: async () =>
+          route === 'unsupported' ? undefined : CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        targetRouter: {
+          getPlaneForMachine: () => (route === 'cloud' ? 'cloud' : 'local'),
+          resolvePlaneForMachine: async () => (route === 'cloud' ? 'cloud' : 'local'),
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('Authentication must never reach remote RPC');
+        },
+      });
+      const request = facade.requestLocalMcpAuthentication(localMachineId, {
+        server,
+        action: 'configure',
+        requesterUserId: 'owner',
+        authentication: { mode: 'manual', bearerToken: 'synthetic-private-token' },
+      });
+      if (route === 'local') {
+        expect(await request).toMatchObject({ status: 'authorized', hasCredentials: true });
+        expect(sent).toEqual([
+          expect.objectContaining({
+            method: 'mcp/authentication',
+            workspaceId,
+            params: expect.objectContaining({
+              authentication: { mode: 'manual', bearerToken: 'synthetic-private-token' },
+            }),
+          }),
+        ]);
+      } else {
+        await expect(request).rejects.toThrow('requires a supported local daemon');
+        expect(sent).toEqual([]);
+      }
+    }
+  );
   it.each([true, false])(
     'gates local inventory by daemon capability (supported=%s)',
     async (supported) => {

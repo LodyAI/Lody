@@ -557,8 +557,16 @@ export type WorkspaceRuntime = {
   ) => Promise<LocalProjectControlResponse | null>;
   requestLocalMcpTools: (
     machineId: MachineId,
-    server: WorkspaceMcpServerMeta
+    server: WorkspaceMcpServerMeta,
+    requesterUserId?: string
   ) => Promise<McpToolListResult>;
+  requestLocalMcpAuthentication: (
+    machineId: MachineId,
+    params: Extract<
+      import('@lody/shared').LocalMachineRpcRequest,
+      { method: 'mcp/authentication' }
+    >['params']
+  ) => Promise<import('@lody/shared').McpAuthenticationResult>;
   requestMachineBugReport: (
     machineId: MachineId,
     args: {

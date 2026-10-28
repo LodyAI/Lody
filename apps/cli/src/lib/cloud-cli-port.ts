@@ -575,10 +575,13 @@ export function createCloudE2eeMachinePort(options: {
   machineId: string;
   credential: string;
   authBaseUrl: string;
+  serverBaseUrl: string;
   logger: Logger;
   client?: Pick<ConvexClient, 'onUpdate' | 'query' | 'close'>;
 }): CloudPort {
   if (getCliPlatformKind() !== 'cloud') throw new Error('e2ee_unavailable');
+  const serverBaseUrl = options.serverBaseUrl.trim();
+  if (!serverBaseUrl) throw new Error('cloud_attachment_upload_unavailable');
   const base = createLocalCloudPort({ identity: { userId: options.accountId }, workspaces: [] });
   const client = options.client ?? new ConvexClient(options.authBaseUrl, { logger: false });
   const access = {
@@ -617,7 +620,7 @@ export function createCloudE2eeMachinePort(options: {
     ...base,
     kind: 'cloud',
     e2eeMachineScope: { workspaceId: options.workspaceId, genesisHash: options.genesisHash },
-    attachmentUpload: LODY_SERVER_URL?.trim() ? { serverBaseUrl: LODY_SERVER_URL } : null,
+    attachmentUpload: { serverBaseUrl },
     e2ee: {
       ...e2ee,
       ...(readExecutionOriginPage
