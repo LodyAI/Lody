@@ -266,7 +266,8 @@ Observed withdrawal invalidates authorization immediately. A strictly less than
 started, intersected with ledger/request deadlines. It does **not** prove an unknown
 withdrawal takes effect within 15 minutes if the server continuously withholds new
 heads: signatures/chains detect known rollback/forks, not globally latest state.
-Trusting complete latest delivery remains pending owner confirmation. Restart or
+On 2026-10-28, the owner confirmed acceptance of trusting the server not to
+continuously withhold newer heads; the MVP adds no signed freshness proof. Restart or
 clock uncertainty requires revalidation; unrelated content/local work stays usable.
 No network, cache, UI or execution integration is enabled by these primitives.
 See the [proposed sharing decision](../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).
