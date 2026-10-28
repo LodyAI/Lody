@@ -60,6 +60,7 @@ export type MessageQueueDisplayProps = {
   scheduledItems?: readonly ScheduledQueueItem[];
   onOpenScheduled?: (item: ScheduledQueueItem) => void;
   onEditScheduledTime?: (item: ScheduledQueueItem) => void;
+  onCancelScheduled?: (item: ScheduledQueueItem) => void;
   footerPosition?: 'below' | 'start' | 'end' | 'inline';
   roomy?: boolean | 'airy';
   title?: string;
@@ -128,6 +129,7 @@ export function MessageQueueDisplay({
   scheduledItems: dedicatedScheduledItems = [],
   onOpenScheduled,
   onEditScheduledTime,
+  onCancelScheduled,
   footerPosition = 'below',
   roomy = false,
   title,
@@ -372,6 +374,7 @@ export function MessageQueueDisplay({
                   item={item}
                   onOpen={onOpenScheduled}
                   onEditTime={onEditScheduledTime}
+                  onCancel={onCancelScheduled}
                   divided={index > 0}
                 />
               ))}

@@ -5597,6 +5597,27 @@ export const SessionChatInterface = memo(
       [currentUser, runtime, scheduledTimeEdit, t]
     );
 
+    const cancelScheduledMessage = useCallback(
+      async (item: ScheduledQueueItem) => {
+        if (!runtime || !currentUser) return;
+        try {
+          await runtime.withScheduleStore(item.scheduleId, () =>
+            new ScheduleRepository(runtime.repo, runtime.workspaceId).setEnabled({
+              scheduleId: item.scheduleId,
+              actorId: currentUser.id,
+              enabled: false,
+              now: getServerNow(),
+              activationId: uuidv4(),
+              requestId: uuidv4(),
+            })
+          );
+        } catch {
+          toast.error(t('scheduledMessage.saveError'));
+        }
+      },
+      [currentUser, runtime, t]
+    );
+
     // Presentation-only "opened by" provenance (MCP `lody_session_create`).
     // Read from the already-loaded session meta cache, so it costs no extra
     // document. `parentSessionId` children are excluded by the atom — they are
@@ -7365,6 +7386,9 @@ export const SessionChatInterface = memo(
                             }}
                             onEditScheduledTime={(item) => {
                               void openScheduledTimeEditor(item);
+                            }}
+                            onCancelScheduled={(item) => {
+                              void cancelScheduledMessage(item);
                             }}
                             onRemove={handleRemoveQueueItem}
                             onReorder={handleReorderQueueItem}

@@ -113,6 +113,7 @@ export const ScheduledSection: Story = {
     ...commonArgs,
     items: makeItems(2),
     onOpenScheduled: () => {},
+    onCancelScheduled: () => {},
     scheduledItems: [
       {
         scheduleId: 'scheduled-later',
@@ -137,6 +138,7 @@ export const ScheduledOnlyMobile: Story = {
     ...commonArgs,
     items: [],
     onOpenScheduled: () => {},
+    onCancelScheduled: () => {},
     scheduledItems: [
       {
         scheduleId: 'scheduled-only',

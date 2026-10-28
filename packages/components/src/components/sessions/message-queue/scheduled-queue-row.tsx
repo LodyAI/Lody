@@ -1,5 +1,9 @@
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
+import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { Menu } from '@lody/ui/menu';
+import { Button } from '@lody/ui/button';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
 import { formatUpcoming } from '../../schedules/schedule-format';
 import { queueSurface } from './surface';
@@ -20,14 +24,18 @@ export function ScheduledQueueRow({
   item,
   onOpen,
   onEditTime,
+  onCancel,
   divided = true,
 }: {
   item: ScheduledQueueItem;
   onOpen?: (item: ScheduledQueueItem) => void;
   onEditTime?: (item: ScheduledQueueItem) => void;
+  onCancel?: (item: ScheduledQueueItem) => void;
   divided?: boolean;
 }) {
   const { t, i18n } = useTranslation();
+  const mobile = useIsMobile();
+  const hasMenu = !!onOpen || !!onCancel;
   const rowProps = stylex.props(queueSurface.scheduledRow);
   const time = formatUpcoming(item.at, item.timeZone, Date.now(), i18n.language);
   return (
@@ -46,6 +54,40 @@ export function ScheduledQueueRow({
         {time}
       </button>
       <span {...stylex.props(queueSurface.scheduledTitle)}>{item.title}</span>
+      {hasMenu ? (
+        <Menu.Root>
+          <Menu.Trigger
+            render={
+              <Button
+                icon
+                variant="ghost"
+                aria-label={t('common.more', 'More')}
+                className={mobile ? 'size-10 shrink-0' : 'size-7 shrink-0'}
+              >
+                <MoreHorizontal size={16} />
+              </Button>
+            }
+          />
+          <Menu.Content align="end" width="compact">
+            {onOpen ? (
+              <Menu.Item icon={Pencil} onClick={() => onOpen(item)}>
+                {t('common.edit', 'Edit')}
+              </Menu.Item>
+            ) : null}
+            {onCancel ? (
+              <Menu.Item
+                icon={Trash2}
+                tone="destructive"
+                onClick={() => {
+                  void onCancel(item);
+                }}
+              >
+                {t('scheduledMessage.cancel')}
+              </Menu.Item>
+            ) : null}
+          </Menu.Content>
+        </Menu.Root>
+      ) : null}
     </div>
   );
 }
