@@ -1,26 +1,28 @@
 # Machine E2EE custody
 
-`CLAUDE.md` is a symlink to this file. Parent CLI rules apply.
+`CLAUDE.md` aliases this; CLI rules apply.
 
 - Lazy machine-only; ordinary startup never probes keyring.
-- First creation probes OS keystore write/read; selects OS or file protection permanently.
+- Creation probes OS keystore write/read; permanently selects OS or file protection.
   Reopen requires original selector/KEK; never probe or switch.
 - File protection: owner-only dirs/files, no symlinks. Windows needs real
   owner/DACL checks via official process Layer, not Unix modes.
 - Core node-custody owns blobs. No personal/private exports, plaintext device files
   or silent keyring downgrade.
-- Display file protection before pairing approval.
+- Show file protection before pairing approval.
 
 - Keyring helper: 10-second timeout, stdin secrets. Confirm termination before
   fallback; retain failed release owners.
-- Batch Windows ACL checks. Retry SQLite BUSY asynchronously with a bound;
+- Batch Windows ACL checks; bound asynchronous SQLite BUSY retries;
   never block busy_timeout during keyring work.
 
 - Resume first Windows ACL setup only with empty custody; otherwise validate.
 - `runtime.ts` composes Feed/VerifiedLedger, installed keys and optional receiver.
   Offline open/status; cloud I/O stays in cloud-cli-port.
   Report damaged history/pins distinctly; never reset trusted pins from remote hints.
-- Execution: `authorizeExecution`; authenticated read; RAM-only <15min from read start.
+- Execution: `authorizeExecution`; same ledger membership as machine; authenticated read;
+  RAM-only <15min/read-start. Credential revoke: fence/clear grants before drain,
+  never network-retry.
 - Journal originals before feed/pin; rebase core pin first after 64 records.
   Retired cache cleanup cannot fail open.
 - No plaintext RPC/presence/attachments/schedules before encrypted channels exist.
@@ -38,13 +40,12 @@
   substitution or uncertain ACP retry.
   [Recovery](../../../README.md#local-encrypted-execution-log-recovery).
 - `prepareCliE2eeMachineLegacy` binds the retained credential hash to the exact
-  desktop-generated 16-byte pairing session using core's fixed v1 helper. Machine
+  desktop 16-byte pairing session via core's fixed v1 helper. Machine
   possession binds strict UTF-8 machineId; activation matches the verified current
   device and retained signed admission. Session
   IDs stay outside possession and ledger records; old developer formats need recreation.
-  Local preparation/activation: OS-user socket; remote pairing: signed offer/scoped port. Fleet checks account/workspace/genesis first.
-  Activation refreshes verified ledger/mailbox; acknowledges only an installed current
-  key. Failure keeps pairing retryable.
+  Local prepare/activate: OS-user socket; remote: signed offer/scoped port. Fleet checks account/workspace/genesis first.
+  Activation refreshes verified ledger/mailbox; ACK only an installed current key. Failure keeps pairing retryable.
 
 - Staging read denial/I/O failure cannot block independently verified mailbox reception.
 - Retain old-epoch sends; select confirmed keys per operation; rotation hints never pause.
@@ -115,7 +116,6 @@
 - Reset: same-user socket; drain, exclusive sibling lease, archive whole dir;
   fresh approval/KEK. OS/unknown stays OS.
 
-Member removal: verify identity/persist receipt before close releases custody.
-Stop/drain execution and sync; erase only account/genesis/device content under its
-identity lease/pairing mutex. Retry busy cleanup before open; preserve projects.
-Rejoin with fresh member/keys.
+Member removal: verify identity/persist receipt before custody release. Drain execution/sync;
+erase only account/genesis/device content under identity lease/pairing mutex. Retry busy
+cleanup before open; preserve projects. Rejoin with new member/keys.

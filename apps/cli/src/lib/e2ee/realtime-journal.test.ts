@@ -1504,6 +1504,37 @@ describe('host-only E2EE realtime journal', () => {
       }
     );
 
+    it('refuses a late authorization after the workspace closes without consuming a start', async () => {
+      const entered = Promise.withResolvers<void>();
+      const released = Promise.withResolvers<void>();
+      let open = true;
+      const execution = makeEncryptedAgentExecution({
+        genesis: key.genesis,
+        workspaceId: key.workspaceId,
+        targetMachineId: key.targetMachineId,
+        journal: () => journal,
+        isExecutionOpen: () => open,
+        resolveVerifiedOriginal: () =>
+          Effect.succeed({
+            requesterDevice: 'ab'.repeat(32),
+            requesterCryptoUserId: '1e'.repeat(32),
+            expiresAt: 1000,
+          }),
+        authorizeExecution: () =>
+          Effect.promise(async () => {
+            entered.resolve();
+            await released.promise;
+            return { _tag: 'Authorized' as const };
+          }),
+      });
+      const pending = Effect.runPromise(execution.claim(intent));
+      await entered.promise;
+      open = false;
+      released.resolve();
+      expect(await pending).toEqual({ state: 'denied' });
+      expect(journal.read(key)).toBeNull();
+    });
+
     it('cancels authorization without consuming execution evidence', async () => {
       let entered: () => void = () => {};
       const ready = new Promise<void>((resolve) => {

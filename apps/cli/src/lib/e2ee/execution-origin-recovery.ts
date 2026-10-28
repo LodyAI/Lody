@@ -1,3 +1,4 @@
+import { isCloudE2eeMemberRemoved, isCloudE2eeDeviceRevoked } from '../cloud-e2ee-errors';
 import { Effect } from 'effect';
 import type { PayloadProtectionOpenInput } from '@loro-dev/streams-crdt';
 import { encodeStreamsRoomAdditionalData } from 'loro-repo/transport/streams';
@@ -117,7 +118,11 @@ export function makeExecutionOriginRecovery(
     // unclaimed turn pending; cleanup and cancellation stay in its Effect scope.
     yield* work.pipe(
       Effect.timeout('3 seconds'),
-      Effect.catch(() => Effect.void)
+      Effect.catch((cause) =>
+        isCloudE2eeMemberRemoved(cause) || isCloudE2eeDeviceRevoked(cause)
+          ? Effect.fail(cause)
+          : Effect.void
+      )
     );
   });
   return { recover, clear: () => cursors.clear() };

@@ -1,3 +1,4 @@
+import { CloudE2eeMemberRemoved, CloudE2eeDeviceRevoked } from '../src/lib/cloud-e2ee-errors';
 import { encodeStreamsRoomAdditionalData } from 'loro-repo/transport/streams';
 import { bindTestPresenceApplication } from './presence-application-fixture';
 import { Lody } from '../src/lib/lody';
@@ -2605,6 +2606,7 @@ describe('SessionExecutionService', () => {
   // left the user with an unanswered message and no error anywhere.
   const runSilentPromptTurn = async (options: {
     sessionId: string;
+    userTurnId?: string;
     workspaceId?: WorkspaceId;
     requesterUserId?: string;
     inputAuthor?: SessionHistoryInput['author'];
@@ -2635,7 +2637,7 @@ describe('SessionExecutionService', () => {
           ]
         : []),
       {
-        id: 'turn-user-1',
+        id: options.userTurnId ?? 'turn-user-1',
         role: 'user',
         author: options.inputAuthor,
         status: 'pending',
@@ -2748,7 +2750,7 @@ describe('SessionExecutionService', () => {
         workspaceId: options.workspaceId ?? 'workspace-1',
         project: undefined,
         acpSessionConfig: { prompt: 'hi', cliType: 'builtin' as const, agentType: 'codex' },
-        userTurnId: 'turn-user-1',
+        userTurnId: options.userTurnId ?? 'turn-user-1',
         userId: options.requesterUserId ?? 'user-1',
         userName: 'User',
         userEmail: 'user@example.com',
@@ -2849,6 +2851,11 @@ describe('SessionExecutionService', () => {
       | 'revoked-device'
       | 'guest'
       | 'removed-member'
+      | 'same-member'
+      | 'other-member'
+      | 'backfill-member-removed'
+      | 'backfill-device-revoked'
+      | 'backfill-network'
   ) => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-native-execution-'));
     vi.stubEnv('LODY_DATA_DIR', directory);
@@ -2860,8 +2867,17 @@ describe('SessionExecutionService', () => {
     const sessionId = 'production-session' as SessionId;
     // The real encrypted UI writes runtime.accountId, not the ledger's crypto user ID.
     const user = accountId;
-    const snapshotOnly = mode === 'snapshot' || mode === 'delayed' || mode === 'expired';
-    const deniedSigner = mode === 'revoked-device' || mode === 'guest' || mode === 'removed-member';
+    const backfillFailure = mode.startsWith('backfill-');
+    const terminalBackfill =
+      mode === 'backfill-member-removed' || mode === 'backfill-device-revoked';
+    const removalReleased = Promise.withResolvers<void>();
+    const snapshotOnly =
+      mode === 'snapshot' || mode === 'delayed' || mode === 'expired' || backfillFailure;
+    const deniedSigner =
+      mode === 'revoked-device' ||
+      mode === 'guest' ||
+      mode === 'removed-member' ||
+      mode === 'other-member';
     const identity = cliE2eeIdentityDirectory(accountId, workspaceId);
     const noKeyring = async () => {
       throw new Error('synthetic missing keyring');
@@ -2958,10 +2974,10 @@ describe('SessionExecutionService', () => {
             | typeof owner
             | Effect.Success<ReturnType<typeof ownerCustody.prepareDevice>> = owner;
           const senderMemberId = Result.getOrThrow(Bytes.membershipId(new Uint8Array(16).fill(40)));
-          if (deniedSigner) {
+          if (deniedSigner || mode === 'same-member') {
             const other = yield* ownerCustody.prepareDevice();
             originalSigner = other;
-            if (mode === 'revoked-device') {
+            if (mode === 'revoked-device' || mode === 'same-member') {
               yield* append(
                 yield* prepareDeviceAdmission({
                   genesis: genesis.genesis,
@@ -3013,6 +3029,19 @@ describe('SessionExecutionService', () => {
           row.set('status', 'pending');
           row.set('inputConfig', inputConfig);
           row.set('items', [{ type: 'text', text: 'hi' }]);
+          if (backfillFailure) {
+            const next = source.getList('history').insertContainer(1, new LoroMap());
+            for (const [key, value] of Object.entries({
+              id: 'turn-user-2',
+              role: 'user',
+              userId: user,
+              timestamp: new Date().toISOString(),
+              status: 'pending',
+              inputConfig,
+              items: [{ type: 'text', text: 'hi' }],
+            }))
+              next.set(key, value);
+          }
           source.commit();
           const update = source.export({ mode: 'update' });
           const plaintext = new Uint8Array(update.length + 4);
@@ -3110,11 +3139,17 @@ describe('SessionExecutionService', () => {
         })
       );
       const historyReads: string[] = [];
-      let originalAvailable = mode !== 'delayed';
+      let originalAvailable = mode !== 'delayed' && !backfillFailure;
       const recoveredRooms: string[] = [];
       const cloud = {
         readExecutionOriginPage: async (input: { docId: string }) => {
           recoveredRooms.push(input.docId);
+          if (!originalAvailable && mode === 'backfill-member-removed')
+            throw new CloudE2eeMemberRemoved();
+          if (!originalAvailable && mode === 'backfill-device-revoked')
+            throw new CloudE2eeDeviceRevoked();
+          if (!originalAvailable && mode === 'backfill-network')
+            throw new Error('synthetic network failure');
           return {
             messages: originalAvailable ? [fixture.message] : [],
             before: '0',
@@ -3154,6 +3189,13 @@ describe('SessionExecutionService', () => {
         machineName: 'Synthetic',
         cloudPort: createTestCloudPort({ kind: 'cloud', e2ee: cloud as never }),
         memoryPressure: {} as never,
+        ...(terminalBackfill
+          ? {
+              onEncryptedMemberRemoved: async () => {
+                await removalReleased.promise;
+              },
+            }
+          : {}),
         machineLifecycleCapability: {
           launchMode: 'foreground',
           canRemoteRestart: false,
@@ -3192,11 +3234,12 @@ describe('SessionExecutionService', () => {
         sessionDoc.handle.doc.import(snapshot);
         snapshot.fill(0);
       }
-      const dispatch = () =>
+      const dispatch = (userTurnId = 'turn-user-1') =>
         runSilentPromptTurn({
           sessionId,
           workspaceId,
           requesterUserId: user,
+          userTurnId,
           hasPromptEventsForTurn: true,
           prepared: true,
           encryptedExecution: composed.runtime.options.handlerConfig.encryptedExecution,
@@ -3204,6 +3247,33 @@ describe('SessionExecutionService', () => {
             submitted.push('hi');
           },
         });
+      if (backfillFailure) {
+        expect(
+          await Effect.runPromise(host.authorizeExecution(workspaceId, fixture.sender))
+        ).toEqual({ _tag: 'Authorized' });
+        const waiting = await dispatch();
+        expect(submitted).toEqual([]);
+        expect(recoveredRooms).toEqual(['session-production-session']);
+        expect(
+          await Effect.runPromise(host.authorizeExecution(workspaceId, fixture.sender))
+        ).toMatchObject({ _tag: terminalBackfill ? 'Denied' : 'Authorized' });
+        if (terminalBackfill)
+          await expect(host.status()).rejects.toThrow(
+            mode === 'backfill-member-removed' ? 'e2ee_member_removed' : 'e2ee_device_revoked'
+          );
+        if (!terminalBackfill) {
+          expect(waiting.getHistory()[0]?.status).toBe('pending');
+          expect(waiting.failureMessages).toEqual([]);
+        }
+        originalAvailable = true;
+        await protection.config.provider
+          .open({ ...fixture.sealed, context: fixture.context, additionalData: fixture.aad })
+          .catch(() => undefined);
+        const later = await dispatch('turn-user-2');
+        expect(submitted).toEqual(terminalBackfill ? [] : ['hi']);
+        if (!terminalBackfill) expect(later.getHistory()[0]?.status).toBe('handled');
+        return;
+      }
       if (mode === 'delayed' || mode === 'expired') {
         if (mode === 'expired') vi.setSystemTime(Date.parse('2026-10-28T02:15:00Z'));
         const waiting = await dispatch();
@@ -3223,7 +3293,11 @@ describe('SessionExecutionService', () => {
       expect(submitted).toEqual(deniedSigner ? [] : ['hi']);
       expect(result.getHistory()[0]?.status).toBe(deniedSigner ? 'failed' : 'handled');
       expect(result.failureMessages).toEqual(
-        deniedSigner ? [expect.stringContaining('not authorized')] : []
+        mode === 'other-member'
+          ? [expect.stringContaining('e2ee_machine_not_owned')]
+          : deniedSigner
+            ? [expect.stringContaining('not authorized')]
+            : []
       );
       expect(recoveredRooms).toEqual(
         !snapshotOnly
@@ -3239,6 +3313,13 @@ describe('SessionExecutionService', () => {
         )
       ).toBe(true);
     } finally {
+      removalReleased.resolve();
+      if (lody)
+        await (
+          lody as unknown as { encryptedWorkspace: CliE2eeWorkspaceLegacy }
+        ).encryptedWorkspace.removalCleanup();
+      if (mode === 'backfill-device-revoked')
+        expect(fs.existsSync(path.join(identity, 'custody'))).toBe(true);
       await lody?.documentManager.cleanUp();
       await presence.closeLegacy();
       source.free();
@@ -3250,7 +3331,19 @@ describe('SessionExecutionService', () => {
 
   it('executes the real UI account ID through production Lody construction without injected authorization', () =>
     runProductionSignedTurn('account'));
-  it.each(['snapshot', 'delayed', 'expired', 'revoked-device', 'guest', 'removed-member'] as const)(
+  it.each([
+    'snapshot',
+    'delayed',
+    'expired',
+    'same-member',
+    'other-member',
+    'revoked-device',
+    'guest',
+    'removed-member',
+    'backfill-member-removed',
+    'backfill-device-revoked',
+    'backfill-network',
+  ] as const)(
     'executes a signed durable turn through production Lody construction (%s)',
     runProductionSignedTurn
   );

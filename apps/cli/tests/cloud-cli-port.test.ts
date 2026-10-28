@@ -1,3 +1,4 @@
+import { isCloudE2eeMemberRemoved, isCloudE2eeDeviceRevoked } from '../src/lib/cloud-e2ee-errors';
 import { Effect, Exit, Scope } from 'effect';
 import type { Logger } from '../src/utils/logger';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -596,3 +597,54 @@ it('reads retained execution originals from the admitted encrypted stream with i
     vi.unstubAllEnvs();
   }
 });
+
+it.each(['e2ee_member_removed', 'e2ee_device_revoked', 'temporary_network_failure'] as const)(
+  'brands only fixed credential endpoint confirmation (%s)',
+  async (code) => {
+    vi.stubEnv('LODY_HTTP_TRANSPORT', 'default');
+    const logger: Logger = {
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      trace: () => {},
+      success: () => {},
+      setLevel: () => {},
+      child: () => logger,
+      close: async () => {},
+    };
+    vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      expect(body.path).toBe('e2eeContent:contentStreamsToken');
+      expect(body.args[0]).toMatchObject({
+        workspaceId: 'workspace',
+        credential: 'synthetic-device-credential',
+      });
+      return Response.json({
+        status: 'error',
+        errorMessage: 'e2ee_member_removed',
+        errorData: { code },
+      });
+    });
+    try {
+      const port = createCloudE2eePort({
+        authBaseUrl: 'https://credential-fixture.convex.cloud',
+        logger,
+      });
+      const failure = await port.readExecutionOriginPage!(
+        {
+          workspaceId: 'workspace',
+          credential: 'synthetic-device-credential',
+          docId: 'session-session',
+        },
+        new AbortController().signal
+      ).catch((cause: unknown) => cause);
+      expect(isCloudE2eeMemberRemoved(failure)).toBe(code === 'e2ee_member_removed');
+      expect(isCloudE2eeDeviceRevoked(new Error('SDK wrapper', { cause: failure }))).toBe(
+        code === 'e2ee_device_revoked'
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  }
+);

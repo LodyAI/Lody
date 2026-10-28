@@ -4589,7 +4589,44 @@ describe('machine execution authorization freshness', () => {
     }
   });
 
-  it('immediately applies verified role changes, revocation and removal without renewing cached authority', async () => {
+  it('terminal invalidation fences cached authority and in-flight refreshes', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'execution-invalidation-'));
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const { fixture, gate, io, device } = yield* executionFixture(directory);
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+            _tag: 'Authorized',
+          });
+          const entered = Promise.withResolvers<void>();
+          const released = Promise.withResolvers<ReturnType<typeof page>>();
+          io.respond = async () => {
+            entered.resolve();
+            return released.promise;
+          };
+          const other = yield* Effect.forkChild(
+            gate.authorizeExecution('workspace', hex(device.publicKey.toBytes()))
+          );
+          yield* Effect.promise(() => entered.promise);
+          gate.invalidate();
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+            _tag: 'Denied',
+            reason: 'closed',
+          });
+          released.resolve(page(fixture.records));
+          expect(yield* Fiber.join(other)).toEqual({ _tag: 'Denied', reason: 'closed' });
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+            _tag: 'Denied',
+            reason: 'closed',
+          });
+        })
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects cross-member roles and immediately applies same-member revocation without renewing cached authority', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'execution-membership-'));
     try {
       await execute(
@@ -4629,7 +4666,8 @@ describe('machine execution authorization freshness', () => {
             )
               yield* append({ _tag: 'SetRole', membershipId: device.membershipId, role });
             expect(yield* gate.authorizeExecution('workspace', key)).toMatchObject({
-              _tag: role === 'guest' ? 'Denied' : 'Authorized',
+              _tag: 'Denied',
+              reason: role === 'guest' ? 'not-authorized' : 'e2ee_machine_not_owned',
             });
           }
           const extraCustody = yield* makeNodeE2eeCustody({

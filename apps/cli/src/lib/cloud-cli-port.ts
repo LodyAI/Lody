@@ -1,5 +1,5 @@
 import { StreamsClient } from '@loro-dev/streams-client';
-import { CloudE2eeMemberRemoved } from './cloud-e2ee-errors';
+import { CloudE2eeMemberRemoved, CloudE2eeDeviceRevoked } from './cloud-e2ee-errors';
 import { Effect } from 'effect';
 import { SessionAttachmentTransfer } from './session-attachment-transfer';
 import { getCliPlatformKind } from './cli-platform';
@@ -216,6 +216,8 @@ export function createCloudE2eePort(
       const rejected = z.object({ data: z.object({ code: z.string() }) }).safeParse(cause);
       if (rejected.success && rejected.data.data.code === 'e2ee_member_removed')
         throw new CloudE2eeMemberRemoved();
+      if (rejected.success && rejected.data.data.code === 'e2ee_device_revoked')
+        throw new CloudE2eeDeviceRevoked();
       throw cause;
     }
   };

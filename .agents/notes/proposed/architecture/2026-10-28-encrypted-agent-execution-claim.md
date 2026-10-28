@@ -64,7 +64,13 @@ different operations, so inspecting the live document at matching counters is un
 Execution identity is the verified signing device and its ledger actor, returned
 as `requesterCryptoUserId`. The native `host.authorizeExecution` resolves that
 device in the current verified ledger and checks its membership, role and
-revocation state. The original signature and current authority remain separate
+revocation state. For the encrypted MVP it additionally requires the requester
+and target machine device to belong to the **same verified ledger membership**.
+Another currently valid Member is rejected with `e2ee_machine_not_owned`, displayed
+as “加密工作区暂不支持使用其他成员的机器”. Machine or project sharing does not enable
+cross-member execution in this MVP. Another active device of the machine's own
+member can execute; Guest/recovery/revoked devices remain forbidden.
+The original signature and current authority remain separate
 checks. UI `requesterUserId`/turn account IDs are display metadata and are never
 compared with the crypto actor, used to select authority, or bound into new
 execution claim evidence. Display-field edits do not change execution input.
@@ -73,7 +79,8 @@ turn without rewriting its exact bytes or permitting another start. The machine
 adds no account directory query or inferred account-to-crypto mapping. Encrypted
 watcher dispatch bypasses ordinary account visibility/catalog admission and does
 not read or publish account-based authority snapshots; it still must pass the
-execution service's verified-device gate. Ordinary workspace admission is unchanged.
+execution service's verified-device and same-member ownership gate. Ordinary
+workspace visibility and project-sharing admission is unchanged.
 Thus revoking one device denies its pending turns even while its user and another
 device stay active. Missing originals, conflicting signer attestations and modified execution input
 prevent a new start. A snapshot signer never becomes the origin of every old turn
@@ -131,6 +138,18 @@ unknown" and is never taken over.
   Both stores use zero SQLite busy timeout. Missing main files
   with retained control evidence are errors, never silently provisioned replacements.
   Explicit reset retains retired execution keys; a new user turn has a new key.
+- Confirmed credential revocation: branded errors from the fixed machine-credential
+  endpoint bypass the missing-origin retry catch. The host synchronously closes new
+  execution admission and invalidates its native grant cache, then reuses the existing
+  removal callback to drain only that workspace. Whole-member removal keeps the
+  identity-verified durable receipt and managed-data erasure. A single-device revoke
+  stops/closes without claiming whole-member removal or erasing local originals.
+  Network errors, arbitrary error-message strings and unknown authorization failures
+  do not authorize that terminal path. Shared refresh I/O remains owned by the native
+  Scope until close; terminal invalidation rejects cached and in-flight grants.
+  A synchronous open check inside the SQLite claim also rejects a late authorization
+  result after closure, including an injected authorization implementation. Existing
+  completed/uncertain evidence stays readable and never permits a new execution.
 - Completion: after the turn body settles, a small fixed settlement marker is
   persisted. It is not an encrypted response or proof of business success. A failed
   finish write logs through the owning turn's observed warning boundary and leaves
@@ -177,7 +196,13 @@ authorization callback or mock host. Synthetic cloud I/O supplies the signed
 records; the ACP harness records prompt submission. It was RED with the absent
 production adapter and GREEN after defaulting to the owned host. Native production regressions also reject updates signed before device revocation,
 member downgrade to Guest or member removal, despite an otherwise valid display
-account. Additional RED → GREEN regressions cover native construction from a verified
+account. Additional native/SQLite RED → GREEN cases cover an active cross-member
+request actually submitting a prompt before the ownership restriction; cached
+authorization surviving real branded backfill revocation before the terminal hook;
+and an injected late authorization claiming a start after close before the final
+SQLite fence. Same-member second devices and network retry are positive controls.
+Exact credential-response parsing does not trust a removal-looking error message.
+Ordinary `not_visible` and `project_not_shared` verdicts remain definitive denials. Additional RED → GREEN regressions cover native construction from a verified
 snapshot signed by another device, delayed original availability without terminal
 writes, original expiry, the actual Streams HTTP backward parser, bounded aborted
 reads and watcher stop cancellation. These tests do not claim deployment acceptance.

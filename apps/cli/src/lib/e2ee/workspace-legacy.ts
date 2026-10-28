@@ -2,7 +2,7 @@ import { makeExecutionOriginRecovery } from './execution-origin-recovery';
 import { ExecutionOrigins } from './execution-origins';
 import type { EncryptedExecutionIntent } from './agent-execution';
 import type { LoroDoc } from 'loro-crdt';
-import { isCloudE2eeMemberRemoved } from '../cloud-e2ee-errors';
+import { isCloudE2eeMemberRemoved, isCloudE2eeDeviceRevoked } from '../cloud-e2ee-errors';
 import {
   getSessionRoomId,
   isSessionDocRoomId,
@@ -347,7 +347,7 @@ type CliE2eeWorkspaceOptions = {
   cloud: CloudE2eePort;
   onUnavailable: () => void;
   /** Stop and drain the document/execution owner. Invoked outside the refresh flight. */
-  onRemoved?: () => Promise<void>;
+  onRemoved?: (reason: 'member-removed' | 'device-revoked') => Promise<void>;
   keyring?: MachineKeyring;
 };
 const Activation = z
@@ -497,6 +497,7 @@ async function openWorkspaceOwned(
   requireActivation: boolean,
   pairing?: { pairingSessionId: string; frontendSigningPublicKey: string; signingPublicKey: string }
 ) {
+  let credentialFailureHandler: (cause: unknown) => void = () => {};
   const directory = cliE2eeIdentityDirectory(options.accountId, options.workspaceId);
   let activation: z.infer<typeof Activation> | undefined;
   if (requireActivation) {
@@ -602,6 +603,7 @@ async function openWorkspaceOwned(
         workspaceId: options.workspaceId,
         credential,
         cloud: options.cloud,
+        onCredentialFailure: (cause) => credentialFailureHandler(cause),
         runtime,
       });
       return {
@@ -656,8 +658,8 @@ async function openWorkspaceOwned(
       () => snapshotFlights.delete(flight),
       (cause) => {
         snapshotFlights.delete(flight);
-        if (isCloudE2eeMemberRemoved(cause)) {
-          startMemberRemoval();
+        if (isCloudE2eeMemberRemoved(cause) || isCloudE2eeDeviceRevoked(cause)) {
+          credentialFailureHandler(cause);
           return;
         }
         console.warn('[e2ee] snapshot repair request failed; will retry');
@@ -671,10 +673,15 @@ async function openWorkspaceOwned(
       'execution-origins.sqlite'
     )
   );
-  const originRecovery = options.cloud.readExecutionOriginPage
+  const readExecutionOriginPage = options.cloud.readExecutionOriginPage?.bind(options.cloud);
+  const originRecovery = readExecutionOriginPage
     ? makeExecutionOriginRecovery(
         executionOrigins,
-        options.cloud.readExecutionOriginPage.bind(options.cloud),
+        (input, signal) =>
+          readExecutionOriginPage(input, signal).catch((cause: unknown) => {
+            credentialFailureHandler(cause);
+            throw cause;
+          }),
         { workspaceId: options.workspaceId, credential: opened.credential },
         encryptedWorkspaceNamespace(binding.genesisHash)
       )
@@ -769,14 +776,10 @@ async function openWorkspaceOwned(
             auth(context).pipe(
               Effect.tapCause((cause) =>
                 Effect.sync(() => {
-                  if (
-                    cause.reasons.some((reason) =>
-                      reason._tag === 'Fail'
-                        ? isCloudE2eeMemberRemoved(reason.error)
-                        : reason._tag === 'Die' && isCloudE2eeMemberRemoved(reason.defect)
-                    )
-                  )
-                    startMemberRemoval();
+                  for (const reason of cause.reasons) {
+                    if (reason._tag === 'Fail') credentialFailureHandler(reason.error);
+                    if (reason._tag === 'Die') credentialFailureHandler(reason.defect);
+                  }
                 })
               )
             );
@@ -799,6 +802,7 @@ async function openWorkspaceOwned(
     },
   };
   let memberRemoved = false;
+  let deviceRevoked = false;
   let removalReceipt: Promise<void> | undefined;
   let removalRecorded: Promise<void> | undefined;
   const isClosed = () => closed;
@@ -846,13 +850,16 @@ async function openWorkspaceOwned(
     }, [250, 1_000, 4_000][ledgerRetryAttempts]);
     ledgerRetryTimer.unref?.();
   };
-  const startMemberRemoval = () => {
+  const startMemberRemoval = (reason: 'member-removed' | 'device-revoked' = 'member-removed') => {
     if (removalReceipt) return;
-    memberRemoved = true;
+    memberRemoved = reason === 'member-removed';
+    deviceRevoked = reason === 'device-revoked';
     closed = true;
+    opened.executionAuthorization.invalidate();
     ledgerBlocked = true;
     clearLedgerRetry();
     removalRecorded = (async () => {
+      if (!memberRemoved) return;
       const removedStatus = await run(opened.runtime.status());
       await Effect.runPromise(
         Effect.scoped(
@@ -901,7 +908,7 @@ async function openWorkspaceOwned(
       }
       try {
         // Even a local persistence failure must stop the execution owner.
-        await options.onRemoved?.();
+        await options.onRemoved?.(reason);
       } catch (cause) {
         if (!failures.includes(cause)) failures.push(cause);
       }
@@ -912,16 +919,21 @@ async function openWorkspaceOwned(
       }
       if (failures.length === 1) throw failures[0];
       if (failures.length > 1) throw new AggregateError(failures, 'e2ee_removal_failed');
-      await eraseRemovedWorkspace({
-        ...options,
-        expectedSigningPublicKey: opened.signingPublicKey,
-      });
+      if (memberRemoved)
+        await eraseRemovedWorkspace({
+          ...options,
+          expectedSigningPublicKey: opened.signingPublicKey,
+        });
     })();
     void removalReceipt.catch(() => {
       try {
         options.onUnavailable();
       } catch {}
     });
+  };
+  credentialFailureHandler = (cause) => {
+    if (isCloudE2eeMemberRemoved(cause)) startMemberRemoval('member-removed');
+    else if (isCloudE2eeDeviceRevoked(cause)) startMemberRemoval('device-revoked');
   };
   const refreshInBackground = (resetRetries = true) => {
     if (closed) return Promise.resolve();
@@ -956,7 +968,7 @@ async function openWorkspaceOwned(
                   credential: opened.credential,
                 });
               } catch (cause) {
-                if (isCloudE2eeMemberRemoved(cause)) throw cause;
+                if (isCloudE2eeMemberRemoved(cause) || isCloudE2eeDeviceRevoked(cause)) throw cause;
               }
               throw historyError;
             });
@@ -997,7 +1009,7 @@ async function openWorkspaceOwned(
     })()
       .catch(async (error: unknown) => {
         if (pairing) pairingFailure = error;
-        if (isCloudE2eeMemberRemoved(error)) startMemberRemoval();
+        credentialFailureHandler(error);
         try {
           options.onUnavailable();
         } catch {
@@ -1012,6 +1024,7 @@ async function openWorkspaceOwned(
   };
   const close = () => {
     closed = true;
+    opened.executionAuthorization.invalidate();
     clearLedgerRetry();
     return (closeReceipt ??= (async () => {
       await epochTransition.close();
@@ -1063,6 +1076,7 @@ async function openWorkspaceOwned(
           originRecovery?.recover
         )
       ),
+    isExecutionOpen: () => !closed,
     authorizeExecution: (workspaceId: string, requesterDevice: string) =>
       Effect.suspend(() =>
         closed
@@ -1085,7 +1099,15 @@ async function openWorkspaceOwned(
     bucketId: () => bucket?.(),
     status: () =>
       closed
-        ? Promise.reject(new Error(memberRemoved ? 'e2ee_member_removed' : 'e2ee_closed'))
+        ? Promise.reject(
+            new Error(
+              memberRemoved
+                ? 'e2ee_member_removed'
+                : deviceRevoked
+                  ? 'e2ee_device_revoked'
+                  : 'e2ee_closed'
+            )
+          )
         : run(opened.runtime.status()).then((status) => ({
             ...status,
             epochPhase: epochTransition.phase(),

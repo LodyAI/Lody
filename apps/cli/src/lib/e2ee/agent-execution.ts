@@ -44,7 +44,8 @@ export type ResolveVerifiedExecutionOriginal = (
 
 export type EncryptedExecutionClaim =
   | { state: 'claimed'; permit: RealtimeStartPermit }
-  | { state: 'uncertain' | 'completed' | 'denied' | 'expired' | 'pending-evidence' };
+  | { state: 'denied'; reason?: 'e2ee_machine_not_owned' }
+  | { state: 'uncertain' | 'completed' | 'expired' | 'pending-evidence' };
 
 /** One owner per encrypted workspace. Journal opening stays lazy so a broken
  * execution log never prevents content sync or another workspace from starting. */
@@ -54,6 +55,7 @@ export function makeEncryptedAgentExecution(options: {
   targetMachineId: string;
   journal: () => RealtimeJournal;
   authorizeExecution?: AuthorizeEncryptedExecution;
+  isExecutionOpen?: () => boolean;
   resolveVerifiedOriginal: ResolveVerifiedExecutionOriginal;
 }) {
   const claim = Effect.fnUntraced(function* (
@@ -87,6 +89,7 @@ export function makeEncryptedAgentExecution(options: {
     };
     let retained = yield* attempt(read);
     if (retained && retained.state !== 'received') return { state: retained.state };
+    if (options.isExecutionOpen?.() === false) return { state: 'denied' };
     const verified = yield* options.resolveVerifiedOriginal(intent);
     if (verified && 'state' in verified) {
       // Snapshot timestamps can bound waiting, but never grant execution. A
@@ -106,7 +109,10 @@ export function makeEncryptedAgentExecution(options: {
     const authorizeExecution = options.authorizeExecution;
     if (!authorizeExecution) return { state: 'denied' };
     const authorization = yield* authorizeExecution(intent.workspaceId, verified.requesterDevice);
-    if (authorization._tag !== 'Authorized') return { state: 'denied' };
+    if (authorization._tag !== 'Authorized')
+      return authorization.reason === 'e2ee_machine_not_owned'
+        ? { state: 'denied', reason: 'e2ee_machine_not_owned' }
+        : { state: 'denied' };
     // Authorization can yield. Re-read before receive so concurrent channels
     // reuse the first expiry instead of replacing or extending its evidence.
     retained = yield* attempt(read);
@@ -120,6 +126,8 @@ export function makeEncryptedAgentExecution(options: {
       frame,
     };
     return yield* attempt(() => {
+      // No await between the terminal lifecycle fence and the durable start.
+      if (options.isExecutionOpen?.() === false) return { state: 'denied' as const };
       journal.receive(request);
       const result = journal.claim(request);
       return result.state === 'existing'

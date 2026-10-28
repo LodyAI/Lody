@@ -1548,24 +1548,33 @@ describe('SessionDispatchWatcher', () => {
   // The fiber's FIRST verify attempt is immediate (no backoff), so recover/deny
   // flows complete without waiting on timers.
 
-  it.each([false, true])(
-    'routes encrypted=%s display accounts through the appropriate admission gate',
-    async (encryptedWorkspace) => {
+  it.each([
+    { encryptedWorkspace: false, reason: 'not_visible' as const },
+    { encryptedWorkspace: true, reason: 'not_visible' as const },
+    { encryptedWorkspace: false, reason: 'project_not_shared' as const },
+    { encryptedWorkspace: true, reason: 'project_not_shared' as const },
+  ])(
+    'routes encrypted=$encryptedWorkspace through its admission gate ($reason)',
+    async ({ encryptedWorkspace, reason }) => {
       const forwarded: string[] = [];
       const snapshots: string[] = [];
       const h = createAccessHarness({
         encryptedWorkspace,
         currentUserId: 'machine-owner',
-        canUseMachine: async () => ({ outcome: 'denied', reason: 'requester_not_member' }),
+        canUseMachine: async () => ({ outcome: 'denied', reason }),
         accessPolicy: {
-          decide: () =>
-            Effect.succeed({ outcome: 'deny' as const, reason: 'requester_not_member' as const }),
+          decide: () => Effect.succeed({ outcome: 'remote' as const }),
         } as never,
         recordMemberAccessSnapshot: async ({ requesterUserId }) => {
           snapshots.push(requesterUserId);
         },
         dispatchPrepared: async (options) => {
-          expect(await options.accessPromise).toEqual({ outcome: 'allowed' });
+          const access = await options.accessPromise;
+          if (access.outcome === 'denied') {
+            await options.onAccessDenied(access);
+            return;
+          }
+          expect(access).toEqual({ outcome: 'allowed' });
           await options.requestPromise;
           forwarded.push(options.userTurnId);
         },

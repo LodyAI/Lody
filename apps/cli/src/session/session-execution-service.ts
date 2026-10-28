@@ -4789,7 +4789,9 @@ export class SessionExecutionService {
                       ? 'This encrypted turn already finished and will not be started again.'
                       : result.state === 'expired'
                         ? 'This encrypted turn expired before execution. Send a new turn to continue.'
-                        : 'This encrypted turn is not authorized for execution.',
+                        : result.state === 'denied' && result.reason === 'e2ee_machine_not_owned'
+                          ? 'e2ee_machine_not_owned: 加密工作区暂不支持使用其他成员的机器。'
+                          : 'This encrypted turn is not authorized for execution.',
               });
             });
 
