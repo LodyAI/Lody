@@ -34,8 +34,10 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   assembly clear them before agent startup, and never add CLI credentials or secrets.
 - Pass the same MCP config on initial and replacement DeepSeek Harness sessions.
 - Workspace MCP resolution starts before `initialize` to overlap the handshake.
-  Only a typed cold-catalog failure may reload once before establishing the provider
-  session; if it remains cold, initialization fails instead of freezing an empty selection.
+  Before the first remote baseline, complete selected rows may start locally with a
+  config warning. Missing selected rows preserve the typed cold error and may reload
+  once before provider-session establishment; still missing fails initialization.
+  Check completeness before preparing local authentication so a recheck cannot repeat it.
 - Acknowledged steer ends `applied`, `not-applied`, or `unknown`. Only adapter proof maps
   `not-applied`; transport/process ambiguity stays `unknown`. Await the request answer even
   after the turn response; Session execution never classifies provider errors.

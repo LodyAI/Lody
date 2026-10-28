@@ -779,6 +779,9 @@ export class AgentClient implements acp.Client {
       const external = select({
         http: this.agentMcpCapabilities?.http === true,
       });
+      for (const message of external.warnings ?? []) {
+        this.options.onAgentWarning?.({ message, source: 'configWarning' });
+      }
       for (const problem of external.problems) {
         this.options.onAgentWarning?.({
           message: formatMcpResolutionProblem(problem),

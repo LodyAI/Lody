@@ -14,6 +14,7 @@ import {
   normalizeMcpServerIdSelection,
 } from '@lody/shared';
 import { formatErrorMessage } from '@/utils/format-error';
+import { WorkspaceSyncUnavailableError } from '@/lib/command-runtime';
 
 /**
  * Applies the agent's advertised capabilities to an already-loaded catalog.
@@ -21,7 +22,7 @@ import { formatErrorMessage } from '@/utils/format-error';
  */
 export type SessionMcpCatalogSelector = (
   agentCapabilities: ResolveSessionMcpServersInput['agentCapabilities']
-) => ResolveSessionMcpServersResult;
+) => ResolveSessionMcpServersResult & { warnings?: string[] };
 
 export type LoadSessionMcpCatalogInput = {
   repo: {
@@ -49,8 +50,8 @@ const EMPTY_SELECTION: SessionMcpCatalogSelector = () => ({ servers: [], problem
  * document read can overlap process spawn and the ACP handshake
  * instead of adding a round trip between `initialize` and `newSession`.
  *
- * Configuration failures remain best effort. A cold baseline rejects instead:
- * startup can recheck it before establishing a session with incomplete tools.
+ * A cold baseline can use complete local selections with a warning. Missing
+ * selected rows retain readiness uncertainty so startup can recheck them.
  */
 export const loadSessionMcpCatalog = async (
   input: LoadSessionMcpCatalogInput
@@ -61,19 +62,33 @@ export const loadSessionMcpCatalog = async (
   }
 
   const docId = getWorkspaceFlockDocId(input.workspaceId);
-  // Readiness uncertainty must retain its typed error, not become a successful
-  // empty catalog that the ACP session would keep for its entire lifetime.
-  await input.waitForCatalogBaseline?.();
+  let baselineError: WorkspaceSyncUnavailableError | undefined;
+  try {
+    await input.waitForCatalogBaseline?.();
+  } catch (error) {
+    if (!(error instanceof WorkspaceSyncUnavailableError)) throw error;
+    baselineError = error;
+  }
   try {
     const handle = await input.repo.openFlockDoc(docId);
     const catalog = getWorkspaceMcpCatalog(readWorkspaceFlockRowsFromFlock(handle.flock));
+    const ids = normalizeMcpServerIdSelection(selectedIds) ?? [];
+    // Check every selected row before authentication preparation: a cold retry
+    // must neither silently omit tools nor prepare credentials twice.
+    if (baselineError && ids.some((id) => !catalog[id])) throw baselineError;
+    const warnings = baselineError
+      ? [
+          'Workspace MCP catalog has not been confirmed with the remote. Using the locally stored configuration for the selected MCP servers.',
+        ]
+      : undefined;
     const env = input.env ?? process.env;
-    if (!input.prepare)
-      return (agentCapabilities) =>
-        resolveSessionMcpServers({ catalog, selectedIds, agentCapabilities, env });
+    const withWarnings: SessionMcpCatalogSelector = (agentCapabilities) => ({
+      ...resolveSessionMcpServers({ catalog, selectedIds, agentCapabilities, env }),
+      ...(warnings ? { warnings } : {}),
+    });
+    if (!input.prepare) return withWarnings;
     const prepared = new Map<string, ResolvedMcpServer>();
     const failed = new Set<string>();
-    const ids = normalizeMcpServerIdSelection(selectedIds) ?? [];
     for (const id of ids) {
       const entry = catalog[id];
       const resolved = resolveSessionMcpServers({
@@ -110,9 +125,10 @@ export const loadSessionMcpCatalog = async (
               'Local MCP authentication is unavailable. Configure it on this machine in Settings → MCP.',
           });
       }
-      return result;
+      return { ...result, ...(warnings ? { warnings } : {}) };
     };
   } catch (error) {
+    if (baselineError && error === baselineError) throw error;
     const reason = formatErrorMessage(error);
     logger.debug(`[${sessionId}] Workspace MCP catalog read failed: ${reason}`);
     return () => ({ servers: [], problems: [{ kind: 'catalog_unavailable', reason }] });

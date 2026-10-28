@@ -53,7 +53,7 @@ Parent instructions apply. Background: [README.md](README.md).
   rejected batch items.
 
 - Catalog uncertainty is not `INVALID_ITEM`; only retryable failures abort batches.
-  Default-only calls allow no cache. Internal inferred defaults
+  Agent capability defaults require fresh catalogs. Internal inferred defaults
   rederive until authored. Explicit choices/access stay strict.
   [Freshness/retries](README.md#machine-catalog-retry-guidance).
 
@@ -67,9 +67,10 @@ Parent instructions apply. Background: [README.md](README.md).
   syncs unless `--offline`. Use active Turn identity and `canReadAgentRole`;
   explicit creation keeps its separate grant contract. Keep unavailable readable Roles,
   three-state presence and credential allowlists.
-- Default MCP selection and Session startup reuse the daemon's workspace catalog after
-  its first baseline, including during reconnects. A cold default catalog returns retryable
-  `SYNC_UNAVAILABLE` before Operation acceptance; request waits never stop its reader.
+- MCP defaults use the daemon's local workspace snapshot even before its first remote
+  baseline; freeze the resolved IDs at acceptance. Session startup may use complete
+  local selected rows with a config warning while cold. Missing selected rows retain
+  retryable `SYNC_UNAVAILABLE`; request waits never stop the shared reader.
 - Directory cursors bind resource, workspace, user and filters. Operations additionally
   bind requester Session and query only that user's machine-local rows; list replies
   contain no canonical prompt or assistant output. See

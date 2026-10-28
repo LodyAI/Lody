@@ -118,7 +118,7 @@ export async function deleteWorkspaceMcpCatalogEntry(
   );
 }
 
-/** Read a single ready workspace snapshot; explicit selections bypass defaults. */
+/** Read a single local workspace snapshot; explicit selections bypass defaults. */
 export async function readProjectDefaultMcpIds(
   repo: WorkspaceMcpReadableRepo,
   workspaceId: WorkspaceId,

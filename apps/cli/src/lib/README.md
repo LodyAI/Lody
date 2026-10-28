@@ -43,15 +43,15 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   remain online-aware independently of the catalog read policy.
   Intent and limits: [resource discovery](../../../../specs/resource-discovery.md).
 - `workspace-mcp-store.ts` — workspace MCP persistence, default selection reads and
-  the shared first-baseline wait. Daemon-hosted creation resolves defaults from its
-  existing reader without an explicit network sync. Until that document's first
-  baseline, a bounded wait returns retryable `SYNC_UNAVAILABLE` before acceptance.
-  Startup uses the same wait before loading selected connections. A cold result
-  keeps its typed error for one recheck at provider-session establishment; continued
-  uncertainty rejects initialization instead of becoming a successful empty selection.
-  Once confirmed, temporary disconnects keep the current replica readable while
-  its owner recovers. Explicit selections bypass default resolution, and accepted
-  Operations retain their selected ids. Standalone CLI sync remains explicit.
+  the shared first-baseline wait. Daemon-hosted creation resolves defaults directly
+  from its local snapshot, including empty and nonempty defaults before remote sync.
+  These are authoring choices, not authorization verdicts; accepted Operations freeze
+  their selected IDs. Startup waits briefly for the shared baseline, then may use
+  complete selected rows locally with a config warning. Missing selected rows retain
+  the typed cold error for one recheck at provider-session establishment; continued
+  uncertainty rejects initialization rather than silently omitting selected tools.
+  Request timeout never cancels the reader. Explicit selections bypass default
+  resolution, and standalone CLI synchronization retains its existing behavior.
 - `agent-role-create.ts` — Agent Role catalog read and create-path resolution
   shared by the MCP create tools and CLI `session create --agent-role`: the Role
   row is authoritative for machine, agent config, run config and prompt prefix,

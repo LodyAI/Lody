@@ -1,8 +1,4 @@
-import {
-  readProjectDefaultMcpIds,
-  syncMcpCatalog,
-  waitForMcpCatalogBaseline,
-} from '@/lib/workspace-mcp-store';
+import { readProjectDefaultMcpIds, syncMcpCatalog } from '@/lib/workspace-mcp-store';
 import { getDaemonWorkspace } from '@/lib/session-command-environment';
 import { normalizeMcpServerIdSelection, resolveSessionConversationConfig } from '@lody/shared';
 import {
@@ -3431,12 +3427,10 @@ export async function resolveEffectiveSessionCreateDispatchConfig(args: {
     dispatchConfig.mcpServerIds !== undefined
       ? [...dispatchConfig.mcpServerIds]
       : await (async () => {
-          if (!args.localOnly) {
-            if (getDaemonWorkspace()?.manager === args.manager) {
-              await waitForMcpCatalogBaseline(args.manager, args.workspaceId);
-            } else {
-              await syncMcpCatalog(args.manager, args.workspaceId);
-            }
+          // Defaults are local authoring choices, not remote authorization.
+          // Borrow the daemon's persisted snapshot even before remote catch-up.
+          if (!args.localOnly && getDaemonWorkspace()?.manager !== args.manager) {
+            await syncMcpCatalog(args.manager, args.workspaceId);
           }
           return readProjectDefaultMcpIds(
             args.manager.repo,

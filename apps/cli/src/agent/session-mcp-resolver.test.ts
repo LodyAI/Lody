@@ -69,7 +69,11 @@ describe('loadSessionMcpCatalog', () => {
   });
 
   it('finishes every read before the agent capabilities are known', async () => {
-    const openFlockDoc = vi.fn(async () => ({ flock: catalogFlock }));
+    let selecting = false;
+    const openFlockDoc = async () => {
+      if (selecting) throw new Error('Selection must not read or prepare the catalog again');
+      return { flock: catalogFlock };
+    };
     const select = await loadSessionMcpCatalog({
       repo: { openFlockDoc },
       workspaceId,
@@ -78,13 +82,12 @@ describe('loadSessionMcpCatalog', () => {
       logger: { debug: vi.fn() },
       env: { NODE_BIN: 'node', ENTRYPOINT: 'server.js' },
     });
-    expect(openFlockDoc).toHaveBeenCalledTimes(1);
+    selecting = true;
 
     // Selecting twice with different capabilities must not touch the document
     // again: the load phase is what ACP startup overlaps with its handshake.
     expect(select({ http: true }).servers).toHaveLength(1);
     expect(select({ http: false }).servers).toHaveLength(1);
-    expect(openFlockDoc).toHaveBeenCalledTimes(1);
   });
 
   it('turns catalog read failures into catalog_unavailable', async () => {

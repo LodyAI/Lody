@@ -133,14 +133,17 @@ the MCP child with `session/close` or Agent teardown.
 `loadExternalMcpServers` runs BEFORE `initialize`, and the selector it resolves to applies
 the agent's advertised `http` capability at `newSession`. Loading reuses the daemon's
 live workspace catalog: only its first baseline may wait, for up to one second,
-overlapping spawn and the handshake. Later starts read the current replica even during
-reconnects without forcing a remote round trip. A cold preload preserves its typed
-error and is rechecked once at provider-session establishment, after the handshake
-has had time to overlap background catch-up. If still unconfirmed, initialization
-rejects before `newSession`/load/resume/fork instead of successfully freezing an empty
-external MCP list. Existing startup owners retain process and relay cleanup; a later
-startup can use the recovered reader. Other configuration diagnostics remain best
-effort. Empty selections skip the catalog entirely.
+overlapping spawn and the handshake. If that wait expires but every frozen selected
+ID exists locally, startup uses those rows and emits a `configWarning` that the
+configuration has not been confirmed with the remote. Local authentication is prepared
+only after checking all selected rows. A missing selected row preserves the original
+typed cold error; startup rechecks once at provider-session establishment. If still
+missing and unconfirmed, initialization rejects before `newSession`/load/resume/fork.
+This avoids freezing an incomplete tool selection while allowing offline startup from
+persisted configuration. The same reader continues recovering independently, and a
+later load after its baseline uses ordinary reads without the cold warning. Existing
+startup owners retain process and relay cleanup. Other configuration diagnostics
+remain best effort. Empty selections skip the catalog entirely.
 
 ### Steer delivery classification
 
