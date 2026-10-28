@@ -27,8 +27,8 @@ vi.mock('../src/components/sessions/session-conversation-page', () => ({
 }));
 
 // Keep the regression probe at the exact production seam that originally
-// escaped: TourApp's reused composer reading visibility data and prompt suggestions. The rest of
-// the heavy product chrome is irrelevant to this provider-wiring assertion.
+// escaped: TourApp's reused composer reading visibility and prompt suggestions.
+// The rest of the product chrome is irrelevant to this provider-wiring assertion.
 vi.mock('../src/components/sessions/session-chat-input-area', async () => {
   const [
     { createElement, forwardRef },
@@ -57,7 +57,7 @@ vi.mock('../src/components/sessions/session-chat-input-area', async () => {
       return createElement(
         'div',
         { 'data-testid': 'tour-composer-cloud-probe' },
-        `${machines?.[0]?.machineId ?? 'missing'}:${localProjects?.[0]?.localProjectId ?? 'missing'}:${suggestion ?? 'no hint'}`
+        `${machines?.[0]?.machineId ?? 'missing'}:${localProjects?.[0]?.localProjectId ?? 'missing'}:${suggestion ?? 'no-suggestion'}`
       );
     }),
   };
@@ -104,7 +104,7 @@ describe('TourApp cloud isolation wiring', () => {
     container.remove();
   });
 
-  it('keeps composer visibility and prompt suggestion reads inside the tour', async () => {
+  it('supplies composer visibility and empty prompt suggestions inside the tour boundary', async () => {
     const useOuterCloudQuery = vi.fn(() => {
       throw new Error('Tour query escaped to the authenticated app cloud adapter');
     });
@@ -134,7 +134,7 @@ describe('TourApp cloud isolation wiring', () => {
     });
 
     expect(container.querySelector('[data-testid="tour-composer-cloud-probe"]')?.textContent).toBe(
-      `${TOUR_MACHINE_ID}:${TOUR_LOCAL_PROJECT_ID}:no hint`
+      `${TOUR_MACHINE_ID}:${TOUR_LOCAL_PROJECT_ID}:no-suggestion`
     );
     expect(useOuterCloudQuery).not.toHaveBeenCalled();
   });

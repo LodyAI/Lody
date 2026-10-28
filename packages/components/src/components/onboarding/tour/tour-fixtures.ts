@@ -769,15 +769,11 @@ const tourRuntime = {
   // the read-only stand-in for that plane, the way `TourCloudBoundary` is the
   // stand-in for the cloud one.
   repo: createTourRepo(),
-  // The scripted tour never receives live prompt suggestions.
-  subscribePromptSuggestion: (
-    _machineId: MachineId,
-    _sessionId: SessionId,
-    listener: (text: string | null) => void
-  ) => {
+  // The real composer subscribes here; this read-only tour has no suggestions.
+  subscribePromptSuggestion: ((_machineId, _sessionId, listener) => {
     listener(null);
     return () => {};
-  },
+  }) satisfies WorkspaceRuntime['subscribePromptSuggestion'],
   // Nothing in the tour writes. A runtime that threw on read would take the
   // whole overlay down; one that silently accepted writes would let a scripted
   // surface believe it had persisted something.
