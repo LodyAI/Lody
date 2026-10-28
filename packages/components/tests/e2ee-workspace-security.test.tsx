@@ -7,6 +7,7 @@ import { PlatformContext } from '@lody/platform/react';
 import { createStaticStore, type E2eeManagementState, type PlatformProvider } from '@lody/platform';
 import { TEST_CLOUD_PLATFORM } from './test-platform';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
+import { E2eeMachineSharingSettings } from '../src/components/settings/e2ee/machine-sharing-settings';
 import { WorkspaceSettings } from '../src/components/settings/e2ee/workspace-security';
 import { E2eeSettingsIcon } from '../src/components/settings/e2ee/security-state';
 const navigation = vi.hoisted(() => ({ target: null as unknown }));
@@ -112,6 +113,50 @@ describe('encrypted workspace settings', () => {
     if (!button) throw new Error(`missing ${key}`);
     await act(async () => button.click());
   };
+  const renderSharing = () =>
+    act(async () =>
+      root.render(
+        <Provider store={store}>
+          <PlatformContext.Provider value={platform}>
+            <E2eeMachineSharingSettings
+              machineId="synthetic-machine"
+              projects={[{ id: 'project-a', name: 'Project A' }]}
+            />
+          </PlatformContext.Provider>
+        </Provider>
+      )
+    );
+  it('uses host ownership for the sharing surface and drops it immediately on account mismatch', async () => {
+    platform.e2eeWorkspaces!.runtime!.readMachineSharing = async () => ({
+      machineId: 'synthetic-machine',
+      generation: '55'.repeat(32),
+      ownerMembershipId: '11'.repeat(16),
+      head: { revision: 3, digest: '33'.repeat(32) },
+      sharedWithTeam: false,
+      projects: [],
+      canManage: false,
+      signer: '44'.repeat(32),
+      needsResign: false,
+      deniedReason: 'e2ee_machine_not_shared',
+    });
+    await renderSharing();
+    expect(container.textContent).toContain('e2ee.machineSharing.notOwned');
+    expect(container.textContent).toContain('v3');
+    expect(container.querySelectorAll('[role=switch]')).toHaveLength(0);
+    const current = store.get(workspaceContentModeAtom)!;
+    await act(async () =>
+      store.set(workspaceContentModeAtom, { ...current, accountId: 'other-account' })
+    );
+    expect(container.textContent).toBe('');
+  });
+  it('does not open sharing ports for an ordinary workspace', async () => {
+    platform.e2eeWorkspaces!.runtime!.readMachineSharing = async () => {
+      throw new Error('ordinary settings opened a crypto port');
+    };
+    store.set(workspaceContentModeAtom, null);
+    await renderSharing();
+    expect(container.textContent).toBe('');
+  });
   it('waits for an explicit click, keeps retry and device rows after failure, then completes and clears the badge', async () => {
     await render();
     expect(signed).toBe(false);

@@ -947,6 +947,10 @@ it.each(['EMFILE', 'EACCES'])(
     const reconcile = vi
       .spyOn(projectMeta, 'reconcileMachineLocalProjectRootPaths')
       .mockResolvedValue(undefined);
+    const schedules = vi.spyOn(scheduleWorkspace, 'createScheduleWorkspace').mockResolvedValue({
+      evaluate: async () => {},
+      dispose: async () => {},
+    });
     const harness = createFleetHarness(
       createCatalogStub(() => Effect.succeed(catalogSnapshot({})))
     );
@@ -985,6 +989,7 @@ it.each(['EMFILE', 'EACCES'])(
       for (const timer of fleet.retryTimers.values()) clearTimeout(timer);
       create.mockRestore();
       reconcile.mockRestore();
+      schedules.mockRestore();
       vi.useRealTimers();
     }
   }
@@ -1035,16 +1040,28 @@ describe('Fleet PR observation composition', () => {
       const reconcile = vi
         .spyOn(projectMeta, 'reconcileMachineLocalProjectRootPaths')
         .mockResolvedValue(undefined);
-      const schedules = vi.spyOn(scheduleWorkspace, 'createScheduleWorkspace').mockResolvedValue({
+      let disposedSchedule = false;
+      const scheduleHandle = {
         evaluate: async () => {},
-        dispose: async () => {},
-      });
+        dispose: async () => {
+          disposedSchedule = true;
+        },
+      };
+      const schedules = vi
+        .spyOn(scheduleWorkspace, 'createScheduleWorkspace')
+        .mockResolvedValue(scheduleHandle);
       const fleet = createFleetHarness(
         createCatalogStub(() => Effect.succeed(catalogSnapshot({}))),
         cloud
       ).fleet as unknown as {
         desiredWorkspaces: Map<string, unknown>;
-        runtimes: Map<string, { prPollerWorkspace: PrPollerWorkspaceHandle | null }>;
+        runtimes: Map<
+          string,
+          {
+            prPollerWorkspace: PrPollerWorkspaceHandle | null;
+            schedules: scheduleWorkspace.ScheduleWorkspaceHandle;
+          }
+        >;
         retryTimers: Map<string, ReturnType<typeof setTimeout>>;
         startWorkspace(workspace: never): Promise<void>;
         stopWorkspace(id: string): Promise<void>;
@@ -1067,6 +1084,7 @@ describe('Fleet PR observation composition', () => {
         await fleet.startWorkspace(workspace as never);
         const runtime = fleet.runtimes.get(workspace.id);
         expect(runtime).toBeDefined();
+        expect(runtime?.schedules).toBe(scheduleHandle);
         if (encrypted) {
           expect(runtime?.prPollerWorkspace).toBeNull();
           expect(requests).toEqual([]);
@@ -1093,6 +1111,7 @@ describe('Fleet PR observation composition', () => {
         }
         await fleet.stopWorkspace(workspace.id);
         expect(fleet.runtimes.has(workspace.id)).toBe(false);
+        expect(disposedSchedule).toBe(true);
       } finally {
         fleet.stopped = true;
         for (const timer of fleet.retryTimers.values()) clearTimeout(timer);

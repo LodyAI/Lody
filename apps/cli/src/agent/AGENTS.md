@@ -33,8 +33,11 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   `LODY_SERVER_URL` so cloud MCP orchestration uses the daemon's deployment, let local platform
   assembly clear them before agent startup, and never add CLI credentials or secrets.
 - Pass the same MCP config on initial and replacement DeepSeek Harness sessions.
-- Workspace MCP resolution stays TWO phases: call `loadExternalMcpServers` BEFORE `initialize`,
-  never between `initialize` and `newSession`.
+- Workspace MCP resolution starts before `initialize` to overlap the handshake.
+  Before the first remote baseline, complete selected rows may start locally with a
+  config warning. Missing selected rows preserve the typed cold error and may reload
+  once before provider-session establishment; still missing fails initialization.
+  Check completeness before preparing local authentication so a recheck cannot repeat it.
 - Acknowledged steer ends `applied`, `not-applied`, or `unknown`. Only adapter proof maps
   `not-applied`; transport/process ambiguity stays `unknown`. Await the request answer even
   after the turn response; Session execution never classifies provider errors.
@@ -74,7 +77,8 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 - Builtin Dimcode is user-installed.
 - `npx-cache.ts`: ACP `npx` spawns force `npm_config_cache`/`NPM_CONFIG_CACHE` to the active
   profile's `npm-cache`. Automatic `_npx`/`_cacache` cleanup is allowed ONLY for that Lody-owned
-  cache.
+  cache. Cold initialize timeout never authorizes clearing `_cacache`; whole-cache
+  recovery requires a corruption signature. [Recovery decision](../../../../.agents/notes/implemented/bug-fix/2026-09-20-acp-authenticate-queue-lane.md).
 
 ## `acp-authentication.ts`
 

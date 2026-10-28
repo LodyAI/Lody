@@ -282,4 +282,52 @@ describe('UnifiedProjectSelectorView options', () => {
     });
     expect(onChange).toHaveBeenCalledWith({ kind: 'group', projectId: 'shop' });
   });
+
+  it('edits a project group from its row without selecting it', async () => {
+    const onChange = vi.fn();
+    const onEditProjectGroup = vi.fn();
+    await act(async () => {
+      root.render(
+        <Tooltip.Provider>
+          <UnifiedProjectSelectorView
+            value={{ kind: 'none' }}
+            onChange={onChange}
+            localProjects={localProjects.slice(0, 1)}
+            projectGroups={[{ projectId: 'shop', name: 'Shop', memberCount: 2, lastUsedAt: 100 }]}
+            onAddLocalProject={vi.fn()}
+            onConnectGitRepo={vi.fn()}
+            onEditProjectGroup={onEditProjectGroup}
+          />
+        </Tooltip.Provider>
+      );
+    });
+
+    const trigger = container.querySelector<HTMLButtonElement>('button');
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        trigger?.dispatchEvent(
+          new TestPointerEvent('mousedown', { bubbles: true, button: 0, pointerType: 'mouse' })
+        );
+        await vi.runAllTimersAsync();
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const editButtons = Array.from(
+      document.querySelectorAll<HTMLElement>('[role="menuitemradio"] button')
+    );
+    // Only the group row offers editing; a single local project has nothing to edit.
+    expect(editButtons.map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Edit {{name}}',
+    ]);
+    await act(async () => {
+      editButtons[0]?.click();
+      await Promise.resolve();
+    });
+
+    expect(onEditProjectGroup).toHaveBeenCalledWith('shop');
+    expect(onChange).not.toHaveBeenCalled();
+  });
 });

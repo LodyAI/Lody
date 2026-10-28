@@ -19,6 +19,14 @@ export const scheduleRunNotificationSourceSchema = z.object({
   scheduleId: z.string().min(1).max(256),
   turnId: z.string().min(1).max(256),
   title: z.string().max(320),
+  definitionFingerprint: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
+  manualRunKey: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
 });
 export type ScheduleRunNotificationSource = z.infer<typeof scheduleRunNotificationSourceSchema>;
 

@@ -223,6 +223,14 @@ const styles = stylex.create({
       '@media (min-width: 640px)': 'minmax(0, 1fr) minmax(0, 220px) 168px 64px',
     },
   },
+  // The mobile home tab can be a narrow pane inside a wide viewport.
+  compactGrid: {
+    display: 'grid',
+    alignItems: 'center',
+    columnGap: '16px',
+    rowGap: { default: 0, '@media (min-width: 640px)': '4px' },
+    gridTemplateColumns: 'minmax(0, 1fr) auto',
+  },
   columns: {
     display: { default: 'none', '@media (min-width: 640px)': 'grid' },
     paddingLeft: '16px',
@@ -308,6 +316,10 @@ const styles = stylex.create({
     fontSize: '0.88em',
     color: 'hsl(var(--muted-foreground))',
   },
+  compactDestination: {
+    gridColumnStart: { default: null, '@media (min-width: 640px)': 1 },
+    gridRowStart: { default: null, '@media (min-width: 640px)': 2 },
+  },
   truncate: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   // Pull the ghost button's padding back so its icon lines up with the others.
   chatButton: { maxWidth: '100%', minWidth: 0, marginInlineStart: '-8px' },
@@ -320,6 +332,17 @@ const styles = stylex.create({
     flexDirection: 'column',
     alignItems: 'flex-end',
     textAlign: 'right',
+  },
+  compactStatus: {
+    display: 'flex',
+    minWidth: 0,
+    maxWidth: { default: '45vw', '@media (min-width: 640px)': 'none' },
+    overflow: 'hidden',
+    flexDirection: 'column',
+    alignItems: { default: 'flex-end', '@media (min-width: 640px)': 'flex-start' },
+    textAlign: { default: 'right', '@media (min-width: 640px)': 'left' },
+    gridColumnStart: { default: null, '@media (min-width: 640px)': 1 },
+    gridRowStart: { default: null, '@media (min-width: 640px)': 3 },
   },
   statusMain: {
     display: 'inline-flex',
@@ -347,6 +370,11 @@ const styles = stylex.create({
     alignItems: 'center',
     justifyContent: 'flex-end',
     columnGap: '2px',
+  },
+  compactActions: {
+    gridColumnStart: { default: null, '@media (min-width: 640px)': 2 },
+    gridRowStart: { default: null, '@media (min-width: 640px)': 1 },
+    gridRowEnd: { default: null, '@media (min-width: 640px)': 'span 3' },
   },
   // Hidden until the row is hovered or focused, only where hover exists.
   hoverAction: {
@@ -435,9 +463,11 @@ const STATUS_ICONS = {
 export function ScheduleStatusText({
   status,
   inline = false,
+  compact = false,
 }: {
   status: ScheduleStatus;
   inline?: boolean;
+  compact?: boolean;
 }) {
   const Icon = status.icon ? STATUS_ICONS[status.icon] : null;
   const main = (
@@ -463,7 +493,7 @@ export function ScheduleStatusText({
       </span>
     );
   return (
-    <div {...stylex.props(styles.status)}>
+    <div {...stylex.props(compact ? styles.compactStatus : styles.status)}>
       {main}
       {status.detail ? <span {...stylex.props(styles.statusDetail)}>{status.detail}</span> : null}
     </div>
@@ -570,15 +600,17 @@ export function ScheduleMenuItems({
 function Destination({
   entry,
   onOpenSession,
+  compact,
 }: {
   entry: Entry;
   onOpenSession?: (id: string) => void;
+  compact: boolean;
 }) {
   const { t } = useTranslation();
   const { row, context } = entry;
   if (row.destination.kind === 'new_session')
     return (
-      <span {...stylex.props(styles.destination)}>
+      <span {...stylex.props(styles.destination, compact && styles.compactDestination)}>
         <Folder {...stylex.props(styles.icon14)} aria-hidden="true" />
         <span {...stylex.props(styles.truncate)}>
           {t('schedules.destination.newSession', 'New chat each run')} ·{' '}
@@ -589,7 +621,7 @@ function Destination({
   const chat = context?.chat;
   if (chat?.sessionId && onOpenSession)
     return (
-      <span {...stylex.props(styles.destination)}>
+      <span {...stylex.props(styles.destination, compact && styles.compactDestination)}>
         <Button
           variant="ghost"
           size="small"
@@ -604,7 +636,7 @@ function Destination({
       </span>
     );
   return (
-    <span {...stylex.props(styles.destination)}>
+    <span {...stylex.props(styles.destination, compact && styles.compactDestination)}>
       <MessageSquare {...stylex.props(styles.icon14)} aria-hidden="true" />
       <span {...stylex.props(styles.truncate)}>
         {chat?.title ??
@@ -622,8 +654,9 @@ function Destination({
 function ScheduleListRow({
   entry,
   selected,
+  compact,
   ...handlers
-}: RowHandlers & { entry: Entry; selected?: boolean }) {
+}: RowHandlers & { entry: Entry; selected?: boolean; compact: boolean }) {
   const { t, i18n } = useTranslation();
   const { row, context, status } = entry;
   const actions = useRowActions(entry, handlers);
@@ -644,7 +677,11 @@ function ScheduleListRow({
     <div
       data-schedule-row=""
       aria-current={selected ? 'true' : undefined}
-      {...stylex.props(styles.grid, styles.row, selected && styles.rowSelected)}
+      {...stylex.props(
+        compact ? styles.compactGrid : styles.grid,
+        styles.row,
+        selected && styles.rowSelected
+      )}
     >
       <button type="button" onClick={handlers.onOpen} {...stylex.props(styles.openButton)}>
         <span {...stylex.props(styles.rowHitTarget)} aria-hidden="true" />
@@ -682,9 +719,9 @@ function ScheduleListRow({
           </span>
         </span>
       </button>
-      <Destination entry={entry} onOpenSession={handlers.onOpenSession} />
-      <ScheduleStatusText status={status} />
-      <div {...stylex.props(styles.actions)}>
+      <Destination entry={entry} onOpenSession={handlers.onOpenSession} compact={compact} />
+      <ScheduleStatusText status={status} compact={compact} />
+      <div {...stylex.props(styles.actions, compact && styles.compactActions)}>
         {primary ? (
           <Tooltip.Root>
             <Tooltip.Trigger
@@ -1220,7 +1257,11 @@ export function ScheduleListView({
                           </p>
                         ) : (
                           <>
-                            <div {...stylex.props(styles.grid, styles.columns)} aria-hidden="true">
+                            <div
+                              {...stylex.props(styles.grid, styles.columns)}
+                              style={hideHeader ? { display: 'none' } : undefined}
+                              aria-hidden="true"
+                            >
                               <span>{t('schedules.column.name', 'Name')}</span>
                               <span>
                                 {section.key === 'tasks'
@@ -1237,6 +1278,7 @@ export function ScheduleListView({
                                 key={entry.row.scheduleId}
                                 entry={entry}
                                 selected={entry.row.scheduleId === selectedId}
+                                compact={hideHeader}
                                 onOpen={() => onOpen(entry.row.scheduleId)}
                                 onToggle={onToggle ? () => onToggle(entry.row) : undefined}
                                 onRun={onRun ? () => onRun(entry.row) : undefined}

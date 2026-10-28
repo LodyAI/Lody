@@ -87,6 +87,7 @@ import {
   type AcknowledgedSteerCapability,
 } from './acknowledged-steer';
 import type { SessionMcpCatalogSelector } from './session-mcp-resolver';
+import { WorkspaceSyncUnavailableError } from '@/lib/command-runtime';
 import {
   getBuiltinToolPermissionOutcome,
   parseLodyExtensionCapabilities,
@@ -767,9 +768,20 @@ export class AgentClient implements acp.Client {
     }
 
     try {
-      const external = (await externalLoad)({
+      const select = await externalLoad.catch((error: unknown) => {
+        if (error instanceof WorkspaceSyncUnavailableError && this.options.loadExternalMcpServers) {
+          // The initial bounded wait overlaps initialize. The daemon may have
+          // caught up since it expired; recheck once at the actual use point.
+          return this.options.loadExternalMcpServers();
+        }
+        throw error;
+      });
+      const external = select({
         http: this.agentMcpCapabilities?.http === true,
       });
+      for (const message of external.warnings ?? []) {
+        this.options.onAgentWarning?.({ message, source: 'configWarning' });
+      }
       for (const problem of external.problems) {
         this.options.onAgentWarning?.({
           message: formatMcpResolutionProblem(problem),
@@ -778,6 +790,9 @@ export class AgentClient implements acp.Client {
       }
       return [...builtin, ...(external.servers as acp.McpServer[])];
     } catch (error) {
+      // A second cold result must leave initialization retryable, before any
+      // provider session or Prompt can be created with a false empty selection.
+      if (error instanceof WorkspaceSyncUnavailableError) throw error;
       const message = `Workspace MCP servers could not be loaded (${formatErrorMessage(
         error
       )}). The agent started with only the built-in Lody server.`;
@@ -1935,7 +1950,7 @@ export class AgentClient implements acp.Client {
     const startupStart = performance.now();
 
     // Off the critical path on purpose: loading the workspace MCP catalog is a
-    // remote sync plus a document read, and nothing in it depends on the
+    // first-baseline wait plus local preparation, and nothing in it depends on the
     // `initialize` response — only the selection applied afterwards does. Start
     // it here so it overlaps the handshake instead of stalling `newSession`.
     // The rejection handler is attached immediately because an `initialize`

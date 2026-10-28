@@ -10,3 +10,9 @@ Parent settings/component rules apply. Edit `AGENTS.md`, not `CLAUDE.md`.
   account/workspace; notify only the corresponding provider after verified refresh.
 - Pure panel stories use synthetic states; the hook/wrapper own the real entry.
   [Decision](../../../../../../.agents/notes/proposed/architecture/2026-10-27-e2ee-manual-key-management.md).
+- Machine sharing uses only the native read/update ports, scoped by account,
+  workspace, machine and verified generation. Render native ownership hints;
+  main rechecks authority. Retry an unknown result with its original requestId
+  and change; only explicit retry after confirmed conflict creates a new intent.
+  Historical signer-revoked state is display/re-sign input, never execution evidence.
+  [Decision](../../../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).

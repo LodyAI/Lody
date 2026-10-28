@@ -17,19 +17,19 @@ npm install -g lody@next
 ## Encrypted remote execution authorization
 
 The encrypted workspace host exposes
-`authorizeExecution(workspaceId, requesterDevice): Effect<ExecutionAuthorization>`.
+`authorizeExecution(workspaceId, requesterDevice, localProjectId?): Effect<ExecutionAuthorization>`.
 The requester is the lowercase hex signing public key from an independently verified
 request. The result is `Authorized`, or `Denied` with `invalid-request`,
-`not-authorized`, `e2ee_machine_not_owned`, `unavailable`, or `closed`. Use it immediately before a new execution;
+`not-authorized`, `e2ee_machine_not_shared`, `unavailable`, or `closed`. Use it immediately before a new execution;
 request integrity, target binding and the durable journal claim remain separate checks.
 
 The machine reads the ledger with its own device credential and verifies every page
 through the existing runtime. Grants are isolated by workspace host and requesting
 device, kept only in memory for less than 15 minutes from read start, and checked
 against currently known membership on every call. Owner/Admin/Member personal or
-machine devices qualify only when they share the target machine's verified ledger
-membership. Cross-member execution is unsupported in the encrypted MVP, including
-shared machines. It returns `e2ee_machine_not_owned` with “加密工作区暂不支持使用其他成员的机器”.
+machine devices qualify directly when they share the target machine's verified ledger
+membership. Cross-member execution requires a current owner-signed machine policy
+and, for a local project, its project switch. Missing authorization returns `e2ee_machine_not_shared` (“机器或本地项目未共享，请联系机器所有者”). See the [native policy host](../../packages/e2ee-machine-sharing/README.md).
 Guest, recovery, removed and revoked devices do not qualify.
 Restart requires another authenticated read. A connection or forwarded proof cannot
 renew a grant. Concurrent misses share a refresh, bounded to 30 seconds; failure
@@ -40,7 +40,7 @@ this interface alone.
 Execution identity comes from the verified original update's device and ledger
 actor. UI account IDs are display metadata: they neither grant nor deny execution
 and are never compared with crypto user IDs. The host checks the signing device's
-current membership, role, revocation and same-member machine ownership before a
+current membership, role, revocation and machine/project authorization before a
 new claim. Ordinary workspace visibility/project-sharing checks remain unchanged.
 
 ## Local encrypted execution log recovery

@@ -1,3 +1,4 @@
+import { useSessionForkCapabilities } from '@/hooks/use-session-fork-capabilities';
 import { requireWorkspaceFeature } from '@/lib/workspace-feature';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { FileLinkCandidateDialog } from './file-link-candidate-dialog';
@@ -40,13 +41,10 @@ import { useRouter } from '@tanstack/react-router';
 import { useComposerNavigationFocus } from '../chat/submission/use-composer-navigation-focus';
 import { usePostHog } from '@posthog/react';
 import {
-  getAcpCapabilityCacheKey,
-  resolveSessionAcpTargetId,
   getProjectRefBranch,
   getServerNow,
   getSessionPullRequestLegacyFields,
   getSessionRoomId,
-  getAcpCapabilityCacheEntryAuthority,
   isLoroRepoDocDeleted,
   resolveProjectGitHubRepo,
   SessionForkOperationSchema,
@@ -118,7 +116,17 @@ import {
   zenLayoutModeAtom,
   zenRightPanelAtom,
 } from '@/atoms/layout-state';
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import { useNativeSideRail } from '../mobile/native-side-rail';
 import * as stylex from '@stylexjs/stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { useDocumentTitle } from '@/hooks/use-document-title';
@@ -915,6 +923,56 @@ const MobileProjectInfo = memo(function MobileProjectInfo({
   );
 });
 
+function AdaptiveMobileSessionHeader({
+  inset,
+  title,
+  hasUnread,
+  onBack,
+  onTabs,
+  onMore,
+}: {
+  inset: string;
+  title: ReactNode;
+  hasUnread: boolean;
+  onBack: () => void;
+  onTabs: () => void;
+  onMore: () => void;
+}) {
+  const { t } = useTranslation();
+  const sideRailVisible = useNativeSideRail(
+    [
+      { id: 'back', label: t('common.back', 'Back'), symbol: 'chevron.left', onPress: onBack },
+      {
+        id: 'more',
+        label: t('sessions.moreActions', 'More actions'),
+        symbol: 'ellipsis',
+        onPress: onMore,
+      },
+    ],
+    2
+  );
+  return (
+    <BaseHeader
+      truncateTitle={false}
+      hideMenuButton
+      className="absolute inset-x-0 top-0 z-30 border-b-0 bg-background/55 backdrop-blur-xl"
+      style={{ height: inset, paddingTop: 'var(--safe-area-top, 0px)' }}
+      leading={sideRailVisible ? undefined : <MobileSessionHeaderBackButton onBack={onBack} />}
+      title={title}
+      actions={
+        <div {...stylex.props(detailStyles.mobileHeaderRight)}>
+          <MobileSessionTabButton hasUnread={hasUnread} onOpen={onTabs} />
+          {!sideRailVisible && (
+            <GlassIconButton label={t('sessions.moreActions', 'More actions')} onClick={onMore}>
+              <Ellipsis {...stylex.props(detailStyles.iconCurrent)} strokeWidth={1.75} />
+            </GlassIconButton>
+          )}
+        </div>
+      }
+    />
+  );
+}
+
 // Toggles the bottom terminal dock, which is hidden by default and only mounted
 // in the desktop app (Electron). Shown only when a terminal-capable local session
 // is active — the dock publishes its controller only for local projects on this
@@ -1634,37 +1692,9 @@ const SessionDetail = ({
     MACHINE_PROTOCOL_CAPABILITIES.codeCollabAllChangesScope
   );
   const effectiveAllChangesDiffScope = allChangesScopeSupported ? allChangesDiffScope : 'branch';
-  const canForkSession = useCallback(
-    (target: SessionMeta): boolean => {
-      if (target.isArchived || !target.agentConfigId || !resolveSessionAcpTargetId(target))
-        return false;
-      const capability =
-        sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(target.agentConfigId)];
-      return (
-        getAcpCapabilityCacheEntryAuthority(capability, undefined) === 'authoritative' &&
-        capability?.sessionFork === true
-      );
-    },
-    [sessionMachine?.acpCapabilities]
-  );
-  const canForkSessionToWorktree = useCallback(
-    (target: SessionMeta): boolean => {
-      if (
-        !target.agentConfigId ||
-        !resolveSessionAcpTargetId(target) ||
-        !target.project ||
-        (target.project.kind !== 'local' && target.project.kind !== 'github')
-      ) {
-        return false;
-      }
-      const capability =
-        sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(target.agentConfigId)];
-      return (
-        getAcpCapabilityCacheEntryAuthority(capability, undefined) === 'authoritative' &&
-        capability?.sessionForkWorktree === true
-      );
-    },
-    [sessionMachine?.acpCapabilities]
+  const { canForkSession, canForkSessionToWorktree } = useSessionForkCapabilities(
+    activeSessionMachineId,
+    sessionMachine?.acpCapabilities
   );
   const handleForkAssistant = useCallback(
     async (
@@ -6303,37 +6333,18 @@ const SessionDetail = ({
           detailStyles.conversationTopInset(mobileHeaderInset)
         )}
       >
-        <BaseHeader
-          truncateTitle={false}
-          hideMenuButton
-          className="absolute inset-x-0 top-0 z-30 border-b-0 bg-background/55 backdrop-blur-xl"
-          style={{ height: mobileHeaderInset, paddingTop: 'var(--safe-area-top, 0px)' }}
-          leading={<MobileSessionHeaderBackButton onBack={handleMobileSessionBack} />}
+        <AdaptiveMobileSessionHeader
+          inset={mobileHeaderInset}
+          onBack={handleMobileSessionBack}
+          onTabs={() => setMobileTabSheetOpen(true)}
+          onMore={() => setMobileMenuSheetOpen(true)}
+          hasUnread={hasBackgroundUnread(mobileConversations)}
           title={
             <MobileProjectInfo
               session={activeSession}
               localProjectMeta={resolvedLocalProjectMeta}
               isSyncing={activeSessionDocIsSyncing}
             />
-          }
-          actions={
-            /* Extra -mr beyond the 4px disc/hit-target offset: the large
-               glass radius reads optically left of the hard right gutter
-               (user avatar + composer), so nudge ~8px total. */
-            <div {...stylex.props(detailStyles.mobileHeaderRight)}>
-              {/* Files, PR, and Browser entries live in the mobile tab sheet
-                  (mobileViewers), not the header. */}
-              <MobileSessionTabButton
-                hasUnread={hasBackgroundUnread(mobileConversations)}
-                onOpen={() => setMobileTabSheetOpen(true)}
-              />
-              <GlassIconButton
-                label={t('sessions.moreActions', 'More actions')}
-                onClick={() => setMobileMenuSheetOpen(true)}
-              >
-                <Ellipsis {...stylex.props(detailStyles.iconCurrent)} strokeWidth={1.75} />
-              </GlassIconButton>
-            </div>
           }
         />
         <MobileSessionTabSheet
@@ -6632,6 +6643,7 @@ const SessionDetail = ({
           onOpenChange={setMobileFilesBrowserOpen}
         >
           <DrawerContent
+            nativeKeyboardInset
             className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
             data-sidebar-swipe-open-disabled
           >
@@ -6687,8 +6699,8 @@ const SessionDetail = ({
            `data-vaul-no-drag`), so PR diffs scroll horizontally without dragging
            the drawer toward dismissal. The zone clears the fixed header so the
            back button stays tappable. See mobile-workspace-stack.tsx. */}
-        {/* Native keyboard handling is owned by ui/drawer.tsx: live viewport
-           inset on non-iOS side drawers, Vaul repositioning on iOS. Mobile web
+        {/* Keyboard handling is owned by ui/drawer.tsx: a native keyboard
+           inset on iOS and the live viewport inset on other shells. Mobile web
            uses browser resizing; see mobile-workspace-stack.tsx. */}
         <Drawer
           direction="right"
@@ -6699,6 +6711,7 @@ const SessionDetail = ({
           }}
         >
           <DrawerContent
+            nativeKeyboardInset
             className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
             data-sidebar-swipe-open-disabled
           >
@@ -6739,8 +6752,8 @@ const SessionDetail = ({
            conversation (invisible until the session drawer closes and flashes
            a few frames). Managed preview iframes survive remount via
            `managed-preview-frame-cache.ts`. */}
-        {/* Native keyboard handling is owned by ui/drawer.tsx: live viewport
-           inset on non-iOS side drawers, Vaul repositioning on iOS. Mobile web
+        {/* Keyboard handling is owned by ui/drawer.tsx: a native keyboard
+           inset on iOS and the live viewport inset on other shells. Mobile web
            uses browser resizing; see mobile-workspace-stack.tsx. */}
         <Drawer
           direction="right"
@@ -6751,6 +6764,7 @@ const SessionDetail = ({
           }}
         >
           <DrawerContent
+            nativeKeyboardInset
             className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
             data-sidebar-swipe-open-disabled
           >
@@ -6809,6 +6823,7 @@ const SessionDetail = ({
           }}
         >
           <DrawerContent
+            nativeKeyboardInset
             className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
             data-sidebar-swipe-open-disabled
           >

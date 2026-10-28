@@ -1442,6 +1442,40 @@ describe('host-only E2EE realtime journal', () => {
       expect(journal.read(key)).toBeNull();
     });
 
+    it('checks the current policy fence immediately before the durable start', async () => {
+      let current = true;
+      let authorized = false;
+      const read = journal.read.bind(journal);
+      vi.spyOn(journal, 'read').mockImplementation((storedKey) => {
+        if (authorized) current = false; // Explicit known withdrawal between authorization and claim.
+        return read(storedKey);
+      });
+      const execution = makeEncryptedAgentExecution({
+        genesis: key.genesis,
+        workspaceId: key.workspaceId,
+        targetMachineId: key.targetMachineId,
+        journal: () => journal,
+        resolveVerifiedOriginal: () =>
+          Effect.succeed({
+            requesterDevice: 'ab'.repeat(32),
+            requesterCryptoUserId: '1e'.repeat(32),
+            expiresAt: 1000,
+          }),
+        authorizeExecution: (_workspace, _requester, localProjectId) =>
+          Effect.sync(() => {
+            expect(localProjectId).toBe('actual-local-project');
+            authorized = true;
+            return { _tag: 'Authorized' as const, isCurrent: () => current };
+          }),
+      });
+      expect(
+        await Effect.runPromise(
+          execution.claim({ ...intent, localProjectId: 'actual-local-project' })
+        )
+      ).toEqual({ state: 'denied' });
+      expect(read(key)).toBeNull();
+    });
+
     it('preserves the first execution deadline through reauthorization and a backwards clock', async () => {
       const first = gate(() => journal, 100);
       expect(await Effect.runPromise(first.claim(intent))).toMatchObject({ state: 'expired' });

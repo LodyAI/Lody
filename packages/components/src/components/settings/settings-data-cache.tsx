@@ -262,8 +262,12 @@ export function SettingsDataCacheProvider({ children }: { children: ReactNode })
   );
 }
 
+export function useOptionalSettingsDataCache() {
+  return useContext(SettingsDataCacheContext);
+}
+
 export function useSettingsDataCache() {
-  const context = useContext(SettingsDataCacheContext);
+  const context = useOptionalSettingsDataCache();
   if (!context) {
     throw new Error('useSettingsDataCache must be used within SettingsDataCacheProvider');
   }

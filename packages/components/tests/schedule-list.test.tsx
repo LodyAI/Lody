@@ -383,6 +383,9 @@ describe('schedule list rows', () => {
     expect(container.querySelector('header')).toBeNull();
     expect(container.textContent).toContain('Nightly review');
     expect(container.textContent).not.toContain('Deploy checklist');
+    expect(container.querySelector('[data-schedule-row]')?.textContent).toContain('MacBook Pro');
+    expect(buttonIn(rowOf('Nightly review'), 'Pause')).not.toBeNull();
+    expect(container.querySelector('[role=separator]')).toBeNull();
   });
 });
 

@@ -23,14 +23,14 @@ Read parent rules and linked context.
 
 - Desktop file/diff/browser/PR viewers are closeable right-panel tabs; never split
   the conversation. `sidePanelTabs` owns order and close fallback neighbours.
-- A Side Chat is a durable child Session (`childSessionPlacement: 'side-panel'`):
-  no top tab, no sidebar row, but it still rolls up into the parent row. Only explicit
-  tab close deletes it; mount it lazily.
+- Side Chat is a durable child Session (`childSessionPlacement: 'side-panel'`):
+  no top tab or sidebar row; rolls up into the parent row. Only tab close deletes it;
+  mount lazily.
 - `SessionMeta.openedBySessionId` is presentation-only provenance: never
   `parentSessionId`, never rolled into the opener, never filtered out of the
   list. Navigation carries root + exact tab ids.
-- The collapsed side panel stays mounted: anything polling or connected in it
-  must take an on-screen prop and pause itself.
+- The collapsed side panel stays mounted: polling/connections need an on-screen
+  prop and must pause while hidden.
 - Panel mount is not preview ownership — never release an endpoint or revoke a
   tunnel from component cleanup.
 
@@ -49,27 +49,28 @@ Read parent rules and linked context.
 
 ## [Conversation surface](../../../../../.agents/docs/sessions-surface.md)
 
-- Message-list crash fallback preserves the composer and copies the shared report,
-  including the original error and caught React component stacks.
+- Mobile chat composers/questions own keyboard lift; other side panels use
+  `nativeKeyboardInset`. Wide sessions inherit root padding once.
+- Message-list crash fallback preserves the composer and copies the shared report
+  with the original error and React component stacks.
 - Read receipts require per-surface `isVisible`, never mere mounting.
 - Keep question drafts on navigation and IME Enter; show failures.
 - Markdown copy uses `buildConversationMarkdown`, not `buildReplayPromptFromHistory`:
   keep prose whole, cap thinking rather than drop it, toast every omission, and
   include the selected message regardless of ACP fork support.
 - Read ACP capabilities via `useResolvedMachineMeta()` and selectors via
-  `useSessionAcpSelectorContext()`; the controlled composer must not recompute
-  selector options.
-- Most rendering changes belong in `../ai-gui/view.tsx`; the conversation
-  `VList` is vertical-only and wide content owns its own scroller.
+  `useSessionAcpSelectorContext()`; never recompute options in the composer.
+- Rendering changes mostly belong in `../ai-gui/view.tsx`; conversation `VList`
+  is vertical-only; wide content owns its scroller.
 
 ## [Run config and Agent Roles](../../../../../.agents/docs/sessions-run-config.md)
 
 - A Role never falls back: `machineId + agentConfigId` are exact, and an
   unavailable one stays listed, disabled, with its reason. A draft authorizes the
   whole Role; an existing session applies only its run config.
-- A Role IS the whole configuration: other knobs render inert,
-  `DesktopPermissionModeButton` is absent when the Role pins permission, and
-  moving a knob unnames the Role instead of clearing values.
+- A Role IS the whole configuration: other knobs are inert;
+  `DesktopPermissionModeButton` is absent when permission is pinned; moving a
+  knob unnames the Role without clearing values.
 - Selection flows through `useAcpSessionConfigSelectionState`, a pure derivation:
   never store the resolved selection or reconcile it in an effect (#185).
 - Freeze `agentRoleId` + `agentRoleRevision` into the Turn `inputConfig` on send;
@@ -84,12 +85,11 @@ Read parent rules and linked context.
 
 ## [Live status and dispatch](../../../../../.agents/docs/sessions-live-status.md)
 
-- Presence owns Working/Waiting UI, never `SessionMeta.status`,
-  `lastRunningSeen`, or CLI dispatch pointers.
-- Only derived activity: dispatched-but-not-started; anchor on the durable turn
-  timestamp and stop at 30s.
-- No presence: queue behind unfinished turns; never relight Working UI.
-- Busy composer without authoritative steer support uses Queue.
+- Presence owns Working/Waiting UI, not `SessionMeta.status`, `lastRunningSeen`,
+  or CLI dispatch pointers.
+- Only derived activity: dispatched-but-not-started; use durable turn time, stop at 30s.
+- No presence: queue behind unfinished turns; never relight Working.
+- Busy composer without authoritative steer uses Queue.
 - Uploads: [contract](../../../../../specs/composer-send-during-upload.md).
 
 ## [Composer info bar](../../../../../.agents/docs/sessions-info-bar.md)

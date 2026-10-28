@@ -698,6 +698,8 @@ export const sessionHistorySchema = schema.LoroMap({
       scheduleId: schema.String(),
       turnId: schema.String(),
       title: schema.String(),
+      definitionFingerprint: schema.String({ required: false }),
+      manualRunKey: schema.String({ required: false }),
     },
     { required: false }
   ),

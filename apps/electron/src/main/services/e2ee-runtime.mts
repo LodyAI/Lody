@@ -1,3 +1,8 @@
+import {
+  makeLazyMachineSharingHost,
+  MachineSharingError,
+  type SharingRemote
+} from '@lody/e2ee-machine-sharing'
 import { makeDesktopRemotePairing } from './e2ee-remote-pairing.mjs'
 import { EpochCandidateStore, SubmissionJournal } from '@lody/e2ee-core/services'
 import {
@@ -90,6 +95,12 @@ export class DesktopE2eeRuntimeError extends Data.TaggedError('DesktopE2eeRuntim
     | 'management_unauthorized'
     | 'management_operator_required'
     | 'management_retry'
+    | 'machine_not_owned'
+    | 'machine_not_shared'
+    | 'sharing_conflict'
+    | 'sharing_unavailable'
+    | 'sharing_invalid'
+    | 'sharing_storage'
     | 'invalid-ledger'
     | 'member_removed'
     | 'missing-binding'
@@ -138,6 +149,14 @@ const boundary = <A, E, R>(work: Effect.Effect<A, E, R>) =>
   work.pipe(
     Effect.mapError((error) => {
       if (error instanceof DesktopE2eeRuntimeError) return error
+      if (error instanceof MachineSharingError) return fail(error.code)
+      if (
+        error instanceof Error &&
+        ['e2ee_machine_not_owned', 'e2ee_machine_not_shared'].includes(error.message)
+      )
+        return fail(
+          error.message === 'e2ee_machine_not_owned' ? 'machine_not_owned' : 'machine_not_shared'
+        )
       const reason =
         (error as { code?: string; reason?: string })?.code ??
         (error as { reason?: string })?.reason
@@ -221,6 +240,10 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           input: E2eeContentSeal
         ) => Effect.Effect<{ header: Uint8Array; sealed: Uint8Array }, unknown>
         openContent: (input: E2eeContentOpen) => Effect.Effect<Uint8Array, unknown>
+        refreshSharingLedger: (
+          readHistory: DesktopE2eeManagementRemote['history']
+        ) => Effect.Effect<void, unknown>
+        sharing: Effect.Success<ReturnType<typeof makeLazyMachineSharingHost>>
         rpc: ReturnType<typeof makeE2eeRpcNative>
         ingest: (page: E2eeWorkspaceHistoryPage) => Effect.Effect<E2eeRuntimeStatus, unknown>
       }
@@ -697,9 +720,11 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         let manager: Effect.Success<ReturnType<typeof makeDesktopE2eeManagement>> | undefined
         let roundAgain = false
         let closing = false
+        let sharingOwner: Effect.Success<ReturnType<typeof makeLazyMachineSharingHost>> | undefined
         const networkAbort = new AbortController()
         const stop = () => {
           closing = true
+          sharingOwner?.stop()
           roundAgain = false
           networkAbort.abort()
         }
@@ -852,6 +877,24 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           return yield* result
         }, Effect.uninterruptible)
         const history = Context.get(historyContext, InstalledEpochHistory)
+        const sharing = yield* makeLazyMachineSharingHost({
+          filename: join(directory, 'machine-sharing.sqlite'),
+          admissionHistory: (view) =>
+            sql(() =>
+              rows()
+                .filter((row) => row.position < view.length)
+                .map((row) => ({ length: row.position + 1, record: new Uint8Array(row.record) }))
+            ),
+          workspaceId,
+          genesisHash: hex(genesis.toBytes()),
+          signer: device,
+          ledger: () => verified.current(),
+          readEpochKey: (epoch) => history.read(epoch),
+          credential: () => options.bootstrap.deviceCredential(workspaceId),
+          // Public methods refresh through their captured device-authenticated history before calling this host.
+          refreshLedger: () => Effect.void
+        })
+        sharingOwner = sharing
         const rpc = makeE2eeRpcNative({
           workspaceId,
           requesterDevice: hex(device.publicKey.toBytes()),
@@ -1009,6 +1052,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           }
         })
         const ingest = Effect.fnUntraced(function* (page: E2eeWorkspaceHistoryPage) {
+          sharing.invalidate()
           const state = yield* feed.current()
           const start = state.bootstrap ? 0 : state.view.length
           if (
@@ -1261,6 +1305,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           seal,
           openContent,
           rpc,
+          sharing,
+          refreshSharingLedger: refreshManagementHistory,
           keyRound,
           stop,
           isClosing: () => closing,
@@ -1341,6 +1387,28 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         })
       )
     }
+    const withSharingHistory = (
+      entry: {
+        refreshSharingLedger: (
+          read: DesktopE2eeManagementRemote['history']
+        ) => Effect.Effect<void, unknown>
+      },
+      workspaceId: string,
+      remote: SharingRemote,
+      readHistory?: DesktopE2eeManagementRemote['history']
+    ): SharingRemote => ({
+      ...remote,
+      ...(readHistory
+        ? {
+            refreshLedger: () =>
+              entry.refreshSharingLedger((request) =>
+                Effect.flatMap(options.bootstrap.deviceCredential(workspaceId), (credential) =>
+                  readHistory({ ...request, credential })
+                )
+              )
+          }
+        : {})
+    })
     return {
       remoteMachineOffer: (
         workspaceId: string,
@@ -1388,6 +1456,16 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           Effect.mapError((error) => {
             rememberDesktopE2eeFailure('workspace-management', error)
             if (error instanceof DesktopE2eeRuntimeError) return error
+            if (error instanceof MachineSharingError) return fail(error.code)
+            if (
+              error instanceof Error &&
+              ['e2ee_machine_not_owned', 'e2ee_machine_not_shared'].includes(error.message)
+            )
+              return fail(
+                error.message === 'e2ee_machine_not_owned'
+                  ? 'machine_not_owned'
+                  : 'machine_not_shared'
+              )
             const cause = (error as { cause?: unknown })?.cause ?? error
             const code = (cause as { code?: string })?.code
             if (
@@ -1503,6 +1581,58 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.seal(input))),
       openContent: (workspaceId: string, input: E2eeContentOpen) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.openContent(input))),
+      readMachineSharing: (
+        workspaceId: string,
+        machineId: string,
+        remote: SharingRemote,
+        readHistory?: DesktopE2eeManagementRemote['history']
+      ) =>
+        Effect.flatMap(run(openWorkspace(workspaceId)), (entry) =>
+          entry.sharing.read(machineId, withSharingHistory(entry, workspaceId, remote, readHistory))
+        ).pipe(boundary),
+      updateMachineSharing: (
+        workspaceId: string,
+        machineId: string,
+        generation: string,
+        requestId: string,
+        change: import('@lody/platform').E2eeMachineSharingChange,
+        remote: SharingRemote,
+        readHistory?: DesktopE2eeManagementRemote['history']
+      ) =>
+        Effect.flatMap(run(openWorkspace(workspaceId)), (entry) =>
+          entry.sharing.write(
+            machineId,
+            generation,
+            requestId,
+            change,
+            withSharingHistory(entry, workspaceId, remote, readHistory)
+          )
+        ).pipe(boundary),
+      prepareDispatch: (
+        workspaceId: string,
+        targetMachineId: string,
+        input: E2eeDispatchInput,
+        remote?: SharingRemote,
+        readHistory?: DesktopE2eeManagementRemote['history']
+      ) =>
+        Effect.flatMap(run(openWorkspace(workspaceId)), (entry) =>
+          entry.rpc.prepareDispatch(
+            targetMachineId,
+            input,
+            remote
+              ? (machineId) =>
+                  Effect.gen(function* () {
+                    const status = yield* entry.status()
+                    return (yield* entry.sharing.authorize(
+                      machineId,
+                      status.signingPublicKey ?? '',
+                      undefined,
+                      withSharingHistory(entry, workspaceId, remote, readHistory)
+                    )).allowed
+                  })
+              : undefined
+          )
+        ).pipe(boundary),
       prepareFeatureRpc: (
         workspaceId: string,
         input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput
@@ -1516,12 +1646,6 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         run(
           Effect.flatMap(openWorkspace(workspaceId), (entry) =>
             entry.rpc.acceptFeatureResponse(input, frame)
-          )
-        ),
-      prepareDispatch: (workspaceId: string, targetMachineId: string, input: E2eeDispatchInput) =>
-        run(
-          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
-            entry.rpc.prepareDispatch(targetMachineId, input)
           )
         ),
       acceptDispatchResponse: (

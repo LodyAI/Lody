@@ -1,3 +1,4 @@
+import { useFoldAwareSheetHeight } from './use-vertical-division';
 import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 import type {
@@ -57,13 +58,17 @@ export function MobileWorktreeConfigSheet({
   /* Both editors are textareas, so this sheet is on screen with the soft
      keyboard up for most of its life. */
   const keyboard = useKeyboardAwareSheet();
+  const maxHeight = useFoldAwareSheetHeight(88, true);
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange} repositionInputs={false}>
       <DrawerContent
+        style={{
+          maxHeight: `min(${maxHeight}, calc(100dvh - var(--native-keyboard-height, 0px)))`,
+        }}
         className={cn(
           'mobile-worktree-config-sheet',
-          'h-auto! max-h-[88dvh]! rounded-t-2xl border-border/60',
+          'h-auto! rounded-t-2xl border-border/60',
           keyboard.contentClassName
         )}
       >

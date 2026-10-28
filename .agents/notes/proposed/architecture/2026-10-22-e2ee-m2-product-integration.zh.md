@@ -25,7 +25,7 @@ Translation: current
 
 ## 未加密出口
 
-M2 使用 Loro 历史和持久派发指针。加密工作区关闭普通云端 RPC、云附件、排期、Shortcuts、公开链接共享与通知正文。[文件与预览决策](../../implemented/feature/2026-10-28-e2ee-file-preview-availability.zh.md)取代了初始 Code Collab 与预览限制；本机导出在独立 PR #2011 中处理。后台 PR 观察、托管 GitHub 凭据和云端关联也关闭，避免仓库名与分支旁路泄漏。同系统用户的可信本地 IPC 可承载必要控制，但不得回落网络 RPC。Loro 的授权结果已经写入受保护的会话文档。文件保管仅限机器设备，必须在明确批准配对前告知用户。
+M2 使用 Loro 历史和持久派发指针。定时任务文档与工作区注册表使用同一受保护 CRDT 传输；定时任务在交接前与共用实际启动 claim 中，都通过现有机器访问检查验证原始定义 signer；显示用的归属字段和机器派生签名都不授予这份权限。加密工作区关闭普通云端 RPC、Shortcuts 与通知正文。[明确确认后发布明文副本](../../implemented/feature/2026-10-28-e2ee-share-plaintext-consent.zh.md)取代了原公开链接分享限制。[文件与预览决策](../../implemented/feature/2026-10-28-e2ee-file-preview-availability.zh.md)取代了初始 Code Collab 与预览限制；本机导出使用 PR #2011 的实现。加密附件遵循[附件决策](2026-10-28-encrypted-attachments.zh.md)。后台 PR 观察、托管 GitHub 凭据和云端关联也关闭，避免仓库名与分支旁路泄漏。同系统用户的可信本地 IPC 可承载必要控制，但不得回落网络 RPC。Loro 的授权结果已经写入受保护的会话文档。文件保管仅限机器设备，必须在明确批准配对前告知用户。
 
 ## 证据与限制
 

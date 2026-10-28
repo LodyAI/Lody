@@ -4742,6 +4742,10 @@ export class SessionExecutionService {
                       workspaceId: self.deps.workspaceId,
                       sessionId,
                       userTurnId,
+                      localProjectId:
+                        runtime.project?.kind === 'local'
+                          ? runtime.project.localProjectId
+                          : undefined,
                       requesterUserId: options.invocation?.requesterUserId,
                       inputConfig: options.invocation?.inputConfig,
                     })
@@ -4794,8 +4798,8 @@ export class SessionExecutionService {
                       ? 'This encrypted turn already finished and will not be started again.'
                       : result.state === 'expired'
                         ? 'This encrypted turn expired before execution. Send a new turn to continue.'
-                        : result.state === 'denied' && result.reason === 'e2ee_machine_not_owned'
-                          ? 'e2ee_machine_not_owned: 加密工作区暂不支持使用其他成员的机器。'
+                        : result.state === 'denied' && result.reason === 'e2ee_machine_not_shared'
+                          ? 'e2ee_machine_not_shared: 机器或本地项目未共享，请联系机器所有者。'
                           : 'This encrypted turn is not authorized for execution.',
               });
             });

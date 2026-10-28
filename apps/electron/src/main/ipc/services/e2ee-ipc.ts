@@ -1,3 +1,9 @@
+import {
+  id as sharingId,
+  generation as sharingGeneration,
+  requestId as sharingRequestId,
+  sharingChangeSchema
+} from '@lody/e2ee-machine-sharing/schemas'
 import { randomUUID } from 'node:crypto'
 import { E2eeMemberRemovedError } from '../../services/e2ee-cloud-errors.mjs'
 import { Effect } from 'effect'
@@ -1450,6 +1456,70 @@ export class E2eeIpc extends IpcService {
     )
   }
   @IpcMethod()
+  async readMachineSharing(workspaceId: string, machineId: string) {
+    if (!sharingId.safeParse(workspaceId).success || !sharingId.safeParse(machineId).success)
+      throw new Error('e2ee_invalid-input')
+    const id = sender()
+    const cloud = await desktopE2eeCloudClient()
+    const access = await withDesktopE2eeAccount(
+      (owner) =>
+        owner.accountId === cloud.accountId && owner.readers.get(workspaceId)?.has(id)
+          ? Effect.succeed({
+              accountId: owner.accountId,
+              work: owner.host.readMachineSharing(
+                workspaceId,
+                machineId,
+                cloud.client.machineSharing(),
+                (request) => cloud.client.history(request)
+              )
+            })
+          : Effect.fail(new Error('e2ee_not_open')),
+      workspaceId,
+      false
+    )
+    return runDesktopE2eeOperation(access.accountId, access.work)
+  }
+  @IpcMethod()
+  async updateMachineSharing(
+    workspaceId: string,
+    machineId: string,
+    generation: string,
+    requestId: string,
+    change: import('@lody/platform').E2eeMachineSharingChange
+  ) {
+    const parsed = sharingChangeSchema.safeParse(change)
+    if (
+      !sharingId.safeParse(workspaceId).success ||
+      !sharingId.safeParse(machineId).success ||
+      !sharingGeneration.safeParse(generation).success ||
+      !sharingRequestId.safeParse(requestId).success ||
+      !parsed.success
+    )
+      throw new Error('e2ee_invalid-input')
+    const id = sender()
+    const cloud = await desktopE2eeCloudClient()
+    const access = await withDesktopE2eeAccount(
+      (owner) =>
+        owner.accountId === cloud.accountId && owner.readers.get(workspaceId)?.has(id)
+          ? Effect.succeed({
+              accountId: owner.accountId,
+              work: owner.host.updateMachineSharing(
+                workspaceId,
+                machineId,
+                generation,
+                requestId,
+                parsed.data,
+                cloud.client.machineSharing(),
+                (request) => cloud.client.history(request)
+              )
+            })
+          : Effect.fail(new Error('e2ee_not_open')),
+      workspaceId,
+      false
+    )
+    return runDesktopE2eeOperation(access.accountId, access.work)
+  }
+  @IpcMethod()
   async prepareFeatureRpc(
     workspaceId: string,
     input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput
@@ -1487,14 +1557,25 @@ export class E2eeIpc extends IpcService {
     input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
   ) {
     const id = sender()
-    return withDesktopE2eeAccount(
+    const cloud = await desktopE2eeCloudClient()
+    const access = await withDesktopE2eeAccount(
       (owner) =>
-        owner.readers.get(workspaceId)?.has(id)
-          ? owner.host.prepareDispatch(workspaceId, targetMachineId, input)
+        owner.accountId === cloud.accountId && owner.readers.get(workspaceId)?.has(id)
+          ? Effect.succeed({
+              accountId: owner.accountId,
+              work: owner.host.prepareDispatch(
+                workspaceId,
+                targetMachineId,
+                input,
+                cloud.client.machineSharing(),
+                (request) => cloud.client.history(request)
+              )
+            })
           : Effect.fail(new Error('e2ee_not_open')),
       workspaceId,
       false
     )
+    return runDesktopE2eeOperation(access.accountId, access.work)
   }
   @IpcMethod()
   async acceptDispatchResponse(

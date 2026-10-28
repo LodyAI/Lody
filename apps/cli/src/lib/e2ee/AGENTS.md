@@ -18,7 +18,7 @@
 - `runtime.ts` composes Feed/VerifiedLedger, installed keys and optional receiver.
   Offline open/status; cloud I/O stays in cloud-cli-port.
   Distinguish damaged history/pins; never reset trusted pins from remote hints.
-- Execution: `authorizeExecution`; same ledger membership as machine; authenticated read;
+- Execution: `authorizeExecution`; same membership or verified owner-signed machine/project policy; authenticated read;
   RAM-only <15min/read-start. Credential revoke: fence/clear grants before drain,
   never network-retry.
 - Journal originals before feed/pin; rebase core pin first after 64 records.
@@ -108,8 +108,8 @@
 
 - Same-context `creating=-1` means `prepare-superseded`; other errors stay errors. Main
   archives only the matching all-null unsigned attempt before fresh consent. Keep CLI originals.
-- Never cache an unimplemented content mode; `export` decrypts locally and both `export` and `sync` skip unsupported schedules
-  for encrypted workspaces
+- Never cache an unimplemented content mode. `export` decrypts locally; `export` and
+  `sync` include encrypted Schedule documents and Registry
   ([note](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-cli-review-fixes.md)).
 
 - Reset: same-user socket; drain, exclusive sibling lease, archive whole dir;

@@ -145,6 +145,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
   const scope = yield* Effect.scope;
   const serial = yield* Semaphore.make(1);
   let closed = false;
+  let executionGeneration = 0;
 
   const db = yield* Effect.acquireRelease(
     sql(() => {
@@ -481,6 +482,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
             )
           )
             return yield* failure('invalid-input');
+          executionGeneration++;
           const records = yield* sql(() => page.recordsHex.map(unhex));
           const length = page.startIndex + records.length;
           if (
@@ -548,6 +550,24 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
           return yield* status();
         })
       ),
+    sharingAdmissionHistory: (view: import('@lody/e2ee-core/protocol').LedgerView) =>
+      serial.withPermit(
+        guard().pipe(
+          Effect.andThen(
+            sql(() =>
+              db
+                .prepare('SELECT position,record FROM records WHERE position < ? ORDER BY position')
+                .all(view.length)
+                .map((row) => ({
+                  length: Number(row.position) + 1,
+                  record: new Uint8Array(row.record as Uint8Array),
+                }))
+            )
+          )
+        )
+      ),
+    executionGeneration: () => executionGeneration,
+    readSharingEpochKey: (epoch: number) => history.read(epoch),
     binding: (resource: string, model: 'loro' | 'flock', writeEpoch: number | 'current') =>
       makeStreamsUpdateBinding({
         genesis,

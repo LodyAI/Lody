@@ -163,3 +163,5 @@ pnpm --filter @lody/e2ee-core check:docs  # 公开导出、命名空间与 servi
 
 Streams 适配器与 Lab 使用当前 workspace catalog 版本。Node 宿主可共用
 [node-custody](docs/surface.zh.md) 保管实现，并分别提供经过核对的系统包装器。
+
+[冻结前格式审查](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-format-freeze-review.zh.md)记录账本格式的未决事项和仅支持当前版本的格式盘点。

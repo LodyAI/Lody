@@ -457,6 +457,7 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
     accordion,
   } = props;
   const { t } = useTranslation();
+  const ordinarySharing = useWorkspaceFeature('sharing');
   const isMobile = useIsMobile();
   const monitoredOnline = useMachineOnlineStatus(machine.id) === 'online';
   // The accordion list already owns the workspace-wide presence snapshot. Reuse
@@ -502,7 +503,7 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
 
   const manageableOwnMachine = isOwn && !readOnly;
   const shareControlVisible =
-    !isMobile && !renaming && manageableOwnMachine && !!onSharedWithTeamChange;
+    !isMobile && !renaming && manageableOwnMachine && ordinarySharing && !!onSharedWithTeamChange;
   const restartVisible = !isMobile && !renaming && !readOnly && !!onRestartDaemon;
   const revokeVisible =
     !isMobile && !renaming && !readOnly && canRevokeCredentials && !!onRevokeCredentials;
@@ -799,28 +800,31 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
                         {t('workspace.machines.editName', 'Edit machine name')}
                       </Menu.Item>
                     )}
-                    {isMobile && manageableOwnMachine && onSharedWithTeamChange && (
-                      <Menu.Item
-                        closeOnClick={false}
-                        onClick={() => {
-                          if (sharing) return;
-                          void handleSharedToggle(!effectiveShared);
-                        }}
-                        disabled={sharing}
-                        icon={Users}
-                        endContent={
-                          <Switch
-                            checked={effectiveShared}
-                            disabled={sharing}
-                            aria-hidden
-                            tabIndex={-1}
-                            className={stylex.props(styles.switchInMenu).className}
-                          />
-                        }
-                      >
-                        {t('workspace.machines.shareMachineLabel', 'Share machine')}
-                      </Menu.Item>
-                    )}
+                    {isMobile &&
+                      manageableOwnMachine &&
+                      ordinarySharing &&
+                      onSharedWithTeamChange && (
+                        <Menu.Item
+                          closeOnClick={false}
+                          onClick={() => {
+                            if (sharing) return;
+                            void handleSharedToggle(!effectiveShared);
+                          }}
+                          disabled={sharing}
+                          icon={Users}
+                          endContent={
+                            <Switch
+                              checked={effectiveShared}
+                              disabled={sharing}
+                              aria-hidden
+                              tabIndex={-1}
+                              className={stylex.props(styles.switchInMenu).className}
+                            />
+                          }
+                        >
+                          {t('workspace.machines.shareMachineLabel', 'Share machine')}
+                        </Menu.Item>
+                      )}
                     {isMobile &&
                       isOwn &&
                       (onPing || (updateVisible && daemonUpdate) || onRestartDaemon) && (

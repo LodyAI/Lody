@@ -2304,3 +2304,17 @@ void test('a background reader closes only the namespace returned by its own ope
   f.identity.generation++
   await assert.rejects(f.ipc.open('team', undefined, 'A'), /e2ee_account_mismatch/)
 })
+
+for (const code of ['machine_not_owned', 'machine_not_shared']) {
+  void test(`encrypted execution refusal preserves ${code} at the public account boundary`, async () => {
+    const { api } = await account()
+    await assert.rejects(
+      api.withDesktopE2eeAccount(() => Effect.fail({ code })),
+      (error) => {
+        assert.equal(error.message, `e2ee_${code}`)
+        assert.equal('cause' in error, false)
+        return true
+      }
+    )
+  })
+}

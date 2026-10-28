@@ -53,6 +53,8 @@ export interface CloudSessionSharingPort {
  */
 /** Device-scoped cloud transport; local opens and custody stay with its host. */
 export interface CloudE2eePort {
+  readonly machineSharing?: import('./e2ee-machine-sharing').E2eeMachineSharingTransport;
+
   /** Raw retained update messages, never a snapshot or an attribution verdict. */
   readExecutionOriginPage?(
     input: {

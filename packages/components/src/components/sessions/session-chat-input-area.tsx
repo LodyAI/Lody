@@ -2415,7 +2415,10 @@ export const SessionChatInputArea = memo(
 
     return (
       <div
-        className={getSessionChatInputAreaShellClassName({ protectFromEdgeBackZone: isMobile })}
+        className={getSessionChatInputAreaShellClassName({
+          protectFromEdgeBackZone: isMobile,
+          liftAboveKeyboard: isMobile,
+        })}
         onMouseDown={(event) => {
           // Keep the restored shell-owned bottom spacing focusable without
           // stealing focus from selectors, attachments, or the prompt itself.

@@ -1,3 +1,4 @@
+import { sharingReplySchemas } from '@lody/e2ee-machine-sharing/schemas';
 import { StreamsClient } from '@loro-dev/streams-client';
 import { CloudE2eeMemberRemoved, CloudE2eeDeviceRevoked } from './cloud-e2ee-errors';
 import { Effect } from 'effect';
@@ -226,6 +227,36 @@ export function createCloudE2eePort(
     }
   };
   return {
+    machineSharing: {
+      readHead: async (input) =>
+        sharingReplySchemas.readHead.parse(
+          await client(AbortSignal.timeout(30_000)).action(api.e2eeMachineSharing.readHead, {
+            ...input,
+            ...(options.token === undefined ? {} : { cliToken: options.token }),
+          })
+        ),
+      readVersion: async (input) =>
+        sharingReplySchemas.readVersion.parse(
+          await client(AbortSignal.timeout(30_000)).action(api.e2eeMachineSharing.readVersion, {
+            ...input,
+            ...(options.token === undefined ? {} : { cliToken: options.token }),
+          })
+        ),
+      readRequest: async (input) =>
+        sharingReplySchemas.readRequest.parse(
+          await client(AbortSignal.timeout(30_000)).action(api.e2eeMachineSharing.readRequest, {
+            ...input,
+            ...(options.token === undefined ? {} : { cliToken: options.token }),
+          })
+        ),
+      commit: async (input) =>
+        sharingReplySchemas.commit.parse(
+          await client(AbortSignal.timeout(30_000)).action(api.e2eeMachineSharing.commit, {
+            ...input,
+            ...(options.token === undefined ? {} : { cliToken: options.token }),
+          })
+        ),
+    },
     ...(options.token === undefined
       ? {
           completeMachinePairing: async (input: {
@@ -609,6 +640,7 @@ export function createCloudE2eeMachinePort(options: {
     }),
   ]);
   const e2ee = createCloudE2eePort({ authBaseUrl: options.authBaseUrl, logger: options.logger });
+  const machineSharing = e2ee.machineSharing;
   const readEpochGroup = e2ee.readEpochGroup;
   const readExecutionOriginPage = e2ee.readExecutionOriginPage;
   const completeMachinePairing = e2ee.completeMachinePairing;
@@ -623,6 +655,28 @@ export function createCloudE2eeMachinePort(options: {
     attachmentUpload: { serverBaseUrl },
     e2ee: {
       ...e2ee,
+      ...(machineSharing
+        ? {
+            machineSharing: {
+              readHead: (input) => {
+                bound(input);
+                return machineSharing.readHead(input);
+              },
+              readVersion: (input) => {
+                bound(input);
+                return machineSharing.readVersion(input);
+              },
+              readRequest: (input) => {
+                bound(input);
+                return machineSharing.readRequest(input);
+              },
+              commit: (input) => {
+                bound(input);
+                return machineSharing.commit(input);
+              },
+            },
+          }
+        : {}),
       ...(readExecutionOriginPage
         ? {
             readExecutionOriginPage: (input, signal) => {

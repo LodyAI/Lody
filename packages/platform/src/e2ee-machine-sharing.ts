@@ -40,3 +40,33 @@ export type {
   E2eeMachineSharingRequests,
   E2eeMachineSharingReplies,
 } from '@lody/cloud-api';
+
+/** Verified host view for switch UI. No credential, keys or generic signing capability. */
+export interface E2eeMachineSharingView {
+  machineId: string;
+  ownerMembershipId: string;
+  /** Ledger-qualified initial admission key; changes on removal/readmission. */
+  generation: string;
+  head: { readonly revision: number; readonly digest: string } | null;
+  sharedWithTeam: boolean;
+  projects: readonly string[];
+  removed?: boolean;
+  /** Current host personal-device authority, derived from the verified ledger. */
+  canManage: boolean;
+  /** Policy's actual signing device, including a historically admitted revoked device. */
+  signer: string | null;
+  /** Historical state is display/re-sign input only; it grants no cross-member execution. */
+  needsResign: boolean;
+  deniedReason?: 'e2ee_machine_not_shared' | 'e2ee_machine_not_owned';
+  /** Discover an interrupted local intent so a new window can reconcile the same request. */
+  pendingRequest?: { requestId: string; change: E2eeMachineSharingChange };
+  /** Pending intent is retained, but no latest policy was verified by this read. */
+  unavailable?: true;
+}
+export type E2eeMachineSharingWriteResult = {
+  status: 'saved' | 'pending' | 'conflict' | 'removed';
+  requestId: string;
+};
+export type E2eeMachineSharingChange =
+  | { readonly kind: 'machine'; readonly sharedWithTeam: boolean }
+  | { readonly kind: 'project'; readonly localProjectId: string; readonly sharedWithTeam: boolean };

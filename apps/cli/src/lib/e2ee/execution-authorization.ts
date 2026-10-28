@@ -5,13 +5,14 @@ import type { CloudE2eePort } from '@lody/platform';
 import type { makeCliE2eeRuntime } from './runtime';
 
 export type ExecutionAuthorization =
-  | { readonly _tag: 'Authorized' }
+  | { readonly _tag: 'Authorized'; readonly isCurrent?: () => boolean }
   | {
       readonly _tag: 'Denied';
       readonly reason:
         | 'invalid-request'
         | 'not-authorized'
         | 'e2ee_machine_not_owned'
+        | 'e2ee_machine_not_shared'
         | 'unavailable'
         | 'closed';
     };
@@ -29,10 +30,14 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
     workspaceId: string;
     credential: string;
     cloud: Pick<CloudE2eePort, 'getHistory'>;
+    sharing?: (
+      requesterDevice: string,
+      localProjectId?: string
+    ) => Effect.Effect<{ allowed: boolean; isCurrent?: () => boolean }, unknown>;
     onCredentialFailure?: (cause: unknown) => void;
     runtime: Pick<
       Effect.Success<ReturnType<typeof makeCliE2eeRuntime>>,
-      'status' | 'ingest' | 'executionLedger'
+      'status' | 'ingest' | 'executionLedger' | 'executionGeneration'
     >;
   }) {
     const scope = yield* Effect.scope;
@@ -122,7 +127,8 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
       function* (
         workspaceId: string,
         requesterDevice: string,
-        access: 'read' | 'execute'
+        access: 'read' | 'execute' | 'owned-execute',
+        localProjectId?: string
       ): Effect.fn.Return<ExecutionAuthorization, unknown> {
         if (closed) return denied('closed');
         if (
@@ -139,6 +145,8 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         if (closed) return denied('closed');
         if (!start || !fresh(start, yield* stamp)) return denied('unavailable');
         // Offline state supplies immediate known revocations, never freshness.
+        let generation = options.runtime.executionGeneration();
+        let policyCurrent: (() => boolean) | undefined;
         const view = yield* options.runtime.executionLedger();
         const state = view.inspectState();
         const local = state.devices.get(self);
@@ -162,7 +170,14 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
           )
         ) {
           grants.delete(requesterDevice);
-          return denied('e2ee_machine_not_owned');
+          if (access !== 'execute') return denied('e2ee_machine_not_owned');
+          if (!options.sharing) return denied('e2ee_machine_not_shared');
+          const shared = yield* options
+            .sharing(requesterDevice, localProjectId)
+            .pipe(Effect.catch(() => Effect.succeed({ allowed: false, isCurrent: undefined })));
+          if (!shared.allowed) return denied('e2ee_machine_not_shared');
+          policyCurrent = shared.isCurrent;
+          generation = options.runtime.executionGeneration();
         }
         if (!fresh(start, yield* stamp)) return denied('unavailable');
         // Revocation may arrive while a native check yields. Nothing may publish
@@ -171,15 +186,31 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         // Bounded cache; eviction can only require an earlier authenticated reread.
         if (grants.size >= 1024) grants.clear();
         grants.set(requesterDevice, start);
-        return { _tag: 'Authorized' };
+        if (access !== 'execute') return { _tag: 'Authorized' };
+        return {
+          _tag: 'Authorized',
+          isCurrent: () =>
+            !closed &&
+            options.runtime.executionGeneration() === generation &&
+            fresh(start, {
+              wall: clock.currentTimeMillisUnsafe(),
+              monotonic: clock.monotonicTimeNanosUnsafe(),
+            }) &&
+            (policyCurrent?.() ?? true),
+        };
       },
       Effect.catchCause((cause) =>
         Cause.hasInterrupts(cause) ? Effect.interrupt : Effect.succeed(denied('unavailable'))
       )
     );
     return {
-      authorizeExecution: (workspaceId: string, requesterDevice: string) =>
-        authorize(workspaceId, requesterDevice, 'execute'),
+      authorizeExecution: (workspaceId: string, requesterDevice: string, localProjectId?: string) =>
+        authorize(workspaceId, requesterDevice, 'execute', localProjectId),
+      authorizeOwnedExecution: (workspaceId: string, requesterDevice: string) =>
+        authorize(workspaceId, requesterDevice, 'owned-execute'),
+      refreshLedger: refreshOnce.pipe(
+        Effect.flatMap((value) => (value ? Effect.void : Effect.fail('unavailable' as const)))
+      ),
       authorizeRead: (workspaceId: string, requesterDevice: string) =>
         authorize(workspaceId, requesterDevice, 'read'),
       invalidate,

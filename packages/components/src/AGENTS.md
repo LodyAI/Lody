@@ -42,11 +42,11 @@ Performance comparisons must use the current full-Mirror baseline.
 
 ## Soft-keyboard viewport handling
 
-- Non-iOS side drawers without snap points use `ui/drawer.tsx`'s live
-  viewport bottom inset on native shells or explicit `repositionInputs={true}`.
-  Never cache a keyboard-shrunken drawer height or infer keyboard visibility from focus:
-  Android-compatible shells can resize the WebView and retain input focus on hide.
-  Preserve the separate iOS native keyboard offset and bottom-sheet handling.
+- Side drawers without snap points keep CSS sizing on native shells or explicit
+  `repositionInputs={true}`. `ui/drawer.tsx` disables Vaul's cached height there:
+  iOS surfaces own their native keyboard offset; other hosts use its live viewport
+  bottom inset. Never cache a focused drawer's height across folds/rotation or infer
+  keyboard visibility from focus. Preserve separate bottom-sheet handling.
   `repositionInputs={false}` explicitly opts out of both Vaul repositioning and
   this inset; callers using it own their keyboard layout.
 

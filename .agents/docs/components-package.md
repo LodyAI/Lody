@@ -20,10 +20,11 @@ admission or client recovery from an unusable remote snapshot.
 `workspaceSupports` owns capability verdicts. UI reads the existing admission-mode
 atom through `useWorkspaceFeature` and gets localized reasons from
 `useWorkspaceFeatureReason`; operations still check their explicit content/runtime.
-Unsupported composer and conversation actions, remote-machine controls and schedule
-deep links explain the restriction before users begin editing or transfer. Presence
+Unsupported composer and conversation actions and remote-machine controls
+explain the restriction before users begin editing or transfer. Presence
 uses a neutral status-slot message; Code Collab reports unavailable rather than
-waiting for an intentionally disabled index. Confirmed local desktop file preview
+waiting for an intentionally disabled index. Schedules use the protected Repo, including
+the workspace Registry, and retain ordinary machine/readiness validation. Confirmed local desktop file preview
 and prepared local file receipts keep their IPC paths. Encrypted attachments use per-file keys inside protected conversation content and opaque relay parts; preparation failures preserve the draft. The [attachment decision](../notes/proposed/architecture/2026-10-28-encrypted-attachments.md) explains historical reads, local backfill receipts and cloud authorization. Local failure cannot enable an unprotected upload. See the
 [availability decision](../notes/implemented/bug-fix/2026-10-27-e2ee-feature-availability.md).
 

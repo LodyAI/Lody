@@ -237,6 +237,8 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
                 native.prepareFeatureRpc(workspaceId, input),
               acceptFeatureRpcResponse: (workspaceId, input, frame) =>
                 native.acceptFeatureRpcResponse(workspaceId, input, frame),
+              readMachineSharing: (workspaceId, machineId) => native.readMachineSharing(workspaceId, machineId),
+              updateMachineSharing: (workspaceId, machineId, generation, requestId, change) => native.updateMachineSharing(workspaceId, machineId, generation, requestId, change),
               prepareDispatch: (workspaceId, machineId, input) =>
                 native.prepareDispatch(workspaceId, machineId, input),
               acceptDispatchResponse: (workspaceId, machineId, input, frame) =>

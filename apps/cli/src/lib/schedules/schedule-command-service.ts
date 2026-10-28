@@ -54,7 +54,9 @@ export async function executeScheduleCommand(
   const command = ScheduleCommandSchema.parse(input);
   const { manager, auth, localOnly, requesterSessionId } = context;
   const workspaceId = context.workspace.id as WorkspaceId;
-  const repository = new ScheduleRepository(manager.repo, workspaceId);
+  const repository = new ScheduleRepository(manager.repo, workspaceId, {
+    protectedContent: context.workspace.contentMode === 'e2ee',
+  });
   const sync = async (room: string) => {
     if (!localOnly) await manager.syncDocOrThrow(room, { reason: 'schedule:command' });
   };

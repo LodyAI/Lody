@@ -76,6 +76,7 @@ vi.mock('@lody/platform/react', () => ({
 }));
 
 import { IntegrationsSettingsComponent } from '../src/components/settings/integrations-setting';
+import { MobileSettingsFoldContext } from '../src/components/mobile/mobile-settings-fold-context';
 import { getPersonalGitHubAuthorizationUrl } from '../src/components/settings/github-personal-authorization';
 
 const repo = (repoFullName: string, enabled: boolean): SettingsWorkspaceRepoWithStatus => ({
@@ -191,6 +192,42 @@ describe('GitHubSettingsView', () => {
   const renderSettings = async () => {
     await act(async () => root.render(createElement(IntegrationsSettingsComponent)));
   };
+
+  it('separates GitHub identity from repositories and keeps the search input during fold changes', async () => {
+    authState.mobile = true;
+    authState.native = true;
+    authState.repos = repos as never[];
+    const renderFold = async (fold: boolean) => {
+      await act(async () =>
+        root.render(
+          createElement(
+            MobileSettingsFoldContext.Provider,
+            { value: fold ? { messageHeight: 300, lowerTop: 340, gapHeight: 40 } : null },
+            createElement(IntegrationsSettingsComponent)
+          )
+        )
+      );
+    };
+    await renderFold(true);
+    const upper = container.querySelector('[data-settings-fold-upper]')!;
+    const lower = container.querySelector('[data-settings-fold-lower]')!;
+    expect(upper.textContent).toContain('Personal Identity');
+    expect(lower.textContent).toContain('loro-dev/loro');
+    const search = lower.querySelector('input[type="search"]');
+    expect(search).not.toBeNull();
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+        search,
+        'loro'
+      );
+      search!.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(lower.textContent).not.toContain('zxch3n/blog');
+    await renderFold(false);
+    expect(container.querySelector('input[type="search"]')).toBe(search);
+    expect(search!.value).toBe('loro');
+    expect(lower.textContent).not.toContain('zxch3n/blog');
+  });
 
   it.each([
     ['electron', false],
