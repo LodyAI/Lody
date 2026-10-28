@@ -49,7 +49,7 @@ import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/s
 import { getLoginShellEnvLegacy } from './login-shell-env';
 import { appendStderrTail, createAcpStartupMonitor } from './acp-startup-monitor';
 import { runNpxStartupWithRecovery } from './acp-npx-startup-policy';
-import { withLodyNpmCacheForNpx } from './npx-cache';
+import { getNpxRuntimeFingerprint, withLodyNpmCacheForNpx } from './npx-cache';
 import { withAcpSessionStartSlot } from './acp-session-start-gate';
 import { withLoopbackNoProxy } from '@lody/shared/proxy-env';
 import {
@@ -981,6 +981,8 @@ export class AcpAuthenticationManager {
           env,
           logger: this.logger,
           logPrefix: '[acp-auth]',
+          runtimeFingerprint:
+            options.agentType === 'deepseek' ? getNpxRuntimeFingerprint() : undefined,
           getStderrTail: () => lastStderrTail,
           attempt: async ({ args }) => {
             running.abortController.signal.throwIfAborted();

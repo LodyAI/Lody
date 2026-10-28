@@ -20,20 +20,25 @@ import {
   findNpxCacheDirsForPackage,
   getConfiguredNpmCacheDir,
   getConfiguredNpxCacheRoot,
-  getNpxCacheRoots,
   getLodyNpmCacheDir,
+  getNpxCacheRoots,
+  getNpxRuntimeFingerprint,
   inspectNpxInstallState,
   isLodyNpmCacheDir,
   isNpxCommand,
   isLikelyBrokenNpxInstall,
   isLikelyNpmCacheCorruption,
+  isLikelyRuntimeIncompatibleNativeAddon,
+  NPX_RUNTIME_MARKER_FILE,
   type NpxCacheIo,
+  type NpxRuntimeFingerprint,
   parseNpxPackageSpec,
   parseNpxPackageSpecFromArgs,
   purgeBrokenNpxCache,
   purgeBrokenNpxInstall,
   purgeLodyNpmCache,
   withLodyNpmCacheForNpx,
+  writeNpxRuntimeMarkers,
 } from './npx-cache';
 
 const originalPlatform = process.env.LODY_PLATFORM;
@@ -55,15 +60,19 @@ function makeIo(setup: {
   files?: Record<string, string>;
   dirs?: Record<string, string[]>;
   rmThrows?: string[];
-}): NpxCacheIo & { removed: string[] } {
+  writeThrows?: string[];
+}): NpxCacheIo & { removed: string[]; written: string[] } {
   const files = new Map(Object.entries(setup.files ?? {}));
   const dirs = new Map(
     Object.entries(setup.dirs ?? {}).map(([key, value]) => [key, new Set(value)])
   );
   const rmThrows = new Set(setup.rmThrows ?? []);
+  const writeThrows = new Set(setup.writeThrows ?? []);
   const removed: string[] = [];
+  const written: string[] = [];
   return {
     removed,
+    written,
     existsSync: (path) => files.has(path) || dirs.has(path),
     readFileSync: (path) => {
       const content = files.get(path);
@@ -96,6 +105,21 @@ function makeIo(setup: {
       }
       dirs.get(dirname(path))?.delete(basename(path));
     },
+    writeFileSync: (path, content) => {
+      if ([...writeThrows].some((blocked) => path === blocked || path.startsWith(`${blocked}.`))) {
+        throw new Error(`EACCES: ${path}`);
+      }
+      files.set(path, content);
+    },
+    renameSync: (from, to) => {
+      const content = files.get(from);
+      if (content === undefined) {
+        throw new Error(`ENOENT: ${from}`);
+      }
+      files.delete(from);
+      files.set(to, content);
+      written.push(to);
+    },
   };
 }
 
@@ -126,6 +150,30 @@ function healthyInstall(root: string, hash: string, pkg: string, version: string
       }),
       [binPath]: '',
     },
+  };
+}
+
+const electron44Runtime: NpxRuntimeFingerprint = {
+  electron: '44.7.0',
+  node: '24.21.0',
+  v8: '15.2.124.28-electron.0',
+  modules: '137',
+  platform: 'darwin',
+  arch: 'arm64',
+};
+
+const electron43Runtime: NpxRuntimeFingerprint = {
+  ...electron44Runtime,
+  electron: '43.7.6',
+  v8: '15.0.245.13-electron.0',
+};
+
+function runtimeMarker(root: string, hash: string, fingerprint: NpxRuntimeFingerprint) {
+  return {
+    [join(root, hash, NPX_RUNTIME_MARKER_FILE)]: JSON.stringify({
+      schema: 1,
+      fingerprint,
+    }),
   };
 }
 
@@ -237,6 +285,75 @@ describe('isLikelyBrokenNpxInstall', () => {
     expect(isLikelyBrokenNpxInstall('model overloaded, try again')).toBe(false);
     expect(isLikelyBrokenNpxInstall(null)).toBe(false);
     expect(isLikelyBrokenNpxInstall(undefined)).toBe(false);
+  });
+});
+
+describe('getNpxRuntimeFingerprint', () => {
+  it('records Electron, Node, V8 and ABI versions', () => {
+    expect(
+      getNpxRuntimeFingerprint(
+        {
+          electron: '44.7.0',
+          node: '24.21.0',
+          v8: '15.2.124.28-electron.0',
+          modules: '137',
+        },
+        'darwin',
+        'arm64'
+      )
+    ).toEqual(electron44Runtime);
+  });
+
+  it('records a plain Node runtime without Electron', () => {
+    expect(
+      getNpxRuntimeFingerprint(
+        { node: '22.14.0', v8: '12.4.254.21-node.26', modules: '127' },
+        'linux',
+        'x64'
+      )
+    ).toEqual({
+      electron: null,
+      node: '22.14.0',
+      v8: '12.4.254.21-node.26',
+      modules: '127',
+      platform: 'linux',
+      arch: 'x64',
+    });
+  });
+});
+
+describe('isLikelyRuntimeIncompatibleNativeAddon', () => {
+  it('recognizes the Harness Electron fingerprint failure', () => {
+    expect(
+      isLikelyRuntimeIncompatibleNativeAddon(
+        'dsh: host preparation failed: node-addon-require-builtin unsupported: ' +
+          'unsupported Electron runtime fingerprint: Node 24.21.0, V8 15.2.124.28-electron.0'
+      )
+    ).toBe(true);
+  });
+
+  it('does not classify ordinary agent failures as native incompatibility', () => {
+    expect(isLikelyRuntimeIncompatibleNativeAddon('ACP connection closed')).toBe(false);
+    expect(isLikelyRuntimeIncompatibleNativeAddon('')).toBe(false);
+  });
+});
+
+describe('writeNpxRuntimeMarkers', () => {
+  it('writes only inside the allowed cache root', () => {
+    const allowedRoot = '/cache/_npx';
+    const otherRoot = '/home/u/.npm/_npx';
+    const io = makeIo({
+      dirs: { [allowedRoot]: ['aa11'], [otherRoot]: ['bb22'] },
+    });
+
+    expect(
+      writeNpxRuntimeMarkers(
+        [join(allowedRoot, 'aa11'), join(otherRoot, 'bb22')],
+        electron44Runtime,
+        { io, allowedRoots: [allowedRoot] }
+      )
+    ).toEqual([join(allowedRoot, 'aa11')]);
+    expect(io.written).toEqual([join(allowedRoot, 'aa11', NPX_RUNTIME_MARKER_FILE)]);
   });
 });
 
@@ -361,6 +478,63 @@ describe('inspectNpxInstallState', () => {
         'package-bin-target-missing'
       );
     }
+  });
+
+  it('accepts a closure recorded for the active runtime', () => {
+    const io = makeIo({
+      dirs: { [root]: ['aa11'], [hashDir]: [] },
+      files: {
+        ...healthyFiles,
+        ...runtimeMarker(root, 'aa11', electron44Runtime),
+      },
+    });
+
+    const state = inspectNpxInstallState(pkg, version, {
+      io,
+      roots: [root],
+      runtimeFingerprint: electron44Runtime,
+    });
+
+    expect(state.kind).toBe('ready');
+  });
+
+  it('returns a runtime mismatch for a closure recorded under another runtime', () => {
+    const io = makeIo({
+      dirs: { [root]: ['aa11'], [hashDir]: [] },
+      files: {
+        ...healthyFiles,
+        ...runtimeMarker(root, 'aa11', electron43Runtime),
+      },
+    });
+
+    const state = inspectNpxInstallState(pkg, version, {
+      io,
+      roots: [root],
+      runtimeFingerprint: electron44Runtime,
+    });
+
+    expect(state.kind).toBe('broken');
+    if (state.kind === 'broken') {
+      expect(state.problems.map((problem) => problem.reason)).toContain(
+        'runtime-fingerprint-mismatch'
+      );
+      expect(purgeBrokenNpxInstall(state, { io, allowedRoots: [root] })).toEqual([hashDir]);
+    }
+  });
+
+  it('keeps a legacy closure without a runtime marker ready', () => {
+    const io = makeIo({
+      dirs: { [root]: ['aa11'], [hashDir]: [] },
+      files: healthyFiles,
+    });
+
+    const state = inspectNpxInstallState(pkg, version, {
+      io,
+      roots: [root],
+      runtimeFingerprint: electron44Runtime,
+    });
+
+    expect(state.kind).toBe('ready');
   });
 });
 
@@ -685,6 +859,202 @@ describe('runNpxStartupWithRecovery', () => {
     });
 
     expect(attempts).toEqual([{ attempt: 1, args: ['agent.js'], startupTimeouts: undefined }]);
+  });
+
+  it('purges a runtime-mismatched closure and refreshes metadata online', async () => {
+    const attempts: NpxStartupAttemptInput[] = [];
+    const cache = '/cache';
+    const root = join(cache, '_npx');
+    const cacache = join(cache, '_cacache');
+    const hashDir = join(root, 'aa11');
+    const pkg = '@deepseek-ai/dsh';
+    const version = '0.2.1-rc.2';
+    const install = healthyInstall(root, 'aa11', pkg, version);
+    const io = makeIo({
+      ...install,
+      dirs: { ...install.dirs, [cacache]: [] },
+      files: {
+        ...install.files,
+        ...runtimeMarker(root, 'aa11', electron43Runtime),
+      },
+    });
+
+    const result = await runNpxStartupWithRecovery({
+      command: 'npx',
+      args: ['--prefer-offline', '-y', '--package', `${pkg}@${version}`, 'node', '-e', 'x'],
+      env: { npm_config_cache: cache },
+      logger,
+      logPrefix: '[test]',
+      npxCacheIo: io,
+      npxCacheRoots: [root],
+      runtimeFingerprint: electron44Runtime,
+      getStderrTail: () => '',
+      attempt: async (input) => {
+        attempts.push(input);
+        return 'ok';
+      },
+    });
+
+    expect(result).toBe('ok');
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]?.args[0]).toBe('--prefer-online');
+    expect(attempts[0]?.startupTimeouts?.initTimeoutMs).toBe(COLD_NPX_INIT_TIMEOUT_MS);
+    expect(io.removed).toEqual([hashDir]);
+    expect(io.removed).not.toContain(cacache);
+  });
+
+  it('records the runtime marker after a successful start', async () => {
+    const root = '/cache/_npx';
+    const pkg = '@deepseek-ai/dsh';
+    const version = '0.2.1-rc.2';
+    const io = makeIo(healthyInstall(root, 'aa11', pkg, version));
+    const markerPath = join(root, 'aa11', NPX_RUNTIME_MARKER_FILE);
+
+    const result = await runNpxStartupWithRecovery({
+      command: 'npx',
+      args: ['--prefer-offline', '-y', '--package', `${pkg}@${version}`, 'node', '-e', 'x'],
+      env: { npm_config_cache: '/cache' },
+      logger,
+      logPrefix: '[test]',
+      npxCacheIo: io,
+      npxCacheRoots: [root],
+      runtimeFingerprint: electron44Runtime,
+      getStderrTail: () => '',
+      attempt: async () => 'ok',
+    });
+
+    expect(result).toBe('ok');
+    expect(io.written).toEqual([markerPath]);
+    const marker = JSON.parse(io.readFileSync(markerPath)) as {
+      schema: number;
+      fingerprint: NpxRuntimeFingerprint;
+    };
+    expect(marker.schema).toBe(1);
+    expect(marker.fingerprint).toEqual(electron44Runtime);
+  });
+
+  it('does not fail startup when the runtime marker cannot be written', async () => {
+    const root = '/cache/_npx';
+    const pkg = '@deepseek-ai/dsh';
+    const version = '0.2.1-rc.2';
+    const install = healthyInstall(root, 'aa11', pkg, version);
+    const markerPath = join(root, 'aa11', NPX_RUNTIME_MARKER_FILE);
+    const io = makeIo({ ...install, writeThrows: [markerPath] });
+
+    const result = await runNpxStartupWithRecovery({
+      command: 'npx',
+      args: ['--prefer-offline', '-y', '--package', `${pkg}@${version}`, 'node', '-e', 'x'],
+      env: { npm_config_cache: '/cache' },
+      logger,
+      logPrefix: '[test]',
+      npxCacheIo: io,
+      npxCacheRoots: [root],
+      runtimeFingerprint: electron44Runtime,
+      getStderrTail: () => '',
+      attempt: async () => 'ok',
+    });
+
+    expect(result).toBe('ok');
+    expect(io.written).toEqual([]);
+  });
+
+  it('purges a runtime-incompatible native dependency and retries online', async () => {
+    const attempts: NpxStartupAttemptInput[] = [];
+    const root = '/cache/_npx';
+    const pkg = '@deepseek-ai/dsh';
+    const version = '0.2.1-rc.2';
+    const io = makeIo(healthyInstall(root, 'aa11', pkg, version));
+    let stderrTail = '';
+
+    const result = await runNpxStartupWithRecovery({
+      command: 'npx',
+      args: ['--prefer-offline', '-y', '--package', `${pkg}@${version}`, 'node', '-e', 'x'],
+      env: { npm_config_cache: '/cache' },
+      logger,
+      logPrefix: '[test]',
+      npxCacheIo: io,
+      npxCacheRoots: [root],
+      runtimeFingerprint: electron44Runtime,
+      getStderrTail: () => stderrTail,
+      attempt: async (input) => {
+        attempts.push(input);
+        if (attempts.length === 1) {
+          stderrTail =
+            'dsh: host preparation failed: node-addon-require-builtin unsupported: ' +
+            'unsupported Electron runtime fingerprint: Node 24.21.0, V8 15.2.124.28-electron.0';
+          throw new Error('ACP connection closed');
+        }
+        return 'ok';
+      },
+    });
+
+    expect(result).toBe('ok');
+    expect(attempts).toHaveLength(2);
+    expect(attempts[0]?.args[0]).toBe('--prefer-offline');
+    expect(attempts[1]?.args[0]).toBe('--prefer-online');
+    expect(io.removed).toEqual([join(root, 'aa11')]);
+  });
+
+  it('stops after one runtime-incompatible native dependency recovery', async () => {
+    const attempts: NpxStartupAttemptInput[] = [];
+    const root = '/cache/_npx';
+    const pkg = '@deepseek-ai/dsh';
+    const version = '0.2.1-rc.2';
+    const io = makeIo(healthyInstall(root, 'aa11', pkg, version));
+    let stderrTail = '';
+
+    await expect(
+      runNpxStartupWithRecovery({
+        command: 'npx',
+        args: ['--prefer-offline', '-y', '--package', `${pkg}@${version}`, 'node', '-e', 'x'],
+        env: { npm_config_cache: '/cache' },
+        logger,
+        logPrefix: '[test]',
+        npxCacheIo: io,
+        npxCacheRoots: [root],
+        runtimeFingerprint: electron44Runtime,
+        getStderrTail: () => stderrTail,
+        attempt: async (input) => {
+          attempts.push(input);
+          stderrTail =
+            'dsh: host preparation failed: node-addon-require-builtin unsupported: ' +
+            'unsupported Electron runtime fingerprint: Node 24.21.0, V8 15.2.124.28-electron.0';
+          throw new Error('ACP connection closed');
+        },
+      })
+    ).rejects.toThrow('ACP connection closed');
+
+    expect(attempts).toHaveLength(2);
+    expect(io.removed).toEqual([join(root, 'aa11')]);
+  });
+
+  it('does not purge the default user npx cache for a runtime-incompatible addon', async () => {
+    const root = join(homedir(), '.npm', '_npx');
+    const pkg = '@deepseek-ai/dsh';
+    const version = '0.2.1-rc.2';
+    const io = makeIo(healthyInstall(root, 'aa11', pkg, version));
+    let stderrTail = '';
+
+    await expect(
+      runNpxStartupWithRecovery({
+        command: 'npx',
+        args: ['--prefer-offline', '-y', '--package', `${pkg}@${version}`, 'node', '-e', 'x'],
+        env: {},
+        logger,
+        logPrefix: '[test]',
+        npxCacheIo: io,
+        runtimeFingerprint: electron44Runtime,
+        getStderrTail: () => stderrTail,
+        attempt: async () => {
+          stderrTail =
+            'dsh: host preparation failed: node-addon-require-builtin unsupported: ' +
+            'unsupported Electron runtime fingerprint: Node 24.21.0, V8 15.2.124.28-electron.0';
+          throw new Error('ACP connection closed');
+        },
+      })
+    ).rejects.toThrow('ACP connection closed');
+
+    expect(io.removed).toEqual([]);
   });
 });
 

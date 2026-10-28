@@ -30,7 +30,7 @@ import {
 import { runNpxStartupWithRecovery } from '@/agent/acp-npx-startup-policy';
 import { runCodexRefreshStartupWithRetry } from './codex-refresh-startup';
 import { ensureLodyDataDir, getLodyDataDir } from '@lody/shared/node/installation-profile';
-import { withLodyNpmCacheForNpx } from '@/agent/npx-cache';
+import { getNpxRuntimeFingerprint, withLodyNpmCacheForNpx } from '@/agent/npx-cache';
 import { resolveDeepSeekHarnessSpawn } from '@/agent/deepseek-harness-runtime';
 import {
   type AcpLauncher,
@@ -812,6 +812,8 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
             env,
             logger: this.logger,
             logPrefix: `[${this.sessionId}]`,
+            runtimeFingerprint:
+              callbacks.agentType === 'deepseek' ? getNpxRuntimeFingerprint() : undefined,
             attempt: ({ startupTimeouts }) => attemptCreateAgent(startupTimeouts),
             cleanupFailedAttempt,
             getStderrTail: () => lastStderrTail,
