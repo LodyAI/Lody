@@ -1976,6 +1976,16 @@ export class LoroDocumentManager {
     sessionId: SessionId,
     suggestion: LodyPromptSuggestion
   ): void {
+    // TEMP prompt-suggestion-debug
+    this.logger.debug('[prompt-suggestion-debug] publish-attempt', {
+      workspaceId: this.workspaceId,
+      machineId,
+      sessionId,
+      hasPublisher: !!this.promptSuggestions,
+      result: suggestion.result.type,
+      textLength:
+        suggestion.result.type === 'completed' ? (suggestion.result.text?.length ?? 0) : 0,
+    });
     this.promptSuggestions?.state.publish(machineId, { ...suggestion, sessionId });
   }
 

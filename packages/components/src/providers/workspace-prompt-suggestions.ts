@@ -90,6 +90,15 @@ export class WorkspacePromptSuggestions extends EphemeralRoomTransport<Ephemeral
   private emit(subscription: Subscription): void {
     const plane = this.options.resolvePlane(subscription.machineId);
     const source = plane === 'local' ? this.localStore : plane === 'cloud' ? this.store : null;
+    // TEMP prompt-suggestion-debug
+    console.info('[prompt-suggestion-debug] route', {
+      workspaceId: this.options.workspaceId,
+      sessionId: subscription.sessionId,
+      machineId: subscription.machineId,
+      plane,
+      hasStore: !!source,
+      entries: source ? Object.keys(source.getAllStates()).length : 0,
+    });
     subscription.listener(
       source
         ? readPromptSuggestion(

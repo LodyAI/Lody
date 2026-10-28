@@ -26,8 +26,21 @@ export function useSessionPromptSuggestion(sessionId: SessionId | null | undefin
   } | null>(null);
 
   useEffect(() => {
+    // TEMP prompt-suggestion-debug
+    console.info('[prompt-suggestion-debug] ui-subscribe', {
+      sessionId,
+      machineId,
+      enabled,
+      hasRuntime: !!runtime,
+    });
     if (!enabled || !runtime || !sessionId || !machineId) return undefined;
     return runtime.subscribePromptSuggestion(machineId, sessionId, (text) => {
+      // TEMP prompt-suggestion-debug
+      console.info('[prompt-suggestion-debug] ui-received', {
+        sessionId,
+        machineId,
+        textLength: text?.length ?? 0,
+      });
       setSnapshot({ runtime, sessionId, machineId, text });
     });
   }, [enabled, runtime, sessionId, machineId]);
