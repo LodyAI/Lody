@@ -34,6 +34,11 @@ directories remain on disk until the Session is deleted.
   root from `getLodyDataDir()`. Existing Session and terminal resolvers recreate missing
   chat workdirs when needed. Contract: [lifecycle Spec](../../../../specs/session-worktree-lifecycle.md).
 
+Public Session docs now explain irreversible chat workdir deletion and empty-only
+archive cleanup in both languages. POSIX `EEXIST` from `rmdir` retains a nonempty
+directory just like `ENOTEMPTY`, without warnings, failure or retry backoff; the
+owning test checks both error codes.
+
 ## Verification and limits
 
 The [owning suite](../../../../apps/cli/tests/worktree-gc.test.ts) uses real temporary

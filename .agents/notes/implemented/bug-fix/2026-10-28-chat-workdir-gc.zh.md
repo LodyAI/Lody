@@ -16,6 +16,8 @@ Translation: current
 - 归档目录使用 `rmdir`：`ENOTEMPTY` 保留文件，不警告、不计失败、不设置重试。删除目录使用递归 `rm`。两条路径都不执行脚本、不记录分支、不调用 Git。清理失败仅影响该目录，之后重试；chats 根目录不可读也退避，根目录不存在则静默返回。工作树清理先于 chats 文件系统操作执行；聊天目录使用路径作为重试/in-flight key，因此同一 owner 遗留的工作树也保持独立。
 - [MessageHandler](../../../../apps/cli/src/lib/message-handler.ts) 从 `getLodyDataDir()` 提供 chats 根目录。现有 Session 和终端解析器会在需要时重建缺失目录。合同：[生命周期 Spec](../../../../specs/session-worktree-lifecycle.zh.md)。
 
+公开会话文档现已用中英文说明聊天工作目录删除后无法恢复、归档仅回收空目录。`rmdir` 返回 POSIX `EEXIST` 时与 `ENOTEMPTY` 一样保留非空目录，不警告、不计失败、不设置重试退避；所属测试验证了两种错误码。
+
 ## 验证与限制
 
 [所属测试套件](../../../../apps/cli/tests/worktree-gc.test.ts) 使用真实临时目录与注入时钟，覆盖保留/移除、元数据/运行时闸门、缺失/不可读根目录、符号链接/名称过滤，以及注入目录忙或 owner 读取失败后的恢复，并验证独立真实工作树仍被移除。22 项 GC 测试和 24 项终端清理测试全部通过，CLI 类型检查、改动文件 lint、格式和文档检查也通过。完整 `pnpm check` 在使用系统 Git、移除继承的 `GIT_*`/`LODY_GIT_*` 变量的子进程中通过。非空归档聊天目录有意保留至会话删除；永久删除移除的文件没有备份或恢复保证。这些测试不代表已完成真实 daemon 或跨设备验收。

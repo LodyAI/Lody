@@ -160,7 +160,17 @@ describe('WorktreeGarbageCollector', () => {
     expect(fs.readFileSync(path.join(full, 'artifact.txt'), 'utf8')).toBe('keep until deletion');
     expect(warnings).toEqual([]);
 
-    // No retry backoff for ENOTEMPTY: deleting the owner takes effect immediately.
+    const rmdir = fs.promises.rmdir;
+    vi.spyOn(fs.promises, 'rmdir').mockImplementation(async (target, options) => {
+      if (target === full)
+        throw Object.assign(new Error('directory not empty'), { code: 'EEXIST' });
+      return rmdir(target, options);
+    });
+    expect(await gc.sweep()).toEqual({ scanned: 1, removed: [], failed: [] });
+    expect(fs.readFileSync(path.join(full, 'artifact.txt'), 'utf8')).toBe('keep until deletion');
+    expect(warnings).toEqual([]);
+
+    // Neither nonempty-directory error backs off: deletion takes effect immediately.
     states[fullId] = { kind: 'deleted', meta: undefined };
     expect((await gc.sweep()).removed).toEqual([fullId]);
     expect(fs.existsSync(full)).toBe(false);

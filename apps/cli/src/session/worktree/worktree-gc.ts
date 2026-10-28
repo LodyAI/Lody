@@ -219,8 +219,8 @@ export class WorktreeGarbageCollector {
           try {
             await fs.promises.rmdir(workdir);
           } catch (error) {
-            if (!(error instanceof Error && 'code' in error && error.code === 'ENOTEMPTY'))
-              throw error;
+            const code = error instanceof Error && 'code' in error ? error.code : undefined;
+            if (code !== 'ENOTEMPTY' && code !== 'EEXIST') throw error;
             this.retryState.delete(workdir);
             continue;
           }
