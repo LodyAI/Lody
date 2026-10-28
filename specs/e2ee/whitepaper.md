@@ -1,9 +1,9 @@
 # Lody Security Whitepaper
 
-Status: approved
+Status: draft
 Translation: current
 
-Approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
+Previously approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
 Approval: 2026-10-28, reviewed and approved by the owner-authorized coordinator
 (session `b12f1597`); [approval record](https://github.com/LodyAI/Lody/pull/1894).
 
@@ -155,6 +155,8 @@ The current Owner unilaterally signs a transfer through an active management-cap
 
 ## 6. Backup and Recovery
 
+The recovery vault is outside the MVP; its detailed design remains the [draft recovery-vault Spec](recovery-vault.md). Only the recovery admission and package-format boundaries and acceptance conditions recorded there are approved. This section follows that Spec and does not establish a deployed recovery feature.
+
 **One recovery file opens a cloud-hosted encrypted recovery vault. Each user has a separate recovery device R in each workspace.** R has independent signing and encryption key pairs and is bound to the current membership in that workspace. Normally inactive, it receives epoch-key envelopes and can authorize that user's new personal devices. It cannot directly write content, execute commands, administer the workspace or forward keys to other devices. Recovery is a device kind, not the Guest role.
 
 The canonical CBOR recovery file is `["vault-v1", 1, vaultId, serviceLocator, U]`, with independent random 256-bit vaultId and unlock material U. A separate random vault master key V is wrapped using an HKDF-SHA256 key derived from U, bound to vaultId and purpose, and XChaCha20-Poly1305. Entries and the index use separate V-derived keys; each new encryption obtains a fresh secure 24-byte nonce. See the [recovery-vault draft](recovery-vault.md) for exact AAD, immutable entry upload, index CAS and rollback pins. The cloud stores only client-encrypted R private-key packages and encrypted envelopes addressed to R; it cannot read those private keys. The file is neither a seed for all future workspace keys nor a full offline content backup. The same file can open later vault entries, but recovery still depends on their ciphertext remaining available.
@@ -164,7 +166,7 @@ First-time recovery setup for a workspace MUST satisfy the following completion 
 1. Generate an independent R for this user and workspace, and unlock the vault using the file or a verified PRF recovery entry.
 2. Encrypt R's private-key package locally, upload it, and read back and decrypt it. Ordinary cloud-account credentials cannot decrypt it.
 3. Register R's public keys in the workspace ledger through the user's active personal device, then verify the result. Uploading the private-key package grants no authority.
-4. Persist a current-epoch envelope for the enrolled R. Mark this workspace recoverable only after testing enrollment, the private-key package, trusted genesis material and current-key availability.
+4. Persist a current-epoch envelope for the enrolled R. Mark this workspace recoverable only after independently confirming the trust anchor, importing R keys, actually decrypting the current-epoch envelope and checking the recovered key against the ledger commitment.
 
 Generation, vault upload and ledger registration form a resumable multi-step process, not a cross-store atomic transaction. Another device of the same user joining this workspace reuses its active R. Readmission after removal uses a new membership and a new R, without reviving retired devices or reusing retired public keys.
 
