@@ -4,7 +4,7 @@ import { useAtomValue, useStore } from 'jotai';
 import { usePostHog } from '@posthog/react';
 import { useTranslation } from 'react-i18next';
 import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
-import type { SessionShareView } from '@lody/cloud-api';
+import type { SessionShareView, SessionShareManagement } from '@lody/cloud-api';
 import type { SessionMeta, WorkspaceId } from '@lody/shared';
 import {
   createSessionShareSecret,
@@ -250,6 +250,45 @@ type PendingPublication = {
   expected: SessionShareView | null;
 };
 
+/** Only record fields returned by both management queries and our own deployment admission. */
+function shareRecordVersion(entry: SessionShareView | null | undefined): string {
+  return JSON.stringify(
+    entry
+      ? [
+          entry.shareId,
+          entry.rootSessionId,
+          entry.publisherUserId,
+          entry.status,
+          entry.revision,
+          entry.credentialVersion,
+          entry.currentDeploymentId,
+          entry.createdAt,
+          entry.updatedAt,
+          entry.title,
+        ]
+      : entry === null
+        ? null
+        : 'loading'
+  );
+}
+const selectedSetKey = (ids: readonly string[]) => JSON.stringify([...ids].sort());
+const sourceMapKey = (ids: readonly { sourceId: string; conversationId: string }[]) =>
+  JSON.stringify(ids.map(({ sourceId, conversationId }) => [sourceId, conversationId]).sort());
+
+type PlaintextShareConsent = {
+  runtime: WorkspaceRuntime;
+  scopeKey: string;
+  selectedIds: string[];
+  entry: SessionShareManagement | undefined;
+  recordVersion: string;
+  confirmation?: { requestId: string; sessionIds: string[]; deliveryPublicKey: string };
+};
+class ShareConsentChangedError extends Error {
+  constructor() {
+    super('Share confirmation changed');
+  }
+}
+
 /**
  * Which irreversible step is running right now.
  *
@@ -279,7 +318,7 @@ export function useSessionShareManagement(
   const scope = useResolvedWorkspaceScope({ workspaceId, enabled: sharingAllowed });
   const userId = useAtomValue(userAtom)?.id;
   const store = useStore();
-  const meta = useAtomValue(sessionMetaCacheAtom);
+  useAtomValue(sessionMetaCacheAtom);
   const postHog = usePostHog();
   const actions = useSessionShareLinkActions(workspaceId);
   const queriedEntry = useCloudQuery(
@@ -299,10 +338,10 @@ export function useSessionShareManagement(
   const [phase, setPhase] = useState<SharePublishPhase>('idle');
   const [result, setResult] = useState<SharePublishResult | null>(null);
   const [plaintextConfirmation, setPlaintextConfirmation] = useState(false);
-  // Consent belongs to this editor's current runtime, never to an account or workspace preference.
-  const plaintextConsentRuntime = useRef<WorkspaceRuntime | null>(null);
+  // A human approves this exact publication scope, never a live server-selected set.
+  const plaintextConsent = useRef<PlaintextShareConsent | null>(null);
   const cancelPlaintextConfirmation = () => {
-    plaintextConsentRuntime.current = null;
+    plaintextConsent.current = null;
     setPlaintextConfirmation(false);
   };
   // Publication is one uninterrupted async unit, so it must read the retry
@@ -325,27 +364,98 @@ export function useSessionShareManagement(
     lifetime.current = controller;
     return () => {
       controller.abort();
-      plaintextConsentRuntime.current = null;
+      plaintextConsent.current = null;
     };
   }, []);
   const selected =
     confirmation?.sessionIds ??
     selectedDraft ??
     (entry?.status === 'active' ? entry.selectedSourceIds : [sessionId]);
+  const selectionAvailable = (ids: readonly string[], candidates: readonly string[]) => {
+    const currentMeta = Object.values(store.get(sessionMetaCacheAtom));
+    return (
+      ids.includes(sessionId) &&
+      ids.length > 0 &&
+      new Set(ids).size === ids.length &&
+      ids.every((id) => candidates.includes(id) && currentMeta.some((session) => session.id === id))
+    );
+  };
+  const canCapture = entry !== undefined && selectionAvailable(selected, candidateIds);
+  const publicationScopeKey = JSON.stringify([
+    workspaceId,
+    sessionId,
+    shareId,
+    userId,
+    selectedSetKey(selected),
+    confirmation?.requestId,
+    confirmation?.deliveryPublicKey,
+  ]);
+  const currentPublication = useRef({ scopeKey: '', entry, candidateIds, selected });
+  currentPublication.current = {
+    scopeKey: publicationScopeKey,
+    entry,
+    candidateIds: [...candidateIds],
+    selected: [...selected],
+  };
+  const assertConsent = (consent?: PlaintextShareConsent, value?: PendingPublication) => {
+    if (!consent) return;
+    const current = currentPublication.current;
+    const unchangedSources =
+      current.entry?.canManage === consent.entry?.canManage &&
+      current.entry?.canRevoke === consent.entry?.canRevoke &&
+      selectedSetKey(current.entry?.selectedSourceIds ?? []) ===
+        selectedSetKey(consent.entry?.selectedSourceIds ?? []) &&
+      sourceMapKey(current.entry?.sourceIds ?? []) === sourceMapKey(consent.entry?.sourceIds ?? []);
+    // Admission can itself create/update the management row. Accept only our exact
+    // acknowledged record and its old or just-prepared source mapping, never another revision.
+    const ownAdmission =
+      value?.deployment &&
+      current.entry?.canManage &&
+      current.entry.canRevoke === (consent.entry?.canRevoke ?? true) &&
+      shareRecordVersion(current.entry) === shareRecordVersion(value.deployment) &&
+      [
+        selectedSetKey(consent.entry?.selectedSourceIds ?? []),
+        selectedSetKey(consent.selectedIds),
+      ].includes(selectedSetKey(current.entry.selectedSourceIds)) &&
+      [
+        sourceMapKey(consent.entry?.sourceIds ?? []),
+        sourceMapKey(value.prepared.sourceIds),
+      ].includes(sourceMapKey(current.entry.sourceIds));
+    if (
+      consent.runtime !== store.get(activeWorkspaceRuntimeAtom) ||
+      consent.scopeKey !== publicationScopeKey ||
+      consent.scopeKey !== current.scopeKey ||
+      !scope.enabled ||
+      store.get(userAtom)?.id !== userId ||
+      current.entry === undefined ||
+      !selectionAvailable(current.selected, current.candidateIds) ||
+      (!(shareRecordVersion(current.entry) === consent.recordVersion && unchangedSources) &&
+        !ownAdmission)
+    )
+      throw new ShareConsentChangedError();
+  };
   const conflict =
     !!pending &&
     !(pending.deployment && entry?.currentDeploymentId === pending.deployment.deploymentId) &&
     (pending.expected?.shareId !== (entry?.status === 'active' ? entry.shareId : undefined) ||
       pending.expected?.revision !== (entry?.status === 'active' ? entry.revision : undefined));
   /** Freeze once before upload; retain the package and keys for retries. */
-  const capture = async (): Promise<PendingPublication> => {
-    const runtime = store.get(activeWorkspaceRuntimeAtom),
+  const capture = async (consent?: PlaintextShareConsent): Promise<PendingPublication> => {
+    assertConsent(consent);
+    const runtime = consent?.runtime ?? store.get(activeWorkspaceRuntimeAtom),
       token = store.get(authTokenAtom);
     if (!runtime || runtime.workspaceId !== workspaceId || !token || !lifetime.current)
       throw new Error('Share source unavailable');
-    const byId = new Map(Object.values(meta).map((session) => [session.id as string, session]));
-    const sessions = selected.map((id) => byId.get(id)).filter((s): s is SessionMeta => !!s);
-    if (sessions.length !== selected.length || !selected.includes(sessionId))
+    const captureIds = consent?.selectedIds ?? selected;
+    const captureEntry = consent ? consent.entry : entry;
+    const byId = new Map(
+      Object.values(store.get(sessionMetaCacheAtom)).map((session) => [
+        session.id as string,
+        session,
+      ])
+    );
+    const sessions = captureIds.map((id) => byId.get(id)).filter((s): s is SessionMeta => !!s);
+    if (sessions.length !== captureIds.length || !captureIds.includes(sessionId))
       throw new Error('Share source unavailable');
     const signal = AbortSignal.any([lifetime.current.signal, AbortSignal.timeout(120_000)]);
     setPhase('capturing');
@@ -354,14 +464,15 @@ export function useSessionShareManagement(
       token,
       sessions,
       rootSessionId: sessionId,
-      previousSourceIds: confirmation ? undefined : entry?.sourceIds,
+      previousSourceIds: confirmation ? undefined : captureEntry?.sourceIds,
       signal,
     }).catch((error: unknown) => {
       signal.throwIfAborted();
       throw error;
     });
     signal.throwIfAborted();
-    const expected = !confirmation && entry?.status === 'active' ? entry : null;
+    assertConsent(consent);
+    const expected = !confirmation && captureEntry?.status === 'active' ? captureEntry : null;
     const value: PendingPublication = {
       prepared,
       expected,
@@ -375,47 +486,56 @@ export function useSessionShareManagement(
   /** Upload the frozen bytes and commit the deployment. Safe to call again after a failure. */
   const publishPrepared = async (
     value: PendingPublication,
-    setStage: (stage: ShareActionStage) => void
+    setStage: (stage: ShareActionStage) => void,
+    consent?: PlaintextShareConsent
   ) => {
     setStage('prepare');
     if (!lifetime.current) throw new Error('Share confirmation changed');
     const { expected, prepared, uploadSecret, readerSecret, requestId } = value;
-    if (confirmation && !value.delivery) {
+    const requestConfirmation = consent ? consent.confirmation : confirmation;
+    assertConsent(consent, value);
+    if (requestConfirmation && !value.delivery) {
       const secret = readerSecret ?? (expected && actions.secretFor(expected));
       if (!secret) throw new Error('Share credential unavailable');
       const origin = new URL(
         createSessionShareUrl('validation', secret, import.meta.env.VITE_SESSION_SHARE_ORIGIN)
       ).origin;
       value.delivery = await encryptShareDelivery(
-        confirmation.deliveryPublicKey,
-        confirmation.requestId,
+        requestConfirmation.deliveryPublicKey,
+        requestConfirmation.requestId,
         origin,
         secret
       );
     }
     setPhase('uploading');
     setProgress(0);
-    const deployment = value.deployment
-      ? value.deployment
-      : await begin({
-          workspaceId,
-          rootSessionId: sessionId,
-          shareId: expected?.shareId,
-          expectedRevision: expected?.revision,
-          credentialHash: readerSecret ? await hashSessionShareSecret(readerSecret) : undefined,
-          uploadCredentialHash: await hashSessionShareSecret(uploadSecret),
-          requestId,
-          confirmationRequestId: confirmation?.requestId,
-          delivery: value.delivery,
-          manifest: prepared.manifest,
-          sourceIds: prepared.sourceIds,
-        });
+    let deployment = value.deployment;
+    if (!deployment) {
+      const credentialHash = readerSecret ? await hashSessionShareSecret(readerSecret) : undefined;
+      const uploadCredentialHash = await hashSessionShareSecret(uploadSecret);
+      // These hashes and capture can yield; validate immediately before the first plaintext egress.
+      assertConsent(consent, value);
+      deployment = await begin({
+        workspaceId,
+        rootSessionId: sessionId,
+        shareId: expected?.shareId,
+        expectedRevision: expected?.revision,
+        credentialHash,
+        uploadCredentialHash,
+        requestId,
+        confirmationRequestId: requestConfirmation?.requestId,
+        delivery: value.delivery,
+        manifest: prepared.manifest,
+        sourceIds: prepared.sourceIds,
+      });
+    }
     value.deployment = deployment;
     setPending((current) =>
       current?.requestId === requestId ? { ...current, deployment } : current
     );
     lifetime.current.signal.throwIfAborted();
     if (readerSecret) actions.persistBeforePublish(deployment, readerSecret);
+    assertConsent(consent, value);
     if (!value.sealed) {
       setStage('upload');
       await uploadPreparedShare({
@@ -434,6 +554,7 @@ export function useSessionShareManagement(
     }
     lifetime.current.signal.throwIfAborted();
     if (readerSecret) actions.persistBeforePublish(deployment, readerSecret);
+    assertConsent(consent, value);
     setStage('publish');
     setPhase('publishing');
     const updated = await publish({ deploymentId: deployment.deploymentId });
@@ -462,10 +583,19 @@ export function useSessionShareManagement(
     setProgress(0);
   };
   /** One human action: freeze if needed, then upload and commit. */
-  const publishNow = () =>
+  const publishNow = (consent?: PlaintextShareConsent) =>
     actions.run(async (setStage) => {
       try {
+        if (!canCapture) throw new Error('Share source unavailable');
+        assertConsent(consent, pendingRef.current ?? undefined);
         const existing = pendingRef.current;
+        if (
+          consent &&
+          existing &&
+          selectedSetKey(existing.prepared.sourceIds.map(({ sourceId }) => sourceId)) !==
+            selectedSetKey(consent.selectedIds)
+        )
+          throw new ShareConsentChangedError();
         if (existing && conflict) throw new Error('Share confirmation changed');
         if (!existing && entry?.status === 'draft' && entry.canManage) {
           // The draft's upload credentials are gone, so it can only be discarded.
@@ -474,7 +604,10 @@ export function useSessionShareManagement(
           await actions.revokeDeployment(entry);
         }
         setStage('capture');
-        await publishPrepared(existing ?? (await capture()), setStage);
+        await publishPrepared(existing ?? (await capture(consent)), setStage, consent);
+      } catch (failure) {
+        if (failure instanceof ShareConsentChangedError) setPending(null);
+        throw failure;
       } finally {
         setPhase('idle');
       }
@@ -491,12 +624,7 @@ export function useSessionShareManagement(
     result,
     /** The current bearer link when this device can rebuild it, else null. */
     shareLink: result?.url ?? shareLink,
-    canCapture:
-      entry !== undefined &&
-      selected.every(
-        (id) =>
-          candidateIds.includes(id) && Object.values(meta).some((session) => session.id === id)
-      ),
+    canCapture,
     busy: actions.busy,
     error: actions.error,
     notice: actions.notice,
@@ -511,8 +639,19 @@ export function useSessionShareManagement(
     onPublish: () => {
       const runtime = store.get(activeWorkspaceRuntimeAtom);
       if (runtime?.workspaceId === workspaceId && runtime.contentMode === 'e2ee') {
-        if (!actions.busy) {
-          plaintextConsentRuntime.current = runtime;
+        if (
+          !actions.busy &&
+          canCapture &&
+          currentPublication.current.scopeKey === publicationScopeKey
+        ) {
+          plaintextConsent.current = {
+            runtime,
+            scopeKey: currentPublication.current.scopeKey,
+            selectedIds: [...selected],
+            entry: structuredClone(entry),
+            recordVersion: shareRecordVersion(entry),
+            confirmation: confirmation ? structuredClone(confirmation) : undefined,
+          };
           setPlaintextConfirmation(true);
         }
         return Promise.resolve();
@@ -520,10 +659,10 @@ export function useSessionShareManagement(
       return publishNow();
     },
     onConfirmPlaintextPublish: () => {
-      const runtime = plaintextConsentRuntime.current;
+      const consent = plaintextConsent.current;
       cancelPlaintextConfirmation();
-      if (!runtime || runtime !== store.get(activeWorkspaceRuntimeAtom)) return Promise.resolve();
-      return publishNow();
+      if (!consent) return Promise.resolve();
+      return publishNow(consent);
     },
     onCancelPlaintextPublish: cancelPlaintextConfirmation,
     onDiscard: () => {

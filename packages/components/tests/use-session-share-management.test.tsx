@@ -67,6 +67,7 @@ import {
 } from '@lody/shared/session-sharing';
 import { userAtom } from '../src/atoms';
 import { activeWorkspaceRuntimeAtom } from '../src/atoms/runtime';
+import { sessionMetaCacheAtom } from '../src/atoms/doc-meta';
 import { SessionShareManager } from '../src/components/sharing/session-share-manager';
 import {
   useSessionShareManagement,
@@ -101,6 +102,7 @@ describe('static publication client lifecycle', () => {
   let control: ReturnType<typeof useSessionShareManagement>;
   let recipient: Awaited<ReturnType<typeof createShareDeliveryKey>>;
   let showEditor = false;
+  let candidates = ['root'];
   let publication: Promise<void> | undefined;
   let confirmation:
     | { requestId: string; sessionIds: string[]; deliveryPublicKey: string }
@@ -109,7 +111,7 @@ describe('static publication client lifecycle', () => {
     control = useSessionShareManagement(
       'workspace' as WorkspaceId,
       'root',
-      ['root'],
+      candidates,
       undefined,
       confirmation
     );
@@ -141,6 +143,7 @@ describe('static publication client lifecycle', () => {
     cloud.language = 'en';
     confirmation = undefined;
     showEditor = false;
+    candidates = ['root'];
     publication = undefined;
     cloud.enabled = true;
     cloud.mutation.mockReset();
@@ -175,6 +178,284 @@ describe('static publication client lifecycle', () => {
     container.remove();
     vi.unstubAllEnvs();
   });
+  it('changing the server selection during consent must not disclose an unselected conversation', async () => {
+    showEditor = true;
+    const reads: string[] = [];
+    const uploads = new Map<string, Uint8Array>();
+    store.set(sessionMetaCacheAtom, {
+      root: { id: 'root', title: 'Root' },
+      private: { id: 'private-foreign', title: 'Unrelated private conversation' },
+    } as never);
+    store.set(activeWorkspaceRuntimeAtom, {
+      workspaceId: 'workspace',
+      contentMode: 'e2ee',
+      prepareSessionTarget: async () => {},
+      acquireSessionStore: async (id: string) => ({
+        sessionId: id,
+        firstSynced: Promise.resolve(),
+        acquireSync: () => () => {},
+        sessionData: {
+          history: {
+            readAll: async () => {
+              reads.push(id);
+              return [
+                {
+                  id: 't',
+                  role: 'assistant',
+                  items: [
+                    {
+                      type: 'text',
+                      text:
+                        id === 'root' ? 'Approved root' : 'DO_NOT_PUBLISH_UNSELECTED_CONVERSATION',
+                    },
+                  ],
+                },
+              ];
+            },
+          },
+        },
+      }),
+      releaseSessionStoreRef: () => {},
+    } as never);
+    const actualPublisher = await vi.importActual<
+      typeof import('../src/lib/session-share-publisher')
+    >('../src/lib/session-share-publisher');
+    const actualProtocol = await vi.importActual<typeof import('@lody/shared/session-sharing')>(
+      '@lody/shared/session-sharing'
+    );
+    cloud.capture.mockImplementation(actualPublisher.captureSessionShare);
+    cloud.upload.mockImplementation((options) =>
+      actualProtocol.uploadPreparedShare({
+        ...options,
+        fetch: async (url: string, init?: RequestInit) => {
+          if (init?.method === 'PUT') uploads.set(url, new Uint8Array(init.body as ArrayBuffer));
+          return new Response(null, { status: 204 });
+        },
+      })
+    );
+    cloud.state = { ...entry };
+    await render();
+    expect(control.selected).toEqual(['root']);
+    expect(control.canCapture).toBe(true);
+    await act(async () => control.onPublish());
+    expect(control.plaintextConfirmation).toBe(true);
+    expect(reads).toEqual([]);
+    // A live management-query update changes the record after the warning opened.
+    cloud.state = { ...entry, revision: 2, selectedSourceIds: ['root', 'private-foreign'] };
+    await render();
+    expect(control.canCapture).toBe(false);
+    expect(control.plaintextConfirmation).toBe(true);
+    await act(async () => {
+      [...container.querySelectorAll('button')]
+        .find((node) => node.textContent === 'Publish decrypted copy')!
+        .click();
+      await publication;
+    });
+    expect(control.result).toBeNull();
+    expect(control.plaintextConfirmation).toBe(false);
+    expect(reads).toEqual([]);
+    expect(uploads.size).toBe(0);
+    expect(cloud.mutation).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'selected set',
+    'revision',
+    'credential version',
+    'source map',
+    'candidate removal',
+    'source removal',
+  ])('invalidates consent on %s changes and requires a new human action', async (change) => {
+    store.set(activeWorkspaceRuntimeAtom, {
+      workspaceId: 'workspace',
+      contentMode: 'e2ee',
+    } as never);
+    store.set(sessionMetaCacheAtom, {
+      root: { id: 'root', title: 'Root' },
+      child: { id: 'child', title: 'Child' },
+    } as never);
+    candidates = ['root', 'child'];
+    cloud.state = { ...entry };
+    await render();
+    await act(async () => control.onPublish());
+    const staleConfirm = control.onConfirmPlaintextPublish;
+    if (change === 'selected set') cloud.state = { ...entry, selectedSourceIds: ['root', 'child'] };
+    if (change === 'revision') cloud.state = { ...entry, revision: 2 };
+    if (change === 'credential version') cloud.state = { ...entry, credentialVersion: 2 };
+    if (change === 'source map')
+      cloud.state = { ...entry, sourceIds: [{ sourceId: 'root', conversationId: 'replacement' }] };
+    if (change === 'candidate removal') candidates = [];
+    if (change === 'source removal') store.set(sessionMetaCacheAtom, {} as never);
+    await render();
+    await act(async () => staleConfirm());
+    expect(control.result).toBeNull();
+    expect(control.plaintextConfirmation).toBe(false);
+    expect(cloud.capture).not.toHaveBeenCalled();
+    expect(cloud.mutation).not.toHaveBeenCalled();
+    expect(cloud.upload).not.toHaveBeenCalled();
+    // Restore a valid selection. The rejected confirmation cannot authorize the replacement.
+    candidates = ['root'];
+    store.set(sessionMetaCacheAtom, { root: { id: 'root', title: 'Root' } } as never);
+    cloud.state = { ...entry, revision: 2 };
+    await render();
+    await act(async () => staleConfirm());
+    expect(cloud.capture).not.toHaveBeenCalled();
+    await act(async () => control.onPublish());
+    expect(control.plaintextConfirmation).toBe(true);
+    expect(cloud.capture).not.toHaveBeenCalled();
+    await act(async () => control.onConfirmPlaintextPublish());
+    expect(control.error).toBeNull();
+    expect(control.result).not.toBeNull();
+    expect(cloud.mutation.mock.calls[0]?.[1]).toMatchObject({ expectedRevision: 2 });
+  });
+
+  it('revalidates the record after asynchronous capture before sending the manifest', async () => {
+    store.set(activeWorkspaceRuntimeAtom, {
+      workspaceId: 'workspace',
+      contentMode: 'e2ee',
+    } as never);
+    cloud.state = { ...entry };
+    const prepared = await prepareSharePackage({
+      rootSourceId: 'root',
+      conversations: [{ sourceId: 'root', title: 'Root', history: [] }],
+      capturedAt: '2026-09-12T00:00:00Z',
+      readAttachment: async () => {
+        throw new Error('Unexpected');
+      },
+    });
+    let entered!: () => void, release!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    cloud.capture.mockImplementation(async () => {
+      entered();
+      await held;
+      return prepared;
+    });
+    await render();
+    await act(async () => control.onPublish());
+    let publishing!: Promise<void>;
+    await act(async () => {
+      publishing = control.onConfirmPlaintextPublish();
+      await started;
+    });
+    cloud.state = { ...entry, revision: 2 };
+    await render();
+    await act(async () => {
+      release();
+      await publishing;
+    });
+    expect(control.result).toBeNull();
+    expect(control.hasPending).toBe(false);
+    expect(cloud.mutation).not.toHaveBeenCalled();
+    expect(cloud.upload).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { existingShare: false, externalChange: false },
+    { existingShare: false, externalChange: true },
+    { existingShare: true, externalChange: false },
+    { existingShare: true, externalChange: true },
+  ])(
+    'recognizes its own admission (existing=$existingShare, external=$externalChange)',
+    async ({ existingShare, externalChange }) => {
+      store.set(activeWorkspaceRuntimeAtom, {
+        workspaceId: 'workspace',
+        contentMode: 'e2ee',
+      } as never);
+      cloud.state = existingShare ? { ...entry } : null;
+      let entered!: () => void, release!: () => void;
+      const started = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const admitted = {
+        ...entry,
+        status: existingShare ? ('active' as const) : ('draft' as const),
+        revision: 2,
+        deploymentId: 'deployment',
+      };
+      cloud.mutation.mockImplementation(async (name: string) => {
+        if (name === 'sessionSharing:beginDeployment') {
+          entered();
+          await held;
+          return admitted;
+        }
+        return { ...admitted, status: 'active' };
+      });
+      await render();
+      await act(async () => control.onPublish());
+      let publishing!: Promise<void>;
+      await act(async () => {
+        publishing = control.onConfirmPlaintextPublish();
+        await started;
+      });
+      cloud.state = { ...admitted, revision: externalChange ? 3 : 2 };
+      await render();
+      await act(async () => {
+        release();
+        await publishing;
+      });
+      if (externalChange) {
+        expect(control.result).toBeNull();
+        expect(control.hasPending).toBe(false);
+        expect(cloud.upload).not.toHaveBeenCalled();
+        expect(cloud.mutation.mock.calls.map(([name]) => name)).toEqual([
+          'sessionSharing:beginDeployment',
+        ]);
+      } else {
+        expect(control.error).toBeNull();
+        expect(control.result).not.toBeNull();
+        expect(cloud.mutation.mock.calls.map(([name]) => name)).toEqual([
+          'sessionSharing:beginDeployment',
+          'sessionSharing:publishDeployment',
+        ]);
+      }
+    }
+  );
+
+  it('does not commit after the share changes during upload', async () => {
+    store.set(activeWorkspaceRuntimeAtom, {
+      workspaceId: 'workspace',
+      contentMode: 'e2ee',
+    } as never);
+    cloud.state = { ...entry };
+    let entered!: () => void, release!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    cloud.upload.mockImplementation(async () => {
+      entered();
+      await held;
+    });
+    await render();
+    await act(async () => control.onPublish());
+    let publishing!: Promise<void>;
+    await act(async () => {
+      publishing = control.onConfirmPlaintextPublish();
+      await started;
+    });
+    cloud.state = { ...entry, revision: 2 };
+    await render();
+    await act(async () => {
+      release();
+      await publishing;
+    });
+    expect(control.result).toBeNull();
+    expect(control.hasPending).toBe(false);
+    expect(cloud.mutation.mock.calls.map(([name]) => name)).toEqual([
+      'sessionSharing:beginDeployment',
+    ]);
+  });
+
   it.each(['en', 'zh_CN'])(
     'confirms encrypted copies before real capture and HTTP upload (%s)',
     async (language) => {
