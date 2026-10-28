@@ -33,6 +33,30 @@ const createLogger = () => ({
   close: () => {},
 });
 
+const listenTestLoopback = (
+  server: http.Server,
+  host: '127.0.0.1' | '::1',
+  port: number
+): Promise<number> =>
+  new Promise((resolve, reject) => {
+    const onError = (error: Error) => {
+      server.off('listening', onListening);
+      reject(error);
+    };
+    const onListening = () => {
+      server.off('error', onError);
+      const address = server.address();
+      if (!address || typeof address === 'string') return reject(new Error('Missing test port'));
+      resolve(address.port);
+    };
+    server.once('error', onError);
+    server.once('listening', onListening);
+    server.listen({ port, host, ...(host === '::1' ? { ipv6Only: true } : {}) });
+  });
+
+const listenTestIPv4 = (server: http.Server, port: number): Promise<number> =>
+  listenTestLoopback(server, '127.0.0.1', port);
+
 const listenHtmlServer = async (
   checkFetchMetadata = false
 ): Promise<{
@@ -816,6 +840,172 @@ describe('LocalPreviewProxyManager', () => {
     });
     expect(tooLarge.status).toBe(431);
     await tooLarge.text();
+  });
+
+  it('owns both loopback families for HTTP and WebSocket until release', async () => {
+    const upstream = await listenWebSocketServer();
+    servers.push(upstream.server);
+    const ipv6Probe = http.createServer();
+    const ipv6Available = await new Promise<boolean>((resolve, reject) => {
+      ipv6Probe.once('error', (error: NodeJS.ErrnoException) => {
+        if (error.code === 'EADDRNOTAVAIL' || error.code === 'EAFNOSUPPORT') resolve(false);
+        else reject(error);
+      });
+      ipv6Probe.listen(0, '::1', () => ipv6Probe.close(() => resolve(true)));
+    });
+    if (!ipv6Available) return;
+    const manager = new LocalPreviewProxyManager({ logger: createLogger() });
+    managers.push(manager);
+    const sessionId = 'dual-loopback' as SessionId;
+    const endpoint = await manager.acquire({ sessionId, target: upstream.target });
+    const port = Number(new URL(endpoint.viewerUrl).port);
+    const intruder = http.createServer();
+    const bound = await new Promise<string>((resolve) => {
+      intruder.once('error', (error: NodeJS.ErrnoException) => resolve(error.code ?? 'unknown'));
+      intruder.listen(port, '::1', () => intruder.close(() => resolve('bound')));
+    });
+    expect(bound).toBe('EADDRINUSE');
+    const ipv6 = new URL(endpoint.viewerUrl);
+    ipv6.hostname = '[::1]';
+    const response = await fetch(ipv6);
+    expect(response.status).toBe(200);
+    await response.text();
+    const denied = new URL(ipv6);
+    denied.search = '';
+    expect((await fetch(denied)).status).toBe(403);
+    const socketUrl = new URL(ipv6);
+    socketUrl.protocol = 'ws:';
+    socketUrl.pathname = '/socket';
+    const socket = new WebSocket(socketUrl);
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', resolve);
+      socket.once('error', reject);
+    });
+    const closed = observeClose(socket);
+    await manager.release(sessionId, endpoint.endpointId);
+    await closed;
+    await expect(fetch(ipv6)).rejects.toThrow();
+    const ipv4 = new URL(ipv6);
+    ipv4.hostname = '127.0.0.1';
+    await expect(fetch(ipv4)).rejects.toThrow();
+  });
+
+  it('retries on an occupied IPv6 port before publishing the local viewer', async () => {
+    const occupied = http.createServer((_request, response) => response.end('unrelated'));
+    const available = await new Promise<boolean>((resolve, reject) => {
+      occupied.once('error', (error: NodeJS.ErrnoException) => {
+        if (error.code === 'EADDRNOTAVAIL' || error.code === 'EAFNOSUPPORT') resolve(false);
+        else reject(error);
+      });
+      occupied.listen(0, '::1', () => resolve(true));
+    });
+    if (!available) return;
+    servers.push(occupied);
+    const address = occupied.address();
+    if (!address || typeof address === 'string') throw new Error('Missing IPv6 port');
+    const upstream = await listenHtmlServer();
+    servers.push(upstream.server);
+    const boundIPv4Ports: number[] = [];
+    const manager = new LocalPreviewProxyManager({
+      logger: createLogger(),
+      initialLocalPort: address.port,
+      listen: async (server, host, port) => {
+        const bound = await listenTestLoopback(server, host, port);
+        if (host === '127.0.0.1') boundIPv4Ports.push(bound);
+        return bound;
+      },
+    });
+    managers.push(manager);
+    const endpoint = await manager.acquire({
+      sessionId: 'ipv6-conflict' as SessionId,
+      target: upstream.target,
+    });
+    expect(boundIPv4Ports[0]).toBe(address.port);
+    expect(boundIPv4Ports.at(-1)).toBe(Number(new URL(endpoint.viewerUrl).port));
+    expect(Number(new URL(endpoint.viewerUrl).port)).not.toBe(address.port);
+    expect((await fetch(endpoint.viewerUrl)).status).toBe(200);
+    const original = await fetch(`http://[::1]:${address.port}/`);
+    expect(await original.text()).toBe('unrelated');
+  });
+
+  it.each(['EADDRNOTAVAIL', 'EAFNOSUPPORT'])(
+    'keeps IPv4 available when IPv6 is unavailable with %s',
+    async (code) => {
+      const upstream = await listenHtmlServer();
+      servers.push(upstream.server);
+      const manager = new LocalPreviewProxyManager({
+        logger: createLogger(),
+        listen: (server, host, port) => {
+          if (host === '::1')
+            return Promise.reject(Object.assign(new Error('IPv6 unavailable'), { code }));
+          return listenTestIPv4(server, port);
+        },
+      });
+      managers.push(manager);
+      const sessionId = 'without-ipv6' as SessionId;
+      const endpoint = await manager.acquire({ sessionId, target: upstream.target });
+      const ipv4 = new URL(endpoint.viewerUrl);
+      ipv4.hostname = '127.0.0.1';
+      expect((await fetch(ipv4)).status).toBe(200);
+      await manager.release(sessionId, endpoint.endpointId);
+      await expect(fetch(ipv4)).rejects.toThrow();
+    }
+  );
+
+  it('cleans up the IPv4 listener on a non-retryable IPv6 failure and allows a later acquire', async () => {
+    const upstream = await listenHtmlServer();
+    servers.push(upstream.server);
+    const originalError = Object.assign(new Error('IPv6 bind denied'), { code: 'EACCES' });
+    let failedPort = 0;
+    let failIPv6 = true;
+    const manager = new LocalPreviewProxyManager({
+      logger: createLogger(),
+      listen: async (server, host, port) => {
+        if (host === '::1' && failIPv6) throw originalError;
+        const bound = await listenTestLoopback(server, host, port);
+        if (host === '127.0.0.1' && failIPv6) failedPort = bound;
+        return bound;
+      },
+    });
+    managers.push(manager);
+    const sessionId = 'ipv6-failure' as SessionId;
+    await expect(manager.acquire({ sessionId, target: upstream.target })).rejects.toBe(
+      originalError
+    );
+    expect(failedPort).toBeGreaterThan(0);
+    const probe = http.createServer();
+    expect(await listenTestIPv4(probe, failedPort)).toBe(failedPort);
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+    failIPv6 = false;
+    const endpoint = await manager.acquire({ sessionId, target: upstream.target });
+    expect((await fetch(endpoint.viewerUrl)).status).toBe(200);
+  });
+
+  it('bounds repeated IPv6 port conflicts and releases each IPv4 reservation', async () => {
+    const upstream = await listenHtmlServer();
+    servers.push(upstream.server);
+    const conflict = Object.assign(new Error('IPv6 occupied'), { code: 'EADDRINUSE' });
+    const reserved: number[] = [];
+    const manager = new LocalPreviewProxyManager({
+      logger: createLogger(),
+      listen: async (server, host, port) => {
+        if (host === '::1') throw conflict;
+        const selected = await listenTestIPv4(server, port);
+        reserved.push(selected);
+        return selected;
+      },
+    });
+    managers.push(manager);
+    await expect(
+      manager.acquire({ sessionId: 'all-conflict' as SessionId, target: upstream.target })
+    ).rejects.toBe(conflict);
+    expect(reserved.length).toBeGreaterThan(1);
+    expect(reserved.length).toBeLessThanOrEqual(8);
+    for (const port of new Set(reserved)) {
+      const probe = http.createServer();
+      expect(await listenTestIPv4(probe, port)).toBe(port);
+      await new Promise<void>((resolve) => probe.close(() => resolve()));
+    }
   });
 
   it('rejects redirects that leave the bound target origin', async () => {

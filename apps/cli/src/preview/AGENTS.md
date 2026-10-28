@@ -58,7 +58,10 @@ Managed preview tunnels and the local proxy. [apps/cli/AGENTS.md](../../AGENTS.m
   is no global unlock: a matching Origin/tokenless Referer never grants access.
   Local and remote tokens differ; cookies are Secure, HttpOnly, SameSite=None and
   Partitioned. Local viewers use a distinct stable localhost subdomain per Session
-  and target origin, and issue a fresh capability on replacement. Only
+  and target origin, and issue a fresh capability on replacement. Before publishing
+  a local viewer, bind its port on both 127.0.0.1 and ::1; retry IPv6 port conflicts
+  and use IPv4 alone only when IPv6 is unavailable. Never bind a wildcard address.
+  Only
   the current scope’s application cookies reach the target, never capability
   cookies. Reissue the capability after application Set-Cookie values. Bound local
   request headers and preserve separate Set-Cookie values and their rewritten

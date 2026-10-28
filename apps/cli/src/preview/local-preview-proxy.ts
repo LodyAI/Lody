@@ -49,13 +49,16 @@ type LocalPreviewProxyRecord = {
   upstreamSockets: Set<LocalWebSocket>;
   proxyOrigin: URL;
   localOrigin: URL;
-  server: http.Server;
+  servers: http.Server[];
   webSocketServer: WebSocketServer;
 };
 
 type LocalPreviewProxyManagerDeps = {
   logger: Logger;
   now?: () => number;
+  // Allows deterministic tests of an IPv6 port collision and disabled IPv6.
+  initialLocalPort?: number;
+  listen?: (server: http.Server, host: '127.0.0.1' | '::1', port: number) => Promise<number>;
 };
 
 type AcquireLocalPreviewEndpointOptions = {
@@ -74,6 +77,60 @@ const LOCAL_PREVIEW_TOKEN_COOKIE = PREVIEW_ACCESS_TOKEN_COOKIE;
 // All local preview ports share a browser cookie jar. Accept a bounded jar
 // larger than Node's default 16 KiB before filtering it for this endpoint.
 const LOCAL_PREVIEW_MAX_HEADER_BYTES = 1024 * 1024;
+const LOCAL_PREVIEW_BIND_ATTEMPTS = 8;
+
+const listenLoopback = (
+  server: http.Server,
+  host: '127.0.0.1' | '::1',
+  port: number
+): Promise<number> =>
+  new Promise((resolve, reject) => {
+    const onError = (error: Error) => {
+      server.off('listening', onListening);
+      reject(error);
+    };
+    const onListening = () => {
+      server.off('error', onError);
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        reject(new Error('Local preview proxy did not bind to a TCP port.'));
+        return;
+      }
+      resolve(address.port);
+    };
+    server.once('error', onError);
+    server.once('listening', onListening);
+    try {
+      server.listen({ host, port, ...(host === '::1' ? { ipv6Only: true } : {}) });
+    } catch (error) {
+      server.off('error', onError);
+      server.off('listening', onListening);
+      reject(error);
+    }
+  });
+
+const closeListeningServer = (server: http.Server): Promise<void> =>
+  server.listening
+    ? new Promise((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      })
+    : Promise.resolve();
+
+const errorCode = (error: unknown): string | undefined =>
+  error instanceof Error && 'code' in error && typeof error.code === 'string'
+    ? error.code
+    : undefined;
+
+const combinePortAndCleanupErrors = (error: unknown, cleanupError: unknown): AggregateError =>
+  new AggregateError([error, cleanupError], 'Preview port retry cleanup failed', { cause: error });
+
+const throwCleanupFailures = (results: PromiseSettledResult<unknown>[]): void => {
+  const failures = results.flatMap((result) =>
+    result.status === 'rejected' ? [result.reason] : []
+  );
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, 'Preview cleanup failed');
+};
 
 // Cookies ignore ports: each loopback listener needs its own name so opening
 // another Session cannot replace the credential for an existing module graph.
@@ -295,18 +352,26 @@ export class LocalPreviewProxyManager {
     const server = http.createServer(
       options.remote ? {} : { maxHeaderSize: LOCAL_PREVIEW_MAX_HEADER_BYTES }
     );
+    const ipv6Server = options.remote
+      ? undefined
+      : http.createServer({
+          maxHeaderSize: LOCAL_PREVIEW_MAX_HEADER_BYTES,
+        });
+    const servers = ipv6Server ? [server, ipv6Server] : [server];
     const webSocketServer = new WebSocketServer({
       noServer: true,
       maxPayload: resourceLimits.maxRequestBodyBytes,
     });
     const sockets = new Set<Socket>();
-    server.on('connection', (socket) => {
-      sockets.add(socket);
-      socket.once('close', () => sockets.delete(socket));
-    });
+    for (const listener of servers) {
+      listener.on('connection', (socket) => {
+        sockets.add(socket);
+        socket.once('close', () => sockets.delete(socket));
+      });
+    }
     const recordRef: { current: LocalPreviewProxyRecord | null } = { current: null };
 
-    server.on('request', (request, response) => {
+    const handleRequest: http.RequestListener = (request, response) => {
       for (const [name, value] of applyPreviewEmbeddingHeaders(new Headers()))
         response.setHeader(name, value);
       response.setHeader('cache-control', 'no-store');
@@ -323,9 +388,9 @@ export class LocalPreviewProxyManager {
         response.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' });
         response.end(`Preview proxy error: ${formatErrorMessage(error)}`);
       });
-    });
+    };
 
-    server.on('upgrade', (request, socket, head) => {
+    const handleUpgrade = (request: IncomingMessage, socket: Duplex, head: Buffer) => {
       const record = recordRef.current;
       if (!record) {
         socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
@@ -337,22 +402,54 @@ export class LocalPreviewProxyManager {
           socket.end('HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n');
         }
       );
-    });
+    };
+    for (const listener of servers) {
+      listener.on('request', handleRequest);
+      listener.on('upgrade', handleUpgrade);
+    }
 
-    const port = await new Promise<number>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(0, '127.0.0.1', () => {
-        server.off('error', reject);
-        const address = server.address();
-        if (!address || typeof address === 'string') {
-          reject(new Error('Local preview proxy did not bind to a TCP port.'));
-          return;
+    const listen = this.deps.listen ?? listenLoopback;
+    const port = await (async () => {
+      for (let attempt = 0; attempt < LOCAL_PREVIEW_BIND_ATTEMPTS; attempt += 1) {
+        const requestedPort =
+          !options.remote && attempt === 0 ? (this.deps.initialLocalPort ?? 0) : 0;
+        const candidate = await listen(server, '127.0.0.1', requestedPort);
+        if (!ipv6Server) return candidate;
+        try {
+          await listen(ipv6Server, '::1', candidate);
+          return candidate;
+        } catch (error) {
+          const code = errorCode(error);
+          if (code === 'EADDRNOTAVAIL' || code === 'EAFNOSUPPORT') return candidate;
+          // The viewer URL is not published yet. Drop any pre-ready sockets
+          // before releasing IPv4 so a collision cannot hold the retry open.
+          for (const socket of sockets) socket.destroy();
+          try {
+            await closeListeningServer(server);
+          } catch (cleanupError) {
+            throw combinePortAndCleanupErrors(error, cleanupError);
+          }
+          if (code !== 'EADDRINUSE' || attempt === LOCAL_PREVIEW_BIND_ATTEMPTS - 1) throw error;
         }
-        resolve(address.port);
-      });
-    }).catch(async (error: unknown) => {
+      }
+      throw new Error('Preview listener binding exhausted its attempts.');
+    })().catch(async (error: unknown) => {
+      for (const socket of sockets) socket.destroy();
       webSocketServer.close();
-      await transport.dispatcher.destroy();
+      const results = await Promise.allSettled([
+        transport.dispatcher.destroy(),
+        ...servers.map(closeListeningServer),
+      ]);
+      const cleanupErrors = results.flatMap((result) =>
+        result.status === 'rejected' ? [result.reason] : []
+      );
+      if (cleanupErrors.length) {
+        throw new AggregateError(
+          [error, ...cleanupErrors],
+          'Preview listener setup and cleanup failed',
+          { cause: error }
+        );
+      }
       throw error;
     });
 
@@ -387,7 +484,7 @@ export class LocalPreviewProxyManager {
       upstreamSockets: new Set(),
       proxyOrigin,
       localOrigin,
-      server,
+      servers,
       webSocketServer,
     };
     recordRef.current = record;
@@ -763,17 +860,10 @@ export class LocalPreviewProxyManager {
     }
     for (const socket of record.sockets) socket.destroy();
     record.webSocketServer.close();
-    await Promise.all([
+    const results = await Promise.allSettled([
       record.transport.dispatcher.destroy(),
-      new Promise<void>((resolve, reject) => {
-        record.server.close((error) => {
-          if (error) {
-            reject(error);
-            return;
-          }
-          resolve();
-        });
-      }),
+      ...record.servers.map(closeListeningServer),
     ]);
+    throwCleanupFailures(results);
   }
 }

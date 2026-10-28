@@ -10,6 +10,9 @@ authenticate through a token-bearing Referer, but nested module imports lack it.
 Each local Session and target origin uses a stable `lody-<scope>.localhost`
 viewer hostname. Chromium resolves it to loopback and gives it a separate
 partitioned-cookie quota, so one preview cannot evict another preview’s token.
+It may connect to IPv6 first, so the proxy reserves the same port on 127.0.0.1
+and ::1 before publishing the URL. Port conflicts retry with a new port; only an
+unavailable IPv6 stack permits IPv4-only operation. Closing joins both listeners.
 Reopening the target reuses the hostname and cookie names, but generates a new
 token. When an application sets cookies the proxy reissues the capability last;
 under Chromium quota pressure application cookies may be evicted. Chromium limits
