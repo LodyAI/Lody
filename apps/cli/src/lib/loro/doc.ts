@@ -505,7 +505,9 @@ export class LoroDocumentManager {
       // Presence is produced locally regardless of remote sync so local-first
       // renderers get machine/session liveness over the data plane; the cloud
       // Streams sink is attached later by the remote bridge.
-      presenceRuntime = await createCliPresenceRuntimeLegacy(workspaceId);
+      presenceRuntime = await createCliPresenceRuntimeLegacy(workspaceId, {
+        minimal: !!options.encryptedWorkspace,
+      });
       const machineMonitorRuntime = new CliMachineMonitorRuntime({ workspaceId, logger });
       const promptSuggestions = new CliPromptSuggestions(workspaceId, logger);
       // No transport is registered at startup: rooms stay pending/detached
@@ -787,12 +789,19 @@ export class LoroDocumentManager {
       // The presence runtime already exists (created at repo init and producing
       // presence locally); attaching the cloud Streams sink additionally mirrors
       // it to the cloud presence stream.
-      if (!this.encryptedWorkspace) {
-        await this.presenceRuntime.attachStreams({
-          streamsBaseUrl: streamsTransport.gatewayBaseUrl,
-          auth: streamsTokens.native.createAuthCallback(),
-          shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
+      const presenceAttach = this.presenceRuntime.attachStreams({
+        streamsBaseUrl: streamsTransport.gatewayBaseUrl,
+        auth: streamsTokens.native.createAuthCallback(),
+        shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
+        ...(this.encryptedWorkspace ? { bucketId: this.encryptedWorkspace.bucketId() } : {}),
+      });
+      if (this.encryptedWorkspace) {
+        // Liveness failure remains unknown and cannot roll back protected document sync.
+        await presenceAttach.catch(() => {
+          this.logger.warn(`[${this.workspaceId}] Presence unavailable; machine status is unknown`);
         });
+      } else {
+        await presenceAttach;
         this.promptSuggestions?.attachStreams({
           streamsBaseUrl: streamsTransport.gatewayBaseUrl,
           auth: streamsTransport.tokenProvider.createAuthCallback(),

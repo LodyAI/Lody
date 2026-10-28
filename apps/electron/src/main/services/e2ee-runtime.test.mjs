@@ -2547,7 +2547,10 @@ for (const source of ['staging', 'not-a-staging-recipient', 'temporary-io'])
         const missing = yield* Effect.result(
           owner.host.keyRound(workspaceId, () => mailbox, staging)
         )
-        assert.equal(Result.isFailure(missing) && missing.failure.reason, 'missing-key')
+        assert.equal(
+          Result.isFailure(missing) && missing.failure.distribution.failure.reason,
+          'missing-key'
+        )
         assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, false)
         const afterFailure = yield* owner.host.seal(workspaceId, oldRequest)
         assert.deepEqual(
@@ -2558,7 +2561,10 @@ for (const source of ['staging', 'not-a-staging-recipient', 'temporary-io'])
         const retried = yield* Effect.result(
           owner.host.keyRound(workspaceId, () => mailbox, staging)
         )
-        assert.equal(Result.isFailure(retried) && retried.failure.reason, 'missing-key')
+        assert.equal(
+          Result.isFailure(retried) && retried.failure.distribution.failure.reason,
+          'missing-key'
+        )
         assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, false)
         if (source === 'staging') unavailable = false
         else yield* mailbox.put('01'.repeat(16), group.envelopes[0].frame)
@@ -3211,6 +3217,7 @@ const maintenanceFixture = (directory) =>
       device,
       genesis,
       prepared,
+      keys,
       view: () => view,
       setView: (next) => {
         view = next
@@ -3262,7 +3269,9 @@ void test('a rejected envelope is repaired by digest and the following good enve
       )
       yield* owner.host.keyRound(workspaceId, () => mailbox)
       assert.equal(db.prepare('SELECT digest FROM mailbox_rejected').get().digest, digest)
-      assert.equal(db.prepare('SELECT count(*) AS n FROM mailbox_reports').get().n, 2)
+      // The independent post-send flush reports the local publication at both repair revisions.
+      assert.equal(db.prepare('SELECT count(*) AS n FROM mailbox_reports').get().n, 3)
+      assert.equal(db.prepare('SELECT count(*) AS n FROM mailbox_envelopes').get().n, 2)
       assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, true)
       db.close()
     })
@@ -3339,7 +3348,7 @@ void test('a transient installed-key write failure never rejects the good mailbo
         "CREATE TRIGGER block_replace BEFORE UPDATE ON installed_epoch_keys BEGIN SELECT RAISE(ABORT,'synthetic write failure'); END"
       )
       const failed = yield* Effect.result(owner.host.keyRound(workspaceId, () => mailbox))
-      assert.equal(failed.failure.cryptographicRejection, false)
+      assert.equal(failed.failure.receive.failure.cryptographicRejection, false)
       const remote = new DatabaseSync(path)
       assert.equal(remote.prepare('SELECT count(*) AS n FROM mailbox_rejected').get().n, 0)
       assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, false)
@@ -3348,6 +3357,85 @@ void test('a transient installed-key write failure never rejects the good mailbo
       assert.equal((yield* owner.host.status(workspaceId)).hasCurrentKey, true)
       remote.close()
       local.close()
+    })
+  )
+})
+
+void test('unknown mailbox sender requests verified ledger refresh and retries exact bytes without rejection', async (t) => {
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const f = yield* maintenanceFixture(directory)
+      const initial = f.view()
+      const joining = yield* f.owner.custody.prepareDevice()
+      const membershipId = initial
+        .inspectState()
+        .devices.get(hex(f.device.publicKey.toBytes())).membershipId
+      const possession = yield* prepareDeviceAdmission({
+        genesis: f.genesis,
+        membershipId,
+        encryptionPublicKey: joining.enc,
+        kind: 'personal',
+        signer: joining
+      })
+      const record = yield* signLedgerRecord(
+        Result.getOrThrow(
+          prepareLedgerCommand(initial, f.device.publicKey, {
+            _tag: 'AdmitDevice',
+            kind: 'personal',
+            signingPublicKey: joining.publicKey,
+            encryptionPublicKey: joining.enc,
+            possessionSignature: possession.possessionSignature
+          })
+        ),
+        f.device
+      )
+      const records = [Buffer.from(f.prepared.genesisRecordHex, 'hex'), record]
+      const latest = Result.getOrThrow(
+        extendLedger(initial, [record], { head: hashRecordBytes(record), length: 2 })
+      )
+      const frame = yield* Effect.acquireUseRelease(
+        f.keys.read(0),
+        (key) =>
+          prepareEpochEnvelope({
+            context: {
+              genesis: f.genesis,
+              epoch: 0,
+              sender: joining.publicKey,
+              recipient: f.device.publicKey
+            },
+            key,
+            signer: joining,
+            ledger: () => Effect.succeed(latest)
+          }),
+        (key) => Effect.sync(() => disposeEpochKey(key))
+      )
+      f.setView(latest)
+      const mailbox = {
+        ...f.mailbox,
+        fetch: () =>
+          Effect.succeed({
+            items: [{ sender: hex(joining.publicKey.toBytes()), frame }],
+            next: null
+          })
+      }
+      yield* f.owner.host.keyRound(
+        workspaceId,
+        () => mailbox,
+        undefined,
+        () => () => Effect.succeed(page(records, f.prepared.genesisHashHex, 0, 2))
+      )
+      assert.equal((yield* f.owner.host.ledgerView(workspaceId)).status.length, 2)
+      const receive = new DatabaseSync(join(directory, 'workspaces', workspaceId, 'receive.sqlite'))
+      assert.equal(
+        receive.prepare("SELECT count(*) AS n FROM receive_tasks WHERE phase='Reported'").get().n,
+        1
+      )
+      receive.close()
+      const backend = new DatabaseSync(f.path)
+      assert.equal(backend.prepare('SELECT count(*) AS n FROM mailbox_rejected').get().n, 0)
+      backend.close()
+      yield* f.owner.custody.discardDevice(joining)
     })
   )
 })

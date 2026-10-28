@@ -89,7 +89,7 @@ export function encryptedWorkspaceResolver(
   };
 }
 
-/** Unencrypted side channels remain unavailable until their E2EE milestones. */
+/** Content-bearing side channels remain unavailable; minimal plaintext presence is allowed. */
 export type WorkspaceRestrictedFeature =
   | 'schedules'
   | 'preview-comments'
@@ -105,9 +105,9 @@ export type WorkspaceRestrictedFeature =
   | 'presence';
 export function workspaceSupports(
   content: WorkspaceStreamsMode,
-  _feature: WorkspaceRestrictedFeature
+  feature: WorkspaceRestrictedFeature
 ): boolean {
-  return content.mode === 'plaintext';
+  return content.mode === 'plaintext' || feature === 'presence';
 }
 
 /** Verified host facts only. This state never supplies ledger authority. */

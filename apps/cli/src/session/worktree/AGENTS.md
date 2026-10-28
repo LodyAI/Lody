@@ -102,11 +102,11 @@ and file responsibilities: [../README.md](../README.md).
   non-durable, inactive Sessions under the shared per-session lock, re-checking liveness.
 - `worktree-config-resolver.ts` follows the durable launch-config rule in
   [../AGENTS.md](../AGENTS.md): do not write per-session `sessionLaunchConfig`.
-- Archive and delete never delete a Session branch; only the worktree directory goes
-  away, after a backup commit. Worktree removal for archived or deleted Sessions is
-  reconciled from Session state by `worktree-gc.ts` (no command, no acknowledgement);
-  it acts only on `archived` or `deleted` owners, never on `unknown`, and only once
-  workspace metadata is complete. Contract: specs/session-worktree-lifecycle.md.
+- Worktree archive/delete keeps branches and requires a backup commit. `worktree-gc.ts`
+  reconciles Session state (no command/acknowledgement): only archived/deleted root owners
+  after complete metadata; unknown stays intact.
+  Chat workdirs: delete recursively for deleted roots; archive uses empty-only `rmdir`.
+  Contract: specs/session-worktree-lifecycle.md.
 
 - Project roots use registrations. Repair links, never removing a correct one (tabs share
   it); archive unlinks without following targets.

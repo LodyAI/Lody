@@ -385,7 +385,8 @@ export class E2eeIpc extends IpcService {
               (signal) =>
                 cloud.client.mailbox({ workspaceId, credential: access.credential }, signal),
               (signal) =>
-                cloud.client.staging({ workspaceId, credential: access.credential }, signal)
+                cloud.client.staging({ workspaceId, credential: access.credential }, signal),
+              (signal) => (request) => cloud.client.history(request, signal)
             )
           )
         )
@@ -969,7 +970,8 @@ export class E2eeIpc extends IpcService {
                 (signal) =>
                   cloud.client.mailbox({ workspaceId, credential: access.credential }, signal),
                 (signal) =>
-                  cloud.client.staging({ workspaceId, credential: access.credential }, signal)
+                  cloud.client.staging({ workspaceId, credential: access.credential }, signal),
+                (signal) => (request) => cloud.client.history(request, signal)
               )
             )
           : Effect.fail(new Error('e2ee_not_open')),

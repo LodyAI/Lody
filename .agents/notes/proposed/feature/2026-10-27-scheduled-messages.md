@@ -14,11 +14,11 @@ blocks and the selected execution configuration. New-chat scheduling is excluded
 
 ## Decisions
 
-- The info bar owns one unstaged scheduled-message icon. Its popover shows the
-  send time and an Edit pill; the composer has no inline time bar. The editor uses
-  typed date/time with 30-minute, 1-hour and 5-hour presets; removing the time
-  preserves the message. Composer and info-bar controls share the same scoped
-  draft and save lock, so an accepted edit changes the actual send time.
+- The composer owns the pre-send draft: one secondary action beside Send reads
+  "发送定时消息 · <time>"; clicking it edits the time or removes the schedule, and
+  removing the time preserves the message. The info bar has no scheduled-message
+  item. The editor uses typed date/time with 30-minute, 1-hour and 5-hour presets.
+  Revised 2026-10-27 after UI review; the earlier info-bar icon decision is rejected.
 - The selected machine owns the clock. Presets and typed input use its IANA zone
   (device zone for legacy metadata). A sleeping/offline machine sends one catch-up;
   existing retry limits apply. A busy conversation waits without interruption.
@@ -41,8 +41,9 @@ blocks and the selected execution configuration. New-chat scheduling is excluded
   so retries reuse reservation/activity identities. Clear only the captured composer
   draft after acceptance. At the due time, the existing prepared-input handoff takes
   frozen blocks/configuration and stable Session/Turn IDs through retries/restarts.
-- The leaf pending summary opens Schedule details. Complete-message details retain
-  the once/current-chat target and edit the full payload; generic manual-run/resume
+- The queue's dedicated Scheduled section edits a reservation's time in place and
+  opens Schedule details or cancels from the row; reservations never enter executable `mq`. Complete-message details retain the
+  once/current-chat target and edit the full payload; generic manual-run/resume
   controls are hidden. Ownership, machine capabilities and workspace content gates
   remain required. Cancellation disables the reservation; show waiting-for-machine
   until the engine reconciles dispatch. A committed dispatch wins and shows sent;
@@ -96,11 +97,11 @@ and dispatch; cloud-backed handoff continues to require current sync readiness.
 
 Expose separate synchronization and delivery dimensions:
 
-| Dimension | Proposed values / meaning |
-| --- | --- |
-| Local request | preparing, saved locally, awaiting owner, rejected/conflict |
-| Owner receipt | request ID, accepted revision/fingerprint, result, receipt sequence |
-| Delivery | scheduled, waiting (busy/offline/sync), dispatching, sent, cancelled, failed |
+| Dimension     | Proposed values / meaning                                                    |
+| ------------- | ---------------------------------------------------------------------------- |
+| Local request | preparing, saved locally, awaiting owner, rejected/conflict                  |
+| Owner receipt | request ID, accepted revision/fingerprint, result, receipt sequence          |
+| Delivery      | scheduled, waiting (busy/offline/sync), dispatching, sent, cancelled, failed |
 
 Delivery transitions are owned by the machine. Offline is an availability overlay,
 not a durable terminal state. A client clock passing the deadline can show time
@@ -127,18 +128,73 @@ new end-to-end verification. Current runtime fields (`messageState`, `queueState
 `observedDefinitionFingerprint`) are useful projections, not the complete proposed
 receipt protocol.
 
-## Visual alternatives under review
+## Current flow audit (2026-10-27)
 
-The real queue exposes optional roomy rows and inline leading/trailing metadata.
-Three Storybook alternatives compare time first, content first, and a more spacious
-content-first row. Their title is simply Message queue; time is muted, regular-weight
-underlined text on the message line. The shared calendar/time picker removes its
-repeated timestamp/timezone summary and uses one confirmation action. These options
-are preview-only pending visual selection; ordinary queue defaults are preserved.
-Real-row editing tests (12) and component typecheck pass; browser checks exercise
-editing and time changes. No backend scheduling behavior changes in this iteration.
+Before this follow-up, the shipped path used the pre-queue surface: after Send,
+`ScheduledMessagesSummary` rendered one ghost line below the info bar and opened the
+generic Schedule detail page. The queue display already accepted scheduled-time rows,
+but production passed only `mq`; the Storybook preview classified reservations by
+faking `MessageQueueItem`, so it did not describe a shippable data path. The delivered
+turn also loses provenance: the synthetic "Scheduled task…" source is filtered by the
+conversation renderer, and the user turn looks typed.
 
-Mobile preview hides row numbers and keeps time plus message inline on one ellipsized line. Rows retain 12px leading padding, no vertical padding, and one trailing More menu containing icon-labelled Edit and destructive Delete; ordinary non-scheduled rows additionally offer Move to top through the existing reorder callback (disabled at the head), while scheduled rows never do. The queue sheet extends 16px behind the composer corners with a matching negative bottom margin, joining the side edges without adding visible spacing. The surrounding preview inset is reduced. Time editing uses the existing modal primitive on mobile devices; desktop retains its popover. Final rendered screenshots at 320/390/430px were inspected, and phone emulation verifies modal time changes plus menu edit/save/remove without overflow.
+After the follow-up, the pre-send state is the composer's secondary action and the
+info bar has no scheduled item. Post-send reservations are read-only rows in the
+queue's dedicated Scheduled section, supplied by a separate view model. The control
+semantics are resolved: that secondary action is the state editor, and the primary
+Send commits the message as scheduled. Remaining open items are the time-editor form,
+a quiet delivered-turn provenance marker, and inline edit/cancel, which still depends
+on the receipt protocol below.
+
+## Terminal retention
+
+The owner worker runs a retention sweep on every ready evaluation. When a
+complete one-time message's runtime row is terminal (`sent`, `cancelled`, or
+`failed`) and its `updatedAt` is at least `SCHEDULED_MESSAGE_RETENTION_MS`
+(seven days) old, the owner purges the `schedule-<id>` document, removes the
+Registry schedule/runtime/manual rows, and leaves a tombstone. The timer starts
+at the terminal projection, not at creation. A busy document (open detail view or
+in-flight sync) is left for the next pass.
+
+Pending or active reservations and non-message Schedules are not swept. This is
+owner-local cleanup: the tombstone rejects stale offline writes, but it does not
+claim physical compaction of Loro history or remote replicas.
+
+## Sync robustness audit (2026-10-27)
+
+The current promise is replication convergence plus the owner's 15-second wake
+loop, not an acknowledgement. A daemon that was stopped at the due instant plans
+when it returns: `run_once` catches up and `plannedAt` is then, so there is no
+expiry measured from the scheduled time. A daemon that is running but not synced
+waits at the sync gate and plans after reconnect. A run that was already planned
+and then cannot dispatch expires after 24 hours or five attempts from `plannedAt`;
+a chat that stays busy retries every 30 seconds against the same 24-hour window.
+
+The two hard gaps are structural: the registry row is the only discovery and
+execution gate, with no owner-side repair scan from Schedule documents; and the
+client has no owner receipt or retry after its local flush. A missing registry row
+therefore makes a reservation invisible and unexecutable, while a locally saved
+row that never reaches the owner can stay Pending forever. The failure-mode matrix
+lives in the review artboard; no production behavior changed in this audit.
+
+## Queue presentation (2026-10-28)
+
+Scheduled rows reuse the queued row layout instead of a separate design. The send
+time leads the text inline (muted, tabular, capitalized relative label) and is the
+row's direct control for the time editor; a failed send turns it destructive with
+an alert glyph and a "Not sent" accessible label, never a status column. Actions
+always end the row, matching queued rows; a design with the time at the end and
+hover-revealed actions between title and time was rejected in review.
+
+Rows are inset tiles without hairline dividers or a header divider. Desktop rows
+share a 16px gutter (index, or empty for a reservation) aligned with the chevron and
+Scheduled label; phones keep #1989's index-free single line. When the sheet is
+narrower than 520px, or on phones, every row folds its actions into one More
+button: queued rows keep Steer, move-to-top, edit and delete; scheduled rows offer
+Edit scheduled time, Edit (details) and Cancel. Phone rows are dense: 32px header,
+13/18 text, 36px rows and a real 40 × 36px More box (the touch-actions Spec was
+revised from 44 × 44 at the owner's request; WCAG 2.2 AA asks for 24 × 24). Data path, ordering and
+callbacks are unchanged.
 
 Presentation ordering is now specified: ordinary rows retain manual order, local attachment-preparation rows follow them, and scheduled rows always form the final section sorted by ascending send instant (ties retain input order). A time edit re-sorts the view. Scheduled rows are excluded from sortable IDs, drag sources/targets, move-to-top and steer. The display uses an explicit scheduled-time accessor; it does not infer scheduling from rendered text or add reservations to durable mq. Component tests cover sorting, changed times and the absence of scheduled drag handles. Backend reservation synchronization remains separate and unimplemented for this queue proposal.
 

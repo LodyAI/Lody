@@ -1,31 +1,30 @@
-# Machine E2EE custody
+# Machine E2EE
 
 `CLAUDE.md` aliases this; CLI rules apply.
 
 - Lazy machine-only; ordinary startup never probes keyring.
-- Creation probes OS keystore write/read; permanently selects OS or file protection.
-  Reopen requires original selector/KEK; never probe or switch.
-- File protection: owner-only dirs/files, no symlinks. Windows needs real
-  owner/DACL checks via official process Layer, not Unix modes.
-- Core node-custody owns blobs. No personal/private exports, plaintext device files
+- Creation probes OS keystore write/read; fixes OS/file protection permanently.
+  Reopen: original selector/KEK; no re-probe/switch.
+- File protection: owner-only dirs/files, no symlinks. Windows: owner/DACL via official
+  process Layer, never Unix mode bits.
+- Core node-custody owns blobs; no personal management, private exports/plaintext device files
   or silent keyring downgrade.
-- Show file protection before pairing approval.
+- Disclose file protection pre-approval.
 
-- Keyring helper: 10-second timeout, stdin secrets. Confirm termination before
-  fallback; retain failed release owners.
-- Batch Windows ACL checks; bound asynchronous SQLite BUSY retries;
-  never block busy_timeout during keyring work.
+- Keyring: 10s timeout, stdin secrets; confirm termination before fallback, retain failed owners.
+- Batch Windows ACL checks; bound async SQLite BUSY retries. No blocking busy_timeout in keyring work.
 
 - Resume first Windows ACL setup only with empty custody; otherwise validate.
 - `runtime.ts` composes Feed/VerifiedLedger, installed keys and optional receiver.
   Offline open/status; cloud I/O stays in cloud-cli-port.
-  Report damaged history/pins distinctly; never reset trusted pins from remote hints.
+  Distinguish damaged history/pins; never reset trusted pins from remote hints.
 - Execution: `authorizeExecution`; same ledger membership as machine; authenticated read;
   RAM-only <15min/read-start. Credential revoke: fence/clear grants before drain,
   never network-retry.
 - Journal originals before feed/pin; rebase core pin first after 64 records.
-  Retired cache cleanup cannot fail open.
-- No plaintext RPC/presence/attachments/schedules before encrypted channels exist.
+  Retired cache cleanup must fail closed.
+- No plaintext RPC/attachments/schedules before encryption. Presence: shared minimal
+  plaintext publish/receive allowlists, ordinary adaptor/90s TTL.
 - `realtime-journal.ts`: schema 3/no migration; SQLite recovery before empty-v0 init.
   Retire readable current keys before intact archive; unreadable keys refuse reset.
   No auto-replace/GC/archive replay/import. Exact originals/first outcome;

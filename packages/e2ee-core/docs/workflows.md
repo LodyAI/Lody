@@ -193,6 +193,21 @@ acknowledged only after the local feed contains the checkpoint it observed.
 installs, fetch one mailbox page, send reports, reconcile and send deliveries,
 send reports again, list results. Each queue keeps its own cursor hint.
 
+
+Receive (including committed staging) and distribution run as separate finite phases.
+A failed receive cannot prevent reconciliation/delivery. `WorkspaceKeyRoundFailure`
+reports both `receive` and `distribution` Results, a separate post-send report Result,
+and retry `cursors`; successful phases advance independently and failed phases keep
+their input hints. Successful rounds retain the existing result fields.
+
+Mailbox fetch skips non-current senders without installing or journaling their keys.
+A strict signature bound to exact routing plus a genuine historical identity absent
+from current membership yields `retiredDigests`; the round queues digest-bound repair.
+Unknown senders only set `refreshRequired`, never reject their digest. Hosts must
+refresh their verified ledger and retry; the workspace facade already refreshes its
+ledger source, and desktop maintenance uses the existing verified history-ingest path
+at most once per call. This refresh occurs after independent distribution.
+
 ## E2eeWorkspace
 
 The application facade over everything above. A `WorkspacePlatform` supplies,

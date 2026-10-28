@@ -84,6 +84,11 @@
   prompt-only projection. Published reservations retain staged local attachment
   bytes. Cancellation is acknowledged only after durable dispatch reconciliation;
   a committed dispatch wins. Busy destination chats defer handoff without interruption.
+- Terminal one-time messages keep their document and Registry row for seven days
+  from the terminal runtime projection, then the owner purges the document, removes
+  schedule/runtime/manual rows and leaves a tombstone. A busy doc retries next pass;
+  pending/active messages and generic Schedules are never swept. Remote/CRDT history
+  compaction is separate.
 - A complete-message Schedule ID is consumed by durable dispatch across all later
   activations. Consult the persistent ledger before planning/processing another run;
   derive cross-activation sent state from that ledger, never a cached runtime row.

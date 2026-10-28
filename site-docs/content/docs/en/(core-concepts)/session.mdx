@@ -129,6 +129,10 @@ Click the delete button next to a session to permanently remove it and its conve
 This cannot be undone. Any remaining managed worktree stays eligible for cleanup under the
 [same backup rule](/docs/worktrees#automatic-cleanup); the local Git branch and commits are kept.
 
+For sessions with no project selected, deletion also removes the Lody-managed chat working
+directory and all files inside it, with no backup or recovery; archiving only reclaims empty
+directories.
+
 <img src="/_docs-assets/delete-archive.png" alt="" />
 
 ## Bulk Restore and Delete

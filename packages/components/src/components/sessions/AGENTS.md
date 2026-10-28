@@ -96,7 +96,7 @@ Read parent rules and linked context.
 
 - Keep cluster order and one nonempty stage when items exist. Hide only without
   items or ambient content. Machine (desktop name/mobile icon) stays unstaged;
-  ownership appears only in details. Scheduled drafts use an unstaged icon popover.
+  ownership appears only in details. Scheduled drafts live in the composer, never the bar.
 - Stage icons stay inert; reserve colour for genuine status; no pulses.
 - Open preview stays gated on a real reported target; repository actions are
   priority-ordered (dirty ⇒ Commit & Push), collapse into one, never duplicated

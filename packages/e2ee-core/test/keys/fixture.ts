@@ -114,6 +114,7 @@ export function envelopeFixture(kind: 0 | 1 | 2 = 0, org = 100) {
   return {
     owner,
     phone,
+    ed,
     secret,
     view,
     append,

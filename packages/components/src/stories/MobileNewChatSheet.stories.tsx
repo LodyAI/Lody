@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { Provider, createStore } from 'jotai';
@@ -53,6 +54,8 @@ import {
   getMobileProjectOptions,
   resolveMobileNewChatDefaultProject,
 } from '@/components/mobile/mobile-new-chat-project-options';
+import { resolveMobileNewChatBranchLabel } from '@/components/mobile/mobile-new-chat-target';
+import { getLocalProjectBranchLabel } from '@/lib/chat-landing-git-state';
 import { MobileNewChatSheet } from '@/components/mobile/mobile-new-chat-sheet';
 import type {
   MobileProjectFolder,
@@ -355,11 +358,17 @@ export function InlinePageReview({
   fullRunConfig?: boolean;
   manyBranches?: boolean;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(true);
   const [machineId, setMachineId] = useState<MachineId>('spikes' as MachineId);
   const [project, setProject] = useState(initialLocalWorktree ? 'blog' : initialProject);
   const [worktree, setWorktree] = useState(initialLocalWorktree);
   const [branch, setBranch] = useState('main');
+  const branchLabels = {
+    local: t('chat.branchLocal'),
+    remote: t('chat.branchRemote'),
+    placeholder: t('chat.branchPlaceholder', 'Branch'),
+  };
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const [roleId, setRoleId] = useState<AgentRoleId | null>(
     initialRole ? ('reviewer' as AgentRoleId) : null
@@ -430,6 +439,15 @@ export function InlinePageReview({
   const isGroup = !!projectGroup;
   const isGitLocal = isLocal && project !== 'docs';
   const hasBranch = isGitLocal || (!isLocal && !isGroup && project !== 'none');
+  const toBranchSelector = (name: string) => `lody:branch:local:${encodeURIComponent(name)}`;
+  const selectedBranch = isGitLocal ? toBranchSelector(branch) : branch;
+  const displayBranch = resolveMobileNewChatBranchLabel({
+    contextType: isGitLocal ? 'local' : 'github',
+    currentBranch: toBranchSelector('main'),
+    selectedBranch,
+    useWorktree: worktree,
+    labels: branchLabels,
+  });
   return (
     <MobileNewChatSheet
       open={open}
@@ -540,10 +558,26 @@ export function InlinePageReview({
               <div className="min-w-0 flex-1">
                 <MobileInlinePicker
                   id="preview-branch"
-                  value={branch}
-                  onChange={setBranch}
+                  value={selectedBranch}
+                  onChange={(value) =>
+                    setBranch(
+                      isGitLocal
+                        ? decodeURIComponent(value.slice('lody:branch:local:'.length))
+                        : value
+                    )
+                  }
                   disabled={isGitLocal && !worktree}
-                  options={branches}
+                  options={
+                    isGitLocal
+                      ? branches.map((option) => ({
+                          value: toBranchSelector(option.value),
+                          label: getLocalProjectBranchLabel(
+                            toBranchSelector(option.value),
+                            branchLabels
+                          ),
+                        }))
+                      : branches
+                  }
                   ariaLabel="Branch"
                   searchable
                   triggerClassName="h-8 rounded-lg bg-transparent px-2 hover:bg-transparent"
@@ -551,7 +585,7 @@ export function InlinePageReview({
                   triggerContent={
                     <>
                       <GitBranch className="size-4 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 truncate">{branch}</span>
+                      <span className="min-w-0 truncate">{displayBranch}</span>
                       <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
                     </>
                   }

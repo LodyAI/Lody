@@ -130,6 +130,16 @@ parent 未变化时不能因此发 CAS。正常 receiver 可独立安装已提�
 
 `runWorkspaceKeyRound(limit, cursors)`（_需要 `KeyRepair`、`KeyReceiver`、`KeyDistributor`_）是一轮有限的维护：发送修复、恢复安装、获取一页邮箱、发送报告、协调并投递、再次发送报告、列出结果。每个队列各自保留游标提示。
 
+
+收钥（包括已提交的暂存组）与发钥是分别尝试的有限阶段。收钥失败不能阻止协调和投递。
+`WorkspaceKeyRoundFailure` 分别保留 `receive`、`distribution` 的 Result、发钥后报告的 Result
+和重试 `cursors`；成功阶段可前进，失败阶段保留输入游标。整轮成功时沿用原结果字段。
+
+邮箱获取会跳过非当前 sender，不安装或保存其密钥。只有精确路由上的严格签名和真实账本中
+已退出当前成员状态的历史身份，才能产生 `retiredDigests`，由轮次提交按摘要绑定的修复。
+未知 sender 只设置 `refreshRequired`，不拒绝摘要。宿主必须刷新已验证账本后重试；工作区
+门面已有账本源刷新，桌面维护则在独立发钥之后，通过现有已验证历史摄入路径每次最多刷新一次。
+
 ## E2eeWorkspace
 
 以上一切之上的应用门面。`WorkspacePlatform` 为每个工作区提供端口 Layer（`WorkspacePorts`）、每个资源的原生文档状态，以及可选的恢复配置。`E2eeWorkspace.open()` 在工作区 Scope 中构建 `E2eeWorkflows` 与 `WorkspaceControl`，返回一个句柄：账本命令、换代与移除、密钥轮次、文档（`document(resource, model)` 返回 Streams 绑定和原生状态）、结果与确认、恢复。

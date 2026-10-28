@@ -1042,40 +1042,66 @@ test('mobile project choices mix sources by recency and render their icons', asy
   );
 });
 
-test('mobile GitHub projects show owner avatars after loading with a GitHub fallback meanwhile', async ({
-  page,
-}) => {
-  let release!: () => void;
-  const ready = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await page.route('https://avatars.githubusercontent.com/**', async (route) => {
-    await ready;
-    await route.fulfill({
-      contentType: 'image/svg+xml',
-      headers: { 'Access-Control-Allow-Origin': '*' },
-      body: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#318080"/></svg>',
+for (const theme of ['light', 'dark']) {
+  test(`mobile GitHub project avatars remain centered while loading and after loading in ${theme}`, async ({
+    page,
+  }) => {
+    let release!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      release = resolve;
     });
+    await page.route('https://avatars.githubusercontent.com/**', async (route) => {
+      await ready;
+      await route.fulfill({
+        contentType: 'image/svg+xml',
+        headers: { 'Access-Control-Allow-Origin': '*' },
+        body: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#318080"/></svg>',
+      });
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(
+      `/iframe.html?id=mobile-mobilenewchatsheet--inline-page-review-story&viewMode=story&globals=theme:${theme}`
+    );
+    const project = page.getByRole('button', { name: 'Project', exact: true });
+    const expectCentered = async (row: typeof project, name: string, icon: string) => {
+      await expect
+        .poll(() =>
+          row.evaluate(
+            (element, { name: labelName, icon: iconSelector }) => {
+              const image = element.querySelector(iconSelector);
+              const label = Array.from(element.querySelectorAll('span')).find(
+                (span) => span.childElementCount === 0 && span.textContent === labelName
+              );
+              if (!image || !label) return Number.POSITIVE_INFINITY;
+              const imageBox = image.getBoundingClientRect();
+              const labelBox = label.getBoundingClientRect();
+              return Math.abs(
+                imageBox.top + imageBox.height / 2 - labelBox.top - labelBox.height / 2
+              );
+            },
+            { name, icon }
+          )
+        )
+        .toBeLessThanOrEqual(0.5);
+    };
+    await expect(project.locator('svg.lucide-github')).toBeVisible();
+    await expectCentered(project, 'loro-dev/loro', 'svg.lucide-github');
+    release();
+    await expect(project.locator('img')).toBeVisible();
+    await expect(project.locator('img')).toHaveCSS('opacity', '1');
+    await expect(project.locator('svg.lucide-github')).toHaveCount(0);
+    await expectCentered(project, 'loro-dev/loro', 'img');
+    await project.click();
+    const repo = page.getByRole('option').filter({ hasText: 'loro-dev/loro' });
+    await expect(repo.locator('img')).toHaveAttribute(
+      'src',
+      /^(blob:|https:\/\/avatars\.githubusercontent\.com\/loro-dev\?size=80)/
+    );
+    await expect(repo.locator('img')).toHaveCSS('opacity', '1');
+    await expect(repo.locator('svg.lucide-github')).toHaveCount(0);
+    await expectCentered(repo, 'loro-dev/loro', 'img');
   });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(
-    '/iframe.html?id=mobile-mobilenewchatsheet--inline-page-review-story&viewMode=story'
-  );
-  const project = page.getByRole('button', { name: 'Project', exact: true });
-  await expect(project.locator('svg.lucide-github')).toBeVisible();
-  release();
-  await expect(project.locator('img')).toBeVisible();
-  await expect(project.locator('img')).toHaveCSS('opacity', '1');
-  await expect(project.locator('svg.lucide-github')).toHaveCount(0);
-  await project.click();
-  const repo = page.getByRole('option').filter({ hasText: 'loro-dev/loro' });
-  await expect(repo.locator('img')).toHaveAttribute(
-    'src',
-    /^(blob:|https:\/\/avatars\.githubusercontent\.com\/loro-dev\?size=80)/
-  );
-  await expect(repo.locator('img')).toHaveCSS('opacity', '1');
-  await expect(repo.locator('svg.lucide-github')).toHaveCount(0);
-});
+}
 
 test('mobile send retains its page through delayed presentation and later URL corrections', async ({
   page,
@@ -1086,6 +1112,20 @@ test('mobile send retains its page through delayed presentation and later URL co
   );
   const composer = page.locator('[class~="@container/composer-box"]');
   await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
+  // Opening new chat now slides the page in. Measure sending from its settled
+  // position so the entrance is not mistaken for first-send layout movement.
+  await expect
+    .poll(() =>
+      composer.evaluate((element) => {
+        for (let parent: Element | null = element; parent; parent = parent.parentElement) {
+          if (parent.getAnimations().some((animation) => animation.playState === 'running')) {
+            return false;
+          }
+        }
+        return true;
+      })
+    )
+    .toBe(true);
   const before = await composer.boundingBox();
   await page.getByRole('button', { name: 'Send', exact: true }).click();
   // Let Vaul's first-frame shortcut expire before the real surface can mount.
@@ -1272,3 +1312,28 @@ for (const project of ['loro-dev/lody', 'blog', 'Loro stack', 'No project select
     await expect(page.getByRole('button', { name: 'Project', exact: true })).toHaveText(project);
   });
 }
+
+test('mobile local branch shows a readable ref across worktree toggles', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(
+    '/iframe.html?id=mobile-mobilenewchatsheet--inline-page-many-branches&viewMode=story'
+  );
+  const branch = page.getByRole('button', { name: 'Branch', exact: true });
+  const worktree = page.getByRole('checkbox');
+  await expect(branch).toHaveText('main (local)');
+  await expect(worktree).toBeChecked();
+  await branch.click();
+  await page
+    .getByRole('listbox', { name: 'Branch', exact: true })
+    .getByRole('option')
+    .filter({ hasText: 'feat/audit-mobile-coupling (local)' })
+    .getByRole('button')
+    .click();
+  await expect(branch).toHaveText('feat/audit-mobile-coupling (local)');
+  await worktree.click();
+  await expect(branch).toBeDisabled();
+  await expect(branch).toHaveText('main (local)');
+  await worktree.click();
+  await expect(branch).toBeEnabled();
+  await expect(branch).toHaveText('feat/audit-mobile-coupling (local)');
+});

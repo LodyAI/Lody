@@ -39,7 +39,9 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
 
 - `mobile-new-chat-sheet.tsx` hosts the new-chat page: the session-style
   composer stays at the bottom, with machine and project in that order above it.
-  Local Git worktree and branch share a row; GitHub exposes its branch. Run
+  Local Git worktree and branch share a row; GitHub exposes its branch. Local
+  checked-out and worktree refs both display decoded branch labels with localized
+  local/remote suffixes; launch keeps the exact selector. Run
   configuration opens the same Sheet as an ongoing conversation. The
   selection group shares the composer column and sits above it. Its page, frosted header,
   back button and composer column reuse the session equivalents. The page lifts above the
@@ -54,7 +56,14 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
   Keyboard inset and safe-area padding share a transition. Entry/completion never
   open a keyboard.
   Entrance suppression persists through delayed portal mounts
-  and same-entry URL replacements; later visits and Back retain their animation. The existing
+  and same-entry URL replacements; later visits and Back retain their animation.
+  The page itself pushes in from the right (`.mobile-drill-in`) and Back slides it
+  out before closing; the host hiding it after first-send presentation removes it
+  without a slide. In the native app a rightward drag starting within
+  `EDGE_ZONE_PX` of the left edge moves the page with the finger over the mounted
+  screen beneath, then commits or snaps back. The drag is bound on the page rather
+  than an overlay strip, so no tap target is covered, and drags starting in the
+  composer shell stay with the composer. The existing
   project and agent selection handlers retain draft and scope semantics. The
   project list mixes all sources using the desktop recency/name/id comparator,
   with a pinned “No project selected” option. Groups and local folders use type icons;
@@ -104,6 +113,8 @@ relative-time`, a collapsed `Archived (N)` disclosure whose rows restore and
   `permission-mode-face.tsx` (classified by `@lody/shared`
   `classifyPermissionModeFace`), `mobile-inline-picker.tsx`,
   `mobile-settings-picker-trigger.tsx`.
+- Desktop landing keyboard navigation:
+  [chat-landing-keyboard-nav.md](chat-landing-keyboard-nav.md).
 - Provider-defined pickers have a separate coordinator ID namespace, so an ACP
   option named `permission` or `model` cannot open or dismiss a built-in row.
   [Collision fix and builtin audit](../../../../../.agents/notes/implemented/bug-fix/2026-10-09-dimcode-mobile-permission-picker.md).

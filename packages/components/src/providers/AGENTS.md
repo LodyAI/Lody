@@ -100,9 +100,9 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   Returning no transport silently disables synchronization for those rooms.
 - Resource monitoring follows machine ownership: local or optional remote transport;
   unknown ownership remains pending.
-- Presence is merged by origin. For an origin represented by the local plane, the local
-  snapshot is authoritative, including absence; do not resurrect cleared presence from a
-  lagging replica. UI reads the transport's display sync state; raw state drives recovery.
+- Presence: local origin/absence wins over cloud; UI uses display state, recovery raw state.
+  Encrypted presence uses its authorized bucket and shared minimal plaintext allowlist
+  on publish/cloud/local read; other protected side channels stay disabled.
 - Doc-metadata bootstrap and the live repo watch overlap by design: merge per field with
   live winning (`mergeBootstrapMetaCache`), never letting the snapshot undo an archive
   already applied live.

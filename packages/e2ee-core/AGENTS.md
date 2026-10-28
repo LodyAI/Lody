@@ -76,6 +76,8 @@ whitepaper, Specs, decisions and this package's docs. Contract:
   opaque payload authentication grants no membership, freshness or execution
   authority. Keep application body codecs, target binding and send/rotation gates
   in the authorized integration; never expand `sealDocument` for these purposes.
+- Key rounds attempt receive and distribution independently; report each outcome
+  and retain the failed phase's retry cursor. Unknown senders request ledger refresh.
 - Durable workflows persist exact originals before any network step, retry
   those bytes, never re-sign, and keep results until explicit acknowledgement.
   Remote hints never end a task; only genuine ledger changes do.

@@ -22,6 +22,9 @@ Behavior: [workflows](../../../docs/workflows.md). Ports: [services](../../../do
   stands in. Queued reports retry their original bytes without re-signing. Copy
   and validate a whole fetched page before any write; a failed install returns no
   `next`. Skip routing/hint mismatches for this fetch, without saving/rejecting them.
+  Skip non-current senders: only genuine historical retirement plus exact signed
+  routing may return `retiredDigests` for repair; unknown senders request ledger
+  refresh and retain their digest for retry. Continue later rows and the cursor.
   `MailboxInstallError` diagnoses the exact frame; it never rejects it.
 - Discovery/repair revisions and mailbox statuses are hints, never authority. Only
   a genuine current ledger ends a task as Obsolete/Revoked. Finite pages let blocked

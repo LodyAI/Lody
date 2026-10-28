@@ -1,4 +1,25 @@
 import type { SessionContextType } from '@/components/chat/context-switch';
+import { getLocalProjectBranchLabel } from '@/lib/chat-landing-git-state';
+
+/** Direct local sessions use the checked-out ref; worktrees use the selected ref.
+ * Both are opaque selectors on the wire and must be formatted only for display. */
+export function resolveMobileNewChatBranchLabel({
+  contextType,
+  currentBranch,
+  selectedBranch,
+  useWorktree,
+  labels,
+}: {
+  contextType: SessionContextType;
+  currentBranch?: string | null;
+  selectedBranch?: string | null;
+  useWorktree: boolean;
+  labels: { local: string; remote: string; placeholder: string };
+}): string {
+  const branch = contextType === 'local' && !useWorktree ? currentBranch : selectedBranch;
+  if (!branch) return labels.placeholder;
+  return contextType === 'local' ? getLocalProjectBranchLabel(branch, labels) : branch;
+}
 
 export type MobileNewChatTargetLabels = {
   noProject: string;

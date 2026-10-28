@@ -227,6 +227,11 @@ type StableSessionValue = NonNullable<
 const storyRuntime = {
   workspaceId: STORY_WORKSPACE_ID,
   workspaceSlug: STORY_WORKSPACE_SLUG,
+  // Frozen preview runtimes have no live prediction source.
+  subscribePromptSuggestion: ((_machineId, _sessionId, listener) => {
+    listener(null);
+    return () => {};
+  }) satisfies WorkspaceRuntime['subscribePromptSuggestion'],
   withSessionStore: async () => Promise.reject(new Error('Story runtime does not persist changes')),
 } as unknown as WorkspaceRuntime;
 
