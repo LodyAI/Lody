@@ -64,6 +64,36 @@ describe('presence helpers', () => {
     }
   );
 
+  it('rejects unverified fallback session IDs on receive while preserving other presence', () => {
+    for (const fallbackSessionId of ['1790000000000-privateroadmap', '1790000000000-k5zmz7k']) {
+      const machine = { kind: 'machine', machineId, instanceId, updatedAt: 100 };
+      const session = {
+        kind: 'session',
+        sessionId: fallbackSessionId,
+        machineId,
+        instanceId,
+        status: { type: 'running' },
+        updatedAt: 100,
+      };
+      const viewing = {
+        kind: 'session-viewing',
+        sessionId: fallbackSessionId,
+        instanceId,
+        userId: 'Abcdef0123456789Abcdef0123456789',
+        since: 50,
+        updatedAt: 100,
+      };
+      expect(parseLodyPresenceStates({ machine, session, viewing }, { minimal: true })).toEqual({
+        machine,
+      });
+      expect(parseLodyPresenceStates({ machine, session, viewing })).toEqual({
+        machine,
+        session,
+        viewing,
+      });
+    }
+  });
+
   it('accepts supported generated ID formats without widening ordinary parsers', () => {
     for (const ids of [
       {
@@ -79,7 +109,7 @@ describe('presence helpers', () => {
         userId: 'local:' + 'cd'.repeat(16),
       },
       {
-        sessionId: '1790000000000-k5zmz7k',
+        sessionId: '019a0d00-0000-7000-8000-000000000002',
         machineId: '01020304-1111-4222-8333-010203040509',
         instanceId: '01020304-1111-4222-8333-010203040507',
         userId: '019a0d00-0000-7000-8000-000000000001',

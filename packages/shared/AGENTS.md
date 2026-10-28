@@ -117,5 +117,5 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
 - Keep `author`, human `userId`, and recipient execution config separate.
   [Contract](../../specs/message-author-identity.md).
 
-Presence: encrypted workspaces use plaintext allowlists with bounded IDs on publish/receive;
+Presence: E2EE requires UUID session IDs and bounded plaintext allowlists on publish/receive;
 ordinary behavior stays unchanged. [Contract](../../.agents/docs/cli-lib-loro-presence.md).

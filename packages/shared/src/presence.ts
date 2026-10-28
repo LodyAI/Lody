@@ -154,17 +154,16 @@ export const LodyPresenceStateSchema = z.discriminatedUnion('kind', [
 ]);
 
 // Minimal metadata must not accept arbitrary strings disguised as branded IDs.
-// Sessions/instances use UUIDs, or the browser's legacy timestamp + base36 fallback.
+// Route-supplied session IDs require UUIDs; timestamp-shaped text proves no provenance.
+// Only internally generated instance IDs retain the legacy browser fallback.
 const MinimalUuidIdSchema = z.string().length(36).uuid();
-const MinimalBrowserIdSchema = z
+const MinimalBrowserInstanceIdSchema = z
   .string()
   .max(30)
   .regex(/^\d{13}-[0-9a-z]{1,16}$(?![\s\S])/);
-const MinimalSessionIdSchema = z
-  .union([MinimalUuidIdSchema, MinimalBrowserIdSchema])
-  .transform((value) => value as SessionId);
+const MinimalSessionIdSchema = MinimalUuidIdSchema.transform((value) => value as SessionId);
 const MinimalInstanceIdSchema = z
-  .union([MinimalUuidIdSchema, MinimalBrowserIdSchema])
+  .union([MinimalUuidIdSchema, MinimalBrowserInstanceIdSchema])
   .transform((value) => value as LodyPresenceInstanceId);
 // New installations use UUIDs; retained legacy machine identities may be SHA-256 hex.
 const MinimalMachineIdSchema = z

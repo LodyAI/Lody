@@ -165,14 +165,22 @@ describe('presence replica and local-origin contracts', () => {
       const detach = replica.store.subscribeLocalUpdates((bytes) => wire.push(bytes));
       try {
         replica.setMachineOnline('private machine /path' as MachineId, 100);
-        replica.setSessionPresence(
-          {
-            sessionId: 'private session /path' as SessionId,
-            machineId: MACHINE_ID,
-            status: { type: 'running' },
-          },
-          100
-        );
+        for (const sessionId of [
+          'private session /path',
+          '1790000000000-privateroadmap',
+          '1790000000000-k5zmz7k',
+        ]) {
+          replica.setSessionPresence(
+            {
+              sessionId: sessionId as SessionId,
+              machineId: MACHINE_ID,
+              status: { type: 'running' },
+            },
+            100
+          );
+          replica.republish(150);
+          replica.clearSessionPresence(sessionId as SessionId);
+        }
         replica.republish(200);
         replica.clear();
         expect(replica.getPresenceStates()).toEqual({});

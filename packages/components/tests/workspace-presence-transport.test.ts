@@ -140,6 +140,8 @@ describe('WorkspacePresenceTransport', () => {
         for (const sessionId of [
           'Private roadmap: /Users/example/project',
           'TitleWithoutSpaces',
+          '1790000000000-privateroadmap',
+          '1790000000000-k5zmz7k',
           'a'.repeat(1024),
         ]) {
           expect(() =>
@@ -155,6 +157,11 @@ describe('WorkspacePresenceTransport', () => {
             userId: 'User name /private/path',
           })
         ).not.toThrow();
+        // An unstarted room must not retain this route for its first publication either.
+        presence.publishSessionViewing({
+          sessionId: '1790000000000-privateroadmap' as SessionId,
+          userId: 'Abcdef0123456789Abcdef0123456789',
+        });
         if (!started) start();
         vi.advanceTimersByTime(LODY_PRESENCE_HEARTBEAT_MS);
         expect(server.getAllStates()).toEqual({});
