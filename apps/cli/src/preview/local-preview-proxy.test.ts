@@ -1,6 +1,8 @@
 import http, { type AddressInfo } from 'node:http';
 import { brotliCompressSync, gzipSync } from 'node:zlib';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { Agent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
+import { previewTestLookup } from './preview-test-lookup';
 import { WebSocket, WebSocketServer } from 'ws';
 import {
   DEFAULT_PREVIEW_RESOURCE_LIMITS,
@@ -10,6 +12,14 @@ import {
 } from '@lody/shared';
 import { LocalPreviewProxyManager } from './local-preview-proxy';
 import { verifyPreviewTunnelRoundTrip } from './preview-tunnel-readiness';
+
+const previousDispatcher = getGlobalDispatcher();
+const viewerDispatcher = new Agent({ connect: { lookup: previewTestLookup } });
+beforeAll(() => setGlobalDispatcher(viewerDispatcher));
+afterAll(async () => {
+  setGlobalDispatcher(previousDispatcher);
+  await viewerDispatcher.close();
+});
 
 const createLogger = () => ({
   debug: () => {},
@@ -144,7 +154,7 @@ const openBrowserSocket = async (viewerUrl: string, protocols?: string[]): Promi
   const socketUrl = new URL(viewerUrl);
   socketUrl.protocol = 'ws:';
   socketUrl.pathname = '/socket';
-  const socket = new WebSocket(socketUrl, protocols);
+  const socket = new WebSocket(socketUrl, protocols, { lookup: previewTestLookup });
   await new Promise<void>((resolve, reject) => {
     socket.once('open', resolve);
     socket.once('error', reject);
@@ -341,6 +351,7 @@ describe('LocalPreviewProxyManager', () => {
             .get(
               url,
               {
+                lookup: previewTestLookup,
                 headers: {
                   'Sec-Fetch-Site': 'cross-site',
                   'Sec-Fetch-Mode': mode,
@@ -418,7 +429,7 @@ describe('LocalPreviewProxyManager', () => {
       });
       const url = new URL(endpoint.viewerUrl);
       url.protocol = 'ws:';
-      const socket = new WebSocket(url, { headers });
+      const socket = new WebSocket(url, { headers, lookup: previewTestLookup });
       const opened = await new Promise<boolean>((resolve) => {
         socket.once('open', () => resolve(true));
         socket.once('error', () => resolve(false));
@@ -669,6 +680,9 @@ describe('LocalPreviewProxyManager', () => {
       jars.push(cookies.map((cookie) => cookie.split(';')[0] ?? ''));
       await response.text();
     }
+    expect(new URL(endpoints[0]?.viewerUrl ?? '').hostname).not.toBe(
+      new URL(endpoints[1]?.viewerUrl ?? '').hostname
+    );
     expect(jars[0]?.[0]).not.toEqual(jars[1]?.[0]);
     const allCookies = jars.flat().join('; ');
     for (const [index, endpoint] of endpoints.entries()) {
@@ -684,7 +698,10 @@ describe('LocalPreviewProxyManager', () => {
       await foreign.text();
       const socketUrl = new URL('/ws', endpoint.viewerUrl);
       socketUrl.protocol = 'ws:';
-      const socket = new WebSocket(socketUrl, { headers: { cookie: allCookies } });
+      const socket = new WebSocket(socketUrl, {
+        lookup: previewTestLookup,
+        headers: { cookie: allCookies },
+      });
       await new Promise<void>((resolve, reject) => {
         socket.once('open', resolve);
         socket.once('error', reject);
@@ -713,6 +730,7 @@ describe('LocalPreviewProxyManager', () => {
     await manager.release(sessionId, first.endpointId);
     const second = await manager.acquire({ sessionId, target });
     expect(second.endpointId).not.toBe(first.endpointId);
+    expect(new URL(second.viewerUrl).hostname).toBe(new URL(first.viewerUrl).hostname);
     const oldTokenRequest = await fetch(new URL('/asset', second.viewerUrl), {
       headers: { cookie: firstCookies.join('; ') },
     });
@@ -733,6 +751,10 @@ describe('LocalPreviewProxyManager', () => {
       headers: { cookie: `${firstCookies[0]}; ${secondCookies[1]}` },
     });
     expect(response.status).toBe(200);
+    const refreshedCookies = response.headers.getSetCookie();
+    expect(refreshedCookies).toHaveLength(2);
+    expect(refreshedCookies[0]).toContain('session=app-value');
+    expect(refreshedCookies[1]?.split(';')[0]).toBe(secondCookies[1]);
     await response.text();
     expect(forwarded).toEqual(['session=app-value']);
     const other = await listenHtmlServer();
@@ -779,6 +801,7 @@ describe('LocalPreviewProxyManager', () => {
     const socketUrl = new URL('/ws', endpoint.viewerUrl);
     socketUrl.protocol = 'ws:';
     const socket = new WebSocket(socketUrl, {
+      lookup: previewTestLookup,
       headers: { cookie: `${staleCookies}; ${cookies.join('; ')}` },
     });
     await new Promise<void>((resolve, reject) => {
@@ -1003,12 +1026,14 @@ describe('LocalPreviewProxyManager WebSocket close forwarding', () => {
     address.search = '';
     address.protocol = 'ws:';
     const denied = new WebSocket(address, {
+      lookup: previewTestLookup,
       headers: { origin: new URL(endpoint.viewerUrl).origin },
     });
     sockets.push(denied);
     const error = await new Promise<Error>((resolve) => denied.once('error', resolve));
     expect(error.message).toContain('403');
     const authorized = new WebSocket(address, {
+      lookup: previewTestLookup,
       headers: { cookie: page.headers.get('set-cookie')?.split(';')[0] ?? '' },
     });
     sockets.push(authorized);

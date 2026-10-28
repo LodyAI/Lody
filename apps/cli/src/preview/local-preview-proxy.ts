@@ -356,7 +356,10 @@ export class LocalPreviewProxyManager {
       throw error;
     });
 
-    const proxyOrigin = new URL(`http://127.0.0.1:${port}`);
+    // Chromium gives each localhost subdomain its own partitioned-cookie
+    // quota. Keep local Sessions isolated even when one app fills its jar.
+    const viewerHost = options.remote ? '127.0.0.1' : `lody-${cookieScope}.localhost`;
+    const proxyOrigin = new URL(`http://${viewerHost}:${port}`);
     const now = Math.round(this.deps.now?.() ?? getServerNow());
     const endpoint: SessionPreviewEndpoint = {
       endpointId,
@@ -664,7 +667,9 @@ export class LocalPreviewProxyManager {
     );
     sanitized.push(['cache-control', 'no-store']);
     sanitized.push(...applyPreviewEmbeddingHeaders(new Headers()).entries());
-    if (setTokenCookie) {
+    // Reissue the capability after app cookies: under Chromium quota pressure
+    // the app session may be evicted, but the preview can still load resources.
+    if (setTokenCookie || cookies.length > 0) {
       cookies.push(
         `${tokenCookieName(record)}=${encodeURIComponent(
           record.token

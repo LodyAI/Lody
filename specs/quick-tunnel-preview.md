@@ -115,18 +115,22 @@ Quick Tunnels have temporary addresses, no SLA, a 200-in-flight-request limit,
 and no SSE support. Errors are explicit. Fixed-version, integrity-checked
 cloudflared is product-managed, never an unknown PATH binary or system service.
 Application cookies are forwarded for HTTP and WebSocket requests after isolation
-by Session and target origin locally and by endpoint remotely. Local names survive
-endpoint replacement; capability values remain freshly generated. The proxy removes Domain, preserves Path and expiry, and forces Secure,
+by Session and target origin locally and by endpoint remotely. Local viewers use
+separate stable localhost subdomains; their names survive endpoint replacement but
+capability values remain freshly generated. When an application sets cookies, the
+proxy reissues the capability last so application cookies may be evicted instead.
+Chromium limits partitioned cookies to about 10 KiB per embedded site and partition;
+other browsers and direct JavaScript cookie writes are not covered by this result.
+The proxy removes Domain, preserves Path and expiry, and forces Secure,
 SameSite=None and Partitioned. Capability cookies never reach the application.
 This relaxes application SameSite protections: the endpoint token and preserved
 foreign Origin do not replace application CSRF defenses. Applications that rely
 only on SameSite for CSRF protection need additional checks. Renamed cookies are
 not transparent to application JavaScript reading or writing document.cookie,
 and browser enforcement of __Host- and __Secure- name prefixes no longer applies;
-OAuth and browser compatibility are not guaranteed. Local endpoint namespacing
-prevents accidental collisions, but cookies share a host across ports: scripts in
-one local preview can access non-HttpOnly cookies belonging to another. No iOS
-simulator work is included.
+OAuth and browser compatibility are not guaranteed. The local viewer host is
+separate from the approved development target; target access remains loopback-only.
+No iOS simulator work is included.
 
 Implementation is in progress. Acceptance requires behavioral HTTP/WS tests,
 deterministic idle/cancellation tests, actual iframe authentication on supported

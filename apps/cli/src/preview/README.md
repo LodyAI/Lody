@@ -7,14 +7,19 @@ SameSite=None, Partitioned cookie on both local and remote endpoints. Chromium
 accepts Secure cookies on the literal loopback listener. SameSite=Lax cannot
 bootstrap cookies inside cross-site preview frames: first-level resources may
 authenticate through a token-bearing Referer, but nested module imports lack it.
-Local cookie names derive from the Session and target origin because cookies ignore
-TCP ports. Reopening the same target reuses names without reusing the credential;
-other Sessions or targets stay separate. Local request headers allow up to 1 MiB
-to accommodate the shared browser cookie jar; larger headers are rejected.
+Each local Session and target origin uses a stable `lody-<scope>.localhost`
+viewer hostname. Chromium resolves it to loopback and gives it a separate
+partitioned-cookie quota, so one preview cannot evict another preview’s token.
+Reopening the target reuses the hostname and cookie names, but generates a new
+token. When an application sets cookies the proxy reissues the capability last;
+under Chromium quota pressure application cookies may be evicted. Chromium limits
+partitioned cookies to about 10 KiB per embedded site and partition. Local headers
+remain limited to 1 MiB for clients with larger cookie jars, not as a browser quota.
 
 Every HTTP request and WebSocket upgrade still requires that endpoint's token.
 Matching Origin or a tokenless Referer cannot unlock the listener. Application cookies
-are scoped by Session and target origin locally and forwarded to the development server; capability cookies
+are scoped by Session and target origin locally and forwarded to the development
+server; capability cookies
 are never forwarded. The [cookie decision](../../../../.agents/notes/implemented/bug-fix/2026-10-28-preview-app-cookies.md) explains the attribute changes and limits. A 502 is a separate
 forwarding/upstream failure; inspect its response body instead of disabling
 authentication or the development server's origin checks.

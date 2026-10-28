@@ -18,9 +18,10 @@ unrelated console warnings remain unverified.
 
 ## Decision and evidence
 
-Cookie scope ignores ports. All ephemeral local listeners used the same host,
+Cookie scope ignores ports. Earlier local listeners used the same host,
 path and name, so even a context accepting the cookie could replace one Session's
-token with another's. Local names derive from the Session and target origin and remain stable across
+token with another's. Local viewers now use separate stable localhost subdomains
+to isolate partitioned-cookie quotas. Local names derive from the Session and target origin and remain stable across
 endpoint replacement; remote names stay unchanged because remote viewers have
 distinct bound hostnames. A replacement generates a fresh capability value. Authorization
 still checks the exact active endpoint's token on every HTTP request and WebSocket
