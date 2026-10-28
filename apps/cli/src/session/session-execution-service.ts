@@ -515,6 +515,7 @@ export type PreparedSessionDispatchOptions = {
   dispatchSource: SessionDispatchSource;
   accessPromise: Promise<MachineAccessVerification>;
   requestPromise: Promise<PreparedSessionDispatchRequest>;
+  onExecutionDeferred?: () => void | Promise<void>;
   onAccessAllowed: () => void | Promise<void>;
   onAccessDenied: (
     reason: MachineAccessVerification & { outcome: 'denied' }
@@ -547,6 +548,8 @@ class SessionTurnHalted extends Data.TaggedError('SessionTurnHalted')<{
   sessionId: SessionId;
   reason: ChatFailedReason;
 }> {}
+
+class SessionTurnExecutionDeferred extends Data.TaggedError('SessionTurnExecutionDeferred')<{}> {}
 
 class SessionTurnClaimContended extends Data.TaggedError('SessionTurnClaimContended')<{
   sessionId: SessionId;
@@ -2836,6 +2839,9 @@ export class SessionExecutionService {
             return undefined;
           })
       );
+      if (visibleOutcome === 'execution-deferred') {
+        await options.onExecutionDeferred?.();
+      }
       if (
         outcome === 'unknown' ||
         visibleOutcome === 'duplicate' ||
@@ -4740,6 +4746,10 @@ export class SessionExecutionService {
                       inputConfig: options.invocation.inputConfig,
                     })
                   : { state: 'denied' as const };
+              if (result.state === 'pending-evidence') {
+                runtime.withdrawInboxExecution = true;
+                return yield* Effect.fail(new SessionTurnExecutionDeferred());
+              }
               if (result.state === 'claimed') {
                 executionPermit = result.permit;
                 // Authorization may have yielded while Stop was requested.
@@ -4874,6 +4884,7 @@ export class SessionExecutionService {
     errorContext: VisibleSessionTurnUnhandledErrorContext;
   }): Promise<string> {
     const { sessionId, sessionDoc, runtime, error, errorContext } = options;
+    if (error instanceof SessionTurnExecutionDeferred) return 'execution-deferred';
     if (isSessionTurnClaimContended(error)) {
       return 'claim-contended';
     }
@@ -5009,8 +5020,10 @@ export class SessionExecutionService {
       try {
         if (inboxInput && !runtime.releaseFailure) {
           this.releaseTurnRuntime(sessionId, runtime.turnId);
-          await inbox!.wake();
-          this.onInboxReleased?.(sessionId);
+          if (outcome !== 'execution-deferred') {
+            await inbox!.wake();
+            this.onInboxReleased?.(sessionId);
+          }
         }
       } finally {
         const notify = async () => {

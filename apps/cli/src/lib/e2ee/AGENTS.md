@@ -33,13 +33,14 @@
   keep control/retired IDs/intent. Shared calls/exclusive reset; keep locks on
   failed main close. Bound permits/cleanup; reply before send; exact retries.
   `agent-execution.ts`: userTurnId claim for RPC/Meta/history; verified signer/user
-  plus device authority; default to host authorization. No signer/capability: deny.
-  Snapshots/author fields are no origin. No uncertain ACP retry.
+  plus device authority; default to host authorization. No capability: deny.
+  Missing origin: backfill/retry pending to original expiry. No snapshot-author
+  substitution or uncertain ACP retry.
   [Recovery](../../../README.md#local-encrypted-execution-log-recovery).
 - `prepareCliE2eeMachineLegacy` binds the retained credential hash to the exact
   desktop-generated 16-byte pairing session using core's fixed v1 helper. Machine
-  possession additionally binds the strict UTF-8 machineId; activation compares it
-  with both the verified current device and the retained signed admission. Session
+  Possession binds strict UTF-8 machineId; activation matches the verified current
+  device and retained signed admission. Session
   IDs stay outside possession and ledger records; old developer formats need recreation.
   Local preparation/activation: OS-user socket; remote pairing: signed offer/scoped port. Fleet checks account/workspace/genesis first.
   Activation refreshes verified ledger/mailbox; acknowledges only an installed current
@@ -80,7 +81,7 @@
   need consent; preserve signer/keys/credential. Preflight latest session before Fleet
   ownership changes; reject late sessions.
 - Publish ownership before replacement originals; publish material/current identity atomically.
-  Same-scope takeover atomically changes old creating=-1/new creating=1, retaining bytes.
+  Same-scope takeover: atomic old creating=-1/new creating=1, retain bytes.
   Match account/machine/workspace/genesis/member; superseded sessions cannot publish/retake.
   Reuse originals. Unpublished generations with retained credentials cannot replace missing
   devices; fresh explicit sessions may replace lost published identities with distinct

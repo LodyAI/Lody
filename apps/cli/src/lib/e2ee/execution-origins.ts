@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import Database from 'better-sqlite3';
-import { Effect, type Scope } from 'effect';
+import { Clock, Effect, type Scope } from 'effect';
 import {
   decodeImportBlobMeta,
   isContainer,
@@ -14,7 +14,11 @@ import {
 } from 'loro-crdt';
 import type { PayloadProtectionOpenInput } from '@loro-dev/streams-crdt';
 import { z } from 'zod';
-import type { EncryptedExecutionIntent, VerifiedExecutionOriginal } from './agent-execution';
+import type {
+  EncryptedExecutionIntent,
+  VerifiedExecutionOriginal,
+  PendingExecutionOriginal,
+} from './agent-execution';
 
 const attempt = <A>(body: () => A) => Effect.try({ try: body, catch: (cause) => cause });
 const frameSchema = z.object({ sealed: z.instanceof(Uint8Array), aad: z.instanceof(Uint8Array) });
@@ -105,7 +109,12 @@ export class ExecutionOrigins {
   }
 
   /** Called only after signature AND AEAD verification; snapshot opens never call it. */
-  retain(resource: string, request: PayloadProtectionOpenInput, plaintext: Uint8Array): void {
+  retain(
+    resource: string,
+    request: PayloadProtectionOpenInput,
+    plaintext: Uint8Array,
+    target?: OpId
+  ): boolean {
     if (
       request.context.kind !== 'update_batch' ||
       request.header.length !== 1 ||
@@ -136,14 +145,24 @@ export class ExecutionOrigins {
         })
         .immediate()
     );
+    return target !== undefined && decoded.some(({ meta }) => contains(meta, target));
   }
 
   resolve = Effect.fnUntraced(function* (
     this: ExecutionOrigins,
     intent: EncryptedExecutionIntent,
     doc: LoroDoc,
-    open: (request: PayloadProtectionOpenInput) => Effect.Effect<Opened, unknown, Scope.Scope>
-  ): Effect.fn.Return<VerifiedExecutionOriginal | undefined, unknown, Scope.Scope> {
+    open: (request: PayloadProtectionOpenInput) => Effect.Effect<Opened, unknown, Scope.Scope>,
+    recover?: (
+      docId: string,
+      id: OpId,
+      open: (request: PayloadProtectionOpenInput) => Effect.Effect<Opened, unknown, Scope.Scope>
+    ) => Effect.Effect<void, unknown, Scope.Scope>
+  ): Effect.fn.Return<
+    VerifiedExecutionOriginal | PendingExecutionOriginal | undefined,
+    unknown,
+    Scope.Scope
+  > {
     const selected = findTurn(doc, intent.userTurnId);
     if (!selected) return undefined;
     const current = projection(selected.map);
@@ -153,15 +172,29 @@ export class ExecutionOrigins {
     )
       return undefined;
     const resource = `doc:${getSessionRoomId(intent.sessionId as SessionId)}`;
-    const rows = yield* attempt(() =>
+    const readRows = () =>
       this.database((db) =>
         db
           .prepare(`SELECT DISTINCT f.sealed, f.aad FROM spans s JOIN frames f ON s.digest=f.digest
       WHERE s.resource=? AND f.resource=? AND s.peer=? AND s.start<=? AND s.end>?`)
           .all(resource, resource, selected.id.peer, selected.id.counter, selected.id.counter)
           .map((row) => frameSchema.parse(row))
+      );
+    let rows = yield* attempt(readRows);
+    if (!rows.length) {
+      const timestamp = typeof current.timestamp === 'string' ? Date.parse(current.timestamp) : NaN;
+      if (
+        !Number.isSafeInteger(timestamp) ||
+        timestamp < 0 ||
+        !Number.isSafeInteger(timestamp + windowMs)
       )
-    );
+        return undefined;
+      if (recover && (yield* Clock.currentTimeMillis) < timestamp + windowMs) {
+        yield* recover(getSessionRoomId(intent.sessionId as SessionId), selected.id, open);
+        rows = yield* attempt(readRows);
+      }
+      if (!rows.length) return { state: 'pending-evidence', expiresAt: timestamp + windowMs };
+    }
     let original: VerifiedExecutionOriginal | undefined;
     for (const row of rows) {
       const opened = yield* open({

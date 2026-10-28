@@ -1,3 +1,4 @@
+import { makeExecutionOriginRecovery } from './execution-origin-recovery';
 import { ExecutionOrigins } from './execution-origins';
 import type { EncryptedExecutionIntent } from './agent-execution';
 import type { LoroDoc } from 'loro-crdt';
@@ -670,6 +671,14 @@ async function openWorkspaceOwned(
       'execution-origins.sqlite'
     )
   );
+  const originRecovery = options.cloud.readExecutionOriginPage
+    ? makeExecutionOriginRecovery(
+        executionOrigins,
+        options.cloud.readExecutionOriginPage.bind(options.cloud),
+        { workspaceId: options.workspaceId, credential: opened.credential },
+        encryptedWorkspaceNamespace(binding.genesisHash)
+      )
+    : undefined;
   const content: WorkspaceStreamsContent = {
     mode: 'protected',
     namespace: encryptedWorkspaceNamespace(binding.genesisHash),
@@ -1008,6 +1017,7 @@ async function openWorkspaceOwned(
       await epochTransition.close();
       await refresh;
       await Promise.allSettled([...snapshotFlights]);
+      originRecovery?.clear();
       // History/snapshot diagnosis may start while close drains those flights.
       // Keep custody alive through identity verification and the durable receipt,
       // never await the parent drain/full erasure that calls back into close.
@@ -1036,17 +1046,21 @@ async function openWorkspaceOwned(
     ),
     resolveVerifiedExecutionOriginal: (intent: EncryptedExecutionIntent, doc: LoroDoc) =>
       Effect.scoped(
-        executionOrigins.resolve(intent, doc, (request) =>
-          Effect.gen(function* () {
-            if (closed || intent.workspaceId !== options.workspaceId)
-              return yield* Effect.fail(new Error('e2ee_execution_origin_unavailable'));
-            const contentBinding = yield* opened.runtime.binding(
-              `doc:${getSessionRoomId(intent.sessionId as SessionId)}`,
-              'loro',
-              'current'
-            );
-            return yield* contentBinding.openAuthenticated(request);
-          })
+        executionOrigins.resolve(
+          intent,
+          doc,
+          (request) =>
+            Effect.gen(function* () {
+              if (closed || intent.workspaceId !== options.workspaceId)
+                return yield* Effect.fail(new Error('e2ee_execution_origin_unavailable'));
+              const contentBinding = yield* opened.runtime.binding(
+                `doc:${getSessionRoomId(intent.sessionId as SessionId)}`,
+                'loro',
+                'current'
+              );
+              return yield* contentBinding.openAuthenticated(request);
+            }),
+          originRecovery?.recover
         )
       ),
     authorizeExecution: (workspaceId: string, requesterDevice: string) =>

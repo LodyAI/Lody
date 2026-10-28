@@ -1,4 +1,5 @@
 import { makeStreamsUpdateBinding } from '@lody/e2ee-core/adapters/loro-streams';
+import { makeExecutionOriginRecovery } from '../src/lib/e2ee/execution-origin-recovery';
 import { ExecutionOrigins } from '../src/lib/e2ee/execution-origins';
 import { makeEncryptedAgentExecution, lazyExecutionJournal } from '../src/lib/e2ee/agent-execution';
 import {
@@ -326,6 +327,58 @@ const page = (records: Uint8Array[], start = 0, end = records.length) => ({
 });
 
 describe('machine E2EE local runtime', () => {
+  effectIt.effect('bounds missing-origin reads, aborts their I/O and allows another attempt', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const directory = yield* Effect.acquireRelease(
+          Effect.promise(() => mkdtemp(join(tmpdir(), 'origin-read-timeout-'))),
+          (path) => Effect.promise(() => rm(path, { recursive: true, force: true }))
+        );
+        const entered = Promise.withResolvers<void>();
+        let aborted = false;
+        let stalled = true;
+        let retried = false;
+        const origins = new ExecutionOrigins(join(directory, 'origins.sqlite'));
+        const recovery = makeExecutionOriginRecovery(
+          origins,
+          async (_input, signal) => {
+            if (!stalled) {
+              retried = true;
+              return { messages: [], before: '0', atStart: true };
+            }
+            entered.resolve();
+            return await new Promise((_, reject) =>
+              signal.addEventListener(
+                'abort',
+                () => {
+                  aborted = true;
+                  reject(new Error('aborted'));
+                },
+                { once: true }
+              )
+            );
+          },
+          { workspaceId: 'workspace', credential: 'synthetic-device-credential' },
+          `lody-e2ee:${'ab'.repeat(32)}`
+        );
+        const request = yield* Effect.forkChild(
+          recovery.recover('session-session', { peer: '1', counter: 0 }, () =>
+            Effect.die('no frame')
+          )
+        );
+        yield* Effect.promise(() => entered.promise);
+        yield* TestClock.adjust(3000);
+        yield* Fiber.join(request);
+        expect(aborted).toBe(true);
+        stalled = false;
+        yield* recovery.recover('session-session', { peer: '1', counter: 0 }, () =>
+          Effect.die('no frame')
+        );
+        expect(retried).toBe(true);
+      })
+    )
+  );
+
   it('binds signed history to the actual device and user across origin-store reopen', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-turn-origins-'));
     const source = new LoroDoc();
@@ -545,7 +598,7 @@ describe('machine E2EE local runtime', () => {
             yield* Effect.scoped(
               noOriginal.resolve(intent('active'), replica, ownerBinding.openAuthenticated)
             )
-          ).toBeUndefined();
+          ).toEqual({ state: 'pending-evidence', expiresAt: 900100 });
           const corrupt = { ...(yield* addTurn('bad-signature', user, '1', ownerBinding)).request };
           corrupt.sealed = Uint8Array.from(corrupt.sealed);
           corrupt.sealed[corrupt.sealed.length - 1] ^= 1;

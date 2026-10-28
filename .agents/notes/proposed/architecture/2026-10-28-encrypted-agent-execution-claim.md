@@ -61,14 +61,33 @@ and checks the live projection again after asynchronous verification. An operati
 number alone is not proof: another valid frame can reuse its peer/counter with
 different operations, so inspecting the live document at matching counters is unsafe.
 
-The verified historical actor must equal `requesterUserId` (the ledger's canonical
-hex user identity); this code does not guess account-to-crypto-user mappings from
-profiles. The verified device key goes to the current-authority gate.
+The current gate compares the historical crypto actor with `requesterUserId`.
+This is a known integration gap: the real encrypted UI writes its account ID,
+which differs from the ledger crypto user ID. The native production fixture with
+that account field reproduces rejection and is retained as an explicit expected
+failure. The available D03 registration action resolves only the authenticated
+account; there is no machine-credential member-account binding query in this
+public contract. Supporting arbitrary requesters needs that trusted binding;
+directory labels or requester-supplied IDs cannot supply it. This remains
+unresolved and the PR is not ready for integration. After origin validation, the
+verified device key still goes to the current-authority gate.
 Thus revoking one device denies its pending turns even while its user and another
 device stay active. Missing originals, conflicting signer attestations, modified
 execution input and user/signer mismatches refuse new starts. A snapshot signer
-never becomes the origin of every old turn inside that snapshot. A snapshot-only
-turn has no executable origin until its original signed update is available.
+never becomes the origin of every old turn inside that snapshot. A snapshot-only turn triggers a backward read of retained Streams updates using
+this workspace's device credential. The host decodes released update framing,
+reconstructs exact logical-room AAD, reopens the original signature/AEAD and retains
+its ciphertext before resolving the turn. The snapshot signer never supplies the
+turn's origin. Local receipt hits do no backfill I/O.
+
+Missing originals remain pending without a journal start, failure marker, handled
+pointer or completed Inbox input. The watcher reuses its per-session admission
+retry owner, with a one-second delay; stop, unwatch and ownership changes cancel
+that owner. Each backfill attempt is limited to eight backward pages and three
+seconds of cooperative I/O, retaining only its scan continuation in memory.
+Another attempt resumes an incomplete scan; a retained-start miss is not cached.
+Expired snapshot turns stop retrying at their timestamp's original window, and a
+recovered signature must still prove its own unchanged deadline before claiming.
 
 For durable history, the original window ends 15 minutes after the authenticated
 turn timestamp. Reopening proofs and refreshing the authorization cache do not
@@ -122,8 +141,9 @@ before the turn can proceed. No proof pruning or snapshot-author substitution oc
 
 The new gate composes native Effects in the existing turn fiber and adapts only
 the synchronous SQLite leaf. It does not launch nested runtimes or introduce an
-in-flight registry, timer, global failure cache, network wait, or dependency on a
-realtime connection. Full Session/Repo/MessageHandler migration remains deferred
+global failure cache or dependency on a realtime connection. Cold origin recovery
+uses bounded network reads; normal retained-origin dispatch does not. The existing
+watcher owns delayed admission retries. Full Session/Repo/MessageHandler migration remains deferred
 because those Promise dependencies are unchanged; this is not a migration-completion
 claim. Local journal writes are required correctness work; this change does not
 claim a measured end-to-end latency improvement.
@@ -151,5 +171,7 @@ signed update was imported into its dependency snapshot. A production-constructi
 SQLite, native authorization and the actual `Lody.create` composition without an
 authorization callback or mock host. Synthetic cloud I/O supplies the signed
 records; the ACP harness records prompt submission. It was RED with the absent
-production adapter and GREEN after defaulting to the owned host. These tests do
-not claim deployment acceptance.
+production adapter and GREEN after defaulting to the owned host. Additional RED → GREEN regressions cover native construction from a verified
+snapshot signed by another device, delayed original availability without terminal
+writes, original expiry, the actual Streams HTTP backward parser, bounded aborted
+reads and watcher stop cancellation. These tests do not claim deployment acceptance.

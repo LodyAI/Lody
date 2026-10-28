@@ -1454,6 +1454,7 @@ describe('SessionDispatchWatcher', () => {
     recordMemberAccessSnapshot?: WatcherDeps['recordMemberAccessSnapshot'];
     recordChatFailure?: WatcherDeps['recordChatFailure'];
     onFatalAuthFailure?: WatcherDeps['onFatalAuthFailure'];
+    dispatchPrepared?: SessionExecutionService['dispatchPreparedSessionTurn'];
   }) => {
     const startSession = vi.fn(async () => {});
     const continueSession = vi.fn(async () => {});
@@ -1505,6 +1506,7 @@ describe('SessionDispatchWatcher', () => {
       ...(opts.currentUserId ? { currentUserId: opts.currentUserId } : {}),
       workspaceDocument,
       executionService: {
+        ...(opts.dispatchPrepared ? { dispatchPreparedSessionTurn: opts.dispatchPrepared } : {}),
         getExecutionSnapshot: vi.fn(() => ({
           hasActiveTurn: false,
           hasBlockingPendingCreate: false,
@@ -1543,6 +1545,43 @@ describe('SessionDispatchWatcher', () => {
   // turn), and the fiber's outcome routes back to dispatch or a visible failure.
   // The fiber's FIRST verify attempt is immediate (no backoff), so recover/deny
   // flows complete without waiting on timers.
+
+  it('retries missing execution evidence without retiring the pending turn, and cancels the retry on stop', async () => {
+    vi.useFakeTimers();
+    const dispatched = createDeferred();
+    let originalAvailable = false;
+    let starts = 0;
+    const h = createAccessHarness({
+      canUseMachine: async () => ({ outcome: 'allowed' }),
+      dispatchPrepared: async (options) => {
+        if (!originalAvailable) {
+          await options.onExecutionDeferred?.();
+          return;
+        }
+        starts += 1;
+        dispatched.resolve();
+      },
+    });
+    try {
+      await runMaybeHandleSession(h.watcher, h.sessionId);
+      expect(h.getHistory()[0]?.status).toBe('pending');
+      expect(starts).toBe(0);
+      originalAvailable = true;
+      await vi.advanceTimersByTimeAsync(1000);
+      await dispatched.promise;
+      expect(starts).toBe(1);
+      expect(h.getHistory()[0]?.status).toBe('pending');
+      originalAvailable = false;
+      await runMaybeHandleSession(h.watcher, h.sessionId);
+      h.watcher.stop();
+      originalAvailable = true;
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(starts).toBe(1);
+    } finally {
+      h.watcher.stop();
+      vi.useRealTimers();
+    }
+  });
 
   it('does not fail or retire a pending turn when access verification is indeterminate', async () => {
     const canUseMachine = vi.fn(async () => ({

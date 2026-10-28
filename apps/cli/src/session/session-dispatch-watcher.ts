@@ -128,7 +128,7 @@ type SessionDispatchWatcherDeps = {
   onFatalAuthFailure?: (error: Error) => void;
 };
 
-/** A running verify-with-retry fiber for a transient access failure on `turnId`. */
+/** A running per-turn admission retry: access or missing execution evidence. */
 type AccessRetryHandle = {
   turnId: string;
   fiber: Fiber.Fiber<void, never>;
@@ -1645,6 +1645,9 @@ export class SessionDispatchWatcher {
             dispatchSource,
             accessPromise: executionAccessPromise,
             requestPromise,
+            onExecutionDeferred: () => {
+              if (isActive()) this.forkExecutionEvidenceRetry(sessionId, nextUserTurn.id);
+            },
             onAccessAllowed: async () => {
               ensureActive();
               this.interruptAccessRetry(sessionId);
@@ -1764,6 +1767,21 @@ export class SessionDispatchWatcher {
         `[${sessionId}] Failed to record member access verdict: ${formatErrorMessage(error)}`
       );
     });
+  }
+
+  private forkExecutionEvidenceRetry(sessionId: SessionId, turnId: string): void {
+    this.interruptAccessRetry(sessionId);
+    const program = Effect.sleep('1 second').pipe(
+      Effect.andThen(
+        Effect.sync(() => {
+          this.clearAccessFiberIf(sessionId, turnId);
+          void this.enqueueSessionCheck(sessionId);
+        })
+      )
+    );
+    // Share the existing per-session admission-retry owner and its lifecycle
+    // cancellation. Never wake the withdrawn Inbox in a tight release loop.
+    this.accessFibers.set(sessionId, { turnId, fiber: Effect.runFork(program) });
   }
 
   /**

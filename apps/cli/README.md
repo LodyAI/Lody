@@ -34,6 +34,12 @@ rejects those new execution requests and permits retry without stopping local ed
 already running work or other workspace hosts. No RPC/agent dispatch is enabled by
 this interface alone.
 
+The execution integration still has a known identity gap: UI history stores account
+IDs while signed content exposes ledger crypto user IDs. A trusted machine-scoped
+account/member binding lookup is required before real UI account IDs can execute;
+the profile directory cannot supply that trust. The regression is retained as an
+expected failure, and this integration remains incomplete.
+
 ## Local encrypted execution log recovery
 
 Stop the journal's execution owners, then run:
@@ -66,7 +72,11 @@ by default. `LodyOptions.authorizeEncryptedExecution` can override this capabili
 with the same signature. Missing signer or authorization denies new starts;
 revoking a device cannot borrow another device's authority from the same user.
 Original ciphertext receipts live in `execution-origins.sqlite`; snapshot authors
-cannot substitute for the original turn signer. Ordinary workspaces do not open this log.
+cannot substitute for the original turn signer. Snapshot recovery backfills retained
+signed updates from Streams. Missing originals keep the turn pending and retryable
+until its original window expires; they never grant a start. Each backfill attempt
+has a three-second/eight-page bound; stop cancels the watcher's delayed retry.
+Ordinary workspaces do not open this log.
 Transport frames keep their own original request/response receipts; execution evidence
 contains intent identities and a settlement marker, never prompt or response plaintext.
 See the

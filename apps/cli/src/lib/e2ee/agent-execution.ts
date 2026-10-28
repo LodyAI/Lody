@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { Effect } from 'effect';
+import { Clock, Effect } from 'effect';
 import { z } from 'zod';
 import {
   RealtimeJournal,
@@ -30,13 +30,14 @@ export type VerifiedExecutionOriginal = {
   requesterUserId: string;
   expiresAt: number;
 };
+export type PendingExecutionOriginal = { state: 'pending-evidence'; expiresAt: number };
 export type ResolveVerifiedExecutionOriginal = (
   intent: EncryptedExecutionIntent
-) => Effect.Effect<VerifiedExecutionOriginal | undefined, unknown>;
+) => Effect.Effect<VerifiedExecutionOriginal | PendingExecutionOriginal | undefined, unknown>;
 
 export type EncryptedExecutionClaim =
   | { state: 'claimed'; permit: RealtimeStartPermit }
-  | { state: 'uncertain' | 'completed' | 'denied' | 'expired' };
+  | { state: 'uncertain' | 'completed' | 'denied' | 'expired' | 'pending-evidence' };
 
 /** One owner per encrypted workspace. Journal opening stays lazy so a broken
  * execution log never prevents content sync or another workspace from starting. */
@@ -75,6 +76,14 @@ export function makeEncryptedAgentExecution(options: {
     let retained = yield* attempt(read);
     if (retained && retained.state !== 'received') return { state: retained.state };
     const verified = yield* options.resolveVerifiedOriginal(intent);
+    if (verified && 'state' in verified) {
+      // Snapshot timestamps can bound waiting, but never grant execution. A
+      // recovered signed original still defines the actual admission deadline.
+      return {
+        state:
+          (yield* Clock.currentTimeMillis) >= verified.expiresAt ? 'expired' : 'pending-evidence',
+      };
+    }
     if (
       !verified ||
       !/^[0-9a-f]{64}$/.test(verified.requesterDevice) ||
