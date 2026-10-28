@@ -20,6 +20,7 @@ import {
   type WorkspaceFlockWritableFlock,
 } from '../src/workspace-flock';
 import { getProjectMcpKey, type WorkspaceMcpServerMeta } from '../src/workspace-mcp';
+import { splitMcpAuthentication, assertPublicMcpServer } from '../src/mcp-authentication';
 
 const id = (value: string): McpServerId => value as McpServerId;
 const agentRole = (roleId: string, overrides: Partial<AgentRole> = {}): AgentRole => ({
@@ -44,6 +45,61 @@ const entry = (serverId: string, name = serverId): WorkspaceMcpServerMeta => ({
   connection: { transport: 'stdio', command: 'node' },
   createdAt: 1,
   updatedAt: 1,
+});
+
+it('keeps manual secrets outside shared writes and strips old credentials on read without mutating the document', () => {
+  const flock = new FakeWorkspaceFlock();
+  const privateEntry: WorkspaceMcpServerMeta = {
+    ...entry('private'),
+    transport: 'http',
+    connection: {
+      transport: 'http',
+      url: 'https://example.test/mcp',
+      bearerToken: 'private-token',
+      headers: { 'X-Key': 'private-key', 'X-Env': '${LOCAL_KEY}' },
+    },
+  };
+  expect(() => writeWorkspaceMcpServerToFlock(flock, privateEntry)).toThrow('local machine');
+  expect(flock.rows.size).toBe(0);
+  expect(() =>
+    writeWorkspaceMcpServerToFlock(flock, {
+      ...privateEntry,
+      connection: {
+        transport: 'http',
+        url: 'https://example.test/mcp',
+        headers: Object.fromEntries([['__proto__', 'private-prototype-token']]),
+      },
+    })
+  ).toThrow('local machine');
+  const split = splitMcpAuthentication(
+    privateEntry.connection ?? { transport: 'stdio', command: 'node' }
+  );
+  expect(split.authentication).toEqual({
+    bearerToken: 'private-token',
+    headers: { 'X-Key': 'private-key' },
+  });
+  writeWorkspaceMcpServerToFlock(flock, { ...privateEntry, connection: split.connection });
+  expect(JSON.stringify([...flock.rows.values()])).not.toContain('private-token');
+  expect(JSON.stringify([...flock.rows.values()])).not.toContain('private-key');
+  expect(listWorkspaceMcpServers(readWorkspaceFlockRowsFromFlock(flock))[0]?.connection).toEqual({
+    transport: 'http',
+    url: 'https://example.test/mcp',
+    authentication: 'local',
+    headers: { 'X-Env': '${LOCAL_KEY}' },
+  });
+  flock.set(workspaceFlockKeys.mcpServer(privateEntry.id), privateEntry);
+  const normalized = listWorkspaceMcpServers(readWorkspaceFlockRowsFromFlock(flock));
+  expect(JSON.stringify(normalized)).not.toContain('private-token');
+  expect(JSON.stringify([...flock.rows.values()])).toContain('private-token');
+  expect(() =>
+    assertPublicMcpServer({
+      ...privateEntry,
+      connection: {
+        transport: 'http',
+        url: 'https://user:private-password@example.test/mcp?token=private-token',
+      },
+    })
+  ).toThrow('URLs must not contain credentials');
 });
 
 class FakeWorkspaceFlock implements WorkspaceFlockWritableFlock {

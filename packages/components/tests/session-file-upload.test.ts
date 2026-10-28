@@ -313,8 +313,8 @@ describe('multipart response and cancellation', () => {
 });
 
 it.each([
-  ['en', en, 'Encrypted workspaces do not yet support attachments.'],
-  ['zh_CN', zhCN, '加密工作区暂不支持附件'],
+  ['en', en, 'e2ee_attachment_requires_preparation'],
+  ['zh_CN', zhCN, 'e2ee_attachment_requires_preparation'],
 ] as const)(
   'explains refused encrypted uploads in %s before any network transfer',
   async (language, translations, message) => {

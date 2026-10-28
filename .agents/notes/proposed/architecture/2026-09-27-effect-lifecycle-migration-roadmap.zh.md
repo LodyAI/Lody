@@ -340,6 +340,8 @@ preview 代理、`packages/loro-streams-rpc`、PR poller、Electron updater：�
 | dispatch、MessageHandler、daemon 集成     | Turn、投递、文档 flush                                | 待迁移             | Promise 编排                    | 已有 shell 根 runtime；其余所有权待完成 | 停会话→最终写入 flush→拆文档，报告外部释放失败                                                                                                                                                                   |
 | Renderer / Electron / supervisor 上层编排 | 各单元真实的平台与同步依赖                            | 待迁移    | 既有孤岛与进程调用方            | 上层资源/任务拥有者待完成               | 既有孤岛未评估；统一进程调用不代表上层 workflow 完成，交付前继续拆单元                                                                                                                                                           |
 
+| 本机 MCP 授权 / 凭证中继                  | MCP SDK 2.0.0、系统凭证库、Node 监听器                | 原生（本地变更） | Legacy SessionManager 与本机 RPC 门面 | 工作区服务 Scope；授权尝试与确切运行实例的子 Scope | [授权决定](../../implemented/architecture/2026-10-26-mcp-oauth-local-credentials.zh.md)；模拟流程/隔离测试；系统验收与 Slim 真实授权待完成                                                                       |
+
 ## 交付依赖图
 
 箭头表示前置依赖，不是全局串行顺序。文件锁、Git 叶子、worktree 观察/本地准备与

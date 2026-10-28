@@ -7,6 +7,9 @@ Machine RPC contracts: [transport map](../../.agents/docs/rpc-loro-streams-rpc.m
 
 ## Invariants
 
+- Encrypted feature RPC admits only Code Collab, restricted file preview and preview
+  create/status/revoke. Reuse verified same-member machine authority and workspace keys;
+  never fall back to ordinary RPC. Keep exact chunk originals and journal saves before execution.
 - Encrypted dispatch retains exact frames across retry/fallback. Receipt ACK never
   completes the shared execution claim. [Ownership/close](README.md#encrypted-dispatch).
 - Request stream ids are workspace/machine scoped:

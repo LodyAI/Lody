@@ -12,9 +12,10 @@ export const isMcpTransport = (value: unknown): value is McpTransport =>
 
 export type McpStdioConnection = {
   transport: 'stdio';
+  authentication?: 'local';
   command: string;
   args?: string[];
-  /** Workspace-readable plaintext. Prefer ${VAR} or envPassthrough for secrets. */
+  /** Exact ${VAR} references only; literal values belong in local authentication. */
   env?: Record<string, string>;
   /** Variable names whose values are read from the target daemon environment. */
   envPassthrough?: string[];
@@ -22,7 +23,9 @@ export type McpStdioConnection = {
 
 export type McpHttpConnection = {
   transport: 'http';
+  authentication?: 'local';
   url: string;
+  /** Exact ${VAR} reference only. Raw tokens never belong in a shared definition. */
   bearerToken?: string;
   headers?: Record<string, string>;
 };
@@ -114,7 +117,11 @@ const isOptionalString = (value: unknown): value is string | undefined =>
   value === undefined || typeof value === 'string';
 
 export const isMcpConnectionSpec = (value: unknown): value is McpConnectionSpec => {
-  if (!isRecord(value) || !isMcpTransport(value.transport)) {
+  if (
+    !isRecord(value) ||
+    !isMcpTransport(value.transport) ||
+    (value.authentication !== undefined && value.authentication !== 'local')
+  ) {
     return false;
   }
 

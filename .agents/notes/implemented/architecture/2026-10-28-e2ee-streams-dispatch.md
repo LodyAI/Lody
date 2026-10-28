@@ -48,6 +48,9 @@ close aborts and awaits the underlying SDK operation before credential release;
 failed native store cleanup retains its handle for retry. Evidence is not garbage
 collected in this implementation.
 
+
+The response reader is shared with the fixed [file and preview feature channel](../feature/2026-10-28-e2ee-file-preview-availability.md). That channel extends method-body framing for large file payloads without changing dispatch originals, the 1 MiB frame limit or execution claims.
+
 ## Evidence and limits
 
 Synthetic real-key/SQLite tests cover retained requests, target/signer/digest

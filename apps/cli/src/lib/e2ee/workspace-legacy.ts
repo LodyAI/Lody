@@ -1,4 +1,5 @@
 import { makeExecutionOriginRecovery } from './execution-origin-recovery';
+import { makeEncryptedFeatureReceiver } from './feature-rpc';
 import { makeEncryptedRpcReceiver } from './realtime-rpc';
 import { lazyExecutionJournal } from './agent-execution';
 import { makeE2eeRpcNative, E2eeRpcOriginals } from '@lody/loro-streams-rpc/e2ee-native';
@@ -1084,6 +1085,15 @@ async function openWorkspaceOwned(
   // Startup is one of the three refresh triggers; no network request is awaited by open.
   void refreshInBackground();
   return {
+    attachmentToken: async () => {
+      if (closed) throw new Error('e2ee_closed');
+      const result = await options.cloud.getContentToken({
+        workspaceId: options.workspaceId,
+        credential: opened.credential,
+      });
+      if (closed || !result.attachmentToken) throw new Error('e2ee_attachment_unavailable');
+      return result.attachmentToken;
+    },
     repositoryDirectory: repositoryDirectory(
       directory,
       binding.genesisHash,
@@ -1145,7 +1155,10 @@ async function openWorkspaceOwned(
     startRpc: (
       machineId: string,
       offer: (input: E2eeDispatchInput) => Promise<E2eeDispatchAck>,
-      trace?: (event: E2eeRpcTiming) => void
+      trace?: (event: E2eeRpcTiming) => void,
+      handleFeature?: (
+        request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest
+      ) => Promise<import('@lody/shared/local-machine-rpc').LocalMachineRpcResponse>
     ) =>
       run(
         Effect.gen(function* () {
@@ -1186,6 +1199,19 @@ async function openWorkspaceOwned(
                   client,
                   trace,
                 });
+                const receiveFeature = handleFeature
+                  ? makeEncryptedFeatureReceiver({
+                      workspaceId: options.workspaceId,
+                      genesis: binding.genesisHash,
+                      machineId,
+                      native: rpc,
+                      journal: rpcJournal,
+                      authorize: opened.executionAuthorization.authorizeExecution,
+                      isOpen: () => !closed,
+                      handle: handleFeature,
+                      client,
+                    })
+                  : undefined;
                 let failureReported = false;
                 yield* makeEncryptedRpcListener({
                   workspaceId: options.workspaceId,
@@ -1193,7 +1219,10 @@ async function openWorkspaceOwned(
                   client,
                   trace,
                   receive: (envelope) =>
-                    receive(envelope).pipe(
+                    Effect.gen(function* () {
+                      if (receiveFeature && (yield* receiveFeature(envelope))) return;
+                      yield* receive(envelope);
+                    }).pipe(
                       Effect.tap(() =>
                         Effect.sync(() => {
                           failureReported = false;

@@ -1,3 +1,4 @@
+import { protectedAttachmentChunks } from './encrypted-session-attachment';
 import { isValidSessionFilePathSegment, type SessionId, type WorkspaceId } from '@lody/shared';
 import { buildSessionFileDownloadUrl } from './session-file-upload';
 import { Base64ChunkEncoder } from './base64-chunk';
@@ -30,6 +31,8 @@ type NativeSaveArgs = {
   sessionId: SessionId;
   fileId: string;
   token: string;
+  encryption?: import('@lody/shared').EncryptedAttachment;
+  attachmentToken?: () => Promise<string>;
   fileName: string;
   mimeType?: string;
 };
@@ -48,7 +51,11 @@ export async function saveSessionFileToNativeShareSheet(args: NativeSaveArgs): P
   const { Filesystem, Directory } = await import('@capacitor/filesystem');
   const { Share } = await import('@capacitor/share');
 
-  const response = await fetch(buildSessionFileDownloadUrl(workspaceId, sessionId, fileId), {
+  const chunks = args.encryption ? protectedAttachmentChunks({ ...args, encryption: args.encryption }) : undefined;
+  const response = chunks ? new Response(new ReadableStream({
+    async pull(controller) { try { const next = await chunks.next(); if (next.done) controller.close(); else controller.enqueue(next.value); } catch (error) { controller.error(error); } },
+    async cancel() { await chunks.return(undefined); },
+  })) : await fetch(buildSessionFileDownloadUrl(workspaceId, sessionId, fileId), {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!response.ok) {
@@ -60,7 +67,11 @@ export async function saveSessionFileToNativeShareSheet(args: NativeSaveArgs): P
   const safeName = sanitizeCacheFileName(fileName || fileId);
   const cachePath = `lody-shared/${fileId}/${safeName}`;
 
-  await writeResponseToCache({ response, Filesystem, Directory, cachePath });
+  try { await writeResponseToCache({ response, Filesystem, Directory, cachePath }); }
+  catch (error) {
+    await Filesystem.deleteFile({ path: cachePath, directory: Directory.Cache }).catch(() => {});
+    throw error;
+  }
 
   // Resolve the native file:// URI the share sheet needs.
   const { uri } = await Filesystem.getUri({ path: cachePath, directory: Directory.Cache });

@@ -19,21 +19,22 @@
   cache just to save. Ordinary Session config validation owns runtime support.
   No project is required (none = plain chat). No consent checkbox, directory-scope
   checkbox, full-access warning or resume dialog.
-- List is the page: no tabs or dialog. `routes/…/schedules.tsx` is a
-  layout route that mounts `SchedulesWorkspace` once (its index and `$scheduleId`
-  children render nothing), so opening a schedule animates instead of
-  remounting. On desktop it slides in beside the table (`ScheduleSplitView`,
-  under the list header via `renderBody`, so title/search/New never move; the
-  panel itself rises full height over the header's trailing end); the
-  table keeps every column, scrolling sideways; the boundary is a drag handle
-  (`scheduleSplitListWidthAtom`). A click on blank page space closes it
-  (`onBlankClick`; rows, controls, the panel and portalled popups excluded).
-  Mobile pushes a page. The header
-  (`ScheduleDetailToolbar`) is close plus compact icon actions; run history is
-  the panel's last section, under the editor (no second drawer). Top-of-pane headers join the Electron drag strip
-  (`useWindowDragRegionClass`) with buttons `WINDOW_DRAG_EXEMPT_CLASS`, or the
-  strip swallows their clicks. Saving and closing return to the full list. Hidden
-  desktop nav: PanelLeft expand at 96px on macOS Electron (Chat Landing/Archive).
+- List is the page. `routes/…/schedules.tsx` is a layout route that mounts
+  `SchedulesWorkspace` once (its index and `$scheduleId` children render
+  nothing). On desktop the open schedule is a 720px modal over the list
+  (`ScheduleDetailModal`); Escape, close and the backdrop return to the list.
+  Mobile pushes a page (`ScheduleDetailPage`) with a back button. Both use one
+  `ScheduleDetailFrame`: `ScheduleDetailHeader` (kind, name, status in words,
+  an enable `Switch` or Run for a manual task, a ⋯ menu with delete, close),
+  then Settings / Run history tabs; a scheduled message and a new schedule have
+  no tabs. The form's footer is sticky inside the modal body. Top-of-pane
+  headers join the Electron drag strip (`useWindowDragRegionClass`) with
+  buttons `WINDOW_DRAG_EXEMPT_CLASS`, or the strip swallows their clicks.
+  Hidden desktop nav: PanelLeft expand at 96px on macOS Electron.
+- Run history: a new chat per run lists Sessions with `SessionMeta.scheduleId`;
+  a schedule that posts into one chat leads with that chat and reads its runs
+  from it (`useScheduleChatRuns`: user turns whose `scheduleRun.scheduleId`
+  matches, via `readAll` only while the tab is open). Nothing new is stored.
 - The editor reuses the composer's parts: one box holds name, a hairline, the
   prompt and, along its bottom, the composer's own Agent controls
   (`ScheduleAgentControls` = `DesktopRunConfigMenu` + `DesktopPermissionModeButton`).
@@ -81,20 +82,23 @@
   rule, same gate, trigger on the target machine's clock.
 - Owner-only pause/delete stays possible when the machine is gone or outdated;
   create/edit/resume/run require the machine's protocol capability. Never fall
-  back to a different Agent. Run history is ordinary Sessions with sparse
-  `SessionMeta.scheduleId`.
-- List (`schedule-list.tsx`): one column template for header and rows; Name,
-  Frequency and Next run are resizable from the header (pointer, arrow keys,
-  double-click resets), persisted per device in `scheduleListColumnWidthsAtom`,
-  as `minmax(72px, width)` so a narrow panel still fits. The header cell must
-  not clip — the handle hangs into the gap. A manual row's button is Run
-  (`Play`); a timed row's is Pause/Resume (Resume is `RotateCcw`, never `Play`). Rows
-  have context menus (open, run, pause/resume, last run, delete). Run from the
-  list starts at once with a toast; delete always confirms. Cells align to their
-  first line; the target column names the machine; row actions are visible by
-  default and hidden only behind `[@media(hover:hover)]`.
+  back to a different Agent.
+- List (`schedule-list.tsx`): two sections, Scheduled tasks and Scheduled
+  messages. Only messages get an ⓘ popover (hover or click) saying they send
+  once; tasks need no explanation, and a second one only confused. Rows are name + summary (frequency · Agent · machine), destination (a
+  chat destination is a button that opens the chat) and status in words from
+  `describeScheduleState`; colour and a glyph mark only states that need a
+  look. No status pills or dots, no resizable columns. Project and status
+  filters and sort sit above the sections. Every row has a ⋯ menu and the same
+  context menu (open, run, pause/resume, open chat, last run, delete); delete
+  always confirms. The hover action is Run for a manual task, Pause/Resume
+  (`RotateCcw`, never `Play`) for a timed one, Delete for a finished message;
+  it is visible by default and hidden only behind `@media (hover: hover)`.
+  "Clear finished" deletes every finished scheduled message after one confirm.
+  Run from the list starts at once with a toast.
 - Chrome: every control is an `@lody/ui` primitive (Button, Input, Select,
-  Combobox, Tooltip, ContextMenu, Skeleton, `@/ui/dialog`); `className` carries
+  Combobox, Menu, Popover, Switch, Tabs, Tooltip, ContextMenu, Skeleton,
+  `@/ui/dialog`); `className` carries
   layout only. Cards are `scheduleCardProps()` (the settings `settingsCard`
   StyleX) inside `data-settings-surface`. Copy is `em` of `--ui-font-size`, two
   inks (`foreground`, `muted-foreground`), `font-normal` except the name.

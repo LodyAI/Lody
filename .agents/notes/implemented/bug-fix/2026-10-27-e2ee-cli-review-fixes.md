@@ -10,9 +10,10 @@ Translation: current
 A code review of the merged M2 CLI integration found paths where an encrypted
 workspace could be handled as plaintext or leak its owner. The local catalog now
 never caches a workspace whose content mode this client does not implement, so an
-offline daemon restart cannot open it as plaintext; `lody export` refuses encrypted
-workspaces and `lody sync` skips their schedule rooms, matching the restricted-feature
-contract. One-shot commands close an opened encrypted workspace when manager creation
+offline daemon restart cannot open it as plaintext. The initial export restriction
+has reached its owner-approved milestone: [local export](../../../../apps/cli/README.md#local-export)
+now reads the protected replica and writes decrypted files on this device. Export and
+sync still skip unsupported encrypted schedule rooms. One-shot commands close an opened encrypted workspace when manager creation
 fails, and the CLI E2EE cloud port validates history and mailbox replies with Zod
 instead of trusting or casting them. Two related findings that depend on the pending
 machine-pairing change are handed to that line rather than patched here.
@@ -24,9 +25,10 @@ machine-pairing change are handed to that line rather than patched here.
   for absent/`plaintext`/`e2ee` modes; an unknown mode drops the row (and any previous
   row for that id) so offline startup cannot pick it up. Online startup already
   rejects it with `workspace_mode_unsupported`.
-- **Export is a restricted feature.** `workspaceSupports(..., 'export')` gates both
-  `--workspace` (explicit refusal) and `--all-workspace` (skip with a visible notice).
-  No decrypted session content reaches disk through export until its E2EE milestone.
+- **Export is device-local.** The original refusal prevented an unverified path from
+  being enabled prematurely. The current exporter uses the protected workspace manager
+  and skips unsupported schedule rooms; it may write decrypted content to the user-selected
+  local directory. Desktop copy/image export also remains local.
 - **Sync keeps the protected replica and skips schedules.** Encrypted workspaces still
   sync meta, session and machine docs; the schedule registry and schedule rooms, which
   have no encrypted channel, are skipped rather than reported as failures.
