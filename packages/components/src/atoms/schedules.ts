@@ -9,6 +9,7 @@ export const scheduleRegistryAtom = atom<{
   runtimes: ScheduleRuntimeRow[];
   ready: boolean;
   error?: string;
+  retrying?: boolean;
 }>({ workspaceId: null, rows: [], runtimes: [], ready: false });
 
 /** Schedule list column widths the person dragged; `null` = defaults. Per device. */
@@ -22,3 +23,6 @@ export const scheduleSplitListWidthAtom = atomWithStorage<number | null>(
   'lody:scheduleSplitListWidth',
   null
 );
+
+/** Explicit retries are handled by the one workspace-shell subscription. */
+export const scheduleRegistryRetryAtom = atom(0);

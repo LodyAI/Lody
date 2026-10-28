@@ -351,7 +351,10 @@ export interface LoroDocumentManagerOptions {
   /** LoroDoc Streams cursors for this process; see `DocumentCursorScope`. */
   documentRemoteCursorStore?: RemoteCursorStore | null;
   remoteStreamsAttached?: boolean;
-  encryptedWorkspace?: Pick<CliE2eeWorkspaceLegacy, 'content' | 'bucketId' | 'refresh' | 'close'>;
+  encryptedWorkspace?: Pick<
+    CliE2eeWorkspaceLegacy,
+    'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory'
+  >;
   streamsTokens?: CloudStreamsTokenPort | null;
   cloudBilling?: CloudBillingPort | null;
   /** One-shot clients route history to the owner; daemons use installed local factories. */
@@ -401,7 +404,7 @@ export class LoroDocumentManager {
   private remoteTransportOpQueue: Promise<unknown> = Promise.resolve();
   private readonly encryptedWorkspace?: Pick<
     CliE2eeWorkspaceLegacy,
-    'content' | 'bucketId' | 'refresh' | 'close'
+    'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory'
   >;
   private readonly streamsTokens: CloudStreamsTokenPort | null;
   public readonly cloudBilling: CloudBillingPort | null;
@@ -437,7 +440,7 @@ export class LoroDocumentManager {
       documentCursorScope?: DocumentCursorScope;
       encryptedWorkspace?: Pick<
         CliE2eeWorkspaceLegacy,
-        'content' | 'bucketId' | 'refresh' | 'close'
+        'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory'
       >;
       streamsTokens?: CloudStreamsTokenPort | null;
       cloudBilling?: CloudBillingPort | null;
@@ -453,11 +456,18 @@ export class LoroDocumentManager {
     // the Streams token is fetched only when the remote bridge attaches later
     // (attachRemoteStreamsTransport), not eagerly here.
     installCliHttpGlobalDispatcher({ logger });
+    if (options.encryptedWorkspace && !options.encryptedWorkspace.repositoryDirectory)
+      throw new Error('e2ee_invalid_input');
     const cliSqliteRepoStore = await traceAsync(
       logger,
       'startup.loro_sqlite_store',
       { workspaceId },
-      async () => await createCliSqliteRepoStore(workspaceId, options.onStorageWriteFailure)
+      async () =>
+        await createCliSqliteRepoStore(
+          workspaceId,
+          options.onStorageWriteFailure,
+          options.encryptedWorkspace?.repositoryDirectory
+        )
     );
     const createRepoTimeoutMs = readTimeoutEnv('LODY_LORO_CREATE_REPO_TIMEOUT_MS', 30_000);
     const joinMetaTimeoutMs = readTimeoutEnv('LODY_LORO_JOIN_META_TIMEOUT_MS', 30_000);

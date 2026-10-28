@@ -2,7 +2,20 @@ import type { AgentConfigId, AgentConfigMeta, MachineId, MachineViewMeta } from 
 import { z } from 'zod';
 import type { AgentSelection } from '@/components/shared';
 
+const lastUsedProjectSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('none') }),
+  z.object({ kind: z.literal('github'), repoFullName: z.string().min(1) }),
+  z.object({
+    kind: z.literal('local'),
+    machineId: z.string().min(1),
+    localProjectId: z.string().min(1),
+  }),
+  z.object({ kind: z.literal('group'), projectId: z.string().min(1) }),
+]);
+
 export const chatLandingDefaultsSchema = z.object({
+  /** Accepted send target; browsing and draft selection must not overwrite it. */
+  lastUsedProject: lastUsedProjectSchema.optional().catch(undefined),
   agentId: z.string().nullable().optional(),
   machineId: z.string().nullable().optional(),
   repoFullName: z.string().nullable().optional(),
@@ -47,6 +60,16 @@ export function writeChatLandingDefaults(
   } catch {
     // ignore
   }
+}
+
+export function recordChatLandingProjectUse(
+  workspaceId: string,
+  project: NonNullable<ChatLandingDefaults['lastUsedProject']>
+) {
+  writeChatLandingDefaults(workspaceId, {
+    ...readChatLandingDefaults(workspaceId),
+    lastUsedProject: project,
+  });
 }
 
 export function getChatLandingAgentSelectionsForMachine(

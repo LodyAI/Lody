@@ -91,22 +91,27 @@ const DrawerOverlay = React.forwardRef<
 DrawerOverlay.displayName = 'DrawerOverlay';
 
 function DrawerContent({
+  skipOpenAnimation = false,
   className,
   children,
   style,
   ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Content>) {
+}: React.ComponentProps<typeof DrawerPrimitive.Content> & {
+  /** Suppress entrance for an in-place handoff; preserve drag/exit transitions. */
+  skipOpenAnimation?: boolean;
+}) {
   const viewportBottom = useDrawerViewportBottom();
   const [popupContainer, setPopupContainer] = React.useState<HTMLDivElement | null>(null);
   const mergedStyle = {
     '--lody-drawer-width': '256px',
     ...style,
+    ...(skipOpenAnimation ? { animationName: 'none' } : {}),
     ...(viewportBottom === undefined ? {} : { bottom: viewportBottom }),
   } as React.CSSProperties;
 
   return (
     <DrawerPortal data-slot="drawer-portal">
-      <DrawerOverlay />
+      <DrawerOverlay style={skipOpenAnimation ? { animationName: 'none' } : undefined} />
       <DrawerPrimitive.Content
         data-slot="drawer-content"
         className={cn(

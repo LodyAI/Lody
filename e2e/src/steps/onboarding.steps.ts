@@ -19,3 +19,15 @@ Then('真实产品会话输入界面可用', async function (this: LodyWorld) {
   await expect(this.harness!.page!.locator('#chat-prompt')).toBeEditable();
   await this.harness!.captureSnapshot();
 });
+
+When('未登录用户保留另一加密身份的清理标记后冷启动桌面', async function (this: LodyWorld) {
+  await this.onboarding!.retainOtherIdentityCleanup();
+  const root = this.harness!.getIsolatedRoot();
+  await this.harness!.close({ preserveRoot: true });
+  await this.launch({ reuseRoot: root, forceOnboarding: false });
+});
+
+Then('普通工作区可用且另一身份的清理标记和数据保持原样', async function (this: LodyWorld) {
+  await this.onboarding!.expectLocalColdStartPreservesOtherIdentity();
+  await this.harness!.captureSnapshot();
+});

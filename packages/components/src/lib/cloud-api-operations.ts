@@ -90,7 +90,8 @@ export interface SharingReviewReconcileResult extends SharingReviewState {
 }
 
 function capabilityForOperation(name: string): PlatformCapability {
-  if (name.startsWith('e2eeWorkspaces:')) return 'multiWorkspace';
+  if (name.startsWith('e2eeWorkspaces:') || name.startsWith('e2eeMembers:'))
+    return 'multiWorkspace';
   if (name.startsWith('promptShortcuts:')) return 'cloudAccount';
   if (name.startsWith('billing:') || name.startsWith('referrals:')) return 'billing';
   if (name.startsWith('usage:')) return 'usageAnalytics';
@@ -138,6 +139,13 @@ const action = <Reference extends FunctionReference<'action'>>(
  * public cloud client contract, never from generated server API declarations.
  */
 export const cloudOperations = {
+  e2eeMembers: {
+    workspaces: query<ConvexApi['e2eeMembers']['workspaces']>('e2eeMembers:workspaces'),
+    preview: definePublicCloudQuery<
+      import('@lody/cloud-api').E2eeMemberRequests['preview'],
+      import('@lody/cloud-api').E2eeMemberReplies['preview']
+    >('teamSharing', 'e2eeMembers:preview'),
+  },
   e2eeWorkspaces: {
     memberProfiles: query<ConvexApi['e2eeWorkspaces']['memberProfiles']>(
       'e2eeWorkspaces:memberProfiles'

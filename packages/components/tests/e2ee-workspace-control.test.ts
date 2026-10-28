@@ -93,7 +93,7 @@ function historyFixture(commitment = 6) {
     [7, 2, fill(32, 10), fill(72, 11)],
   ]);
   // A genuine Owner capability declaration that this client version cannot verify past.
-  const declaration = signed([hashRecordBytes(second).toBytes(), publicKey, [9, [1]]]);
+  const declaration = signed([hashRecordBytes(second).toBytes(), publicKey, [9, [2]]]);
   const checkpoint = { headHash: bytesToHex(hashRecordBytes(second).toBytes()), length: 2 };
   const firstPage: E2eeWorkspaceHistoryPage = {
     workspaceId: 'workspace-1',
@@ -437,6 +437,10 @@ describe('encrypted workspace recovery classification', () => {
 
   it('separates identity conflicts, rollbacks and invalid server history', () => {
     const fixture = historyFixture();
+    expect(classifyE2eeControlFailure(new Error('e2ee_conflict'))).toEqual({
+      kind: 'identity-conflict',
+      code: 'pin-mismatch',
+    });
     expect(
       failureOf(() =>
         appendLedgerHistory(null, fixture.firstPage, {

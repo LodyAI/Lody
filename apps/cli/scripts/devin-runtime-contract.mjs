@@ -19,7 +19,7 @@ export function devinRuntimeContractPlugin() {
         'utf8'
       );
       JSON.parse(manifest);
-      return { code: code.replace(expression, JSON.stringify(manifest)), map: null };
+      return { code: code.replaceAll(expression, JSON.stringify(manifest)), map: null };
     },
   };
 }

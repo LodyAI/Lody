@@ -754,3 +754,18 @@ export function getChatLandingSelectionSyncDecision({
   if (!armed) return 'arm';
   return selectionKey === urlKey ? 'skip' : 'sync';
 }
+
+export function compareUnifiedProjectOptions(
+  left: { label: string; value: string; lastUsedAt?: number },
+  right: { label: string; value: string; lastUsedAt?: number }
+): number {
+  if (left.lastUsedAt !== undefined && right.lastUsedAt !== undefined) {
+    if (left.lastUsedAt !== right.lastUsedAt) return right.lastUsedAt - left.lastUsedAt;
+  } else if (left.lastUsedAt !== undefined) {
+    return -1;
+  } else if (right.lastUsedAt !== undefined) {
+    return 1;
+  }
+  const labelComparison = left.label.localeCompare(right.label);
+  return labelComparison !== 0 ? labelComparison : left.value.localeCompare(right.value);
+}

@@ -1,3 +1,4 @@
+import { requireWorkspaceFeature, WorkspaceFeatureUnavailableError } from '@/lib/workspace-feature';
 import {
   requirePlaintextWorkspaceStreamsContent,
   type WorkspaceStreamsContent,
@@ -31,6 +32,7 @@ import {
   rpcDeliveredTurnsAtom,
 } from '@/atoms/session-dispatch-delivery';
 import { desktopWindowId } from '@/lib/desktop-window';
+import { encryptedLocalNamespace, type E2eeLocalDataIdentity } from '../lib/e2ee-local-data';
 import { navigationSidebarHiddenAtom } from '@/atoms/layout-state';
 import {
   getMachineRoomId,
@@ -202,13 +204,20 @@ export type WorkspaceRuntimeAnalyticsEvent = {
 
 export function resolveWorkspaceRuntimeCacheIdentity(
   workspaceId: WorkspaceId,
-  windowId: string
+  windowId: string,
+  identity?: E2eeLocalDataIdentity
 ): {
   namespace: string;
   repoDbName: string;
   remoteCursorDbName: string;
 } {
-  const namespace = windowId ? `${workspaceId}:${windowId}` : workspaceId;
+  if (identity && identity.workspaceId !== workspaceId)
+    throw new Error('e2ee_local_identity_mismatch');
+  const namespace = identity
+    ? encryptedLocalNamespace({ ...identity, windowId })
+    : windowId
+      ? `${workspaceId}:${windowId}`
+      : workspaceId;
   return {
     namespace,
     repoDbName: `lody-loro-repo-db-${namespace}`,
@@ -223,6 +232,7 @@ export type WorkspaceE2eeTransport = {
 type RuntimeDeps = {
   content: WorkspaceStreamsContent;
   e2ee?: WorkspaceE2eeTransport;
+  e2eeLocalIdentity?: E2eeLocalDataIdentity;
   /** Cancels an initialization retired by the provider before publication. */
   signal?: AbortSignal;
   accountId?: string | null;
@@ -473,7 +483,16 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   deps.signal?.throwIfAborted();
   const protectedContent = deps.content.mode === 'protected';
   if (protectedContent && !deps.e2ee) throw new Error('e2ee_transport_unavailable');
-  const cacheIdentity = resolveWorkspaceRuntimeCacheIdentity(deps.workspaceId, desktopWindowId());
+  if (
+    protectedContent &&
+    (!deps.e2eeLocalIdentity || deps.e2eeLocalIdentity.accountId !== deps.accountId)
+  )
+    throw new Error('e2ee_local_identity_required');
+  const cacheIdentity = resolveWorkspaceRuntimeCacheIdentity(
+    deps.workspaceId,
+    desktopWindowId(),
+    protectedContent ? deps.e2eeLocalIdentity : undefined
+  );
   const createDeferred = <T>() => {
     let resolve: ((value: T | PromiseLike<T>) => void) | undefined;
     let reject: ((reason?: unknown) => void) | undefined;
@@ -1764,7 +1783,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     provider: LoroStreamsTokenProviderLegacy,
     streamsBaseUrl: string
   ): LoroStreamsJsonStreamClient => {
-    if (protectedContent) throw new Error('e2ee_rpc_unavailable');
+    requireWorkspaceFeature({ mode: protectedContent ? 'protected' : 'plaintext' }, 'rpc');
     if (!jsonStreamClient) {
       jsonStreamClient = createLoroStreamsJsonStreamClient({
         bucketId: LORO_STREAMS_BUCKET_ID,
@@ -1831,7 +1850,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const getMachineRpcClient = async (
     machineId: MachineId
   ): Promise<LoroStreamsMachineRpcClient> => {
-    if (protectedContent) throw new Error('e2ee_rpc_unavailable');
+    requireWorkspaceFeature({ mode: protectedContent ? 'protected' : 'plaintext' }, 'rpc');
     const streamClient = await waitForMachineRpcTransportReady();
     const responseDispatcher = getMachineRpcResponseDispatcher(streamClient);
 
@@ -4789,7 +4808,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const createPreviewVisualCommentStore = async (
     sessionId: SessionId
   ): Promise<PreviewVisualCommentDocStore> => {
-    if (protectedContent) throw new Error('e2ee_feature_unavailable');
+    requireWorkspaceFeature(
+      { mode: protectedContent ? 'protected' : 'plaintext' },
+      'preview-comments'
+    );
     const roomId = getPreviewCommentRoomId(sessionId);
     const persistedDoc = await repo.openPersistedDoc(roomId);
 
@@ -4883,7 +4905,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     releaseDelayMs: STORE_RELEASE_DELAY_MS,
     unload: (id) => repo.unloadDoc(getScheduleRoomId(id)),
     create: async (id) => {
-      if (protectedContent) throw new Error('e2ee_feature_unavailable');
+      requireWorkspaceFeature({ mode: protectedContent ? 'protected' : 'plaintext' }, 'schedules');
       const roomId = getScheduleRoomId(id);
       const handle = await repo.openPersistedDoc(roomId);
       const mirror = new Mirror({
@@ -5435,7 +5457,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const codeCollabFileIndexCache = protectedContent
     ? {
         acquire: async () => {
-          throw new Error('e2ee_feature_unavailable');
+          throw new WorkspaceFeatureUnavailableError('code-collab-index');
         },
         dispose: async () => {},
       }
@@ -5453,6 +5475,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       ),
     accountId: deps.accountId ?? `local:${workspaceId}`,
     workspaceId,
+    ...(protectedContent ? { localIdentity: deps.e2eeLocalIdentity } : {}),
     paused: !initialMetaSyncCompleted,
     runtime: {
       repo,

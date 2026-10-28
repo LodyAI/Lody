@@ -1,9 +1,11 @@
-import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
+import { WorkspaceFeatureReasonText } from '@/components/workspace-feature-notice';
+import { useWorkspaceFeatureReason } from '@/hooks/use-workspace-feature';
 import { useState } from 'react';
 import { Clock, ChevronLeft, ChevronRight, Paperclip, Plug, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { describeMcpConnection, type McpServerId, type WorkspaceMcpServerMeta } from '@lody/shared';
 import { Button } from '@lody/ui/button';
+import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { Menu } from '@/ui/menu';
 import { MCP_TRANSPORT_LABELS } from '@/components/shared/mcp-transport';
@@ -24,6 +26,7 @@ export interface AttachmentAddMenuProps {
   isMobile: boolean;
   /** Smaller trigger for the landing composer variant. */
   isLanding?: boolean;
+  isSheet?: boolean;
   /** Disables the whole trigger (e.g. the prompt is disabled). */
   disabled?: boolean;
   /** Omit the callback to hide the attachment item entirely. The picker is
@@ -53,17 +56,16 @@ export interface AttachmentAddMenuProps {
 export function AttachmentAddMenu({
   isMobile,
   isLanding,
+  isSheet,
   disabled,
-  onAddAttachment: requestedAddAttachment,
+  onAddAttachment,
   attachmentDisabled,
-  onScheduleSend: requestedScheduleSend,
+  onScheduleSend,
   scheduleDisabledReason,
   mcp,
 }: AttachmentAddMenuProps) {
-  const schedulesAllowed = useWorkspaceFeature('schedules');
-  const onScheduleSend = schedulesAllowed ? requestedScheduleSend : undefined;
-  const attachmentAllowed = useWorkspaceFeature('attachments');
-  const onAddAttachment = attachmentAllowed ? requestedAddAttachment : undefined;
+  const scheduleFeatureReason = useWorkspaceFeatureReason('schedules');
+  const attachmentFeatureReason = useWorkspaceFeatureReason('attachments');
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   // Mobile's pushed panel. Desktop uses a real submenu and stays on 'root'.
@@ -86,6 +88,38 @@ export function AttachmentAddMenu({
       ? t('session.mcp.loadCount', { count: selectedCount })
       : t('session.mcp.loadNone');
 
+  const scheduleDisabled = Boolean(scheduleFeatureReason || scheduleDisabledReason);
+  const scheduleItem = onScheduleSend ? (
+    <Menu.Item
+      icon={Clock}
+      onClick={onScheduleSend}
+      disabled={scheduleDisabled}
+      className={itemClass}
+    >
+      {scheduleFeatureReason ? (
+        <WorkspaceFeatureReasonText reason={scheduleFeatureReason} />
+      ) : (
+        t('scheduledMessage.menu')
+      )}
+    </Menu.Item>
+  ) : null;
+
+  // A disabled menu row does not receive pointer events, so a `title` on it can
+  // never show. Keep the row disabled and put the hover target on a wrapper that
+  // owns the same box; the tooltip then explains the state without making the
+  // command clickable.
+  const scheduleEntry =
+    scheduleItem && scheduleDisabled && !scheduleFeatureReason ? (
+      <Tooltip.Root>
+        <Tooltip.Trigger delay={0} render={<div />}>
+          {scheduleItem}
+        </Tooltip.Trigger>
+        <Tooltip.Content side="right">{scheduleDisabledReason}</Tooltip.Content>
+      </Tooltip.Root>
+    ) : (
+      scheduleItem
+    );
+
   return (
     <Menu.Root
       open={open}
@@ -106,6 +140,7 @@ export function AttachmentAddMenu({
             aria-label={triggerLabel}
             className={cn(
               triggerSize,
+              isSheet && 'rounded-full bg-muted/55 text-foreground/80 dark:bg-input/80',
               // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
               // `bg-accent`/`bg-muted`) because those equal the background in the
               // dark theme and paint nothing.
@@ -124,6 +159,7 @@ export function AttachmentAddMenu({
           aria-label={triggerLabel}
           className={cn(
             triggerSize,
+            isSheet && 'rounded-full bg-muted/55 text-foreground/80 dark:bg-input/80',
             // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
             // `bg-accent`/`bg-muted`) because those equal the background in the
             // dark theme and paint nothing.
@@ -166,24 +202,19 @@ export function AttachmentAddMenu({
             {onAddAttachment ? (
               <Menu.Item
                 onClick={onAddAttachment}
-                disabled={attachmentDisabled}
+                disabled={attachmentDisabled || !!attachmentFeatureReason}
+                title={attachmentFeatureReason}
                 className={itemClass}
                 icon={Paperclip}
               >
-                {triggerLabel}
+                {attachmentFeatureReason ? (
+                  <WorkspaceFeatureReasonText reason={attachmentFeatureReason} />
+                ) : (
+                  triggerLabel
+                )}
               </Menu.Item>
             ) : null}
-            {onScheduleSend ? (
-              <Menu.Item
-                icon={Clock}
-                onClick={onScheduleSend}
-                disabled={!!scheduleDisabledReason}
-                title={scheduleDisabledReason}
-                className={itemClass}
-              >
-                {t('scheduledMessage.menu')}
-              </Menu.Item>
-            ) : null}
+            {scheduleEntry}
             {hasMcp && mcp ? (
               <>
                 {onAddAttachment ? <Menu.Separator /> : null}

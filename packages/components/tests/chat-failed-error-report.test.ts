@@ -1,3 +1,4 @@
+import { getChatFailedDiagnosticCopy } from '../src/components/ai-gui/chat-failed-diagnostic-copy';
 import { describe, expect, it } from 'vitest';
 import {
   buildChatFailedErrorReport,
@@ -133,5 +134,36 @@ describe('buildChatFailedErrorReport', () => {
       `Error details: 启动失败\nReason: turn_pre_prompt_failed\nSession: session-test\n\n${message}`
     );
     expect(() => new URL(report)).toThrow(TypeError);
+  });
+});
+
+describe('DeepSeek Node failure presentation', () => {
+  it.each([
+    ['DSH_NODE_NOT_FOUND', 'needs Node.js on the target machine'],
+    ['DSH_NODE_UNSUPPORTED', 'needs a supported standalone Node.js version'],
+    ['DSH_NODE_EXEC_FAILED', 'could not run Node.js on the target machine'],
+  ])(
+    'presents an actionable diagnostic for %s through the startup failure message',
+    (code, title) => {
+      const message = `Starting the agent failed: [${code}] synthetic runtime failure`;
+      const diagnostic = getChatFailedDiagnosticCopy(undefined, message);
+      expect(diagnostic?.title).toContain(title);
+      if (!diagnostic) throw new Error('Expected a Node diagnostic');
+      const detail = buildChatFailedNoticeDetail({
+        title: diagnostic.title,
+        action: diagnostic.action,
+        message,
+      });
+      expect(detail).toContain('machine running this Agent');
+      expect(detail).toContain('https://nodejs.org/en/download');
+      expect(detail).toContain(message);
+    }
+  );
+
+  it('keeps unrelated failures and Git diagnostics unchanged', () => {
+    expect(getChatFailedDiagnosticCopy(undefined, 'ACP connection closed')).toBeNull();
+    expect(getChatFailedDiagnosticCopy('git_executable_not_found')?.title).toContain(
+      'Git executable'
+    );
   });
 });

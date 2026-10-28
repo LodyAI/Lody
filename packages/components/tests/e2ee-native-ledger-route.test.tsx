@@ -1,3 +1,4 @@
+vi.mock('@/lib/desktop-window', () => ({ desktopWindowId: () => '' }));
 // @vitest-environment jsdom
 import { act, createElement, Fragment, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -53,7 +54,7 @@ vi.mock('@/components/pages/e2ee-workspace-control-page', () => ({
       null,
       createElement(
         'p',
-        null,
+        { 'data-control-state': true },
         failure
           ? 'failed'
           : history?.upgradeRequiredAt !== undefined
@@ -64,6 +65,8 @@ vi.mock('@/components/pages/e2ee-workspace-control-page', () => ({
       children
     ),
 }));
+vi.mock('@/components/settings/e2ee-team-settings', () => ({ E2eeTeamSettingsHost: () => null }));
+vi.mock('@/components/e2ee/email-admission-worker', () => ({ EmailAdmissionWorker: () => null }));
 vi.mock('@/components/pages/e2ee-personal-pairing', () => ({
   E2eePersonalPairing: ({ workspaceId }: { workspaceId: string }) =>
     fixture.showTools ? createElement('aside', { 'data-pairing': workspaceId }) : null,
@@ -133,67 +136,76 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
 });
-it('shows local verified state before network and resumes history from its saved position', async () => {
-  const description =
-    Promise.withResolvers<Awaited<ReturnType<PlatformE2eeWorkspaces['describe']>>>();
-  const entered = Promise.withResolvers<void>();
-  const reads: unknown[] = [];
-  const leases = new Set<string>();
-  fixture.port = {
-    create: async () => {
-      throw new Error('unused');
-    },
-    describe: async () => {
-      entered.resolve();
-      return description.promise;
-    },
-    history: async (request) => {
-      reads.push(request);
-      return {
-        workspaceId,
-        genesisHash,
-        checkpoint: { headHash: genesisHash, length: 1 },
-        startIndex: 1,
-        recordsHex: [],
-        position: local.status.position!,
-        nextCursor: null,
-      };
-    },
-    runtime: {
-      recordCreated: async () => {},
-      open: async (id) => {
-        leases.add(id);
-        return local.status;
+it.each([false, true])(
+  'shows local verified state before network, including damaged renderer markers (%s)',
+  async (damaged) => {
+    if (damaged) {
+      localStorage.setItem(`lody-e2ee-genesis-pin:account:${workspaceId}`, 'broken pin');
+      localStorage.setItem(`lody-e2ee-known-mode:account:${workspaceId}`, 'broken marker');
+    }
+    const description =
+      Promise.withResolvers<Awaited<ReturnType<PlatformE2eeWorkspaces['describe']>>>();
+    const entered = Promise.withResolvers<void>();
+    const reads: unknown[] = [];
+    const leases = new Set<string>();
+    fixture.port = {
+      create: async () => {
+        throw new Error('unused');
       },
-      close: async (id) => {
-        leases.delete(id);
+      describe: async () => {
+        entered.resolve();
+        return description.promise;
       },
-      status: async () => local.status,
-      ledgerView: async () => local,
-      ingestLedgerRecords: async () => local.status,
-    },
-  };
-  const Component = Route.options.component as () => ReturnType<typeof createElement>;
-  await act(async () => {
-    root.render(createElement(Component));
-  });
-  await entered.promise;
-  expect(container.textContent).toBe('1');
-  expect(reads).toEqual([]);
-  await act(async () => {
-    description.resolve({
-      workspaceId,
-      contentMode: 'e2ee',
-      contentModeVersion: 1,
-      genesisHash,
-      cryptoOrgId: genesisHash,
-      activation: 'control-only',
+      history: async (request) => {
+        reads.push(request);
+        return {
+          workspaceId,
+          genesisHash,
+          checkpoint: { headHash: genesisHash, length: 1 },
+          startIndex: 1,
+          recordsHex: [],
+          position: local.status.position!,
+          nextCursor: null,
+        };
+      },
+      runtime: {
+        account: async () => ({ userId: 'account', source: 'offline' }),
+        recordCreated: async () => {},
+        open: async (id) => {
+          leases.add(id);
+          return local.status;
+        },
+        close: async (id) => {
+          leases.delete(id);
+        },
+        readIdentity: async () => ({ workspaceId, genesisHash }),
+        status: async () => local.status,
+        ledgerView: async () => local,
+        ingestLedgerRecords: async () => local.status,
+      },
+    };
+    const Component = Route.options.component as () => ReturnType<typeof createElement>;
+    await act(async () => {
+      root.render(createElement(Component));
     });
-  });
-  expect(reads).toEqual([{ workspaceId, after: local.status.position }]);
-  await act(async () => root.unmount());
-  expect(leases.size).toBe(0);
-});
+    await entered.promise;
+    expect(container.textContent).toBe('1');
+    expect(reads).toEqual([]);
+    await act(async () => {
+      description.resolve({
+        workspaceId,
+        contentMode: 'e2ee',
+        contentModeVersion: 1,
+        genesisHash,
+        cryptoOrgId: genesisHash,
+        activation: 'control-only',
+      });
+    });
+    expect(reads).toEqual([{ workspaceId, after: local.status.position }]);
+    await act(async () => root.unmount());
+    expect(leases.size).toBe(0);
+  }
+);
 
 for (const upgrade of [false, true]) {
   it(`publishes only the completed view or a mid-page upgrade (${upgrade})`, async () => {
@@ -334,7 +346,13 @@ it.each([
       'missing-binding',
       'closed',
     ].includes(code);
-    expect(container.textContent).toBe(availability && !mismatch ? '1' : 'failed');
+    expect(container.querySelector('[data-control-state]')?.textContent).toBe(
+      availability && !mismatch ? '1' : 'failed'
+    );
+    if (!mismatch && ['custody_unavailable', 'missing-binding', 'corrupt'].includes(code))
+      expect(container.textContent).toContain(
+        code === 'custody_unavailable' ? 'e2ee.identity.lockedTitle' : 'e2ee.identity.lostTitle'
+      );
     expect(fetched).toEqual(availability ? ['describe'] : []);
   }
 );

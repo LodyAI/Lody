@@ -11,6 +11,7 @@ import { currentWorkspaceIdAtom } from '../src/atoms';
 import { authTokenAtom, runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import type { PendingSessionSend } from '../src/lib/session-pending-sends';
 import { initI18n } from '../src/i18n';
+import { ForceMobileLayoutProvider } from '../src/hooks/use-mobile';
 
 // Each variant resolves to a distinct URL so the test can tell the row's
 // thumbnail from the full-size image the preview loads.
@@ -73,6 +74,46 @@ describe('queued message editing commits', () => {
     }
     container?.remove();
     container = undefined;
+  });
+
+  it('keeps mobile steer available for the queue head', async () => {
+    const steered: string[] = [];
+    await act(async () => {
+      root?.render(
+        createElement(
+          ForceMobileLayoutProvider,
+          { force: true },
+          createElement(MessageQueueDisplay, {
+            sessionId: 'session-test' as SessionId,
+            items: [makeItem()],
+            roomy: true,
+            showSteerAction: true,
+            onRemove: () => {},
+            onReorder: () => {},
+            onEditStart: () => {},
+            onEditCancel: () => {},
+            onEditSave: () => {},
+            onSteer: (item: MessageQueueItem) => {
+              steered.push(item.$cid);
+            },
+          })
+        )
+      );
+    });
+    const trigger = container!.querySelector<HTMLButtonElement>('.group\\/row button')!;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+      trigger.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0 }));
+      trigger.click();
+    });
+    const steer = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (item) => item.textContent?.trim() === 'Steer'
+    );
+    expect(steer).toBeDefined();
+    await act(async () => {
+      steer!.click();
+    });
+    expect(steered).toEqual(['cid-0']);
   });
 
   it('keeps scheduled messages after ordinary rows, re-sorts time edits, and excludes them from dragging', async () => {

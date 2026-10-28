@@ -1,5 +1,10 @@
 import {
   LOCAL_E2EE_PAIRING_PATH,
+  LOCAL_E2EE_RESET_PATH,
+  LocalE2eeResetResponseSchema,
+  LocalE2eeRecoveryFailureSchema,
+  type LocalE2eeResetRequest,
+  type LocalE2eeResetResponse,
   LocalE2eePrepareReplySchema,
   LocalE2eeActivateResponseSchema,
   type LocalE2eePrepareRequest,
@@ -181,6 +186,10 @@ export type LocalProbeClientService = {
 };
 
 export type LocalControlClientService = {
+  e2eeReset: (
+    message: LocalE2eeResetRequest,
+    options?: LocalIpcRequestOptions
+  ) => Effect.Effect<LocalE2eeResetResponse, IpcError>;
   e2eePrepare: (
     message: LocalE2eePrepareRequest,
     options?: LocalIpcRequestOptions
@@ -950,6 +959,19 @@ function makeControlClient(
   postSessionControl?: PostSessionControlFn
 ): LocalControlClientService {
   return {
+    e2eeReset: (message, options) =>
+      Effect.flatMap(
+        post(
+          LOCAL_E2EE_RESET_PATH,
+          message,
+          options?.timeoutMs ?? DEFAULT_LOCAL_CONTROL_TIMEOUT_MS
+        ),
+        ({ response, payload }) =>
+          parseJsonBody<LocalE2eeResetResponse>(
+            LocalE2eeResetResponseSchema,
+            () => 'e2ee_reset_unavailable'
+          )(response, payload)
+      ),
     e2eePrepare: (message, options) =>
       Effect.flatMap(
         post(
@@ -958,10 +980,10 @@ function makeControlClient(
           options?.timeoutMs ?? DEFAULT_LOCAL_CONTROL_TIMEOUT_MS
         ),
         ({ response, payload }) =>
-          parseJsonBody<LocalE2eePrepareReply>(
-            LocalE2eePrepareReplySchema,
-            () => 'e2ee_pairing_unavailable'
-          )(response, payload)
+          parseJsonBody<LocalE2eePrepareReply>(LocalE2eePrepareReplySchema, () => {
+            const safe = LocalE2eeRecoveryFailureSchema.safeParse(payload);
+            return safe.success ? safe.data.error : 'e2ee_pairing_unavailable';
+          })(response, payload)
       ),
     e2eeActivate: (message, options) =>
       Effect.flatMap(
@@ -971,10 +993,10 @@ function makeControlClient(
           options?.timeoutMs ?? DEFAULT_LOCAL_CONTROL_TIMEOUT_MS
         ),
         ({ response, payload }) =>
-          parseJsonBody<LocalE2eeActivateResponse>(
-            LocalE2eeActivateResponseSchema,
-            () => 'e2ee_pairing_unavailable'
-          )(response, payload)
+          parseJsonBody<LocalE2eeActivateResponse>(LocalE2eeActivateResponseSchema, () => {
+            const safe = LocalE2eeRecoveryFailureSchema.safeParse(payload);
+            return safe.success ? safe.data.error : 'e2ee_pairing_unavailable';
+          })(response, payload)
       ),
     sessionControl: (message, requestOptions) =>
       postSessionControl

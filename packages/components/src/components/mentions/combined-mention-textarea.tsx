@@ -114,6 +114,7 @@ function TwoLevelMentionMenu({
   menuSide,
   menuAnchor,
   menuMobileDocked,
+  mobilePanelPlacement,
 }: {
   fileData: MentionFileDataState;
   fileSourceKind: MentionFileSourceKind;
@@ -137,6 +138,7 @@ function TwoLevelMentionMenu({
   enableAgentRoleMentions: boolean;
   agentRoleItems: readonly AgentRoleMentionItem[];
   surface: MentionSurface;
+  mobilePanelPlacement?: 'above-composer' | 'bottom';
   templateScope?: PromptShortcutScope;
   promptShortcutSource?: MentionCategorySources['promptShortcut'];
   menuSide?: 'top' | 'bottom';
@@ -455,6 +457,7 @@ function TwoLevelMentionMenu({
       menuSide={menuSide}
       anchor={menuAnchor}
       mobileDocked={menuMobileDocked}
+      mobilePanelPlacement={mobilePanelPlacement}
     />
   );
 }
@@ -711,6 +714,10 @@ export interface CombinedMentionTextareaProps extends Omit<
   value: string;
   onValueChange: (value: string) => void;
   containerClassName?: string;
+  /** Let the input fill a flex-column parent (the full-height chat sheet). */
+  fillHeight?: boolean;
+  /** Full-height composers dock the mobile mention panel above their footer. */
+  mentionPanelPlacement?: 'above-composer' | 'bottom';
   mentionValues?: string[];
   onMentionValuesChange?: (values: string[]) => void;
   label?: string;
@@ -790,6 +797,8 @@ export const CombinedMentionTextarea = React.forwardRef<
       draftKey,
       mentionActionsRef,
       className,
+      fillHeight = false,
+      mentionPanelPlacement,
       ...props
     },
     ref
@@ -1055,7 +1064,7 @@ export const CombinedMentionTextarea = React.forwardRef<
           onChange={(event) => {
             onValueChange(event.target.value);
           }}
-          className={cn('resize-none', className)}
+          className={cn('resize-none', fillHeight && 'min-h-0 flex-1', className)}
           aria-label={props['aria-label'] ?? label}
           {...props}
         />
@@ -1086,7 +1095,7 @@ export const CombinedMentionTextarea = React.forwardRef<
         onFilter={(options) => options}
         autoCloseOnEmpty={false}
         loop
-        className="w-full"
+        className={cn('w-full', fillHeight && 'min-h-0 flex-1')}
       >
         <React.Fragment key={hydrationKey}>
           <FileMentionHydrator
@@ -1140,8 +1149,8 @@ export const CombinedMentionTextarea = React.forwardRef<
           // See the data attribute note above — scopes the ⇧Tab mode cycle.
           data-lody-composer-input=""
           value={value}
-          containerClassName={containerClassName}
-          className={cn('resize-none', className)}
+          containerClassName={cn(containerClassName, fillHeight && 'h-full')}
+          className={cn('resize-none', fillHeight && 'h-full', className)}
           {...props}
         />
         <TwoLevelMentionMenu
@@ -1171,6 +1180,7 @@ export const CombinedMentionTextarea = React.forwardRef<
           menuSide={menuSide}
           menuAnchor={menuAnchor}
           menuMobileDocked={menuMobileDocked}
+          mobilePanelPlacement={mentionPanelPlacement}
         />
       </Mention>
     );

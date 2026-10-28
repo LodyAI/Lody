@@ -920,3 +920,355 @@ for (const imeSignal of [{ isComposing: true }, { keyCode: 229 }, { which: 229 }
     await expect(input).toHaveValue('保留现有接口，先修改队列编辑。');
   });
 }
+
+test.describe('mobile first-send continuity', () => {
+  for (const scenario of [
+    { theme: 'light', width: 390, height: 844, keyboard: 0 },
+    { theme: 'dark', width: 390, height: 844, keyboard: 0 },
+    { theme: 'dark', width: 320, height: 568, keyboard: 0 },
+    { theme: 'light', width: 430, height: 932, keyboard: 0 },
+    { theme: 'dark', width: 390, height: 844, keyboard: 300 },
+  ]) {
+    test(`${scenario.theme} ${scenario.width}px keyboard ${scenario.keyboard}px replaces in place`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(scenario);
+      await page.goto(
+        `/iframe.html?id=mobile-newchattransition--send-in-place&viewMode=story&globals=theme:${scenario.theme}`
+      );
+      const composer = page.locator('[class~="@container/composer-box"]');
+      const send = page.getByRole('button', { name: 'Send', exact: true });
+      await expect(send).toBeEnabled({ timeout: 15000 });
+      if (scenario.keyboard) {
+        await page.evaluate(
+          (height) =>
+            document.documentElement.style.setProperty('--native-keyboard-height', `${height}px`),
+          scenario.keyboard
+        );
+        await expect
+          .poll(async () => {
+            const box = await composer.boundingBox();
+            return box ? box.y + box.height : 0;
+          })
+          .toBe(scenario.height - scenario.keyboard - 8);
+      }
+      const before = await composer.boundingBox();
+      const model = page.getByRole('button', { name: 'Run configuration', exact: true });
+      const modelLabel = await model.innerText();
+      // Observe real surfaces through routing and 45 frames of the new page.
+      const samples = page.evaluate(
+        () =>
+          new Promise<Array<{ boxes: number[][]; transform: string; animations: number }>>(
+            (resolve) => {
+              const result: Array<{ boxes: number[][]; transform: string; animations: number }> =
+                [];
+              let sentFrames = 0;
+              const sample = () => {
+                const drawer = document.querySelector('[data-vaul-drawer]');
+                result.push({
+                  boxes: Array.from(
+                    document.querySelectorAll('[class~="@container/composer-box"]'),
+                    (element) => {
+                      const box = element.getBoundingClientRect();
+                      return [box.x, box.y, box.width, box.height];
+                    }
+                  ),
+                  transform: drawer ? getComputedStyle(drawer).transform : 'none',
+                  animations: drawer
+                    ? drawer
+                        .getAnimations()
+                        .filter((animation) => animation.playState === 'running').length
+                    : 0,
+                });
+                if (drawer && ++sentFrames >= 45) resolve(result);
+                else requestAnimationFrame(sample);
+              };
+              requestAnimationFrame(sample);
+            }
+          )
+      );
+      await send.click();
+      await expect(page.getByText('请检查移动端发送消息的布局。', { exact: true })).toBeVisible();
+      await expect(composer).toHaveCount(1);
+      expect(await composer.boundingBox()).toEqual(before);
+      expect(await model.innerText()).toBe(modelLabel);
+      await expect(model).toHaveCSS('font-weight', '400');
+      for (const frame of await samples) {
+        expect(frame.boxes).toEqual([[before!.x, before!.y, before!.width, before!.height]]);
+        expect(['none', 'matrix(1, 0, 0, 1, 0, 0)']).toContain(frame.transform);
+        expect(frame.animations).toBe(0);
+      }
+    });
+  }
+});
+
+test('mobile project choices mix sources by recency and render their icons', async ({ page }) => {
+  await page.route('https://avatars.githubusercontent.com/**', (route) => route.abort());
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(
+    '/iframe.html?id=mobile-mobilenewchatsheet--inline-page-review-story&viewMode=story'
+  );
+  await page.getByRole('button', { name: 'Project', exact: true }).click();
+  const list = page.getByRole('listbox', { name: 'Project', exact: true });
+  await expect(list).toBeVisible();
+  const names = async () =>
+    (await list.getByRole('option').allInnerTexts()).map((text) => text.split('\n')[0]);
+  await expect
+    .poll(names)
+    .toEqual([
+      'No project selected',
+      'blog',
+      'loro-dev/lody',
+      'Loro stack',
+      'lody',
+      'loro-dev/loro',
+      'docs',
+      'loro-dev/lody-web',
+    ]);
+  for (const option of await list.getByRole('option').all())
+    await expect(option.locator('button > span').first().locator('svg')).toHaveCount(1);
+  await expect(list.getByText('High-performance CRDT framework', { exact: true })).toHaveCount(0);
+  await expect(
+    list.getByRole('option').filter({ hasText: 'loro-dev/loro' }).locator('svg.lucide-github')
+  ).toHaveCount(1);
+  await page.getByRole('textbox', { name: 'Search projects', exact: true }).fill('loro');
+  await expect
+    .poll(names)
+    .toEqual(['loro-dev/lody', 'Loro stack', 'loro-dev/loro', 'loro-dev/lody-web']);
+  await page.getByRole('textbox', { name: 'Search projects', exact: true }).fill('');
+  await list.getByRole('button', { name: 'No project selected', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Project', exact: true })).toHaveText(
+    'No project selected'
+  );
+});
+
+test('mobile GitHub projects show owner avatars after loading with a GitHub fallback meanwhile', async ({
+  page,
+}) => {
+  let release!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route('https://avatars.githubusercontent.com/**', async (route) => {
+    await ready;
+    await route.fulfill({
+      contentType: 'image/svg+xml',
+      headers: { 'Access-Control-Allow-Origin': '*' },
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#318080"/></svg>',
+    });
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(
+    '/iframe.html?id=mobile-mobilenewchatsheet--inline-page-review-story&viewMode=story'
+  );
+  const project = page.getByRole('button', { name: 'Project', exact: true });
+  await expect(project.locator('svg.lucide-github')).toBeVisible();
+  release();
+  await expect(project.locator('img')).toBeVisible();
+  await expect(project.locator('img')).toHaveCSS('opacity', '1');
+  await expect(project.locator('svg.lucide-github')).toHaveCount(0);
+  await project.click();
+  const repo = page.getByRole('option').filter({ hasText: 'loro-dev/loro' });
+  await expect(repo.locator('img')).toHaveAttribute(
+    'src',
+    /^(blob:|https:\/\/avatars\.githubusercontent\.com\/loro-dev\?size=80)/
+  );
+  await expect(repo.locator('img')).toHaveCSS('opacity', '1');
+  await expect(repo.locator('svg.lucide-github')).toHaveCount(0);
+});
+
+test('mobile send retains its page through delayed presentation and later URL corrections', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(
+    '/iframe.html?id=mobile-newchattransition--deferred-send-in-place&viewMode=story&globals=theme:dark'
+  );
+  const composer = page.locator('[class~="@container/composer-box"]');
+  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
+  const before = await composer.boundingBox();
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  // Let Vaul's first-frame shortcut expire before the real surface can mount.
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  );
+  await expect(page.getByRole('button', { name: 'Project', exact: true })).toBeVisible();
+  await expect(page.locator('[data-vaul-drawer]')).toHaveCount(0);
+  expect(await composer.boundingBox()).toEqual(before);
+  await page.evaluate(() => window.dispatchEvent(new Event('storybook:session-ready')));
+  await expect(page.getByText('请检查移动端发送消息的布局。', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Project', exact: true })).toHaveCount(0);
+  const drawer = page.locator('[data-vaul-drawer]');
+  await expect(drawer).toHaveCSS('animation-name', 'none');
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  );
+  await page.evaluate(() => window.dispatchEvent(new Event('storybook:normalize-session-url')));
+  for (let frame = 0; frame < 45; frame++) {
+    const geometry = await drawer.evaluate((element) => ({
+      transform: getComputedStyle(element).transform,
+      animations: element.getAnimations().filter((animation) => animation.playState === 'running')
+        .length,
+    }));
+    expect(['none', 'matrix(1, 0, 0, 1, 0, 0)']).toContain(geometry.transform);
+    expect(geometry.animations).toBe(0);
+    expect(await composer.boundingBox()).toEqual(before);
+    await page.evaluate(
+      () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    );
+  }
+});
+
+for (const dismiss of ['none', 'blur', 'native-hide'] as const) {
+  test(`mobile first send dismisses the keyboard after presentation without reopening it (dismiss=${dismiss})`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.addInitScript(() => {
+      Object.defineProperty(window, '__LODY_NATIVE__', { value: true, configurable: true });
+      Object.defineProperty(navigator, 'userAgent', { value: 'iPhone Mobile', configurable: true });
+    });
+    await page.goto(
+      '/iframe.html?id=mobile-newchattransition--deferred-send-in-place&viewMode=story'
+    );
+    const source = page.locator('#chat-prompt-mobile-sheet');
+    await source.focus();
+    // Model the native keyboard signal from focus ownership rather than holding
+    // a constant height through a blur (which hid the original regression).
+    await page.evaluate(() => {
+      const sync = () =>
+        document.documentElement.style.setProperty(
+          '--native-keyboard-height',
+          document.activeElement?.matches('textarea[data-lody-composer-input]') ? '300px' : '0px'
+        );
+      document.addEventListener('focusin', sync);
+      document.addEventListener('focusout', () => queueMicrotask(sync));
+      sync();
+    });
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(source).toBeFocused();
+    await expect(source).not.toHaveAttribute('disabled');
+    await expect(source).toHaveValue('');
+    await page.keyboard.type('must not replace the submitted draft');
+    await expect(source).toHaveValue('');
+    if (dismiss === 'blur') await source.evaluate((node: HTMLTextAreaElement) => node.blur());
+    if (dismiss === 'native-hide') {
+      await page.evaluate(() =>
+        document.documentElement.style.setProperty('--native-keyboard-height', '0px')
+      );
+      await expect(source).toBeFocused();
+    }
+    await page.evaluate(() => window.dispatchEvent(new Event('storybook:session-ready')));
+    const destination = page.locator('textarea[data-lody-composer-input]');
+    await expect(destination).toHaveCount(1);
+    await expect(destination).not.toBeFocused();
+    await expect(page.locator('html')).toHaveCSS('--native-keyboard-height', '0px');
+  });
+}
+
+test('mobile composer animates keyboard inset and safe-area padding together', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(
+    '/iframe.html?id=mobile-mobilenewchatsheet--inline-page-review-story&viewMode=story'
+  );
+  await page.getByRole('button', { name: 'Send', exact: true }).waitFor();
+  const samples = await page.evaluate(() => {
+    const input = document.querySelector('textarea')!;
+    let shell: HTMLElement | null = input.parentElement;
+    while (shell && !getComputedStyle(shell).transitionProperty.includes('margin-bottom'))
+      shell = shell.parentElement;
+    if (!shell) throw new Error('Missing keyboard-aware composer shell');
+    document.documentElement.style.setProperty('--safe-area-bottom', '34px');
+    document.documentElement.style.setProperty('--native-keyboard-height', '300px');
+    shell.getBoundingClientRect();
+    for (const animation of shell.getAnimations()) animation.finish();
+    shell.getBoundingClientRect();
+    document.documentElement.style.setProperty('--native-keyboard-height', '0px');
+    shell.getBoundingClientRect();
+    const animations = shell.getAnimations();
+    for (const animation of animations) animation.pause();
+    const box = input.closest('[class~="@container/composer-box"]')!;
+    return [0, 0.5, 1].map((progress) => {
+      for (const animation of animations)
+        animation.currentTime = Number(animation.effect!.getTiming().duration) * progress;
+      return {
+        y: box.getBoundingClientRect().y,
+        padding: parseFloat(getComputedStyle(shell!).paddingBottom),
+      };
+    });
+  });
+  expect(samples[0].padding).toBeCloseTo(8);
+  expect(samples[1].padding).toBeGreaterThan(8);
+  expect(samples[1].padding).toBeLessThan(42);
+  expect(samples[2].padding).toBeCloseTo(42);
+  expect(samples[1].y).toBeGreaterThan(samples[0].y);
+  expect(samples[1].y).toBeLessThan(samples[2].y);
+});
+
+test('mobile first send keeps the keyboard if the user starts the next draft before dismissal', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(
+    '/iframe.html?id=mobile-newchattransition--deferred-send-in-place&viewMode=story'
+  );
+  const source = page.locator('#chat-prompt-mobile-sheet');
+  await source.focus();
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty('--native-keyboard-height', '300px');
+    document.addEventListener('focusin', (event) => {
+      const input = event.target;
+      if (input instanceof HTMLTextAreaElement && input.id !== 'chat-prompt-mobile-sheet')
+        queueMicrotask(() =>
+          input.dispatchEvent(
+            new InputEvent('beforeinput', { bubbles: true, inputType: 'insertText', data: 'a' })
+          )
+        );
+    });
+  });
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event('storybook:session-ready')));
+  const destination = page.locator('textarea[data-lody-composer-input]');
+  await expect(destination).toHaveCount(1);
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  );
+  await expect(destination).toBeFocused();
+  await page.keyboard.type('A new draft');
+  await expect(destination).toHaveValue('A new draft');
+});
+
+for (const project of ['loro-dev/lody', 'blog', 'Loro stack', 'No project selected']) {
+  test(`mobile new conversation restores last sent project ${project} after reopening and reload`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/iframe.html?id=mobile-mobilenewchatsheet--remembered-project&viewMode=story');
+    await page.getByRole('button', { name: 'New conversation', exact: true }).click();
+    await page.getByRole('button', { name: 'Project', exact: true }).click();
+    await page
+      .getByRole('listbox', { name: 'Project', exact: true })
+      .getByRole('option')
+      .filter({ has: page.getByText(project, { exact: true }) })
+      .getByRole('button')
+      .click();
+    await page
+      .locator('textarea[data-lody-composer-input]')
+      .fill('Synthetic project restoration test');
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
+    await page.getByRole('button', { name: 'New conversation', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Project', exact: true })).toHaveText(project);
+    await page.reload();
+    await page.getByRole('button', { name: 'New conversation', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Project', exact: true })).toHaveText(project);
+  });
+}

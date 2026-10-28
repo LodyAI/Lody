@@ -33,18 +33,23 @@ function Harness({
   suggestion = SUGGESTION,
   initialPrompt = '',
   disabled = false,
+  preservePromptFocus = false,
+  variant = 'session',
   onPromptChange,
 }: {
   promptRef: RefObject<HTMLTextAreaElement | null>;
   suggestion?: string | null;
   initialPrompt?: string;
   disabled?: boolean;
+  preservePromptFocus?: boolean;
+  variant?: 'session' | 'sheet';
   onPromptChange?: (value: string) => void;
 }) {
   const [promptValue, setPromptValueState] = useState(initialPrompt);
   setPromptValue = setPromptValueState;
   return createElement(ChatComposer, {
-    variant: 'session',
+    variant,
+    preservePromptFocus,
     promptRef,
     promptValue,
     onPromptChange: (value) => {
@@ -183,43 +188,55 @@ describe('ChatComposer prompt suggestion', () => {
     expect(promptRef.current?.value).toBe('');
 
     await act(async () => {
-      root.render(createElement(Harness, { promptRef, disabled: true, onPromptChange: onChange }));
+      root.render(
+        createElement(Harness, {
+          promptRef,
+          disabled: true,
+          preservePromptFocus: true,
+          onPromptChange: onChange,
+        })
+      );
     });
     expect(getSuggestionHint(container)).toBeNull();
+    expect(promptRef.current?.disabled).toBe(false);
+    expect(promptRef.current?.getAttribute('aria-disabled')).toBe('true');
     await pressTab(promptRef.current!);
     expect(onChange).not.toHaveBeenCalled();
     expect(promptRef.current?.value).toBe('');
   });
 
-  it('shows Apply on mobile, accepts only from that control, and focuses the input from the hint text', async () => {
-    layout.mobile = true;
-    const promptRef = createRef<HTMLTextAreaElement>();
-    const onChange = vi.fn();
-    await act(async () => {
-      root.render(createElement(Harness, { promptRef, onPromptChange: onChange }));
-    });
+  it.each(['session', 'sheet'] as const)(
+    'shows Apply on mobile %s, accepts only from that control, and focuses the input from the hint text',
+    async (variant) => {
+      layout.mobile = true;
+      const promptRef = createRef<HTMLTextAreaElement>();
+      const onChange = vi.fn();
+      await act(async () => {
+        root.render(createElement(Harness, { promptRef, variant, onPromptChange: onChange }));
+      });
 
-    const hint = getSuggestionHint(container)!;
-    const apply = hint.querySelector('button');
-    expect(apply?.textContent).toBe('Apply');
-    expect(hint.querySelector('kbd')).toBeNull();
+      const hint = getSuggestionHint(container)!;
+      const apply = hint.querySelector('button');
+      expect(apply?.textContent).toBe('Apply');
+      expect(hint.querySelector('kbd')).toBeNull();
 
-    await pressTab(promptRef.current!);
-    expect(onChange).not.toHaveBeenCalled();
-    expect(promptRef.current?.value).toBe('');
+      await pressTab(promptRef.current!);
+      expect(onChange).not.toHaveBeenCalled();
+      expect(promptRef.current?.value).toBe('');
 
-    const suggestionText = hint.querySelector('span:last-child')!;
-    await act(async () => suggestionText.click());
-    expect(onChange).not.toHaveBeenCalled();
-    expect(document.activeElement).toBe(promptRef.current);
-    expect(promptRef.current?.value).toBe('');
+      const suggestionText = hint.querySelector('span:last-child')!;
+      await act(async () => suggestionText.click());
+      expect(onChange).not.toHaveBeenCalled();
+      expect(document.activeElement).toBe(promptRef.current);
+      expect(promptRef.current?.value).toBe('');
 
-    await act(async () => apply!.click());
-    expect(onChange).toHaveBeenCalledWith(SUGGESTION);
-    expect(promptRef.current?.value).toBe(SUGGESTION);
-    expect(document.activeElement).toBe(promptRef.current);
-    expect(promptRef.current?.selectionStart).toBe(SUGGESTION.length);
-  });
+      await act(async () => apply!.click());
+      expect(onChange).toHaveBeenCalledWith(SUGGESTION);
+      expect(promptRef.current?.value).toBe(SUGGESTION);
+      expect(document.activeElement).toBe(promptRef.current);
+      expect(promptRef.current?.selectionStart).toBe(SUGGESTION.length);
+    }
+  );
 
   it('ignores empty and whitespace-only suggestions', async () => {
     const promptRef = createRef<HTMLTextAreaElement>();

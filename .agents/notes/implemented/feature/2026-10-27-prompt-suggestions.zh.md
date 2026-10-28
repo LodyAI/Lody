@@ -63,7 +63,7 @@ Core build/typecheck 与全部 10 项测试通过。adapter 测试覆盖未协�
 
 Core 0.3.0 在干净的独立 adapter 克隆中使用 `npm ci` 验证：Codex 类型检查、构建和 11 项定向测试通过；Claude 构建、check 和 699 项定向测试通过（10 项跳过）。真实模型生成和抑制行为仍未验证。
 
-更新 submodule 后，Lody 的 46 项 CLI、21 项共享边界及 72 项 renderer/composer 测试通过。此前共享包全量 1,688 项测试通过。shared、CLI、components 类型检查通过，根格式化和文档检查通过。根 `pnpm check` 在 Devin adapter 准备阶段因该 checkout 缺少依赖阻塞，不能视为全仓检查通过。根 lint 也遇到其他 checkout 范围缺少 Node/React/Vite 类型定义。Storybook 浏览器检查覆盖桌面 Tab、移动端应用、输入隐藏与清空恢复，控制台无错误；数据为合成组件输入，并非真实模型或完整应用会话。
+合并 main 后，Lody 的 46 项 CLI、21 项共享边界及 80 项 renderer/composer 测试通过；扩展后的 6 项建议测试也通过，覆盖 sheet 接受和禁用时保留焦点。此前共享包全量 1,688 项测试通过。合并 main 前 shared、CLI、components 类型检查通过；合并后 components 类型检查因已安装的 Streams 依赖缺少 main 的 `onSnapshotRecovery` 补丁阻塞，相关 E2EE 消费代码与 main 一致。根格式化和文档检查通过。根 `pnpm check` 在 Devin adapter 准备阶段因该 checkout 缺少依赖阻塞，不能视为全仓检查通过。根 lint 也遇到其他 checkout 范围缺少 Node/React/Vite 类型定义。Storybook 浏览器检查覆盖桌面 Tab、移动端应用、输入隐藏与清空恢复，控制台无错误；数据为合成组件输入，并非真实模型或完整应用会话。
 
 ## 证据
 

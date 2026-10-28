@@ -1,8 +1,20 @@
+import { E2eeRemoteMachinePairing } from '@/components/pages/e2ee-remote-machine-pairing';
+import { E2eeIdentityRecovery } from '@/components/pages/e2ee-identity-recovery';
+
+import { E2eeTeamSettingsHost } from '@/components/settings/e2ee-team-settings';
+import { desktopWindowId } from '@/lib/desktop-window';
+import { readEncryptedLocalIdentity, type E2eeLocalDataScope } from '@/lib/e2ee-local-data';
+import {
+  isE2eeMemberRemoved,
+  retainEncryptedWorkspaceCleanup,
+  resumeEncryptedWorkspaceCleanup,
+} from '@/lib/e2ee-member-removal';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { usePlatform, usePlatformSession } from '@lody/platform/react';
+import type { E2eeRuntimeStatus } from '@lody/platform';
 import type { WorkspaceModeDescriptor } from '@lody/cloud-api';
 import { setWorkspaceContextAtom } from '@/atoms';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
@@ -19,6 +31,8 @@ import {
 } from '@/lib/e2ee-ledger-history';
 import {
   readE2eeGenesisPin,
+  readWorkspaceModeEvidence,
+  recoverE2eeWorkspaceIdentity,
   repairUnreadableE2eeCaches,
   resetObservedLedgerProgress,
   retainEncryptedWorkspaceMode,
@@ -65,11 +79,16 @@ function WorkspaceControlRoute() {
     history: VerifiedLedgerHistory | null;
     loading: boolean;
     failure: E2eeControlFailure | null;
+    custodyFailure?: string;
     offline?: boolean;
+    removed?: boolean;
+    nativeStatus?: E2eeRuntimeStatus;
   }>({ scope, identity, descriptor: null, history: null, loading: true, failure: null });
   useEffect(() => {
     let disposed = false;
     let hostOpened = false;
+    let cleanup: E2eeLocalDataScope | null = null;
+    let nativeFailure: E2eeControlFailure | null = null;
     const closeHost = () => {
       if (hostOpened && port?.runtime) {
         hostOpened = false;
@@ -93,8 +112,21 @@ function WorkspaceControlRoute() {
     readOwner.current = owner;
     void (async () => {
       try {
+        const retained = readEncryptedLocalIdentity(accountId, workspaceId);
+        if (retained) cleanup = { ...retained, windowId: desktopWindowId() };
         if (port.runtime) {
           const runtime = port.runtime;
+          try {
+            readWorkspaceModeEvidence(localStorage, accountId, workspaceId);
+          } catch {
+            await recoverE2eeWorkspaceIdentity({
+              storage: localStorage,
+              accountId,
+              workspaceId,
+              runtime,
+              isCurrent: () => !disposed && scopeRef.current === scope,
+            });
+          }
           const pin = readE2eeGenesisPin(localStorage, accountId, workspaceId);
           let status;
           try {
@@ -113,6 +145,7 @@ function WorkspaceControlRoute() {
               )
             )
               throw error;
+            nativeFailure = classifyE2eeControlFailure(error);
           }
           if (status) {
             hostOpened = true;
@@ -129,11 +162,20 @@ function WorkspaceControlRoute() {
               cryptoOrgId: status.genesisHash,
             };
             const publish = async () => {
-              const history = hostLedgerHistory(await runtime.ledgerView(workspaceId));
+              const exported = await runtime.ledgerView(workspaceId);
+              const history = hostLedgerHistory(exported);
               if (!history.continuityPending)
                 retainObservedLedgerCheckpoint(localStorage, accountId, workspaceId, history);
               if (!disposed)
-                setState({ scope, identity, descriptor, history, loading: false, failure: null });
+                setState({
+                  scope,
+                  identity,
+                  descriptor,
+                  history,
+                  nativeStatus: exported.status,
+                  loading: false,
+                  failure: null,
+                });
             };
             await publish();
             // A saved local view is visible before the first network request.
@@ -165,6 +207,16 @@ function WorkspaceControlRoute() {
                 });
               }
             } catch (error) {
+              // The account-facing directory/history can only report a generic
+              // denial. Native refresh checks the retained device credential;
+              // only its exact whole-member result authorizes local erasure.
+              if (!disposed) {
+                try {
+                  await runtime.refresh(workspaceId, { installKeys: false });
+                } catch (checked) {
+                  if (isE2eeMemberRemoved(checked)) throw checked;
+                }
+              }
               if (classifyE2eeControlFailure(error).kind !== 'network') throw error;
               // A disconnected refresh does not invalidate a verified local view.
               // Reconnection or the existing Refresh action retries the same suffix.
@@ -200,8 +252,32 @@ function WorkspaceControlRoute() {
           workspaceId,
           history
         );
-        setState({ scope, identity, descriptor, history, loading: false, failure: null });
+        setState({
+          scope,
+          identity,
+          descriptor,
+          history,
+          loading: false,
+          failure: null,
+          custodyFailure: nativeFailure?.kind === 'local-identity' ? nativeFailure.code : undefined,
+        });
       } catch (error) {
+        if (!disposed && isE2eeMemberRemoved(error)) {
+          try {
+            if (cleanup) retainEncryptedWorkspaceCleanup(cleanup);
+          } catch {
+            /* Native receipt still retries local cleanup on the next open. */
+          }
+          closeHost();
+          if (cleanup) await resumeEncryptedWorkspaceCleanup(cleanup, true).catch(() => undefined);
+          if (!disposed)
+            setState((previous) =>
+              previous.scope === scope
+                ? { ...previous, history: null, loading: false, failure: null, removed: true }
+                : previous
+            );
+          return;
+        }
         if (!disposed)
           setState((previous) =>
             previous.scope === scope
@@ -311,6 +387,7 @@ function WorkspaceControlRoute() {
       failure: current?.failure ?? null,
     });
   };
+  if (current?.removed) return <p role="status">{t('e2ee.members.removed')}</p>;
   return (
     <>
       {current?.offline && (
@@ -318,7 +395,35 @@ function WorkspaceControlRoute() {
           {t('sessions.offline')}
         </p>
       )}
+      {port?.runtime && (current?.custodyFailure || current?.failure) && (
+        <E2eeIdentityRecovery
+          key={scope}
+          workspaceId={workspaceId}
+          runtime={port.runtime}
+          error={current.custodyFailure ?? current.failure?.code ?? ''}
+          onReset={refresh}
+        />
+      )}
       <E2eeWorkspaceControlPage
+        memberManagement={
+          current?.nativeStatus?.deviceKind === 'personal' &&
+          (current.nativeStatus.memberRole === 'owner' ||
+            current.nativeStatus.memberRole === 'admin') &&
+          port?.runtime?.removeMember &&
+          port.runtime.setMemberRole
+            ? {
+                actorRole: current.nativeStatus.memberRole,
+                remove: async (membershipId) => {
+                  await port.runtime!.removeMember!(workspaceId, membershipId);
+                  if (scopeRef.current === scope) refresh();
+                },
+                setRole: async (membershipId, role) => {
+                  await port.runtime!.setMemberRole!(workspaceId, membershipId, role);
+                  if (scopeRef.current === scope) refresh();
+                },
+              }
+            : undefined
+        }
         workspaceId={workspaceId}
         genesisHash={current?.descriptor?.genesisHash}
         history={current?.history ?? null}
@@ -347,6 +452,17 @@ function WorkspaceControlRoute() {
           void navigate({ to: '/workspace/create', search: { allowExisting: true } });
         }}
       >
+        {port?.runtime && accountId && current?.history?.locallyPinned && (
+          <>
+            <E2eeTeamSettingsHost
+              key={identity + ':team'}
+              runtime={port.runtime}
+              workspaceId={workspaceId}
+              accountId={accountId}
+              profiles={directory?.scope === scope ? directory.profiles : undefined}
+            />
+          </>
+        )}
         {port?.runtime && accountId && (
           <E2eePersonalPairing
             key={identity}
@@ -354,6 +470,13 @@ function WorkspaceControlRoute() {
             runtime={port.runtime}
             canApprove={Boolean(current?.history?.locallyPinned)}
             onJoined={refresh}
+          />
+        )}
+        {port?.runtime && current?.history?.locallyPinned && (
+          <E2eeRemoteMachinePairing
+            key={identity + ':remote-machine'}
+            workspaceId={workspaceId}
+            runtime={port.runtime}
           />
         )}
         {port && current?.history?.locallyPinned && (

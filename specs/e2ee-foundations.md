@@ -55,7 +55,29 @@ Ledger evolution is append-only:
 - A new operation becomes valid only after a capability declaration (operation tag 9) earlier in the same ledger. The declaration lists strictly ascending nonzero u32 capability codes, is signed by an Owner or Admin personal device and is monotonic. A client that does not implement a declared capability verifies the preceding records and stops at the declaration with `upgrade-required`; it never reports corruption or skips the record. Writers and hosts refuse a declaration they do not implement and any operation whose capability was not declared earlier.
 - Changing the cipher suite or another genesis-level parameter creates a new ledger with a new genesis. The old ledger is never rewritten; it ends with a link record introduced through a capability, as MLS ReInit links a replacement group.
 
-Every other format remains current-only. Content, journal, local-store and snapshot formats have no deployed data: support only the current format for each entrypoint, with no old-format decoders, dual readers, schema upgrades, legacy imports or compatibility facades. Snapshots can always be rebuilt from full v1 history, so a snapshot format change does not break ledger compatibility. Unsupported formats fail without application-level rewriting of their schema or committed evidence. SQLite may perform its own transaction rollback recovery and WAL checkpoint while opening or closing a database, including before the application can identify and reject an unsupported version; these native operations may change physical files but must preserve committed logical data and format. This does not permit application migrations, replacement or rebuilding of an unsupported store. Normal reopening of current stores, verified history within the current ledger and epoch-key history recovery remain required. This scope choice does not select any pending replacement format or approve production activation.
+Every other format remains current-only. Content, journal, local-store and snapshot formats have no deployed data: support only the current format for each entrypoint, with no old-format decoders, dual readers, schema upgrades, legacy imports or compatibility facades. Snapshots can always be rebuilt from full v1 history, so a snapshot format change does not break ledger compatibility. Unsupported formats fail without application-level rewriting of their schema or committed evidence. SQLite may perform its own transaction rollback recovery and WAL checkpoint while opening or closing a database, including before the application can identify and reject an unsupported version; these native operations may change physical files but must preserve committed logical data and format. This does not permit application migrations or rebuilding an unsupported store. The host execution journal has a narrow operator-recovery exception: rename and retain an unsupported store, report its evidence path, and require explicit local reset before provisioning a fresh journal. Reset never imports or automatically re-executes archived work; current-format request IDs remain fenced across reset. A provably empty interrupted first creation may finish initialization. See the [MVP recovery decision](../.agents/notes/proposed/bug-fix/2026-10-27-e2ee-realtime-journal-recovery.md). Normal reopening of current stores, verified history within the current ledger and epoch-key history recovery remain required. This scope choice does not select any pending replacement format or approve production activation.
+
+## Machine identity before the ledger freeze
+
+The owner-approved pre-freeze change extends existing machine AdmitDevice (tag4),
+without a new operation, capability code or tag9 declaration. Both the approving
+record and machine possession proof bind machineId using the same strict UTF-8
+byte string, 1..256 bytes, with no normalization. Producers reject invalid strings;
+verifiers reject invalid UTF-8, empty and oversized identities. Byte-distinct IDs
+stay distinct. Personal-device possession is unchanged. Session IDs remain one-time
+pairing context bound by the separate bindingSignature, never permanent ledger facts.
+
+Only one device may currently bind a machineId within one workspace. Replacing it
+requires the existing same-member personal-device authority and revokes the exact
+old key while admitting the new one in the same record. Historical keys stay
+non-reusable; rotationRequired advises administrators to update keys without blocking
+new seals or workspace use. Snapshot, retained and digest version 4 preserve the binding
+and historical device kind.
+Old developer machine records require workspace recreation, without a legacy reader
+or migration. The independent v1 vector is regenerated under this explicit pre-freeze
+approval. This does not approve production activation. The generic advisory permission
+policy is adopted from [#1956](https://github.com/LodyAI/Lody/pull/1956); this ledger
+change adds no send guard.
 
 ## Retained verified state (proposed)
 
@@ -69,7 +91,7 @@ Full replay costs about 5.4 ms per record on an idle desktop-class host (4,096 r
 - **One state encoding.** Retained state, endorsed snapshots and the comparison digest share one authorization-state encoding, so all three sources (full replay, qualified snapshot import, retained restore) agree on the state, its digest and every author at the same position. The retained envelope adds only the verification source, which survives a round trip and is never upgraded; verified hashes before the restore point are not kept. Layout and acceptance: [compact state note](../.agents/notes/proposed/architecture/2026-10-20-e2ee-compact-ledger-state.md).
 - **Digest use.** `stateDigest` identifies a state for cross-party comparison (comparison notes) and for background audits. Restore checks it only when the caller supplies it, which costs one hash and no re-verification.
 - **Background audit (deferred).** A full replay from genesis compared with the retained digest can catch bugs or storage corruption. It is optional, not part of this change, and may run outside the host's request runtime (for example a separate worker that reads the stored ledger and the retained digest). If added, a mismatch is an incident that stops writes for that ledger until resolved.
-- **Format.** The retained encoding is current-format only and versioned: retained envelope version 2, snapshot body version 2 and the `snapshot-digest/v2` digest domain (version 1 was the pre-compact layout). Any other version fails with `unknown-version`; the party then discards its retained state and rebuilds it by one full replay of v1 history. Changing the encoding bumps these versions.
+- **Format.** The retained encoding is current-format only and versioned: retained envelope version 4, snapshot body version 4 and the `snapshot-digest/v4` digest domain (version 1 was the pre-compact layout). Any other version fails with `unknown-version`; the party then discards its retained state and rebuilds it by one full replay of v1 history. Changing the encoding bumps these versions.
 - **Reads.** A host serving history pages needs no verification on the read path; clients verify what they receive. Host verification belongs to write admission.
 - **Local stores.** If adopted, clients may restore their local retained state on open instead of revalidating all stored records, which supersedes the full revalidation described below.
 

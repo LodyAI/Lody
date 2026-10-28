@@ -10,6 +10,7 @@ import {
   MoreHorizontal,
   Trash2,
   ArrowUpToLine,
+  Send,
   type LucideIcon,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -404,6 +405,11 @@ function RowActions(props: MessageQueueRowProps) {
             }
           />
           <Menu.Content align="end" width="compact">
+            {shouldShowQueuedItemSteer({ showSteerAction, isFirst, nativeSteerAvailable }) ? (
+              <Menu.Item icon={Send} onClick={() => void onSteer(item)}>
+                {t('sessions.messageQueue.guideAction', 'Steer')}
+              </Menu.Item>
+            ) : null}
             {props.onMoveToTop ? (
               <Menu.Item
                 icon={ArrowUpToLine}

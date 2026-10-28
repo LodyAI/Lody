@@ -531,7 +531,7 @@ async function resolveManagedRuntimeForLaunch(
   return launch;
 }
 
-function resolveCliAdapterEntry(
+export function resolveCliAdapterEntry(
   adapter: 'claude-acp' | 'codex-acp' | 'deepseek-acp' | 'grok-acp' | 'devin-acp'
 ): [string] {
   const argvEntry = process.argv[1] ? resolve(process.argv[1]) : undefined;

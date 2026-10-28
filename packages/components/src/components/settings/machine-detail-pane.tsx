@@ -1,3 +1,6 @@
+import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
+import { WorkspaceFeatureNotice } from '@/components/workspace-feature-notice';
+import { localMachineIdAtom } from '@/atoms/local-probe';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
@@ -249,7 +252,7 @@ export type MachineProvidersSectionProps = {
 
 /** "Agent Provider" list + add button — shared by the mobile detail pane and the
  *  desktop Agents tab. */
-export function MachineProvidersSection({
+function SupportedMachineProvidersSection({
   machine,
   configs,
   setups = [],
@@ -418,7 +421,7 @@ export type MachineDetailPaneProps = {
   };
 };
 
-export function MachineDetailPane(props: MachineDetailPaneProps) {
+function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
   const {
     machine,
     mode = 'agents',
@@ -1165,5 +1168,24 @@ function AvailableProviders({
         ))}
       </div>
     </section>
+  );
+}
+
+export function MachineProvidersSection(props: MachineProvidersSectionProps) {
+  const allowed = useWorkspaceFeature('rpc');
+  const localMachineId = useAtomValue(localMachineIdAtom);
+  return allowed || props.machine.id === localMachineId ? (
+    <SupportedMachineProvidersSection {...props} />
+  ) : (
+    <WorkspaceFeatureNotice feature="rpc" />
+  );
+}
+
+export function MachineDetailPane(props: MachineDetailPaneProps) {
+  const allowed = useWorkspaceFeature('rpc');
+  return allowed || props.isLocal ? (
+    <SupportedMachineDetailPane {...props} />
+  ) : (
+    <WorkspaceFeatureNotice feature="rpc" />
   );
 }

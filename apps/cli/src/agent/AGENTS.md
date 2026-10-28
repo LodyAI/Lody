@@ -50,7 +50,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 - `deepseek-harness-runtime.ts` is not managed: no download/prefetch/override/auth.
   Keep npx argv for recovery. Windows uses npm JS without cmd.exe;
   npm, forwarder, DSH and Job children stay windowless, preserving stdio/env/containment.
-  DSH uses `process.execPath` and `ELECTRON_RUN_AS_NODE`.
+  DSH pins Node checked in child cwd; no Electron fallback.
   Provider ID isolates homes; preserve user YAML/settings and legacy history:
   [contract](../../../../specs/deepseek-harness-settings.md).
   Credentials stay in env. Models/reasoning use the Agent request waterfall;

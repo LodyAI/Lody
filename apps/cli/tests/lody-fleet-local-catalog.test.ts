@@ -1,5 +1,7 @@
 import { createLocalCloudPort, type CloudPort } from '@lody/platform';
 import {
+  machineFlockKeys,
+  type AgentConfigId,
   type LocalSessionControlRequest,
   type LocalSessionControlResponse,
   type MachineId,
@@ -7,7 +9,7 @@ import {
 } from '@lody/shared';
 import { Effect } from 'effect';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import fs, { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
@@ -143,128 +145,153 @@ const activeWorkspace = (
 });
 
 describe('LodyFleet local catalog bootstrap', () => {
-  it('reconciles ordinary starts and revocations through a failed encrypted sidecar, then repairs with unchanged remote input', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'fleet-e2ee-cache-reconcile-'));
-    const filePath = join(directory, 'workspace-catalog.json');
-    const sidecar = `${filePath}.e2ee`;
-    const catalog = makeLocalWorkspaceCatalog({
-      filePath,
-      lockName: `cache-${basename(directory)}`,
-      cacheTtlMs: 0,
-    });
-    const ordinary = { id: 'ordinary', name: 'Ordinary', slug: null, role: 'owner' };
-    const removed = { id: 'removed', name: 'Removed', slug: null, role: 'owner' };
-    const encrypted = {
-      id: 'encrypted',
-      name: 'Encrypted',
-      slug: null,
-      role: 'owner',
-      contentMode: 'e2ee',
-      genesisHash: 'ab'.repeat(32),
-    };
-    const identity = { userId: 'user-1' };
-    const machine = { machineId: 'machine-1', machineName: 'host' };
-    await fileLocksLegacy.runPromise(
-      catalog.cacheRemoteWorkspaces({ identity, machine, workspaces: [removed, encrypted] })
-    );
-    const healthy = await readFile(sidecar, 'utf8');
-    const damaged = '{preserve damaged encrypted discovery';
-    await writeFile(sidecar, damaged);
-    const harness = createFleetHarness(catalog);
-    const events: string[] = [];
-    const issues = new Set<string>();
-    harness.runtimeStateReporter.upsertIssue.mockImplementation((issue) => {
-      issues.add(issue.code);
-    });
-    harness.runtimeStateReporter.clearIssue.mockImplementation((code) => {
-      issues.delete(code);
-    });
-    const state = (workspace: typeof ordinary) => {
-      let attached = false;
-      return {
-        workspace,
-        lody: {
-          isControlPlaneReady: () => true,
-          isControlPlaneRecovering: () => false,
-          isRemoteBridgeAttached: () => attached,
-          getActiveSessionCount: () => 0,
-          getConnectedRoomCount: () => 0,
-          attachRemoteBridge: async () => {
-            attached = true;
-            events.push(`${workspace.id}:attach`);
-          },
-          detachRemoteBridge: async () => {
-            attached = false;
-          },
-          handleRemoteAccessRevoked: async () => {
-            attached = false;
-            events.push(`${workspace.id}:revoked`);
-          },
-        },
+  it.each([false, true])(
+    'rebuilds corrupt discovery while ordinary starts and revocations survive a publication failure (%s)',
+    async (failPublication) => {
+      const directory = await mkdtemp(join(tmpdir(), 'fleet-e2ee-cache-reconcile-'));
+      const originalLocksDir = process.env.LODY_LOCKS_DIR;
+      process.env.LODY_LOCKS_DIR = join(directory, 'locks');
+      const filePath = join(directory, 'workspace-catalog.json');
+      const sidecar = `${filePath}.e2ee`;
+      const catalog = makeLocalWorkspaceCatalog({
+        filePath,
+        lockName: `cache-${basename(directory)}`,
+        cacheTtlMs: 0,
+      });
+      const ordinary = { id: 'ordinary', name: 'Ordinary', slug: null, role: 'owner' };
+      const removed = { id: 'removed', name: 'Removed', slug: null, role: 'owner' };
+      const encrypted = {
+        id: 'encrypted',
+        name: 'Encrypted',
+        slug: null,
+        role: 'owner',
+        contentMode: 'e2ee',
+        genesisHash: 'ab'.repeat(32),
       };
-    };
-    const fleet = harness.fleet as unknown as {
-      runtimes: Map<string, ReturnType<typeof state>>;
-      waitingForPairing: Set<string>;
-      remoteBridge: RemoteBridge;
-      startWorkspace(workspace: typeof ordinary & { contentMode?: string }): Promise<void>;
-      applyRemoteWorkspaceList(input: unknown): Promise<void>;
-      lastCachedWorkspaceSignature: string | null;
-      lastValidWorkspaceListResult: unknown;
-      reconcileRetryTimer: ReturnType<typeof setTimeout> | null;
-      clearReconcileRetry(): void;
-    };
-    fleet.runtimes.set(removed.id, state(removed));
-    fleet.startWorkspace = async (workspace) => {
-      if (workspace.contentMode === 'e2ee') {
-        fleet.waitingForPairing.add(workspace.id);
-        return;
+      const identity = { userId: 'user-1' };
+      const machine = { machineId: 'machine-1', machineName: 'host' };
+      await fileLocksLegacy.runPromise(
+        catalog.cacheRemoteWorkspaces({ identity, machine, workspaces: [removed, encrypted] })
+      );
+      const damaged = '{preserve damaged encrypted discovery';
+      await writeFile(sidecar, damaged);
+      let publicationBlocked = failPublication;
+      const rename = fs.rename;
+      const fault = Object.assign(new Error('synthetic encrypted publication EACCES'), {
+        code: 'EACCES',
+      });
+      const renameSpy = vi
+        .spyOn(fs, 'rename')
+        .mockImplementation((source, target) =>
+          publicationBlocked && target === sidecar ? Promise.reject(fault) : rename(source, target)
+        );
+      const harness = createFleetHarness(catalog);
+      const events: string[] = [];
+      const issues = new Set<string>();
+      harness.runtimeStateReporter.upsertIssue.mockImplementation((issue) => {
+        issues.add(issue.code);
+      });
+      harness.runtimeStateReporter.clearIssue.mockImplementation((code) => {
+        issues.delete(code);
+      });
+      const state = (workspace: typeof ordinary) => {
+        let attached = false;
+        return {
+          workspace,
+          lody: {
+            isControlPlaneReady: () => true,
+            isControlPlaneRecovering: () => false,
+            isRemoteBridgeAttached: () => attached,
+            getActiveSessionCount: () => 0,
+            getConnectedRoomCount: () => 0,
+            attachRemoteBridge: async () => {
+              attached = true;
+              events.push(`${workspace.id}:attach`);
+            },
+            detachRemoteBridge: async () => {
+              attached = false;
+            },
+            handleRemoteAccessRevoked: async () => {
+              attached = false;
+              events.push(`${workspace.id}:revoked`);
+            },
+          },
+        };
+      };
+      const fleet = harness.fleet as unknown as {
+        runtimes: Map<string, ReturnType<typeof state>>;
+        waitingForPairing: Set<string>;
+        remoteBridge: RemoteBridge;
+        startWorkspace(workspace: typeof ordinary & { contentMode?: string }): Promise<void>;
+        applyRemoteWorkspaceList(input: unknown): Promise<void>;
+        lastCachedWorkspaceSignature: string | null;
+        lastValidWorkspaceListResult: unknown;
+        reconcileRetryTimer: ReturnType<typeof setTimeout> | null;
+        clearReconcileRetry(): void;
+      };
+      fleet.runtimes.set(removed.id, state(removed));
+      fleet.startWorkspace = async (workspace) => {
+        if (workspace.contentMode === 'e2ee') {
+          fleet.waitingForPairing.add(workspace.id);
+          return;
+        }
+        events.push(`${workspace.id}:start`);
+        fleet.runtimes.set(workspace.id, state(workspace));
+      };
+      fleet.remoteBridge = new RemoteBridge({
+        logger: createSilentLogger(),
+        catalog,
+        userId: 'user-1',
+        machineId: 'machine-1' as MachineId,
+        machineName: 'host',
+        getRuntime: (id) => fleet.runtimes.get(id)?.lody as RemoteBridgeRuntime | undefined,
+      });
+      const remote = { status: 'authorized', userId: 'user-1', workspaces: [ordinary, encrypted] };
+      fleet.lastValidWorkspaceListResult = remote;
+      try {
+        await fleet.applyRemoteWorkspaceList(remote);
+        expect(events).toEqual(['removed:revoked', 'ordinary:start', 'ordinary:attach']);
+        if (failPublication) {
+          expect(issues.has('encrypted_workspace_catalog_unavailable')).toBe(true);
+          expect(fleet.lastCachedWorkspaceSignature).toBeNull();
+          expect(fleet.reconcileRetryTimer).not.toBeNull();
+          fleet.clearReconcileRetry();
+          await expect(stat(sidecar)).rejects.toMatchObject({ code: 'ENOENT' });
+          const cold = await fileLocksLegacy.runPromise(
+            makeLocalWorkspaceCatalog({ filePath }).read()
+          );
+          expect(cold.encryptedCatalogUnavailable).toBe(true);
+          expect(cold.workspaces.map((workspace) => workspace.workspaceId)).toEqual([
+            'ordinary',
+            'removed',
+          ]);
+          publicationBlocked = false;
+          await fleet.applyRemoteWorkspaceList(remote);
+        }
+        const archives = (await readdir(directory)).filter((entry) =>
+          entry.startsWith('workspace-catalog.json.e2ee.corrupt-')
+        );
+        expect(archives).toHaveLength(1);
+        expect(await readFile(join(directory, archives[0] ?? ''), 'utf8')).toBe(damaged);
+        expect(issues.has('encrypted_workspace_catalog_unavailable')).toBe(false);
+        expect(fleet.lastCachedWorkspaceSignature).not.toBeNull();
+        expect(fleet.reconcileRetryTimer).toBeNull();
+        expect(
+          (
+            await fileLocksLegacy.runPromise(makeLocalWorkspaceCatalog({ filePath }).read())
+          ).workspaces.map((workspace) => workspace.workspaceId)
+        ).toEqual(['ordinary', 'removed', 'encrypted']);
+      } finally {
+        fleet.clearReconcileRetry();
+        fleet.remoteBridge.shutdown();
+        renameSpy.mockRestore();
+        if (originalLocksDir === undefined) delete process.env.LODY_LOCKS_DIR;
+        else process.env.LODY_LOCKS_DIR = originalLocksDir;
+        vi.useRealTimers();
+        await rm(directory, { recursive: true, force: true });
       }
-      events.push(`${workspace.id}:start`);
-      fleet.runtimes.set(workspace.id, state(workspace));
-    };
-    fleet.remoteBridge = new RemoteBridge({
-      logger: createSilentLogger(),
-      catalog,
-      userId: 'user-1',
-      machineId: 'machine-1' as MachineId,
-      machineName: 'host',
-      getRuntime: (id) => fleet.runtimes.get(id)?.lody as RemoteBridgeRuntime | undefined,
-    });
-    const remote = { status: 'authorized', userId: 'user-1', workspaces: [ordinary, encrypted] };
-    fleet.lastValidWorkspaceListResult = remote;
-    try {
-      await fleet.applyRemoteWorkspaceList(remote);
-      expect(events).toEqual(['removed:revoked', 'ordinary:start', 'ordinary:attach']);
-      expect(issues.has('encrypted_workspace_catalog_unavailable')).toBe(true);
-      expect(fleet.lastCachedWorkspaceSignature).toBeNull();
-      expect(fleet.reconcileRetryTimer).not.toBeNull();
-      // Cancel the real scheduled retry synchronously; drive its same entry
-      // explicitly after repair, without faking the native Effect scheduler.
-      fleet.clearReconcileRetry();
-      expect(await readFile(sidecar, 'utf8')).toBe(damaged);
-      expect(
-        (
-          await fileLocksLegacy.runPromise(makeLocalWorkspaceCatalog({ filePath }).read())
-        ).workspaces.map((workspace) => workspace.workspaceId)
-      ).toEqual(['ordinary', 'removed']);
-      await writeFile(sidecar, healthy);
-      await fleet.applyRemoteWorkspaceList(remote);
-      expect(issues.has('encrypted_workspace_catalog_unavailable')).toBe(false);
-      expect(fleet.lastCachedWorkspaceSignature).not.toBeNull();
-      expect(fleet.reconcileRetryTimer).toBeNull();
-      expect(
-        (
-          await fileLocksLegacy.runPromise(makeLocalWorkspaceCatalog({ filePath }).read())
-        ).workspaces.map((workspace) => workspace.workspaceId)
-      ).toEqual(['ordinary', 'removed', 'encrypted']);
-    } finally {
-      fleet.clearReconcileRetry();
-      fleet.remoteBridge.shutdown();
-      vi.useRealTimers();
-      await rm(directory, { recursive: true, force: true });
     }
-  });
+  );
 
   it('starts ordinary offline rows and clears its scoped issue after the encrypted index recovers', async () => {
     let broken = true;
@@ -483,6 +510,73 @@ describe('LodyFleet remote authentication boundary', () => {
         message: 'Remote CLI identity user-2 does not match cached identity user-1.',
       })
     );
+  });
+
+  it('gives daemon commands the bootstrap cache, then the live subscription, as their access verdict', async () => {
+    vi.useFakeTimers();
+    let push: (
+      snapshot: Parameters<Parameters<CloudPort['access']['watchWorkspaceAccess']>[0]>[0]
+    ) => void = () => {};
+    let fail: (error: Error) => void = () => {};
+    const { fleet: harness } = createFleetHarness(
+      createCatalogStub(() =>
+        Effect.succeed(
+          catalogSnapshot({ workspaces: [activeWorkspace('ws-1', 'One', 'one', 'member')] })
+        )
+      ),
+      createTestCloudPort((onValue, onError) => {
+        push = onValue;
+        fail = onError;
+        return () => {};
+      })
+    );
+    const fleet = harness as unknown as typeof harness & {
+      startWorkspaceSubscription: (options: { waitForInitial: boolean }) => Promise<void>;
+      applyRemoteWorkspaceList: () => Promise<void>;
+      readWorkspaceAccess: (workspaceId: string) => unknown;
+    };
+    fleet.applyRemoteWorkspaceList = async () => {};
+    const remote = {
+      id: 'ws-1',
+      name: 'One',
+      slug: 'one',
+      role: 'admin',
+      contentMode: 'e2ee',
+      genesisHash: 'ab'.repeat(32),
+    };
+    try {
+      expect(fleet.readWorkspaceAccess('ws-1')).toEqual({ status: 'unknown' });
+      await fleet.bootstrapFromLocalCatalog();
+      expect(fleet.readWorkspaceAccess('ws-1')).toEqual({
+        status: 'authorized',
+        workspace: { id: 'ws-1', name: 'One', slug: 'one', role: 'member' },
+      });
+      expect(fleet.readWorkspaceAccess('ws-2')).toEqual({ status: 'unknown' });
+
+      await fleet.startWorkspaceSubscription({ waitForInitial: false });
+      push({ status: 'authorized', userId: 'user-1', workspaces: [remote] });
+      expect(fleet.readWorkspaceAccess('ws-1')).toEqual({
+        status: 'authorized',
+        workspace: remote,
+      });
+      // An unreachable control plane is not a revocation.
+      fail(new Error('Synthetic subscription outage'));
+      expect(fleet.readWorkspaceAccess('ws-1')).toEqual({
+        status: 'authorized',
+        workspace: remote,
+      });
+      push({ status: 'authorized', userId: 'user-1', workspaces: [] });
+      expect(fleet.readWorkspaceAccess('ws-1')).toEqual({ status: 'revoked' });
+      push({ status: 'authorized', userId: 'user-1', workspaces: [remote] });
+      expect(fleet.readWorkspaceAccess('ws-1')).toEqual({
+        status: 'authorized',
+        workspace: remote,
+      });
+      push({ status: 'unauthorized', reason: 'CLI token is invalid or expired.' });
+      expect(fleet.readWorkspaceAccess('ws-1')).toEqual({ status: 'unauthorized' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('reports a rejected backend authorization for an invalid token', async () => {
@@ -1048,4 +1142,187 @@ it('joins background project observation before closing its workspace document',
   await closing;
   expect(steps).toEqual(['schedules', 'document', 'poller']);
   expect(fleet.runtimes.has('observing')).toBe(false);
+});
+
+it('starts only the scoped encrypted workspace without a legacy Streams bridge or account catalog rewrite', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'fleet-paired-service-'));
+  const filePath = join(directory, 'catalog.json');
+  const catalog = makeLocalWorkspaceCatalog({
+    filePath,
+    lockName: `paired-${basename(directory)}`,
+    cacheTtlMs: 0,
+  });
+  try {
+    await fileLocksLegacy.runPromise(
+      catalog.cacheRemoteWorkspaces({
+        identity: { userId: 'user-1' },
+        machine: { machineId: 'machine-1', machineName: 'host' },
+        workspaces: [{ id: 'ordinary', name: 'Ordinary', slug: null, role: 'owner' }],
+      })
+    );
+    const original = await readFile(filePath, 'utf8');
+    const workspace = {
+      id: 'paired',
+      name: 'Encrypted',
+      slug: null,
+      role: 'member',
+      contentMode: 'e2ee',
+      genesisHash: 'ab'.repeat(32),
+    };
+    const base = createLocalCloudPort({ identity: { userId: 'user-1' }, workspaces: [] });
+    const cloud: CloudPort = {
+      ...base,
+      kind: 'cloud',
+      e2eeMachineScope: { workspaceId: workspace.id, genesisHash: workspace.genesisHash },
+      e2ee: {
+        getHistory: async () => {
+          throw new Error('unused');
+        },
+        getContentToken: async () => {
+          throw new Error('unused');
+        },
+        mailboxCall: async () => {
+          throw new Error('unused');
+        },
+      },
+    };
+    const { fleet, started } = createFleetHarness(catalog, cloud);
+    const native = fleet as unknown as {
+      applyRemoteWorkspaceList(input: {
+        status: 'authorized';
+        userId: string;
+        workspaces: (typeof workspace)[];
+      }): Promise<void>;
+      desiredWorkspaces: Map<string, unknown>;
+      startWorkspace(item: typeof workspace): Promise<void>;
+      runtimes: Map<string, unknown>;
+      remoteBridge: RemoteBridge;
+    };
+    let attached = false;
+    native.startWorkspace = async (item) => {
+      started.push(item.id);
+      native.runtimes.set(item.id, {
+        workspace: item,
+        lody: {
+          attachRemoteBridge: async () => {
+            attached = true;
+          },
+          detachRemoteBridge: async () => {
+            attached = false;
+          },
+          handleRemoteAccessRevoked: async () => {
+            attached = false;
+          },
+          isRemoteBridgeAttached: () => attached,
+          isControlPlaneReady: () => attached,
+          isControlPlaneRecovering: () => false,
+          getActiveSessionCount: () => 0,
+          getConnectedRoomCount: () => (attached ? 1 : 0),
+        },
+      });
+    };
+    await native.applyRemoteWorkspaceList({
+      status: 'authorized',
+      userId: 'user-1',
+      workspaces: [workspace],
+    });
+    expect([...native.desiredWorkspaces.keys()]).toEqual(['paired']);
+    expect(started).toEqual(['paired']);
+    expect(attached).toBe(true);
+    expect(await readFile(filePath, 'utf8')).toBe(original);
+    for (const changed of [
+      { ...workspace, id: 'other' },
+      { ...workspace, contentMode: 'plaintext' },
+      { ...workspace, genesisHash: 'cd'.repeat(32) },
+    ]) {
+      await expect(
+        native.applyRemoteWorkspaceList({
+          status: 'authorized',
+          userId: 'user-1',
+          workspaces: [changed],
+        })
+      ).rejects.toThrow('scope mismatch');
+      expect([...native.desiredWorkspaces.keys()]).toEqual(['paired']);
+    }
+    await native.remoteBridge.markOffline(
+      [...native.runtimes.values()].map((value) => (value as { lody: RemoteBridgeRuntime }).lody)
+    );
+    expect(attached).toBe(false);
+    native.remoteBridge.shutdown();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+describe('local DSH Provider discovery', () => {
+  it('returns only local builtin DSH ids/names across workspaces, without credentials', async () => {
+    const { fleet: raw } = createFleetHarness(
+      createCatalogStub(() => Effect.succeed(catalogSnapshot({})))
+    );
+    const fleet = raw as unknown as {
+      runtimes: Map<string, unknown>;
+      dispatchLocalSessionControl: (
+        request: LocalSessionControlRequest
+      ) => Promise<LocalSessionControlResponse[]>;
+    };
+    const configs = [
+      {
+        id: 'local-dsh',
+        name: 'DSH',
+        cliType: 'builtin',
+        agentType: 'deepseek',
+        machineId: 'machine-1',
+        env: { DEEPSEEK_API_KEY: 'synthetic-secret' },
+      },
+      {
+        id: 'remote',
+        name: 'Remote',
+        cliType: 'builtin',
+        agentType: 'deepseek',
+        machineId: 'machine-2',
+        env: {},
+      },
+      {
+        id: 'codex',
+        name: 'Codex',
+        cliType: 'builtin',
+        agentType: 'codex',
+        machineId: 'machine-1',
+        env: {},
+      },
+      {
+        id: 'registry',
+        name: 'Registry',
+        cliType: 'registry',
+        agentType: 'deepseek',
+        machineId: 'machine-1',
+        env: {},
+      },
+    ];
+    const repo = {
+      getMeta: () => ({ scan: async () => [] }),
+      openFlockDoc: async () => ({
+        flock: {
+          scan: () =>
+            configs.map((config) => ({
+              key: machineFlockKeys.agentConfig(config.id as AgentConfigId),
+              value: config,
+            })),
+        },
+      }),
+    };
+    for (const id of ['workspace-1', 'workspace-2'])
+      fleet.runtimes.set(id, { workspace: { id }, lody: { documentManager: { repo } } });
+    expect(
+      await fleet.dispatchLocalSessionControl({
+        type: 'machine/dsh-providers',
+        machineId: 'machine-1' as MachineId,
+      })
+    ).toEqual([
+      {
+        type: 'machine/dsh-providers_response',
+        providers: [{ id: 'local-dsh', name: 'DSH' }],
+      },
+    ]);
+  });
 });

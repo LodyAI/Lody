@@ -668,6 +668,7 @@ describe('durable local epoch rotation', () => {
                 membershipId: target,
                 encryptionPublicKey: device.encryptionPublicKey,
                 kind: kind as 'machine' | 'recovery',
+                ...(kind === 'machine' ? { machineId: 'removed-member-machine' } : {}),
                 signer: device.signer,
               });
             f.append(
@@ -1078,6 +1079,86 @@ describe('durable local epoch rotation', () => {
             disposeEpochKey(key1);
             disposeEpochKey(key2);
           }
+        })
+      )
+    );
+  });
+  it.each(['missing', 'damaged'] as const)(
+    'releases a verified installed publication after candidate %s without re-signing',
+    async (damage) => {
+      const f = fixture();
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const { rotation, journal } = yield* f.open();
+            const done = yield* rotation.publish();
+            const db = new Database(f.files.candidate);
+            try {
+              if (damage === 'missing') db.exec('DELETE FROM epoch_rotation_candidates');
+              else db.exec("UPDATE epoch_rotation_candidates SET blob=x'00'");
+            } finally {
+              db.close();
+            }
+            const recovered = yield* rotation.resume();
+            expect(recovered).toEqual(done);
+            yield* rotation.acknowledge(recovered!);
+            expect((yield* journal.load(f.context.genesis)).record).toBeNull();
+            expect(f.signed()).toBe(1);
+            f.requestRotation();
+            expect((yield* rotation.publish()).epoch).toBe(2);
+            expect(f.signed()).toBe(2);
+          })
+        )
+      );
+    }
+  );
+  it('does not complete an unrelated removal intent from a missing candidate submission', async () => {
+    const f = fixture();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { rotation } = yield* f.open();
+          const done = yield* rotation.publish();
+          const db = new Database(f.files.candidate);
+          try {
+            db.exec('DELETE FROM epoch_rotation_candidates');
+          } finally {
+            db.close();
+          }
+          failureCode(
+            yield* Effect.exit(rotation.publishRemoving(f.view().inspectState().owner)),
+            'busy'
+          );
+          expect(yield* rotation.resume()).toEqual(done);
+          expect(f.signed()).toBe(1);
+        })
+      )
+    );
+  });
+  it('never appends an unconfirmed publication after its candidate disappears, and releases it after a genuine conflict', async () => {
+    const f = fixture();
+    f.mode('unavailable');
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { rotation } = yield* f.open();
+          failureCode(yield* Effect.exit(rotation.publish()), 'unconfirmed');
+          const db = new Database(f.files.candidate);
+          try {
+            db.exec('DELETE FROM epoch_rotation_candidates');
+          } finally {
+            db.close();
+          }
+          const length = f.records().length;
+          f.mode('ok');
+          failureCode(yield* Effect.exit(rotation.resume()), 'candidate-missing');
+          expect(f.records()).toHaveLength(length);
+          f.requestRotation();
+          const conflict = yield* rotation.resume();
+          expect(conflict?.outcome).toBe('Conflict');
+          yield* rotation.acknowledge(conflict!);
+          expect((yield* rotation.publish()).outcome).toBe('Committed');
+          expect(f.signed()).toBe(2);
         })
       )
     );
