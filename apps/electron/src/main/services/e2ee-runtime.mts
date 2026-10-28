@@ -209,7 +209,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         restartRequired: () => boolean
         keyRound: (
           mailbox: (signal: AbortSignal) => KeyMailbox['Service'],
-          staging?: (signal: AbortSignal) => EpochStagingStore['Service']
+          staging?: (signal: AbortSignal) => EpochStagingStore['Service'],
+          refreshLedger?: (signal: AbortSignal) => DesktopE2eeManagementRemote['history']
         ) => Effect.Effect<void, unknown>
         seal: (
           input: E2eeContentSeal
@@ -723,7 +724,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         const isClosing = () => closing
         const keyRound = Effect.fnUntraced(function* (
           mailbox: (signal: AbortSignal) => KeyMailbox['Service'],
-          staging?: (signal: AbortSignal) => EpochStagingStore['Service']
+          staging?: (signal: AbortSignal) => EpochStagingStore['Service'],
+          refreshLedger?: (signal: AbortSignal) => DesktopE2eeManagementRemote['history']
         ) {
           if (closing) return yield* fail('closed')
           roundAgain = true
@@ -796,32 +798,44 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                   )
                 }
                 let passes = 0
+                let refreshedUnknown = false
                 do {
                   roundAgain = false
                   const view = yield* verified.current()
                   const epoch = view.inspectState().epoch.number
-                  const checked = yield* Effect.result(keys.check(epoch))
-                  if (staging && epoch > 0 && Result.isFailure(checked)) {
-                    const located = getCommittedEpochStagingKey(view, epoch)
-                    // A snapshot-joined device without this publication original uses mailbox/history.
-                    if (Result.isSuccess(located)) {
-                      // Staging denial or I/O failure must not gate verified mailbox receipt.
-                      const group = yield* staging(networkAbort.signal)
-                        .readGroup(located.success)
-                        .pipe(Effect.catch(() => Effect.succeed(null)))
-                      if (
-                        group?.envelopes.some(
-                          (row) => row.recipient === hex(device.publicKey.toBytes())
+                  const currentReceiver = Context.get(maintenance, KeyReceiver)
+                  const beforeReceive = Effect.gen(function* () {
+                    const checked = yield* Effect.result(keys.check(epoch))
+                    if (staging && epoch > 0 && Result.isFailure(checked)) {
+                      const located = getCommittedEpochStagingKey(view, epoch)
+                      // A snapshot-joined device without this publication original uses mailbox/history.
+                      if (Result.isSuccess(located)) {
+                        // Staging denial or I/O failure must not gate verified mailbox receipt.
+                        const group = yield* staging(networkAbort.signal)
+                          .readGroup(located.success)
+                          .pipe(Effect.catch(() => Effect.succeed(null)))
+                        if (
+                          group?.envelopes.some(
+                            (row) => row.recipient === hex(device.publicKey.toBytes())
+                          )
                         )
-                      )
-                        yield* Context.get(maintenance, KeyReceiver).receiveStagedGroup(group)
-                    } else if (view.verification !== 'endorsed-snapshot')
-                      return yield* located.failure
-                  }
+                          yield* currentReceiver.receiveStagedGroup(group)
+                      } else if (view.verification !== 'endorsed-snapshot')
+                        return yield* located.failure
+                    }
+                    return undefined
+                  })
                   maintainKeys ??= yield* makeDesktopKeyMaintenance().pipe(
                     Effect.provide(maintenance)
                   )
-                  yield* maintainKeys(epoch)
+                  const needsRefresh = yield* maintainKeys(epoch, beforeReceive)
+                  if (needsRefresh && refreshLedger && !refreshedUnknown) {
+                    refreshedUnknown = true
+                    // Delivery already ran. Refresh only this workspace through the
+                    // existing verified ingest, outside native/account locks.
+                    yield* refreshManagementHistory(refreshLedger(networkAbort.signal))
+                    roundAgain = true
+                  }
                 } while (roundAgain && ++passes < 4 && !isClosing())
                 return undefined
               })
@@ -1191,7 +1205,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                             if (Result.isFailure(installedCurrent))
                               yield* keyRound(
                                 () => upstream.mailbox(),
-                                () => upstream.staging()
+                                () => upstream.staging(),
+                                () => upstream.history
                               )
                             // A later installed epoch can restore an older pending publication key.
                             yield* Context.get(historyContext, InstalledEpochHistory).recover()
@@ -1449,7 +1464,8 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
       keyRound: (
         workspaceId: string,
         mailbox: (signal: AbortSignal) => KeyMailbox['Service'],
-        staging?: (signal: AbortSignal) => EpochStagingStore['Service']
+        staging?: (signal: AbortSignal) => EpochStagingStore['Service'],
+        refreshLedger?: (signal: AbortSignal) => DesktopE2eeManagementRemote['history']
       ) =>
         Effect.flatMap(
           run(
@@ -1459,7 +1475,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
                 : Effect.fail(fail('closed'))
             )
           ),
-          (entry) => entry.keyRound(mailbox, staging)
+          (entry) => entry.keyRound(mailbox, staging, refreshLedger)
         ),
       seal: (workspaceId: string, input: E2eeContentSeal) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.seal(input))),

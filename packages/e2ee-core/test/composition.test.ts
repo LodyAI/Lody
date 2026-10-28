@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { Context, Effect, Layer } from 'effect';
+import { Context, Effect, Layer, Result } from 'effect';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   E2eeWorkflows,
@@ -10,6 +10,8 @@ import {
   KeyDistributor,
   KeyReceiver,
   WorkspacePlatform,
+  WorkspaceKeyRoundFailure,
+  runWorkspaceKeyRound,
 } from '@lody/e2ee-core';
 import {
   BackendError,
@@ -18,6 +20,7 @@ import {
   EpochPublicationSource,
   EpochStagingStore,
   KeyProtector,
+  KeyMailbox,
   LedgerLog,
   LedgerLogError,
   LedgerSync,
@@ -33,6 +36,10 @@ import {
 import { envelopeFixture, recipientPair } from './keys/fixture';
 import { synthetic } from './keys/protection-fixture';
 
+const okMailbox = (
+  host: Effect.Success<ReturnType<typeof makeSqliteKeyMailbox>>,
+  device: DeviceSigner['publicKey']
+) => Result.getOrThrow(host.bind(device));
 const dirs: string[] = [];
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -139,12 +146,14 @@ describe('E2eeWorkflows composition', () => {
     );
   });
 
-  it('runs a key round between two E2eeWorkspace handles opened through a WorkspacePlatform', async () => {
+  it.each(['healthy', 'fetch', 'staged'] as const)('independent key rounds (%s)', async (mode) => {
+    const receiveFails = mode !== 'healthy';
     const f = envelopeFixture(),
       dir = mkdtempSync(path.join(tmpdir(), 'e2ee-workspace-')),
       phonePair = await recipientPair(),
       native = synthetic();
     dirs.push(dir);
+    let faultActive = mode === 'fetch';
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
@@ -168,7 +177,23 @@ describe('E2eeWorkflows composition', () => {
                 Effect.succeed({
                   ports: Layer.mergeAll(
                     sqliteLocalStores({ directory, mode: 'create-or-open' }),
-                    referenceKeyMailbox(host, signer.publicKey),
+                    name === 'owner' && mode === 'fetch'
+                      ? Layer.effect(
+                          KeyMailbox,
+                          Effect.map(KeyMailbox, (mailbox) => ({
+                            ...mailbox,
+                            fetch: (epoch, cursor, limit) =>
+                              faultActive
+                                ? Effect.fail(
+                                    new BackendError({
+                                      service: 'KeyMailbox',
+                                      reason: 'unavailable',
+                                    })
+                                  )
+                                : mailbox.fetch(epoch, cursor, limit),
+                          }))
+                        ).pipe(Layer.provide(referenceKeyMailbox(host, signer.publicKey)))
+                      : referenceKeyMailbox(host, signer.publicKey),
                     Layer.succeed(LedgerSync, LedgerSync.of({ current: state, refresh: state })),
                     Layer.succeed(
                       LedgerLog,
@@ -187,7 +212,9 @@ describe('E2eeWorkflows composition', () => {
                     ),
                     Layer.succeed(
                       EpochPublicationSource,
-                      EpochPublicationSource.of({ current: () => Effect.succeed(f.genesisRecord) })
+                      EpochPublicationSource.of({
+                        current: () => Effect.succeed(f.genesisRecord),
+                      })
                     ),
                     KeyProtector.layerFromPromises(native.protector),
                     CandidateProtector.layerFromPromises(native.protector)
@@ -210,9 +237,52 @@ describe('E2eeWorkflows composition', () => {
             const owner = yield* E2eeWorkspace.open();
             expect(yield* owner.rotationStatus()).toMatchObject({ epoch: 0, mayRotate: true });
             yield* Context.get(owner.services, InstalledEpochKeys).saveAndReload(0, f.secret);
-            const round = yield* owner.keyRound();
-            expect(round.reconciliation).toMatchObject({ scheduled: 1, blocked: [] });
-            expect(round.deliveryResults.items.map((item) => item.outcome)).toEqual(['Observed']);
+            const cursor = '00'.repeat(32) + ':' + '00'.repeat(32);
+            const attempt = yield* Effect.result(
+              mode === 'staged'
+                ? runWorkspaceKeyRound(
+                    100,
+                    { received: cursor },
+                    Effect.fail(new Error('synthetic staging refusal'))
+                  ).pipe(Effect.provide(owner.services))
+                : owner.keyRound(100, { received: cursor })
+            );
+            // Observable delivery must happen even when this owner's receive page fails.
+            expect(
+              (yield* okMailbox(host, f.phone.publicKey).fetch(0, null, 100)).items
+            ).toHaveLength(1);
+            if (receiveFails) {
+              expect(attempt).toMatchObject({
+                _tag: 'Failure',
+                failure: {
+                  _tag: 'WorkspaceKeyRoundFailure',
+                  receive: { _tag: 'Failure' },
+                  distribution: { _tag: 'Success' },
+                  cursors: {
+                    received: '00'.repeat(32) + ':' + '00'.repeat(32),
+                    reconciliation: null,
+                    delivered: null,
+                  },
+                },
+              });
+              if (
+                !Result.isFailure(attempt) ||
+                !(attempt.failure instanceof WorkspaceKeyRoundFailure)
+              )
+                throw new Error('expected partial round');
+              const original = (yield* okMailbox(host, f.phone.publicKey).fetch(0, null, 100))
+                .items[0]!.frame;
+              faultActive = false;
+              const retried = yield* owner.keyRound(100, attempt.failure.cursors);
+              expect(retried.reconciliation.scheduled).toBe(0);
+              expect(
+                (yield* okMailbox(host, f.phone.publicKey).fetch(0, null, 100)).items[0]!.frame
+              ).toEqual(original);
+            } else {
+              const round = Result.getOrThrow(attempt);
+              expect(round.reconciliation).toMatchObject({ scheduled: 1, blocked: [] });
+              expect(round.deliveryResults.items.map((item) => item.outcome)).toEqual(['Observed']);
+            }
             yield* owner.close();
           }).pipe(Effect.provide(platform('owner', f.owner.signer, {} as CryptoKeyPair)));
           // Phone: one key round fetches, installs and reports the key.
@@ -222,7 +292,9 @@ describe('E2eeWorkflows composition', () => {
             expect(round.received).toBe(1);
             expect(round.results.map((item) => item.outcome)).toEqual(['Reported']);
             yield* phone.close();
-            expect(yield* Effect.flip(phone.rotationStatus())).toMatchObject({ reason: 'closed' });
+            expect(yield* Effect.flip(phone.rotationStatus())).toMatchObject({
+              reason: 'closed',
+            });
           }).pipe(Effect.provide(platform('phone', f.phone.signer, phonePair)));
         })
       )

@@ -7,6 +7,7 @@ import { signVerified } from '../foundation/signing';
 import { verifySignature } from '../foundation/signature';
 import { openEpochKeyHpke } from '../crypto/hpke';
 import { hashRecordBytes } from '../ledger';
+import { historicalContentIdentity } from '../ledger/replay';
 import { VerifiedLedger, type VerifiedLedgerError } from '../ledger/verified-ledger';
 import { makeCloseGuard, own, ownIdentity } from '../lifecycle';
 import { KeyMailbox } from '../../services/keys';
@@ -185,13 +186,21 @@ export class KeyReceiver extends Context.Service<
      * sender/workspace/epoch/recipient hints are skipped for this fetch without
      * journaling or rejecting the digest. `processed` counts scanned rows, not
      * installed keys. An actual install failure stops the page and returns no
-     * `next`. Cursors are non-durable hints; a later fetch can retry skipped rows.
+     * `next`. Non-current senders are skipped without installation: signed frames
+     * from genuinely retired identities return `retiredDigests` for targeted repair;
+     * unknown identities set `refreshRequired` for the host, without digest rejection.
+     * Cursors are non-durable hints; a later fetch can retry skipped rows.
      */
     fetchAndInstall(
       cursor?: string | null,
       limit?: number
     ): Effect.Effect<
-      { readonly processed: number; readonly next: string | null },
+      {
+        readonly processed: number;
+        readonly next: string | null;
+        readonly retiredDigests?: readonly string[];
+        readonly refreshRequired?: boolean;
+      },
       ReceiveFailure | MailboxInstallError
     >;
   }
@@ -678,6 +687,8 @@ export class KeyReceiver extends Context.Service<
         }
         if (rows.length !== count) return yield* fail('invalid-page');
         if ((yield* eligible()) !== epoch) return yield* fail('rollback');
+        const retiredDigests: string[] = [];
+        let refreshRequired = false;
         for (const row of items) {
           // These fields grant no authority. A server can change the row's sender
           // without changing the original frame: skip mismatches for this fetch,
@@ -695,8 +706,41 @@ export class KeyReceiver extends Context.Service<
           // genuine current membership, HPKE and commitment before installation.
           const frameDigest = Reports.mailboxDigest(row.frame);
           let cryptographicRejection = false;
-          yield* receive(row.sender, row.frame, () => {
+          const rejected = () => {
             cryptographicRejection = true;
+          };
+          yield* Effect.gen(function* () {
+            const view = yield* current();
+            const state = view.inspectState();
+            if (state.epoch.number !== epoch) return yield* fail('context-changed');
+            const sender = state.devices.get(keyId(row.sender.toBytes()));
+            if (!sender || !state.members.has(keyId(sender.membershipId.toBytes()))) {
+              if (Result.isSuccess(historicalContentIdentity(view, row.sender))) {
+                // Only genuine retired identity plus exact signed routing diagnoses this digest.
+                yield* envelopeStep(
+                  Effect.fromResult(
+                    authenticateEpochEnvelopeSignature(
+                      {
+                        genesis: anchor,
+                        epoch: yield* Effect.fromResult(Bytes.epochNumber(epoch)),
+                        sender: row.sender,
+                        recipient: signer.publicKey,
+                      },
+                      row.frame
+                    )
+                  ),
+                  rejected
+                );
+                retiredDigests.push(frameDigest);
+              } else {
+                // Absence may mean a lagging local ledger. Ask the host to refresh;
+                // never install, journal, or reject these bytes on this attempt.
+                refreshRequired = true;
+              }
+              return undefined;
+            }
+            yield* receive(row.sender, row.frame, rejected);
+            return undefined;
           }).pipe(
             Effect.catchCause((failure) =>
               Effect.failCause(
@@ -717,7 +761,12 @@ export class KeyReceiver extends Context.Service<
             )
           );
         }
-        return { processed: items.length, next };
+        return {
+          processed: items.length,
+          next,
+          ...(retiredDigests.length ? { retiredDigests } : {}),
+          ...(refreshRequired ? { refreshRequired } : {}),
+        };
       });
 
       return KeyReceiver.of({
