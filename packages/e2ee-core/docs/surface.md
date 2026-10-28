@@ -64,6 +64,8 @@ repository's tests and the Lab, with no compatibility promise.
 | Reports                     | `installationBody`, `installationSigningBytes`, `encodeInstallationReport`, `decodeInstallationReport`, `authenticateInstallationReport`, `checkInstallationContext`, `checkLocalPublication`, `envelopeRouting`, `mailboxDigest`, `slotId`, `MailboxSlot`, `InstallationSource`, `InstallationContext`                                                                                                                                                                                                                                      |
 | Recovery                    | `generateRecoveryPackage`, `importRecoveryIdentity`, `parseRecoveryFile`, `wipeRecoveryPackage`, `verifiedPasskeyPrf`, `disposePrf`, `ownVaultCiphertext`, `vaultCiphertextDigest`, `sameVaultCiphertext`, `RecoveryVaultError`, `RecoveryIdentity`, `RecoveryPrivatePackage`, `VerifiedPasskeyPrf`, `VaultCiphertext`                                                                                                                                                                                                                       |
 
+| Machine sharing | `updateMachineSharingState`, `encodeMachineSharingPolicy`, `decodeMachineSharingPolicy`, `machineSharingContentScope`, `machineSharingDigest`, `sealMachineSharingPolicy`, `openMachineSharingPolicy`, `verifyMachineSharingHistoryStep`, `authorizeMachineExecution`, `MachineSharingBinding`, `MachineSharingState`, `MachineSharingChange`, `MachineSharingPolicy`, `MachineSharingHead`, `VerifiedMachineSharingPolicy`, `MachineExecutionDecision` |
+
 ## `@lody/e2ee-core/host` — backend contract
 
 | Group                        | Exports                                                                                                                                                                                                                                                                                                  |
@@ -74,6 +76,8 @@ repository's tests and the Lab, with no compatibility promise.
 | Document admission           | `admitDocument`, `admitStreamsUpdateBatch`, `admitStreamsUpdateBatchEffect`, `admitStreamsSnapshot`, `admitStreamsSnapshotEffect`, `authenticateStreamsSnapshotEffect`, `StreamsRecordBoundary`, `StreamsRecordBoundaryPort`                                                                             |
 | Port types                   | `KeyMailbox`, `KeyMailboxStatus`, `EpochStagingStore`                                                                                                                                                                                                                                                    |
 | Recovery vault wire contract | `RecoveryVaultCiphertextDto`, `RecoveryVaultPutRequest`, `RecoveryVaultReadRequest`, `RecoveryVaultIndexReadRequest`, `RecoveryVaultIndexCasRequest`, `RecoveryVaultIndexCasReply`, `RecoveryVaultDeleteRequest`, `encodeRecoveryVaultCiphertext`, `decodeRecoveryVaultCiphertext`, `RecoveryVaultStore` |
+
+| Machine sharing admission | `admitMachineSharingFrame` |
 
 ## `@lody/e2ee-core/adapters/node-sqlite`
 
