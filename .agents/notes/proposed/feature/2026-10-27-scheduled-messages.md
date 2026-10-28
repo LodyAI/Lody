@@ -179,23 +179,21 @@ lives in the review artboard; no production behavior changed in this audit.
 
 ## Queue presentation (2026-10-28)
 
-The sheet is one list with a shared 16px gutter: the disclosure chevron, queued
-indices and the Scheduled label align, and every row's text starts on one column.
-Rows are inset tiles with a hover fill instead of hairline dividers; there is no
-header divider. Queued text is subheadline (13/18 at the default UI size).
-Desktop edit/remove and scheduled details/cancel appear on row hover or focus and
-remain visible on touch or hover-less pointers; Steer stays visible as a tray pill.
-A scheduled row ends with its send time as a chip that opens the time editor; a
-failed send marks the chip in the destructive tone with an alert glyph and a
-"Not sent" accessible label, never a status column. Relative labels start
-capitalized ("Tomorrow 9:00 AM").
+Scheduled rows reuse the queued row layout instead of a separate design. The send
+time leads the text inline (muted, tabular, capitalized relative label) and is the
+row's direct control for the time editor; a failed send turns it destructive with
+an alert glyph and a "Not sent" accessible label, never a status column. Actions
+always end the row, matching queued rows; a design with the time at the end and
+hover-revealed actions between title and time was rejected in review.
 
-Touch rows use a three-column grid (gutter, content, 44px More). Queued rows keep
-their indices and a one-line clamp. A scheduled row stacks its title over the
-send time as one button that opens the time editor; its More menu offers Edit
-scheduled time, Edit (details) and Cancel. Both More buttons are real 44px boxes,
-which the previous Button-based trigger (rendered at 32px) did not provide.
-The redesign is presentational; the data path, ordering and callbacks are unchanged.
+Rows are inset tiles without hairline dividers or a header divider. Desktop rows
+share a 16px gutter (index, or empty for a reservation) aligned with the chevron and
+Scheduled label; phones keep #1989's index-free single line. When the sheet is
+narrower than 520px, or on phones, every row folds its actions into one More
+button: queued rows keep Steer, move-to-top, edit and delete; scheduled rows offer
+Edit scheduled time, Edit (details) and Cancel. Touch More buttons are real 44px
+boxes; the previous Button-based trigger rendered at 32px. Data path, ordering and
+callbacks are unchanged.
 
 Presentation ordering is now specified: ordinary rows retain manual order, local attachment-preparation rows follow them, and scheduled rows always form the final section sorted by ascending send instant (ties retain input order). A time edit re-sorts the view. Scheduled rows are excluded from sortable IDs, drag sources/targets, move-to-top and steer. The display uses an explicit scheduled-time accessor; it does not infer scheduling from rendered text or add reservations to durable mq. Component tests cover sorting, changed times and the absence of scheduled drag handles. Backend reservation synchronization remains separate and unimplemented for this queue proposal.
 

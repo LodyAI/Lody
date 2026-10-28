@@ -182,7 +182,7 @@ describe('queued message editing commits', () => {
     expect(cancelledRows).toEqual(['later']);
   });
 
-  it('gives each mobile scheduled row one time target and a More menu', async () => {
+  it('leads a mobile scheduled row with its time and folds actions into More', async () => {
     const edited: string[] = [];
     const opened: string[] = [];
     const cancelledRows: string[] = [];
@@ -221,8 +221,11 @@ describe('queued message editing commits', () => {
     const target = row.querySelector<HTMLButtonElement>(
       'button[aria-label*="Edit scheduled time"]'
     )!;
-    expect(target.textContent).toContain('Send the weekly summary');
     expect(target.textContent).toContain('9:00');
+    expect(row.textContent!.indexOf('9:00')).toBeLessThan(
+      row.textContent!.indexOf('Send the weekly summary')
+    );
+    expect(row.querySelector('button[aria-label="Edit"]')).toBeNull();
     await act(async () => target.click());
     expect(edited).toEqual(['mobile']);
 
@@ -243,6 +246,60 @@ describe('queued message editing commits', () => {
     await act(async () => menuItem('Cancel scheduled message')!.click());
     expect(cancelledRows).toEqual(['mobile']);
     expect(opened).toEqual([]);
+  });
+
+  it('folds desktop row actions into More when the sheet is narrow', async () => {
+    const width = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth')!;
+    Object.defineProperty(Element.prototype, 'clientWidth', {
+      configurable: true,
+      get: () => 400,
+    });
+    const removed: string[] = [];
+    try {
+      await act(async () => {
+        root?.render(
+          createElement(MessageQueueDisplay, {
+            sessionId: 'session-test' as SessionId,
+            items: [makeItem()],
+            scheduledItems: [
+              {
+                scheduleId: 'narrow',
+                title: 'Send the weekly summary',
+                at: Date.parse('2026-10-27T09:00:00Z'),
+                timeZone: 'UTC',
+                state: 'pending',
+              },
+            ],
+            onOpenScheduled: () => {},
+            onCancelScheduled: () => {},
+            onRemove: (cid) => {
+              removed.push(cid);
+            },
+            onReorder: () => {},
+            onEditStart: () => {},
+            onEditCancel: () => {},
+            onEditSave: () => {},
+            onSteer: () => {},
+          })
+        );
+      });
+      expect(container!.querySelector('button[aria-label="Remove from queue"]')).toBeNull();
+      expect(container!.querySelector('button[aria-label="Cancel scheduled message"]')).toBeNull();
+      const mores = container!.querySelectorAll<HTMLButtonElement>('button[aria-label="More"]');
+      expect(mores).toHaveLength(2);
+      await act(async () => {
+        mores[0]!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+        mores[0]!.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0 }));
+        mores[0]!.click();
+      });
+      const remove = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+        (entry) => entry.textContent?.trim() === 'Delete'
+      );
+      await act(async () => remove!.click());
+      expect(removed).toEqual(['cid-0']);
+    } finally {
+      Object.defineProperty(Element.prototype, 'clientWidth', width);
+    }
   });
 
   it('routes the scheduled time to the time editor rather than details', async () => {

@@ -166,6 +166,17 @@ export const ScheduledSection: Story = {
   },
 };
 
+/** A full conversation column: actions fit inline at the row's end. */
+export const ScheduledSectionWide: Story = {
+  args: {
+    ...commonArgs,
+    ...scheduledArgs,
+    items: makeItems(2),
+    scheduledItems,
+  },
+  parameters: { containerWidth: 'w-[720px]' },
+};
+
 export const ScheduledOnly: Story = {
   args: {
     ...commonArgs,

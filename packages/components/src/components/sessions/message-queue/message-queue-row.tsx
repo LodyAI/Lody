@@ -57,6 +57,8 @@ export type MessageQueueRowProps = {
   footer?: ReactNode;
   footerPosition?: 'below' | 'start' | 'end' | 'inline';
   roomy?: boolean | 'airy';
+  /** The sheet is too narrow for inline actions: fold them into More. */
+  compact?: boolean;
 };
 
 type EditCommitProps = {
@@ -127,7 +129,13 @@ export function MessageQueueRow(props: MessageQueueRowProps) {
         sortable.isDragging && 'z-10 bg-[hsl(var(--composer))] opacity-95 shadow-md'
       )}
     >
-      <LeadingHandle {...props} sortable={sortable} />
+      {props.roomy ? (
+        <span {...stylex.props(queueSurface.leading)}>
+          <LeadingHandle {...props} sortable={sortable} />
+        </span>
+      ) : (
+        <LeadingHandle {...props} sortable={sortable} />
+      )}
       {props.footerPosition === 'start' && !isEditing ? (
         <div {...stylex.props(queueSurface.inlineMeta)}>{props.footer}</div>
       ) : null}
@@ -387,11 +395,12 @@ function RowActions(props: MessageQueueRowProps) {
     return null;
   }
 
-  if (mobile && props.roomy) {
+  // Phones, and any sheet too narrow for inline actions, fold every action into More.
+  if ((mobile && props.roomy) || props.compact) {
     return (
-      <div {...stylex.props(queueSurface.roomyActions)}>
+      <div {...stylex.props(queueSurface.actions, props.roomy && queueSurface.roomyActions)}>
         <Menu.Root>
-          <Menu.Trigger render={<MoreTrigger />} />
+          <Menu.Trigger render={<MoreTrigger fine={!props.roomy} />} />
           <Menu.Content align="end" width="compact">
             {shouldShowQueuedItemSteer({ showSteerAction, isFirst, nativeSteerAvailable }) ? (
               <Menu.Item icon={Send} onClick={() => void onSteer(item)}>
@@ -427,27 +436,8 @@ function RowActions(props: MessageQueueRowProps) {
     );
   }
 
-  // Edit and remove surface on hover or focus; Steer stays visible because it
-  // is the one action that changes what the agent is doing right now.
   return (
     <div {...stylex.props(queueSurface.actions, props.roomy && queueSurface.roomyActions)}>
-      <div className={cn(stylex.props(queueSurface.actions).className, ROW_REVEAL_CLASS)}>
-        <IconAction
-          roomy={props.roomy}
-          icon={Pencil}
-          label={t('sessions.messageQueue.editMessage', 'Edit queued message')}
-          onClick={() => onStartEdit(item)}
-        />
-        <IconAction
-          roomy={props.roomy}
-          icon={X}
-          label={t('sessions.messageQueue.remove', 'Remove from queue')}
-          destructive
-          onClick={() => {
-            void onRemove(item.$cid);
-          }}
-        />
-      </div>
       {shouldShowQueuedItemSteer({ showSteerAction, isFirst, nativeSteerAvailable }) ? (
         <button
           type="button"
@@ -463,31 +453,42 @@ function RowActions(props: MessageQueueRowProps) {
           {t('sessions.messageQueue.guideAction', 'Steer')}
         </button>
       ) : null}
+      <IconAction
+        roomy={props.roomy}
+        icon={Pencil}
+        label={t('sessions.messageQueue.editMessage', 'Edit queued message')}
+        onClick={() => onStartEdit(item)}
+      />
+      <IconAction
+        roomy={props.roomy}
+        icon={X}
+        label={t('sessions.messageQueue.remove', 'Remove from queue')}
+        destructive
+        onClick={() => {
+          void onRemove(item.$cid);
+        }}
+      />
     </div>
   );
 }
 
-/** The touch row's 44 px More button; its menu carries every row action. */
-export function MoreTrigger(props: ComponentProps<'button'>) {
+/**
+ * A row's More button; its menu carries every row action. Touch rows get a real
+ * 44 px box; `fine` is the compact desktop trigger for a narrow sheet.
+ */
+export function MoreTrigger({ fine, ...props }: ComponentProps<'button'> & { fine?: boolean }) {
   const { t } = useTranslation();
   return (
     <button
       type="button"
       aria-label={t('common.more', 'More')}
       {...props}
-      {...stylex.props(queueSurface.more)}
+      {...stylex.props(queueSurface.more, fine && queueSurface.compactMore)}
     >
-      <MoreHorizontal size={18} strokeWidth={1.75} aria-hidden="true" />
+      <MoreHorizontal size={fine ? 14 : 18} strokeWidth={1.75} aria-hidden="true" />
     </button>
   );
 }
-
-/** Desktop row actions surface on the row's hover or focus; touch keeps them. */
-export const ROW_REVEAL_CLASS = cn(
-  'opacity-0 transition-opacity duration-100',
-  'group-hover/row:opacity-100 group-focus-within/row:opacity-100',
-  '[@media(hover:none)]:opacity-100 [@media(pointer:coarse)]:opacity-100'
-);
 
 export function TextAction({
   text,

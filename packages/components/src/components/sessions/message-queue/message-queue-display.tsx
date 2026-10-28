@@ -69,6 +69,8 @@ export type MessageQueueDisplayProps = {
 };
 
 const FADE_PX = 20;
+/** Below this sheet width, row actions fold into one More button. */
+const INLINE_ACTIONS_MIN_WIDTH = 520;
 const TOUCH = '@media (pointer: coarse), (max-width: 600px)';
 const styles = stylex.create({
   joinedSheet: { paddingBottom: space[4], marginBottom: `calc(-1 * ${space[4]})` },
@@ -139,6 +141,7 @@ export function MessageQueueDisplay({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(true);
   const [overflow, setOverflow] = useState(NO_SCROLL_EDGE_OVERFLOW);
+  const [compact, setCompact] = useState(false);
 
   const items = sourceItems;
   const ordinaryItems = sourceItems;
@@ -168,6 +171,7 @@ export function MessageQueueDisplay({
     if (!el) return;
     const next = readScrollEdgeOverflow(el);
     setOverflow((current) => (scrollEdgeOverflowEquals(current, next) ? current : next));
+    setCompact(el.clientWidth > 0 && el.clientWidth < INLINE_ACTIONS_MIN_WIDTH);
   }, []);
 
   useLayoutEffect(() => {
@@ -220,6 +224,7 @@ export function MessageQueueDisplay({
         footer={renderItemFooter?.(item)}
         footerPosition={footerPosition}
         roomy={roomy}
+        compact={compact}
         onMoveToTop={index > 0 ? () => onReorder(item.$cid, items[0]!.$cid) : undefined}
         index={index}
         isFirst={index === 0}
@@ -250,7 +255,6 @@ export function MessageQueueDisplay({
   // A sheet tucked onto the surface below it (the info bar, or the composer when
   // there is no bar): rounded top, square open bottom, and the composer's own
   // fill and hairline so the stack reads as one piece rather than a gray slab.
-  // Rows use divide-y so the list feels continuous rather than stacked cards.
   return (
     <Tooltip.Provider>
       <Collapsible.Root
@@ -361,6 +365,8 @@ export function MessageQueueDisplay({
                 <ScheduledQueueRow
                   key={item.scheduleId}
                   item={item}
+                  roomy={roomy}
+                  compact={compact}
                   onOpen={onOpenScheduled}
                   onEditTime={onEditScheduledTime}
                   onCancel={onCancelScheduled}
