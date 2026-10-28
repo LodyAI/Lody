@@ -32,7 +32,8 @@ Parent instructions apply. Background: [README.md](README.md).
   Before accepting an Operation, freeze the Role target, Prompt prefix, revision and run
   config. Recovery uses the frozen canonical Prompt and dispatch config, never rereading
   the Role. Roles may target any reachable Machine; Local
-  Projects default to child Sessions only for same-Machine Roles. `readDelegatedMachineAccess`
+  Projects default to child Sessions only for same-Machine Roles; a remote Role
+  defaults to the Local Project's linked GitHub repository only when the workspace enables it. `readDelegatedMachineAccess`
   requires access for both executing Machine owner and driving human (owned, or shared with
   shared project), never trusting synced `MachineMeta.ownerUserId`.
 - Operation identity comes only from active Host dispatch; reject absent runtime/userId.
