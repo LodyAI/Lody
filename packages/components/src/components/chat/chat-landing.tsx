@@ -357,7 +357,10 @@ import {
   resolveMobileNewChatDefaultProject,
 } from '@/components/mobile/mobile-new-chat-project-options';
 import { MobileSessionRunConfig } from '@/components/mobile/mobile-session-run-config';
-import { resolveMobileNewChatTargetLabel } from '@/components/mobile/mobile-new-chat-target';
+import {
+  resolveMobileNewChatBranchLabel,
+  resolveMobileNewChatTargetLabel,
+} from '@/components/mobile/mobile-new-chat-target';
 import { MobileWorkspaceSwitcherSheet } from '@/components/mobile/mobile-workspace-switcher-sheet';
 import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspace-mark';
 import { MobileCreateWorkspaceSheet } from '@/components/mobile/mobile-create-workspace-sheet';
@@ -2895,8 +2898,6 @@ function WorkspaceChatLanding({
   }, [activeLocalGitState, contextType, repoBranches, t]);
 
   const currentBranch = contextType === 'local' ? selectedLocalBranch : selectedBranch;
-  const currentBranchLabel =
-    branchOptions.find((option) => option.value === currentBranch)?.label ?? currentBranch;
   const setCurrentBranch =
     contextType === 'local' ? handleSelectedLocalBranchChange : setSelectedBranch;
 
@@ -6336,6 +6337,17 @@ function WorkspaceChatLanding({
   const mobileLocalGitProject =
     contextType === 'local' && !!selectedLocalProject && activeLocalGitState?.git === true;
   const mobileBranchVisible = mobileLocalGitProject || (contextType === 'github' && !!selectedRepo);
+  const mobileBranchLabel = resolveMobileNewChatBranchLabel({
+    contextType,
+    currentBranch: activeLocalGitState?.git ? activeLocalGitState.currentBranch : null,
+    selectedBranch: currentBranch,
+    useWorktree: effectiveWorkdirMode === 'worktree',
+    labels: {
+      local: t('chat.branchLocal'),
+      remote: t('chat.branchRemote'),
+      placeholder: t('chat.branchPlaceholder', 'Branch'),
+    },
+  });
   const mobileNewChatSheetContentProps: MobileNewChatSheetContentProps = {
     labels: {
       title: t('chat.mobileNewChat.title', '新建对话'),
@@ -6427,11 +6439,7 @@ function WorkspaceChatLanding({
                 triggerContent={
                   <>
                     <GitBranch className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 truncate">
-                      {(mobileLocalGitProject && effectiveWorkdirMode === 'local'
-                        ? activeLocalGitState?.currentBranch
-                        : currentBranchLabel) ?? t('chat.branchPlaceholder', 'Branch')}
-                    </span>
+                    <span className="min-w-0 truncate">{mobileBranchLabel}</span>
                     <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
                   </>
                 }

@@ -39,7 +39,9 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
 
 - `mobile-new-chat-sheet.tsx` hosts the new-chat page: the session-style
   composer stays at the bottom, with machine and project in that order above it.
-  Local Git worktree and branch share a row; GitHub exposes its branch. Run
+  Local Git worktree and branch share a row; GitHub exposes its branch. Local
+  checked-out and worktree refs both display decoded branch labels with localized
+  local/remote suffixes; launch keeps the exact selector. Run
   configuration opens the same Sheet as an ongoing conversation. The
   selection group shares the composer column and sits above it. Its page, frosted header,
   back button and composer column reuse the session equivalents. The page lifts above the

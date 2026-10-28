@@ -1272,3 +1272,28 @@ for (const project of ['loro-dev/lody', 'blog', 'Loro stack', 'No project select
     await expect(page.getByRole('button', { name: 'Project', exact: true })).toHaveText(project);
   });
 }
+
+test('mobile local branch shows a readable ref across worktree toggles', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(
+    '/iframe.html?id=mobile-mobilenewchatsheet--inline-page-many-branches&viewMode=story'
+  );
+  const branch = page.getByRole('button', { name: 'Branch', exact: true });
+  const worktree = page.getByRole('checkbox');
+  await expect(branch).toHaveText('main (local)');
+  await expect(worktree).toBeChecked();
+  await branch.click();
+  await page
+    .getByRole('listbox', { name: 'Branch', exact: true })
+    .getByRole('option')
+    .filter({ hasText: 'feat/audit-mobile-coupling (local)' })
+    .getByRole('button')
+    .click();
+  await expect(branch).toHaveText('feat/audit-mobile-coupling (local)');
+  await worktree.click();
+  await expect(branch).toBeDisabled();
+  await expect(branch).toHaveText('main (local)');
+  await worktree.click();
+  await expect(branch).toBeEnabled();
+  await expect(branch).toHaveText('feat/audit-mobile-coupling (local)');
+});
