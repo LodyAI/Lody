@@ -7,6 +7,7 @@ import type {
   WorkspaceId,
 } from '@lody/shared';
 import { loadSessionMcpCatalog } from './session-mcp-resolver';
+import { WorkspaceSyncUnavailableError } from '@/lib/command-runtime';
 
 const workspaceId = 'workspace-1' as WorkspaceId;
 const sessionId = 'session-1' as SessionId;
@@ -124,20 +125,20 @@ describe('loadSessionMcpCatalog', () => {
     expect(select(undefined).servers).toHaveLength(1);
   });
 
-  it('reports an unconfirmed baseline as unavailable instead of missing selected ids', async () => {
-    const select = await loadSessionMcpCatalog({
+  it('preserves the original cold-baseline error instead of freezing an empty catalog', async () => {
+    const cause = new Error('Synthetic initial-sync timeout');
+    const error = new WorkspaceSyncUnavailableError({ message: 'Catalog is still syncing', cause });
+    const loading = loadSessionMcpCatalog({
       repo: { openFlockDoc: async () => ({ flock: flockWithRows([]) }) },
       waitForCatalogBaseline: async () => {
-        throw new Error('Catalog is still syncing');
+        throw error;
       },
       workspaceId,
       sessionId,
       selectedIds: [selectedId],
       logger: { debug: () => {} },
     });
-    expect(select(undefined)).toEqual({
-      servers: [],
-      problems: [{ kind: 'catalog_unavailable', reason: 'Catalog is still syncing' }],
-    });
+    await expect(loading).rejects.toBe(error);
+    expect(error.cause).toBe(cause);
   });
 });

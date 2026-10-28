@@ -49,8 +49,8 @@ const EMPTY_SELECTION: SessionMcpCatalogSelector = () => ({ servers: [], problem
  * document read can overlap process spawn and the ACP handshake
  * instead of adding a round trip between `initialize` and `newSession`.
  *
- * Best effort. Configuration failures come back as problems on the selector so
- * the agent still starts with its built-in MCP.
+ * Configuration failures remain best effort. A cold baseline rejects instead:
+ * startup can recheck it before establishing a session with incomplete tools.
  */
 export const loadSessionMcpCatalog = async (
   input: LoadSessionMcpCatalogInput
@@ -61,9 +61,10 @@ export const loadSessionMcpCatalog = async (
   }
 
   const docId = getWorkspaceFlockDocId(input.workspaceId);
+  // Readiness uncertainty must retain its typed error, not become a successful
+  // empty catalog that the ACP session would keep for its entire lifetime.
+  await input.waitForCatalogBaseline?.();
   try {
-    // An unconfirmed catalog must not turn selected ids into false "missing" results.
-    await input.waitForCatalogBaseline?.();
     const handle = await input.repo.openFlockDoc(docId);
     const catalog = getWorkspaceMcpCatalog(readWorkspaceFlockRowsFromFlock(handle.flock));
     const env = input.env ?? process.env;

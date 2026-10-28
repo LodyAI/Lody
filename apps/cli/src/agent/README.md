@@ -134,9 +134,13 @@ the MCP child with `session/close` or Agent teardown.
 the agent's advertised `http` capability at `newSession`. Loading reuses the daemon's
 live workspace catalog: only its first baseline may wait, for up to one second,
 overlapping spawn and the handshake. Later starts read the current replica even during
-reconnects without forcing a remote round trip. An unconfirmed baseline becomes a
-`catalog_unavailable` problem rather than missing-server diagnostics. Empty selections
-skip the catalog entirely.
+reconnects without forcing a remote round trip. A cold preload preserves its typed
+error and is rechecked once at provider-session establishment, after the handshake
+has had time to overlap background catch-up. If still unconfirmed, initialization
+rejects before `newSession`/load/resume/fork instead of successfully freezing an empty
+external MCP list. Existing startup owners retain process and relay cleanup; a later
+startup can use the recovered reader. Other configuration diagnostics remain best
+effort. Empty selections skip the catalog entirely.
 
 ### Steer delivery classification
 
