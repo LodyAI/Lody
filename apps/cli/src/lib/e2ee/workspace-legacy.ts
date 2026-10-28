@@ -645,6 +645,7 @@ async function openWorkspaceOwned(
         genesisHash: binding.genesisHash,
         signer: device,
         ledger: () => runtime.executionLedger(),
+        admissionHistory: runtime.sharingAdmissionHistory,
         readEpochKey: runtime.readSharingEpochKey,
         credential,
         refreshLedger: () => executionAuthorization.refreshLedger,
@@ -1269,11 +1270,12 @@ async function openWorkspaceOwned(
         : Promise.reject(new Error('e2ee_sharing_unavailable')),
     updateMachineSharing: (
       machineId: string,
+      generation: string,
       requestId: string,
       change: import('@lody/platform').E2eeMachineSharingChange
     ) =>
       opened.sharingRemote
-        ? run(opened.sharing.write(machineId, requestId, change, opened.sharingRemote))
+        ? run(opened.sharing.write(machineId, generation, requestId, change, opened.sharingRemote))
         : Promise.reject(new Error('e2ee_sharing_unavailable')),
     authorizeExecution: (workspaceId: string, requesterDevice: string, localProjectId?: string) =>
       Effect.suspend(() =>

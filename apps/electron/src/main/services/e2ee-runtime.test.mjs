@@ -3981,6 +3981,7 @@ void test('sharing host retains an unknown owner original across reopen and pres
           genesisHash: input.genesisHash,
           machineId: input.machineId,
           ownerMembershipId: input.ownerMembershipId,
+          generation: input.generation,
           revision: input.revision,
           digest: version.digest,
           status: 'active'
@@ -4031,6 +4032,9 @@ void test('sharing host retains an unknown owner original across reopen and pres
         yield* owner.host.updateMachineSharing(
           workspaceId,
           'synthetic-machine',
+          version?.generation ??
+            (yield* owner.host.readMachineSharing(workspaceId, 'synthetic-machine', remote))
+              .generation,
           rid,
           change,
           remote
@@ -4049,6 +4053,9 @@ void test('sharing host retains an unknown owner original across reopen and pres
         yield* owner.host.updateMachineSharing(
           workspaceId,
           'synthetic-machine',
+          version?.generation ??
+            (yield* owner.host.readMachineSharing(workspaceId, 'synthetic-machine', remote))
+              .generation,
           rid,
           change,
           remote

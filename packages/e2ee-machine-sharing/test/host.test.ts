@@ -24,7 +24,7 @@ const setup = Effect.fnUntraced(function* (directory: string) {
     expiresAt: null,
     signer: bob.signer,
   });
-  const record = yield* P.signLedgerRecord(
+  const memberRecord = yield* P.signLedgerRecord(
     ok(
       P.prepareLedgerCommand(view, f.owner.publicKey, {
         _tag: 'AdmitMember',
@@ -35,12 +35,24 @@ const setup = Effect.fnUntraced(function* (directory: string) {
     f.owner.signer
   );
   view = ok(
-    P.extendLedger(view, [record], { head: P.hashRecordBytes(record), length: view.length + 1 })
+    P.extendLedger(view, [memberRecord], {
+      head: P.hashRecordBytes(memberRecord),
+      length: view.length + 1,
+    })
   );
+  let originals = [...f.records(), memberRecord];
   let head: E2eeMachineSharingHeadState | null = null;
   const versions = new Map<number, E2eeMachineSharingVersion>();
   const requests = new Map<string, E2eeMachineSharingVersion>();
-  const io = { offline: false, lost: false, wall: 100, mono: 100, reads: 0, commits: 0 };
+  const io = {
+    proofUnavailable: false,
+    offline: false,
+    lost: false,
+    wall: 100,
+    mono: 100,
+    reads: 0,
+    commits: 0,
+  };
   const network = <A>(work: () => A) =>
     Effect.try({
       try: () => {
@@ -79,6 +91,7 @@ const setup = Effect.fnUntraced(function* (directory: string) {
           genesisHash: input.genesisHash,
           machineId: input.machineId,
           ownerMembershipId: input.ownerMembershipId,
+          generation: input.generation,
           status: 'active',
           revision,
           digest,
@@ -105,6 +118,12 @@ const setup = Effect.fnUntraced(function* (directory: string) {
       signer,
       ledger: () => Effect.sync(() => view),
       refreshLedger: () => network(() => undefined),
+      admissionHistory: () =>
+        Effect.succeed(
+          io.proofUnavailable
+            ? []
+            : originals.map((record, index) => ({ record, length: index + 1 }))
+        ),
       readEpochKey: () => Effect.succeed(f.secret),
       credential: 'synthetic-secret',
     }).pipe(Effect.provideService(Clock.Clock, clock));
@@ -125,6 +144,21 @@ const setup = Effect.fnUntraced(function* (directory: string) {
     setHead: (value: E2eeMachineSharingHeadState | null) => {
       head = value;
     },
+    newResource: () => {
+      head = null;
+      versions.clear();
+      requests.clear();
+    },
+    append: Effect.fnUntraced(function* (command: Parameters<typeof P.prepareLedgerCommand>[2]) {
+      const record = yield* P.signLedgerRecord(
+        ok(P.prepareLedgerCommand(view, f.owner.publicKey, command)),
+        f.owner.signer
+      );
+      view = ok(
+        P.extendLedger(view, [record], { head: P.hashRecordBytes(record), length: view.length + 1 })
+      );
+      originals.push(record);
+    }),
     head: () => head,
     view: () => view,
     setView: (v: P.LedgerView) => {
@@ -160,7 +194,11 @@ describe('native machine-sharing control and execution', () => {
         f.io.lost = true;
         const scope = yield* Scope.make();
         const owner = yield* f.make('writer').pipe(Scope.provide(scope));
-        expect(yield* f.run(owner.write('fixture-machine', rid(1), change, f.remote))).toEqual({
+        expect(
+          yield* f.run(
+            owner.write('fixture-machine', hex(f.f.phone.publicKey), rid(1), change, f.remote)
+          )
+        ).toEqual({
           status: 'pending',
           requestId: rid(1),
         });
@@ -173,7 +211,11 @@ describe('native machine-sharing control and execution', () => {
           pendingRequest: { requestId: rid(1), change },
         });
         f.io.offline = false;
-        expect(yield* f.run(reopened.write('fixture-machine', rid(1), change, f.remote))).toEqual({
+        expect(
+          yield* f.run(
+            reopened.write('fixture-machine', hex(f.f.phone.publicKey), rid(1), change, f.remote)
+          )
+        ).toEqual({
           status: 'saved',
           requestId: rid(1),
         });
@@ -184,6 +226,7 @@ describe('native machine-sharing control and execution', () => {
             yield* Effect.result(
               reopened.write(
                 'fixture-machine',
+                hex(f.f.phone.publicKey),
                 rid(1),
                 { kind: 'machine', sharedWithTeam: false },
                 f.remote
@@ -200,7 +243,9 @@ describe('native machine-sharing control and execution', () => {
         const machine = yield* f
           .make('retained-machine', f.f.phone.signer)
           .pipe(Scope.provide(lifetime));
-        yield* f.run(f.owner.write('fixture-machine', rid(1), change, f.remote));
+        yield* f.run(
+          f.owner.write('fixture-machine', hex(f.f.phone.publicKey), rid(1), change, f.remote)
+        );
         const allow = () =>
           f.run(machine.authorize('fixture-machine', hex(f.bob.publicKey), 'project-a', f.remote));
         expect(yield* allow()).toMatchObject({ allowed: true, reason: 'team' });
@@ -213,6 +258,7 @@ describe('native machine-sharing control and execution', () => {
         yield* f.run(
           f.owner.write(
             'fixture-machine',
+            hex(f.f.phone.publicKey),
             rid(2),
             { kind: 'machine', sharedWithTeam: false },
             f.remote
@@ -234,7 +280,9 @@ describe('native machine-sharing control and execution', () => {
   it('uses strict read-start wall and monotonic freshness, and restart never renews it', () =>
     test((f) =>
       Effect.gen(function* () {
-        yield* f.run(f.owner.write('fixture-machine', rid(1), change, f.remote));
+        yield* f.run(
+          f.owner.write('fixture-machine', hex(f.f.phone.publicKey), rid(1), change, f.remote)
+        );
         const allow = () =>
           f.run(
             f.machine.authorize('fixture-machine', hex(f.bob.publicKey), 'project-a', f.remote)
@@ -269,7 +317,9 @@ it('retains private defaults for a missing policy and refuses a machine writer',
       ).toMatchObject({ allowed: true, reason: 'owner' });
       expect(
         Result.isFailure(
-          yield* Effect.result(f.machine.write('fixture-machine', rid(1), change, f.remote))
+          yield* Effect.result(
+            f.machine.write('fixture-machine', hex(f.f.phone.publicKey), rid(1), change, f.remote)
+          )
         )
       ).toBe(true);
       expect(f.io.commits).toBe(0);
@@ -279,20 +329,29 @@ it('retains private defaults for a missing policy and refuses a machine writer',
 it('does not rebase a confirmed CAS conflict or replace its original on retry', () =>
   test((f) =>
     Effect.gen(function* () {
-      yield* f.run(f.owner.write('fixture-machine', rid(1), change, f.remote));
+      yield* f.run(
+        f.owner.write('fixture-machine', hex(f.f.phone.publicKey), rid(1), change, f.remote)
+      );
       const race: SharingRemote = {
         ...f.remote,
         commit: () => Effect.succeed({ status: 'conflict', head: f.head() }),
       };
       expect(
         yield* f.run(
-          f.owner.write('fixture-machine', rid(2), { kind: 'machine', sharedWithTeam: false }, race)
+          f.owner.write(
+            'fixture-machine',
+            hex(f.f.phone.publicKey),
+            rid(2),
+            { kind: 'machine', sharedWithTeam: false },
+            race
+          )
         )
       ).toEqual({ status: 'conflict', requestId: rid(2) });
       expect(
         yield* f.run(
           f.owner.write(
             'fixture-machine',
+            hex(f.f.phone.publicKey),
             rid(2),
             { kind: 'machine', sharedWithTeam: false },
             f.remote
@@ -309,7 +368,9 @@ it('does not rebase a confirmed CAS conflict or replace its original on retry', 
 it('rejects stale policy signatures immediately after a known issuer revocation', () =>
   test((f) =>
     Effect.gen(function* () {
-      yield* f.run(f.owner.write('fixture-machine', rid(1), change, f.remote));
+      yield* f.run(
+        f.owner.write('fixture-machine', hex(f.f.phone.publicKey), rid(1), change, f.remote)
+      );
       expect(
         yield* f.run(
           f.machine.authorize('fixture-machine', hex(f.bob.publicKey), 'project-a', f.remote)
@@ -355,6 +416,7 @@ it('rejects stale policy signatures immediately after a known issuer revocation'
         yield* f.run(
           secondHost.write(
             'fixture-machine',
+            hex(f.f.phone.publicKey),
             rid(2),
             { kind: 'machine', sharedWithTeam: true },
             f.remote
@@ -380,7 +442,9 @@ it('rejects stale policy signatures immediately after a known issuer revocation'
 it('persists removal barriers and cannot revive an older active head', () =>
   test((f) =>
     Effect.gen(function* () {
-      yield* f.run(f.owner.write('fixture-machine', rid(1), change, f.remote));
+      yield* f.run(
+        f.owner.write('fixture-machine', hex(f.f.phone.publicKey), rid(1), change, f.remote)
+      );
       yield* f.run(f.machine.read('fixture-machine', f.remote));
       const old = f.head()!;
       f.setHead({ ...old, status: 'removed' });
@@ -395,7 +459,9 @@ it('persists removal barriers and cannot revive an older active head', () =>
 it('charges slow I/O to the cache lifetime and a backward clock never renews it', () =>
   test((f) =>
     Effect.gen(function* () {
-      yield* f.run(f.owner.write('fixture-machine', rid(1), change, f.remote));
+      yield* f.run(
+        f.owner.write('fixture-machine', hex(f.f.phone.publicKey), rid(1), change, f.remote)
+      );
       const slow: SharingRemote = {
         ...f.remote,
         readHead: (input) =>
@@ -450,9 +516,15 @@ it('opens policy storage lazily and retries a failed open without touching conte
         signer: f.f.phone.signer,
         credential: 'synthetic-secret',
         ledger: () => Effect.succeed(f.view()),
+        admissionHistory: () =>
+          Effect.succeed(f.f.records().map((record, index) => ({ record, length: index + 1 }))),
         readEpochKey: () => Effect.succeed(f.f.secret),
         refreshLedger: () => Effect.void,
       });
+      expect(
+        (yield* host.authorize('fixture-machine', hex(f.f.owner.publicKey), 'project-a', f.remote))
+          .allowed
+      ).toBe(true);
       expect(Result.isFailure(yield* Effect.result(host.read('fixture-machine', f.remote)))).toBe(
         true
       );
@@ -467,7 +539,9 @@ it('opens policy storage lazily and retries a failed open without touching conte
 it('does not publish a delayed old read over a newer verified withdrawal', () =>
   test((f) =>
     Effect.gen(function* () {
-      yield* f.run(f.owner.write('fixture-machine', rid(1), change, f.remote));
+      yield* f.run(
+        f.owner.write('fixture-machine', hex(f.f.phone.publicKey), rid(1), change, f.remote)
+      );
       yield* f.run(f.machine.read('fixture-machine', f.remote));
       const old = f.head();
       const entered = yield* Deferred.make<void>();
@@ -487,6 +561,7 @@ it('does not publish a delayed old read over a newer verified withdrawal', () =>
       yield* f.run(
         f.owner.write(
           'fixture-machine',
+          hex(f.f.phone.publicKey),
           rid(2),
           { kind: 'machine', sharedWithTeam: false },
           f.remote
@@ -525,10 +600,14 @@ it('concurrent retries of one intent adopt one retained original before publicat
       const first = yield* f.make('concurrent-writer', signer);
       const second = yield* f.make('concurrent-writer', signer);
       const a = yield* Effect.forkChild(
-        f.run(first.write('fixture-machine', rid(1), change, f.remote)).pipe(Effect.result)
+        f
+          .run(first.write('fixture-machine', hex(f.f.phone.publicKey), rid(1), change, f.remote))
+          .pipe(Effect.result)
       );
       const b = yield* Effect.forkChild(
-        f.run(second.write('fixture-machine', rid(1), change, f.remote)).pipe(Effect.result)
+        f
+          .run(second.write('fixture-machine', hex(f.f.phone.publicKey), rid(1), change, f.remote))
+          .pipe(Effect.result)
       );
       yield* Deferred.await(ready);
       yield* Deferred.succeed(release, undefined);
@@ -538,5 +617,143 @@ it('concurrent retries of one intent adopt one retained original before publicat
       expect((yield* f.run(f.machine.read('fixture-machine', f.remote))).projects).toEqual([
         'project-a',
       ]);
+    })
+  ));
+
+it('isolates pending originals, high water and live caches on same-member machine readmission', () =>
+  test((f) =>
+    Effect.gen(function* () {
+      const old = hex(f.f.phone.publicKey);
+      yield* f.run(f.owner.write('fixture-machine', old, rid(1), change, f.remote));
+      yield* f.run(
+        f.owner.write(
+          'fixture-machine',
+          old,
+          rid(2),
+          { kind: 'machine', sharedWithTeam: false },
+          f.remote
+        )
+      );
+      f.io.lost = true;
+      expect(
+        yield* f.run(f.owner.write('fixture-machine', old, rid(3), change, f.remote))
+      ).toMatchObject({ status: 'pending' });
+      const permitted = yield* f.run(
+        f.machine.authorize('fixture-machine', hex(f.bob.publicKey), 'project-a', f.remote)
+      );
+      expect(permitted.allowed).toBe(true);
+      const replacement = f.f.ed(29);
+      yield* f.append({ _tag: 'RevokeDevice', target: f.f.phone.publicKey });
+      const admission = yield* P.prepareDeviceAdmission({
+        genesis: f.view().genesis,
+        membershipId: f.view().inspectState().owner,
+        encryptionPublicKey: ok(P.Bytes.encryptionPublicKey(new Uint8Array(32).fill(29))),
+        kind: 'machine',
+        machineId: 'fixture-machine',
+        signer: replacement.signer,
+      });
+      yield* f.append(admission);
+      f.newResource();
+      f.io.lost = false;
+      const generation = hex(replacement.publicKey);
+      const state = yield* f.run(f.owner.read('fixture-machine', f.remote));
+      expect(state).toMatchObject({ generation, head: null, sharedWithTeam: false, projects: [] });
+      expect(state.pendingRequest).toBeUndefined();
+      expect(
+        (yield* f.run(
+          f.machine.authorize('fixture-machine', hex(f.bob.publicKey), 'project-a', f.remote)
+        )).allowed
+      ).toBe(false);
+      expect(
+        Result.isFailure(
+          yield* Effect.result(f.owner.write('fixture-machine', old, rid(3), change, f.remote))
+        )
+      ).toBe(true);
+      // Reusing an ID in another generation cannot reconcile or retransmit the old original.
+      expect(
+        yield* f.run(f.owner.write('fixture-machine', generation, rid(3), change, f.remote))
+      ).toMatchObject({ status: 'saved' });
+      expect(f.head()).toMatchObject({ generation, revision: 1 });
+      expect(
+        (yield* f.run(
+          f.machine.authorize('fixture-machine', hex(f.bob.publicKey), 'project-a', f.remote)
+        )).allowed
+      ).toBe(true);
+      const reopened = yield* f.make('machine');
+      expect(
+        (yield* f.run(
+          reopened.authorize('fixture-machine', hex(f.bob.publicKey), 'project-a', f.remote)
+        )).allowed
+      ).toBe(true);
+    })
+  ));
+
+it('keeps same-member authority when generation proof is unavailable and retries sharing after recovery', () =>
+  test((f) =>
+    Effect.gen(function* () {
+      yield* f.run(
+        f.owner.write('fixture-machine', hex(f.f.phone.publicKey), rid(1), change, f.remote)
+      );
+      expect(
+        (yield* f.run(
+          f.machine.authorize('fixture-machine', hex(f.bob.publicKey), 'project-a', f.remote)
+        )).allowed
+      ).toBe(true);
+      f.io.proofUnavailable = true;
+      expect(
+        (yield* f.run(
+          f.machine.authorize('fixture-machine', hex(f.bob.publicKey), 'project-a', f.remote)
+        )).allowed
+      ).toBe(false);
+      expect(
+        yield* f.run(
+          f.machine.authorize('fixture-machine', hex(f.f.owner.publicKey), 'project-a', f.remote)
+        )
+      ).toMatchObject({ allowed: true, reason: 'owner' });
+      f.io.proofUnavailable = false;
+      expect(
+        (yield* f.run(
+          f.machine.authorize('fixture-machine', hex(f.bob.publicKey), 'project-a', f.remote)
+        )).allowed
+      ).toBe(true);
+    })
+  ));
+
+it('qualifies compact ledger checkpoints from originals and preserves the generation across atomic key replacement', () =>
+  test((f) =>
+    Effect.gen(function* () {
+      const generation = hex(f.f.phone.publicKey);
+      yield* f.run(f.owner.write('fixture-machine', generation, rid(1), change, f.remote));
+      const replacement = f.f.ed(30);
+      const admission = yield* P.prepareDeviceAdmission({
+        genesis: f.view().genesis,
+        membershipId: f.view().inspectState().owner,
+        encryptionPublicKey: ok(P.Bytes.encryptionPublicKey(new Uint8Array(32).fill(30))),
+        kind: 'machine',
+        machineId: 'fixture-machine',
+        signer: replacement.signer,
+      });
+      yield* f.append({ ...admission, replaces: f.f.phone.publicKey });
+      f.setView(ok(P.restoreVerifiedState(ok(P.exportVerifiedState(f.view())))));
+      expect(yield* f.run(f.owner.read('fixture-machine', f.remote))).toMatchObject({
+        generation,
+        sharedWithTeam: true,
+        head: { revision: 1 },
+      });
+      expect(
+        (yield* f.run(
+          f.machine.authorize('fixture-machine', hex(f.bob.publicKey), 'project-a', f.remote)
+        )).allowed
+      ).toBe(true);
+      yield* f.run(
+        f.owner.write(
+          'fixture-machine',
+          generation,
+          rid(2),
+          { kind: 'machine', sharedWithTeam: false },
+          f.remote
+        )
+      );
+      expect(f.head()).toMatchObject({ generation, revision: 2 });
     })
   ));

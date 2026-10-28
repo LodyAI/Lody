@@ -23,7 +23,9 @@ import {
   prepareEpochEnvelope,
   machineSharingContentScope,
   scopedDocumentKey,
+  decodeRecord,
   sealMachineSharingPolicy,
+  verifyMachineSharingGeneration,
   machineSharingDigest,
 } from '@lody/e2ee-core/protocol';
 import { makeStreamsUpdateBinding } from '@lody/e2ee-core/adapters/loro-streams';
@@ -3118,6 +3120,7 @@ describe('SessionExecutionService', () => {
             genesisHash: hex(genesis.genesis.toBytes()),
             machineId: 'machine-1',
             ownerMembershipId: hex(membershipId.toBytes()),
+            generation: hex(machine.publicKey.toBytes()),
           };
           const sharingPolicy = {
             ...sharingScope,
@@ -3134,6 +3137,23 @@ describe('SessionExecutionService', () => {
             Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(20)))
           );
           const sharingFrame = yield* sealMachineSharingPolicy({
+            machineGeneration: Result.getOrThrow(
+              verifyMachineSharingGeneration({
+                ledger: view,
+                machineId: 'machine-1',
+                device: machine.publicKey,
+                admissionChain: records
+                  .map((original, index) => ({ record: original, length: index + 1 }))
+                  .filter(({ record: original }) => {
+                    const body = Result.getOrThrow(decodeRecord(original)).body;
+                    return (
+                      body.type === 'ordinary' &&
+                      body.operation.type === 'admitDevice' &&
+                      body.operation.kind === 'machine'
+                    );
+                  }),
+              })
+            ),
             policy: sharingPolicy,
             epoch: 0,
             documentKey: leaf,
@@ -3193,6 +3213,7 @@ describe('SessionExecutionService', () => {
                   genesisHash: fixture.sharingVersion.genesisHash,
                   machineId: 'machine-1',
                   ownerMembershipId: fixture.sharingVersion.ownerMembershipId,
+                  generation: fixture.sharingVersion.generation,
                   revision: 1,
                   digest: fixture.sharingVersion.digest,
                   status: 'active' as const,

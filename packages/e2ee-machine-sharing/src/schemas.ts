@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { E2eeMachineSharingReplies } from '@lody/platform';
+export const generation = z.string().regex(/^[0-9a-f]{64}$/);
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
 export const requestId = z.string().regex(/^[0-9a-f]{32}$/);
 export const id = z
@@ -18,6 +19,7 @@ const scopeSchema = z.object({
   genesisHash: hash,
   machineId: id,
   ownerMembershipId: requestId,
+  generation,
 });
 const headSchema = z.object({
   revision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),

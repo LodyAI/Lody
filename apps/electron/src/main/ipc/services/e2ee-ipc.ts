@@ -1,5 +1,6 @@
 import {
   id as sharingId,
+  generation as sharingGeneration,
   requestId as sharingRequestId,
   sharingChangeSchema
 } from '@lody/e2ee-machine-sharing/schemas'
@@ -1480,6 +1481,7 @@ export class E2eeIpc extends IpcService {
   async updateMachineSharing(
     workspaceId: string,
     machineId: string,
+    generation: string,
     requestId: string,
     change: import('@lody/platform').E2eeMachineSharingChange
   ) {
@@ -1487,6 +1489,7 @@ export class E2eeIpc extends IpcService {
     if (
       !sharingId.safeParse(workspaceId).success ||
       !sharingId.safeParse(machineId).success ||
+      !sharingGeneration.safeParse(generation).success ||
       !sharingRequestId.safeParse(requestId).success ||
       !parsed.success
     )
@@ -1501,6 +1504,7 @@ export class E2eeIpc extends IpcService {
               work: owner.host.updateMachineSharing(
                 workspaceId,
                 machineId,
+                generation,
                 requestId,
                 parsed.data,
                 cloud.client.machineSharing(),

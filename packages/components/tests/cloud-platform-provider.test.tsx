@@ -207,7 +207,7 @@ describe('CloudPlatformProvider', () => {
     fixture.usePreload = true;
     window.ipc = ipcBridge;
     refetch('Encrypted');
-    const view = { machineId: 'machine-a', ownerMembershipId: '11'.repeat(16), head: { revision: 2, digest: '22'.repeat(32) }, sharedWithTeam: true, projects: ['project-a'] };
+    const view = { generation: '55'.repeat(32), machineId: 'machine-a', ownerMembershipId: '11'.repeat(16), head: { revision: 2, digest: '22'.repeat(32) }, sharedWithTeam: true, projects: ['project-a'] };
     const rid = '33'.repeat(16);
     const change = { kind: 'project', localProjectId: 'project-a', sharedWithTeam: true } as const;
     let pending = true;
@@ -217,7 +217,7 @@ describe('CloudPlatformProvider', () => {
         return view;
       }
       if (channel === 'e2ee.updateMachineSharing') {
-        expect(args).toEqual(['workspace-a', 'machine-a', rid, change]);
+        expect(args).toEqual(['workspace-a', 'machine-a', view.generation, rid, change]);
         const result = { status: pending ? 'pending' : 'saved', requestId: rid };
         pending = false;
         return result;
@@ -227,8 +227,8 @@ describe('CloudPlatformProvider', () => {
     await render();
     const runtime = seen.at(-1)!.e2eeWorkspaces!.runtime!;
     expect(await runtime.readMachineSharing!('workspace-a', 'machine-a')).toEqual(view);
-    expect(await runtime.updateMachineSharing!('workspace-a', 'machine-a', rid, change)).toEqual({ status: 'pending', requestId: rid });
-    expect(await runtime.updateMachineSharing!('workspace-a', 'machine-a', rid, change)).toEqual({ status: 'saved', requestId: rid });
+    expect(await runtime.updateMachineSharing!('workspace-a', 'machine-a', view.generation, rid, change)).toEqual({ status: 'pending', requestId: rid });
+    expect(await runtime.updateMachineSharing!('workspace-a', 'machine-a', view.generation, rid, change)).toEqual({ status: 'saved', requestId: rid });
   });
 
   it('keeps ordinary access unauthenticated while E2EE opens with an expired snapshot and retained bearer after network retries fail', async () => {

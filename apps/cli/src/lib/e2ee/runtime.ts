@@ -550,6 +550,22 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
           return yield* status();
         })
       ),
+    sharingAdmissionHistory: (view: import('@lody/e2ee-core/protocol').LedgerView) =>
+      serial.withPermit(
+        guard().pipe(
+          Effect.andThen(
+            sql(() =>
+              db
+                .prepare('SELECT position,record FROM records WHERE position < ? ORDER BY position')
+                .all(view.length)
+                .map((row) => ({
+                  length: Number(row.position) + 1,
+                  record: new Uint8Array(row.record as Uint8Array),
+                }))
+            )
+          )
+        )
+      ),
     executionGeneration: () => executionGeneration,
     readSharingEpochKey: (epoch: number) => history.read(epoch),
     binding: (resource: string, model: 'loro' | 'flock', writeEpoch: number | 'current') =>

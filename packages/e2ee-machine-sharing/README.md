@@ -23,10 +23,18 @@ store; cancelling a waiter leaves the retained operation with that owner.
 Atomic SQLite comparisons fence concurrent results without holding a lock over
 network or cryptographic work. Failed opens can retry.
 
+Every binding, policy original, request lookup, rollback pin and RAM cache includes
+`generation`, qualified by core from local ledger admission originals. Atomic key
+replacement preserves the initial admission key; removal/readmission creates a
+new resource with no inherited grants or pending intent and starts at revision one.
+A compact ledger uses a full local replay at its authenticated endpoint when
+checkpoints are missing. Missing originals deny sharing only; same-member execution
+continues without opening policy storage. No remote generation hint is trusted.
+
 The store retains immutable request originals and resource-bound accepted heads.
 Credentials, keys, decrypted policy bodies and freshness timestamps are not
 persisted. `intent` retains the narrow local switch change for retry comparison.
-An unknown result returns `pending`; retry the same requestId and change. A
+An unknown result returns `pending`; retry the same generation, requestId and change. A
 confirmed conflict stays terminal for that request and never rebases. Reads expose
 the pending requestId and narrow change so a new window can reconcile it, including
 when a latest-policy read is unavailable. `saved`
@@ -50,7 +58,9 @@ without a retained original cannot be skipped; policy-dependent work fails close
 The CLI's retained identity remains machine-only, so it can consume policy but
 cannot impersonate a personal owner to publish a change. Its host write method
 returns the ownership refusal for that identity. The desktop exposes only
-`readMachineSharing` and `updateMachineSharing`; no signing or private-key IPC is
+`readMachineSharing` (returns generation) and `updateMachineSharing` (requires that
+generation before requestId/change); stale window intents cannot enable a new
+generation. No signing or private-key IPC is
 introduced. Proxy dispatch retains the existing two-actor access intersection;
 entries without authenticated actor evidence remain closed.
 

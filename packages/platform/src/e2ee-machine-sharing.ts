@@ -45,6 +45,8 @@ export type {
 export interface E2eeMachineSharingView {
   machineId: string;
   ownerMembershipId: string;
+  /** Ledger-qualified initial admission key; changes on removal/readmission. */
+  generation: string;
   head: { readonly revision: number; readonly digest: string } | null;
   sharedWithTeam: boolean;
   projects: readonly string[];

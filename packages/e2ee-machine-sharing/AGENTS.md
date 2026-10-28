@@ -5,6 +5,8 @@ methods. Policy crypto remains in e2ee-core. DTOs remain in cloud-api.
 
 - Keep complete originals and request identity before any commit. Unknown results
   reconcile the original request before retrying; confirmed conflicts never rebase.
+- Derive generation only from core-verified local admission originals. Scope originals,
+  requests, pins and caches by generation; never migrate grants on readmission.
 - Persist resource-bound high water and ciphertext, never credentials or freshness.
   Restart requires authenticated latest reads. Historical steps grant no execution.
 - Recheck the current ledger and actual local project before admitting new work.

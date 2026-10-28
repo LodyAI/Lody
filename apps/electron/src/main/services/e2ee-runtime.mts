@@ -879,6 +879,12 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         const history = Context.get(historyContext, InstalledEpochHistory)
         const sharing = yield* makeLazyMachineSharingHost({
           filename: join(directory, 'machine-sharing.sqlite'),
+          admissionHistory: (view) =>
+            sql(() =>
+              rows()
+                .filter((row) => row.position < view.length)
+                .map((row) => ({ length: row.position + 1, record: new Uint8Array(row.record) }))
+            ),
           workspaceId,
           genesisHash: hex(genesis.toBytes()),
           signer: device,
@@ -1587,6 +1593,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
       updateMachineSharing: (
         workspaceId: string,
         machineId: string,
+        generation: string,
         requestId: string,
         change: import('@lody/platform').E2eeMachineSharingChange,
         remote: SharingRemote,
@@ -1595,6 +1602,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         Effect.flatMap(run(openWorkspace(workspaceId)), (entry) =>
           entry.sharing.write(
             machineId,
+            generation,
             requestId,
             change,
             withSharingHistory(entry, workspaceId, remote, readHistory)

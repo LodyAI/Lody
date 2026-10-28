@@ -234,7 +234,7 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
               contentStreamsToken: (workspaceId, rejectedToken) =>
                 native.contentStreamsToken(workspaceId, rejectedToken),
               readMachineSharing: (workspaceId, machineId) => native.readMachineSharing(workspaceId, machineId),
-              updateMachineSharing: (workspaceId, machineId, requestId, change) => native.updateMachineSharing(workspaceId, machineId, requestId, change),
+              updateMachineSharing: (workspaceId, machineId, generation, requestId, change) => native.updateMachineSharing(workspaceId, machineId, generation, requestId, change),
               prepareDispatch: (workspaceId, machineId, input) =>
                 native.prepareDispatch(workspaceId, machineId, input),
               acceptDispatchResponse: (workspaceId, machineId, input, frame) =>

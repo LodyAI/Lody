@@ -3,6 +3,9 @@ import { Clock, Data, Effect, Fiber, Result, Scope, Semaphore } from 'effect';
 import { z } from 'zod';
 import {
   Bytes,
+  contentPermissions,
+  type MachineSharingAdmission,
+  type VerifiedMachineSharingGeneration,
   ContentError,
   machineSharingContentScope,
   scopedDocumentKey,
@@ -21,6 +24,7 @@ import {
   type MachineSharingHead,
   type VerifiedMachineSharingPolicy,
 } from '@lody/e2ee-core/protocol';
+import { machineSharingGenerationFromHistory } from './generation';
 import type {
   E2eeMachineSharingTransport,
   E2eeMachineSharingHeadState,
@@ -64,6 +68,7 @@ const key = (binding: MachineSharingBinding) =>
     binding.genesisHash,
     binding.machineId,
     binding.ownerMembershipId,
+    binding.generation,
   ]);
 const matches = (binding: MachineSharingBinding, value: MachineSharingBinding) =>
   key(binding) === key(value);
@@ -85,6 +90,44 @@ type Pending = {
   state: 'pending' | 'saved' | 'conflict' | 'removed';
 };
 
+// Preserve the policy-independent same-member rule even when policy storage or history is damaged.
+const authorizeOwner = Effect.fnUntraced(function* (
+  options: { ledger: () => Effect.Effect<LedgerView, unknown>; genesisHash: string },
+  machineId: string,
+  requester: string,
+  localProjectId: string | undefined
+) {
+  // Same-member authority is independent of sharing history or policy storage.
+  if (
+    !id.safeParse(machineId).success ||
+    (localProjectId !== undefined && !id.safeParse(localProjectId).success)
+  )
+    return undefined;
+  const current = yield* options.ledger();
+  if (hex(current.genesis.toBytes()) !== options.genesisHash) return undefined;
+  const state = current.inspectState();
+  const requesterDevice = state.devices.get(requester);
+  const machines = [...state.devices.entries()].filter(
+    ([, d]) => d.kind === 'machine' && d.machineId === machineId
+  );
+  if (machines.length === 1 && requesterDevice) {
+    const [device, machine] = machines[0]!;
+    const signer = yield* Effect.fromResult(Bytes.signingPublicKey(unhex(requester)));
+    const machineKey = yield* Effect.fromResult(Bytes.signingPublicKey(unhex(device)));
+    const a = contentPermissions(current, signer),
+      b = contentPermissions(current, machineKey);
+    if (
+      requesterDevice.membershipId.equals(machine.membershipId) &&
+      Result.isSuccess(a) &&
+      a.success.mayWriteDocument &&
+      Result.isSuccess(b) &&
+      b.success.mayWriteDocument
+    )
+      return { allowed: true as const, reason: 'owner' as const };
+  }
+  return undefined;
+});
+
 /** Native, workspace-scoped owner. SQLite retains ciphertext/pins, never keys, credentials or freshness.
  * Atomic SQLite writes fence concurrent results; no lock spans crypto/network work. */
 export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(function* (options: {
@@ -93,6 +136,9 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
   genesisHash: string;
   signer: DeviceSigner;
   ledger: () => Effect.Effect<LedgerView, unknown>;
+  admissionHistory: (
+    ledger: LedgerView
+  ) => Effect.Effect<readonly MachineSharingAdmission[], unknown>;
   readEpochKey: (epoch: number) => Effect.Effect<Bytes.EpochKey, unknown>;
   /** Refresh verified ledger before any authenticated latest read or write. */
   refreshLedger: () => Effect.Effect<void, unknown>;
@@ -138,15 +184,23 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     );
     if (devices.length !== 1) return yield* fail('machine_not_shared');
     const [device, machine] = devices[0]!;
+    const machineGeneration = yield* machineSharingGenerationFromHistory({
+      ledger,
+      machineId,
+      device: yield* Effect.fromResult(Bytes.signingPublicKey(unhex(device))),
+      originals: yield* options.admissionHistory(ledger),
+    });
     return {
       binding: {
         workspaceId: options.workspaceId,
         genesisHash: options.genesisHash,
         machineId,
         ownerMembershipId: hex(machine.membershipId.toBytes()),
+        generation: machineGeneration.generation,
       },
       device,
       ledger,
+      machineGeneration,
     };
   });
   const pin = (binding: MachineSharingBinding) =>
@@ -261,6 +315,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
   const readFrame = Effect.fnUntraced(function* (
     binding: MachineSharingBinding,
     version: E2eeMachineSharingVersion,
+    machineGeneration: VerifiedMachineSharingGeneration,
     previous: MachineSharingHead | null,
     final: boolean,
     management = false
@@ -281,6 +336,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
         const input = {
           ledger: yield* options.ledger(),
           binding,
+          machineGeneration,
           epoch,
           documentKey,
           frame,
@@ -313,6 +369,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
   const latest = Effect.fnUntraced(function* (
     binding: MachineSharingBinding,
     remote: SharingRemote,
+    machineGeneration: VerifiedMachineSharingGeneration,
     force = false,
     management = false
   ) {
@@ -345,9 +402,8 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
       yield* remember(binding, head, saved?.original ?? null);
       return { policy: null, state: null, head };
     }
-    // A removed barrier never grants execution. Only a strictly later signed policy may reactivate.
-    if (saved?.head?.status === 'removed' && head.revision <= saved.head.revision)
-      return yield* fail('sharing_conflict');
+    // Removal is terminal within a generation. Re-admission has a separate resource.
+    if (saved?.head?.status === 'removed') return yield* fail('sharing_conflict');
     let previous: MachineSharingHead | null = saved?.original
       ? { revision: saved.original.revision, digest: saved.original.digest }
       : null;
@@ -372,7 +428,14 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
             );
       if (!raw || 'status' in raw || raw.revision !== revision)
         return yield* fail('sharing_unavailable');
-      const read = yield* readFrame(binding, raw, previous, revision === head.revision, management);
+      const read = yield* readFrame(
+        binding,
+        raw,
+        machineGeneration,
+        previous,
+        revision === head.revision,
+        management
+      );
       previous = read.head;
       policy = read.policy;
       fullState = read.state;
@@ -401,7 +464,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     remote: SharingRemote,
     force = true
   ) {
-    const { binding } = yield* target(machineId);
+    const { binding, machineGeneration } = yield* target(machineId);
     return yield* admitted(
       Effect.gen(function* () {
         const unfinished = yield* sql(() => {
@@ -421,13 +484,14 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
             ),
           };
         });
-        const checked = yield* Effect.result(latest(binding, remote, force));
+        const checked = yield* Effect.result(latest(binding, remote, machineGeneration, force));
         if (Result.isFailure(checked) && !unfinished) return yield* Effect.fail(checked.failure);
         const policy = Result.isSuccess(checked) ? checked.success.policy : null;
         const saved = yield* pin(binding);
         return {
           machineId,
           ownerMembershipId: binding.ownerMembershipId,
+          generation: binding.generation,
           head: policy?.head ?? null,
           sharedWithTeam: policy?.inspect().sharedWithTeam ?? false,
           projects: policy?.inspect().projects ?? [],
@@ -445,11 +509,17 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     remote: SharingRemote
   ) {
     yield* guard();
-    const initial = yield* target(machineId);
+    const owner = yield* authorizeOwner(options, machineId, requester, localProjectId);
+    if (owner) return owner;
+    const qualified = yield* Effect.result(target(machineId));
+    if (Result.isFailure(qualified))
+      return { allowed: false as const, reason: 'policy-unavailable' as const };
+    const initial = qualified.success;
     const signer = yield* Effect.fromResult(Bytes.signingPublicKey(unhex(requester)));
     const decide = (ledger: LedgerView, policy: VerifiedMachineSharingPolicy | null) =>
       authorizeMachineExecution({
         ledger,
+        machineGeneration: initial.machineGeneration,
         policy,
         signer,
         localProjectId,
@@ -457,6 +527,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
           workspaceId: options.workspaceId,
           genesisHash: options.genesisHash,
           machineId,
+          generation: initial.binding.generation,
           device: Result.getOrThrow(Bytes.signingPublicKey(unhex(initial.device))),
         },
       });
@@ -472,7 +543,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
             .some((row) => (JSON.parse(String(row.value)) as Pending).state === 'pending')
         );
         if (uncertain) return { allowed: false as const, reason: 'policy-unavailable' as const };
-        const { policy } = yield* latest(initial.binding, remote);
+        const { policy } = yield* latest(initial.binding, remote, initial.machineGeneration);
         yield* guard();
         const cached = cache.get(key(initial.binding));
         if (!cached || cached.policy !== policy || !sharingFresh(cached.stamp, yield* sharingStamp))
@@ -493,6 +564,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
   });
   const write = Effect.fnUntraced(function* (
     machineId: string,
+    generation: string,
     rid: string,
     change: MachineSharingChange,
     remote: SharingRemote
@@ -502,7 +574,8 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
     const accessCredential = yield* credential();
     yield* options.refreshLedger();
     yield* remote.refreshLedger?.() ?? Effect.void;
-    const { binding, ledger } = yield* target(machineId);
+    const { binding, ledger, machineGeneration } = yield* target(machineId);
+    if (generation !== binding.generation) return yield* fail('sharing_conflict');
     const own = ledger.inspectState().devices.get(self);
     if (
       !own ||
@@ -529,8 +602,9 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
               .some((row) => (JSON.parse(String(row.value)) as Pending).state === 'pending')
           );
           if (unfinished) return yield* fail('sharing_conflict');
-          const current = yield* latest(binding, remote, true, true);
+          const current = yield* latest(binding, remote, machineGeneration, true, true);
           const expectedHead = current.head;
+          if (expectedHead?.status === 'removed') return { status: 'removed', requestId: rid };
           const state = current.state ?? { sharedWithTeam: false, projects: [] };
           const next = yield* Effect.fromResult(updateMachineSharingState(state, normalized));
           const view = yield* options.ledger();
@@ -545,6 +619,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
                 yield* options.readEpochKey(epoch)
               );
               return yield* sealMachineSharingPolicy({
+                machineGeneration,
                 policy: {
                   ...binding,
                   ...next,
@@ -628,7 +703,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
                   digest: original.request.expectedHead.digest as string,
                 }
               : null;
-          yield* readFrame(binding, version, previous, true);
+          yield* readFrame(binding, version, machineGeneration, previous, true);
           yield* remember(
             binding,
             { ...binding, revision: version.revision, digest: version.digest, status: 'active' },
@@ -706,7 +781,13 @@ export const makeLazyMachineSharingHost = Effect.fnUntraced(function* (
     ) => Effect.flatMap(get, (value) => value.write(...args)),
     authorize: (
       ...args: Parameters<Effect.Success<ReturnType<typeof makeMachineSharingHost>>['authorize']>
-    ) => Effect.flatMap(get, (value) => value.authorize(...args)),
+    ) =>
+      Effect.gen(function* () {
+        if (stopped) return yield* fail('closed');
+        const ownDecision = yield* authorizeOwner(options, args[0], args[1], args[2]);
+        if (ownDecision) return ownDecision;
+        return yield* Effect.flatMap(get, (value) => value.authorize(...args));
+      }),
     invalidate: () => owner?.invalidate(),
     stop,
   };
