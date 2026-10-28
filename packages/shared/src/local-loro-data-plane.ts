@@ -278,6 +278,11 @@ const LocalLoroServerMachineMonitorMessageSchema = z.object({
   dataBase64: z.string().min(1),
 });
 
+const LocalLoroServerPromptSuggestionsMessageSchema =
+  LocalLoroServerMachineMonitorMessageSchema.extend({
+    type: z.literal('prompt-suggestions'),
+  });
+
 const LocalLoroPongMessageSchema = z.object({
   type: z.literal('pong'),
   protocolVersion: z.literal(LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION),
@@ -290,6 +295,7 @@ export const LocalLoroDataPlaneServerMessageSchema = z.discriminatedUnion('type'
   LocalLoroServerErrorMessageSchema,
   LocalLoroServerPresenceMessageSchema,
   LocalLoroServerMachineMonitorMessageSchema,
+  LocalLoroServerPromptSuggestionsMessageSchema,
   LocalLoroPongMessageSchema,
 ]);
 

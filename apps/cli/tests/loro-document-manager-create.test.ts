@@ -87,6 +87,7 @@ afterEach(() => presenceApplication.closeLegacy());
 import type { Logger } from '../src/utils/logger';
 import * as logging from '../src/utils/logger';
 import { CliMachineMonitorRuntime } from '../src/lib/loro/machine-monitor';
+import { CliPromptSuggestions } from '../src/lib/loro/prompt-suggestions';
 
 // The production interceptors install once for the whole module lifetime. Keep
 // these underlying delegates stable across tests, regardless of which test first
@@ -667,7 +668,10 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
     });
     let root = captureLogger('process-before');
     const rootGetter = vi.spyOn(logging, 'getLogger').mockImplementation(() => root);
-    // This case exercises diagnostics, not the independent live monitor room.
+    // Keep independent live rooms from issuing requests into the diagnostic fetch fixture.
+    const suggestionsAttach = vi
+      .spyOn(CliPromptSuggestions.prototype, 'attachStreams')
+      .mockResolvedValue(undefined);
     const monitorAttach = vi
       .spyOn(CliMachineMonitorRuntime.prototype, 'attachStreams')
       .mockResolvedValue(undefined);
@@ -763,6 +767,7 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
       diagnosticConsoleSink = undefined;
       diagnosticFetch = undefined;
       monitorAttach.mockRestore();
+      suggestionsAttach.mockRestore();
       rootGetter.mockRestore();
     }
   });

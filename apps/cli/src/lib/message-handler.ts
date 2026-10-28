@@ -3820,6 +3820,10 @@ export class MessageHandler {
       });
     });
 
+    this.sessionManager.on('onPromptSuggestion', (sessionId, suggestion) => {
+      this.workspaceDocument.publishPromptSuggestion(this.machineId, sessionId, suggestion);
+    });
+
     this.sessionManager.on('onContextWindowUsageUpdate', (sessionId, usage) => {
       this.enqueueContextWindowUsageUpdate(sessionId, usage);
     });

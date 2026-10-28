@@ -7424,6 +7424,7 @@ const ThoughtCard = ({
           text={text}
           size={fontSize}
           isStreaming={isStreaming}
+          muted
           searchBlockId={searchBlockId}
         />
       </div>

@@ -14,6 +14,29 @@ The package owns:
 - The web RPC client.
 - The CLI RPC server.
 
+## Candidate E2EE body codecs
+
+`src/e2ee-wire.ts` implements the candidate M5 request, response, nested error
+and presence plaintext layouts from [the wire draft](https://github.com/LodyAI/Lody/pull/1894).
+The codecs are pure and introduce no transport, keys, persistence or execution.
+Normal workspace RPC keeps its existing envelopes. The exact profile still
+requires owner review before product adoption; see the
+[decision and integration limits](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-realtime-body-codecs.md).
+
+RPC bodies reserve content v0's 143-byte overhead inside a complete 1 MiB frame.
+Presence bodies have a 64 KiB limit and positive TTL at most 60 seconds. These
+limits are checked before output allocation or copying decoded byte fields.
+Lengths and integers use unsigned big endian; unsafe u64 values, unsupported
+versions/kinds, truncation, trailing bytes and invalid ASCII fields are rejected.
+Method bytes stay opaque and are never parsed or reserialized here.
+
+Use decoders only after authenticating the content frame. The caller owns and
+wipes returned bytes and separately verifies the workspace/target/signer/epoch,
+method DTO, current permissions, execution freshness, request digest and response
+sequence state. Presence additionally needs room binding, replay checks and
+`issuedAt <= now < expiresAt`. Retry sends the retained sealed frame; encoding
+another body never supplies permission to re-sign or repeat an action.
+
 ## Request deadlines
 
 JSON appends keep a 10-second upload deadline by default. A configured

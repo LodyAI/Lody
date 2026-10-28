@@ -241,6 +241,11 @@ export type WorkspaceRuntime = {
     sessionIds: readonly SessionId[] | null
   ) => void;
   setAuthToken: (token: string | null) => Promise<void>;
+  subscribePromptSuggestion: (
+    machineId: MachineId,
+    sessionId: SessionId,
+    listener: (text: string | null) => void
+  ) => () => void;
   subscribeMachineMonitor: (
     machineId: MachineId,
     listener: (snapshot: import('@lody/shared').MachineMonitorSnapshot | null) => void
