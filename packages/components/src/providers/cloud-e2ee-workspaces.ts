@@ -28,7 +28,7 @@ export class E2eeClientUpgradeRequiredError extends Error {
  */
 export function createCloudE2eeWorkspaces(input: {
   session: () => PlatformSessionState;
-  remote: Pick<PlatformE2eeWorkspaces, 'create' | 'describe' | 'history'>;
+  remote: Pick<PlatformE2eeWorkspaces, 'create' | 'describe' | 'history' | 'memberProfiles'>;
   prepareCreation?: PlatformE2eeWorkspaces['prepareCreation'];
   runtime?: PlatformE2eeWorkspaces['runtime'];
   refreshWorkspaces: () => Promise<void>;
@@ -46,6 +46,26 @@ export function createCloudE2eeWorkspaces(input: {
   const intentKey = (owner: string, requestId: string) => JSON.stringify([owner, requestId]);
 
   return {
+    ...(input.remote.memberProfiles
+      ? {
+          memberProfiles: async (request: { workspaceId: string }) => {
+            const owner = account();
+            const workspaceId = request.workspaceId;
+            const result = await input.remote.memberProfiles!({ workspaceId });
+            assertAccount(owner);
+            if (result.workspaceId !== workspaceId) throw new Error('e2ee_profiles_scope_mismatch');
+            // Keep only display fields; callers must resolve IDs through verified ledger state.
+            return {
+              workspaceId,
+              profiles: result.profiles.map(({ cryptoUserId, name, image }) => ({
+                cryptoUserId,
+                name,
+                image,
+              })),
+            };
+          },
+        }
+      : {}),
     ...(input.runtime ? { runtime: input.runtime } : {}),
     ...(prepareCreation
       ? {
@@ -77,7 +97,8 @@ export function createCloudE2eeWorkspaces(input: {
         request.developerMode !== true ||
         request.name !== original.name ||
         request.slug !== original.slug ||
-        request.genesisRecordHex !== original.genesisRecordHex
+        request.genesisRecordHex !== original.genesisRecordHex ||
+        request.deviceCredentialHash !== original.deviceCredentialHash
       ) {
         throw new Error('e2ee_preparation_required');
       }
@@ -96,15 +117,30 @@ export function createCloudE2eeWorkspaces(input: {
         throw new Error('e2ee_creation_receipt_mismatch');
       }
       if (input.runtime) {
-        await input.runtime.recordCreated({ workspaceId: result.workspaceId, genesisHash: original.genesisHashHex, requestId: original.requestId });
+        try {
+          await input.runtime.recordCreated({
+            workspaceId: result.workspaceId,
+            genesisHash: original.genesisHashHex,
+            requestId: original.requestId,
+          });
+        } catch (error) {
+          if (
+            error instanceof Error &&
+            /e2ee_(?:conflict|local-evidence-conflict|account_mismatch)/.test(error.message)
+          )
+            throw error;
+          console.warn('Encrypted workspace local binding pending', {
+            code: 'e2ee_binding_pending',
+          });
+        }
         assertAccount(owner);
       }
       // Listing is a projection: its failure must not turn a committed, validated
       // creation into an error. The next listing refresh shows the workspace.
       try {
         await input.refreshWorkspaces();
-      } catch (error) {
-        console.warn('Encrypted workspace created; refreshing the workspace list failed', error);
+      } catch {
+        console.warn('Encrypted workspace list refresh pending', { code: 'e2ee_listing_pending' });
       }
       assertAccount(owner);
       return result;

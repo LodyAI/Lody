@@ -72,13 +72,13 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
   change permission policy.
 
 - Daemon workflows gate on `MachineMeta.protocolCapabilities`, never CLI version.
-  Missing means unsupported; keep key/version pairs in `machine-protocol-capabilities.ts`.
+  Missing means unsupported. Full-message schedules require v3 and `messageVersion: 1`.
 - ACP capability `cacheVersion` controls refresh freshness, never readability. Consumers
   preserve understood fields from parsed older or newer entries during mixed-version
   operation, adapting only fields with known incompatible semantics; runtime-override source
   matching remains a separate applicability gate.
-- Rate limits use `agentConfigId + limitId`; bound Providers ignore legacy
-  machine/type rows, and deletion removes scoped rows.
+- Quota: share `src/subscription-quota.ts`; key `agentConfigId + limitId`.
+  Bound Providers ignore legacy; delete scoped rows.
 
 ## Session goal control
 

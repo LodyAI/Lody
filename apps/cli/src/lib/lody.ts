@@ -1,3 +1,5 @@
+import { workspaceSupports } from '@lody/shared/workspace-streams-content';
+import type { CliE2eeWorkspaceLegacy } from './e2ee/workspace-legacy';
 import { LoroDocumentManager } from '@/lib/loro/doc';
 import { MachineRuntime } from '@/lib/machine-runtime';
 import { Logger } from '@/utils/logger';
@@ -27,6 +29,7 @@ import { traceAsync } from '@/utils/trace-span';
 import type { MemoryPressureSnapshotSource } from '@/monitor/memory-pressure-sampler';
 import type { WorkspaceWatchCoordinatorApi } from '@/lib/code-collab/workspace-watch-coordinator';
 import type { CloudPort } from '@lody/platform';
+import type { DaemonWorkspaceAccess } from '@/lib/session-command-environment';
 
 const BUILTIN_AGENT_CONFIG_INITIAL_RETRY_DELAY_MS = 10_000;
 const BUILTIN_AGENT_CONFIG_MAX_RETRY_DELAY_MS = 5 * 60_000;
@@ -36,6 +39,8 @@ interface LodyOptions {
   builtinAgentConfigCliTypes?: CliType[];
   supportRegistryAgentTypes?: string[];
   workspaceId: WorkspaceId;
+  contentMode?: string;
+  genesisHash?: string;
   workspaceSlug?: string;
   token: string;
   userId: string;
@@ -50,8 +55,10 @@ interface LodyOptions {
   ) => Promise<void>;
   onFatalAuthFailure?: (error: Error) => void;
   onStorageWriteFailure?: (error: Error) => void;
+  onEncryptedMemberRemoved?: (owner: Lody) => Promise<void>;
   onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
   workspaceWatchCoordinator?: WorkspaceWatchCoordinatorApi;
+  readWorkspaceAccess?: () => DaemonWorkspaceAccess;
   cloudPort: CloudPort;
 }
 export class Lody {
@@ -65,6 +72,9 @@ export class Lody {
   private runtime: MachineRuntime;
   private supportRegistryAgentTypes: string[];
   private cleanedUp = false;
+  private encryptedWorkspace?: CliE2eeWorkspaceLegacy;
+  private memberRemoved = false;
+  private startReceipt?: Promise<void>;
   private builtinAgentConfigRetryTimer: ReturnType<typeof setTimeout> | undefined;
   private pendingBuiltinAgentConfigRetryCliTypes = new Set<CliType>();
   private builtinAgentConfigRetryAttempt = 0;
@@ -75,6 +85,53 @@ export class Lody {
     // resolve its backend. The selector remains metadata-driven, so legacy and
     // new Loro sessions continue to use the built-in backend by default.
     installRoostNodeSessionBackend();
+    if (
+      options.contentMode !== undefined &&
+      options.contentMode !== 'plaintext' &&
+      options.contentMode !== 'e2ee'
+    )
+      throw new Error('workspace_mode_unsupported');
+    const encrypted = options.contentMode === 'e2ee';
+    let e2ee: CliE2eeWorkspaceLegacy | undefined;
+    let resolveRemovalOwner: (value: Lody | null) => void = () => {};
+    const removalOwner = new Promise<Lody | null>((resolve) => {
+      resolveRemovalOwner = resolve;
+    });
+    if (!workspaceSupports({ mode: encrypted ? 'protected' : 'plaintext' }, 'rpc')) {
+      if (!options.genesisHash || !options.cloudPort.e2ee)
+        throw new Error('e2ee_workspace_unavailable');
+      const { openCliE2eeWorkspaceLegacy } = await import('./e2ee/workspace-legacy');
+      e2ee = await openCliE2eeWorkspaceLegacy({
+        accountId: options.userId,
+        workspaceId: options.workspaceId,
+        genesisHash: options.genesisHash,
+        cloud: options.cloudPort.e2ee,
+        onUnavailable: () => options.logger.debug('e2ee_background_unavailable'),
+        onRemoved: async () => {
+          const owner = await removalOwner;
+          if (!owner) return;
+          owner.memberRemoved = true;
+          await owner.startReceipt?.catch(() => undefined);
+          if (options.onEncryptedMemberRemoved) await options.onEncryptedMemberRemoved(owner);
+          else await owner.cleanup();
+          if (!owner.startReceipt) await owner.documentManager.cleanUp();
+        },
+      });
+      // Unimplemented channels cannot inherit their ordinary plaintext sinks.
+      options = {
+        ...options,
+        cloudPort: {
+          ...options.cloudPort,
+          streamsTokens: null,
+          notifications: null,
+          attachmentUpload: null,
+          remotePreview: null,
+          sessionSharing: null,
+          prAssociation: null,
+          githubTokens: null,
+        },
+      };
+    }
     let manager: LoroDocumentManager | undefined;
     // Commands the daemon executes may touch Sessions owned by other machines; their
     // Roost history lives with that owner, never in this machine's database.
@@ -109,13 +166,21 @@ export class Lody {
           // shared SQLite cursors; one-shot commands keep theirs in memory.
           documentCursorScope: 'shared-durable',
           keepWorkspaceCatalogJoined: true,
-          streamsTokens: options.cloudPort.streamsTokens,
+          streamsTokens: e2ee?.tokens ?? options.cloudPort.streamsTokens,
+          encryptedWorkspace: e2ee,
           cloudBilling: options.cloudPort.billing,
           ownerHistoryRouter,
           onStorageWriteFailure: options.onStorageWriteFailure,
         })
-    );
-    return new Lody(options, manager);
+    ).catch(async (error) => {
+      resolveRemovalOwner(null);
+      await e2ee?.close();
+      throw error;
+    });
+    const lody = new Lody(options, manager);
+    lody.encryptedWorkspace = e2ee;
+    resolveRemovalOwner(lody);
+    return lody;
   }
 
   constructor(
@@ -145,6 +210,7 @@ export class Lody {
       memoryPressure: options.memoryPressure,
       handlerConfig: {
         token: this.token,
+        encryptedWorkspace: options.contentMode === 'e2ee',
         workspaceId: this.workspaceId,
         workspaceSlug: this.workspaceSlug,
         userId: this.userId,
@@ -162,6 +228,7 @@ export class Lody {
         onFatalAuthFailure: options.onFatalAuthFailure,
         onProcessLifecycleAction: options.onProcessLifecycleAction,
         workspaceWatchCoordinator: options.workspaceWatchCoordinator,
+        readWorkspaceAccess: options.readWorkspaceAccess,
         cloudPort: options.cloudPort,
       },
       logger: this.logger,
@@ -169,6 +236,11 @@ export class Lody {
   }
 
   async start(): Promise<void> {
+    if (this.memberRemoved) throw new Error('e2ee_member_removed');
+    return (this.startReceipt = this.startRuntime());
+  }
+
+  private async startRuntime(): Promise<void> {
     // Warm the login-shell env probe (~100-300ms) concurrently with startup so
     // synchronous terminal environment callbacks usually read a populated PATH.
     // ACP startup awaits the same cached probe before spawning. The Legacy cache
@@ -349,7 +421,7 @@ export class Lody {
     }
     this.pendingBuiltinAgentConfigRetryCliTypes.clear();
     this.builtinAgentConfigRetryAttempt = 0;
-    return await this.runtime.cleanup();
+    await this.runtime.cleanup();
   };
 
   async dispatchLocalControl(
@@ -391,7 +463,32 @@ export class Lody {
     return this.runtime.getMessageHandler()?.hasAutomationSessionWork(sessionId) ?? true;
   }
 
+  /** Local pairing completion wakes ledger verification and key installation, never trusts a remote admission hint. */
+  async confirmEncryptedWorkspacePairing(intent: {
+    pairingSessionId: string;
+    frontendSigningPublicKey: string;
+    signingPublicKey: string;
+  }): Promise<boolean> {
+    if (!this.encryptedWorkspace) throw new Error('e2ee_workspace_unavailable');
+    if ((await this.encryptedWorkspace.status()).devicePublicKey !== intent.signingPublicKey)
+      return false;
+    await this.encryptedWorkspace.confirmPairing(intent);
+    await this.refreshEncryptedWorkspace(intent.signingPublicKey);
+    return true;
+  }
+
+  async refreshEncryptedWorkspace(expectedSigningPublicKey: string): Promise<boolean> {
+    if (!this.encryptedWorkspace) throw new Error('e2ee_workspace_unavailable');
+    if ((await this.encryptedWorkspace.status()).devicePublicKey !== expectedSigningPublicKey)
+      return false;
+    await this.encryptedWorkspace.refresh();
+    if (!(await this.encryptedWorkspace.status()).hasCurrentKey)
+      throw new Error('e2ee_waiting_for_key');
+    return true;
+  }
+
   async attachRemoteBridge(): Promise<void> {
+    void this.encryptedWorkspace?.refresh();
     await this.runtime.attachRemoteBridge();
     this.startBuiltinAgentRegistration();
   }

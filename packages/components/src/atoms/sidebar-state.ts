@@ -213,6 +213,27 @@ export const localProjectOrderAtom = atom<readonly string[], [readonly string[]]
   }
 );
 
+/** Per-workspace Project group order: group ids, most recently arranged by the user. */
+const projectGroupOrderByWorkspaceAtom = atomWithStorage<Record<string, string[]>>(
+  'lody-sidebar-project-group-order-by-workspace',
+  {}
+);
+
+/** Project group order scoped to the current workspace, like `localProjectOrderAtom`. */
+export const projectGroupOrderAtom = atom<readonly string[], [readonly string[]], void>(
+  (get) => {
+    const workspaceId = get(currentWorkspaceIdAtom);
+    if (!workspaceId) return EMPTY_LOCAL_PROJECT_ORDER;
+    return get(projectGroupOrderByWorkspaceAtom)[workspaceId] ?? EMPTY_LOCAL_PROJECT_ORDER;
+  },
+  (get, set, value) => {
+    const workspaceId = get(currentWorkspaceIdAtom);
+    if (!workspaceId) return;
+    const map = get(projectGroupOrderByWorkspaceAtom);
+    set(projectGroupOrderByWorkspaceAtom, { ...map, [workspaceId]: [...value] });
+  }
+);
+
 /**
  * Reorder the visible projects in one machine section while retaining saved
  * entries that are currently absent or belong to another machine.

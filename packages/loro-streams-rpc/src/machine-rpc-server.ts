@@ -1,3 +1,9 @@
+import {
+  FileDownloadRequestSchema,
+  type FileDownloadRequest,
+  type FileDownloadResponse,
+} from '@lody/shared';
+import type { ProjectProbeLocalMemberResult } from '@lody/shared';
 import type {
   BugReportClientLog,
   MemoryProviderRequest,
@@ -489,6 +495,7 @@ type RpcServerDeps = {
   resolveCodeCollabOwnerSessionId?: (sessionId: SessionId) => Promise<SessionId>;
   /** File Preview v3 — a plain read; must not activate Code Collab. */
   previewFile?: (args: FilePreviewV3Request) => Promise<FilePreviewV3Response>;
+  downloadFileChunk?: (args: FileDownloadRequest) => Promise<FileDownloadResponse>;
   refreshCodeCollabText?: (
     args: CodeCollabV2RefreshTextRequest
   ) => Promise<CodeCollabV2RefreshTextResponse>;
@@ -508,12 +515,14 @@ type RpcServerDeps = {
   getCodeCollabLspDefinition?: (args: {
     sessionId: SessionId;
     path: string;
+    rootId?: string;
     line?: number;
     character?: number;
   }) => Promise<CodeCollabV2LspUnsupported>;
   getCodeCollabLspReferences?: (args: {
     sessionId: SessionId;
     path: string;
+    rootId?: string;
     line?: number;
     character?: number;
   }) => Promise<CodeCollabV2LspUnsupported>;
@@ -540,6 +549,10 @@ type RpcServerDeps = {
     proof: PreviewControlProof;
     reason?: string;
   }) => Promise<SessionPreviewRevokeResponse>;
+  probeLocalProjectMember?: (args: {
+    localProjectId: LocalProjectId;
+    requestedByUserId: string;
+  }) => Promise<ProjectProbeLocalMemberResult>;
   getLocalProjectGitState?: (args: {
     localProjectId: LocalProjectId;
     requestedByUserId: string;
@@ -1794,6 +1807,7 @@ export class LoroStreamsMachineRpcServer {
           const response = await this.deps.getCodeCollabLspDefinition({
             sessionId: params.sessionId as SessionId,
             path: params.path,
+            ...(params.rootId === undefined ? {} : { rootId: params.rootId }),
             ...(params.line === undefined ? {} : { line: params.line }),
             ...(params.character === undefined ? {} : { character: params.character }),
           });
@@ -1817,9 +1831,23 @@ export class LoroStreamsMachineRpcServer {
           const response = await this.deps.getCodeCollabLspReferences({
             sessionId: params.sessionId as SessionId,
             path: params.path,
+            ...(params.rootId === undefined ? {} : { rootId: params.rootId }),
             ...(params.line === undefined ? {} : { line: params.line }),
             ...(params.character === undefined ? {} : { character: params.character }),
           });
+          await this.appendResultResponse(request.replyTo, request.id, request.method, response, {
+            codeCollabOwnerSessionId: decoded.ownerSessionId,
+          });
+          return;
+        }
+        case 'file/download-chunk': {
+          const decoded = await this.decryptCodeCollabV2RequestParams(request.params);
+          codeCollabOwnerSessionId = decoded.ownerSessionId;
+          const params = FileDownloadRequestSchema.parse(decoded.payload);
+          await this.verifyCodeCollabV2OwnerSession(decoded.ownerSessionId, params.sessionId);
+          const response: FileDownloadResponse = this.deps.downloadFileChunk
+            ? await this.deps.downloadFileChunk(params)
+            : { status: 'error', code: 'unsupported_protocol' };
           await this.appendResultResponse(request.replyTo, request.id, request.method, response, {
             codeCollabOwnerSessionId: decoded.ownerSessionId,
           });
@@ -1919,6 +1947,21 @@ export class LoroStreamsMachineRpcServer {
           await this.appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
+        case 'project/probe-local-member': {
+          if (!this.deps.probeLocalProjectMember) {
+            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+              code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
+              message: 'Project group member probing is not available on this machine.',
+            });
+            return;
+          }
+          const result = await this.deps.probeLocalProjectMember({
+            localProjectId: request.params.localProjectId as LocalProjectId,
+            requestedByUserId: request.params.requestedByUserId,
+          });
+          await this.appendResultResponse(request.replyTo, request.id, request.method, result);
+          return;
+        }
         case 'local-project/git-state': {
           if (!this.deps.getLocalProjectGitState) {
             await this.appendErrorResponse(request.replyTo, request.id, request.method, {
@@ -2002,7 +2045,7 @@ export class LoroStreamsMachineRpcServer {
       }
       const codeCollabError = request.method.startsWith('code-collab/')
         ? toCodeCollabRpcError(failure)
-        : request.method === 'file/preview'
+        : request.method === 'file/preview' || request.method === 'file/download-chunk'
           ? toFilePreviewRpcError(failure, message)
           : null;
       await this.appendErrorResponse(
@@ -2144,10 +2187,12 @@ export class LoroStreamsMachineRpcServer {
       | CodeCollabV2InitDirectoryOk
       | CodeCollabV2LspUnsupported
       | FilePreviewV3Response
+      | FileDownloadResponse
       | SessionPreviewCreateResponse
       | SessionPreviewRevokeResponse
       | SessionPreviewStatusResponse
       | IosSimulatorResponse
+      | ProjectProbeLocalMemberResult
       | LocalProjectGitStateRpcResponse
       | LocalProjectControlResponse,
     options: { readonly codeCollabOwnerSessionId?: string } = {}

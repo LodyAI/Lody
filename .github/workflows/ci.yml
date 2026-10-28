@@ -222,7 +222,8 @@ jobs:
   # .agents/notes/implemented/architecture/2026-09-27-conversation-scroll-engine.md.
   conversation-e2e:
     name: Conversation browser tests
-    runs-on: ubuntu-latest
+    # Playwright 1.58.2 supports Ubuntu 24.04, not the 26.04 ubuntu-latest image.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Checkout

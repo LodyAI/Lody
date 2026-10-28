@@ -1,3 +1,4 @@
+import type { SessionProjectRun } from './workspace-project';
 import type { SessionEntry, SessionFileDiff } from './session-data/domain';
 import { InferInputType, InferType, schema } from 'loro-mirror';
 import {
@@ -1003,7 +1004,13 @@ export type SessionSteerOperationRecord = {
   updatedAt: number;
 };
 
-export type SessionMeta = {
+/** Independent lifecycle register per canonical GitHub PR URL (not association membership). */
+export type SessionPullRequestLifecycle = { s: PrStatus; u: number };
+export type SessionPullRequestLifecycleFields = {
+  [field: `prLifecycle:${string}`]: SessionPullRequestLifecycle | undefined;
+};
+
+export type SessionMeta = SessionPullRequestLifecycleFields & {
   /** Latest assistant's actual model; null means no assistant history, absent means unknown. */
   lastModel?: { modelId?: string; name?: string } | null;
   id: SessionId;
@@ -1064,6 +1071,7 @@ export type SessionMeta = {
   openedByRootSessionId?: SessionId;
   /** Project binding for this session (GitHub repo or local project). */
   project?: ProjectRef;
+  projectRun?: SessionProjectRun;
   repoFullName?: string;
   /** Base branch selected when the session starts (starting point). */
   baseBranch?: string;
@@ -1071,12 +1079,12 @@ export type SessionMeta = {
   branchName?: string;
   /** True if this session runs inside a git worktree (local or GitHub). */
   isWorktree?: boolean;
+  /** Machine-owned association order; status is a compatibility projection. */
   pullRequests?: SessionPullRequestMeta[];
   /**
    * CI rollup + merge/readiness per associated PR URL, written by the CLI PR
-   * poller (compact single-letter codes, ≤50B/entry). Kept outside
-   * `pullRequests` because the webhook fan-out replaces that array wholesale
-   * and strips it to `{url, status}`.
+   * poller (compact single-letter codes, ≤50B/entry). Independent of both
+   * association ordering and provider-versioned lifecycle registers.
    */
   pullRequestState?: Record<string, SessionPullRequestStateMeta>;
   contextWindowUsage?: SessionContextWindowUsage;
@@ -1148,7 +1156,12 @@ export type SessionMeta = {
   externalHistory?: ExternalAcpHistorySyncMeta;
   /** Monotonic-ish signal used to wake the owning CLI when the CRDT message queue changes. */
   messageQueueUpdatedAt?: number;
-  /** Last queue update signal the owning CLI checked when no dispatchable turn was found. */
+  /** Control-document causal frontier captured after the queue mutation named by updatedAt. */
+  messageQueueUpdateVersion?: {
+    updatedAt: number;
+    frontiers: { peer: `${number}`; counter: number }[];
+  };
+  /** Last queue signal whose control mutation was observed and whose queue was drained. */
   messageQueueCheckedAt?: number;
   /**
    * When the session started waiting on a human answer, cleared when the request

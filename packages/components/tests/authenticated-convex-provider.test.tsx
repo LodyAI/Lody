@@ -19,12 +19,13 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../src/components/auth-recovery-error', () => ({
-  AuthRecoveryError: ({ onRetry }: { onRetry: () => void }) => (
-    <div role="alert">
-      <span>Authentication recovery failed</span>
-      <button onClick={onRetry}>Retry</button>
-    </div>
-  ),
+  AuthRecoveryError: ({ onRetry, isRecovering }: { onRetry: () => void; isRecovering: boolean }) =>
+    isRecovering ? null : (
+      <div role="alert">
+        <span>Authentication recovery failed</span>
+        <button onClick={onRetry}>Retry</button>
+      </div>
+    ),
 }));
 
 vi.mock('convex/react', () => ({

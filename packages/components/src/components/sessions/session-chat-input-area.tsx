@@ -1,3 +1,9 @@
+import { getSessionChatInputAreaShellClassName } from '@/components/chat/composer-surface';
+export { getSessionChatInputAreaShellClassName } from '@/components/chat/composer-surface';
+import { ScheduledMessagesSummary } from '../schedules/scheduled-messages-summary';
+import { useScheduledMessage } from '../schedules/use-scheduled-message';
+import { useLatestRef } from '@/hooks/use-latest-ref';
+import { ScheduledMessageTimeDialog } from '../schedules/scheduled-message-time';
 import type { AgentConfigMeta } from '@lody/shared';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
@@ -22,7 +28,7 @@ import {
   useImperativeHandle,
 } from 'react';
 import { useAtomValue } from 'jotai';
-import { ArrowUp } from 'lucide-react';
+import { ArrowUp, Clock } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
@@ -53,6 +59,8 @@ import {
 import type { CombinedMentionTextareaHandle } from '@/components/mentions/combined-mention-textarea';
 import type { AttachmentAddMenuMcp } from '@/components/chat/attachment-add-menu';
 import { useComposerSubmission } from '@/components/chat/submission/use-composer-submission';
+import { focusComposerAfterNavigation } from '@/components/chat/submission/use-composer-navigation-focus';
+import { dismissComposerKeyboardAfterPaint } from '@/components/chat/submission/composer-keyboard-dismissal';
 import { MobileSessionRunConfig } from '@/components/mobile/mobile-session-run-config';
 import { useRunConfigFace } from '@/components/mobile/mobile-run-config-button';
 import {
@@ -143,19 +151,6 @@ import type { MachineRateLimits } from '@/lib/session-usage';
 const sessionDraftsCache = new Map<SessionId, string>();
 
 const styles = stylex.create({
-  shell: {
-    position: 'relative',
-    flexShrink: 0,
-    paddingTop: 0,
-    marginBottom: 'var(--native-keyboard-height, 0px)',
-    paddingBottom:
-      'calc(0.5rem + max(0px, env(safe-area-inset-bottom, 0px) - var(--native-keyboard-height, 0px)))',
-    backgroundColor: colors.background,
-    transitionProperty: 'margin-bottom',
-    transitionDuration: '250ms',
-    transitionTimingFunction: 'var(--ease-out, cubic-bezier(0, 0, 0.2, 1))',
-  },
-  shellEdgeBackLayer: { zIndex: 40 },
   footerSelectors: {
     display: 'flex',
     minWidth: 0,
@@ -427,18 +422,6 @@ const createLocalImageId = (): string => {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 };
 
-export function getSessionChatInputAreaShellClassName({
-  protectFromEdgeBackZone = false,
-}: { protectFromEdgeBackZone?: boolean } = {}): string {
-  const shell = stylex.props(
-    styles.shell,
-    // The native session drawer owns a z-30 transparent left-edge swipe zone.
-    // Keep the composer above it so the zone cannot swallow its controls.
-    protectFromEdgeBackZone && styles.shellEdgeBackLayer
-  );
-  return shell.className ?? '';
-}
-
 export interface SessionChatInputAreaProps {
   /** Claims a one-shot navigation focus request; absent for ordinary session visits. */
   claimNavigationFocus?: () => boolean;
@@ -648,9 +631,17 @@ export const SessionChatInputArea = memo(
     const postHog = usePostHog();
     const isArchived = session.isArchived === true;
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const cancelNavigationDismissal = useRef<(() => void) | undefined>(undefined);
+    useLayoutEffect(() => () => cancelNavigationDismissal.current?.(), [session.id]);
     useLayoutEffect(() => {
-      if (claimNavigationFocus?.() && !usesMobileKeyboardAction) {
-        textareaRef.current?.focus({ preventScroll: true });
+      if (
+        claimNavigationFocus?.() &&
+        focusComposerAfterNavigation(textareaRef.current, usesMobileKeyboardAction) &&
+        usesMobileKeyboardAction &&
+        textareaRef.current
+      ) {
+        cancelNavigationDismissal.current?.();
+        cancelNavigationDismissal.current = dismissComposerKeyboardAfterPaint(textareaRef.current);
       }
     }, [claimNavigationFocus, usesMobileKeyboardAction]);
     const agentRoleTurnSelectionRef = useRef<SessionTurnAgentRoleSelection>(undefined);
@@ -864,6 +855,9 @@ export const SessionChatInputArea = memo(
      */
     const mentionRangesRef = useRef<MentionRange[]>([]);
     const { machine: quotaMachine } = useResolvedMachineMeta(session.machineId);
+    const scheduled = useScheduledMessage(session, quotaMachine);
+    // The hook returns fresh closures each render; keep sendMessage stable while typing.
+    const scheduledSaveRef = useLatestRef(scheduled.save);
     const refreshQuota = useProviderQuotaRefresh(
       session.machineId,
       session.agentConfigId,
@@ -1752,8 +1746,9 @@ export const SessionChatInputArea = memo(
           comments: commentReferencesRef.current,
           annotations: visualAnnotationReferencesRef.current,
         };
-        const submission = beginSubmission({ dismissKeyboard: usesMobileKeyboardAction });
+        const submission = beginSubmission({ restoreFocusOnComplete: !usesMobileKeyboardAction });
         if (!submission) return;
+        let accepted = false;
         try {
           const images = pendingImages;
           const files = pendingFiles;
@@ -1774,11 +1769,35 @@ export const SessionChatInputArea = memo(
           submittedDraft.files = sessionFileDraftsCache.get(session.id);
           // Use the committed callback and Role after waiting: routing and run
           // config must come from the same current composer state.
-          const accepted = await onSendMessage(inputBlocks, agentRoleTurnSelectionRef.current, {
-            ...options,
-            attachments,
-            ...(mcpServerIds ? { mcpServerIds } : {}),
-          });
+          const role = agentRoleTurnSelectionRef.current;
+          accepted = scheduled.at
+            ? await scheduledSaveRef.current({
+                inputBlocks,
+                attachments,
+                agent: {
+                  agentConfigId: session.agentConfigId ?? '',
+                  ...(selectedModeId ? { modeId: selectedModeId } : {}),
+                  ...(selectedModelId ? { modelId: selectedModelId } : {}),
+                  ...(configOptionValues ? { configOptionValues } : {}),
+                  ...(role?.memory ? { memory: role.memory } : {}),
+                },
+                message: {
+                  ...(mcpServerIds ? { mcpServerIds } : {}),
+                  ...(role
+                    ? {
+                        agentRoleId: role.agentRoleId,
+                        agentRoleRevision: role.agentRoleRevision,
+                        agentRoleSnapshot: role.agentRoleSnapshot,
+                        rolePromptPrefix: selectedAgentRoleRef.current?.promptPrefix,
+                      }
+                    : {}),
+                },
+              })
+            : await onSendMessage(inputBlocks, role, {
+                ...options,
+                attachments,
+                ...(mcpServerIds ? { mcpServerIds } : {}),
+              });
           if (accepted) {
             captureAgentRoleMentionsApplied(postHog, {
               spans: trimmedSpans,
@@ -1810,12 +1829,12 @@ export const SessionChatInputArea = memo(
               // write component state from a retired submission.
               clearSessionChatInputDrafts(session.id);
             }
-            if (submittedVisualAnnotationReferences.length > 0) {
+            if (!scheduled.at && submittedVisualAnnotationReferences.length > 0) {
               void onVisualAnnotationReferencesSubmitted?.(submittedVisualAnnotationReferences);
             }
           }
         } finally {
-          submission.finish();
+          submission.finish({ dismissKeyboard: accepted && usesMobileKeyboardAction });
         }
       },
       [
@@ -1829,6 +1848,11 @@ export const SessionChatInputArea = memo(
         durableAgentRoleReady,
         mcp,
         mcpSelectionReady,
+        scheduled.at,
+        scheduledSaveRef,
+        selectedModeId,
+        selectedModelId,
+        configOptionValues,
         isExternalHistoryRefreshing,
         isMachineRemoved,
         isVisible,
@@ -1840,6 +1864,7 @@ export const SessionChatInputArea = memo(
         publishVisualAnnotationReferences,
         postHog,
         session.id,
+        session.agentConfigId,
         session.machineId,
         sessionProjectKind,
         updatePastedTextDraftsForSession,
@@ -1891,7 +1916,7 @@ export const SessionChatInputArea = memo(
       hasUploadedFiles ||
       commentReferences.length > 0 ||
       visualAnnotationReferences.length > 0;
-    const showStopButton = canStopAgent && !hasDraft && !isArchived;
+    const showStopButton = canStopAgent && !hasDraft && !isArchived && !scheduled.at;
     const isSendActionDisabled =
       !isVisible ||
       submissionPending ||
@@ -2254,16 +2279,21 @@ export const SessionChatInputArea = memo(
         onClick={() => {
           void sendMessage();
         }}
+        onMouseDown={(event) => event.preventDefault()}
         disabled={!hasSendableContent || isSendActionDisabled}
         aria-label={
           isExternalHistoryRefreshing && externalHistorySyncLabel
             ? externalHistorySyncLabel
-            : t('sessions.send')
+            : scheduled.at
+              ? t('scheduledMessage.title')
+              : t('sessions.send')
         }
         className="shadow-xs transition-all bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]"
       >
         {submissionPending || isExternalHistoryRefreshing ? (
           <Spinner size={isMobile ? 'medium' : 'small'} />
+        ) : scheduled.at ? (
+          <Clock {...stylex.props(isMobile ? styles.sendIconMobile : styles.sendIconDesktop)} />
         ) : (
           <ArrowUp {...stylex.props(isMobile ? styles.sendIconMobile : styles.sendIconDesktop)} />
         )}
@@ -2299,6 +2329,7 @@ export const SessionChatInputArea = memo(
         promptPlaceholder={promptPlaceholder}
         compactPlaceholderName={compactPlaceholderName}
         promptDisabled={submissionPending || isArchived}
+        preservePromptFocus={usesMobileKeyboardAction && submissionPending && !isArchived}
         promptRows={2}
         promptEnterKeyHint={promptEnterKeyHint}
         commentReferenceItems={submissionPending ? [] : commentReferences}
@@ -2342,6 +2373,17 @@ export const SessionChatInputArea = memo(
         onImageRetry={submissionPending || isArchived ? undefined : handleRetryImage}
         fileItems={submissionPending ? [] : fileItems}
         mcp={mcp}
+        onScheduleSend={
+          (scheduled.available || scheduled.featureUnavailable) && !isArchived
+            ? scheduled.openPicker
+            : undefined
+        }
+        scheduleDisabledReason={scheduled.disabledReason}
+        statusMessage={
+          submissionPending && scheduled.progress !== null
+            ? t('scheduledMessage.preparing', { progress: scheduled.progress })
+            : undefined
+        }
         onFileRemove={submissionPending || isArchived ? undefined : handleRemoveFile}
         onFileRetry={submissionPending || isArchived ? undefined : handleRetryFile}
         footerSelector={footerSelectorNode}
@@ -2370,6 +2412,16 @@ export const SessionChatInputArea = memo(
             unmount with them the moment it opened. Mounted only while OPEN:
             it reads machine visibility, and the composer must stay renderable
             in hosts that do not provide that context. */}
+        {isVisible && scheduled.pickerOpen && !submissionPending ? (
+          <ScheduledMessageTimeDialog
+            at={scheduled.at}
+            timeZone={scheduled.timeZone}
+            onApply={scheduled.apply}
+            onClose={scheduled.closePicker}
+            onRemoveTime={scheduled.at ? scheduled.cancel : undefined}
+            finalFocus={usesMobileKeyboardAction ? false : textareaRef}
+          />
+        ) : null}
         {agentRoleEditor && !submissionPending ? (
           <AgentRoleEditorDialog
             editor={agentRoleEditor}
@@ -2382,6 +2434,7 @@ export const SessionChatInputArea = memo(
         ) : null}
         <ConversationColumn>
           {hideTopSpacer ? null : <div aria-hidden="true" {...stylex.props(styles.topSpacer)} />}
+          <ScheduledMessagesSummary sessionId={session.id} timeZone={scheduled.timeZone} />
           {externalHistorySyncNode}
           {freeTurnLimitNoticeNode}
           {attachmentAddEnabled ? (

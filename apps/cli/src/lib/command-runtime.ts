@@ -52,6 +52,7 @@ import { findWorkspacesBySelector, formatWorkspaceCandidate } from '@/lib/worksp
 import { listAliveRoomIds } from '@/lib/loro/repo-existence';
 import {
   createCloudBillingPort,
+  createCloudE2eePort,
   createCloudStreamsTokenPort,
   createCloudSessionSharingPort,
 } from '@/lib/cloud-cli-port';
@@ -59,6 +60,10 @@ import { getCliPlatformKind } from '@/lib/cli-platform';
 import type { CloudSessionSharingPort } from '@lody/platform';
 import { getDaemonWorkspace, getSessionCommandEnvironment } from './session-command-environment';
 import { makeWorkspaceCommandManagers } from './workspace-command-manager';
+import {
+  makeLocalWorkspaceCatalog,
+  type LocalWorkspaceCatalogService,
+} from './local-workspace-catalog';
 
 export function getCommandSessionSharingPort(): CloudSessionSharingPort | null {
   if (getCliPlatformKind() !== 'cloud') return null;
@@ -242,19 +247,93 @@ export function getAuthContextOrThrow(loggerName: string): AuthContext {
   };
 }
 
+const DAEMON_LOGIN_MISMATCH =
+  'The CLI login no longer matches the running Lody daemon; restart the daemon to use the new login.';
+
+export type ResolveWorkspaceOptions = {
+  /** Resolve from the local workspace catalog instead of online discovery. */
+  offline?: boolean;
+  catalog?: Pick<LocalWorkspaceCatalogService, 'read'>;
+};
+
+/**
+ * Workspace candidates for a standalone command: online discovery by default,
+ * or the active entries the daemon last cached for this login with `--offline`.
+ */
+export async function listWorkspaceCandidates(
+  auth: AuthContext,
+  options: ResolveWorkspaceOptions & { selector?: string } = {}
+): Promise<WorkspaceSummary[]> {
+  if (options.offline !== true) return await listWorkspacesForToken(auth.token);
+  const snapshot = await Effect.runPromise((options.catalog ?? makeLocalWorkspaceCatalog()).read());
+  let workspaces =
+    snapshot.identity?.userId === auth.userId
+      ? snapshot.workspaces.filter((workspace) => workspace.state === 'active')
+      : [];
+  // A degraded catalog omits encrypted rows. Only an exact id or slug of a
+  // readable row stays decidable; a name or default choice could be wrong.
+  if (snapshot.encryptedCatalogUnavailable || snapshot.encryptedCatalogError) {
+    const selector = normalizeCliValue(options.selector);
+    const matches = workspaces.filter(
+      (workspace) => selector && (workspace.workspaceId === selector || workspace.slug === selector)
+    );
+    if (matches.length !== 1)
+      throw new Error(
+        'Encrypted workspace cache is unavailable; pass --workspace with a non-encrypted workspace id or slug, or run without --offline.',
+        { cause: snapshot.encryptedCatalogError }
+      );
+    workspaces = matches;
+  }
+  if (workspaces.length === 0)
+    throw new Error(
+      'No workspaces are cached locally for the current CLI login; run without --offline.'
+    );
+  return workspaces.map(({ workspaceId, name, slug, role, contentMode, genesisHash }) => ({
+    id: workspaceId,
+    name,
+    slug,
+    role,
+    ...(contentMode ? { contentMode } : {}),
+    ...(genesisHash ? { genesisHash } : {}),
+  }));
+}
+
 export async function resolveWorkspaceOrThrow(
   auth: AuthContext,
-  selector?: string
+  selector?: string,
+  options: ResolveWorkspaceOptions = {}
 ): Promise<WorkspaceSummary> {
   const environment = getSessionCommandEnvironment();
   if (environment) {
     if (auth !== environment.auth) throw new Error('Session command identity mismatch');
     return selectWorkspaceSummary([environment.workspace], selector);
   }
-  const workspaces = await listWorkspacesForToken(auth.token);
   const effectiveSelector =
     normalizeCliValue(selector) ?? normalizeCliValue(process.env.LODY_WORKSPACE_ID);
-  return selectWorkspaceSummary(workspaces, effectiveSelector);
+  // A daemon command is bound to the daemon's workspace, whose access the daemon
+  // already tracks; enumerating every workspace of the login adds only a
+  // network dependency.
+  const daemon = getDaemonWorkspace();
+  const access = daemon?.readAccess?.();
+  if (daemon && access && access.status !== 'unknown') {
+    if (auth.userId !== daemon.userId || auth.machineId !== daemon.machineId)
+      throw new Error(DAEMON_LOGIN_MISMATCH);
+    if (access.status === 'unauthorized')
+      throw new Error('CLI token is invalid or expired. Run `lody login` again.');
+    if (access.status === 'revoked')
+      throw new Error(`Workspace access was revoked: ${daemon.workspaceId}`);
+    if (
+      access.workspace.id !== daemon.workspaceId ||
+      (effectiveSelector &&
+        findWorkspacesBySelector([access.workspace], effectiveSelector).length === 0)
+    )
+      throw new Error('Daemon command workspace mismatch');
+    return access.workspace;
+  }
+  return selectWorkspaceSummary(
+    await listWorkspaceCandidates(auth, { ...options, selector: effectiveSelector }),
+    effectiveSelector
+  );
 }
 
 export async function withMachineRpcClient<T>(
@@ -350,6 +429,12 @@ export async function withWorkspaceManager<T>(
   loggerName: string,
   fn: (manager: LoroDocumentManager) => Promise<T>
 ): Promise<T> {
+  if (
+    workspace.contentMode !== undefined &&
+    workspace.contentMode !== 'plaintext' &&
+    workspace.contentMode !== 'e2ee'
+  )
+    throw new Error('workspace_mode_unsupported');
   const environment = getSessionCommandEnvironment();
   if (environment) {
     if (auth !== environment.auth || workspace.id !== environment.workspace.id)
@@ -362,9 +447,7 @@ export async function withWorkspaceManager<T>(
     // and never writes into it under a different identity.
     if (workspace.id !== daemon.workspaceId) throw new Error('Daemon command workspace mismatch');
     if (auth.userId !== daemon.userId || auth.machineId !== daemon.machineId)
-      throw new Error(
-        'The CLI login no longer matches the running Lody daemon; restart the daemon to use the new login.'
-      );
+      throw new Error(DAEMON_LOGIN_MISMATCH);
     return fn(daemon.manager);
   }
   // One-shot commands write directly into the workspace repo and rely on
@@ -388,18 +471,40 @@ export async function withWorkspaceManager<T>(
     },
     async () => {
       let manager: LoroDocumentManager;
+      let resolveRemovalOwner: (value: LoroDocumentManager | null) => void = () => {};
+      const removalOwner = new Promise<LoroDocumentManager | null>((resolve) => {
+        resolveRemovalOwner = resolve;
+      });
+      const e2ee =
+        workspace.contentMode === 'e2ee'
+          ? await (
+              await import('./e2ee/workspace-legacy')
+            ).openCliE2eeWorkspaceLegacy({
+              accountId: commandAuth.userId,
+              workspaceId: workspace.id,
+              genesisHash: workspace.genesisHash ?? '',
+              cloud: createCloudE2eePort({ token: commandAuth.token, authBaseUrl, logger }),
+              onUnavailable: () => logger.debug('e2ee_background_unavailable'),
+              onRemoved: async () => {
+                await (await removalOwner)?.cleanUp();
+              },
+            })
+          : undefined;
       manager = await LoroDocumentManager.create(
         workspace.id as WorkspaceId,
         commandAuth.userId,
         logger,
         {
-          attachRemoteOnCreate: true,
-          streamsTokens: createCloudStreamsTokenPort({
-            token: commandAuth.token,
-            authBaseUrl,
-            authSiteUrl,
-            logger,
-          }),
+          attachRemoteOnCreate: !e2ee,
+          encryptedWorkspace: e2ee,
+          streamsTokens:
+            e2ee?.tokens ??
+            createCloudStreamsTokenPort({
+              token: commandAuth.token,
+              authBaseUrl,
+              authSiteUrl,
+              logger,
+            }),
           cloudBilling: createCloudBillingPort({ token: commandAuth.token }),
           sessionHistoryFactory: createCommandSessionHistoryFactory(
             () => manager,
@@ -407,7 +512,21 @@ export async function withWorkspaceManager<T>(
             workspace.id as WorkspaceId
           ),
         }
-      );
+      ).catch(async (error: unknown) => {
+        resolveRemovalOwner(null);
+        // The manager owns `e2ee.close()` only once created; otherwise close the
+        // opened custody/history/refresh owner here, keeping the original error.
+        await e2ee?.close().catch((cleanup: unknown) => {
+          logger.debug(`e2ee_cleanup_failed: ${formatErrorMessage(cleanup)}`);
+        });
+        throw error;
+      });
+      resolveRemovalOwner(manager);
+      // E2EE local acceptance never waits for a token or network connection.
+      if (e2ee)
+        void manager
+          .attachRemoteStreamsTransport()
+          .catch(() => logger.debug('e2ee_background_unavailable'));
       return manager;
     },
     fn,
@@ -634,17 +753,19 @@ async function exitOneShotCommand(code: number): Promise<void> {
 export async function runOneShotCommand(
   loggerName: string,
   options: Pick<CommonCommandOptions, 'json' | 'jsonl' | 'debug'>,
-  action: () => Promise<void>
+  action: () => Promise<void>,
+  execution: { localOnly?: boolean } = {}
 ): Promise<void> {
   if (options.debug) {
     rootLogger.setDebug(true);
   }
 
-  // Start the analytics poster once per one-shot command (idempotent; no-op without a key).
-  initCliAnalytics();
+  // Local maintenance must remain usable without cloud time or analytics setup.
+  // Other commands start the analytics poster once (idempotent; no-op without a key).
+  if (execution.localOnly !== true) initCliAnalytics();
 
   try {
-    await syncCommandTime(loggerName);
+    if (execution.localOnly !== true) await syncCommandTime(loggerName);
     await action();
     await exitOneShotCommand(0);
   } catch (error) {

@@ -20,7 +20,7 @@
       "owner": "desktop-bootstrap",
       "feature": "src/features/onboarding.feature",
       "fixture": "fresh-local-workspace",
-      "fingerprint": "ccfecdbae92c8a9848a554d502beb53acc897e21b3c30ab8a45d5c5eebbee1b3",
+      "fingerprint": "2f8305bae7fd558b06ebe16c370a757493848da2531e96c48bcf2c0b3a97a215",
       "ownerPaths": [
         "apps/electron/",
         "packages/components/src/components/onboarding/",
@@ -38,19 +38,24 @@
         },
         {
           "id": "onboarding.enterWorkspace"
+        },
+        {
+          "id": "desktop.restartWithRetiredEncryptedIdentity"
         }
       ],
       "checkpoints": [
         "bundled CLI owns the isolated local runtime",
         "workspace initialization completes",
-        "session composer is editable"
+        "session composer is editable",
+        "unsigned-in ordinary workspace remains editable after cold restart with another encrypted identity cleanup receipt",
+        "ordinary cache and retained encrypted identity content remain in their own namespaces"
       ],
       "cleanup": ["desktop process tree exits", "isolated endpoint can be rebound"],
       "coverage": {
         "renderer": "Intro and local entry",
         "electronIpc": "Real window and invoke bridge",
         "bundledCli": "Real owned runtime",
-        "durableState": "Isolated workspace catalog and onboarding state",
+        "durableState": "Isolated local catalog, ordinary Repo cache, retained encrypted identity cleanup receipt and content",
         "externalWire": "None"
       },
       "signals": {

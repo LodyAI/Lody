@@ -1,3 +1,7 @@
+import {
+  buildSessionFileRootMounts,
+  toSessionFileDisplayPath,
+} from '@/lib/session-file-root-mounts';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -532,10 +536,10 @@ function SessionConversationDiffPanelImpl({
   active = true,
   sessionId,
   turnId,
-  filePaths,
-  fileDiffs,
+  filePaths: rawFilePaths,
+  fileDiffs: rawFileDiffs,
   fileDiffsPending,
-  focusFilePath,
+  focusFilePath: rawFocusFilePath,
   focusComment,
   focusRequestSeq,
   mode = 'conversation',
@@ -556,6 +560,32 @@ function SessionConversationDiffPanelImpl({
   const postHog = usePostHog();
   const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
   const user = useAtomValue(userAtom);
+  // Turn diffs of Project group members outside the main directory are
+  // recorded under encoded keys. Shown, matched and opened as display paths;
+  // the file provider splits them back into `rootId` for the machine.
+  const projectRun = (workspaceSession ?? session)?.projectRun;
+  const mounts = useMemo(() => buildSessionFileRootMounts(projectRun), [projectRun]);
+  const filePaths = useMemo(
+    () =>
+      mounts.length === 0 && !rawFilePaths.some((path) => path.startsWith('\0'))
+        ? rawFilePaths
+        : rawFilePaths.map((path) => toSessionFileDisplayPath(path, mounts)),
+    [mounts, rawFilePaths]
+  );
+  const fileDiffs = useMemo(
+    () =>
+      rawFileDiffs?.some((diff) => diff.filePath.startsWith('\0'))
+        ? rawFileDiffs.map((diff) => ({
+            ...diff,
+            filePath: toSessionFileDisplayPath(diff.filePath, mounts),
+          }))
+        : rawFileDiffs,
+    [mounts, rawFileDiffs]
+  );
+  const focusFilePath =
+    rawFocusFilePath?.startsWith('\0') === true
+      ? toSessionFileDisplayPath(rawFocusFilePath, mounts)
+      : rawFocusFilePath;
   const diffCommentAnalyticsBase = useMemo(
     () => ({ workspaceId: currentWorkspaceId ?? null, sessionId, mode }),
     [currentWorkspaceId, mode, sessionId]

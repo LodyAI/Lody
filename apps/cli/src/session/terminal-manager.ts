@@ -70,12 +70,15 @@ interface TerminalState<THandle> {
   outputByteLimit: number;
   truncated: boolean;
   exitStatus: TerminalExitStatus | null;
+  /** Exit status is available before the bounded output drain finishes. */
+  exitComplete: boolean;
   waiters: Array<(status: TerminalExitStatus) => void>;
 }
 
 interface TerminalHooks {
   onData(chunk: Buffer): void;
   onExit(exitCode: number | null, signal: NodeJS.Signals | null): void;
+  onDrained(): void;
   onError?(error: Error): void;
 }
 
@@ -85,6 +88,8 @@ interface BaseTerminalManagerOptions {
   getActiveAcpSessionId: () => string | null;
   defaultOutputByteLimit?: number;
 }
+
+const TERMINAL_EXIT_DRAIN_MS = 100;
 
 const DEFAULT_TERMINAL_BYTE_LIMIT = 1024 * 1024; // 1MB of retained output
 
@@ -120,12 +125,14 @@ abstract class BaseTerminalManager<THandle> implements TerminalManager {
       outputByteLimit: outputByteLimit ?? this.defaultOutputByteLimit,
       truncated: false,
       exitStatus: null,
+      exitComplete: false,
       waiters: [],
     };
 
     const hooks: TerminalHooks = {
       onData: (chunk) => this.appendOutput(state, chunk),
       onExit: (exitCode, signal) => this.handleExit(state, exitCode, signal),
+      onDrained: () => this.completeExit(state),
       onError: (error) => {
         this.logger.error(`[${this.sessionLabel}] Terminal ${terminalId} error: ${error.message}`);
         // A process error is terminal for this handle: the child either never
@@ -133,6 +140,7 @@ abstract class BaseTerminalManager<THandle> implements TerminalManager {
         // status here `terminal/wait_for_exit` would never resolve and the
         // agent's turn would hang forever.
         this.handleExit(state, null, null);
+        this.completeExit(state);
       },
     };
 
@@ -174,8 +182,8 @@ abstract class BaseTerminalManager<THandle> implements TerminalManager {
     }
     if (!state.exitStatus) {
       state.exitStatus = { exitCode: null, signal: 'SIGTERM' };
-      this.resolveWaiters(state);
     }
+    this.completeExit(state);
     await this.disposeHandle(state);
     this.terminals.delete(terminalId);
     this.logger.debug(`[${this.sessionLabel}] Terminal ${terminalId} released`);
@@ -183,7 +191,7 @@ abstract class BaseTerminalManager<THandle> implements TerminalManager {
 
   async waitForTerminalExit(acpSessionId: string, terminalId: string): Promise<TerminalExitStatus> {
     const state = this.getTerminal(acpSessionId, terminalId);
-    if (state.exitStatus) {
+    if (state.exitComplete && state.exitStatus) {
       return state.exitStatus;
     }
 
@@ -259,16 +267,18 @@ abstract class BaseTerminalManager<THandle> implements TerminalManager {
     exitCode: number | null,
     signal: NodeJS.Signals | null
   ) {
-    // A released terminal keeps the status `releaseTerminal` already recorded.
-    // A terminal that fails between `startProcess` and registration has no map
-    // entry yet and still needs one, or a later wait would never resolve.
-    if (!this.terminals.has(state.id) && state.exitStatus) {
+    // The direct process owns its status; late close/error cannot replace it.
+    if (state.exitStatus) {
       return;
     }
     state.exitStatus = {
       exitCode: typeof exitCode === 'number' ? exitCode : null,
       signal: signal ?? undefined,
     };
+  }
+
+  private completeExit(state: TerminalState<THandle>) {
+    state.exitComplete = true;
     this.resolveWaiters(state);
   }
 
@@ -355,7 +365,13 @@ export class ShellTerminalManager
 
     const stdoutListener = (chunk: Buffer) => hooks.onData(chunk);
     const stderrListener = (chunk: Buffer) => hooks.onData(chunk);
-    const closeListener = (code: number | null, signal: NodeJS.Signals | null) => {
+    let drainTimer: ReturnType<typeof setTimeout> | undefined;
+    let exitStatus: [number | null, NodeJS.Signals | null] | undefined;
+    let reported = false;
+    const reportExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      if (reported) return;
+      reported = true;
+      clearTimeout(drainTimer);
       void processHandle
         .inspectExit(code, signal)
         .then((violation) => {
@@ -371,16 +387,30 @@ export class ShellTerminalManager
           hooks.onError?.(error instanceof Error ? error : new Error(String(error)));
         })
         .finally(() => {
-          hooks.onExit(code, signal);
+          hooks.onDrained();
         });
+    };
+    const exitListener = (code: number | null, signal: NodeJS.Signals | null) => {
+      exitStatus = [code, signal];
+      hooks.onExit(code, signal);
+      // Background descendants can keep stdio open after the command exits.
+      // Preserve the tail without waiting for those descendants or killing them.
+      drainTimer = setTimeout(() => reportExit(code, signal), TERMINAL_EXIT_DRAIN_MS);
+    };
+    const closeListener = (code: number | null, signal: NodeJS.Signals | null) => {
+      hooks.onExit(code, signal);
+      reportExit(...(exitStatus ?? [code, signal]));
     };
     const errorListener = (error: Error) => hooks.onError?.(error);
 
     const unsubscribeStdout = processHandle.onStdout(stdoutListener);
     const unsubscribeStderr = processHandle.onStderr(stderrListener);
+    const unsubscribeExit = processHandle.onExit(exitListener);
     const unsubscribeClose = processHandle.onClose(closeListener);
     const unsubscribeError = processHandle.onError(errorListener);
     const dispose = () => {
+      clearTimeout(drainTimer);
+      unsubscribeExit();
       unsubscribeStdout();
       unsubscribeStderr();
       unsubscribeClose();

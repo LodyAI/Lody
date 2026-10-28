@@ -30,6 +30,10 @@ context/message-flow.md "Upstream".
   use each property's `description` as the full question and `title` as its short
   header, including single-question forms whose request message is generic. Legacy
   Claude single-question forms retain their request-message prompt.
+- `claude-task-lifecycle.ts` — converts Claude task lifecycle events into ACP task
+  updates. Rendered titles may use a fallback; persisted actor metadata is omitted when
+  Claude reports no actor, so later events preserve an earlier identity. Providers that
+  rely on an unknown-actor label can configure a separate metadata fallback.
 - `acp-runner.ts` — process spawn/restart around the client. Spawn + initialize +
   `newSession`/`loadSession` share `acp-session-start-gate.ts`.
 - `acp-session-start-gate.ts` — process-wide start semaphore used by
@@ -40,7 +44,16 @@ context/message-flow.md "Upstream".
   remain in Dimcode's own configuration or provider environment. Refresh capabilities
   after upgrading. Existing registry configurations retain their saved launch contract.
 - `deepseek-harness-runtime.ts` — Provider-scoped Harness homes, atomic host bundles,
-  and npx launch wrapper around the `packages/acp-extension-dsh` submodule. It converts
+  and npx launch wrapper around the `packages/acp-extension-dsh` submodule. DSH uses
+  a supported standalone Node from the final launch PATH in the target working directory.
+  Missing, unsupported or unexecutable Node fails before npx with installation guidance. All session, probe,
+  history and protocol-auth launches share this check. `Session.createAgent` runs it
+  inside each startup attempt, after shell, credential and memory environment
+  merges; the checked environment goes to both executable resolution and sandbox
+  spawn. The probe freezes `process.execPath`, so directory-sensitive Node managers
+  cannot select a different runtime afterwards. Inaccessible PATH directories are
+  skipped; a selected executable failing its probe still fails the launch. See the
+  [system Node decision](../../../../.agents/notes/implemented/bug-fix/2026-10-27-dsh-system-node.md). It converts
   the adapter entry to a file URL for Cordis ESM imports, including Windows drive paths,
   while preset and session directories remain filesystem paths. Its Windows bootstrap
   suppresses child consoles inside npm and DSH, including the pinned native Job
@@ -54,8 +67,12 @@ context/message-flow.md "Upstream".
 - `acp-binary-manager.ts` — registry binary-distribution agents (tar/zip install).
 - `npx-cache.ts` — npx cache isolation plus poisoning detection/purge for resilient
   registry launches.
-- `acp-capabilities.ts` / `acp-startup-monitor.ts` / `acp-analytics.ts` — capability cache,
-  startup health, analytics.
+- `acp-capabilities.ts` / `acp-startup-monitor.ts` / `acp-analytics.ts` — capability probing,
+  startup health, analytics. Each capability probe owns a unique writable temporary
+  workspace for process startup and `session/new`, independent of the daemon cwd.
+  Cleanup follows agent shutdown, including failed/cancelled probes; removal errors
+  are diagnostic and do not replace probe results. Provider homes and real-session
+  project directories remain unchanged. [Decision and cleanup limits](../../../../.agents/notes/implemented/bug-fix/2026-10-25-acp-probe-workdir.md).
 - `login-shell-env.ts` — explicit Legacy cache over the shared native
   LoginShellEnvironment probe; the three-second pending wait is distinct from
   retained failure. [Decision](../../../../.agents/notes/implemented/architecture/2026-10-10-effect-login-shell-probe.md).
@@ -140,6 +157,31 @@ fails; ending a local waiter never manufactures a provider refusal.
 `<Lody data root>/dsh/providers/<encoded Provider ID>` and launches the pinned closure
 through `dsh --profile lody-acp`. Its profile composes `@deepseek-ai/dsh-base`, a
 content-addressed Lody bundle, the user-owned `cordis.patch.yml`, and a final host guard.
+Startup reconciles only the base/host bundle entries, preserving user dependencies,
+other package-manager fields and user bundle order. User `pnpm-workspace.yaml`,
+lockfiles and patches survive startup and upgrades.
+
+Manage plugins from the local terminal:
+
+```sh
+lody dsh plugin add <package-or-path> --agent-config <provider-id>
+lody dsh plugin remove <package-name> --agent-config <provider-id>
+```
+
+Omit `--agent-config` to choose a local builtin DSH Provider interactively; scripts
+must supply the id. Lody must be running so the command can read Provider ids/names
+from its local daemon, across active workspaces, without cloud catalog requests.
+The command invokes the pinned native `dsh plugin --profile lody-acp …` with that
+Provider's `DSH_HOME` and pinned pnpm. It forwards native arguments, terminal I/O,
+caller cwd and environment; saved Provider API credentials are not loaded.
+Local paths and GitHub/Git specs follow the native DSH/package-manager support.
+The selected profile cannot be overridden. Startup and CLI package operations share
+a Provider-home file lock; Ctrl-C cancels the child before releasing that lock.
+Native DSH owns installation state and error recovery; Lody does not roll back
+selected files after a partial package-manager failure. Reconnect sessions after
+changes. The UI does not list or manage plugins, and no remote plugin RPC exists.
+Stop Lody before running external `dsh plugin` commands against that same profile.
+See the [plugin management decision](../../../../.agents/notes/implemented/feature/2026-10-26-dsh-plugin-management.md).
 Only missing user patches are created. DSH itself recreates the empty `cordis.yml`
 include root; Lody does not duplicate that write. The host guard preserves ACP and
 history paths and disables product telemetry, inventory and logging, so the host keeps
@@ -161,8 +203,8 @@ move desired customizations to the YAML path shown in Provider details. See the
 
 On Windows, both session and probe/title spawns resolve the selected npx shim from
 the final child PATH and execute its adjacent `node_modules/npm/bin/npx-cli.js`
-with Lody's Node. This keeps the full pinned closure out of `cmd.exe`, whose
-8191-character limit is smaller than the package argument list. Native executable
+with the validated standalone Node. This keeps the full pinned closure out of
+`cmd.exe`, whose 8191-character limit is smaller than the package argument list. Native executable
 shims remain direct launches; a script shim without the standard npm entry fails
 with an actionable error instead of falling through to another installation.
 Cache isolation, startup budgets, and retries still see the original npx command
@@ -295,6 +337,10 @@ requested options fail to the existing prompt-derived fallback. The bundled adap
 has no automatic generator, so neither the main nor title session starts an extra
 naming turn. Main conversation settings and Provider authentication are preserved.
 
+Other isolated title sessions retain the Provider's current model unless a title model
+was explicitly saved. Catalog order does not define a model preference; inferred safe
+mode and reasoning options remain independent of the model choice.
+
 Title output accepts normal assistant text with an absent message phase, as Codex
 providers do not all emit that optional field. Explicit `commentary` is excluded;
 when a final-answer stream exists, it takes precedence over unphased text. Both
@@ -357,3 +403,11 @@ the native LoginShellCache runtime and waits for its producer at daemon/command 
 [Ownership decision](../../../../.agents/notes/implemented/architecture/2026-10-10-effect-login-shell-probe.md).
 
 Provider quota refresh uses `queryLocalAcpRateLimits`: initialize a separately owned ACP process, verify Core `rateLimits.query`, query without a session, and await process-tree cleanup. The session execution service owns Provider coalescing and guarded Flock publication. See the [quota refresh decision](../../../../.agents/notes/implemented/architecture/2026-10-13-provider-quota-refresh.md).
+
+Account eligibility for both renderer display and daemon refresh lives in
+[`subscription-quota.ts`](../../../../packages/shared/src/subscription-quota.ts).
+Codex, Claude and Grok allow ordinary tool environment variables; account/config
+overrides, API-key profiles, explicit brands and Magpie routes remain excluded.
+Other builtin env policies and custom adapter capability semantics are unchanged.
+Keep provider-specific key rules in that module, not in individual UI consumers.
+See the [policy and source evidence](../../../../.agents/notes/implemented/bug-fix/2026-10-25-subscription-quota-environment.md).

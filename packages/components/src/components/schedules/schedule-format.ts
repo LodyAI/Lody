@@ -163,6 +163,22 @@ export function formatInstant(at: number, timeZone: string, locale?: string): st
   }).format(new Date(at));
 }
 
+/** A clock time with its zone, for a compact "send at 2:31 PM UTC" action. */
+export function formatClockWithZone(at: number, timeZone: string, locale?: string): string {
+  const time = new Intl.DateTimeFormat(intl(locale), {
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone,
+  }).format(new Date(at));
+  const zone = new Intl.DateTimeFormat(intl(locale), {
+    timeZone,
+    timeZoneName: 'short',
+  })
+    .formatToParts(new Date(at))
+    .find((part) => part.type === 'timeZoneName')?.value;
+  return zone ? `${time} ${zone}` : time;
+}
+
 /** Short calendar-relative form for a next run: "Today 09:00", "Tue 09:00". */
 export function formatUpcoming(at: number, timeZone: string, now: number, locale?: string): string {
   const language = intl(locale);
@@ -203,8 +219,22 @@ export type ScheduleStatus = { label: string; tone: ScheduleStatusTone };
 export function describeStatus(
   t: TFunction,
   enabled: boolean,
-  queueState?: 'due' | 'waiting_for_agent' | 'retrying' | 'blocked'
+  queueState?: 'due' | 'waiting_for_agent' | 'retrying' | 'blocked',
+  messageState?: 'pending' | 'sent' | 'cancelled' | 'failed'
 ): ScheduleStatus {
+  if (messageState) {
+    if (messageState === 'sent') return { label: t('scheduledMessage.sent'), tone: 'muted' };
+    if (messageState === 'cancelled')
+      return { label: t('scheduledMessage.cancelled'), tone: 'muted' };
+    if (messageState === 'failed')
+      return { label: t('scheduledMessage.failed'), tone: 'attention' };
+    return {
+      label: enabled
+        ? t('scheduledMessage.pending', { count: 1 })
+        : t('scheduledMessage.cancelPending'),
+      tone: 'progress',
+    };
+  }
   if (!enabled) return { label: t('schedules.paused', 'Paused'), tone: 'muted' };
   if (queueState === 'blocked')
     return { label: t('schedules.state.blocked', 'Needs attention'), tone: 'attention' };

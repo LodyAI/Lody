@@ -1,3 +1,5 @@
+import { encodeSessionFilePath, type SessionFileRoot } from '@lody/shared';
+import { resolveProjectFileTarget } from '@/session/worktree/project-member-access';
 import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
@@ -24,10 +26,7 @@ import { v4 as uuidV4 } from 'uuid';
 
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
-import {
-  resolveContainedUploadPath,
-  sanitizeAttachmentFileName,
-} from '@/lib/session-file-attachments';
+import { sanitizeAttachmentFileName } from '@/lib/session-file-attachments';
 
 type UploadedACPAgentSessionImage = NonNullable<SessionImageUploadResponse['images']>[number];
 type UploadedACPAgentSessionFile = SessionFilePayload & { downloadUrl: string };
@@ -54,6 +53,7 @@ type MaterializeACPAgentRichContentOptions = {
   sessionId: SessionId;
   notification: AcpSessionNotification;
   logger: Pick<Logger, 'debug' | 'warn'>;
+  resolveSessionFileRoots?: (sessionId: SessionId) => Promise<readonly SessionFileRoot[]>;
   resolveSessionWorkspaceRoot: (sessionId: SessionId) => string | null;
   validateSessionImageUploadPath: (filePath: string) => Promise<ACPAgentUploadableImageFile>;
   uploadSessionImageFile: (args: {
@@ -63,7 +63,7 @@ type MaterializeACPAgentRichContentOptions = {
   }) => Promise<UploadedACPAgentSessionImage>;
   validateSessionFileUploadPath: (
     filePath: string,
-    options?: { containWithin?: string }
+    options?: { containWithin?: string; fileRoots?: readonly SessionFileRoot[] }
   ) => Promise<ACPAgentValidatedUploadFile>;
   uploadValidatedSessionFile: (args: {
     workspaceId: WorkspaceId;
@@ -372,7 +372,12 @@ const materializeACPResourceLinkContent = async (
     throw new Error('Session workspace is not available on this machine');
   }
 
-  const containedPath = await resolveContainedUploadPath(localPath, workspaceRoot);
+  const fileRoots = (await options.resolveSessionFileRoots?.(options.sessionId)) ?? [
+    { id: 'main', absolutePath: workspaceRoot },
+  ];
+  const target = resolveProjectFileTarget(fileRoots, localPath);
+  if (!target) throw new Error('Agent file is outside the session roots');
+  const containedPath = target.absolutePath;
   const mimeType = normalizeACPMimeType(content.mimeType);
 
   if (shouldTreatACPPathAsImage(containedPath, mimeType)) {
@@ -392,14 +397,14 @@ const materializeACPResourceLinkContent = async (
   }
 
   const file = await options.validateSessionFileUploadPath(containedPath, {
-    containWithin: workspaceRoot,
+    fileRoots,
   });
   const uploaded = await options.uploadValidatedSessionFile({
     workspaceId: options.workspaceId,
     sessionId: options.sessionId,
     file,
   });
-  return [toFileMessageContent(uploaded)];
+  return [toFileMessageContent({ ...uploaded, sourcePath: encodeSessionFilePath(target) })];
 };
 
 const materializeACPEmbeddedResourceContent = async (

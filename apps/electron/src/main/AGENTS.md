@@ -12,6 +12,18 @@ cookie, preserve the fallback's error/result. A network failure or 5xx must neve
 be replaced by the earlier 401: shared session verification would interpret two
 such results as confirmed sign-out. Cached identity remains scoped to the auth
 generation and is cleared by explicit sign-out or definitive session rejection.
+The 5-second session timeout bounds the caller, not the request: a late resolved
+answer seeds the cached session only if no answer, including a definitive
+rejection, was committed after its request started (same generation).
+`getSessionToken` treats an unreachable verification as no verdict and uses the
+durable cookie (else the supplied bearer); it never starts a second check.
+For local E2EE directory selection, `auth-storage.ts` also retains a token-hash/user-ID
+binding in the existing auth config, with no time expiry. `getCachedSessionIdentity`
+uses it only when the device cookie or supplied bearer matches; it never grants cloud
+access or ledger authority. A matching supplied bearer can seed the in-memory token
+for subsequent E2EE calls. Identity observers run only after confirmed auth changes;
+transport uncertainty neither clears the binding nor publishes sign-out. Ordinary
+renderer bootstrap snapshots retain their existing seven-day lifetime.
 
 ## Diagnostics
 
@@ -22,6 +34,13 @@ OSS must not exchange cloud credentials. Callback schemes stay channel-specific.
 product-window dispatch, preserving the explicit workspace. Provider import links stay local to
 the chosen installation and only stage user confirmation; never dispatch cloud auth or write
 Provider settings from a URL. Contract: [Magpie import](../../../../specs/magpie-provider-import.md). See [deep links](../../../../specs/deep-links.md).
+
+On a cross-channel desktop-lease conflict, hand a channel-neutral `session`,
+`chat/new` or `provider/import` destination to the running owner over the bounded
+lease before quitting. The owner acknowledges only after its launch handler is
+bound; a refused startup rejects the handoff instead of acknowledging an unconsumed
+buffer. Never hand off auth/cloud callbacks, and keep credentials and business
+modules unloaded.
 
 Main-process `console` output, lifecycle, and embedded-CLI supervision reach the
 CLI daily log through `desktop-log.ts`; write synchronously, never persist
@@ -50,9 +69,9 @@ The [window Spec](../../../../specs/desktop-windows.md) owns the behavior contra
 `e2ee-custody.mts` selects Electron OS protection for core node-custody, which owns an explicit Scope, a wrapped KEK and
 XChaCha20-Poly1305 protected blobs. It never joins the renderer IPC registry or
 starts from application bootstrap. The explicit E2EE IPC methods create
-or reopen an account-bound local pending request and workspace runtime; they expose public state and signed genesis bytes only, with no arbitrary signing or key export. It rejects local composition
+or reopen an account-bound local pending request and workspace runtime; they expose public state and room-bound content seal/open; device access credentials stay in main, with no arbitrary signing or content-key export. It rejects local composition
 before authentication/native access and checks the main-process account session.
-Content synchronization remains closed until its separate encrypted adapter exists.
+The encrypted adapter enables only Meta, Loro session documents and the owning workspace/machine Flocks; unsupported rooms and plaintext side channels stay closed.
 `e2ee-custody-electron.ts` is the readiness-gated native composition factory.
 Reject unavailable native encryption and Linux `basic_text`/unknown backends;
 never reuse auth cookie plaintext overrides or fall back to plaintext files.
@@ -82,3 +101,16 @@ activation belongs in this host workflow.
 The owning test uses synthetic authenticated safeStorage plus real crypto,
 filesystem and another OS process. It does not prove an OS keychain or all-platform
 packaging result; native safeStorage assurance needs an isolated platform run.
+
+`e2ee.readIdentity` is an expected-account-bound local read of retained verified identity.
+It grants no renderer reader/status/content capability. Preserve existing readers;
+release a cold temporary host before replying. `status` still requires a window reader.
+
+Team-member joining uses `services/e2ee-member-join.mts`: retain exact KeyPackages
+and every signed admission before I/O. Unknown outcomes cannot replace them;
+verify competing ledger bytes or a terminal server reservation before retirement.
+New accounts replay genuine history from their independently retained genesis;
+server labels never establish native identity. [Decision](../../../../.agents/notes/proposed/feature/2026-10-28-e2ee-team-joining-native.md).
+
+Removal erases `member_joins` and `personal_join_histories`. All three join installs
+clear the removed marker only after verifying a different retained signing key.

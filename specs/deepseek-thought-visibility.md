@@ -10,9 +10,11 @@ Translation: current
 Builtin DeepSeek Harness conversations show thoughts in independent default-open
 disclosures and tools in separate default-closed groups, preserving their order.
 Explicit toggles remain respected and search can reveal matching thoughts. Tool
-arrival must not collapse preceding thoughts. Ordinary prose stays visible both
-during streaming and after completion: DSH does not use the outer finished-work
-fold. These rules apply to incoming output and saved history.
+arrival must not collapse preceding thoughts. During streaming, prose stays
+visible. After completion, the shared finished-work disclosure collapses earlier
+thoughts, tools and intermediate prose, keeping the final answer tail visible.
+Users can expand the whole process again; search reveals matching folded prose.
+Interrupted turns without a final answer remain expanded. These rules apply to incoming output and saved history.
 
 Thoughts retain their label and stored type; rendering does not turn them into
 ordinary assistant text or rewrite history. Provider identity comes from Session

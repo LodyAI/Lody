@@ -1,3 +1,16 @@
+import type {
+  E2eeContentTokenRequest,
+  E2eeContentToken,
+  E2eeMailboxRequests,
+  E2eeMailboxReplies,
+  E2eeAppendRecordRequest,
+  E2eeAppendRecordReply,
+} from './e2ee-device';
+import type { E2eeJoinRequests, E2eeJoinReplies } from './e2ee-join';
+import type { E2eeMemberRequests, E2eeMemberReplies } from './e2ee-members';
+export type * from './e2ee-members';
+export type * from './e2ee-join';
+export type * from './e2ee-device';
 import type { NotificationPresentation } from '@lody/shared/notifications';
 import type { TerminalOutcome } from '@lody/shared/notifications';
 import { anyApi, type FunctionReference } from 'convex/server';
@@ -7,6 +20,8 @@ import type {
   E2eeWorkspaceCreateResult,
   E2eeWorkspaceHistoryRequest,
   E2eeWorkspaceHistoryPage,
+  E2eeWorkspaceMemberProfilesRequest,
+  E2eeWorkspaceMemberProfiles,
 } from './e2ee-workspaces';
 export type {
   WorkspaceAdmissionDescriptor,
@@ -14,6 +29,8 @@ export type {
   E2eeWorkspaceCreateRequest,
   E2eeWorkspaceCreateResult,
   E2eeLedgerCheckpoint,
+  E2eeWorkspaceMemberProfilesRequest,
+  E2eeWorkspaceMemberProfiles,
   E2eeWorkspaceHistoryRequest,
   E2eeWorkspaceHistoryPage,
 } from './e2ee-workspaces';
@@ -75,6 +92,9 @@ import type {
   WorktreeCleanupScriptConfig,
   WorktreeSetupScriptConfig,
 } from '@lody/shared';
+
+import type { E2eeMachinePairingRequests, E2eeMachinePairingStatus } from './e2ee-machine-pairing';
+export type { E2eeMachinePairingRequests, E2eeMachinePairingStatus } from './e2ee-machine-pairing';
 
 type Query<Args extends Record<string, unknown>, Result> = FunctionReference<
   'query',
@@ -367,7 +387,7 @@ type UpcomingInvoicePreview = {
  * workspaces and gift/enterprise entitlements that are not billed per seat;
  * `billed` quotes the prorated charge applied when the invitation is accepted.
  */
-type SeatInvitePreview =
+export type SeatInvitePreview =
   | { status: 'not_billed'; reason: 'free' | 'covered' }
   | {
       status: 'billed';
@@ -382,10 +402,61 @@ type SeatInvitePreview =
     };
 
 export type CloudApi = {
+  e2eeMembers: {
+    workspaces: Query<Record<string, never>, import('./e2ee-members').E2eeMemberWorkspace[]>;
+    createInvitation: Mutation<
+      E2eeMemberRequests['createInvitation'],
+      E2eeMemberReplies['createInvitation']
+    >;
+    preview: Query<E2eeMemberRequests['preview'], E2eeMemberReplies['preview']>;
+    submit: Mutation<E2eeMemberRequests['submit'], E2eeMemberReplies['submit']>;
+    retire: Mutation<E2eeMemberRequests['retire'], E2eeMemberReplies['retire']>;
+    pending: Query<E2eeMemberRequests['pending'], E2eeMemberReplies['pending']>;
+    read: Query<E2eeMemberRequests['read'], E2eeMemberReplies['read']>;
+    reject: Mutation<E2eeMemberRequests['reject'], E2eeMemberReplies['reject']>;
+    revoke: Mutation<E2eeMemberRequests['revoke'], E2eeMemberReplies['revoke']>;
+    claim: Query<E2eeMemberRequests['claim'], E2eeMemberReplies['claim']>;
+  };
   /** Optional developer-only E2EE control plane; does not authorize content access. */
+  e2eeContent: { contentStreamsToken: Action<E2eeContentTokenRequest, E2eeContentToken> };
+  e2eeJoinMailbox: {
+    begin: Mutation<E2eeJoinRequests['begin'], E2eeJoinReplies['begin']>;
+    status: Query<E2eeJoinRequests['status'], E2eeJoinReplies['status']>;
+    readRequest: Query<E2eeJoinRequests['readRequest'], E2eeJoinReplies['readRequest']>;
+    cancel: Mutation<E2eeJoinRequests['cancel'], E2eeJoinReplies['cancel']>;
+    publish: Mutation<E2eeJoinRequests['publish'], E2eeJoinReplies['publish']>;
+    claim: Query<E2eeJoinRequests['claim'], E2eeJoinReplies['claim']>;
+  };
+  e2eeMailbox: {
+    put: Mutation<E2eeMailboxRequests['put'], E2eeMailboxReplies['put']>;
+    read: Query<E2eeMailboxRequests['read'], E2eeMailboxReplies['read']>;
+    fetch: Query<E2eeMailboxRequests['fetch'], E2eeMailboxReplies['fetch']>;
+    status: Query<E2eeMailboxRequests['status'], E2eeMailboxReplies['status']>;
+    report: Mutation<E2eeMailboxRequests['report'], E2eeMailboxReplies['report']>;
+    repair: Mutation<E2eeMailboxRequests['repair'], E2eeMailboxReplies['repair']>;
+  };
+  e2eeMachinePairing: {
+    begin: Mutation<E2eeMachinePairingRequests['begin'], E2eeMachinePairingStatus>;
+    inspect: Query<E2eeMachinePairingRequests['inspect'], E2eeMachinePairingStatus>;
+    cancel: Mutation<E2eeMachinePairingRequests['cancel'], E2eeMachinePairingStatus>;
+    authorizeExisting: Mutation<E2eeMachinePairingRequests['inspect'], E2eeMachinePairingStatus>;
+    bootstrap: Query<
+      { workspaceId: string; credential: string; machineId: string },
+      | {
+          status: 'authorized';
+          userId: string;
+          workspaces: (WorkspaceSummary & { contentMode: 'e2ee'; genesisHash: string })[];
+        }
+      | { status: 'unauthorized'; reason: string }
+    >;
+    complete: Mutation<E2eeMachinePairingRequests['inspect'], E2eeMachinePairingStatus>;
+  };
   e2eeWorkspaces: {
+    accountIdentity: Action<Record<string, never>, { accountId: string; cryptoUserId: string }>;
+    appendRecord: Action<E2eeAppendRecordRequest, E2eeAppendRecordReply>;
     create: Action<E2eeWorkspaceCreateRequest, E2eeWorkspaceCreateResult>;
     describe: Query<{ workspaceId: string }, WorkspaceAdmissionDescriptor>;
+    memberProfiles: Query<E2eeWorkspaceMemberProfilesRequest, E2eeWorkspaceMemberProfiles>;
     history: Action<E2eeWorkspaceHistoryRequest, E2eeWorkspaceHistoryPage>;
   };
   /** Optional E2EE ciphertext staging. No ordinary/local product constructs it. */
@@ -936,7 +1007,7 @@ export type CloudApi = {
   };
   deviceAuth: {
     listMyWorkspacesForCliToken: Query<
-      { token: string },
+      { token: string; includeEncrypted?: boolean },
       | { valid: false; userId: null; workspaces: WorkspaceSummary[] }
       | { valid: true; userId: string; workspaces: WorkspaceSummary[] }
     >;

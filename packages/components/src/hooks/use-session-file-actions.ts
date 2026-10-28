@@ -156,17 +156,26 @@ export function useSessionFileActions({
   /** Null while the surface has no session yet; every action is then absent. */
   readonly session: SessionMeta | null | undefined;
   /**
-   * Only `openFile` is used (for the remote download), so both the file
-   * workspace and session provider shapes fit.
+   * Preview bytes cover ordinary downloads; the optional download path handles
+   * larger files without entering the preview/editor cache.
    */
   readonly fileProvider?: {
     openFile(pathOrFileId: string): Promise<FileWorkspaceOpenResult>;
+    downloadFile?(path: string, signal?: AbortSignal): Promise<Uint8Array | null>;
   } | null;
 }): SessionFileActions {
   const { t } = useTranslation();
   const postHog = usePostHog();
   const nativeShell = isNativeAppShell();
   const exportingRef = useRef(false);
+  const downloadControllers = useRef(new Set<AbortController>());
+  const largeDownloadInProgress = useRef(false);
+  useEffect(
+    () => () => {
+      for (const controller of downloadControllers.current) controller.abort();
+    },
+    [session?.id]
+  );
   // `session/file_action`: one event per user-invoked file action. Only the
   // extension bucket leaves the client, never the path.
   const trackFileAction = useCallback(
@@ -537,15 +546,8 @@ export function useSessionFileActions({
   const download = useMemo(() => {
     if (!session || !availability.download || !fileProvider) return null;
 
-    // KNOWN CEILING: this reads through the preview API, which answers in ONE
-    // bounded response (10 MiB text / 5 MiB binary remotely). So the download
-    // covers ordinary files and cannot cover the oversized ones — the very
-    // files whose error card sent the user looking for a way out. Saying that
-    // is the point of `downloadTooLarge`: a generic "could not download" reads
-    // as a glitch worth retrying. A real answer for those needs a ranged or
-    // streamed transfer, which is a Machine RPC protocol change (new method
-    // plus a negotiated `protocolCapabilities` key, never inferred from the CLI
-    // version) rather than a client-side fix.
+    // Preview stays bounded. Paid machines can supply original bytes in small chunks
+    // through the separately negotiated download path when preview cannot return them.
     const reportUnavailable = (reason: CodeCollabContentUnavailableReason | 'no-bytes') => {
       if (reason === 'deleted') {
         toast.error(t('sessions.fileActions.fileMissing', 'That file no longer exists.'));
@@ -569,14 +571,35 @@ export function useSessionFileActions({
         exportingRef.current = true;
         setSharing(true);
       }
+      const controller = new AbortController();
+      downloadControllers.current.add(controller);
       void (async () => {
         try {
           const exportBytes = async (bytes: Uint8Array) => {
             if (nativeShell) await shareFileBytesNatively(getDownloadFileName(filePath), bytes);
             else downloadBytesAsFile(filePath, bytes);
           };
+          const downloadOriginal = async () => {
+            if (largeDownloadInProgress.current) return true;
+            largeDownloadInProgress.current = true;
+            try {
+              const bytes = await fileProvider.downloadFile?.(filePath, controller.signal);
+              controller.signal.throwIfAborted();
+              if (!bytes) return false;
+              await exportBytes(bytes);
+              return true;
+            } finally {
+              largeDownloadInProgress.current = false;
+            }
+          };
           const result = await fileProvider.openFile(filePath);
+          controller.signal.throwIfAborted();
           if (result.status !== 'ready') {
+            if (
+              (result.reason === 'text-too-large' || result.reason === 'blob-too-large') &&
+              (await downloadOriginal())
+            )
+              return;
             reportUnavailable(result.reason);
             return;
           }
@@ -591,14 +614,17 @@ export function useSessionFileActions({
           }
           // A `binary` snapshot with no bytes is the machine declining to send
           // them, which is the same "too big for one response" situation.
+          if (await downloadOriginal()) return;
           reportUnavailable('no-bytes');
         } catch {
+          if (controller.signal.aborted) return;
           toast.error(
             nativeShell
               ? t('sessions.fileActions.shareFailed', 'Could not share that file.')
               : t('sessions.fileActions.downloadFailed', 'Could not download that file.')
           );
         } finally {
+          downloadControllers.current.delete(controller);
           if (nativeShell) {
             exportingRef.current = false;
             setSharing(false);

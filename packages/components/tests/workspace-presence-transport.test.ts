@@ -11,6 +11,7 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import {
+  PRESENCE_SYNC_DISPLAY_GRACE_MS,
   WorkspacePresenceTransport,
   type PresenceStoreLike,
   type PresenceTransportLike,
@@ -291,6 +292,129 @@ describe('WorkspacePresenceTransport', () => {
     expect(presence.getSyncState()).toBe('idle');
     expect(presence.needsReconnect()).toBe(false);
     expect(states).toEqual(['idle', 'connecting', 'synced', 'reconnecting', 'error', 'idle']);
+  });
+
+  describe('display sync state', () => {
+    const setup = () => {
+      const transports: FakePresenceTransport[] = [];
+      const presence = new WorkspacePresenceTransport({
+        workspaceId: 'workspace-1' as WorkspaceId,
+        createStore: () => new FakePresenceStore(),
+        createTransport: () => {
+          const transport = new FakePresenceTransport();
+          transports.push(transport);
+          return transport;
+        },
+      });
+      return { presence, transports };
+    };
+
+    const openJoinedRoom = async (
+      presence: WorkspacePresenceTransport,
+      transports: FakePresenceTransport[]
+    ) => {
+      presence.start({ baseUrl: 'https://streams.example.test', auth: async () => 'token' });
+      transports[0]?.resolve({ ok: true, value: { unsubscribe: vi.fn() } } as JoinResult);
+      await flush();
+      transports[0]?.emitStatus('joined');
+    };
+
+    it('holds the last synced state through a brief in-place reconnect', async () => {
+      vi.useFakeTimers();
+      const { presence, transports } = setup();
+      const display: string[] = [];
+      presence.subscribeDisplaySyncState((state) => display.push(state));
+      try {
+        await openJoinedRoom(presence, transports);
+        expect(display).toEqual(['idle', 'connecting', 'synced']);
+
+        transports[0]?.emitStatus('reconnecting');
+        expect(presence.getSyncState()).toBe('reconnecting');
+        expect(presence.getDisplaySyncState()).toBe('synced');
+        expect(display).toEqual(['idle', 'connecting', 'synced']);
+
+        await vi.advanceTimersByTimeAsync(PRESENCE_SYNC_DISPLAY_GRACE_MS - 1);
+        expect(presence.getDisplaySyncState()).toBe('synced');
+
+        // Recovery before the window closes cancels the pending demotion.
+        transports[0]?.emitStatus('joined');
+        await vi.advanceTimersByTimeAsync(PRESENCE_SYNC_DISPLAY_GRACE_MS);
+        expect(presence.getDisplaySyncState()).toBe('synced');
+        expect(display).toEqual(['idle', 'connecting', 'synced']);
+      } finally {
+        await presence.stop();
+        vi.useRealTimers();
+      }
+    });
+
+    it('surfaces a reconnect that outlasts the grace window', async () => {
+      vi.useFakeTimers();
+      const { presence, transports } = setup();
+      const display: string[] = [];
+      presence.subscribeDisplaySyncState((state) => display.push(state));
+      try {
+        await openJoinedRoom(presence, transports);
+        transports[0]?.emitStatus('reconnecting');
+
+        await vi.advanceTimersByTimeAsync(PRESENCE_SYNC_DISPLAY_GRACE_MS);
+        expect(presence.getDisplaySyncState()).toBe('reconnecting');
+        expect(display).toEqual(['idle', 'connecting', 'synced', 'reconnecting']);
+      } finally {
+        await presence.stop();
+        vi.useRealTimers();
+      }
+    });
+
+    it('surfaces terminal transport states immediately', async () => {
+      vi.useFakeTimers();
+      const { presence, transports } = setup();
+      try {
+        await openJoinedRoom(presence, transports);
+
+        transports[0]?.emitStatus('error');
+        expect(presence.getDisplaySyncState()).toBe('error');
+        expect(presence.needsReconnect()).toBe(true);
+      } finally {
+        await presence.stop();
+        vi.useRealTimers();
+      }
+    });
+
+    it('never hides a store replacement behind the grace window', async () => {
+      vi.useFakeTimers();
+      const { presence, transports } = setup();
+      const display: string[] = [];
+      presence.subscribeDisplaySyncState((state) => display.push(state));
+      try {
+        await openJoinedRoom(presence, transports);
+
+        // A watchdog restart starts a new store, so its empty snapshot is not
+        // covered by the previous room's authority.
+        presence.start({ baseUrl: 'https://streams.example.test', auth: async () => 'token' });
+        expect(presence.getDisplaySyncState()).toBe('connecting');
+        expect(display).toEqual(['idle', 'connecting', 'synced', 'connecting']);
+      } finally {
+        await presence.stop();
+        vi.useRealTimers();
+      }
+    });
+
+    it('publishes idle immediately when stopped inside the grace window', async () => {
+      vi.useFakeTimers();
+      const { presence, transports } = setup();
+      try {
+        await openJoinedRoom(presence, transports);
+        transports[0]?.emitStatus('reconnecting');
+
+        await presence.stop();
+        expect(presence.getDisplaySyncState()).toBe('idle');
+
+        await vi.advanceTimersByTimeAsync(PRESENCE_SYNC_DISPLAY_GRACE_MS);
+        expect(presence.getDisplaySyncState()).toBe('idle');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it('requests an external-wake restart when the synced presence stream is stale', async () => {

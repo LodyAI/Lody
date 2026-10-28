@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MarkdownRenderer } from '../src/components/ai-gui/markdown-renderer';
 import { SessionReadonlyContext } from '../src/components/ai-gui/session-readonly-context';
 import { SessionLinkProvider } from '../src/components/ai-gui/session-link-context';
@@ -18,6 +18,11 @@ vi.mock('react-i18next', () => ({
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
+
+afterAll(async () => {
+  // Copy-tex installs a document listener; finish the renderer's lazy import before jsdom closes.
+  await vi.dynamicImportSettled();
+});
 
 describe('anonymous Markdown resource boundary', () => {
   let root: Root, container: HTMLDivElement;

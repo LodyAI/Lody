@@ -7,6 +7,9 @@ import { verifySignatureEffect } from '../src/internal/foundation/signature';
 import { signVerified } from '../src/internal/foundation/signing';
 import {
   Bytes,
+  deviceCredentialBindingBytes,
+  signDeviceCredentialBinding,
+  verifyDeviceCredentialBinding,
   decodeCbor,
   encodeCbor,
   encodeDocumentContext,
@@ -666,4 +669,81 @@ it('agrees across backends on strict Ed25519 subgroup-edge vectors', async () =>
         pure.failure.code
       );
   }
+});
+
+describe('device credential binding v1', () => {
+  const publicKey = ok(
+    Bytes.signingPublicKey(hex('d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a'))
+  );
+  const context = {
+    genesis: ok(Bytes.genesisHash(new Uint8Array(32).fill(0x11))),
+    pairingSessionId: new Uint8Array(16).fill(0x22),
+    signingPublicKey: publicKey,
+    credentialHash: new Uint8Array(32).fill(0x33),
+  };
+  const signatureHex =
+    '76a440ad230b54f0c97391a252aab86a6f242be095b4d017d7428a6688242d9dd6ed6379778c41e52a2b4cd9c381e00441f43a5fb885055cd12ed9325a3e310c';
+  it('matches the fixed concatenation and Ed25519 vector', async () => {
+    expect(toHex(ok(deviceCredentialBindingBytes(context)))).toBe(
+      '6c6f64792d653265652f6465766963652d63726564656e7469616c2d62696e64696e672f763100' +
+        '11'.repeat(32) +
+        '22'.repeat(16) +
+        toHex(publicKey.toBytes()) +
+        '33'.repeat(32)
+    );
+    const bindingPrivateKey = createPrivateKey({
+      format: 'der',
+      type: 'pkcs8',
+      key: Buffer.from(
+        '302e020100300506032b6570042204209d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60',
+        'hex'
+      ),
+    });
+    const signature = await Effect.runPromise(
+      signDeviceCredentialBinding({
+        ...context,
+        signer: {
+          publicKey,
+          sign: (message) =>
+            Effect.succeed(ok(Bytes.signature(sign(null, message, bindingPrivateKey)))),
+        },
+      })
+    );
+    expect(toHex(signature.toBytes())).toBe(signatureHex);
+    expect(Result.isSuccess(verifyDeviceCredentialBinding(context, hex(signatureHex)))).toBe(true);
+  });
+  it('rejects another active session, genesis, public key or credential hash and malformed lengths', () => {
+    for (const altered of [
+      { ...context, genesis: ok(Bytes.genesisHash(new Uint8Array(32).fill(0x12))) },
+      { ...context, pairingSessionId: new Uint8Array(16).fill(0x23) },
+      { ...context, credentialHash: new Uint8Array(32).fill(0x34) },
+      {
+        ...context,
+        signingPublicKey: ok(
+          Bytes.signingPublicKey(
+            hex('3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c')
+          )
+        ),
+      },
+    ])
+      expect(Result.isFailure(verifyDeviceCredentialBinding(altered, hex(signatureHex)))).toBe(
+        true
+      );
+    for (const [pairingSessionId, credentialHash] of [
+      [new Uint8Array(15), context.credentialHash],
+      [context.pairingSessionId, new Uint8Array(31)],
+    ])
+      expect(
+        Result.isFailure(
+          deviceCredentialBindingBytes({
+            ...context,
+            pairingSessionId: pairingSessionId!,
+            credentialHash: credentialHash!,
+          })
+        )
+      ).toBe(true);
+    const badSignature = hex(signatureHex);
+    badSignature[63] = 255;
+    expect(Result.isFailure(verifyDeviceCredentialBinding(context, badSignature))).toBe(true);
+  });
 });

@@ -1,3 +1,4 @@
+import { AcpStartupProcessError, AcpStartupProcessExitError } from '../agent/acp-startup-monitor';
 import { describe, expect, it } from 'vitest';
 import { RequestError } from '@agentclientprotocol/sdk';
 import {
@@ -27,6 +28,23 @@ describe('ACP error classification', () => {
       message: 'Internal error',
       data: { details: 'Connection is disposed.' },
     });
+  });
+
+  it('keeps startup diagnostics out of generic disconnect classification', () => {
+    const options = {
+      sessionId: 'synthetic-startup',
+      command: 'npx',
+      args: [],
+      stderrTail: 'npm error EBADDEVENGINES; ACP connection closed',
+    };
+    for (const error of [
+      new AcpStartupProcessError({ ...options, cause: new Error('ACP connection closed') }),
+      new AcpStartupProcessExitError({ ...options, exitCode: 1, signal: null }),
+    ]) {
+      expect(parseACPError(error)).toBeNull();
+      expect(isAgentDisconnectedError(error)).toBe(false);
+      expect(error.message).toContain('EBADDEVENGINES');
+    }
   });
 
   it('maps disposed ACP connections to agent_disconnected', () => {

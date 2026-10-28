@@ -12,16 +12,44 @@ const registerServicesPath = path.join(ipcDirectory, 'register-services.ts')
 void test('invoke policy allows methods only within renderer-facing service groups', () => {
   assert.equal(isIpcInvokeChannel('auth.getSession'), true)
   for (const method of [
+    'createMemberInvitation',
+    'pendingMemberJoin',
+    'prepareMemberJoin',
+    'memberJoinRequests',
+    'approveMemberJoin',
+    'rejectMemberJoin',
+    'revokeMemberInvitation',
+    'claimMemberJoin',
+    'personalPairingOffer',
+    'pendingPersonalJoin',
+    'preparePersonalJoin',
+    'inspectPersonalJoin',
+    'approvePersonalJoin',
+    'claimPersonalJoin',
+    'cancelPersonalJoin',
     'prepareCreation',
     'recordCreated',
     'open',
     'close',
     'status',
+    'readIdentity',
     'ingestLedgerRecords',
-    'ledgerView'
+    'ledgerView',
+    'managementState',
+    'updateKeys',
+    'revokeDevice'
   ])
     assert.equal(isIpcInvokeChannel(`e2ee.${method}`), true)
-  for (const method of ['sign', 'exportKey', 'createDevice', 'unknown'])
+  for (const method of [
+    'sign',
+    'exportKey',
+    'createDevice',
+    'deviceCredential',
+    'promoteMember',
+    'memberScope',
+    'installMemberJoin',
+    'unknown'
+  ])
     assert.equal(isIpcInvokeChannel(`e2ee.${method}`), false)
   assert.equal(isIpcInvokeChannel('cli.methodAddedWithoutASecondAllowlist'), true)
   assert.equal(isIpcInvokeChannel('lodyAuth:getSession'), false)

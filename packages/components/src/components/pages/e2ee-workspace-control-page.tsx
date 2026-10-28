@@ -1,3 +1,4 @@
+import { E2eeMemberActions, type E2eeMemberManagement } from './e2ee-member-actions';
 import * as stylex from '@stylexjs/stylex';
 import { Accordion } from '@lody/ui/accordion';
 import { Alert } from '@lody/ui/alert';
@@ -5,7 +6,7 @@ import { Avatar } from '@lody/ui/avatar';
 import { Button } from '@lody/ui/button';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text as type } from '@lody/ui/tokens/scales.stylex';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronLeft, CircleHelp, RefreshCw } from 'lucide-react';
 import type { TFunction } from 'i18next';
@@ -193,6 +194,7 @@ const styles = stylex.create({
 });
 
 const failureMessage: Record<E2eeControlFailure['kind'], string> = {
+  'local-identity': 'e2ee.identity.localFailure',
   network: 'e2ee.control.failure.network',
   auth: 'e2ee.control.failure.auth',
   server: 'e2ee.control.failure.server',
@@ -298,11 +300,20 @@ function useMemberNames(
 ) {
   const { t } = useTranslation();
   return useMemo(() => {
-    const merged = new Map(profiles);
+    const merged = new Map<string, E2eeMemberProfile>();
+    for (const member of overview?.members ?? []) {
+      const profile = profiles?.get(member.userId);
+      if (profile) merged.set(member.membershipId, profile);
+    }
     let self: string | null = null;
     // Only a creation pin on this device ties the genesis member to this account.
     const genesis = overview?.events[0];
-    if (history?.locallyPinned === true && you && genesis?.type === 'genesis') {
+    if (
+      profiles === undefined &&
+      history?.locallyPinned === true &&
+      you &&
+      genesis?.type === 'genesis'
+    ) {
       self = genesis.actor.membershipId;
       merged.set(self, you);
     }
@@ -349,6 +360,8 @@ function eventSentence(t: TFunction, name: ResolveMember, event: LedgerEventSumm
       return t('e2ee.summary.transferOwner', { actor, member: name(event.member) });
     case 'publishEpoch':
       return t('e2ee.summary.publishEpoch', { actor, epoch: event.epoch });
+    case 'removeMember':
+      return t('e2ee.summary.removeMember', { actor, member: name(event.member) });
     case 'removeMemberAndPublishEpoch':
       return t('e2ee.summary.removeMemberAndPublishEpoch', {
         actor,
@@ -364,6 +377,7 @@ function eventSentence(t: TFunction, name: ResolveMember, event: LedgerEventSumm
 function MembersSection(props: {
   overview: LedgerOverview;
   names: ReturnType<typeof useMemberNames>;
+  management?: E2eeMemberManagement;
 }) {
   const { t } = useTranslation();
   const { names } = props;
@@ -402,6 +416,9 @@ function MembersSection(props: {
               >
                 {t('e2ee.control.deviceCount', { count: member.devices.length })}
               </span>
+              {props.management && (
+                <E2eeMemberActions member={member} name={name} management={props.management} />
+              )}
             </li>
           );
         })}
@@ -411,6 +428,7 @@ function MembersSection(props: {
 }
 
 export interface E2eeWorkspaceControlPageProps {
+  memberManagement?: E2eeMemberManagement;
   workspaceId: string;
   genesisHash?: string;
   history: VerifiedLedgerHistory | null;
@@ -419,7 +437,7 @@ export interface E2eeWorkspaceControlPageProps {
   unavailable?: boolean;
   /** The signed-in account; shown on the genesis member only when this device holds the creation pin. */
   you?: E2eeMemberProfile;
-  /** Server-provided display profiles by membership ID. Display only: verify with the ledger code. */
+  /** Server-provided display profiles by crypto user ID. Display only: verify with the ledger code. */
   memberProfiles?: ReadonlyMap<string, E2eeMemberProfile>;
   /** Builds the support report on demand; it contains no keys or record bodies. */
   diagnostics: () => string;
@@ -430,6 +448,8 @@ export interface E2eeWorkspaceControlPageProps {
   onLoadMore: () => void;
   onRefresh: () => void;
   onBack: () => void;
+  /** Optional host-backed developer controls; no cryptographic work in this surface. */
+  children?: ReactNode;
 }
 
 /** Standalone control surface: it never mounts a workspace document or execution runtime. */
@@ -516,7 +536,15 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
           </p>
         )}
         {history && <LedgerVerificationCard history={history} />}
-        {history && overview && <MembersSection overview={overview} names={names} />}
+        {props.children}
+        {history?.view.inspectState().epoch.rotationRequired && (
+          <Alert.Root tone="warning">
+            <Alert.Description>{t('e2ee.members.rotationHint')}</Alert.Description>
+          </Alert.Root>
+        )}
+        {history && overview && (
+          <MembersSection overview={overview} names={names} management={props.memberManagement} />
+        )}
         {history && overview && (
           <section aria-label={t('e2ee.control.history')} {...stylex.props(styles.section)}>
             <h2 {...stylex.props(styles.sectionHeading)}>

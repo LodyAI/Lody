@@ -1,3 +1,13 @@
+import {
+  SessionFileRootIdSchema,
+  FileDownloadResponseSchema,
+  type FileDownloadRequest,
+  type FileDownloadResponse,
+} from '@lody/shared';
+import {
+  ProjectProbeLocalMemberResultSchema,
+  type ProjectProbeLocalMemberResult,
+} from '@lody/shared';
 import { BugReportClientLogSchema, type BugReportClientLog } from '@lody/shared';
 import {
   MemoryProviderRequestSchema,
@@ -260,6 +270,7 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   // File Preview v3. Deliberately outside the `code-collab/` namespace: it is a
   // plain read and must never activate Code Collab on the machine.
   'file/preview',
+  'file/download-chunk',
   'session/cancel',
   'session/live-status',
   'session/steer',
@@ -276,6 +287,7 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   'session/preview-create',
   'session/preview-revoke',
   'session/preview-status',
+  'project/probe-local-member',
   'local-project/git-state',
   'local-project/control',
 ]);
@@ -489,6 +501,7 @@ export const LoroCodeCollabV2InitDirectoryRpcRequestSchema = BaseRpcRequestSchem
 
 export const CodeCollabV2LspRpcParamsSchema = z
   .object({
+    rootId: SessionFileRootIdSchema.optional(),
     sessionId: z.string().trim().min(1),
     path: z.string().min(1),
     line: z.number().int().nonnegative().optional(),
@@ -512,6 +525,11 @@ export const LoroCodeCollabV2LspReferencesRpcRequestSchema = BaseRpcRequestSchem
  * clear on the Streams plane, and the envelope's owner binding is what the
  * machine authorizes against. The envelope is transport, not Code Collab state.
  */
+export const LoroFileDownloadRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('file/download-chunk'),
+  params: CodeCollabV2RpcContentEnvelopeSchema,
+}).strict();
+
 export const LoroFilePreviewRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('file/preview'),
   params: CodeCollabV2RpcContentEnvelopeSchema,
@@ -526,6 +544,7 @@ export const LoroFilePreviewRpcRequestSchema = BaseRpcRequestSchema.extend({
 export const isOwnerScopedEncryptedRpcMethod = (method: string): boolean =>
   method.startsWith('code-collab/') ||
   method === 'file/preview' ||
+  method === 'file/download-chunk' ||
   method === 'session/history-read' ||
   method === 'session/history-watch' ||
   method === 'session/history-write';
@@ -714,6 +733,16 @@ export const LoroSessionPreviewRevokeRpcRequestSchema = BaseRpcRequestSchema.ext
     .strict(),
 }).strict();
 
+export const LoroProjectProbeLocalMemberRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('project/probe-local-member'),
+  params: z
+    .object({
+      localProjectId: z.string().trim().min(1),
+      requestedByUserId: z.string().trim().min(1),
+    })
+    .strict(),
+}).strict();
+
 export const LoroLocalProjectGitStateRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('local-project/git-state'),
   params: z
@@ -758,6 +787,7 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroCodeCollabV2LspDefinitionRpcRequestSchema,
   LoroCodeCollabV2LspReferencesRpcRequestSchema,
   LoroFilePreviewRpcRequestSchema,
+  LoroFileDownloadRpcRequestSchema,
   LoroSessionCancelRpcRequestSchema,
   LoroSessionLiveStatusRpcRequestSchema,
   LoroSessionSteerRpcRequestSchema,
@@ -775,6 +805,7 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroSessionPreviewRevokeRpcRequestSchema,
   LoroSessionPreviewStatusRpcRequestSchema,
   LoroIosSimulatorRpcRequestSchema,
+  LoroProjectProbeLocalMemberRpcRequestSchema,
   LoroLocalProjectGitStateRpcRequestSchema,
   LoroLocalProjectControlRpcRequestSchema,
 ]);
@@ -1617,6 +1648,7 @@ export type LoroMachineRpcResult =
   | CodeCollabV2RpcResponse
   | CodeCollabV2Error
   | FilePreviewV3Response
+  | FileDownloadResponse
   | MachineProviderRateLimitsRefreshResponse
   | MachineAcpCapabilitiesRefreshResponse
   | MachineAcpAuthenticateResponse
@@ -1643,6 +1675,7 @@ export type LoroMachineRpcResult =
   | SessionPreviewRevokeResponse
   | SessionPreviewStatusResponse
   | IosSimulatorRemoteResponse
+  | ProjectProbeLocalMemberResult
   | LocalProjectGitStateRpcResponse
   | LocalProjectControlResponse;
 
@@ -1917,6 +1950,11 @@ const toLegacyRpcErrorResponse = (
     return historyRpcFailureResponse(method, historyContext, error, historyFailure);
   }
 
+  if (method === 'file/download-chunk') {
+    const parsed = FileDownloadResponseSchema.safeParse({ status: 'error', code: error.code });
+    return parsed.success ? parsed.data : { status: 'error', code: 'transient_io' };
+  }
+
   if (method === 'file/preview') {
     const parsedData = FilePreviewV3ErrorSchema.safeParse(error.data);
     if (parsedData.success) {
@@ -2138,6 +2176,10 @@ const parseRpcSuccessResult = async (
       const parsed = SessionHistoryWriteResponseSchema.safeParse(decrypted);
       return parsed.success ? (parsed.data as SessionHistoryWriteResponse) : null;
     }
+    if (response.method === 'file/download-chunk') {
+      const parsed = FileDownloadResponseSchema.safeParse(decrypted);
+      return parsed.success ? parsed.data : null;
+    }
     if (response.method === 'file/preview') {
       const previewParsed = FilePreviewV3ResponseSchema.safeParse(decrypted);
       return previewParsed.success ? previewParsed.data : null;
@@ -2156,6 +2198,10 @@ const parseRpcSuccessResult = async (
   if (response.method === 'session/preview-create') {
     const parsed = SessionPreviewCreateResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as SessionPreviewCreateResponse) : null;
+  }
+  if (response.method === 'project/probe-local-member') {
+    const parsed = ProjectProbeLocalMemberResultSchema.safeParse(response.result);
+    return parsed.success ? parsed.data : null;
   }
   if (response.method === 'local-project/git-state') {
     const parsed = LoroLocalProjectGitStateRpcResponseSchema.safeParse(response.result);
@@ -3282,6 +3328,7 @@ export class LoroStreamsMachineRpcClient {
       params: {
         sessionId: options.sessionId,
         path: options.path,
+        ...(options.rootId === undefined ? {} : { rootId: options.rootId }),
       },
     })) as CodeCollabV2OpenTextOk | CodeCollabV2Error | null;
   }
@@ -3290,6 +3337,18 @@ export class LoroStreamsMachineRpcClient {
    * File Preview v3. One call covers first read and revalidation, and never
    * activates Code Collab on the machine.
    */
+  async requestFileDownloadChunk(
+    options: FileDownloadRequest & { ownerSessionId?: string }
+  ): Promise<FileDownloadResponse | null> {
+    const { ownerSessionId, ...params } = options;
+    return (await this.sendRequest({
+      method: 'file/download-chunk',
+      timeoutMs: 30_000,
+      ownerSessionId: ownerSessionId ?? options.sessionId,
+      params,
+    })) as FileDownloadResponse | null;
+  }
+
   async requestFilePreview(
     options: Omit<FilePreviewV3Request, 'v'> & { ownerSessionId?: string; timeoutMs?: number }
   ): Promise<FilePreviewV3Response | null> {
@@ -3301,6 +3360,7 @@ export class LoroStreamsMachineRpcClient {
         v: FILE_PREVIEW_PROTOCOL_VERSION,
         sessionId: options.sessionId,
         path: options.path,
+        ...(options.rootId === undefined ? {} : { rootId: options.rootId }),
         ...(options.resolveMarkdownLink ? { resolveMarkdownLink: true } : {}),
         ...(options.knownDigest === undefined ? {} : { knownDigest: options.knownDigest }),
         ...(options.maxBytes === undefined ? {} : { maxBytes: options.maxBytes }),
@@ -3318,6 +3378,7 @@ export class LoroStreamsMachineRpcClient {
       params: {
         sessionId: options.sessionId,
         path: options.path,
+        ...(options.rootId === undefined ? {} : { rootId: options.rootId }),
         digest: options.digest,
       },
     })) as CodeCollabV2RefreshTextResponse | CodeCollabV2Error | null;
@@ -3334,6 +3395,7 @@ export class LoroStreamsMachineRpcClient {
         sessionId: options.sessionId,
         requestedByUserId: options.requestedByUserId,
         path: options.path,
+        ...(options.rootId === undefined ? {} : { rootId: options.rootId }),
         baseDigest: options.baseDigest,
         text: options.text,
         ...(options.format === undefined ? {} : { format: options.format }),
@@ -3351,6 +3413,7 @@ export class LoroStreamsMachineRpcClient {
       params: {
         sessionId: options.sessionId,
         path: options.path,
+        ...(options.rootId === undefined ? {} : { rootId: options.rootId }),
         ...(options.scope === undefined ? {} : { scope: options.scope }),
       },
     })) as CodeCollabV2OpenCurrentDiffResponse | CodeCollabV2Error | null;
@@ -3365,6 +3428,7 @@ export class LoroStreamsMachineRpcClient {
       ownerSessionId: options.ownerSessionId ?? options.sessionId,
       params: {
         sessionId: options.sessionId,
+        ...(options.rootId === undefined ? {} : { rootId: options.rootId }),
         ...(options.focusPath === undefined ? {} : { focusPath: options.focusPath }),
         ...(options.scope === undefined ? {} : { scope: options.scope }),
       },
@@ -3382,6 +3446,7 @@ export class LoroStreamsMachineRpcClient {
         sessionId: options.sessionId,
         turnId: options.turnId,
         path: options.path,
+        ...(options.rootId === undefined ? {} : { rootId: options.rootId }),
       },
     })) as CodeCollabV2OpenTurnDiffResponse | CodeCollabV2Error | null;
   }
@@ -3396,6 +3461,7 @@ export class LoroStreamsMachineRpcClient {
       params: {
         sessionId: options.sessionId,
         path: options.path,
+        ...(options.rootId === undefined ? {} : { rootId: options.rootId }),
       },
     })) as CodeCollabV2InitDirectoryOk | CodeCollabV2Error | null;
   }
@@ -3403,6 +3469,7 @@ export class LoroStreamsMachineRpcClient {
   async requestCodeCollabLspDefinition(options: {
     sessionId: string;
     path: string;
+    rootId?: string;
     line?: number;
     character?: number;
     ownerSessionId?: string;
@@ -3415,6 +3482,7 @@ export class LoroStreamsMachineRpcClient {
       params: {
         sessionId: options.sessionId,
         path: options.path,
+        ...(options.rootId === undefined ? {} : { rootId: options.rootId }),
         ...(options.line === undefined ? {} : { line: options.line }),
         ...(options.character === undefined ? {} : { character: options.character }),
       },
@@ -3424,6 +3492,7 @@ export class LoroStreamsMachineRpcClient {
   async requestCodeCollabLspReferences(options: {
     sessionId: string;
     path: string;
+    rootId?: string;
     line?: number;
     character?: number;
     ownerSessionId?: string;
@@ -3436,6 +3505,7 @@ export class LoroStreamsMachineRpcClient {
       params: {
         sessionId: options.sessionId,
         path: options.path,
+        ...(options.rootId === undefined ? {} : { rootId: options.rootId }),
         ...(options.line === undefined ? {} : { line: options.line }),
         ...(options.character === undefined ? {} : { character: options.character }),
       },
@@ -3529,6 +3599,21 @@ export class LoroStreamsMachineRpcClient {
         reason: options.reason,
       },
     })) as SessionPreviewRevokeResponse | null;
+  }
+
+  async requestProjectProbeLocalMember(options: {
+    localProjectId: LocalProjectId;
+    requestedByUserId: string;
+    timeoutMs?: number;
+  }): Promise<ProjectProbeLocalMemberResult | null> {
+    return (await this.sendRequest({
+      method: 'project/probe-local-member',
+      timeoutMs: options.timeoutMs ?? 30_000,
+      params: {
+        localProjectId: options.localProjectId,
+        requestedByUserId: options.requestedByUserId,
+      },
+    })) as ProjectProbeLocalMemberResult | null;
   }
 
   async requestLocalProjectGitState(options: {
@@ -3819,9 +3904,16 @@ export class LoroStreamsMachineRpcClient {
           params: {
             sessionId: string;
             path: string;
+            rootId?: string;
             line?: number;
             character?: number;
           };
+        }
+      | {
+          method: 'file/download-chunk';
+          timeoutMs: number;
+          ownerSessionId: string;
+          params: FileDownloadRequest;
         }
       | {
           method: 'file/preview';
@@ -3870,7 +3962,7 @@ export class LoroStreamsMachineRpcClient {
           };
         }
       | {
-          method: 'local-project/git-state';
+          method: 'local-project/git-state' | 'project/probe-local-member';
           timeoutMs: number;
           params: {
             localProjectId: LocalProjectId;
@@ -3909,6 +4001,7 @@ export class LoroStreamsMachineRpcClient {
       args.method === 'code-collab/lsp-definition' ||
       args.method === 'code-collab/lsp-references' ||
       args.method === 'file/preview' ||
+      args.method === 'file/download-chunk' ||
       args.method === 'session/history-read' ||
       args.method === 'session/history-watch' ||
       args.method === 'session/history-write'
@@ -4194,6 +4287,7 @@ export class LoroStreamsMachineRpcClient {
             params: await encryptCodeCollabV2RpcPayload(args.ownerSessionId, args.params),
           };
           break;
+        case 'file/download-chunk':
         case 'file/preview':
           request = {
             ...envelope,
@@ -4211,6 +4305,7 @@ export class LoroStreamsMachineRpcClient {
         case 'ios-simulator/control':
           request = { ...envelope, method: args.method, params: args.params };
           break;
+        case 'project/probe-local-member':
         case 'local-project/git-state':
           request = { ...envelope, method: args.method, params: args.params };
           break;

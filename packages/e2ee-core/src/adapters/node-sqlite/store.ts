@@ -21,6 +21,17 @@ export interface SqliteFileOptions {
 export const openSqliteConnection = (path: string, options?: Database.Options) =>
   new Database(path, options);
 
+/** SQLite's definite file-corruption codes; busy/locked/permission errors remain retryable I/O. */
+export const isSqliteCorruption = (error: unknown) =>
+  error instanceof Error &&
+  'code' in error &&
+  typeof error.code === 'string' &&
+  (/^(?:SQLITE_CORRUPT(?:_.*)?|SQLITE_NOTADB)$/.test(error.code) ||
+    (error.code === 'ERR_SQLITE_ERROR' &&
+      'errcode' in error &&
+      typeof error.errcode === 'number' &&
+      [11, 26].includes(error.errcode & 0xff)));
+
 class SqliteSetupFailure<E> {
   constructor(readonly error: E) {}
 }
@@ -40,7 +51,9 @@ export const openSqliteStore = <E>(input: {
       Effect.try({
         try: work,
         catch: (error) =>
-          error instanceof SqliteSetupFailure ? (error.error as E) : input.error('storage'),
+          error instanceof SqliteSetupFailure
+            ? (error.error as E)
+            : input.error(isSqliteCorruption(error) ? 'corrupt' : 'storage'),
       });
     if (
       typeof input.path !== 'string' ||

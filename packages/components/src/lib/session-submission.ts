@@ -82,6 +82,11 @@ function buildSessionCreateResult(
   if (payload.project) {
     sessionMeta.project = payload.project;
   }
+  // The creation snapshot of a multi-repository Session. After this write the
+  // owning daemon is its only writer.
+  if (payload.projectRun) {
+    sessionMeta.projectRun = payload.projectRun;
+  }
   if (
     payload.isWorktree === true ||
     payload.project?.kind === 'github' ||
@@ -124,17 +129,22 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
   } = ports;
 
   const prepareCreate = async (payload: SessionToCreate): Promise<CreateSessionResult> => {
-    const wanted = payload.historyBackend ?? defaultHistoryBackend;
+    const encrypted = runtime?.contentMode === 'e2ee';
+    const wanted = encrypted
+      ? LEGACY_SESSION_HISTORY_BACKEND
+      : (payload.historyBackend ?? defaultHistoryBackend);
     const machine =
       wanted === 'roost'
         ? ((await runtime!.repo.getDocMeta(getMachineRoomId(payload.machineId)))?.meta as
             | MachineMeta
             | undefined)
         : undefined;
-    const backend = resolveNewSessionHistoryBackend(machine, {
-      requested: payload.historyBackend,
-      preferred: defaultHistoryBackend,
-    });
+    const backend = encrypted
+      ? LEGACY_SESSION_HISTORY_BACKEND
+      : resolveNewSessionHistoryBackend(machine, {
+          requested: payload.historyBackend,
+          preferred: defaultHistoryBackend,
+        });
     return buildSessionCreateResult({ ...payload, historyBackend: backend }, backend);
   };
 

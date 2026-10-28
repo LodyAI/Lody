@@ -1,7 +1,7 @@
 import { useMemo, useRef } from 'react';
 import { useAtomValue } from 'jotai';
 import type { MachineId, SessionMeta, WorkspaceId } from '@lody/shared';
-import { userAtom } from '@/atoms';
+import { useWorkspaceLocalAccountId } from '@/lib/e2ee-account';
 import { allActiveSessionsAtom, archivedSessionListAtom, sessionListAtom } from '@/atoms/doc-meta';
 import { filterSessionsByVisibility, type SessionListEntry } from '@/lib/session-visibility';
 import { useVisibleLocalProjects } from './use-visible-local-projects';
@@ -95,7 +95,7 @@ export function useVisibleSessionMetas(
   const { visibleLocalProjectKeys, isLoading: localProjectLoading } =
     useVisibleLocalProjectKeySet(scope);
   const enabled = scope.enabled;
-  const currentUserIdValue = useAtomValue(userAtom)?.id ?? null;
+  const currentUserIdValue = useWorkspaceLocalAccountId();
   const currentUserId = enabled ? currentUserIdValue : null;
   const isLoading = machineLoading || localProjectLoading;
 
@@ -150,7 +150,7 @@ export function useVisibleArchivedSessionMetas(
   const { visibleMachineIds, isLoading: machineLoading } = useVisibleMachineIdSet(scope);
   const { visibleLocalProjectKeys, isLoading: localProjectLoading } =
     useVisibleLocalProjectKeySet(scope);
-  const currentUserIdValue = useAtomValue(userAtom)?.id ?? null;
+  const currentUserIdValue = useWorkspaceLocalAccountId();
   const currentUserId = scope.enabled ? currentUserIdValue : null;
   const isLoading = machineLoading || localProjectLoading;
 

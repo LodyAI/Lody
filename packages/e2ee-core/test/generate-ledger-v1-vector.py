@@ -61,6 +61,8 @@ def signed(body, signer):
 
 
 owner, bob, carol, phone = Device(1), Device(2), Device(3), Device(4)
+old_machine, replacement_machine = Device(5), Device(8)
+machine_id = "machine/é".encode("utf-8")
 membership = {name: filled(n, 16) for name, n in (('owner', 10), ('bob', 11), ('carol', 12))}
 genesis = signed([1, owner.pk, filled(10), membership['owner'], owner.enc, filled(20)], owner)
 anchor = record_hash(genesis)
@@ -80,29 +82,36 @@ append(owner, [1, membership['bob'], join(bob, 2)])
 append(owner, [3, membership['bob'], 1])
 possession = phone.sign(domain('possess/v2') + cbor([anchor, membership['owner'], phone.pk, phone.enc, 0]))
 append(owner, [4, 0, phone.pk, phone.enc, possession])
+# Owner-approved pre-production-freeze tag4 extension. No capability declaration.
+for target, replaces in ((old_machine, None), (replacement_machine, old_machine.pk)):
+    possession = target.sign(domain('possess/v2') + cbor([
+        anchor, membership['owner'], target.pk, target.enc, 1, machine_id,
+    ]))
+    append(owner, [4, 1, target.pk, target.enc, possession, machine_id, replaces])
 append(bob, [7, 1, filled(21), filled(0x31, 72)])
 append(owner, [5, phone.pk])
 append(owner, [8, membership['bob'], 2, filled(22), filled(0x32, 72)])
 append(owner, [1, membership['carol'], join(carol, 3)])
 append(owner, [6, membership['carol']])
 append(carol, [9, [1]])
+append(carol, [10, membership['owner']])
+append(carol, [9, [2]])
 
 print(json.dumps({
     'source': 'Python hashlib SHA256 and PyNaCl 1.6.2 Ed25519; independent ledger v1 encoding',
     'anchor': anchor.hex(),
     'records': [{'hex': record.hex(), 'hash': record_hash(record).hex()} for record in records],
     'expected': {
-        'verifiedLength': 9,
-        'failure': {'code': 'upgrade-required', 'position': 9},
+        'verifiedLength': 13,
+        'failure': {'code': 'upgrade-required', 'position': 13},
         'owner': membership['carol'].hex(),
         'members': {
-            membership['owner'].hex(): {'userId': filled(10).hex(), 'role': 'admin'},
             membership['carol'].hex(): {'userId': filled(3).hex(), 'role': 'owner'},
         },
         'devices': {
-            owner.pk.hex(): {'membershipId': membership['owner'].hex(), 'kind': 'personal'},
             carol.pk.hex(): {'membershipId': membership['carol'].hex(), 'kind': 'personal'},
         },
-        'epoch': {'number': 2, 'keyCommitment': filled(22).hex(), 'rotationRequired': False},
+        'machineBindings': {},
+        'epoch': {'number': 2, 'keyCommitment': filled(22).hex(), 'rotationRequired': True},
     },
 }, indent=2))

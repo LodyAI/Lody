@@ -1,14 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { usePostHog } from '@posthog/react';
 import { toast } from '@/lib/toast';
 import { useTranslation } from 'react-i18next';
-import type { GitHubMergeMethod, PrStatus } from '@lody/shared';
+import type { GitHubMergeMethod } from '@lody/shared';
 
 import { currentWorkspaceIdAtom } from '@/atoms';
-import { derivePrStatusFromDetails } from '@/lib/github-pr-details-state';
 import { getDurationSinceMs, getPerformanceNowMs } from '@/lib/posthog-analytics';
 import {
   isGitHubOperationTokenConnectionLostError,
@@ -42,13 +41,8 @@ export interface PrTabContainerProps {
   visible?: boolean;
   /** Session this PR tab belongs to, for analytics breakdown (spec §8d). */
   sessionId?: string | null;
-  /**
-   * Fired when the live PR details resolve to a coarse {@link PrStatus},
-   * letting the owner reconcile the persisted session PR status (which drives
-   * the sidebar + session-header badges) against GitHub's live truth — most
-   * visibly `draft`, which the webhook/CLI may not have propagated yet.
-   */
-  onResolvedPrStatus?: (status: PrStatus) => void;
+  /** Open conversation that receives PR-tab agent actions; null disables them. */
+  actionSessionId: string | null;
 }
 
 function resolveGitHubAppInstallUrl(): string {
@@ -70,8 +64,8 @@ export function PrTabContainer({
   leadingSlot,
   className,
   sessionId,
+  actionSessionId,
   visible = true,
-  onResolvedPrStatus,
 }: PrTabContainerProps) {
   const { t } = useTranslation();
   const postHog = usePostHog();
@@ -104,10 +98,12 @@ export function PrTabContainer({
     visible,
   });
   const mergeMethod = usePreferredPrMergeMethod();
-  // The owning session (this PR tab's session) publishes the live resolve-
-  // conflicts action; consuming it here keeps the PR-tab button in lockstep with
-  // the info-bar "Resolve Conflicts" button (same dispatch, shared pending).
-  const resolveConflictsAction = useAtomValue(resolveConflictsActionAtomFamily(sessionId ?? ''));
+  // PR data belongs to sessionId, while this action must target the open
+  // conversation. Keep those identities separate so a child tab never sends
+  // its prompt to the workspace owner's (often root) conversation.
+  const resolveConflictsAction = useAtomValue(
+    resolveConflictsActionAtomFamily(actionSessionId ?? '')
+  );
   const canResolveConflicts = Boolean(
     resolveConflictsAction?.available && !resolveConflictsAction.pending
   );
@@ -144,15 +140,6 @@ export function PrTabContainer({
   // webhook/CLI own; until those propagate (notably `draft`), this is the only
   // surface that knows the real state. Fire once per resolved status so the
   // owner's write doesn't loop.
-  const lastResolvedStatusRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!pullRequest || !onResolvedPrStatus) return;
-    const status = derivePrStatusFromDetails(pullRequest);
-    const key = `${pullRequest.number}:${status}`;
-    if (lastResolvedStatusRef.current === key) return;
-    lastResolvedStatusRef.current = key;
-    onResolvedPrStatus(status);
-  }, [onResolvedPrStatus, pullRequest]);
 
   const handleSelectMergeMethod = useCallback((method: GitHubMergeMethod) => {
     setPreferredPrMergeMethod(method);

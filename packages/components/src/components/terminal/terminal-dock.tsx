@@ -7,6 +7,8 @@ import { ChevronDown, Plus, TerminalSquare, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react';
 import { useSetAtom } from 'jotai';
 import { usePostHog } from '@posthog/react';
+import * as stylex from '@stylexjs/stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { cn } from '@/lib/utils';
@@ -44,12 +46,23 @@ const TERMINAL_TAB_ACTIVE_CLASS =
 const TERMINAL_TAB_INACTIVE_CLASS =
   'text-tab-inactive-foreground hover:bg-muted-foreground/[0.08] hover:text-tab-hover-foreground';
 
-// Chrome above the resizable body: the drag zone (h-1.5 = 6px) + the top tab
-// strip (h-8 = 32px). Added to `bodyHeight` for the dock's height.
-const RESIZE_HANDLE_HEIGHT = 6;
 const HEADER_HEIGHT = 32;
-const DOCK_CHROME_HEIGHT = RESIZE_HANDLE_HEIGHT + HEADER_HEIGHT;
-const DOCK_TOTAL_CHROME_HEIGHT = DOCK_CHROME_HEIGHT;
+const DOCK_CHROME_HEIGHT = HEADER_HEIGHT + 1;
+
+const styles = stylex.create({
+  frame: {
+    position: 'relative',
+  },
+  resizeHandle: {
+    position: 'absolute',
+    top: 0,
+    insetInline: 0,
+    height: space[1.5],
+    zIndex: 1,
+    cursor: 'ns-resize',
+    touchAction: 'none',
+  },
+});
 
 const MIN_BODY_HEIGHT = 140;
 const MAX_BODY_HEIGHT = 680;
@@ -173,7 +186,7 @@ export function TerminalDock({
 
   // Publish whether a terminal can be created right now so the header icon can
   // disable itself while the local daemon is still starting (canCreateTerminal
-  // is false until it reaches running/degraded).
+  // is false until this workspace's local runtime and session are ready).
   const setDockCanCreate = useSetAtom(terminalDockCanCreateAtom);
   useEffect(() => {
     setDockCanCreate(canCreateTerminal);
@@ -475,12 +488,15 @@ export function TerminalDock({
         !isResizing && 'transition-[height] duration-200 ease-out',
         className
       )}
-      style={{ height: isOpen ? bodyHeight + DOCK_TOTAL_CHROME_HEIGHT : 0 }}
+      style={{ height: isOpen ? bodyHeight + DOCK_CHROME_HEIGHT : 0 }}
       aria-hidden={!isOpen}
     >
       {isOpen ? (
         <div
-          className="flex min-w-0 flex-col overflow-hidden border-t border-sidebar-border/80 bg-sidebar"
+          className={cn(
+            'flex min-w-0 flex-col overflow-hidden border-t border-sidebar-border/80 bg-sidebar',
+            stylex.props(styles.frame).className
+          )}
           style={{ height: bodyHeight + DOCK_CHROME_HEIGHT }}
         >
           {/* Drag-to-resize zone at the very top edge (no visible handle bar). */}
@@ -488,7 +504,7 @@ export function TerminalDock({
             onPointerDown={onResizeDown}
             onPointerMove={onResizeMove}
             onPointerUp={onResizeUp}
-            className="h-1.5 flex-none cursor-ns-resize"
+            {...stylex.props(styles.resizeHandle)}
           />
 
           {/* Top tab strip: terminal tabs (+ new) fill the width left of the
@@ -582,7 +598,6 @@ export function TerminalDock({
                   });
                 }}
                 onTitleChange={updateActiveTitle}
-                className="px-2 py-1"
               />
             ) : (
               <div

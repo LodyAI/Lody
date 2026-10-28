@@ -5,11 +5,13 @@ the outline rail, and the markdown/terminal/file content surfaces.
 
 Builtin DeepSeek Harness separates thought disclosures from tool groups. Thoughts
 start open, tools closed, and explicit toggles remain respected. DSH thought prose
-uses the same Markdown typography and reading color as ordinary answers; tool
-labels and details retain their compact process styling. DSH skips the outer
-finished-work fold so intermediate prose stays visible in order after completion;
-duration moves to the existing footer. Both layout and virtual-row caches include
-provider visibility. Other providers retain their grouping and filtering. This is
+uses the same Markdown typography as ordinary answers, aligned with its disclosure
+label and shown in secondary text color; tool
+labels and details retain their compact process styling. While streaming,
+intermediate prose stays visible in order. Once a final answer is complete, the shared finished-work disclosure collapses earlier prose and tools;
+expanding it restores their order and independent disclosure states. Interrupted
+turns without an answer remain visible. Duration follows the shared header/footer
+policy. Both layout and virtual-row caches include provider visibility. Other providers retain their grouping and filtering. This is
 presentation only: stored thought/text types and provider delivery remain unchanged.
 
 Binding rules live in [AGENTS.md](AGENTS.md); this file is the directory index and
@@ -285,7 +287,9 @@ states, and the "no output" status).
 ruled rows. A row's first line is the task and its time; a running task adds a
 second line with its latest step, taken from the last `run.items` entry, then
 `run.progress`, then the legacy `summary`/`lastToolName`, so older tasks keep
-working. A row opens the panel's ONE dialog by task id (not a snapshot), so a
+working. While any task is pending or running, the finished turn keeps this
+panel after its answer; once every task is terminal, the panel returns to the
+folded work details. A row opens the panel's ONE dialog by task id (not a snapshot), so a
 streaming run keeps updating inside it and the view follows the end only while
 the reader is there. `subagent-run-history.tsx` groups `run.items` with the conversation's
 `buildAssistantTurnRenderBlocks`; `view.tsx` supplies the same activity headers,

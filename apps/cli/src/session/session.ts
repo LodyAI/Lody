@@ -19,7 +19,7 @@ import { Logger } from '@/utils/logger';
 import { ndJsonStream } from '@agentclientprotocol/sdk';
 import * as fs from 'fs';
 import type { AcpStartupTimeoutOptions, AgentClient } from '@/agent/agent-client';
-import { createAcpClient } from '@/agent/acp-runner';
+import { createAcpClient, prepareAcpProcessEnvironmentLegacy } from '@/agent/acp-runner';
 import { withAcpSessionStartSlot } from '@/agent/acp-session-start-gate';
 import {
   AcpStartupProcessError,
@@ -615,15 +615,21 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         closeBroker = prepared.close;
         Object.assign(prepared.env, memoryEnvironment(this.config.memory));
         if (releaseProfile) prepared.env.LODY_CODEX_PROCESS_TOKEN = releaseProfile.token;
+        const startupEnv = await prepareAcpProcessEnvironmentLegacy(
+          { command: callbacks.command, args: callbacks.args ?? [], env: callbacks.env },
+          prepared.env,
+          { logger: this.logger, signal: callbacks.abortSignal, cwd: this.getWorkdir() }
+        );
+        callbacks.abortSignal?.throwIfAborted();
         const executable = resolveDeepSeekHarnessSpawn({
           command: callbacks.command,
           args: callbacks.args ?? [],
-          env: prepared.env,
+          env: startupEnv,
           workdir: this.getWorkdir(),
         });
         agentProcessHandle = await this.sandbox.spawn(executable.command, executable.args, {
           cwd: this.getWorkdir(),
-          env: prepared.env,
+          env: startupEnv,
           stdio: ['pipe', 'pipe', 'pipe'],
         });
         agentProcessHandle.onExit(() => {
@@ -716,6 +722,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           stream,
           workdir: this.getWorkdir(),
           resolveWorktreeProject: callbacks.resolveWorktreeProject,
+          resolveAdditionalDirectories: callbacks.resolveAdditionalDirectories,
           logger: this.logger,
           terminalManager: this.terminalManager,
           agentConfig: {
@@ -761,17 +768,21 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           agent: { cliType: this.config.agentCliType, agentType: this.config.agentType },
         });
       } catch (error) {
+        const startupError = startupMonitor.resolveError(error);
         // The agent process died before startup completed (the startup monitor
         // surfaces async ENOENT/EACCES/early-exit here). Protocol-level failures
         // are captured inside AgentClient.startSession; only spawn-level monitor
         // errors are reported here to avoid double-counting.
         if (
-          error instanceof AcpStartupProcessExitError ||
-          error instanceof AcpStartupProcessError
+          startupError instanceof AcpStartupProcessExitError ||
+          startupError instanceof AcpStartupProcessError
         ) {
-          captureAcpSpawnFailed({ ...spawnAnalyticsProps, reason: classifyCliSpawnReason(error) });
+          captureAcpSpawnFailed({
+            ...spawnAnalyticsProps,
+            reason: classifyCliSpawnReason(startupError),
+          });
         }
-        throw error;
+        throw startupError;
       } finally {
         startupMonitor.dispose();
         externalAbort?.dispose();

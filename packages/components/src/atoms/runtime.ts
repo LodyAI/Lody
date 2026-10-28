@@ -1,4 +1,9 @@
-import type { MemoryProviderRequest, MemoryProviderResponse } from '@lody/shared';
+import type { FileDownloadRequest, FileDownloadResponse } from '@lody/shared';
+import type {
+  MemoryProviderRequest,
+  MemoryProviderResponse,
+  ProjectProbeLocalMemberResult,
+} from '@lody/shared';
 import type { PendingSessionSends } from '../lib/session-pending-sends';
 import type { SessionSendResources } from '@/lib/session-send-resources';
 import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
@@ -197,6 +202,8 @@ export type WorkspaceRuntime = {
    * The workspace id used for IndexedDB/WebSocket connections.
    */
   readonly workspaceId: WorkspaceId;
+  /** Missing only on older ordinary test/embedded ports; encrypted runtimes set it explicitly. */
+  readonly contentMode?: 'plaintext' | 'e2ee';
   readonly sendResources: SessionSendResources;
   /** In-memory sends whose attachments are still preparing; lost with the page. */
   readonly pendingSends: PendingSessionSends | null;
@@ -427,6 +434,11 @@ export type WorkspaceRuntime = {
    * File Preview v3: read one file from the machine. Never activates Code Collab
    * there, and always resolves (transport failures come back as `status: 'error'`).
    */
+  requestFileDownloadChunk: (
+    machineId: MachineId,
+    request: FileDownloadRequest,
+    ownerSessionId?: string
+  ) => Promise<FileDownloadResponse>;
   requestFilePreview: (
     machineId: MachineId,
     request: Omit<FilePreviewV3Request, 'v'>,
@@ -518,6 +530,13 @@ export type WorkspaceRuntime = {
     requestedByUserId: string,
     options?: { timeoutMs?: number }
   ) => Promise<LocalProjectGitStateRpcResponse | null>;
+  /** Read-only `.gitmodules` probe of one local project, for the Project group editor. */
+  requestProjectProbeLocalMember: (
+    machineId: MachineId,
+    localProjectId: LocalProjectId,
+    requestedByUserId: string,
+    options?: { timeoutMs?: number }
+  ) => Promise<ProjectProbeLocalMemberResult | null>;
   requestLocalProjectControl: (
     request: LocalProjectControlRequest,
     options?: { timeoutMs?: number }
@@ -571,7 +590,7 @@ export type WorkspaceRuntimeInitFailure = {
   errorType: string;
   /** Present only when content-mode admission failed. Encryption wording is shown
    * only when the workspace is known to be encrypted or encrypted creation is on. */
-  modeAdmission?: { knownEncrypted: boolean };
+  modeAdmission?: { knownEncrypted: boolean; workspaceId?: string };
 };
 
 export const workspaceRuntimeInitFailureAtom = atom<WorkspaceRuntimeInitFailure | null>(null);

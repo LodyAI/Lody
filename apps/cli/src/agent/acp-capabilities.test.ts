@@ -1,4 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { existsSync, rmSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import type { CodexProfileExecution } from './codex-profile-runtime';
+import type { StartLocalAcpAgentOptions } from './acp-runner';
 
 import type { Logger } from '@/utils/logger';
 
@@ -17,6 +23,11 @@ vi.mock('./acp-authentication', () => ({
   probeBuiltinAuthentication: mocks.probeBuiltinAuthentication,
 }));
 
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...actual, mkdtemp: vi.fn(actual.mkdtemp), rm: vi.fn(actual.rm) };
+});
+
 import { fetchAcpCapabilities } from './acp-capabilities';
 import { AcpAuthenticationRequiredError } from './agent-client';
 
@@ -28,6 +39,7 @@ const createSilentLogger = (): Logger => ({
   debug: () => {},
   trace: () => {},
   setLevel: () => {},
+  setDebug: () => {},
   child: () => createSilentLogger(),
   close: async () => {},
 });
@@ -72,8 +84,20 @@ function mockStartupWithSessionResponse(sessionResponse: Record<string, unknown>
 }
 
 describe('fetchAcpCapabilities', () => {
+  const probeDirectories = new Set<string>();
+  afterEach(() => {
+    vi.restoreAllMocks();
+    for (const directory of probeDirectories) {
+      // A regression may pass cwd instead: never delete it from test teardown.
+      if (/^lody-(acp-capabilities|test-profile)-/.test(path.basename(directory))) {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+    probeDirectories.clear();
+  });
+
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mocks.probeBuiltinAuthentication.mockResolvedValue({ status: 'unknown' });
     mocks.startLocalAcpAgent.mockImplementation(async () => createSuccessfulStartupResult());
   });
@@ -119,18 +143,248 @@ describe('fetchAcpCapabilities', () => {
     expect(mocks.startLocalAcpAgent).not.toHaveBeenCalled();
   });
 
-  it('uses the current working directory for capability probing', async () => {
-    const result = await fetchAcpCapabilities('registry', 'probe-agent', createSilentLogger());
+  it.each(['registry', 'custom', 'builtin'] as const)(
+    'uses a writable isolated workspace for %s probes even when daemon cwd is root',
+    async (cliType) => {
+      const inheritedCwd = path.parse(process.cwd()).root;
+      vi.spyOn(process, 'cwd').mockReturnValue(inheritedCwd);
+      let workdir = '';
+      mocks.startLocalAcpAgent.mockImplementation(async (options: StartLocalAcpAgentOptions) => {
+        workdir = options.workdir;
+        probeDirectories.add(workdir);
+        expect(path.isAbsolute(workdir)).toBe(true);
+        expect(workdir).not.toBe(inheritedCwd);
+        await mkdir(path.join(workdir, '.gemini', 'skills'), { recursive: true });
+        await writeFile(path.join(workdir, '.gemini', 'skills', 'probe'), 'workspace ready');
+        return createSuccessfulStartupResult();
+      });
+      mocks.shutdownLocalAcpAgent.mockImplementation(async () => {
+        expect(await readFile(path.join(workdir, '.gemini', 'skills', 'probe'), 'utf8')).toBe(
+          'workspace ready'
+        );
+      });
 
-    expect(mocks.startLocalAcpAgent).toHaveBeenCalledTimes(1);
-    expect(mocks.startLocalAcpAgent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        cliType: 'registry',
-        agentType: 'probe-agent',
-        workdir: process.cwd(),
-      })
-    );
-    expect(result.availableCommands).toEqual([{ name: '/help', description: 'Help' }]);
+      const result = await fetchAcpCapabilities(cliType, 'probe-agent', createSilentLogger());
+      expect(result.models.map((model) => model.modelId)).toEqual(['claude-sonnet']);
+      expect(result.availableCommands).toEqual([{ name: '/help', description: 'Help' }]);
+      expect(existsSync(workdir)).toBe(false);
+    }
+  );
+
+  it('keeps concurrent probe directories until each shutdown finishes', async () => {
+    let notifyStarted = () => {};
+    const started = new Promise<void>((resolve) => {
+      notifyStarted = resolve;
+    });
+    let releaseShutdown = () => {};
+    const shutdownReleased = new Promise<void>((resolve) => {
+      releaseShutdown = resolve;
+    });
+    const directories: string[] = [];
+    mocks.startLocalAcpAgent.mockImplementation(async ({ workdir }: StartLocalAcpAgentOptions) => {
+      probeDirectories.add(workdir);
+      directories.push(workdir);
+      await writeFile(path.join(workdir, 'owner'), workdir);
+      return createSuccessfulStartupResult();
+    });
+    mocks.shutdownLocalAcpAgent.mockImplementation(async () => {
+      notifyStarted();
+      await shutdownReleased;
+    });
+    const first = fetchAcpCapabilities('registry', 'probe-agent', createSilentLogger());
+    await started;
+    try {
+      mocks.shutdownLocalAcpAgent.mockImplementation(async () => {});
+      await fetchAcpCapabilities('registry', 'probe-agent', createSilentLogger());
+      const [firstDir = '', secondDir = ''] = directories;
+      expect(firstDir).not.toBe(secondDir);
+      expect(await readFile(path.join(firstDir, 'owner'), 'utf8')).toBe(firstDir);
+      expect(existsSync(secondDir)).toBe(false);
+    } finally {
+      releaseShutdown();
+      await first;
+    }
+    expect(directories.every((directory) => !existsSync(directory))).toBe(true);
+  });
+
+  it.each(['startup', 'cancelled', 'normalization'] as const)(
+    'removes the workspace after %s failure and preserves the original error',
+    async (failure) => {
+      const controller = new AbortController();
+      const error = new Error(failure);
+      let workdir = '';
+      mocks.startLocalAcpAgent.mockImplementation(async (options: StartLocalAcpAgentOptions) => {
+        workdir = options.workdir;
+        probeDirectories.add(workdir);
+        await mkdir(path.join(workdir, '.gemini', 'skills'), { recursive: true });
+        if (failure === 'cancelled') {
+          controller.abort(error);
+          options.signal?.throwIfAborted();
+        }
+        if (failure === 'startup') throw error;
+        const startup = createSuccessfulStartupResult();
+        startup.client = {
+          supportsSessionFork: () => {
+            throw error;
+          },
+        } as never;
+        return startup;
+      });
+      await expect(
+        fetchAcpCapabilities(
+          'registry',
+          'probe-agent',
+          createSilentLogger(),
+          undefined,
+          undefined,
+          undefined,
+          { signal: controller.signal }
+        )
+      ).rejects.toBe(error);
+      expect(workdir).not.toBe('');
+      expect(existsSync(workdir)).toBe(false);
+    }
+  );
+
+  it('cleans a directory allocated while cancellation was arriving without starting an agent', async () => {
+    const controller = new AbortController();
+    const error = new Error('cancelled during allocation');
+    const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    let workdir = '';
+    vi.mocked(mkdtemp).mockImplementationOnce(async (prefix) => {
+      workdir = await actual.mkdtemp(prefix);
+      probeDirectories.add(workdir);
+      controller.abort(error);
+      return workdir;
+    });
+    let spawned = false;
+    mocks.startLocalAcpAgent.mockImplementation(async () => {
+      spawned = true;
+      return createSuccessfulStartupResult();
+    });
+    await expect(
+      fetchAcpCapabilities(
+        'registry',
+        'probe-agent',
+        createSilentLogger(),
+        undefined,
+        undefined,
+        undefined,
+        { signal: controller.signal }
+      )
+    ).rejects.toBe(error);
+    expect(spawned).toBe(false);
+    expect(existsSync(workdir)).toBe(false);
+  });
+
+  it('does not fall back to inherited cwd when workspace allocation fails', async () => {
+    const error = new Error('temporary directory unavailable');
+    vi.mocked(mkdtemp).mockRejectedValueOnce(error);
+    let spawned = false;
+    mocks.startLocalAcpAgent.mockImplementation(async () => {
+      spawned = true;
+      return createSuccessfulStartupResult();
+    });
+    await expect(
+      fetchAcpCapabilities('registry', 'probe-agent', createSilentLogger())
+    ).rejects.toBe(error);
+    expect(spawned).toBe(false);
+  });
+
+  it.each([false, true])(
+    'preserves the probe outcome when removal fails (startup failure: %s)',
+    async (failStartup) => {
+      const startupError = new Error('provider authentication required');
+      const warnings: string[] = [];
+      const logger = createSilentLogger();
+      logger.warn = (message) => {
+        warnings.push(String(message));
+        throw new Error('log sink unavailable');
+      };
+      const directories: string[] = [];
+      mocks.startLocalAcpAgent.mockImplementation(
+        async ({ workdir }: StartLocalAcpAgentOptions) => {
+          probeDirectories.add(workdir);
+          directories.push(workdir);
+          if (failStartup) throw startupError;
+          return createSuccessfulStartupResult();
+        }
+      );
+      vi.mocked(rm).mockRejectedValueOnce(new Error('workspace busy'));
+      const result = fetchAcpCapabilities('registry', 'probe-agent', logger);
+      if (failStartup) await expect(result).rejects.toBe(startupError);
+      else expect((await result).models.map((model) => model.modelId)).toEqual(['claude-sonnet']);
+      expect(warnings).toEqual(['[acp-capabilities] Failed to remove temporary probe workspace']);
+      expect(existsSync(directories[0] ?? '')).toBe(true);
+
+      mocks.startLocalAcpAgent.mockImplementation(
+        async ({ workdir }: StartLocalAcpAgentOptions) => {
+          probeDirectories.add(workdir);
+          directories.push(workdir);
+          return createSuccessfulStartupResult();
+        }
+      );
+      const retry = await fetchAcpCapabilities('registry', 'probe-agent', logger);
+      expect(retry.models.map((model) => model.modelId)).toEqual(['claude-sonnet']);
+      expect(directories[1]).not.toBe(directories[0]);
+      expect(existsSync(directories[1] ?? '')).toBe(false);
+    }
+  );
+
+  it('preserves the Codex profile home when credential verification fails', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'lody-test-profile-'));
+    probeDirectories.add(home);
+    await writeFile(path.join(home, 'auth.json'), 'synthetic credentials');
+    const codexProfile: CodexProfileExecution = {
+      profile: {
+        workspaceId: 'workspace',
+        machineId: 'machine',
+        configId: 'config',
+        home,
+        authStore: 'codex-default',
+        profile: {
+          mode: 'api-key',
+          profileId: '00000000-0000-4000-8000-000000000001',
+          baseUrl: 'https://example.invalid/v1',
+        },
+      },
+    };
+    let workdir = '';
+    mocks.startLocalAcpAgent.mockImplementation(async (options: StartLocalAcpAgentOptions) => {
+      workdir = options.workdir;
+      probeDirectories.add(workdir);
+      expect(options.codexProfile).toBe(codexProfile);
+      expect(workdir).not.toBe(home);
+      return createSuccessfulStartupResult();
+    });
+    await expect(
+      fetchAcpCapabilities(
+        'builtin',
+        'codex',
+        createSilentLogger(),
+        undefined,
+        undefined,
+        undefined,
+        { codexProfile, verifyCodexCredential: true }
+      )
+    ).rejects.toThrow('Codex credential verification requires a candidate key');
+    expect(existsSync(workdir)).toBe(false);
+    expect(await readFile(path.join(home, 'auth.json'), 'utf8')).toBe('synthetic credentials');
+  });
+
+  it('still attempts workspace cleanup if shutdown unexpectedly rejects', async () => {
+    let workdir = '';
+    const error = new Error('shutdown failed');
+    mocks.startLocalAcpAgent.mockImplementation(async (options: StartLocalAcpAgentOptions) => {
+      workdir = options.workdir;
+      probeDirectories.add(workdir);
+      return createSuccessfulStartupResult();
+    });
+    mocks.shutdownLocalAcpAgent.mockRejectedValueOnce(error);
+    await expect(
+      fetchAcpCapabilities('registry', 'probe-agent', createSilentLogger())
+    ).rejects.toBe(error);
+    expect(existsSync(workdir)).toBe(false);
   });
 
   it('records provider title ownership from the live initialization', async () => {

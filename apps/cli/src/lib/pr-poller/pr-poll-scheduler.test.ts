@@ -1,3 +1,5 @@
+import { computeDiscoveryFingerprint } from './pr-poll-targets';
+import { planPullRequestLifecycle } from '@lody/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   LodyPresenceInstanceId,
@@ -40,7 +42,13 @@ function createTestLogger(): Logger {
 }
 
 function makeMeta(overrides: Partial<SessionMeta> = {}): SessionMeta {
-  return { userId: 'user-1', machineId: LOCAL_MACHINE, ...overrides } as SessionMeta;
+  const meta = { userId: 'user-1', machineId: LOCAL_MACHINE, ...overrides } as SessionMeta;
+  // Existing modern fixtures have already published their provider revision.
+  for (const pr of meta.pullRequests ?? []) {
+    const write = planPullRequestLifecycle({ ...pr, updatedAt: '2026-07-17T00:00:00Z' });
+    if (write && !Object.hasOwn(meta, write.field)) meta[write.field] = write.value;
+  }
+  return meta;
 }
 
 function prMeta(prNumber: number, status: PrObservation['status'] = 'open') {
@@ -134,7 +142,12 @@ class FakeWorkspace {
         this.writeEffect?.();
         this.writtenPatches.push({ sessionId, patch });
         const current = this.metas.get(sessionId) ?? makeMeta();
-        this.metas.set(sessionId, { ...current, ...patch });
+        const { lifecycle = [], ...legacyPatch } = patch;
+        this.metas.set(sessionId, {
+          ...current,
+          ...legacyPatch,
+          ...Object.fromEntries(lifecycle.map((write) => [write.field, write.value])),
+        });
         // A real workspace fires the doc-metadata watcher on writes.
         this.notifyMetaChanged(sessionId);
       },
@@ -1014,7 +1027,9 @@ describe('PrPollScheduler', () => {
     workspace.associateResult = true;
     await advance(config.lowMinIntervalMs);
     expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(9, 'merged'), prMeta(55)]);
-    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBe('owner/repo|feat/x');
+    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBe(
+      computeDiscoveryFingerprint('owner/repo', 'feat/x')
+    );
     expect(workspace.writtenPatches).toHaveLength(1);
     await advance(config.lowStatusIntervalMs);
     expect(workspace.associateCalls).toHaveLength(3);
@@ -1081,7 +1096,10 @@ describe('PrPollScheduler', () => {
         branchName: 'feat/x',
       })
     );
-    stateStore.getStored().discoveryFingerprints['ws1:s1'] = 'owner/repo|feat/x';
+    stateStore.getStored().discoveryFingerprints['ws1:s1'] = computeDiscoveryFingerprint(
+      'owner/repo',
+      'feat/x'
+    );
     clientHandler = async (batch) => {
       const outcome = successOutcome(batch);
       if (outcome.kind === 'success')
@@ -1097,7 +1115,9 @@ describe('PrPollScheduler', () => {
     scheduler = makeScheduler();
     workspace.associateResult = true;
     await startWith([workspace]);
-    expect(stateStore.getStored().discoveryFingerprints['ws1:s1']).toBe('owner/repo|feat/x');
+    expect(stateStore.getStored().discoveryFingerprints['ws1:s1']).toBe(
+      computeDiscoveryFingerprint('owner/repo', 'feat/x')
+    );
     const callsAfterRecovery = calls().length;
     await advance(config.lowDiscoveryIntervalMs);
     expect(calls()).toHaveLength(callsAfterRecovery);
@@ -1161,7 +1181,9 @@ describe('PrPollScheduler', () => {
     workspace.writeEffect = null;
     await advance(config.lowMinIntervalMs);
     expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(55)]);
-    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBe('owner/repo|feat/x');
+    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBe(
+      computeDiscoveryFingerprint('owner/repo', 'feat/x')
+    );
     expect(workspace.associateCalls).toHaveLength(1);
   });
 
@@ -1208,7 +1230,9 @@ describe('PrPollScheduler', () => {
     await startWith([workspace]);
     // One discovery pass records the context fingerprint...
     expect(calls()).toHaveLength(1);
-    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBe('owner/repo|feat/x');
+    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBe(
+      computeDiscoveryFingerprint('owner/repo', 'feat/x')
+    );
 
     // ...after which the terminal owner consumes no quota at all.
     await advance(45 * 60_000);
@@ -1224,6 +1248,116 @@ describe('PrPollScheduler', () => {
     await advance(5_000);
     expect(calls()).toHaveLength(2);
     expect(calls()[1]?.batch.variables).toMatchObject({ b0: 'feat/next' });
+  });
+
+  it.each([false, true])(
+    'rediscovers a new PR on an idle terminal branch after child activity (project=%s)',
+    async (project) => {
+      const workspace = new FakeWorkspace('ws1');
+      workspace.metas.set(
+        sid('s1'),
+        makeMeta({
+          project: { kind: 'github', repoFullName: 'owner/repo' } as SessionMeta['project'],
+          branchName: 'feat/x',
+          ...(project
+            ? {
+                projectRun: {
+                  members: {
+                    a: {
+                      src: { kind: 'github', repoFullName: 'owner/other' },
+                      branch: 'feat/x',
+                      base: 'main',
+                    },
+                    b: {
+                      src: { kind: 'github', repoFullName: 'owner/repo' },
+                      branch: 'feat/x',
+                      base: 'main',
+                    },
+                  },
+                } as never,
+              }
+            : {}),
+          pullRequests: [
+            ...(project
+              ? [{ url: 'https://github.com/owner/other/pull/8', status: 'merged' as const }]
+              : []),
+            prMeta(9, 'merged'),
+          ],
+          lastMessageAt: T0,
+        })
+      );
+      workspace.metas.set(
+        sid('child'),
+        makeMeta({ parentSessionId: sid('s1'), lastMessageAt: T0 })
+      );
+      await startWith([workspace]);
+      await advance(60_000);
+      expect(Object.keys(stateStore.getStored().targets)).toHaveLength(0);
+      // A restart retains the checkpoint even though transient target success was pruned.
+      scheduler.stop();
+      await scheduler.settle();
+      scheduler = makeScheduler();
+      await startWith([workspace]);
+      const idleCalls = calls().length;
+      await advance(config.highIntervalMs);
+      expect(calls()).toHaveLength(idleCalls);
+      clientHandler = async (batch) => {
+        const outcome = successOutcome(batch);
+        if (outcome.kind === 'success' && batch.variables.name === 'repo')
+          for (const discovery of outcome.batch.discoveries) discovery.prs = [observation(10)];
+        return outcome;
+      };
+      workspace.metas.set(
+        sid('child'),
+        makeMeta({ parentSessionId: sid('s1'), lastMessageAt: now })
+      );
+      workspace.notifyMetaChanged(sid('child'));
+      await advance(config.highIntervalMs);
+      expect(workspace.metas.get(sid('s1'))?.pullRequests).toContainEqual(prMeta(10));
+      expect(workspace.metas.get(sid('s1'))?.pullRequests).toContainEqual(prMeta(9, 'merged'));
+      if (project)
+        expect(workspace.metas.get(sid('s1'))?.pullRequests).toContainEqual({
+          url: 'https://github.com/owner/other/pull/8',
+          status: 'merged',
+        });
+    }
+  );
+
+  it('does not acknowledge activity arriving during a discovery request', async () => {
+    const workspace = new FakeWorkspace('ws1');
+    workspace.metas.set(
+      sid('s1'),
+      makeMeta({
+        project: { kind: 'github', repoFullName: 'owner/repo' } as SessionMeta['project'],
+        branchName: 'feat/x',
+        pullRequests: [prMeta(9, 'merged')],
+        lastMessageAt: T0,
+      })
+    );
+    let first = true;
+    clientHandler = async (batch) => {
+      const outcome = successOutcome(batch);
+      if (first) {
+        first = false;
+        workspace.metas.set(sid('s1'), {
+          ...workspace.metas.get(sid('s1'))!,
+          lastMessageAt: T0 + 1,
+        });
+        workspace.notifyMetaChanged(sid('s1'));
+      } else if (outcome.kind === 'success') {
+        for (const discovery of outcome.batch.discoveries) discovery.prs = [observation(10)];
+      }
+      return outcome;
+    };
+    await startWith([workspace]);
+    expect(stateStore.getStored().discoveryFingerprints['ws1:s1']).toBe(
+      computeDiscoveryFingerprint('owner/repo', 'feat/x', T0)
+    );
+    await advance(config.highIntervalMs);
+    expect(workspace.metas.get(sid('s1'))?.pullRequests).toContainEqual(prMeta(10));
+    expect(stateStore.getStored().discoveryFingerprints['ws1:s1']).toBe(
+      computeDiscoveryFingerprint('owner/repo', 'feat/x', T0 + 1)
+    );
   });
 
   it('drops in-flight discovery results when the branch switched mid-request', async () => {
@@ -1288,7 +1422,9 @@ describe('PrPollScheduler', () => {
 
     expect(workspace.associateCalls).toHaveLength(1);
     expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(55)]);
-    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBe('owner/repo|feat/x');
+    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBe(
+      computeDiscoveryFingerprint('owner/repo', 'feat/x')
+    );
   });
 
   it('does not write or associate for an owner that migrated machines mid-poll', async () => {

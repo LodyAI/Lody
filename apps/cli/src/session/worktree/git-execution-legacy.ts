@@ -1,3 +1,6 @@
+import { probeLocalProjectMember } from './project-member-probe';
+import { NodeFileSystem } from '@effect/platform-node-shared';
+import { checkoutProjectSubmodule, persistProjectSubmoduleBranch } from './project-submodules';
 import {
   FileLockCleanupFailed,
   LockOwnershipLost,
@@ -45,10 +48,25 @@ const executeLegacy = async <A, E>(
 };
 
 /**
- * @deprecated Only for WorktreeManager's unmigrated Promise orchestration.
+ * @deprecated Only for unmigrated worktree manager and Project group orchestration.
  * Delete when that owner composes WorktreeGit in its own Effect workflow.
  */
+// The read-only member probe is also called by MessageHandler machine RPC; remove
+// its Promise bridge when that dispatcher uses the native daemon runtime.
 export const worktreeGitLegacy = {
+  probeLocalProjectMember: (rootPath: string, options: PlatformFacadeOptions = {}) =>
+    executeLegacy(
+      probeLocalProjectMember(rootPath).pipe(Effect.provide(NodeFileSystem.layer)),
+      options
+    ),
+  persistProjectSubmoduleBranch: (
+    input: Parameters<typeof persistProjectSubmoduleBranch>[0],
+    options: PlatformFacadeOptions = {}
+  ) => executeLegacy(persistProjectSubmoduleBranch(input), options),
+  checkoutProjectSubmodule: (
+    input: Parameters<typeof checkoutProjectSubmodule>[0],
+    options: PlatformFacadeOptions = {}
+  ) => executeLegacy(checkoutProjectSubmodule(input), options),
   run: (command: WorktreeGitCommand, options: PlatformFacadeOptions = {}) =>
     executeLegacy(
       Effect.flatMap(WorktreeGit, (git) => git.run(command)),

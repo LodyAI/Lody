@@ -1,3 +1,5 @@
+import { requireWorkspaceFeature } from '@/lib/workspace-feature';
+import { type WorkspaceStreamsMode } from '@lody/shared/workspace-streams-content';
 import type { MachineId, SessionFilePayload, SessionId, WorkspaceId } from '@lody/shared';
 import { sendSessionFileToLocalRuntime } from './electron-session-file-sender';
 import {
@@ -19,6 +21,7 @@ export class SessionFilePreparationAuthError extends Error {
 export function prepareSessionFile(
   resources: SessionSendResources,
   args: {
+    content: WorkspaceStreamsMode;
     workspaceId: WorkspaceId;
     sessionId: SessionId;
     machineId: MachineId | null;
@@ -47,6 +50,7 @@ export function prepareSessionFile(
       }
     }
     throwIfSendAborted(signal);
+    requireWorkspaceFeature(args.content, 'attachments');
     if (!args.token) throw new SessionFilePreparationAuthError();
     const progress = (value: SessionFileUploadProgress) => {
       if (!signal.aborted) args.onProgress?.(value);
@@ -59,6 +63,7 @@ export function prepareSessionFile(
     if (hash.status === 'rejected') throw hash.reason;
     if (preview.status === 'rejected') throw preview.reason;
     return await uploadSessionFile({
+      content: args.content,
       workspaceId: args.workspaceId,
       sessionId: args.sessionId,
       token: args.token,

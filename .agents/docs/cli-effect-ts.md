@@ -351,6 +351,10 @@ Local-project Git is native as described above; full worktree ownership is separ
 
 ## Worktree Git execution
 
+The read-only Project group member probe also uses this boundary through
+`worktreeGitLegacy.probeLocalProjectMember`; the RPC owns the finite request and awaits
+command release. Remove this adapter when its dispatcher uses the native daemon runtime.
+
 `WorktreeGit` / `WorktreeGitLive` own native command execution, status checking and
 bounded credential-helper protocol. Layers provide official FileSystem, the process
 spawner and a per-command environment Effect. Each command owns its process Scope;
@@ -467,6 +471,14 @@ migrated layer. Current facades:
 `pnpm check:cli-process-boundary` fails when code in those packages bypasses
 these and reaches `child_process`, `cross-spawn`, `node-pty`, `process.kill` or
 a child's `kill` directly.
+
+`publishTurnCompletionLegacy` in `session/turn-completion-legacy.ts` is consumed by
+`SessionExecutionService.releaseVisibleTurn`. The native publication policy owns
+confirmation retry/deadline; the existing host drain owns its Promise and shutdown
+signal. History/backend/notification Promise adapters remain unfinished dependencies,
+so this does not complete Turn migration. Delete the facade when these owners and
+the Session caller compose native Effects. See the
+[completion decision](../notes/implemented/bug-fix/2026-10-26-turn-completion-signals.md).
 
 Session credential acquisition also has a temporary `acquireSessionCredentialsLegacy`
 facade (`session/session-credentials.ts`): the Effect broker lease's scope belongs

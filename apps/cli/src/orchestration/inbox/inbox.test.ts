@@ -1001,6 +1001,50 @@ it('keeps the original shared failed shutdown receipt and recovers settlement th
   db.close();
 });
 
+it('post-restart admission waits for the startup release probe instead of reporting a stale block', async () => {
+  const { operationInboxLegacy } = await import('./legacy');
+  const { InboxExecutionBlocked, InboxExecutionRejected } = await import('./admission-failure');
+  const { InboxRecoveryProbe } = await import('./recovery');
+  const f = fixture();
+  f.start();
+  f.sql.registerResources(f.input, 'execution-1', {
+    platform: 'linux',
+    roots: [4242],
+    complete: true,
+  });
+  f.release('unreleased');
+  const restarted = new LodyOperationStore(f.filename);
+  stores.push(restarted);
+  restarted.inbox.activate('workspace', 'replacement');
+  const probed = Effect.runSync(Deferred.make<boolean>());
+  const bridge = operationInboxLegacy({
+    workspaceId: 'workspace',
+    owner: 'replacement',
+    sql: restarted.inbox,
+    ownsConnection: false,
+    ready: () => false,
+    admit: () => true,
+    launch: async () => {},
+    report: () => {},
+    recoveryProbe: Layer.succeed(InboxRecoveryProbe, { released: () => Deferred.await(probed) }),
+  });
+  // The interrupted turn is redispatched before the probe has read the process table.
+  const redispatch = bridge.openExecution(f.input, 'execution-1');
+  const fresh = { ...f.input, inputId: 'fresh-human' };
+  await bridge.accept(fresh);
+  const successor = bridge.openExecution(fresh, 'successor');
+  Effect.runSync(Deferred.succeed(probed, true));
+  // The interrupted input ends without replay rather than demanding manual recovery.
+  const rejected = await redispatch.then(
+    () => undefined,
+    (cause: unknown) => cause
+  );
+  expect(rejected).toBeInstanceOf(InboxExecutionRejected);
+  expect(rejected).not.toBeInstanceOf(InboxExecutionBlocked);
+  expect((await successor).input.inputId).toBe('fresh-human');
+  expect(restarted.inbox.blockedExecutions('workspace')).toEqual([]);
+});
+
 it('physical release clears inherited recovery blocking for another requester in the same session', () => {
   const f = fixture();
   f.start();

@@ -185,6 +185,10 @@ describe('MessageHandler machine registration', () => {
     // version reach every client, so adding one must be acknowledged here.
     const hostCapabilities = getHostMachineProtocolCapabilities();
     expect(registeredMeta.protocolCapabilities).toEqual({
+      multiRepoProject: 1,
+      projectFileRoots: 1,
+      projectRepositoryMembers: 1,
+      projectFolderSelection: 1,
       operationInbox: 2,
       providerRateLimitsRefresh: 1,
       codeCollabAllChangesScope: 1,
@@ -211,13 +215,14 @@ describe('MessageHandler machine registration', () => {
       localProjectCreateDirectory: 1,
       localProjectHistoryProvider: 1,
       localFileResources: 1,
+      fileDownload: 1,
       markdownFileLinks: 1,
       providerSetup: 1,
       acpProtocolAuthentication: 2,
       acpCapabilityRefreshCache: 1,
       subagentCancellation: 1,
       subagentEvents: 1,
-      schedules: 2,
+      schedules: 3,
       preparedSessionInput: 1,
       sessionInputAttachments: 1,
       sessionCollaborationControl: 1,

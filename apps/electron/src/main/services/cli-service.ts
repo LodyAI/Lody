@@ -1,3 +1,7 @@
+import {
+  LocalE2eeRecoveryFailureSchema,
+  type LocalE2eeResetRequest
+} from '@lody/shared/e2ee-local-pairing'
 import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
@@ -12,6 +16,10 @@ import {
   type ProcessHandleLegacy,
   type TerminationPolicy
 } from '@lody/shared/node/process'
+import type {
+  LocalE2eePrepareRequest,
+  LocalE2eeActivateRequest
+} from '@lody/shared/e2ee-local-pairing'
 import { isLocalSessionControlRequest } from '@lody/shared/node/local-session-control'
 import { isLocalProjectControlRequest } from '@lody/shared/node/local-project-control'
 import {
@@ -803,6 +811,52 @@ export class CliService {
       }
       return fallbackMachineId
     }
+  }
+
+  async resetLocalE2eeIdentity(message: LocalE2eeResetRequest) {
+    if (!this.cliAutoStartEnabled) throw new Error('e2ee_local_agent_disabled')
+    return Effect.runPromise(this.localControlClient.e2eeReset(message, { timeoutMs: 30_000 }))
+  }
+
+  async prepareLocalE2eeDevice(message: LocalE2eePrepareRequest) {
+    if (!this.cliAutoStartEnabled) throw new Error('e2ee_local_agent_disabled')
+    return Effect.runPromise(
+      this.localControlClient
+        .e2eePrepare(message, { timeoutMs: 30_000 })
+        .pipe(
+          Effect.mapError(
+            (error) =>
+              new Error(
+                LocalE2eeRecoveryFailureSchema.safeParse({ ok: false, error: error.message })
+                  .success
+                  ? error.message
+                  : error._tag === 'IpcTimeoutError'
+                    ? 'e2ee_local_agent_pending'
+                    : 'e2ee_local_agent_unavailable',
+                { cause: error }
+              )
+          )
+        )
+    )
+  }
+
+  async activateLocalE2eeDevice(message: LocalE2eeActivateRequest) {
+    if (!this.cliAutoStartEnabled) throw new Error('e2ee_local_agent_disabled')
+    return Effect.runPromise(
+      this.localControlClient
+        .e2eeActivate(message, { timeoutMs: 30_000 })
+        .pipe(
+          Effect.mapError(
+            (error) =>
+              new Error(
+                error._tag === 'IpcTimeoutError'
+                  ? 'e2ee_local_agent_pending'
+                  : 'e2ee_local_agent_unavailable',
+                { cause: error }
+              )
+          )
+        )
+    )
   }
 
   async sendLocalSessionControl(

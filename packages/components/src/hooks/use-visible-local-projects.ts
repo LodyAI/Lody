@@ -1,8 +1,7 @@
 import { useMemo } from 'react';
-import { useAtomValue } from 'jotai';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import type { WorkspaceId } from '@lody/shared';
-import { userAtom } from '@/atoms';
+import { useWorkspaceLocalAccountId } from '@/lib/e2ee-account';
 import {
   canRunAuthedWorkspaceQuery,
   isAuthedWorkspaceQueryLoading,
@@ -23,6 +22,7 @@ export type { LocalProjectVisibilityAccess };
 const EMPTY_ACCESS_ROWS: LocalProjectVisibilityAccess[] = [];
 
 type UseVisibleLocalProjectsOptions = {
+  includeMemberOnly?: boolean;
   includeMachineFlock?: boolean;
   syncMachineFlock?: boolean;
   workspaceId?: WorkspaceId | null;
@@ -41,17 +41,18 @@ export function useVisibleLocalProjects(
   return useVisibleLocalProjectsFromMachineIndex(visibleMachineIndex, {
     workspaceId: options.workspaceId,
     enabled: options.enabled,
+    includeMemberOnly: options.includeMemberOnly,
   });
 }
 
 export function useVisibleLocalProjectsFromMachineIndex(
   visibleMachineIndex: Pick<VisibleMachineIndex, 'machines' | 'accessByMachineId' | 'isLoading'>,
-  options: { enabled?: boolean; workspaceId?: WorkspaceId | null } = {}
+  options: { enabled?: boolean; workspaceId?: WorkspaceId | null; includeMemberOnly?: boolean } = {}
 ): VisibleLocalProjectIndex {
   const { workspaceId, enabled } = useResolvedWorkspaceScope(options);
   const { isAuthenticated, isLoading: isConvexAuthLoading } = useAuthenticatedConvex();
   const canQuery = enabled && canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
-  const currentUserId = useAtomValue(userAtom)?.id ?? null;
+  const currentUserId = useWorkspaceLocalAccountId();
   const {
     machines: visibleMachines,
     accessByMachineId,
@@ -80,7 +81,16 @@ export function useVisibleLocalProjectsFromMachineIndex(
         convexAccessRows: rawAccessRows,
         currentUserId: enabled ? currentUserId : null,
         isLoading,
+        includeMemberOnly: options.includeMemberOnly,
       }),
-    [accessByMachineId, currentUserId, enabled, isLoading, rawAccessRows, visibleMachines]
+    [
+      accessByMachineId,
+      currentUserId,
+      enabled,
+      isLoading,
+      rawAccessRows,
+      visibleMachines,
+      options.includeMemberOnly,
+    ]
   );
 }

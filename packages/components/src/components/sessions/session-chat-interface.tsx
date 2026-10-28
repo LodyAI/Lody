@@ -1,3 +1,9 @@
+import { WorkspaceFeatureReasonText } from '@/components/workspace-feature-notice';
+import {
+  useWorkspaceFeature,
+  useWorkspaceFeatureReason,
+  useMachineRpcFeatureReason,
+} from '@/hooks/use-workspace-feature';
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
 import type { DocumentSelection } from '@/lib/document-selection';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
@@ -140,6 +146,7 @@ import {
   resolveActiveAssistantTurnId,
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
+  decodeProjectPreparationProgress,
   type McpServerId,
 } from '@lody/shared';
 import { useIsMobile } from '../../hooks/use-mobile';
@@ -229,19 +236,26 @@ import { Tooltip } from '@lody/ui/tooltip';
 import { useSessionDoc } from '@/hooks/use-session-doc';
 import { useSessionPendingConfig } from '@/hooks/use-session-pending-config';
 import { getSessionRunConfigDraftTargetKey } from '@/atoms/session-run-config-drafts';
+import { sessionProjectMemberSelectionAtomFamily } from '@/atoms/session-project-member-selection';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import { useWorkspaceMembers, type WorkspaceMember } from '@/hooks/use-workspace-members';
 import { UserAvatar } from '@/components/user-avatar';
 import { RenameSessionDialog, type RenameSessionDialogTarget } from './rename-session-dialog';
 import { useResolvedTheme } from '../../theme-provider';
 import { PullRequestBadge } from './pull-request-badge';
-import { SessionInfoBar } from './session-info-bar';
+import { ScheduledMessageInfoBar } from '../schedules/scheduled-message-info-bar';
 import { SessionPreviewPreload } from './session-preview-preload';
 import { CurrentSessionRelationsChip, useHasSessionRelations } from './session-relations-chip';
+import { SessionProjectMembersChip } from './session-project-members-chip';
+import {
+  buildSessionProjectMemberRows,
+  resolveSessionProjectMemberRow,
+} from '@/lib/session-project-members';
 import {
   mapGitHubCheckRunToPrCiRun,
   type ContextChipAction,
   type PrCiRun,
+  type WorkspaceLocationKind,
 } from './session-info-chips';
 import {
   resolveSessionInfoBarGitHubActionIds,
@@ -271,6 +285,7 @@ import {
   CREATE_PR_ORIGIN_PROMPT,
   PR_BRANCH_UPKEEP_PROMPT,
   withPrBranchUpkeep,
+  withProjectGroupPrScope,
   withQuickActionOrigin,
 } from './create-pr-prompt';
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
@@ -1310,7 +1325,7 @@ export function SessionHeaderMenu({
   onShareWithTeam,
   onShareAsImage,
   onOpenSearch,
-  onFork,
+  onFork: requestedFork,
   isForking = false,
   forkWorktreeAvailability = 'hidden',
   onForkMenuOpen,
@@ -1361,6 +1376,11 @@ export function SessionHeaderMenu({
   };
   t: SessionSharingTranslator;
 }) {
+  const rpcReason = useMachineRpcFeatureReason(session.machineId);
+  const onFork = rpcReason ? undefined : requestedFork;
+  const exportReason = useWorkspaceFeatureReason('export');
+  const sharingReason = useWorkspaceFeatureReason('sharing');
+  const previewReason = useWorkspaceFeatureReason('remote-preview');
   const isArchived = !!session.isArchived;
   const project = session.project as
     | { kind: 'github'; repoFullName?: string; branch?: string }
@@ -1697,7 +1717,7 @@ export function SessionHeaderMenu({
 
           {openInIdeMenu}
 
-          {onOpenPublicShare && (
+          {onOpenPublicShare && !sharingReason && (
             <Menu.Item icon={Share2} onClick={onOpenPublicShare}>
               {t('sharing.manager.title', 'Share')}
             </Menu.Item>
@@ -1714,7 +1734,7 @@ export function SessionHeaderMenu({
             </Menu.Item>
           )}
 
-          {onFork || onCopyConversationHistory ? (
+          {onFork || (onCopyConversationHistory && !exportReason) ? (
             <Menu.Submenu>
               <Menu.SubmenuTrigger
                 icon={isForking ? <Spinner size="small" label={null} /> : GitFork}
@@ -1765,7 +1785,7 @@ export function SessionHeaderMenu({
                       </SessionForkOptionTooltip>
                     );
                   })}
-                {onCopyConversationHistory && (
+                {onCopyConversationHistory && !exportReason && (
                   <Menu.Item
                     icon={Copy}
                     onClick={() => {
@@ -1836,7 +1856,7 @@ export function SessionHeaderMenu({
           {/* Copy URL stays in the Copy submenu even for private sessions (the
               link still works for the owner); sharing is a separate action that
               only appears while the conversation isn't team-visible. */}
-          {sharing && sharing.visibility !== 'team' ? (
+          {sharing && !sharingReason && sharing.visibility !== 'team' ? (
             <Menu.Item
               disabled={shareActionDisabled}
               onClick={() => {
@@ -1907,14 +1927,15 @@ export function SessionHeaderMenu({
                 onClick={() => {
                   void onCopyConversationHistory?.();
                 }}
-                disabled={!onCopyConversationHistory}
+                disabled={!!exportReason || !onCopyConversationHistory}
                 title={
-                  onCopyConversationHistory
+                  exportReason ??
+                  (onCopyConversationHistory
                     ? undefined
                     : t(
                         'sessions.copyConversationHistoryUnavailable',
                         'Conversation history is unavailable for this tab'
-                      )
+                      ))
                 }
                 icon={Copy}
               >
@@ -1932,14 +1953,35 @@ export function SessionHeaderMenu({
           </Menu.Submenu>
 
           <Menu.Item
-            disabled={!onShareAsImage}
+            disabled={!!exportReason || !onShareAsImage}
+            title={exportReason}
             onClick={() => {
               onShareAsImage?.();
             }}
             icon={Image}
           >
-            {t('sessions.shareAsImage', 'Share as image…')}
+            {exportReason ? (
+              <WorkspaceFeatureReasonText reason={exportReason} />
+            ) : (
+              t('sessions.shareAsImage', 'Share as image…')
+            )}
           </Menu.Item>
+
+          {rpcReason ? (
+            <Menu.Item disabled>
+              <WorkspaceFeatureReasonText reason={rpcReason} />
+            </Menu.Item>
+          ) : null}
+          {sharingReason ? (
+            <Menu.Item disabled icon={Share2}>
+              <WorkspaceFeatureReasonText reason={sharingReason} />
+            </Menu.Item>
+          ) : null}
+          {previewReason ? (
+            <Menu.Item disabled>
+              <WorkspaceFeatureReasonText reason={previewReason} />
+            </Menu.Item>
+          ) : null}
 
           {/* Archive / Restore + Delete */}
           {isArchived
@@ -2456,7 +2498,9 @@ export const SessionChatInterface = memo(
     const postHog = usePostHog();
     const localeObj = i18n.language?.startsWith('zh') ? zhCN : enUS;
     const workspaceId = useAtomValue(currentWorkspaceIdAtom);
-    const publicSharingAvailable = useAppCapability('teamSharing');
+    const rpcReason = useMachineRpcFeatureReason(session.machineId);
+    const sharingAllowed = useWorkspaceFeature('sharing');
+    const publicSharingAvailable = useAppCapability('teamSharing') && sharingAllowed;
     // One owner for the static-share editor, because both the header control
     // and the "…" menu open the same one.
     const publicShareWorkspaceId = publicSharingAvailable && workspaceId ? workspaceId : undefined;
@@ -2686,10 +2730,8 @@ export const SessionChatInterface = memo(
     const steerCapability = session.agentConfigId
       ? sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)]
       : undefined;
-    const nativeSteerAvailable = shouldRequestNativeQueueSteer(
-      capabilityAuthority,
-      steerCapability
-    );
+    const nativeSteerAvailable =
+      !rpcReason && shouldRequestNativeQueueSteer(capabilityAuthority, steerCapability);
     const { selectedModeId, selectedModelId, configOptionValues } =
       useResolvedAcpSessionConfigSelection(sessionConfigSelection, selectorOptions, {
         cliType: session.cliType,
@@ -2780,6 +2822,44 @@ export const SessionChatInterface = memo(
       return formatSessionDate(session.createdAt, localeObj) || session.id;
     }, [session, localeObj]);
 
+    // A Project group freezes its Member forest on the workspace-owner
+    // Session; a child tab reads the same snapshot. The selection is keyed by
+    // that owner so the tab and its root describe the same repository.
+    const projectMemberOwnerSession = workspaceSession ?? session;
+    const sessionProjectRun = projectMemberOwnerSession.projectRun;
+    const projectMemberRows = useMemo(
+      () =>
+        buildSessionProjectMemberRows(projectMemberOwnerSession, {
+          machineId: session.machineId,
+          localProjects: sessionMachineLocalProjects,
+        }),
+      [projectMemberOwnerSession, session.machineId, sessionMachineLocalProjects]
+    );
+    const selectedProjectMemberId = useAtomValue(
+      sessionProjectMemberSelectionAtomFamily(projectMemberOwnerSession.id)
+    );
+    const setSelectedProjectMemberId = useSetAtom(
+      sessionProjectMemberSelectionAtomFamily(projectMemberOwnerSession.id)
+    );
+    const legacyRepoFullName =
+      resolveProjectGitHubRepo(projectMemberOwnerSession.project) ??
+      projectMemberOwnerSession.repoFullName;
+    const selectedProjectMemberRow = useMemo(
+      () =>
+        resolveSessionProjectMemberRow(
+          projectMemberRows,
+          selectedProjectMemberId,
+          legacyRepoFullName
+        ),
+      [legacyRepoFullName, projectMemberRows, selectedProjectMemberId]
+    );
+    // `undefined` keeps the single-repository projection; `null` says the
+    // selected Member has no GitHub remote, so it must not borrow the first
+    // Member's PR. An explicit repository describes that Member.
+    const activeProjectRepository = sessionProjectRun
+      ? (selectedProjectMemberRow?.repoFullName ?? null)
+      : undefined;
+
     const {
       sourceSessionId: prSessionId,
       repoFullName,
@@ -2791,8 +2871,8 @@ export const SessionChatInterface = memo(
       workspaceUnpushed,
       hasChanges,
     } = useMemo(
-      () => getSessionGitHubState(session, workspaceSession),
-      [session, workspaceSession]
+      () => getSessionGitHubState(session, workspaceSession, activeProjectRepository),
+      [activeProjectRepository, session, workspaceSession]
     );
     const hasHostedGitHub = usePlatformCapability('githubIntegration');
     const latestPrNumber = getPullRequestNumber(latestPr);
@@ -3097,15 +3177,23 @@ export const SessionChatInterface = memo(
 
     // Session status strip above the composer: one priority-ordered slot for
     // "will my message run?" (self offline > machine removed > machine offline).
+    const presenceAvailable = useWorkspaceFeature('presence');
     const statusStripState = useMemo(
       () =>
         resolveSessionStatusStripState({
           browserOnline,
+          presenceAvailable,
           machineRemoved: isMachineRemoved,
           machineOnlineStatus: sessionMachineOnlineStatus,
           machineName: sessionMachine?.name ?? null,
         }),
-      [browserOnline, isMachineRemoved, sessionMachineOnlineStatus, sessionMachine?.name]
+      [
+        browserOnline,
+        presenceAvailable,
+        isMachineRemoved,
+        sessionMachineOnlineStatus,
+        sessionMachine?.name,
+      ]
     );
 
     // Keyboard cyclers (⇧Tab mode + rebindable model / thinking). The agent provider is
@@ -3186,10 +3274,39 @@ export const SessionChatInterface = memo(
         case 'initializing': {
           const stage = liveSessionStatus.stage;
           switch (stage) {
-            case 'git-clone':
-              return tHeartbeat('sessions.statusIndicator.gitClone', {
-                repo: '',
-              });
+            case 'git-clone': {
+              // A Project group says which step it is on; anything else keeps
+              // the plain clone heartbeat.
+              const progress = decodeProjectPreparationProgress(liveSessionStatus.detail);
+              switch (progress?.step) {
+                case 'resolve':
+                  return t(
+                    'sessions.statusIndicator.projectPrep.resolve',
+                    'Finding the group’s repositories on this machine'
+                  );
+                case 'member':
+                  return t(
+                    'sessions.statusIndicator.projectPrep.member',
+                    'Preparing repositories {{done}}/{{total}} · {{path}}',
+                    progress
+                  );
+                case 'submodules':
+                  return t(
+                    'sessions.statusIndicator.projectPrep.submodules',
+                    'Checking out submodules'
+                  );
+                case 'setup':
+                  return t(
+                    'sessions.statusIndicator.projectPrep.setup',
+                    'Running setup for {{path}}',
+                    progress
+                  );
+                default:
+                  return tHeartbeat('sessions.statusIndicator.gitClone', {
+                    repo: '',
+                  });
+              }
+            }
             case 'managed-runtime':
               return (
                 liveSessionStatus.detail ??
@@ -3278,7 +3395,10 @@ export const SessionChatInterface = memo(
     const goalCapability = session.agentConfigId
       ? sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)]
       : undefined;
-    const goalCommands = useMemo(() => getSessionGoalCommands(goalCapability), [goalCapability]);
+    const goalCommands = useMemo(
+      () => (rpcReason ? [] : getSessionGoalCommands(goalCapability)),
+      [rpcReason, goalCapability]
+    );
     const canPauseGoal = goalCommands.includes('pause');
 
     useEffect(() => {
@@ -3496,6 +3616,7 @@ export const SessionChatInterface = memo(
     ]);
     const editableLastUserMessageId = useMemo(() => {
       if (
+        rpcReason ||
         session.isArchived ||
         isGoalActive ||
         session.cliType !== 'builtin' ||
@@ -3538,6 +3659,7 @@ export const SessionChatInterface = memo(
       // The first user message uses session/new and therefore has no fork boundary.
       return userMessage.id;
     }, [
+      rpcReason,
       isGoalActive,
       session.agentConfigId,
       session.agentType,
@@ -3556,7 +3678,10 @@ export const SessionChatInterface = memo(
         // records where each mention landed so the transcript paints the user's
         // own wording back over it — identical to a fresh send.
         const nextText = submission.text;
-        const requesterUserId = currentUser?.id ?? session.userId;
+        const requesterUserId =
+          (runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
+          currentUser?.id ??
+          session.userId;
         if (
           !runtime ||
           !requesterUserId ||
@@ -4086,8 +4211,6 @@ export const SessionChatInterface = memo(
       peekStore: peekSessionStore,
     });
     const canStopAgent = canStopAgentEnabled({
-      isContextCompacting,
-      isSessionActive,
       activeAssistantTurnId: activeAssistantTurnId ?? null,
       isGoalActive,
       canPauseGoal,
@@ -4310,7 +4433,10 @@ export const SessionChatInterface = memo(
           const turnModelId =
             options?.modelIdOverride !== undefined ? options.modelIdOverride : selectedModelId;
           const turnConfigOptionValues = options?.configOptionValuesOverride ?? configOptionValues;
-          const derivedUserId = currentUser?.id ?? session.userId;
+          const derivedUserId =
+            (runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
+            currentUser?.id ??
+            session.userId;
           const prompt = extractPromptPreviewFromInputBlocks(inputBlocks);
           const issuePRMentions = prompt
             ? extractIssuePRMentionsFromText(prompt, knownIssuePrItems, repoFullName)
@@ -4422,6 +4548,8 @@ export const SessionChatInterface = memo(
         }
       },
       [
+        runtime?.accountId,
+        runtime?.contentMode,
         addSessionHistory,
         captureRunConfigForSend,
         captureSessionEvent,
@@ -4469,7 +4597,10 @@ export const SessionChatInterface = memo(
           const turnModelId =
             options?.modelIdOverride !== undefined ? options.modelIdOverride : selectedModelId;
           const turnConfigOptionValues = options?.configOptionValuesOverride ?? configOptionValues;
-          const derivedUserId = currentUser?.id ?? session.userId;
+          const derivedUserId =
+            (runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
+            currentUser?.id ??
+            session.userId;
           const prompt = extractPromptPreviewFromInputBlocks(inputBlocks);
           const issuePRMentions = prompt
             ? extractIssuePRMentionsFromText(prompt, knownIssuePrItems, repoFullName)
@@ -4542,6 +4673,8 @@ export const SessionChatInterface = memo(
         }
       },
       [
+        runtime?.accountId,
+        runtime?.contentMode,
         captureRunConfigForSend,
         captureSessionEvent,
         configOptionValues,
@@ -4928,7 +5061,10 @@ export const SessionChatInterface = memo(
 
         try {
           const response = await requestSessionGoal(session.id, command, {
-            userId: currentUser?.id ?? session.userId,
+            userId:
+              (runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
+              currentUser?.id ??
+              session.userId,
             machineId: session.machineId,
           });
           if (!response?.accepted) {
@@ -4961,6 +5097,8 @@ export const SessionChatInterface = memo(
         }
       },
       [
+        runtime?.accountId,
+        runtime?.contentMode,
         captureSessionEvent,
         currentUser?.id,
         goalCommands,
@@ -5121,18 +5259,28 @@ export const SessionChatInterface = memo(
     const prBranchUpkeep = t('sessions.prompts.prBranchUpkeep', PR_BRANCH_UPKEEP_PROMPT);
     // The origin line tells the user, reading back, that this message came from
     // the button rather than from something they typed.
+    // A Project group conversation publishes every repository it changed, the
+    // submodules before their parents, so the same actions carry that scope.
+    const scopeToProjectGroup = (prompt: string) =>
+      session.projectRun ? withProjectGroupPrScope(prompt) : prompt;
     const createPrPrompt = withQuickActionOrigin(
       t('sessions.prompts.createPrOrigin', CREATE_PR_ORIGIN_PROMPT),
-      withPrBranchUpkeep(t('sessions.prompts.createPr', CREATE_PR_BASE_PROMPT), prBranchUpkeep)
+      scopeToProjectGroup(
+        withPrBranchUpkeep(t('sessions.prompts.createPr', CREATE_PR_BASE_PROMPT), prBranchUpkeep)
+      )
     );
     const createDraftPrPrompt = withQuickActionOrigin(
       t('sessions.prompts.createDraftPrOrigin', CREATE_DRAFT_PR_ORIGIN_PROMPT),
-      withPrBranchUpkeep(
-        t('sessions.prompts.createDraftPr', CREATE_DRAFT_PR_BASE_PROMPT),
-        prBranchUpkeep
+      scopeToProjectGroup(
+        withPrBranchUpkeep(
+          t('sessions.prompts.createDraftPr', CREATE_DRAFT_PR_BASE_PROMPT),
+          prBranchUpkeep
+        )
       )
     );
-    const commitAndPushPrompt = t('sessions.prompts.commitAndPush', COMMIT_AND_PUSH_PROMPT);
+    const commitAndPushPrompt = scopeToProjectGroup(
+      t('sessions.prompts.commitAndPush', COMMIT_AND_PUSH_PROMPT)
+    );
 
     const handleCreatePr = useCallback(() => {
       captureSessionEvent('session/quick_action_selected', {
@@ -5419,6 +5567,53 @@ export const SessionChatInterface = memo(
         </ConversationColumn>
       );
     }, [openedByRelations, t]);
+
+    // A Project group's GitHub actions stay conversation-scoped (Create PR
+    // publishes every changed Member). `getSessionGitHubState` already reads
+    // the workspace-owner fields that `projectRunMetaPatch` aggregates across
+    // every Member, including its committed-diff fallback for mixed groups.
+    const selectedMemberInPlace =
+      selectedProjectMemberRow?.access === 'additional' ||
+      selectedProjectMemberRow?.access === 'link';
+    const infoBarProjectName = sessionProjectRun
+      ? repoFullName || selectedProjectMemberRow?.path || null
+      : repoFullName || resolvedLocalProjectMeta?.name || null;
+    const infoBarBranch = sessionProjectRun
+      ? (selectedProjectMemberRow?.branch ?? null)
+      : session.branchName?.trim() || null;
+    const infoBarWorkspaceLocation = useMemo<{
+      kind: WorkspaceLocationKind;
+      path?: string | null;
+    } | null>(() => {
+      if (sessionProjectRun && selectedProjectMemberRow) {
+        const base = sessionWorkspacePath?.replace(/[\\/]+$/, '');
+        return {
+          kind: selectedMemberInPlace ? 'folder' : repoFullName ? 'github-worktree' : 'worktree',
+          // A Member used in place lives outside the conversation's main
+          // directory; the snapshot does not carry its host path, so do not
+          // pretend the mount path is copyable.
+          path: selectedMemberInPlace || !base ? null : `${base}/${selectedProjectMemberRow.path}`,
+        };
+      }
+      if (session.isWorktree) {
+        return {
+          kind: repoFullName ? 'github-worktree' : 'worktree',
+          path: sessionWorkspacePath,
+        };
+      }
+      return resolvedLocalProjectMeta ? { kind: 'folder', path: sessionWorkspacePath } : null;
+    }, [
+      repoFullName,
+      resolvedLocalProjectMeta,
+      selectedMemberInPlace,
+      selectedProjectMemberRow,
+      session.isWorktree,
+      sessionProjectRun,
+      sessionWorkspacePath,
+    ]);
+    const infoBarDiffStat = sessionProjectRun
+      ? (selectedProjectMemberRow?.diff ?? null)
+      : changesDiffStat;
 
     const infoBarContextActions = useMemo<ContextChipAction[]>(() => {
       // The CI pill renders from live check runs, so the action gating must
@@ -6919,7 +7114,9 @@ export const SessionChatInterface = memo(
                       and work context, glued to the composer shell. It
                       replaced the mobile status strip / goal banner /
                       in-composer scheduled panel. */}
-                    <SessionInfoBar
+                    <ScheduledMessageInfoBar
+                      session={session}
+                      machineMeta={sessionMachine}
                       status={statusStripState}
                       machine={
                         sessionMachine
@@ -6970,26 +7167,28 @@ export const SessionChatInterface = memo(
                       prCiRuns={infoBarPrCiRuns}
                       onOpenPrCiRun={handleOpenPrCiRun}
                       prCiState={latestPrState?.s}
-                      projectName={repoFullName || resolvedLocalProjectMeta?.name || null}
-                      branch={isMobile ? null : session.branchName?.trim() || null}
-                      workspaceLocation={
-                        session.isWorktree
-                          ? {
-                              // GitHub sessions are always worktrees, so surface the
-                              // GitHub identity rather than the redundant worktree mark.
-                              kind: repoFullName ? 'github-worktree' : 'worktree',
-                              path: sessionWorkspacePath,
-                            }
-                          : resolvedLocalProjectMeta
-                            ? { kind: 'folder', path: sessionWorkspacePath }
-                            : null
-                      }
+                      projectName={infoBarProjectName}
+                      branch={isMobile ? null : infoBarBranch}
+                      workspaceLocation={infoBarWorkspaceLocation}
                       pr={canShowGitHubActions ? effectiveLatestPr : null}
                       onOpenPr={prLinkHandler}
                       contextActions={infoBarContextActions}
                       onOpenAllChanges={onOpenAllChanges}
                       // Opener + every Session/Tab created here: the in-stream
                       // creation cards scroll away with the conversation.
+                      projectMembers={
+                        sessionProjectRun && projectMemberRows.length > 0 ? (
+                          <SessionProjectMembersChip
+                            groupName={sessionProjectRun.name}
+                            rows={projectMemberRows}
+                            selectedMemberId={selectedProjectMemberRow?.id}
+                            onSelectMember={setSelectedProjectMemberId}
+                            onOpenPullRequest={(url) => {
+                              void openExternalUrl(url);
+                            }}
+                          />
+                        ) : undefined
+                      }
                       relations={
                         hasSessionRelations ? (
                           <CurrentSessionRelationsChip
@@ -7016,7 +7215,7 @@ export const SessionChatInterface = memo(
                             }
                           : undefined
                       }
-                      diffStat={changesDiffStat}
+                      diffStat={infoBarDiffStat}
                       // Desktop only: mobile already shows catch-up in its header.
                       syncStatus={
                         isMobile
@@ -7052,6 +7251,8 @@ export const SessionChatInterface = memo(
                               !isExternalHistoryRefreshing
                             }
                             nativeSteerAvailable={nativeSteerAvailable}
+                            roomy={isMobile}
+                            footerPosition={isMobile ? 'inline' : 'below'}
                           />
                         ) : undefined
                       }

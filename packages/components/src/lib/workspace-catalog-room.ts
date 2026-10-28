@@ -4,19 +4,21 @@ import {
   getWorkspaceFlockDocId,
   listWorkspaceAgentRoles,
   listWorkspaceMcpServers,
+  listWorkspaceProjects,
   readWorkspaceFlockRowsFromFlock,
   type AgentRole,
   type ProjectMcpDefault,
   type WorkspaceFlockEvent,
   type WorkspaceFlockRowMap,
   type WorkspaceMcpServerMeta,
+  type WorkspaceProject,
 } from '@lody/shared';
 import type { WorkspaceRuntime } from '@/atoms/runtime';
 
 /**
  * The workspace document's catalogs, as one snapshot.
  *
- * MCP servers and Agent Roles are separate row families of the SAME Flock
+ * MCP servers, Agent Roles and Project groups are separate row families of the SAME Flock
  * document, so they are read through one room rather than one room each: a
  * second room would open the same document, join the same Loro room, and keep a
  * second copy of the same row map for a list of a few dozen entries.
@@ -24,6 +26,8 @@ import type { WorkspaceRuntime } from '@/atoms/runtime';
 export type WorkspaceCatalogSnapshot = {
   servers: WorkspaceMcpServerMeta[];
   roles: AgentRole[];
+  /** Multi-repository Project groups, sorted by name. */
+  projects: WorkspaceProject[];
   /** Explicit per-project default MCP selections, keyed by `getProjectMcpKey`. */
   projectMcpDefaults: Readonly<Record<string, ProjectMcpDefault>>;
   /**
@@ -44,6 +48,7 @@ const EMPTY_ROWS = Object.freeze({}) as WorkspaceFlockRowMap;
 export const EMPTY_WORKSPACE_CATALOG: WorkspaceCatalogSnapshot = Object.freeze({
   servers: Object.freeze([]) as unknown as WorkspaceMcpServerMeta[],
   roles: Object.freeze([]) as unknown as AgentRole[],
+  projects: Object.freeze([]) as unknown as WorkspaceProject[],
   projectMcpDefaults: Object.freeze({}),
   loaded: false,
   failed: false,
@@ -106,6 +111,7 @@ function publish(room: SharedCatalogRoom, rows: WorkspaceFlockRowMap, synced: bo
   room.rows = rows;
   const servers = reuseUnchanged(previous.servers, listWorkspaceMcpServers(rows));
   const roles = reuseUnchanged(previous.roles, listWorkspaceAgentRoles(rows));
+  const projects = reuseUnchanged(previous.projects, listWorkspaceProjects(rows));
   const projectMcpDefaults = reuseUnchangedRecord(
     previous.projectMcpDefaults,
     getProjectMcpDefaults(rows)
@@ -113,13 +119,22 @@ function publish(room: SharedCatalogRoom, rows: WorkspaceFlockRowMap, synced: bo
   if (
     servers === previous.servers &&
     roles === previous.roles &&
+    projects === previous.projects &&
     projectMcpDefaults === previous.projectMcpDefaults &&
     previous.loaded &&
     previous.synced === synced
   ) {
     return;
   }
-  emit(room, { servers, roles, projectMcpDefaults, loaded: true, failed: false, synced });
+  emit(room, {
+    servers,
+    roles,
+    projects,
+    projectMcpDefaults,
+    loaded: true,
+    failed: false,
+    synced,
+  });
 }
 
 function startRoom(runtime: WorkspaceRuntime, room: SharedCatalogRoom): void {

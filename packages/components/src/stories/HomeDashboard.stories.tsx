@@ -49,6 +49,10 @@ type Story = StoryObj<typeof meta>;
 /** What the agents are doing: what needs you, the plan usage, what runs, what finished, what to pick back up. */
 export const Now: Story = {};
 
+export const NoAgentsRunning: Story = {
+  args: { now: homeNowFixture('idle') },
+};
+
 /** The 5-hour window is nearly spent; the Codex reset the forecast knows about sits beside it. */
 export const NowNearReset: Story = {
   args: {

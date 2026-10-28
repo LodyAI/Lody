@@ -8,9 +8,9 @@ import { ConversationColumn } from '@/components/shared/conversation-column';
  * The `agent_warning` system notice, rendered through the real `MessageRowView`
  * system-message path inside the shared conversation column.
  *
- * It sits among prose and tool rows, so it follows the conversation's compact
- * transparent language rather than painting a filled card: the triangle carries
- * the status colour and the text stays on the normal prose ramp. The long and
+ * It sits among prose and tool rows, so it takes the conversation's soft-well
+ * material rather than an outlined alert: a low tone tint, the status colour on
+ * the glyph and label, and the body at the well's leading edge. The long and
  * multi-line cases are here because an agent warning is arbitrary runtime text —
  * it wraps rather than clipping, and it must not stretch the column.
  */

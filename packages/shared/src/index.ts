@@ -44,6 +44,7 @@ export * from './bug-report';
 export * from './billing';
 export * from './agent-brand';
 export * from './agent-authentication';
+export * from './subscription-quota';
 export * from './acp-authentication-limits';
 export * from './schema';
 export * from './schedule-types';
@@ -118,6 +119,7 @@ export * from './workspace-route';
 export * from './layout';
 export * from './code-collab';
 export * from './file-preview';
+export * from './file-download';
 export * from './machine-flock';
 export * from './workspace-mcp';
 export * from './agent-role';
@@ -499,3 +501,9 @@ export * from './memory-provider';
 export * from './message-author';
 
 export * from './magpie-import';
+
+export * from './workspace-project';
+
+export * from './project-path';
+
+export * from './session-pull-requests';

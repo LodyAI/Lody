@@ -22,6 +22,76 @@ afterEach(() => {
 });
 
 describe('createWorkspaceMachineRpcFacade', () => {
+  it('requires fileDownload capability before requesting paid download bytes', async () => {
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => ({}),
+      getMachineRpcClient: async () => {
+        throw new Error('Old daemon must not receive a download request');
+      },
+    });
+    expect(
+      await facade.requestFileDownloadChunk(remoteMachineId, {
+        sessionId,
+        path: 'a.bin',
+        offset: 0,
+      })
+    ).toEqual({ status: 'error', code: 'unsupported_protocol' });
+  });
+
+  it('does not fall back to cloud for a local file download without IPC', async () => {
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => ({ fileDownload: 1 }),
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: async () => 'local',
+      },
+      getMachineRpcClient: async () => {
+        throw new Error('Local files must not use cloud');
+      },
+    });
+    expect(
+      await facade.requestFileDownloadChunk(localMachineId, { sessionId, path: 'a.bin', offset: 0 })
+    ).toEqual({ status: 'error', code: 'unsupported_protocol' });
+  });
+
+  it('routes authorized chunk responses with the owning session and member root', async () => {
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => ({ fileDownload: 1 }),
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () =>
+        ({
+          requestFileDownloadChunk: async (request: {
+            ownerSessionId?: string;
+            rootId?: string;
+          }) => {
+            if (request.ownerSessionId !== 'parent' || request.rootId !== 'member:docs')
+              return { status: 'error', code: 'permission_denied' };
+            return {
+              status: 'ok',
+              path: 'a.bin',
+              revision: 'a'.repeat(64),
+              offset: 0,
+              sizeBytes: 1,
+              data: '/w==',
+            };
+          },
+        }) as never,
+    });
+    expect(
+      await facade.requestFileDownloadChunk(
+        remoteMachineId,
+        { sessionId, path: 'a.bin', rootId: 'member:docs', offset: 0 },
+        'parent'
+      )
+    ).toMatchObject({ status: 'ok', data: '/w==' });
+  });
+
   it('negotiates relative-link discovery without downgrading to an ordinary preview', async () => {
     const facade = createWorkspaceMachineRpcFacade({
       workspaceId,
@@ -554,6 +624,35 @@ describe('createWorkspaceMachineRpcFacade', () => {
     ).toMatchObject({ status: 'ok', content: { text: 'remote document' } });
   });
 
+  it('sends a member-root preview to the machine with its rootId, never to the local fast path', async () => {
+    const invoke = vi.fn(async () => {
+      throw new Error('the Electron fast path resolves against the main root');
+    });
+    vi.stubGlobal('window', { __LODY_ELECTRON__: true, ipc: { invoke } });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineProtocolCapabilities: async () => undefined,
+      getMachineRpcClient: async () =>
+        ({
+          requestFilePreview: async (request: unknown) => {
+            expect(request).toMatchObject({ sessionId, path: 'guide.md', rootId: 'member:docs' });
+            return { status: 'ok', content: { text: 'member document' } };
+          },
+        }) as never,
+    });
+    expect(
+      await facade.requestFilePreview(remoteMachineId, {
+        sessionId,
+        path: 'guide.md',
+        rootId: 'member:docs',
+      })
+    ).toMatchObject({ status: 'ok', content: { text: 'member document' } });
+  });
+
   it('does not route a local filesystem failure to the cloud', async () => {
     vi.stubGlobal('window', {
       __LODY_ELECTRON__: true,
@@ -652,6 +751,49 @@ describe('createWorkspaceMachineRpcFacade', () => {
     expect(getMachineRpcClient).not.toHaveBeenCalled();
   });
 
+  it('previews a member root on this machine through the local daemon with its rootId', async () => {
+    const invoke = vi.fn(async (channel: string) => {
+      expect(channel).toBe('machineRpc.send');
+      return {
+        ok: true as const,
+        result: {
+          status: 'ok',
+          v: 3,
+          path: 'guide.md',
+          digest: { size: 6, sha256: 'a'.repeat(64) },
+          content: { kind: 'text', text: 'member', encoding: 'utf8' },
+        },
+      };
+    });
+    vi.stubGlobal('window', { __LODY_ELECTRON__: true, ipc: { invoke } });
+    const getMachineRpcClient = vi.fn();
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: vi.fn(async () => 'local' as const),
+      },
+      getMachineRpcClient,
+    });
+
+    await facade.requestFilePreview(
+      localMachineId,
+      { sessionId, path: 'guide.md', rootId: 'member:docs' },
+      { ownerSessionId: sessionId }
+    );
+    expect(invoke).toHaveBeenCalledWith(
+      'machineRpc.send',
+      expect.objectContaining({
+        method: 'file/preview',
+        params: expect.objectContaining({ path: 'guide.md', rootId: 'member:docs' }),
+      })
+    );
+    // Neither the main-root fast path nor a remote channel is involved.
+    expect(invoke).not.toHaveBeenCalledWith('machineRpc.previewFile', expect.anything());
+    expect(getMachineRpcClient).not.toHaveBeenCalled();
+  });
+
   it('uses the local bridge without creating a cloud client for the local machine', async () => {
     const invoke = vi.fn(async () => ({
       ok: true as const,
@@ -694,6 +836,27 @@ describe('createWorkspaceMachineRpcFacade', () => {
     expect(getMachineRpcClient).not.toHaveBeenCalled();
   });
 
+  it('uses only the explicit same-machine cancel bridge in a protected cloud-only topology', async () => {
+    let bridgeAvailable = true;
+    let delivered: unknown;
+    const invoke = async (_channel: string, request: unknown) => {
+      delivered = request;
+      return bridgeAvailable ? {ok:true,result:{type:'session/cancel_response',sessionId,success:true}} : undefined;
+    };
+    vi.stubGlobal('window',{__LODY_ELECTRON__:true,ipc:{invoke}});
+    let networkUsed = false;
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId, getMachineProtocolCapabilities:async()=>CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter:{getPlaneForMachine:()=> 'cloud',resolvePlaneForMachine:async()=> 'cloud'},
+      isLocalControlMachine: machine => machine === localMachineId,
+      getMachineRpcClient:async()=>{networkUsed=true;throw new Error('cloud RPC unavailable');},
+    });
+    expect(await facade.requestSessionCancel(localMachineId,sessionId,'turn-1')).toMatchObject({success:true});
+    expect(delivered).toMatchObject({workspaceId,machineId:localMachineId,method:'session/cancel'});
+    bridgeAvailable=false;
+    expect(await facade.requestSessionCancel(localMachineId,sessionId,'turn-1')).toMatchObject({success:false,error:'Local machine RPC is unavailable.'});
+    expect(networkUsed).toBe(false);
+  });
   it('uses the cloud Machine RPC client for a remote machine', async () => {
     const invoke = vi.fn();
     vi.stubGlobal('window', {

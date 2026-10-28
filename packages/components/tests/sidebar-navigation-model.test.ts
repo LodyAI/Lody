@@ -4,6 +4,8 @@ import { ONLY_CHATS_KEY, type SidebarNavItem } from '../src/atoms/focus-layer';
 import { buildSidebarNavigationItems } from '../src/components/sidebar-navigation-model';
 import type { SidebarUpdatedItem } from '../src/components/sidebar-updated-task-list';
 import type { SessionListRow } from '../src/components/session-list';
+import { placeProjectGroups } from '../src/lib/project-group-placement';
+import type { LocalProjectId, MachineId, ProjectMemberId, WorkspaceProject } from '@lody/shared';
 
 function sessionRow(
   sessionId: string,
@@ -302,5 +304,149 @@ describe('sidebar navigation model opened-by tree', () => {
     });
 
     expect(sessionIds(items)).toEqual(['opener', 'opened', 'unrelated']);
+  });
+
+  it('lists a machine-bound project after the folders of its machine and the rest with GitHub', () => {
+    const groupRow = (id: string, at: string, group: { id: string; name: string }) => ({
+      ...sessionRow(id, at, 'acme/web'),
+      projectGroup: group,
+    });
+    const shop = { id: 'shop', name: 'Shop' };
+    const items = buildSidebarNavigationItems({
+      ...baseOptions,
+      workspace: {
+        ...baseOptions.workspace,
+        localSections: [
+          {
+            collapsed: false,
+            projects: [
+              {
+                machineId: 'machine-1',
+                localProjectId: 'notes',
+                collapsed: true,
+                showFull: false,
+                sessions: [],
+              },
+            ],
+            // Shop holds a folder without a remote, so it needs this machine.
+            projectGroups: [{ projectId: 'shop', name: 'Shop', collapsed: false }],
+            projectGroupSessions: [
+              groupRow('group-old', '2026-04-22T08:00:00.000Z', shop),
+              groupRow('group-new', '2026-04-22T09:00:00.000Z', shop),
+            ],
+          },
+        ],
+        // Repository-only projects run anywhere and sit with GitHub; a
+        // deleted project's conversations keep their snapshot name there.
+        projectGroups: [{ projectId: 'empty', name: 'Empty', collapsed: false }],
+        repoSessions: [
+          groupRow('orphan', '2026-04-22T07:00:00.000Z', { id: 'gone', name: 'Gone' }),
+        ],
+        chatSessions: [sessionRow('chat', '2026-04-22T10:00:00.000Z')],
+      },
+    });
+
+    expect(
+      items.flatMap((item) =>
+        item.kind === 'group-header'
+          ? [item.groupKey]
+          : item.kind === 'local-project'
+            ? [`local:${item.localProjectId}`]
+            : []
+      )
+    ).toEqual([
+      'local:notes',
+      'projectGroup:shop',
+      'projectGroup:empty',
+      'projectGroup:gone',
+      ONLY_CHATS_KEY,
+    ]);
+    expect(sessionIds(items)).toEqual(['group-new', 'group-old', 'orphan', 'chat']);
+  });
+
+  it('skips a machine-bound project while its machine is folded', () => {
+    const items = buildSidebarNavigationItems({
+      ...baseOptions,
+      workspace: {
+        ...baseOptions.workspace,
+        localSections: [
+          {
+            collapsed: true,
+            projects: [],
+            projectGroups: [{ projectId: 'shop', name: 'Shop', collapsed: false }],
+            projectGroupSessions: [
+              {
+                ...sessionRow('group-row', '2026-04-22T08:00:00.000Z'),
+                projectGroup: { id: 'shop', name: 'Shop' },
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(items).toEqual([]);
+  });
+
+  it('lists GitHub-side projects only while they have conversations, like repositories', () => {
+    const row = (id: string, group: { id: string; name: string }) => ({
+      ...sessionRow(id, '2026-04-22T08:00:00.000Z', 'acme/web'),
+      projectGroup: group,
+    });
+    const folder = (machineId: string): WorkspaceProject['members'] => [
+      {
+        id: 'm1' as ProjectMemberId,
+        source: {
+          kind: 'local',
+          machineId: machineId as MachineId,
+          localProjectId: 'notes' as LocalProjectId,
+        },
+        placement: { kind: 'root', dir: 'notes' },
+      },
+    ];
+    const placed = placeProjectGroups({
+      projects: [
+        { id: 'local', members: folder('machine-1') },
+        { id: 'idle', members: [] },
+        { id: 'busy', members: [] },
+      ],
+      states: [
+        { projectId: 'local', name: 'Local', collapsed: false },
+        { projectId: 'idle', name: 'Idle', collapsed: false },
+        { projectId: 'busy', name: 'Busy', collapsed: false },
+        // Deleted, its restored conversation still names it; folded by the user.
+        { projectId: 'gone', name: 'Gone', collapsed: true, removed: true },
+      ],
+      sessions: [
+        row('busy-row', { id: 'busy', name: 'Busy' }),
+        row('gone-row', { id: 'gone', name: 'Gone' }),
+      ],
+      listedMachineIds: new Set(['machine-1' as MachineId]),
+    });
+    const local = placed.byMachine.get('machine-1' as MachineId);
+    const items = buildSidebarNavigationItems({
+      ...baseOptions,
+      workspace: {
+        ...baseOptions.workspace,
+        localSections: [
+          {
+            collapsed: false,
+            projects: [],
+            projectGroups: local?.states,
+            projectGroupSessions: local?.sessions,
+          },
+        ],
+        projectGroups: placed.anywhere.states,
+        repoSessions: placed.anywhere.sessions,
+      },
+    });
+
+    // A machine's project stays like its folders; an idle GitHub-side one does not.
+    expect(items.flatMap((item) => (item.kind === 'group-header' ? [item.groupKey] : []))).toEqual([
+      'projectGroup:local',
+      'projectGroup:busy',
+      'projectGroup:gone',
+    ]);
+    // The deleted project's group honours its fold.
+    expect(sessionIds(items)).toEqual(['busy-row']);
   });
 });

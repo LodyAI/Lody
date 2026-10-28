@@ -1,56 +1,192 @@
+import { Effect } from 'effect';
+import { NodeFileSystem } from '@effect/platform-node-shared';
+import { WorktreeGit, WorktreeGitCommandFailed } from './worktree/git-execution';
+import { probeLocalProjectMember } from './worktree/project-member-probe';
+import {
+  reconcileProjectMemberLink,
+  removeProjectMemberLinks,
+  resolveProjectFileRoots,
+  resolveProjectFileTarget,
+} from './worktree/project-member-access';
+import { WorktreeManager } from './worktree/worktree-manager';
+import { worktreeGitLegacy } from './worktree/git-execution-legacy';
+import { archiveProjectGroup } from './worktree/project-worktree-archive';
+import { existsSync } from 'node:fs';
+import {
+  materializeProjectGroup,
+  projectGroupDirectory,
+  resolveProjectGroupRepositories,
+  ProjectRepositoryNotOnMachineError,
+} from './worktree/project-worktrees';
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import {
+  mkdtemp,
+  rm,
+  writeFile,
+  readFile,
+  symlink,
+  mkdir,
+  unlink,
+  realpath,
+} from 'node:fs/promises';
 import { devNull, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve as resolvePath } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProjectRef, SessionId } from '@lody/shared';
+import type { ProjectRef, SessionId, SessionMeta, SessionProjectRun } from '@lody/shared';
+import { decodeProjectPreparationProgress } from '@lody/shared';
+import { projectRunMetaPatch } from './project-run-state';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import type { Logger } from '@/utils/logger';
 import type { SessionExec } from '@/lib/git/resolve-git-branch-name';
 import { WorkspaceGitService } from './workspace-git-service';
 
+const projectRun = (): SessionProjectRun => ({
+  id: '12345678-1234-4234-8234-123456789012' as never,
+  name: 'Example',
+  root: 'project-example-12345678-1234-4234-8234-123456789012',
+  members: {
+    web: {
+      o: 0,
+      src: { kind: 'github', repoFullName: 'example/web' },
+      placement: { kind: 'root', dir: 'web' },
+      path: 'web',
+      base: 'main',
+    },
+    api: {
+      o: 1,
+      src: { kind: 'github', repoFullName: 'example/api' },
+      placement: { kind: 'root', dir: 'api' },
+      path: 'api',
+      base: 'main',
+    },
+  },
+});
 const exec = promisify(execFile);
 const owner = 'owner' as SessionId;
 const child = 'child' as SessionId;
 function fixture() {
-  const meta = new Map<
-    SessionId,
-    { branchName?: string; parentSessionId?: SessionId; project?: ProjectRef }
-  >([
+  const meta = new Map<SessionId, Partial<SessionMeta>>([
     [owner, {}],
     [child, { parentSessionId: owner }],
   ]);
+  const workspaceDocument = {
+    repo: {
+      async getDocMeta() {
+        return { meta: meta.get(owner) };
+      },
+      async upsertDocMeta(_room: string, patch: Partial<SessionMeta>) {
+        meta.set(owner, { ...meta.get(owner), ...patch });
+      },
+    },
+    async getOrCreateSessionDoc(id: SessionId) {
+      return {
+        async getMetaState() {
+          return meta.get(id);
+        },
+        async setProjectRun(run: SessionProjectRun) {
+          meta.set(id, { ...meta.get(id), ...projectRunMetaPatch(run) });
+        },
+        async setProject(project: ProjectRef) {
+          meta.set(id, { ...meta.get(id), project });
+        },
+        async setBranchName(branchName: string) {
+          meta.set(id, { ...meta.get(id), branchName });
+        },
+      };
+    },
+  } as unknown as LoroDocumentManager;
   const service = new WorkspaceGitService({
     logger: { debug() {} } as unknown as Logger,
-    workspaceDocument: {
-      async getOrCreateSessionDoc(id: SessionId) {
-        return {
-          async getMetaState() {
-            return meta.get(id);
-          },
-          async setProject(project: ProjectRef) {
-            meta.set(id, { ...meta.get(id), project });
-          },
-          async setBranchName(branchName: string) {
-            meta.set(id, { ...meta.get(id), branchName });
-          },
-        };
-      },
-    } as unknown as LoroDocumentManager,
+    workspaceDocument,
   });
-  return { service, meta };
+  return { service, meta, workspaceDocument };
 }
 async function withRepo(
   run: (cwd: string, git: (args: string[]) => Promise<string>) => Promise<void>
 ) {
-  const cwd = await mkdtemp(join(tmpdir(), 'lody-branch-'));
+  // Frozen repository identities use real paths, including macOS /var aliases.
+  const cwd = await realpath(await mkdtemp(join(tmpdir(), 'lody-branch-')));
   const git = async (args: string[]) => (await exec('git', args, { cwd })).stdout;
   try {
     await git(['init', '-b', 'feature/local']);
     await run(cwd, git);
   } finally {
     await rm(cwd, { recursive: true, force: true });
+  }
+}
+
+async function withLocalSubmoduleGroup(
+  selected: boolean,
+  runTest: (context: {
+    directory: string;
+    web: string;
+    api: string;
+    roots: { api: string };
+    run: SessionProjectRun;
+    options: Parameters<typeof materializeProjectGroup>[0];
+    meta: ReturnType<typeof fixture>['meta'];
+    git: (cwd: string, args: string[]) => Promise<string>;
+  }) => Promise<void>
+) {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'lody-submodule-group-')));
+  const web = join(directory, 'web');
+  const api = join(directory, 'api');
+  const git = async (cwd: string, args: string[]) => (await exec('git', args, { cwd })).stdout;
+  vi.stubEnv('GIT_ALLOW_PROTOCOL', 'file');
+  vi.stubEnv('GIT_AUTHOR_NAME', 'Test');
+  vi.stubEnv('GIT_AUTHOR_EMAIL', 'test@example.com');
+  vi.stubEnv('GIT_COMMITTER_NAME', 'Test');
+  vi.stubEnv('GIT_COMMITTER_EMAIL', 'test@example.com');
+  vi.stubEnv('LODY_DATA_DIR', join(directory, 'data'));
+  try {
+    for (const repository of [web, api]) {
+      await mkdir(repository);
+      await git(repository, ['init', '-b', 'main']);
+      await writeFile(join(repository, 'readme'), 'original');
+      await git(repository, ['add', '.']);
+      await git(repository, ['commit', '-m', 'base']);
+    }
+    const moduleUrl = 'https://github.com/example/api.git';
+    await git(web, ['submodule', 'add', pathToFileURL(api).href, 'deps/api']);
+    await git(web, ['config', '-f', '.gitmodules', 'submodule.deps/api.url', moduleUrl]);
+    await git(web, ['commit', '-am', 'submodule']);
+    await git(api, ['remote', 'add', 'origin', 'git@github.com:example/api.git']);
+    vi.stubEnv('GIT_CONFIG_COUNT', '1');
+    vi.stubEnv('GIT_CONFIG_KEY_0', `url.${pathToFileURL(api).href}.insteadOf`);
+    vi.stubEnv('GIT_CONFIG_VALUE_0', moduleUrl);
+    const { meta, workspaceDocument } = fixture();
+    const run = projectRun();
+    for (const [id, member] of Object.entries(run.members)) {
+      member.src = {
+        kind: 'local',
+        machineId: 'machine' as never,
+        localProjectId: id as never,
+      };
+      member.base = 'HEAD';
+    }
+    const apiId = Object.keys(run.members)[1]!;
+    if (selected) {
+      const member = run.members[apiId as keyof typeof run.members]!;
+      member.placement = { kind: 'submodule', parent: 'web' as never, path: 'deps/api' };
+      member.path = 'web/deps/api';
+      member.base = 'gitlink';
+    }
+    meta.set(owner, { projectRun: run, machineId: 'machine' as never });
+    const roots = { api };
+    const options = {
+      sessionId: owner,
+      machineId: 'machine',
+      workspaceDocument,
+      logger: { debug() {}, info() {}, warn() {}, trace() {} } as unknown as Logger,
+      resolveLocalRoot: async (id: string) => (id === 'web' ? web : roots.api),
+      brokerAuth: async () => undefined,
+      setup: async () => {},
+    };
+    await runTest({ directory, web, api, roots, run, options, meta, git });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 }
 
@@ -66,6 +202,1073 @@ describe('WorkspaceGitService', () => {
     vi.stubEnv('GIT_CONFIG_GLOBAL', devNull);
   });
   afterEach(() => vi.unstubAllEnvs());
+
+  it('re-observes ranked local copies, separates managed fallback, and rejects duplicate identities', async () => {
+    await withRepo(async (root, git) => {
+      await git(['remote', 'add', 'origin', 'https://github.com/example/web.git']);
+      await withRepo(async (stale, staleGit) => {
+        await staleGit(['remote', 'add', 'origin', 'https://github.com/example/other.git']);
+        const run = projectRun();
+        const [webId, apiId] = Object.keys(run.members) as Array<keyof typeof run.members>;
+        const web = run.members[webId!]!;
+        web.src = { kind: 'github', repoFullName: 'example/web', preferLocal: true };
+        const candidates = [
+          {
+            id: 'missing' as never,
+            rootPath: join(stale, 'missing'),
+            name: 'missing',
+            createdAtMs: 3,
+            githubRepoFullName: 'example/web',
+          },
+          {
+            id: 'stale' as never,
+            rootPath: stale,
+            name: 'stale',
+            createdAtMs: 2,
+            githubRepoFullName: 'example/web',
+          },
+          {
+            id: 'valid' as never,
+            rootPath: root,
+            name: 'valid',
+            createdAtMs: 1,
+            githubRepoFullName: 'EXAMPLE/WEB',
+          },
+        ];
+        const options = {
+          machineId: 'machine',
+          resolveLocalRoot: async (id: string) => (id === 'valid' ? root : stale),
+          listLocalProjects: async () => [...candidates],
+          allowManagedClone: false,
+        };
+        const resolved = await resolveProjectGroupRepositories(run, options);
+        expect(resolved.get(webId!)?.source).toEqual({
+          kind: 'local-shared',
+          originalRootPath: await realpath(root),
+        });
+        expect(resolved.get(webId!)?.repositoryCheckout).toEqual({
+          kind: 'local',
+          machineId: 'machine',
+          localProjectId: 'valid',
+        });
+        expect(resolved.get(apiId!)?.source.kind).toBe('github');
+        await expect(
+          resolveProjectGroupRepositories(run, {
+            ...options,
+            listLocalProjects: async () => candidates.slice(0, 2),
+          })
+        ).rejects.toMatchObject({ code: 'project_repository_not_on_machine', memberId: webId });
+        const managed = await resolveProjectGroupRepositories(run, {
+          ...options,
+          listLocalProjects: async () => [],
+          allowManagedClone: true,
+        });
+        expect(managed.get(webId!)?.source.kind).toBe('github');
+        expect(managed.get(webId!)?.repositoryCheckout).toEqual({ kind: 'github' });
+        web.repositoryCheckout = { kind: 'github' };
+        expect(
+          (await resolveProjectGroupRepositories(run, { ...options, allowManagedClone: true })).get(
+            webId!
+          )?.source.kind
+        ).toBe('github');
+        delete web.repositoryCheckout;
+        run.members[apiId!]!.src = {
+          kind: 'local',
+          machineId: 'machine' as never,
+          localProjectId: 'valid' as never,
+        };
+        await expect(resolveProjectGroupRepositories(run, options)).rejects.toThrow(
+          /same Git root|duplicate/
+        );
+        run.members[apiId!]!.src = { ...web.src };
+        await expect(resolveProjectGroupRepositories(run, options)).rejects.toThrow(
+          /same Git root|duplicate/
+        );
+        await git(['remote', 'remove', 'origin']);
+        await expect(resolveProjectGroupRepositories(run, options)).rejects.toBeInstanceOf(
+          ProjectRepositoryNotOnMachineError
+        );
+      });
+    });
+  }, 180_000);
+
+  it('pins a repository local copy through archive and restore and uses native member credentials', async () => {
+    await withRepo(async (root, git) => {
+      await git([
+        '-c',
+        'user.name=Test',
+        '-c',
+        'user.email=test@example.com',
+        'commit',
+        '--allow-empty',
+        '-m',
+        'base',
+      ]);
+      await git(['remote', 'add', 'origin', 'https://github.com/example/web.git']);
+      const data = await mkdtemp(join(tmpdir(), 'repository-member-'));
+      vi.stubEnv('LODY_DATA_DIR', data);
+      const { meta, workspaceDocument } = fixture();
+      const run = projectRun();
+      const first = Object.keys(run.members)[0] as keyof typeof run.members;
+      const member = run.members[first]!;
+      member.src = { kind: 'github', repoFullName: 'example/web', preferLocal: true };
+      member.base = 'HEAD';
+      const docs = join(data, 'docs');
+      await mkdir(docs);
+      const second = Object.keys(run.members)[1] as keyof typeof run.members;
+      run.members[second]!.src = {
+        kind: 'local',
+        machineId: 'machine' as never,
+        localProjectId: 'docs' as never,
+      };
+      meta.set(owner, { projectRun: run, machineId: 'machine' as never });
+      const options = {
+        sessionId: owner,
+        machineId: 'machine',
+        workspaceDocument,
+        logger: { debug() {}, info() {}, warn() {}, trace() {} } as unknown as Logger,
+        resolveLocalRoot: async (id: string) => (id === 'copy' ? root : docs),
+        listLocalProjects: async () => [
+          {
+            id: 'copy' as never,
+            name: 'copy',
+            rootPath: root,
+            createdAtMs: 1,
+            githubRepoFullName: 'example/web',
+          },
+        ],
+        brokerAuth: async (source: { kind: string }) => {
+          if (source.kind !== 'local-shared')
+            throw new Error('Unexpected managed credential enrollment');
+          return undefined;
+        },
+        setup: async () => {},
+      };
+      try {
+        const prepared = await materializeProjectGroup(options);
+        const receipt = prepared.run.members[first]!.repositoryCheckout;
+        expect(receipt).toEqual({ kind: 'local', machineId: 'machine', localProjectId: 'copy' });
+        expect(prepared.run.members[first]!.repoFullName).toBe('example/web');
+        await writeFile(join(prepared.workdir, member.path, 'saved.txt'), 'durable');
+        meta.set(owner, { ...meta.get(owner), isArchived: true });
+        await archiveProjectGroup({
+          ...options,
+          worktreePath: prepared.workdir,
+          cleanup: async () => {},
+        });
+        expect(existsSync(prepared.workdir)).toBe(false);
+        const branch = Object.values(meta.get(owner)!.projectRun!.members)[0]!.branch!;
+        expect((await git(['show', `${branch}:saved.txt`])).trim()).toBe('durable');
+        // Registry ranking is irrelevant after the receipt is published.
+        const restored = await materializeProjectGroup({
+          ...options,
+          listLocalProjects: async () => [],
+        });
+        expect(await readFile(join(restored.workdir, member.path, 'saved.txt'), 'utf8')).toBe(
+          'durable'
+        );
+        expect(restored.run.members[first]!.repositoryCheckout).toEqual(receipt);
+      } finally {
+        await rm(data, { recursive: true, force: true });
+      }
+    });
+  }, 180_000);
+
+  it('serializes owner and child member mutations and recovers after a failed mutation', async () => {
+    const { service, meta } = fixture();
+    meta.set(owner, { projectRun: projectRun() });
+    let release!: () => void;
+    let started!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const entered = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const first = service.updateProjectRun(owner, async (run) => {
+      started();
+      await gate;
+      Object.values(run.members)[0]!.branch = 'feature/web';
+      return run;
+    });
+    await entered;
+    const second = service.updateProjectRun(child, async (run) => {
+      Object.values(run.members)[1]!.branch = 'feature/api';
+      return run;
+    });
+    release();
+    await Promise.all([first, second]);
+    await expect(
+      service.updateProjectRun(owner, async (run) => {
+        run.name = 'Uncommitted';
+        throw new Error('failed');
+      })
+    ).rejects.toThrow('failed');
+    await service.updateProjectRun(child, async (run) => ({ ...run, instructions: 'Ready' }));
+    expect(
+      Object.values(meta.get(owner)!.projectRun!.members).map((member) => member.branch)
+    ).toEqual(['feature/web', 'feature/api']);
+    expect(meta.get(owner)).toMatchObject({
+      branchName: 'feature/web',
+      repoFullName: 'example/web',
+      projectRun: { name: 'Example', instructions: 'Ready' },
+    });
+    expect(meta.get(child)).toEqual({ parentSessionId: owner });
+  });
+
+  it('projects known member state without treating unknown probes as clean', () => {
+    const run = projectRun();
+    const [web, api] = Object.values(run.members);
+    web!.dirty = false;
+    web!.unpushed = true;
+    web!.diff = { add: 2, del: 3 };
+    expect(projectRunMetaPatch(run)).not.toHaveProperty('workspaceDirty');
+    expect(projectRunMetaPatch(run)).toHaveProperty('workspaceUnpushed', true);
+    api!.dirty = true;
+    api!.diff = { add: 5, del: 7 };
+    expect(projectRunMetaPatch(run)).toMatchObject({
+      workspaceDirty: true,
+      diffStats: { allChange: { add: 7, del: 10 } },
+    });
+  });
+
+  it('probes working submodule configuration without fetching, writing config or exposing host paths', async () => {
+    vi.stubEnv('GIT_ALLOW_PROTOCOL', 'file');
+    await withRepo(async (root, git) => {
+      await git(['remote', 'add', 'origin', 'git@github.com:acme/api.git']);
+      expect(await worktreeGitLegacy.probeLocalProjectMember(root)).toEqual({
+        isGit: true,
+        repoFullName: 'acme/api',
+        submodules: [],
+      });
+      const modules =
+        '[submodule "quoted name"]\npath = deps/proto\nurl = ../proto.git\n[submodule "local"]\npath = local\nurl = /private/host/repo\n[include]\npath = /not-readable-or-needed\n';
+      await writeFile(join(root, '.gitmodules'), modules);
+      const config = await readFile(join(root, '.git/config'), 'utf8');
+      expect(await worktreeGitLegacy.probeLocalProjectMember(root)).toEqual({
+        isGit: true,
+        repoFullName: 'acme/api',
+        submodules: [
+          { path: 'deps/proto', url: '../proto.git', repoFullName: 'acme/proto' },
+          { path: 'local', url: '' },
+        ],
+      });
+      expect(await readFile(join(root, '.git/config'), 'utf8')).toBe(config);
+      expect(await readFile(join(root, '.gitmodules'), 'utf8')).toBe(modules);
+      await rm(join(root, '.gitmodules'));
+      await symlink(join(root, '.git/config'), join(root, '.gitmodules'));
+      await expect(worktreeGitLegacy.probeLocalProjectMember(root)).rejects.toThrow();
+    });
+  });
+
+  it.each([true, false])(
+    'materializes and archives non-Git members without touching their source (additional=%s)',
+    async (supportsAdditionalDirectories) => {
+      await withRepo(async (web, git) => {
+        await git([
+          '-c',
+          'user.name=Test',
+          '-c',
+          'user.email=test@example.com',
+          'commit',
+          '--allow-empty',
+          '-m',
+          'base',
+        ]);
+        const data = await mkdtemp(join(tmpdir(), 'non-git-group-'));
+        const docs = await mkdtemp(join(tmpdir(), 'non-git-docs-'));
+        vi.stubEnv('LODY_DATA_DIR', data);
+        await writeFile(join(docs, 'keep.txt'), 'original');
+        const { meta, workspaceDocument } = fixture();
+        const run = projectRun();
+        for (const [id, member] of Object.entries(run.members)) {
+          member.src = {
+            kind: 'local',
+            machineId: 'machine' as never,
+            localProjectId: id as never,
+          };
+          member.base = 'HEAD';
+        }
+        meta.set(owner, { projectRun: run, machineId: 'machine' as never });
+        const options = {
+          sessionId: owner,
+          machineId: 'machine',
+          workspaceDocument,
+          supportsAdditionalDirectories,
+          logger: { debug() {}, info() {}, warn() {}, trace() {} } as unknown as Logger,
+          resolveLocalRoot: async (id: string) => (id === 'web' ? web : docs),
+          brokerAuth: async () => undefined,
+          setup: async () => {},
+        };
+        try {
+          const prepared = await materializeProjectGroup(options);
+          const member = Object.values(prepared.run.members)[1]!;
+          expect(member.access).toBe(supportsAdditionalDirectories ? 'additional' : 'link');
+          expect(member.branch).toBeUndefined();
+          expect(existsSync(join(prepared.workdir, 'api'))).toBe(!supportsAdditionalDirectories);
+          meta.set(owner, { ...meta.get(owner), isArchived: true });
+          await archiveProjectGroup({
+            ...options,
+            worktreePath: prepared.workdir,
+            cleanup: async () => {},
+          });
+          expect(existsSync(prepared.workdir)).toBe(false);
+          expect(await readFile(join(docs, 'keep.txt'), 'utf8')).toBe('original');
+          expect(existsSync(join(docs, '.git'))).toBe(false);
+        } finally {
+          await rm(data, { recursive: true, force: true });
+          await rm(docs, { recursive: true, force: true });
+        }
+      });
+    },
+    180_000
+  );
+
+  it.each(['roots', 'submodule', 'submodule-cache', 'repository-submodule'])(
+    'materializes, observes, archives and restores %s without losing branches',
+    async (layout) => {
+      await withRepo(async (web, webGit) => {
+        await withRepo(async (api, apiGit) => {
+          for (const git of [webGit, apiGit])
+            await git([
+              '-c',
+              'user.name=Test',
+              '-c',
+              'user.email=test@example.com',
+              'commit',
+              '--allow-empty',
+              '-m',
+              'base',
+            ]);
+          if (layout !== 'roots') {
+            vi.stubEnv('GIT_ALLOW_PROTOCOL', 'file');
+            const moduleUrl =
+              layout === 'submodule-cache' || layout === 'repository-submodule'
+                ? 'https://github.com/example/api.git'
+                : api;
+            if (layout === 'submodule-cache' || layout === 'repository-submodule') {
+              vi.stubEnv('GIT_CONFIG_COUNT', '1');
+              vi.stubEnv('GIT_CONFIG_KEY_0', `url.${api}.insteadOf`);
+              vi.stubEnv('GIT_CONFIG_VALUE_0', moduleUrl);
+            }
+            await webGit([
+              '-c',
+              'protocol.file.allow=always',
+              'submodule',
+              'add',
+              moduleUrl,
+              'deps/api',
+            ]);
+            await webGit([
+              '-c',
+              'user.name=Test',
+              '-c',
+              'user.email=test@example.com',
+              'commit',
+              '-am',
+              'submodule',
+            ]);
+          }
+          if (layout === 'repository-submodule')
+            await apiGit(['remote', 'add', 'origin', 'git@github.com:example/api.git']);
+          const data = await mkdtemp(join(tmpdir(), 'lody-project-group-'));
+          vi.stubEnv('LODY_DATA_DIR', data);
+          const { service, meta, workspaceDocument } = fixture();
+          const run = projectRun();
+          for (const [id, member] of Object.entries(run.members)) {
+            member.src = {
+              kind: 'local',
+              machineId: 'machine' as never,
+              localProjectId: id as never,
+            };
+            member.base = 'HEAD';
+          }
+          const apiPath = layout !== 'roots' ? 'web/deps/api' : 'api';
+          if (layout !== 'roots') {
+            const member = Object.values(run.members)[1]!;
+            member.placement = { kind: 'submodule', parent: 'web' as never, path: 'deps/api' };
+            member.path = apiPath;
+            member.base = 'gitlink';
+            if (layout === 'submodule-cache' || layout === 'repository-submodule')
+              member.src = {
+                kind: 'github',
+                repoFullName: 'example/api',
+                ...(layout === 'repository-submodule' ? { preferLocal: true as const } : {}),
+              };
+          }
+          meta.set(owner, { projectRun: run, machineId: 'machine' as never });
+          const options = {
+            sessionId: owner,
+            machineId: 'machine',
+            workspaceDocument,
+            logger: { debug() {}, info() {}, warn() {}, trace() {} } as unknown as Logger,
+            resolveLocalRoot: async (id: string) => (id === 'web' ? web : api),
+            listLocalProjects: async () => [
+              {
+                id: 'api' as never,
+                name: 'api',
+                rootPath: api,
+                createdAtMs: 1,
+                githubRepoFullName: 'example/api',
+              },
+            ],
+            brokerAuth: async () => undefined,
+            setup: async () => {},
+          };
+          try {
+            const prepared = await materializeProjectGroup(options);
+            const firstBranches = Object.values(prepared.run.members).map(
+              (member) => member.branch
+            );
+            const firstBases = Object.values(prepared.run.members).map((member) => member.base);
+            expect(firstBases[0]).toBe('feature/local');
+            if (layout === 'roots') expect(firstBases[1]).toBe('feature/local');
+            else expect(firstBases[1]).toMatch(/^[0-9a-f]{40,64}$/);
+            const again = await materializeProjectGroup(options);
+            expect(Object.values(again.run.members).map((member) => member.branch)).toEqual(
+              firstBranches
+            );
+            await writeFile(join(prepared.workdir, apiPath, 'new-file.txt'), 'uncommitted');
+            await service.syncLocalWorkspace(owner, prepared.workdir);
+            const members = Object.values(meta.get(owner)!.projectRun!.members);
+            expect(members.map((member) => member.dirty)).toEqual([layout !== 'roots', true]);
+            expect(meta.get(owner)).toMatchObject({
+              workspaceDirty: true,
+              branchName: firstBranches[0],
+              diffStats: { allChange: { add: 0, del: 0 } },
+            });
+            meta.set(owner, { ...meta.get(owner), isArchived: true });
+            await archiveProjectGroup({
+              ...options,
+              worktreePath: prepared.workdir,
+              cleanup: async () => {},
+            });
+            expect(existsSync(prepared.workdir)).toBe(false);
+            meta.set(owner, { ...meta.get(owner), isArchived: false });
+            const restored = await materializeProjectGroup(options);
+            expect(await readFile(join(restored.workdir, apiPath, 'new-file.txt'), 'utf8')).toBe(
+              'uncommitted'
+            );
+            expect(Object.values(restored.run.members).map((member) => member.branch)).toEqual(
+              firstBranches
+            );
+            expect(Object.values(restored.run.members).map((member) => member.base)).toEqual(
+              firstBases
+            );
+          } finally {
+            await rm(data, { recursive: true, force: true });
+          }
+        });
+      });
+    },
+    180_000
+  );
+
+  it('materializes a local partial-clone member without borrowing or hydrating its missing objects', async () => {
+    await withLocalSubmoduleGroup(true, async ({ directory, web, api, roots, options, git }) => {
+      let seed = 33;
+      const random = () => {
+        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+        return seed;
+      };
+      const text = () =>
+        Array.from({ length: 100 }, () => 'abcdefghijklmnopqrstuvwxyz '[random() % 27]).join('');
+      const lines = Array.from({ length: 1200 }, () => `${text()}\n`);
+      const addRevision = async (version: number) => {
+        for (let change = 0; change < 30; change++)
+          lines[random() % lines.length] = `${version} ${text()}\n`;
+        // Shrinking blobs produce deltas against older promised blobs when the
+        // remote advances beyond the partial clone's known commits.
+        await writeFile(join(api, 'file'), lines.join('').slice(0, 120000 - version * 100));
+        await git(api, ['add', 'file']);
+        await git(api, ['commit', '-m', `revision ${version}`]);
+      };
+      for (let version = 0; version < 12; version++) await addRevision(version);
+      await git(api, ['gc', '--aggressive', '--prune=now']);
+      await git(api, ['config', 'uploadpack.allowFilter', 'true']);
+      await git(api, ['config', 'uploadpack.allowAnySHA1InWant', 'true']);
+      const partial = join(directory, 'partial');
+      await git(directory, [
+        'clone',
+        '--filter=blob:none',
+        '--no-checkout',
+        pathToFileURL(api).href,
+        partial,
+      ]);
+      await git(partial, ['remote', 'set-url', 'origin', 'git@github.com:example/api.git']);
+      roots.api = partial;
+      const missingObjects = async () =>
+        (await git(partial, ['rev-list', '--objects', '--all', '--missing=print']))
+          .split('\n')
+          .filter((line) => line.startsWith('?'))
+          .sort();
+      const before = await missingObjects();
+      expect(before.length).toBeGreaterThan(0);
+      expect((await git(partial, ['config', '--get', 'remote.origin.promisor'])).trim()).toBe(
+        'true'
+      );
+      expect(
+        (await git(partial, ['config', '--get', 'remote.origin.partialclonefilter'])).trim()
+      ).toBe('blob:none');
+      await git(partial, ['fsck', '--connectivity-only']);
+      for (let version = 12; version < 16; version++) await addRevision(version);
+      await git(api, ['gc', '--aggressive', '--prune=now']);
+      const nested = join(web, 'deps/api');
+      await git(nested, ['fetch']);
+      await git(nested, ['checkout', (await git(api, ['rev-parse', 'HEAD'])).trim()]);
+      await git(web, ['commit', '-am', 'advance gitlink']);
+
+      const prepared = await materializeProjectGroup(options);
+      const checkout = join(prepared.workdir, 'web/deps/api');
+      expect(await readFile(join(checkout, 'file'), 'utf8')).toBe(
+        await readFile(join(api, 'file'), 'utf8')
+      );
+      expect((await git(checkout, ['rev-parse', 'HEAD'])).trim()).toBe(
+        (await git(api, ['rev-parse', 'HEAD'])).trim()
+      );
+      await git(checkout, ['fsck', '--full']);
+      expect(await missingObjects()).toEqual(before);
+    });
+  }, 180_000);
+
+  it('ignores stale unselected submodule paths while initializing real gitlinks', async () => {
+    await withLocalSubmoduleGroup(false, async ({ web, options, git }) => {
+      await git(web, ['config', '-f', '.gitmodules', 'submodule.stale.path', 'deps/stale']);
+      await git(web, [
+        'config',
+        '-f',
+        '.gitmodules',
+        'submodule.stale.url',
+        'file:///nonexistent-stale-submodule',
+      ]);
+      await git(web, ['commit', '-am', 'stale submodule metadata']);
+
+      const prepared = await materializeProjectGroup(options);
+      expect(await readFile(join(prepared.workdir, 'web/deps/api/readme'), 'utf8')).toBe(
+        'original'
+      );
+      expect(existsSync(join(prepared.workdir, 'web/deps/api/.git'))).toBe(true);
+      expect(existsSync(join(prepared.workdir, 'web/deps/stale'))).toBe(false);
+    });
+  }, 180_000);
+
+  it.each(['linked-worktree', 'shallow'])(
+    'materializes a local member backed by a %s without using it as an object reference',
+    async (layout) => {
+      await withLocalSubmoduleGroup(true, async ({ directory, api, roots, options, git }) => {
+        const reference = join(directory, 'reference');
+        if (layout === 'linked-worktree')
+          await git(api, ['worktree', 'add', '-b', 'local-copy', reference]);
+        else {
+          await git(directory, ['clone', '--depth', '1', pathToFileURL(api).href, reference]);
+          await git(reference, ['remote', 'set-url', 'origin', 'git@github.com:example/api.git']);
+        }
+        roots.api = reference;
+        const sourceHead = (await git(reference, ['rev-parse', 'HEAD'])).trim();
+
+        const prepared = await materializeProjectGroup(options);
+
+        expect(await readFile(join(prepared.workdir, 'web/deps/api/readme'), 'utf8')).toBe(
+          'original'
+        );
+        expect((await git(reference, ['rev-parse', 'HEAD'])).trim()).toBe(sourceHead);
+        expect((await git(reference, ['rev-parse', '--is-shallow-repository'])).trim()).toBe(
+          layout === 'shallow' ? 'true' : 'false'
+        );
+      });
+    },
+    180_000
+  );
+
+  it.each(['empty', 'missing'])(
+    'archives a failed submodule clone with a %s member directory and preserves completed work',
+    async (state) => {
+      await withLocalSubmoduleGroup(
+        true,
+        async ({ directory, web, api, run, options, meta, git }) => {
+          vi.stubEnv(
+            'GIT_CONFIG_KEY_0',
+            `url.${pathToFileURL(join(directory, 'unavailable')).href}.insteadOf`
+          );
+          await expect(materializeProjectGroup(options)).rejects.toThrow(/clone|repository/i);
+          const root = join(projectGroupDirectory(run), 'worktrees', owner);
+          const parent = join(root, 'web');
+          const member = join(parent, 'deps/api');
+          await rm(member, { recursive: true, force: true });
+          if (state === 'empty') await mkdir(member, { recursive: true });
+          await writeFile(join(parent, 'saved.txt'), 'completed before archive');
+          const sourceHead = (await git(web, ['rev-parse', 'HEAD'])).trim();
+          const childBranches = await git(api, [
+            'for-each-ref',
+            '--format=%(refname) %(objectname)',
+            'refs/heads/',
+          ]);
+          meta.set(owner, { ...meta.get(owner), isArchived: true });
+
+          await archiveProjectGroup({ ...options, worktreePath: root, cleanup: async () => {} });
+
+          expect(existsSync(root)).toBe(false);
+          const saved = Object.values(meta.get(owner)!.projectRun!.members)[0]!.branch;
+          if (!saved) throw new Error('Archived parent branch was not recorded');
+          expect((await git(web, ['show', `${saved}:saved.txt`])).trim()).toBe(
+            'completed before archive'
+          );
+          expect((await git(web, ['rev-parse', 'HEAD'])).trim()).toBe(sourceHead);
+          expect(await readFile(join(web, 'readme'), 'utf8')).toBe('original');
+          expect(existsSync(join(web, 'saved.txt'))).toBe(false);
+          expect(
+            await git(api, ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads/'])
+          ).toBe(childBranches);
+          expect(await git(web, ['ls-tree', saved, '--', 'deps/api'])).toMatch(/^160000 commit /);
+          vi.stubEnv('GIT_CONFIG_KEY_0', `url.${pathToFileURL(api).href}.insteadOf`);
+          meta.set(owner, { ...meta.get(owner), isArchived: false });
+          const restored = await materializeProjectGroup(options);
+          expect(await readFile(join(restored.workdir, 'web/saved.txt'), 'utf8')).toBe(
+            'completed before archive'
+          );
+          expect(await readFile(join(restored.workdir, 'web/deps/api/readme'), 'utf8')).toBe(
+            'original'
+          );
+          expect(existsSync(join(restored.workdir, 'web/deps/api/.git'))).toBe(true);
+        }
+      );
+    },
+    180_000
+  );
+
+  it('preserves an unknown nonempty submodule directory without backing up its parent as the child', async () => {
+    await withLocalSubmoduleGroup(true, async ({ directory, api, run, options, meta, git }) => {
+      vi.stubEnv(
+        'GIT_CONFIG_KEY_0',
+        `url.${pathToFileURL(join(directory, 'unavailable')).href}.insteadOf`
+      );
+      await expect(materializeProjectGroup(options)).rejects.toThrow(/clone|repository/i);
+      const root = join(projectGroupDirectory(run), 'worktrees', owner);
+      const parent = join(root, 'web');
+      const member = join(parent, 'deps/api');
+      await mkdir(member, { recursive: true });
+      await writeFile(join(member, 'keep.txt'), 'unknown local content');
+      const parentHead = (await git(parent, ['rev-parse', 'HEAD'])).trim();
+      const childBranches = await git(api, [
+        'for-each-ref',
+        '--format=%(refname) %(objectname)',
+        'refs/heads/',
+      ]);
+      meta.set(owner, { ...meta.get(owner), isArchived: true });
+
+      await expect(
+        archiveProjectGroup({ ...options, worktreePath: root, cleanup: async () => {} })
+      ).rejects.toThrow(/no independent Git checkout/);
+
+      expect(await readFile(join(member, 'keep.txt'), 'utf8')).toBe('unknown local content');
+      expect((await git(parent, ['rev-parse', 'HEAD'])).trim()).toBe(parentHead);
+      expect(
+        await git(api, ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads/'])
+      ).toBe(childBranches);
+    });
+  }, 180_000);
+
+  it('keeps the project when a missing submodule has an unrestorable saved branch', async () => {
+    await withLocalSubmoduleGroup(true, async ({ directory, run, options, meta }) => {
+      vi.stubEnv(
+        'GIT_CONFIG_KEY_0',
+        `url.${pathToFileURL(join(directory, 'unavailable')).href}.insteadOf`
+      );
+      await expect(materializeProjectGroup(options)).rejects.toThrow(/clone|repository/i);
+      const root = join(projectGroupDirectory(run), 'worktrees', owner);
+      const member = join(root, 'web/deps/api');
+      await rm(member, { recursive: true, force: true });
+      const savedRun = meta.get(owner)!.projectRun!;
+      Object.values(savedRun.members)[1]!.branch = 'local/missing-backup';
+      meta.set(owner, { ...meta.get(owner), projectRun: savedRun, isArchived: true });
+      await writeFile(join(root, 'web/keep.txt'), 'unbacked parent work');
+
+      await expect(
+        archiveProjectGroup({ ...options, worktreePath: root, cleanup: async () => {} })
+      ).rejects.toThrow();
+
+      expect(await readFile(join(root, 'web/keep.txt'), 'utf8')).toBe('unbacked parent work');
+      expect(existsSync(root)).toBe(true);
+      expect(existsSync(member)).toBe(false);
+    });
+  }, 180_000);
+
+  it.each(['empty', 'missing'])(
+    'preserves an explicit staged gitlink deletion when a submodule directory is %s',
+    async (state) => {
+      await withLocalSubmoduleGroup(true, async ({ directory, run, options, meta, git }) => {
+        vi.stubEnv(
+          'GIT_CONFIG_KEY_0',
+          `url.${pathToFileURL(join(directory, 'unavailable')).href}.insteadOf`
+        );
+        await expect(materializeProjectGroup(options)).rejects.toThrow(/clone|repository/i);
+        const root = join(projectGroupDirectory(run), 'worktrees', owner);
+        const parent = join(root, 'web');
+        await rm(join(parent, 'deps/api'), { recursive: true, force: true });
+        if (state === 'empty') await mkdir(join(parent, 'deps/api'), { recursive: true });
+        await git(parent, ['rm', '--cached', 'deps/api']);
+        const staged = await git(parent, ['diff', '--cached', '--raw']);
+        const parentHead = (await git(parent, ['rev-parse', 'HEAD'])).trim();
+        meta.set(owner, { ...meta.get(owner), isArchived: true });
+
+        await expect(
+          archiveProjectGroup({ ...options, worktreePath: root, cleanup: async () => {} })
+        ).rejects.toThrow();
+
+        expect(await git(parent, ['diff', '--cached', '--raw'])).toBe(staged);
+        expect(await git(parent, ['ls-files', '--stage', '--', 'deps/api'])).toBe('');
+        expect((await git(parent, ['rev-parse', 'HEAD'])).trim()).toBe(parentHead);
+        expect(existsSync(root)).toBe(true);
+      });
+    },
+    180_000
+  );
+
+  it('rejects a missing submodule below an escaping symlink without creating an external directory', async () => {
+    await withLocalSubmoduleGroup(true, async ({ directory, run, options, meta, git }) => {
+      vi.stubEnv(
+        'GIT_CONFIG_KEY_0',
+        `url.${pathToFileURL(join(directory, 'unavailable')).href}.insteadOf`
+      );
+      await expect(materializeProjectGroup(options)).rejects.toThrow(/clone|repository/i);
+      const root = join(projectGroupDirectory(run), 'worktrees', owner);
+      const parent = join(root, 'web');
+      const outside = join(directory, 'outside');
+      await mkdir(outside);
+      await writeFile(join(outside, 'keep.txt'), 'external content');
+      await rm(join(parent, 'deps'), { recursive: true, force: true });
+      await symlink(outside, join(parent, 'deps'), 'dir');
+      const parentHead = (await git(parent, ['rev-parse', 'HEAD'])).trim();
+      meta.set(owner, { ...meta.get(owner), isArchived: true });
+
+      await expect(
+        archiveProjectGroup({ ...options, worktreePath: root, cleanup: async () => {} })
+      ).rejects.toThrow();
+
+      expect(existsSync(join(outside, 'api'))).toBe(false);
+      expect(await readFile(join(outside, 'keep.txt'), 'utf8')).toBe('external content');
+      expect((await git(parent, ['rev-parse', 'HEAD'])).trim()).toBe(parentHead);
+      expect(existsSync(root)).toBe(true);
+    });
+  }, 180_000);
+
+  it.each(['main', 'detached'])(
+    'preserves an independent submodule checkout on %s when no task branch was recorded',
+    async (checkoutState) => {
+      await withLocalSubmoduleGroup(true, async ({ directory, api, run, options, meta, git }) => {
+        vi.stubEnv(
+          'GIT_CONFIG_KEY_0',
+          `url.${pathToFileURL(join(directory, 'unavailable')).href}.insteadOf`
+        );
+        await expect(materializeProjectGroup(options)).rejects.toThrow(/clone|repository/i);
+        const root = join(projectGroupDirectory(run), 'worktrees', owner);
+        const parent = join(root, 'web');
+        const member = join(parent, 'deps/api');
+        await rm(member, { recursive: true, force: true });
+        await git(parent, ['clone', pathToFileURL(api).href, member]);
+        if (checkoutState === 'detached') await git(member, ['checkout', '--detach']);
+        await writeFile(join(member, 'keep.txt'), 'unclaimed checkout work');
+        const parentHead = (await git(parent, ['rev-parse', 'HEAD'])).trim();
+        const childBranches = await git(api, [
+          'for-each-ref',
+          '--format=%(refname) %(objectname)',
+          'refs/heads/',
+        ]);
+        meta.set(owner, { ...meta.get(owner), isArchived: true });
+
+        await expect(
+          archiveProjectGroup({ ...options, worktreePath: root, cleanup: async () => {} })
+        ).rejects.toThrow();
+
+        expect(await readFile(join(member, 'keep.txt'), 'utf8')).toBe('unclaimed checkout work');
+        expect((await git(parent, ['rev-parse', 'HEAD'])).trim()).toBe(parentHead);
+        expect(
+          await git(api, ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads/'])
+        ).toBe(childBranches);
+      });
+    },
+    180_000
+  );
+
+  it('prepares independent roots and nested members with local Git transport', async () => {
+    const directory = await realpath(await mkdtemp(join(tmpdir(), 'lody-group-startup-')));
+    const repositories = ['web', 'api', 'core', 'docs', 'tools', 'extra', 'leaf'];
+    const git = async (repo: string, args: string[]) =>
+      (await exec('git', ['-C', join(directory, repo), ...args])).stdout.trim();
+    const timings: Record<string, number[]> = {};
+    const spans: Array<{ phase: string; start: number; end: number }> = [];
+    const started = performance.now();
+    for (const method of [
+      'createWorktree',
+      'materializeProjectSubmodule',
+      'initializeMissingProjectSubmodules',
+    ] as const) {
+      const original = WorktreeManager.prototype[method];
+      // Instrument the real boundary; no simulated Git or elapsed-time assertions.
+      vi.spyOn(WorktreeManager.prototype, method).mockImplementation(async function (
+        this: WorktreeManager,
+        ...args: never[]
+      ) {
+        const start = performance.now();
+        try {
+          return await Reflect.apply(original, this, args);
+        } finally {
+          const end = performance.now();
+          (timings[method] ??= []).push(end - start);
+          spans.push({
+            phase: method === 'initializeMissingProjectSubmodules' ? 'submodules' : 'checkouts',
+            start,
+            end,
+          });
+        }
+      });
+    }
+    try {
+      vi.stubEnv('GIT_ALLOW_PROTOCOL', 'file');
+      vi.stubEnv('LODY_DATA_DIR', join(directory, 'data'));
+      vi.stubEnv('GIT_CONFIG_COUNT', '1');
+      vi.stubEnv('GIT_CONFIG_KEY_0', 'url.file:///.insteadOf');
+      vi.stubEnv('GIT_CONFIG_VALUE_0', '/');
+      for (const repo of repositories) {
+        await mkdir(join(directory, repo));
+        await git(repo, ['init', '-b', 'main']);
+        await writeFile(join(directory, repo, 'readme'), repo);
+        await git(repo, ['add', '.']);
+        await git(repo, [
+          '-c',
+          'user.name=Test',
+          '-c',
+          'user.email=test@example.com',
+          'commit',
+          '-m',
+          'base',
+        ]);
+      }
+      for (const [parent, nested] of [
+        ['core', 'leaf'],
+        ['api', 'core'],
+        ['web', 'api'],
+        ['web', 'extra'],
+      ]) {
+        await git(parent!, ['submodule', 'add', join(directory, nested!), `deps/${nested}`]);
+        await git(parent!, [
+          '-c',
+          'user.name=Test',
+          '-c',
+          'user.email=test@example.com',
+          'commit',
+          '-am',
+          'submodule',
+        ]);
+      }
+      const { meta, workspaceDocument } = fixture();
+      const run = projectRun();
+      run.members = {};
+      for (const [index, id] of ['web', 'api', 'core', 'docs', 'tools'].entries()) {
+        const parent = id === 'api' ? 'web' : id === 'core' ? 'api' : undefined;
+        run.members[id as keyof typeof run.members] = {
+          o: 10 - index, // Setup must retain parent-before-child traversal despite display order.
+          src: { kind: 'local', machineId: 'machine' as never, localProjectId: id as never },
+          placement: parent
+            ? { kind: 'submodule', parent: parent as never, path: `deps/${id}` }
+            : { kind: 'root', dir: id },
+          path: id === 'core' ? 'web/deps/api/deps/core' : id === 'api' ? 'web/deps/api' : id,
+          base: parent ? 'gitlink' : 'HEAD',
+        };
+      }
+      meta.set(owner, { projectRun: run, machineId: 'machine' as never });
+      const setup: string[] = [];
+      const progress: string[] = [];
+      const seen = new Set<string>();
+      const rootsReady = Promise.withResolvers<void>();
+      let rootsStarted = 0;
+      const start = performance.now();
+      const prepared = await materializeProjectGroup({
+        sessionId: owner,
+        machineId: 'machine',
+        workspaceDocument,
+        logger: { debug() {}, info() {}, warn() {}, trace() {} } as unknown as Logger,
+        resolveLocalRoot: async (id) => join(directory, id),
+        onProgress: (detail) => progress.push(detail),
+        brokerAuth: async (source) => {
+          if (source.kind !== 'local-shared' || seen.has(source.originalRootPath)) return undefined;
+          seen.add(source.originalRootPath);
+          if (
+            ['web', 'docs', 'tools'].some((id) => source.originalRootPath === join(directory, id))
+          ) {
+            if (++rootsStarted === 3) rootsReady.resolve();
+            await rootsReady.promise;
+          } else {
+            const root = join(directory, 'data/repos', run.root, 'worktrees', owner, 'web');
+            const nested =
+              source.originalRootPath === join(directory, 'api')
+                ? 'deps/api'
+                : 'deps/api/deps/core';
+            // A selected descendant must not be cloned recursively under its parent's credentials.
+            expect(existsSync(join(root, nested, '.git'))).toBe(false);
+          }
+          return undefined;
+        },
+        setup: async (member, workdir) => {
+          const setupStart = performance.now();
+          expect(await readFile(join(workdir, 'readme'), 'utf8')).toBe(
+            member.src.kind === 'local' ? member.src.localProjectId : ''
+          );
+          setup.push(member.path);
+          spans.push({ phase: 'setup', start: setupStart, end: performance.now() });
+        },
+      });
+      const materializeMs = performance.now() - start;
+      expect(setup).toEqual(['web', 'web/deps/api', 'web/deps/api/deps/core', 'docs', 'tools']);
+      // Lifecycle steps only: start, one per finished member, submodules, one per setup.
+      const steps = progress.map(decodeProjectPreparationProgress);
+      expect(steps[0]).toEqual({ step: 'resolve' });
+      expect(steps.filter((step) => step?.step === 'member')).toHaveLength(5);
+      expect(steps).toContainEqual({
+        step: 'member',
+        done: 5,
+        total: 5,
+        path: expect.any(String),
+      });
+      expect(steps.filter((step) => step?.step === 'submodules')).toHaveLength(1);
+      expect(
+        steps
+          .filter((step) => step?.step === 'setup')
+          .map((step) => step && 'path' in step && step.path)
+      ).toEqual(setup);
+      expect(progress.length).toBe(1 + 5 + 1 + setup.length);
+      // --dissociate must leave no dependency on a source repository's object retention.
+      const objects = (
+        await exec('git', [
+          '-C',
+          join(prepared.workdir, 'web/deps/api'),
+          'rev-parse',
+          '--git-path',
+          'objects/info/alternates',
+        ])
+      ).stdout.trim();
+      expect(existsSync(resolvePath(prepared.workdir, 'web/deps/api', objects))).toBe(false);
+      expect(
+        await readFile(join(prepared.workdir, 'web/deps/api/deps/core/deps/leaf/readme'), 'utf8')
+      ).toBe('leaf');
+      expect(await readFile(join(prepared.workdir, 'web/deps/extra/readme'), 'utf8')).toBe('extra');
+      for (const member of Object.values(prepared.run.members)) {
+        expect(
+          (
+            await exec('git', [
+              '-C',
+              join(prepared.workdir, member.path),
+              'branch',
+              '--show-current',
+            ])
+          ).stdout.trim()
+        ).toBe(member.branch);
+      }
+      if (process.env.PROJECT_STARTUP_MEASUREMENTS)
+        await writeFile(
+          process.env.PROJECT_STARTUP_MEASUREMENTS,
+          JSON.stringify({
+            materializeMs,
+            phaseWallMs: Object.fromEntries(
+              ['checkouts', 'submodules', 'setup'].map((phase) => {
+                const entries = spans.filter((span) => span.phase === phase);
+                return [
+                  phase,
+                  Math.max(...entries.map((span) => span.end)) -
+                    Math.min(...entries.map((span) => span.start)),
+                ];
+              })
+            ),
+            resolutionAndOwnerMs: Math.min(...spans.map((span) => span.start)) - start,
+            timings,
+            fixtureAndRunMs: performance.now() - started,
+          })
+        );
+    } finally {
+      vi.restoreAllMocks();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it('retains the Project owner until concurrent mutations settle after a failure', async () => {
+    await withRepo(async (web, webGit) =>
+      withRepo(async (api, apiGit) => {
+        for (const git of [webGit, apiGit])
+          await git([
+            '-c',
+            'user.name=Test',
+            '-c',
+            'user.email=test@example.com',
+            'commit',
+            '--allow-empty',
+            '-m',
+            'base',
+          ]);
+        const data = await mkdtemp(join(tmpdir(), 'lody-group-drain-'));
+        vi.stubEnv('LODY_DATA_DIR', data);
+        const { meta, workspaceDocument, service } = fixture();
+        const run = projectRun();
+        for (const [id, member] of Object.entries(run.members)) {
+          member.src = {
+            kind: 'local',
+            machineId: 'machine' as never,
+            localProjectId: id as never,
+          };
+          member.base = 'HEAD';
+        }
+        meta.set(owner, { projectRun: run });
+        const secondStarted = Promise.withResolvers<void>();
+        const failed = Promise.withResolvers<void>();
+        const release = Promise.withResolvers<void>();
+        let settled = false;
+        let successorEntered = false;
+        try {
+          const preparation = materializeProjectGroup({
+            sessionId: owner,
+            machineId: 'machine',
+            workspaceDocument,
+            logger: { debug() {}, info() {}, warn() {}, trace() {} } as unknown as Logger,
+            resolveLocalRoot: async (id) => (id === 'web' ? web : api),
+            brokerAuth: async (source) => {
+              if (source.kind === 'local-shared' && source.originalRootPath === web) {
+                await secondStarted.promise;
+                failed.resolve();
+                throw new Error('fixture credential failure');
+              }
+              secondStarted.resolve();
+              await release.promise;
+              return undefined;
+            },
+            setup: async () => {},
+          }).then(
+            () => {
+              settled = true;
+            },
+            (error) => {
+              settled = true;
+              throw error;
+            }
+          );
+          const outcome = expect(preparation).rejects.toThrow('fixture credential failure');
+          await failed.promise;
+          const successor = service.updateProjectRun(owner, async (snapshot) => {
+            successorEntered = true;
+            expect(snapshot.members['api' as keyof typeof snapshot.members]?.branch).toBeTruthy();
+            return snapshot;
+          });
+          expect(settled).toBe(false);
+          expect(successorEntered).toBe(false);
+          release.resolve();
+          await outcome;
+          await successor;
+          expect(successorEntered).toBe(true);
+        } finally {
+          release.resolve();
+          await rm(data, { recursive: true, force: true });
+        }
+      })
+    );
+  });
 
   it('publishes a local repository without a remote, including its unborn branch and later checkout', async () => {
     await withRepo(async (cwd, git) => {
@@ -193,5 +1396,136 @@ describe('WorkspaceGitService', () => {
     await Promise.all([first, second]);
     expect(meta.get(owner)?.branchName).toBe('feature/new');
     expect(meta.get(child)).toEqual({ parentSessionId: owner });
+  });
+});
+
+describe('non-Git member access', () => {
+  it.each([
+    [128, 'fatal: not a git repository (or any of the parent directories): .git', true],
+    [
+      128,
+      'fatal: not a git repository (or any parent up to mount point /)\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).',
+      true,
+    ],
+    [1, 'fatal: not a git repository (or any parent up to mount point /)', false],
+    [128, 'fatal: not a git repository: /broken/.git', false],
+    [128, 'fatal: failed to stat /private: Permission denied', false],
+  ] as const)('classifies discovery exit %s: %s', async (code, stderr, nonGit) => {
+    const root = await mkdtemp(join(tmpdir(), 'member-discovery-'));
+    const failure = new WorktreeGitCommandFailed({
+      args: ['rev-parse', '--show-toplevel'],
+      cwd: root,
+      code,
+      signal: null,
+      stdout: '',
+      stderr,
+      message: stderr,
+    });
+    try {
+      const result = Effect.runPromise(
+        probeLocalProjectMember(root).pipe(
+          Effect.provideService(
+            WorktreeGit,
+            WorktreeGit.of({
+              run: () => Effect.fail(failure),
+              probeCredentials: () => Effect.die('Unexpected credential probe'),
+            })
+          ),
+          Effect.provide(NodeFileSystem.layer)
+        )
+      );
+      if (nonGit) await expect(result).resolves.toEqual({ isGit: false, submodules: [] });
+      else await expect(result).rejects.toBe(failure);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rebuilds a replaced link from registration, rejects escapes and preserves target on cleanup', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'project-roots-'));
+    try {
+      const main = join(base, 'main');
+      const docs = join(base, 'docs');
+      const outside = join(base, 'outside');
+      for (const folder of [main, docs, outside]) await mkdir(folder);
+      await writeFile(join(docs, 'keep.txt'), 'original');
+      await writeFile(join(outside, 'secret.txt'), 'outside');
+      const run = projectRun();
+      const [id, member] = Object.entries(run.members)[0]!;
+      member.src = { kind: 'local', machineId: 'm' as never, localProjectId: 'docs' as never };
+      member.access = 'link';
+      member.placement = { kind: 'root', dir: 'docs' };
+      member.path = 'docs';
+      await reconcileProjectMemberLink(main, 'docs', docs, false);
+      const roots = await resolveProjectFileRoots(main, run, 'm', async () => docs);
+      expect(resolveProjectFileTarget(roots, 'docs/keep.txt')).toMatchObject({
+        rootId: `member:${id}`,
+        relativePath: 'keep.txt',
+      });
+      await unlink(join(main, 'docs'));
+      await symlink(outside, join(main, 'docs'), 'junction');
+      expect(resolveProjectFileTarget(roots, 'docs/secret.txt')).toBeUndefined();
+      await reconcileProjectMemberLink(main, 'docs', docs, false);
+      expect(await realpath(join(main, 'docs'))).toBe(await realpath(docs));
+      await symlink(outside, join(docs, 'escape'), 'junction');
+      expect(resolveProjectFileTarget(roots, 'escape/secret.txt', `member:${id}`)).toBeUndefined();
+      await symlink(join(outside, 'missing'), join(docs, 'dangling'), 'dir');
+      expect(resolveProjectFileTarget(roots, 'dangling/file.txt', `member:${id}`)).toBeUndefined();
+      await removeProjectMemberLinks(main, run);
+      expect(existsSync(join(main, 'docs'))).toBe(false);
+      expect(await readFile(join(docs, 'keep.txt'), 'utf8')).toBe('original');
+      expect(await readFile(join(outside, 'secret.txt'), 'utf8')).toBe('outside');
+      await expect(
+        reconcileProjectMemberLink(main, 'docs', join(base, 'missing'), false)
+      ).rejects.toThrow();
+      await mkdir(join(main, 'docs'));
+      await writeFile(join(main, 'docs', 'agent.txt'), 'keep');
+      await expect(reconcileProjectMemberLink(main, 'docs', docs, false)).rejects.toThrow(
+        'real entry'
+      );
+      expect(await readFile(join(main, 'docs', 'agent.txt'), 'utf8')).toBe('keep');
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+  it("keeps a sibling tab's member link when a later Provider takes additional directories", async () => {
+    const base = await mkdtemp(join(tmpdir(), 'project-member-link-'));
+    try {
+      const main = join(base, 'main');
+      const docs = join(base, 'docs');
+      const other = join(base, 'other');
+      await mkdir(main);
+      await mkdir(docs);
+      await mkdir(other);
+      await writeFile(join(docs, 'keep.txt'), 'original');
+      // The parent tab's Provider lacks additional directories: it uses the link.
+      expect(await reconcileProjectMemberLink(main, 'docs', docs, false)).toBe(true);
+      // A child tab's Provider takes them; the parent still reads through the link.
+      expect(await reconcileProjectMemberLink(main, 'docs', docs, true)).toBe(true);
+      expect(await readFile(join(main, 'docs', 'keep.txt'), 'utf8')).toBe('original');
+      // A link to somewhere else is still removed, and none is created.
+      await unlink(join(main, 'docs'));
+      await symlink(other, join(main, 'docs'), 'junction');
+      expect(await reconcileProjectMemberLink(main, 'docs', docs, true)).toBe(false);
+      expect(existsSync(join(main, 'docs'))).toBe(false);
+      expect(await reconcileProjectMemberLink(main, 'docs', docs, true)).toBe(false);
+      expect(existsSync(join(main, 'docs'))).toBe(false);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+  it('probes non-Git directories and rejects missing roots', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'non-git-member-'));
+    try {
+      expect(await worktreeGitLegacy.probeLocalProjectMember(root)).toEqual({
+        isGit: false,
+        submodules: [],
+      });
+      await expect(
+        worktreeGitLegacy.probeLocalProjectMember(join(root, 'missing'))
+      ).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

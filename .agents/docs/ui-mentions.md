@@ -68,6 +68,14 @@ before that focus cycle lets the empty-query handler cancel it. Preparation keep
 the menu open for loading and retry feedback. See the
 [touch focus note](../notes/implemented/bug-fix/2026-10-07-shortcut-touch-focus.md).
 
+Committed mentions are atomic caret ranges. Left and Right Arrow cross a mention
+without placing the caret inside it. On macOS, the default Emacs text-navigation
+bindings Control+B and Control+F use that same movement at a mention edge; away
+from mentions, the browser retains its normal shortcut behavior. Other macOS
+Emacs bindings such as Control+A/E and Control+P/N move by line, so this
+character-movement rule leaves them with the browser. See the
+[caret navigation decision](../notes/implemented/bug-fix/2026-10-27-mention-emacs-caret-navigation.md).
+
 ## Ranking
 
 File menus use `useMentionFileSearch`: a Worker owns the file/directory index,

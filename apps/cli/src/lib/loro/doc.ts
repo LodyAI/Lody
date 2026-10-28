@@ -1,3 +1,5 @@
+import type { CliE2eeWorkspaceLegacy } from '../e2ee/workspace-legacy';
+import { projectRunMetaPatch } from '@/session/project-run-state';
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
 import { terminalNotificationSchema, type TerminalNotification } from '@lody/shared/notifications';
 import { createSessionAgentWrites, type SessionAgentWrites } from './session-agent-writes';
@@ -40,14 +42,12 @@ import {
   SessionStatus,
   SessionContextWindowUsage,
   type ProjectRef,
-  SessionPullRequestMeta,
   SessionPlanEntry,
   type SessionExternalHistoryCursorDocState,
   ACP_CAPABILITY_CACHE_VERSION,
   MessageQueueItem,
   SessionTitleSource,
   getAcpCapabilityCacheKey,
-  normalizeSessionPullRequestMeta,
   getServerNow,
   shouldRenewAcpCapabilityFetchTime,
   isLoroRepoDocDeleted,
@@ -343,6 +343,10 @@ export interface LoroDocumentManagerOptions {
   /** LoroDoc Streams cursors for this process; see `DocumentCursorScope`. */
   documentRemoteCursorStore?: RemoteCursorStore | null;
   remoteStreamsAttached?: boolean;
+  encryptedWorkspace?: Pick<
+    CliE2eeWorkspaceLegacy,
+    'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory'
+  >;
   streamsTokens?: CloudStreamsTokenPort | null;
   cloudBilling?: CloudBillingPort | null;
   /** One-shot clients route history to the owner; daemons use installed local factories. */
@@ -389,6 +393,10 @@ export class LoroDocumentManager {
   > | null = null;
   private remoteStreamsStatusUnsubscribe: (() => void) | null = null;
   private remoteTransportOpQueue: Promise<unknown> = Promise.resolve();
+  private readonly encryptedWorkspace?: Pick<
+    CliE2eeWorkspaceLegacy,
+    'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory'
+  >;
   private readonly streamsTokens: CloudStreamsTokenPort | null;
   public readonly cloudBilling: CloudBillingPort | null;
   private readonly sessionHistoryFactory?: SessionBackendFactory;
@@ -396,6 +404,10 @@ export class LoroDocumentManager {
   private catalogSync?: WorkspaceCatalogSyncLegacy;
 
   /** Reader interest belongs to the daemon, never to a discovery request. */
+  isEncryptedWorkspace(): boolean {
+    return this.encryptedWorkspace !== undefined;
+  }
+
   async holdCatalogFlockDoc(flockDocId: string): Promise<void> {
     await this.catalogSync?.hold(flockDocId);
   }
@@ -417,6 +429,10 @@ export class LoroDocumentManager {
        * The default keeps LoroDoc progress in this process's memory.
        */
       documentCursorScope?: DocumentCursorScope;
+      encryptedWorkspace?: Pick<
+        CliE2eeWorkspaceLegacy,
+        'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory'
+      >;
       streamsTokens?: CloudStreamsTokenPort | null;
       cloudBilling?: CloudBillingPort | null;
       sessionHistoryFactory?: SessionBackendFactory;
@@ -431,11 +447,18 @@ export class LoroDocumentManager {
     // the Streams token is fetched only when the remote bridge attaches later
     // (attachRemoteStreamsTransport), not eagerly here.
     installCliHttpGlobalDispatcher({ logger });
+    if (options.encryptedWorkspace && !options.encryptedWorkspace.repositoryDirectory)
+      throw new Error('e2ee_invalid_input');
     const cliSqliteRepoStore = await traceAsync(
       logger,
       'startup.loro_sqlite_store',
       { workspaceId },
-      async () => await createCliSqliteRepoStore(workspaceId, options.onStorageWriteFailure)
+      async () =>
+        await createCliSqliteRepoStore(
+          workspaceId,
+          options.onStorageWriteFailure,
+          options.encryptedWorkspace?.repositoryDirectory
+        )
     );
     const createRepoTimeoutMs = readTimeoutEnv('LODY_LORO_CREATE_REPO_TIMEOUT_MS', 30_000);
     const joinMetaTimeoutMs = readTimeoutEnv('LODY_LORO_JOIN_META_TIMEOUT_MS', 30_000);
@@ -518,6 +541,7 @@ export class LoroDocumentManager {
         ),
         remoteStreamsAttached: false,
         streamsTokens: options.streamsTokens ?? null,
+        encryptedWorkspace: options.encryptedWorkspace,
         cloudBilling: options.cloudBilling ?? null,
         sessionHistoryFactory: options.sessionHistoryFactory,
         ownerHistoryRouter: options.ownerHistoryRouter,
@@ -606,6 +630,7 @@ export class LoroDocumentManager {
     this.documentRemoteCursorStore = options.documentRemoteCursorStore ?? null;
     this.remoteStreamsAttached = options.remoteStreamsAttached ?? false;
     this.streamsTokens = options.streamsTokens ?? null;
+    this.encryptedWorkspace = options.encryptedWorkspace;
     this.cloudBilling = options.cloudBilling ?? null;
     this.sessionHistoryFactory = options.sessionHistoryFactory;
     this.ownerHistoryRouter = options.ownerHistoryRouter;
@@ -657,6 +682,7 @@ export class LoroDocumentManager {
     this.detachMachineFlockMetaRoomSyncedListener = this.connectionRecovery.onStreamsOnline(
       (reason) => {
         this.machineFlockSync.retryDirtyNow(`streams-online:${reason}`);
+        void this.encryptedWorkspace?.refresh();
       }
     );
   }
@@ -707,8 +733,10 @@ export class LoroDocumentManager {
       this.streamsTokens.createTokenProvider({ workspaceId: this.workspaceId })
     );
     this.remoteStreamsTokens = streamsTokens;
+    if (this.encryptedWorkspace) await streamsTokens.legacy.getToken();
     const streamsTransport = await createCliStreamsTransport({
-      content: { mode: 'plaintext' },
+      content: this.encryptedWorkspace?.content ?? { mode: 'plaintext' },
+      bucketId: this.encryptedWorkspace?.bucketId(),
       workspaceId: this.workspaceId,
       tokenProvider: streamsTokens.legacy,
       repo: this.repo,
@@ -746,16 +774,18 @@ export class LoroDocumentManager {
       // The presence runtime already exists (created at repo init and producing
       // presence locally); attaching the cloud Streams sink additionally mirrors
       // it to the cloud presence stream.
-      await this.presenceRuntime.attachStreams({
-        streamsBaseUrl: streamsTransport.gatewayBaseUrl,
-        auth: streamsTokens.native.createAuthCallback(),
-        shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
-      });
-      this.machineMonitorRuntime?.attachStreams({
-        streamsBaseUrl: streamsTransport.gatewayBaseUrl,
-        auth: streamsTransport.tokenProvider.createAuthCallback(),
-        shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
-      });
+      if (!this.encryptedWorkspace) {
+        await this.presenceRuntime.attachStreams({
+          streamsBaseUrl: streamsTransport.gatewayBaseUrl,
+          auth: streamsTokens.native.createAuthCallback(),
+          shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
+        });
+        this.machineMonitorRuntime?.attachStreams({
+          streamsBaseUrl: streamsTransport.gatewayBaseUrl,
+          auth: streamsTransport.tokenProvider.createAuthCallback(),
+          shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
+        });
+      }
       this.remoteStreamsAttached = true;
       this.remoteStreamsGeneration += 1;
       this.logger.info(`[${this.workspaceId}] Remote Streams transport attached`);
@@ -913,6 +943,11 @@ export class LoroDocumentManager {
     await this.repo.unloadDoc(docId);
     this.localLoroDataPlaneServer?.invalidateDocRoom(docId);
     this.logger.debug(`[${this.workspaceId}] Unloaded doc ${docId} and invalidated its local room`);
+  }
+
+  /** Capture a remote confirmation boundary without treating local-only as disconnected. */
+  getRemoteStreamsGeneration(): number | undefined {
+    return this.remoteStreamsAttached ? this.remoteStreamsGeneration : undefined;
   }
 
   isTransportConnected(): boolean {
@@ -1406,6 +1441,8 @@ export class LoroDocumentManager {
     sessionId: SessionId,
     options: { historyBackend?: SessionHistoryBackendKind; skipAutoRead?: boolean } = {}
   ): Promise<SessionDocument> {
+    if (this.encryptedWorkspace && options.historyBackend && options.historyBackend !== 'loro')
+      throw new Error('e2ee_history_backend_unavailable');
     const docId = getSessionRoomId(sessionId);
     // An activated SessionDocument owns the live cloud room from here on. Stop
     // any one-shot renderer reconciliation without unloading the shared doc.
@@ -1446,6 +1483,8 @@ export class LoroDocumentManager {
         (!isLoroRepoDocDeleted(meta)
           ? (meta?.meta as Partial<SessionMeta> | undefined)?.historyBackend
           : undefined);
+      if (this.encryptedWorkspace && historyBackend && historyBackend !== 'loro')
+        throw new Error('e2ee_history_backend_unavailable');
       // Observation commands own an isolated manager and must not arm execution's
       // auto-seen/model-summary writers. This option applies to a new open only;
       // it never changes the policies of an already-owned cached document.
@@ -1498,6 +1537,8 @@ export class LoroDocumentManager {
       const historyBackend = !isLoroRepoDocDeleted(meta)
         ? (meta?.meta as Partial<SessionMeta> | undefined)?.historyBackend
         : undefined;
+      if (this.encryptedWorkspace && historyBackend && historyBackend !== 'loro')
+        throw new Error('e2ee_history_backend_unavailable');
       await sessionDoc.init({
         skipAutoRead: true,
         ...(historyBackend ? { historyBackend } : {}),
@@ -1528,7 +1569,7 @@ export class LoroDocumentManager {
       isArchived: false,
       cliType,
       agentType,
-      historyBackend: NEW_SESSION_HISTORY_BACKEND,
+      historyBackend: this.encryptedWorkspace ? 'loro' : NEW_SESSION_HISTORY_BACKEND,
     };
     const sanitizedTitle = title?.trim();
     if (sanitizedTitle) {
@@ -1906,6 +1947,7 @@ export class LoroDocumentManager {
     this.remoteStreamsStatusUnsubscribe?.();
     this.remoteStreamsStatusUnsubscribe = null;
     await this.destroyRepo({ fast: options.fast });
+    await this.encryptedWorkspace?.close();
     if (presenceCleanupFailure) throw presenceCleanupFailure;
   }
 
@@ -2020,6 +2062,17 @@ export function subscribeSessionChanges(
 }
 
 export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'history'>, SessionMeta> {
+  private static readonly activityWritesByRepo = new WeakMap<LoroRepo, ConcurrentQueue<string>>();
+
+  private get activityWrites(): ConcurrentQueue<string> {
+    let queue = SessionDocument.activityWritesByRepo.get(this.repo);
+    if (!queue) {
+      queue = new ConcurrentQueue<string>(Infinity);
+      SessionDocument.activityWritesByRepo.set(this.repo, queue);
+    }
+    return queue;
+  }
+
   private mirror: SessionControlPlaneMirror | null = null;
   handle: RepoDocHandle | null = null;
   docSub: RepoRoomSubscription | null = null;
@@ -2933,6 +2986,14 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     await this.repo.upsertDocMeta(this.roomId, { project });
   }
 
+  /** Caller must hold the conversation's WorkspaceGitService mutation queue. */
+  async setProjectRun(run: NonNullable<SessionMeta['projectRun']>) {
+    if (!this.mirror) throw new Error('SessionDocument not initialized');
+    const current = await this.repo.getDocMeta(this.roomId);
+    if (isLoroRepoDocDeleted(current)) return;
+    await this.repo.upsertDocMeta(this.roomId, projectRunMetaPatch(run));
+  }
+
   async setBranchName(branchName: string) {
     if (!this.mirror) {
       throw new Error('SessionDocument not initialized');
@@ -2975,22 +3036,21 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async setLastMessageAt(timestamp?: number) {
-    if (!this.mirror) {
-      throw new Error('SessionDocument not initialized');
-    }
+    if (!this.mirror) throw new Error('SessionDocument not initialized');
     const next =
       typeof timestamp === 'number' && Number.isFinite(timestamp) ? timestamp : getServerNow();
-    const current = await this.repo.getDocMeta(this.roomId);
-    if (isLoroRepoDocDeleted(current)) return;
-    const currentMeta = current?.meta as SessionMeta | undefined;
-    await this.repo.upsertDocMeta(this.roomId, {
-      lastMessageAt: next,
+    const parentSessionId = await this.activityWrites.enqueue(this.roomId, async () => {
+      const current = await this.repo.getDocMeta(this.roomId);
+      if (isLoroRepoDocDeleted(current)) return undefined;
+      const meta = current?.meta as SessionMeta | undefined;
+      if (typeof meta?.lastMessageAt !== 'number' || meta.lastMessageAt < next) {
+        await this.repo.upsertDocMeta(this.roomId, { lastMessageAt: next });
+      }
+      return meta?.parentSessionId;
     });
-    const parentSessionId = currentMeta?.parentSessionId;
-    if (!parentSessionId || parentSessionId === this.sessionId) {
-      return;
+    if (parentSessionId && parentSessionId !== this.sessionId) {
+      await this.setParentLastMessageAt(parentSessionId, next);
     }
-    await this.setParentLastMessageAt(parentSessionId, next);
   }
 
   /**
@@ -3015,18 +3075,20 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
 
   private async setParentLastMessageAt(parentSessionId: SessionId, timestamp: number) {
     const parentRoomId = getSessionRoomId(parentSessionId);
-    const parent = await this.repo.getDocMeta(parentRoomId);
-    if (isLoroRepoDocDeleted(parent)) return;
-    const parentMeta = parent?.meta as SessionMeta | undefined;
-    const parentLastMessageAt =
-      typeof parentMeta?.lastMessageAt === 'number' && Number.isFinite(parentMeta.lastMessageAt)
-        ? parentMeta.lastMessageAt
-        : null;
-    if (parentLastMessageAt !== null && parentLastMessageAt >= timestamp) {
-      return;
-    }
-    await this.repo.upsertDocMeta(parentRoomId, {
-      lastMessageAt: timestamp,
+    return this.activityWrites.enqueue(parentRoomId, async () => {
+      const parent = await this.repo.getDocMeta(parentRoomId);
+      if (isLoroRepoDocDeleted(parent)) return;
+      const parentMeta = parent?.meta as SessionMeta | undefined;
+      const parentLastMessageAt =
+        typeof parentMeta?.lastMessageAt === 'number' && Number.isFinite(parentMeta.lastMessageAt)
+          ? parentMeta.lastMessageAt
+          : null;
+      if (parentLastMessageAt !== null && parentLastMessageAt >= timestamp) {
+        return;
+      }
+      await this.repo.upsertDocMeta(parentRoomId, {
+        lastMessageAt: timestamp,
+      });
     });
   }
 
@@ -3183,24 +3245,6 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       return [];
     }
     return (entry.plan ?? []) as SessionPlanEntry[];
-  }
-
-  async addPullRequest(prMeta: SessionPullRequestMeta): Promise<void> {
-    const summary = normalizeSessionPullRequestMeta(prMeta);
-    if (!summary) return;
-    const current = await this.repo.getDocMeta(this.roomId);
-    if (isLoroRepoDocDeleted(current)) return;
-    const existingMeta = current?.meta as SessionMeta | undefined;
-    const existing = (existingMeta?.pullRequests ?? []).flatMap((item) => {
-      const parsed = normalizeSessionPullRequestMeta(item);
-      return parsed ? [parsed] : [];
-    });
-    const filtered = existing.filter((item) => item.url !== summary.url);
-    const updated = [...filtered, summary];
-
-    await this.repo.upsertDocMeta(this.roomId, {
-      pullRequests: updated,
-    });
   }
 
   /**

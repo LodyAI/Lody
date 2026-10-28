@@ -190,7 +190,8 @@ function projectPullRequestNode(
   node: Schema.Schema.Type<typeof PullRequestNodeSchema>
 ): PrObservation | null {
   const status = mapPullRequestStatus(node.state, node.isDraft);
-  if (!status) {
+  const updatedAtMs = Date.parse(node.updatedAt);
+  if (!status || !Number.isFinite(updatedAtMs) || updatedAtMs <= 0) {
     return null;
   }
   const rollupState = node.commits.nodes[0]?.commit.statusCheckRollup?.state;

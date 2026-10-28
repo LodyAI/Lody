@@ -7,6 +7,7 @@ import {
   type TextAppend,
 } from './roost-content-patches';
 import type { ContentOp } from '@loro-dev/roost-node';
+import { applicationJsonText } from '@loro-dev/roost/lody-history';
 import type { AgentHistoryMutationPath } from '@lody/shared';
 
 const index = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
@@ -142,6 +143,117 @@ export function planRoostMessageState(
     };
   }
   return { content: createRoostMessageState(primary, primaryTurnId, next) };
+}
+
+/** Preserve one unchanged large patch node while changing its array position.
+ * The final patch order stays exact; this schedules storage edits, not semantic
+ * state operations. Ordinary appends retain the existing diff and hints. */
+export function roostMessageStatePatches(
+  previous: unknown,
+  next: unknown,
+  appends?: TextAppendHints
+): ContentOp[] {
+  const baseline = roostContentPatches(previous, next, appends);
+  const inPatches = (op: ContentOp) =>
+    op.path[1] && 'key' in op.path[1] && op.path[1].key === 'patches';
+  const hasLargePayload = (op: ContentOp) => {
+    // A genuine append already transmits only new bytes. Do not parse or
+    // inspect the full state to optimize that unchanged hot path.
+    if (op.kind === 'appendText') return false;
+    const payload =
+      'contentJson' in op
+        ? op.contentJson
+        : 'valuesJson' in op
+          ? op.valuesJson
+          : 'text' in op
+            ? op.text
+            : '';
+    return payload.length >= 1024;
+  };
+  if (
+    baseline.some((op) => op.path.length < 2) ||
+    !baseline.some((op) => inPatches(op) && hasLargePayload(op)) ||
+    !object(previous) ||
+    !object(next) ||
+    !Array.isArray(previous.patches) ||
+    !Array.isArray(next.patches) ||
+    previous.patches.length > 128 ||
+    next.patches.length > 128
+  )
+    return baseline;
+  const old = deltaSchema.safeParse(previous);
+  const updated = deltaSchema.safeParse(next);
+  if (!old.success || !updated.success || old.data.primaryTurnId !== updated.data.primaryTurnId)
+    return baseline;
+
+  type StatePatch = z.infer<typeof deltaSchema>['patches'][number];
+  const positions = (patches: readonly StatePatch[]) => {
+    const result = new Map<string, number | null>();
+    patches.forEach((patch, position) => {
+      if (patch.kind !== 'appendText') return;
+      const identity = JSON.stringify(patch.path);
+      result.set(identity, result.has(identity) ? null : position);
+    });
+    return result;
+  };
+  const before = positions(old.data.patches);
+  const after = positions(updated.data.patches);
+  const anchors: { oldPosition: number; newPosition: number; bytes: number }[] = [];
+  for (const [identity, oldPosition] of before) {
+    const newPosition = after.get(identity);
+    if (oldPosition == null || newPosition == null || oldPosition === newPosition) continue;
+    const oldPatch = old.data.patches[oldPosition];
+    const newPatch = updated.data.patches[newPosition];
+    if (
+      oldPatch?.kind !== 'appendText' ||
+      newPatch?.kind !== 'appendText' ||
+      oldPatch.text !== newPatch.text ||
+      oldPatch.text.length < 1024
+    )
+      continue;
+    const bytes = Buffer.byteLength(oldPatch.text);
+    if (bytes >= 4096) anchors.push({ oldPosition, newPosition, bytes });
+  }
+  if (!anchors.length) return baseline;
+
+  // Optional planning only: no writes or authoritative validation happen here.
+  // Any unsupported local representation keeps the original diff/error boundary.
+  try {
+    const size = (ops: readonly ContentOp[]) => Buffer.byteLength(applicationJsonText(ops));
+    const originalBytes = size(baseline);
+    let best = baseline;
+    let bestBytes = originalBytes;
+    const arrayPath: ContentOp['path'] = [{ key: 'content' }, { key: 'patches' }];
+    for (const anchor of anchors.sort((a, b) => b.bytes - a.bytes).slice(0, 4)) {
+      const candidate = baseline.filter((op) => !inPatches(op));
+      const splice = (at: number, remove: number, values: readonly StatePatch[]) => {
+        if (!remove && !values.length) return;
+        candidate.push({
+          kind: 'spliceArray',
+          path: arrayPath,
+          index: BigInt(at),
+          delete: BigInt(remove),
+          valuesJson: applicationJsonText(values),
+        });
+      };
+      // Leave the old anchor as the sole array element, then restore the exact
+      // next suffix/prefix around it. Its text never enters an inserted value.
+      splice(anchor.oldPosition + 1, old.data.patches.length - anchor.oldPosition - 1, []);
+      splice(0, anchor.oldPosition, []);
+      splice(1, 0, updated.data.patches.slice(anchor.newPosition + 1));
+      splice(0, 0, updated.data.patches.slice(0, anchor.newPosition));
+      const bytes = size(candidate);
+      if (bytes + 1024 >= bestBytes || bytes * 2 > originalBytes) continue;
+      const staged = stageRoostContent(previous, candidate);
+      if (staged === undefined || applicationJsonText(staged) !== applicationJsonText(next))
+        continue;
+      best = candidate;
+      bestBytes = bytes;
+    }
+    return best;
+  } catch {
+    return baseline;
+  }
 }
 
 /** Reconstruct application content without changing the signed primary. */

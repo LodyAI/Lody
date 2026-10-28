@@ -30,6 +30,11 @@ delivery. The wrapper component keeps the standalone pending-message surface.
 
 ## Home dashboard transitions
 
+The Now summary and running session rows reuse the sidebar's
+[`WorkingGrid`](../../ui/working-grid.tsx): a 12px grid centred in the existing
+14px icon slot, with the shared animation and reduced-motion behavior. A zero
+running count keeps a muted static grid, without the active accent colour.
+
 [`home/home-dashboard.tsx`](home/home-dashboard.tsx) owns board selection, the summary
 segments and their typed View Transition; [`home/home-dashboard-host.tsx`](home/home-dashboard-host.tsx)
 supplies the live models and device-local preference. The landing stage in
@@ -44,6 +49,10 @@ records the failure and browser verification.
 
 [`home/week-bento.tsx`](home/week-bento.tsx) keeps each agent's icon beside its name and
 session share, above its own meter, rather than collecting icons in the tile header.
+
+The plan-usage Provider picker in [`home/tiles.tsx`](home/tiles.tsx) closes when a
+Provider is selected, including the current selection. Its radio items explicitly
+set `closeOnClick`; Base UI otherwise keeps radio menus open.
 
 The stage also tells its group how tall it is: [`landing-stage.ts`](landing-stage.ts) provides
 the stage and group elements, and `useLandingRoom` turns them into the height the dashboard may

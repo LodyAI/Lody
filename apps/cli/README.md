@@ -14,6 +14,33 @@ Install the CLI package:
 npm install -g lody@next
 ```
 
+## Local encrypted execution log recovery
+
+Stop the journal's execution owners, then run:
+
+```sh
+lody e2ee journal reset --file /absolute/path/to/journal.sqlite --json
+```
+
+The command works offline and returns `archivePath` and `journalPath`. It renames
+and preserves the old execution log, creates a fresh log, and retains old current-format
+request ID fences in the adjacent `.control.sqlite`. Keep that file and the archive;
+unknown results are not automatically retried. Restart owners after reset. Retrying
+this command completes an interrupted reset using the same archive path.
+
+A clock error asks you to calibrate the system clock. Without trusted reference time,
+a bad observation can still reject new claims in its workspace until explicit reset;
+other workspaces and completed evidence remain available. Empty interrupted first
+creation initializes automatically. An unknown schema is archived and reported,
+then waits for explicit reset. An incomplete current-format store still retires all
+readable request keys before archival; unreadable current request keys refuse reset
+and preserve the original for repair. No legacy data is imported.
+
+This maintenance command is available by its explicit name and hidden from general
+CLI help. The journal has no product dispatch caller yet, so there is no default
+product path or desktop reset button. See the
+[recovery decision](../../.agents/notes/proposed/bug-fix/2026-10-27-e2ee-realtime-journal-recovery.md).
+
 ## Development type checking
 
 `tsconfig.json` includes source and tests so editor language servers resolve the
@@ -144,6 +171,36 @@ These workspace queries use the existing cloud command runtime. The OSS local
 composition does not enable cloud queries; local project listing remains available.
 Catalog `--offline` skips catalog synchronization but still verifies authorization;
 GitHub repository listing requires connectivity.
+
+## Import Magpie providers on a server
+
+Run on the machine hosting both Lody and Magpie, with Lody signed in and its daemon
+running. This uses the existing workspace command runtime, not the OSS local-only
+composition. Explicit command execution authorizes the import; no desktop is needed.
+
+```sh
+lody agent-config import-magpie --workspace team --json
+lody agent-config import-magpie --workspace team --targets pi,codex --gateway http://127.0.0.1:3425 --json
+lody agent-config import-magpie --workspace team --link 'lody://provider/import?v=1&data=…' --json
+```
+
+Without `--targets`, import all seven (`claude,codex,pi,dsh,kimi,grok,bub`), or all
+those offered by `--link`. A target subset cannot expand a link's offered targets.
+`--gateway` and `--link` are mutually exclusive. The gateway must be a literal
+loopback HTTP origin; upstream credentials stay in Magpie. The command always
+uses the invoking machine, ignoring `LODY_MACHINE_ID`; there is no remote-machine
+flag. The daemon must advertise `magpieImport` and `providerSetup`, plus `builtinPi`
+when Pi is selected. Unsupported selections fail before any writes.
+
+Existing providers are preserved. Repeated imports reuse providers or pending setup
+IDs for the same gateway/runtime, and requeue failed setups with their existing
+configuration. Managed runtimes and Bub enter the normal daemon setup queue;
+DSH is saved directly. Bub still needs a user-installed `bub acp` and ACP plugin.
+JSON lists each target, `agentConfigId`, and status (`existing`, `created`, or a
+setup status). `queued` is not ready: follow progress in Providers. `synced: false`
+means saved locally but publication is unconfirmed; rerun after connectivity recovers.
+Import does not verify upstream inference. Startup generates native configuration
+from the gateway's live catalog as described in the [Magpie contract](../../specs/magpie-provider-import.md).
 
 ## Agent configuration output
 

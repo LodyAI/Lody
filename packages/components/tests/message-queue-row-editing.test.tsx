@@ -11,6 +11,7 @@ import { currentWorkspaceIdAtom } from '../src/atoms';
 import { authTokenAtom, runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import type { PendingSessionSend } from '../src/lib/session-pending-sends';
 import { initI18n } from '../src/i18n';
+import { ForceMobileLayoutProvider } from '../src/hooks/use-mobile';
 
 // Each variant resolves to a distinct URL so the test can tell the row's
 // thumbnail from the full-size image the preview loads.
@@ -73,6 +74,83 @@ describe('queued message editing commits', () => {
     }
     container?.remove();
     container = undefined;
+  });
+
+  it('keeps mobile steer available for the queue head', async () => {
+    const steered: string[] = [];
+    await act(async () => {
+      root?.render(
+        createElement(
+          ForceMobileLayoutProvider,
+          { force: true },
+          createElement(MessageQueueDisplay, {
+            sessionId: 'session-test' as SessionId,
+            items: [makeItem()],
+            roomy: true,
+            showSteerAction: true,
+            onRemove: () => {},
+            onReorder: () => {},
+            onEditStart: () => {},
+            onEditCancel: () => {},
+            onEditSave: () => {},
+            onSteer: (item: MessageQueueItem) => {
+              steered.push(item.$cid);
+            },
+          })
+        )
+      );
+    });
+    const trigger = container!.querySelector<HTMLButtonElement>('.group\\/row button')!;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+      trigger.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0 }));
+      trigger.click();
+    });
+    const steer = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (item) => item.textContent?.trim() === 'Steer'
+    );
+    expect(steer).toBeDefined();
+    await act(async () => {
+      steer!.click();
+    });
+    expect(steered).toEqual(['cid-0']);
+  });
+
+  it('keeps scheduled messages after ordinary rows, re-sorts time edits, and excludes them from dragging', async () => {
+    const items = ['late', 'ordinary-a', 'early', 'ordinary-b'].map((id) => ({
+      ...makeItem(),
+      $cid: id,
+      task: id,
+    }));
+    const render = async (lateAt: number) => {
+      await act(async () => {
+        root?.render(
+          createElement(MessageQueueDisplay, {
+            sessionId: 'session-test' as SessionId,
+            items,
+            getItemScheduledAt: (item) =>
+              item.$cid === 'late' ? lateAt : item.$cid === 'early' ? 10 : null,
+            onRemove: () => {},
+            onReorder: () => {},
+            onEditStart: () => {},
+            onEditCancel: () => {},
+            onEditSave: () => {},
+            onSteer: () => {},
+          })
+        );
+      });
+    };
+    const rows = () => [...(container?.querySelectorAll('.group\\/row') ?? [])];
+    const order = () =>
+      rows().map((row) => items.find((item) => row.textContent?.includes(item.task))?.$cid);
+    await render(20);
+    expect(order()).toEqual(['ordinary-a', 'ordinary-b', 'early', 'late']);
+    for (const row of rows().slice(2))
+      expect(row.querySelector('[aria-label="Drag to reorder"]')).toBeNull();
+    for (const row of rows().slice(0, 2))
+      expect(row.querySelector('[aria-label="Drag to reorder"]')).not.toBeNull();
+    await render(5);
+    expect(order()).toEqual(['ordinary-a', 'ordinary-b', 'late', 'early']);
   });
 
   // The save promise stays pending until the test releases it, so the row is

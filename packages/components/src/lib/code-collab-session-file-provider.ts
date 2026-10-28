@@ -51,6 +51,7 @@ export type ParsedFileMetadataSnapshot = {
 
 export type CodeCollabSessionFileProviderRuntime = {
   readonly sessionId: SessionId;
+  downloadFile?(path: string, signal?: AbortSignal): Promise<Uint8Array | null>;
   /**
    * File Preview v3 — the read path behind `openFile`. Always resolves; a
    * transport failure arrives as `status: 'error'`.
@@ -338,6 +339,10 @@ export class CodeCollabSessionFileProvider implements SessionFileProvider {
    * which is the only authority on what the file actually is. The machine
    * answers with a plain read; it never activates Code Collab for a preview.
    */
+  async downloadFile(path: string, signal?: AbortSignal): Promise<Uint8Array | null> {
+    return (await this.runtime?.downloadFile?.(path, signal)) ?? null;
+  }
+
   async openFile(
     pathOrFileId: string,
     _mode?: SessionFileProviderMode

@@ -1,11 +1,24 @@
 import * as stylex from '@stylexjs/stylex';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Check, GripVertical, Pencil, X, type LucideIcon } from 'lucide-react';
+import {
+  Check,
+  GripVertical,
+  Pencil,
+  X,
+  MoreHorizontal,
+  Trash2,
+  ArrowUpToLine,
+  Send,
+  type LucideIcon,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { MessageQueueItem, SessionId } from '@lody/shared';
 import { normalizeSessionInputBlocks } from '@lody/shared';
+import { Menu } from '@lody/ui/menu';
+import { Button } from '@lody/ui/button';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { Tooltip } from '@lody/ui/tooltip';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
@@ -33,6 +46,10 @@ export type MessageQueueRowProps = {
   onSaveEdit: (item: MessageQueueItem) => void;
   onRemove: (cid: string) => void | Promise<void>;
   onSteer: (item: MessageQueueItem) => void | Promise<void>;
+  onMoveToTop?: () => void | Promise<void>;
+  footer?: ReactNode;
+  footerPosition?: 'below' | 'start' | 'end' | 'inline';
+  roomy?: boolean | 'airy';
 };
 
 type EditCommitProps = {
@@ -93,8 +110,13 @@ export function MessageQueueRow(props: MessageQueueRowProps) {
       ref={sortable.setNodeRef}
       style={style}
       className={cn(
-        'group/row relative gap-2 px-2 py-1.5',
-        stylex.props(queueSurface.row).className,
+        'group/row relative',
+        !props.roomy && 'gap-2 px-2 py-1.5',
+        stylex.props(
+          queueSurface.row,
+          props.roomy && queueSurface.roomyRow,
+          props.roomy === 'airy' && queueSurface.airyRow
+        ).className,
         // Dividers go between rows only. (`divide-y` on the list also lined the
         // last row, because dnd-kit appends hidden nodes after it, and that
         // line doubled the composer's top border into a shadow-like band.)
@@ -104,8 +126,27 @@ export function MessageQueueRow(props: MessageQueueRowProps) {
         isEditing && 'bg-background/60'
       )}
     >
-      <LeadingHandle {...props} sortable={sortable} />
-      <RowBody {...props} imageBlocks={imageBlocks} onCommitEdit={commitEdit} />
+      {props.roomy ? (
+        <span {...stylex.props(queueSurface.leading)}>
+          <LeadingHandle {...props} sortable={sortable} />
+        </span>
+      ) : (
+        <LeadingHandle {...props} sortable={sortable} />
+      )}
+      {props.footerPosition === 'start' && !isEditing ? (
+        <div {...stylex.props(queueSurface.inlineMeta)}>{props.footer}</div>
+      ) : null}
+      {props.footer && (!props.footerPosition || props.footerPosition === 'below') ? (
+        <div className="min-w-0 flex-1">
+          <RowBody {...props} imageBlocks={imageBlocks} onCommitEdit={commitEdit} />
+          {props.footer}
+        </div>
+      ) : (
+        <RowBody {...props} imageBlocks={imageBlocks} onCommitEdit={commitEdit} />
+      )}
+      {props.footerPosition === 'end' && !isEditing ? (
+        <div {...stylex.props(queueSurface.inlineMeta)}>{props.footer}</div>
+      ) : null}
       <RowActions {...props} />
     </div>
   );
@@ -200,7 +241,9 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
     // newline. Esc blurs, which commits too — there is no separate "discard changes"
     // affordance by design.
     return (
-      <div className="min-w-0 flex-1">
+      <div
+        className={cn('min-w-0 flex-1', props.roomy && stylex.props(queueSurface.editor).className)}
+      >
         <div
           className={cn(
             'rounded-md border border-border/60 bg-background/80 transition-colors',
@@ -282,7 +325,13 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
   }
 
   return (
-    <div className="flex min-w-0 flex-1 items-start gap-1.5">
+    <div
+      className={cn(
+        'flex flex-1 items-start gap-1.5',
+        !props.roomy && 'min-w-0',
+        props.roomy && stylex.props(queueSurface.roomyBody).className
+      )}
+    >
       {inlineImages.length > 0 ? (
         <div className="flex shrink-0 items-center gap-0.5 pt-px">
           {inlineImages.map((image, i) => (
@@ -302,15 +351,17 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
       ) : null}
       <div
         className={cn(
-          'min-w-0 flex-1 overflow-hidden text-xs leading-snug text-foreground/80',
-          stylex.props(queueSurface.text).className
+          'min-w-0 flex-1 overflow-hidden text-foreground/80',
+          !props.roomy && 'text-xs leading-snug',
+          stylex.props(queueSurface.text, props.roomy && queueSurface.roomyText).className
         )}
         style={{
           display: '-webkit-box',
-          WebkitLineClamp: 2,
+          WebkitLineClamp: props.footerPosition === 'inline' ? 1 : 2,
           WebkitBoxOrient: 'vertical',
         }}
       >
+        {props.footerPosition === 'inline' && props.footer ? <>{props.footer} </> : null}
         {item.task}
       </div>
     </div>
@@ -319,6 +370,7 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
 
 function RowActions(props: MessageQueueRowProps) {
   const { t } = useTranslation();
+  const mobile = useIsMobile();
   const {
     item,
     isFirst,
@@ -336,8 +388,64 @@ function RowActions(props: MessageQueueRowProps) {
     return null;
   }
 
+  if (mobile && props.roomy) {
+    return (
+      <div {...stylex.props(queueSurface.roomyActions)}>
+        <Menu.Root>
+          <Menu.Trigger
+            render={
+              <Button
+                icon
+                variant="ghost"
+                aria-label={t('common.more', 'More')}
+                style={{ width: 44, height: 44 }}
+              >
+                <MoreHorizontal size={18} />
+              </Button>
+            }
+          />
+          <Menu.Content align="end" width="compact">
+            {shouldShowQueuedItemSteer({ showSteerAction, isFirst, nativeSteerAvailable }) ? (
+              <Menu.Item icon={Send} onClick={() => void onSteer(item)}>
+                {t('sessions.messageQueue.guideAction', 'Steer')}
+              </Menu.Item>
+            ) : null}
+            {props.onMoveToTop ? (
+              <Menu.Item
+                icon={ArrowUpToLine}
+                disabled={isFirst}
+                onClick={() => {
+                  void props.onMoveToTop?.();
+                }}
+              >
+                {t('sessions.messageQueue.moveToTop', 'Move to top')}
+              </Menu.Item>
+            ) : null}
+            <Menu.Item icon={Pencil} onClick={() => onStartEdit(item)}>
+              {t('common.edit', 'Edit')}
+            </Menu.Item>
+            <Menu.Item
+              icon={Trash2}
+              tone="destructive"
+              onClick={() => {
+                void onRemove(item.$cid);
+              }}
+            >
+              {t('common.delete', 'Delete')}
+            </Menu.Item>
+          </Menu.Content>
+        </Menu.Root>
+      </div>
+    );
+  }
+
   return (
-    <div className={cn('flex shrink-0 items-center', stylex.props(queueSurface.actions).className)}>
+    <div
+      className={cn(
+        'flex shrink-0 items-center',
+        stylex.props(queueSurface.actions, props.roomy && queueSurface.roomyActions).className
+      )}
+    >
       {shouldShowQueuedItemSteer({ showSteerAction, isFirst, nativeSteerAvailable }) ? (
         <TextAction
           text={t('sessions.messageQueue.guideAction', 'Steer')}
@@ -351,11 +459,13 @@ function RowActions(props: MessageQueueRowProps) {
         />
       ) : null}
       <IconAction
+        roomy={props.roomy}
         icon={Pencil}
         label={t('sessions.messageQueue.editMessage', 'Edit queued message')}
         onClick={() => onStartEdit(item)}
       />
       <IconAction
+        roomy={props.roomy}
         icon={X}
         label={t('sessions.messageQueue.remove', 'Remove from queue')}
         destructive
@@ -396,12 +506,14 @@ export function TextAction({
 
 export function IconAction({
   icon: Icon,
+  roomy,
   label,
   destructive,
   disabled,
   onClick,
 }: {
   icon: LucideIcon;
+  roomy?: boolean | 'airy';
   label: string;
   destructive?: boolean;
   disabled?: boolean;
@@ -418,7 +530,7 @@ export function IconAction({
             disabled={disabled}
             className={cn(
               'flex h-5 w-5 items-center justify-center rounded',
-              stylex.props(queueSurface.action).className,
+              stylex.props(queueSurface.action, roomy && queueSurface.roomyAction).className,
               'text-muted-foreground/60 transition-colors',
               'hover:bg-hover hover:text-foreground',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
@@ -427,7 +539,13 @@ export function IconAction({
             )}
             onClick={onClick}
           >
-            <Icon className="h-3 w-3" />
+            <Icon
+              {...stylex.props(
+                roomy && (destructive ? queueSurface.removeGlyph : queueSurface.editGlyph)
+              )}
+              size={roomy ? 16 : 12}
+              strokeWidth={1.5}
+            />
           </button>
         }
       />

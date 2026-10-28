@@ -36,6 +36,7 @@ export const LODY_GIT_CRED_CONTEXT_TOKEN_ENV = 'LODY_GIT_CRED_CONTEXT_TOKEN';
 export const LODY_GIT_CRED_CONTEXT_FILE_ENV = 'LODY_GIT_CRED_CONTEXT_FILE';
 
 export type GitCredentialBrokerSessionContext = {
+  nativeRepositories?: readonly string[];
   sessionId: string;
   requesterUserId: string;
   machineId: string;
@@ -441,7 +442,10 @@ export class GitCredentialBroker {
     return Effect.acquireRelease(
       Effect.try({
         try: (): GitCredentialLease => {
-          const snapshot = Object.freeze({ ...context });
+          const snapshot = Object.freeze({
+            ...context,
+            nativeRepositories: Object.freeze([...(context.nativeRepositories ?? [])]),
+          });
           const contextToken = randomBytes(32).toString('hex');
           const file = this.getPinnedContextFilePath(contextToken);
           const allowLocalAuth = snapshot.requesterUserId === this.ownerUserId;
@@ -449,10 +453,19 @@ export class GitCredentialBroker {
             mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
             // Unique filename: publish completely before giving any caller the lease.
             try {
-              writeFileSync(file, JSON.stringify({ version: 1, contextToken, allowLocalAuth }), {
-                mode: 0o600,
-                flag: 'wx',
-              });
+              writeFileSync(
+                file,
+                JSON.stringify({
+                  version: 1,
+                  contextToken,
+                  allowLocalAuth,
+                  nativeRepositories: snapshot.nativeRepositories,
+                }),
+                {
+                  mode: 0o600,
+                  flag: 'wx',
+                }
+              );
             } catch (error) {
               removeFileIfExists(file);
               throw error;

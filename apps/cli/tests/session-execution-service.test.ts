@@ -1,3 +1,4 @@
+import { AcpStartupProcessError } from '../src/agent/acp-startup-monitor';
 import * as quotaRunner from '../src/agent/acp-runner';
 import { ProviderQuotaRefreshCache } from '../src/session/provider-quota-refresh-cache';
 import { createSessionBackend } from '@/session/session-backend';
@@ -174,7 +175,8 @@ const ensureSessionDocDefaults = <T>(
       if (roomId) await repo?.upsertDocMeta?.(roomId, patch);
       Object.assign(fixtureMeta, patch);
     };
-    target.waitUntilSynced ??= vi.fn(async () => {});
+    target.waitUntilSynced ??= vi.fn(async () => true);
+    target.flushLocalWrites ??= async () => {};
     target.getMetaState ??= readMeta;
     target.getSteerTurnStatuses ??= async () => (await readMeta())?.steerTurnStatuses;
     target.replaceSteerTurnStatuses ??= async (statuses: SessionMeta['steerTurnStatuses']) =>
@@ -368,6 +370,7 @@ const createBaseDeps = (
     )
   );
 
+  deps.workspaceDocument.getRemoteStreamsGeneration ??= () => undefined;
   return deps;
 };
 
@@ -1003,6 +1006,7 @@ describe('SessionExecutionService', () => {
       lastHandledUserMsgId: 'user-c',
       processingUserMsgId: undefined,
     });
+    await service.drainInboxExecutions();
     expect(deps.turnFinalization.onTurnOutcome).toHaveBeenCalledTimes(1);
     expect(deps.processMessageQueue).toHaveBeenCalledTimes(1);
     expect(service.getExecutionSnapshot(sessionId)).toMatchObject({ hasActiveTurn: false });
@@ -2479,6 +2483,7 @@ describe('SessionExecutionService', () => {
 
     expect(agentClient.prompt).toHaveBeenCalled();
     expect(history[0]?.status).toBe('handled');
+    await service.drainInboxExecutions();
     expect(onTurnOutcome).toHaveBeenCalledTimes(1);
   });
 
@@ -2576,7 +2581,8 @@ describe('SessionExecutionService', () => {
     inputAuthor?: SessionHistoryInput['author'];
     earlierInputAuthor?: SessionHistoryInput['author'];
     attempts?: number;
-    hasPromptOutputForTurn: boolean;
+    hasPromptEventsForTurn: boolean;
+    content?: boolean | 'unobservable';
     dispatchSource?: 'rpc' | 'crdt' | 'queue' | 'goal';
     promptFailure?: unknown;
     notificationAudience?: TurnResultAudience;
@@ -2684,8 +2690,12 @@ describe('SessionExecutionService', () => {
           });
         }),
       },
-      observePromptOutputForTurn: vi.fn(() => options.hasPromptOutputForTurn),
-      hasPromptOutputForTurn: vi.fn(() => options.hasPromptOutputForTurn),
+      observePromptContentForTurn: vi.fn(() =>
+        options.content === 'unobservable'
+          ? undefined
+          : (options.content ?? options.hasPromptEventsForTurn)
+      ),
+      hasPromptEventsForTurn: vi.fn(() => options.hasPromptEventsForTurn),
     });
 
     const service = new SessionExecutionService(deps);
@@ -2734,7 +2744,7 @@ describe('SessionExecutionService', () => {
     async ({ output, outcome }) => {
       const { notificationFacts, getHistory } = await runSilentPromptTurn({
         sessionId: 'notification-source',
-        hasPromptOutputForTurn: output,
+        hasPromptEventsForTurn: output,
       });
       expect(notificationFacts).toEqual([
         {
@@ -2759,7 +2769,7 @@ describe('SessionExecutionService', () => {
     } as const;
     const { notificationFacts } = await runSilentPromptTurn({
       sessionId: 'notification-child',
-      hasPromptOutputForTurn: true,
+      hasPromptEventsForTurn: true,
       notificationAudience: audience,
     });
     expect(notificationFacts).toEqual([
@@ -2778,7 +2788,7 @@ describe('SessionExecutionService', () => {
   it('publishes provider failure separately from successful completion', async () => {
     const { notificationFacts, getHistory } = await runSilentPromptTurn({
       sessionId: 'notification-failure',
-      hasPromptOutputForTurn: true,
+      hasPromptEventsForTurn: true,
       promptFailure: new Error('synthetic provider failure'),
     });
     expect(notificationFacts).toEqual([
@@ -2798,7 +2808,7 @@ describe('SessionExecutionService', () => {
   it('retains disconnected execution as unknown instead of claiming success', async () => {
     const { notificationFacts } = await runSilentPromptTurn({
       sessionId: 'notification-disconnected',
-      hasPromptOutputForTurn: true,
+      hasPromptEventsForTurn: true,
       promptFailure: new Error('Connection is disposed'),
     });
     expect(notificationFacts.map((fact) => fact.outcome)).toEqual([
@@ -2810,7 +2820,7 @@ describe('SessionExecutionService', () => {
     const attempts: TurnOutcomeFact[] = [];
     const { notificationFacts, getHistory, agentClient } = await runSilentPromptTurn({
       sessionId: 'notification-store-failure',
-      hasPromptOutputForTurn: true,
+      hasPromptEventsForTurn: true,
       onTurnOutcome: async (fact) => {
         attempts.push(fact);
         throw new Error('synthetic notification failure');
@@ -2826,7 +2836,7 @@ describe('SessionExecutionService', () => {
     const { deps, sessionDoc, notificationFacts, upsertDocMeta, agentClient, getHistory } =
       await runSilentPromptTurn({
         sessionId: 'session-silent-turn',
-        hasPromptOutputForTurn: false,
+        hasPromptEventsForTurn: false,
       });
 
     expect(agentClient.prompt).toHaveBeenCalled();
@@ -2852,7 +2862,7 @@ describe('SessionExecutionService', () => {
   it('publishes a single successful output fact', async () => {
     const { deps, getHistory, notificationFacts } = await runSilentPromptTurn({
       sessionId: 'session-output-turn',
-      hasPromptOutputForTurn: true,
+      hasPromptEventsForTurn: true,
     });
 
     expect(deps.recordChatFailure).not.toHaveBeenCalled();
@@ -2860,6 +2870,29 @@ describe('SessionExecutionService', () => {
     expect(notificationFacts).toHaveLength(1);
     expect(notificationFacts[0]?.outcome).toEqual({ kind: 'succeeded' });
   });
+
+  it.each([
+    {
+      content: false as const,
+      status: 'failed',
+      outcome: { kind: 'failed', code: 'no_agent_output' },
+    },
+    { content: 'unobservable' as const, status: 'handled', outcome: { kind: 'succeeded' } },
+  ])(
+    'settles content independently of replay evidence ($content)',
+    async ({ content, status, outcome }) => {
+      const result = await runSilentPromptTurn({
+        sessionId: 'independent-observations',
+        hasPromptEventsForTurn: true,
+        content,
+      });
+      expect(result.getHistory()[0]?.status).toBe(status);
+      expect(result.notificationFacts.map((fact) => fact.outcome)).toEqual([outcome]);
+      expect(
+        result.service.getExecutionSnapshot('independent-observations' as SessionId).hasActiveTurn
+      ).toBe(false);
+    }
+  );
 
   it.each(['agent', 'human'] as const)(
     'uses the exact %s-authored input for completion notifications',
@@ -2874,7 +2907,7 @@ describe('SessionExecutionService', () => {
       const { deps, notificationFacts, getHistory, getStatus, finalizationOwners } =
         await runSilentPromptTurn({
           sessionId: `session-notify-${kind}`,
-          hasPromptOutputForTurn: true,
+          hasPromptEventsForTurn: true,
           notificationAudience:
             kind === 'agent'
               ? { kind: 'agent', sessionId: 'sender-session' as SessionId, turnId: 'sender-turn' }
@@ -3373,9 +3406,9 @@ describe('SessionExecutionService', () => {
     expect(events.filter((event) => event === 'phase:finalizing')).toEqual(['phase:finalizing']);
   });
 
-  it.each([undefined] as const)(
-    'preserves the completion submission policy after a transport failure for %s dispatch',
-    async (dispatchSource) => {
+  it.each([true, false] as const)(
+    'retries a disconnected turn only with an observable empty event stream (observable=%s)',
+    async (observable) => {
       const sessionId = 'session-stale-acp' as SessionId;
       const acpSessionId = 'acp-stale' as ACPSessionId;
       const restoredAcpSessionId = 'acp-restored' as ACPSessionId;
@@ -3442,7 +3475,7 @@ describe('SessionExecutionService', () => {
           history = updater(history);
         }),
       });
-      const deps = createBaseDeps({});
+      const deps = createBaseDeps({ hasPromptEventsForTurn: observable ? () => false : undefined });
       const sessionManager = deps.sessionManager as unknown as {
         getSession: ReturnType<typeof vi.fn>;
         terminateSession: ReturnType<typeof vi.fn>;
@@ -3456,25 +3489,24 @@ describe('SessionExecutionService', () => {
       workspaceDocument.getOrCreateSessionDoc.mockResolvedValue(sessionDoc);
 
       const service = new SessionExecutionService(deps);
-      await service.continueSession(
-        {
-          type: 'session/chat',
-          sessionId,
-          machineId: 'machine-1',
-          workspaceId: 'workspace-1' as WorkspaceId,
-          project: undefined,
-          acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
-          userTurnId: 'turn-user-1',
-          userId: 'user-1',
-          userName: 'User',
-          userEmail: 'user@example.com',
-        },
-        dispatchSource ? { dispatchSource } : undefined
-      );
+      await service.continueSession({
+        type: 'session/chat',
+        sessionId,
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        project: undefined,
+        acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
+        userTurnId: 'turn-user-1',
+        userId: 'user-1',
+        userName: 'User',
+        userEmail: 'user@example.com',
+      });
 
       expect(service.getExecutionSnapshot(sessionId).hasActiveTurn).toBe(false);
-      expect(submittedSessions).toEqual([acpSessionId, restoredAcpSessionId]);
-      expect(history[0]?.status).toBe('handled');
+      expect(submittedSessions).toEqual(
+        observable ? [acpSessionId, restoredAcpSessionId] : [acpSessionId]
+      );
+      expect(history[0]?.status).toBe(observable ? 'handled' : 'failed');
     }
   );
 
@@ -6223,6 +6255,20 @@ describe('SessionExecutionService', () => {
       expectedReason: 'agent_disconnected',
       expectedMessage: 'The agent process disconnected unexpectedly. Please try again.',
       expectedTerminateForce: true,
+    },
+    {
+      name: 'startup transport failure with npm diagnostics',
+      error: new AcpStartupProcessError({
+        sessionId: 'synthetic-startup',
+        command: 'npx',
+        args: [],
+        stderrTail: 'npm error EBADDEVENGINES: requires Node >=22.23.4',
+        cause: new Error('ACP connection closed'),
+      }),
+      stage: 'agent-start',
+      expectedReason: 'turn_pre_prompt_failed',
+      expectedMessage:
+        'Starting the agent failed: [ACP_STARTUP_FAILED] ACP agent process failed before startup completed (command=npx): ACP connection closed; stderr tail: npm error EBADDEVENGINES: requires Node >=22.23.4',
     },
     {
       name: 'ordinary non-ACP failure',
@@ -9116,6 +9162,93 @@ describe('SessionExecutionService', () => {
     });
   });
 
+  describe('dead assistant turns', () => {
+    const setup = (userStatus: 'processing' | 'failed') => {
+      const upsertDocMeta = vi.fn(async (_room: string, _patch: Record<string, unknown>) => {});
+      const history: Array<Record<string, unknown>> = [
+        { id: 'user-dead', role: 'user', status: userStatus, items: [], timestamp: 't0' },
+        {
+          id: 'assistant:user-dead',
+          role: 'assistant',
+          userTurnId: 'user-dead',
+          items: [{ type: 'text', text: 'partial answer' }],
+          timestamp: 't1',
+        },
+      ];
+      const sessionDoc = withHistoryPort({
+        getHistory: vi.fn(() => history),
+        setStatus: vi.fn(async () => {}),
+        updateHistory: vi.fn(async (update: (value: typeof history) => typeof history) => {
+          update(history);
+        }),
+      });
+      const deps = createBaseDeps({
+        sessionManager: {
+          getSession: vi.fn(() => null),
+          getPendingSession: vi.fn(() => null),
+        } as unknown as SessionManager,
+        getActiveTurnId: vi.fn(() => undefined),
+        workspaceDocument: {
+          repo: {
+            upsertDocMeta,
+            getDocMeta: vi.fn(async () => ({
+              meta: { latestUserMsgId: 'user-dead', processingUserMsgId: 'user-dead' },
+            })),
+          },
+          getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+          updateAcpCapabilities: vi.fn(async () => {}),
+        } as unknown as LoroDocumentManager,
+      });
+      return { service: new SessionExecutionService(deps), history, upsertDocMeta, sessionDoc };
+    };
+
+    it('Stop closes an ordinary turn whose agent process is gone', async () => {
+      const { service, history, upsertDocMeta, sessionDoc } = setup('processing');
+
+      const result = await service.cancelSession({
+        type: 'session/cancel',
+        sessionId: 'session-dead' as SessionId,
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        turnId: 'assistant:user-dead',
+      });
+
+      expect(result).toEqual({ success: true });
+      expect(history[1]).toMatchObject({ finished: true, endedAt: expect.any(Number) });
+      expect(history[0]).toMatchObject({ status: 'canceled' });
+      expect(upsertDocMeta).toHaveBeenCalledWith('session-session-dead', {
+        lastHandledUserMsgId: 'user-dead',
+        processingUserMsgId: undefined,
+      });
+      expect(sessionDoc.setStatus).toHaveBeenCalledWith(SessionStatusFactory.idle());
+      expect(upsertDocMeta).toHaveBeenCalledWith('session-session-dead', {
+        lastCanceledTurn: undefined,
+      });
+    });
+
+    it('closes automatically only after the user input settled', async () => {
+      const owed = setup('processing');
+      // A processing input still owes its crash-recovery run on this entry.
+      await expect(
+        owed.service.closeDeadAssistantTurn('session-dead' as SessionId, {
+          requireSettledUserTurn: true,
+        })
+      ).resolves.toBe(false);
+      expect(owed.history[1]?.finished).toBeUndefined();
+
+      const failed = setup('failed');
+      await expect(
+        failed.service.closeDeadAssistantTurn('session-dead' as SessionId, {
+          requireSettledUserTurn: true,
+        })
+      ).resolves.toBe(true);
+      expect(failed.history[1]).toMatchObject({ finished: true });
+      // The settled outcome is kept, not rewritten as a cancellation.
+      expect(failed.history[0]).toMatchObject({ status: 'failed' });
+      expect(failed.upsertDocMeta).not.toHaveBeenCalled();
+    });
+  });
+
   it('keeps a newer queued turn pending when cancelling the currently running turn', async () => {
     const upsertDocMeta = vi.fn(async () => {});
     const sessionDoc = withHistoryPort({
@@ -10871,6 +11004,7 @@ describe('Operation Inbox execution boundary', () => {
       isArchived: false,
     };
     const repo = {
+      flush: async () => {},
       getDocMeta: async () => ({ meta }),
       upsertDocMeta: async (_id: string, patch: Partial<SessionMeta>) => {
         meta = { ...meta, ...patch };
@@ -11320,11 +11454,30 @@ describe('Operation Inbox execution boundary', () => {
       };
       expect(f.store.inbox.accept(old)).toBe(true);
       expect(f.store.inbox.begin(old, 'assistant:human-input')).toBe(true);
+      // The crashed run left its assistant entry open.
+      await f.doc.sessionData.commands.applyHistoryAction({
+        kind: 'upsert-turn',
+        turn: {
+          id: 'assistant:human-input',
+          role: 'assistant',
+          userTurnId: 'human-input',
+          timestamp: '2026-10-12T00:00:01Z',
+          items: [{ type: 'text', text: 'partial answer' }],
+          fileDiff: [],
+        },
+      });
       // Restart observation blocks the owner without manufacturing a release receipt.
       f.store.inbox.activate('workspace-1', 'owner');
       await expect(f.service.continueSession(f.message)).rejects.toBeInstanceOf(
         InboxExecutionBlocked
       );
+      // The rejected run settles its input, so nothing owns the leftover entry any more.
+      const backend = await createSessionBackend(f.doc);
+      expect((await backend.readTurn('human-input')).turn).toMatchObject({ status: 'failed' });
+      expect((await backend.readTurn('assistant:human-input')).turn).toMatchObject({
+        finished: true,
+        endedAt: expect.any(Number),
+      });
       expect(f.store.inbox.blockedExecutions('workspace-1', f.message.sessionId)).toMatchObject([
         { executionId: 'assistant:human-input' },
       ]);
@@ -11445,6 +11598,7 @@ describe('Operation Inbox execution boundary', () => {
       await f.wake();
       await summaries[2]!.promise;
       expect(promptCount).toBe(4);
+      await f.service.drainInboxExecutions();
       expect(facts).toEqual([
         expect.objectContaining({ audience: { kind: 'user' }, outcome: { kind: 'succeeded' } }),
       ]);
@@ -11604,6 +11758,111 @@ describe('Operation Inbox execution boundary', () => {
     }
   });
 
+  it('publishes unread and success only after finalization, release and history sync', async () => {
+    const finalizing = createDeferred<void>();
+    const finalized = createDeferred<void>();
+    const confirming = createDeferred<void>();
+    const synced = createDeferred<boolean>();
+    const f = inboxExecutionFixture(async () => ({ stopReason: 'end_turn' }));
+    let presence = false;
+    const facts: TurnOutcomeFact[] = [];
+    f.deps.startSessionActivePresence = () => {
+      presence = true;
+    };
+    f.deps.clearSessionActivePresence = () => {
+      presence = false;
+    };
+    f.deps.workspaceDocument.getRemoteStreamsGeneration = () => 1;
+    f.doc.waitUntilSynced = async () => {
+      confirming.resolve();
+      return synced.promise;
+    };
+    f.deps.turnFinalization.finalizeACPState = async (_id, turnId) => {
+      finalizing.resolve();
+      await finalized.promise;
+      await (
+        await createSessionBackend(f.doc)
+      ).applyHistoryAction({ kind: 'finish-assistant', turnId, endedAt: 100 });
+    };
+    f.deps.turnFinalization.onTurnOutcome = async (fact) => {
+      expect(presence).toBe(false);
+      facts.push(fact);
+    };
+    try {
+      await f.accept();
+      const running = f.service.continueSession(f.message, {
+        notificationAudience: { kind: 'user' },
+      });
+      await finalizing.promise;
+      expect(presence).toBe(true);
+      expect((await f.doc.getMetaState())?.lastMessageAt).toBeUndefined();
+      finalized.resolve();
+      await confirming.promise;
+      await running;
+      expect(presence).toBe(false);
+      expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
+      expect((await f.doc.getMetaState())?.lastMessageAt).toBeUndefined();
+      expect(facts).toEqual([]);
+      synced.resolve(true);
+      await f.service.drainInboxExecutions();
+      expect((await f.doc.getMetaState())?.lastMessageAt).toEqual(expect.any(Number));
+      expect(facts.map((fact) => fact.outcome)).toEqual([{ kind: 'succeeded' }]);
+    } finally {
+      finalized.resolve();
+      synced.resolve(true);
+      await f.close();
+    }
+  });
+
+  it('history finalization failure releases the slot and emits failure attention without unread success', async () => {
+    const f = inboxExecutionFixture(async () => ({ stopReason: 'end_turn' }));
+    const facts: TurnOutcomeFact[] = [];
+    f.deps.turnFinalization.finalizeACPState = async () => {
+      throw new Error('history storage unavailable');
+    };
+    f.deps.turnFinalization.onTurnOutcome = async (fact) => {
+      facts.push(fact);
+    };
+    try {
+      await f.accept();
+      await f.service.continueSession(f.message, { notificationAudience: { kind: 'user' } });
+      await f.service.drainInboxExecutions();
+      expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
+      expect(facts.map((fact) => fact.outcome.kind)).toEqual(['failed']);
+      expect((await f.doc.getMetaState())?.lastMessageAt).toBeUndefined();
+    } finally {
+      await f.close();
+    }
+  });
+
+  it('shutdown ends a pending sync waiter and late sync cannot publish completion', async () => {
+    const confirming = createDeferred<void>();
+    const synced = createDeferred<boolean>();
+    const f = inboxExecutionFixture(async () => ({ stopReason: 'end_turn' }));
+    const facts: TurnOutcomeFact[] = [];
+    f.deps.workspaceDocument.getRemoteStreamsGeneration = () => 1;
+    f.doc.waitUntilSynced = async () => {
+      confirming.resolve();
+      return synced.promise;
+    };
+    f.deps.turnFinalization.onTurnOutcome = async (fact) => {
+      facts.push(fact);
+    };
+    try {
+      await f.accept();
+      await f.service.continueSession(f.message, { notificationAudience: { kind: 'user' } });
+      await confirming.promise;
+      f.service.stopCompletionPublication();
+      await f.service.drainInboxExecutions();
+      synced.resolve(true);
+      expect(facts).toEqual([]);
+      expect((await f.doc.getMetaState())?.lastMessageAt).toBeUndefined();
+    } finally {
+      synced.resolve(true);
+      await f.close();
+    }
+  });
+
   it('releases the execution slot while a notification transport is still pending', async () => {
     const sending = createDeferred<void>();
     const delivered = createDeferred<void>();
@@ -11633,6 +11892,7 @@ describe('Operation Inbox execution boundary', () => {
   it('runs the next automatic batch while the previous batch notification is still sending', async () => {
     const sending = createDeferred<void>();
     const delivered = createDeferred<void>();
+    const secondSent = createDeferred<void>();
     const secondPrompt = createDeferred<void>();
     const secondBatchDone = createDeferred<void>();
     let prompts = 0;
@@ -11652,6 +11912,8 @@ describe('Operation Inbox execution boundary', () => {
       if (++sends === 1) {
         sending.resolve();
         await delivered.promise;
+      } else {
+        secondSent.resolve();
       }
     };
     try {
@@ -11662,6 +11924,7 @@ describe('Operation Inbox execution boundary', () => {
       await f.wake();
       await secondPrompt.promise;
       await secondBatchDone.promise;
+      await secondSent.promise;
       expect(sends).toBe(2);
       delivered.resolve();
       await f.service.drainInboxExecutions();
@@ -12106,6 +12369,7 @@ describe('Operation Inbox execution boundary', () => {
       for (let i = 0; i < 8; i++) f.add(`saved-${i}`, i === 0 ? 15 : 0);
       await f.accept();
       await f.service.continueSession(f.message, { notificationAudience: audience });
+      await f.service.drainInboxExecutions();
       expect(notificationFacts).toEqual([
         {
           scope: { workspaceId: 'workspace-1', recipientId: 'user-1' },
@@ -12450,11 +12714,12 @@ describe('Provider quota refresh', () => {
     ],
   };
 
-  function quotaHarness(query = true) {
+  function quotaHarness(query = true, overrides: Partial<AgentConfigMeta> = {}) {
     let config: AgentConfigMeta | null = createLaunchConfig({
       cliType: 'custom',
       agentType: 'example',
       env: {},
+      ...overrides,
     });
     const rows = new Map<string, unknown>();
     const deps = createBaseDeps({});
@@ -12475,6 +12740,9 @@ describe('Provider quota refresh', () => {
       rows,
       remove: () => {
         config = null;
+      },
+      change: () => {
+        if (config) config = { ...config, env: { OP_TOKEN: 'changed' } };
       },
     };
   }
@@ -12502,7 +12770,59 @@ describe('Provider quota refresh', () => {
     }
   });
 
-  it.each(['empty', 'failure', 'push', 'deleted', 'unsupported'] as const)(
+  it.each([
+    ['codex', 'OPENAI_API_KEY'],
+    ['claude', 'ANTHROPIC_BASE_URL'],
+    ['grok', 'XAI_API_KEY'],
+  ])(
+    'refreshes %s with tool env but preserves cached quota for account overrides',
+    async (agentType, accountKey) => {
+      const read = vi
+        .spyOn(quotaRunner, 'queryLocalAcpRateLimits')
+        .mockImplementation(async (options) => {
+          expect(options.agentConfigId).toBe(capabilityConfigId);
+          expect(options.env?.OP_TOKEN).toBe('synthetic');
+          return snapshot;
+        });
+      const status = vi
+        .spyOn(SessionExecutionService.prototype, 'getMachineAcpBinaryStatus')
+        .mockResolvedValue({
+          type: 'machine/acp-binary-status_response',
+          machineId: 'machine-1',
+          agentType,
+          success: true,
+          status: 'installed',
+        });
+      try {
+        const allowed = quotaHarness(true, {
+          cliType: 'builtin',
+          agentType,
+          env: { OP_TOKEN: 'synthetic' },
+        });
+        expect((await allowed.service.refreshProviderRateLimits(capabilityConfigId)).success).toBe(
+          true
+        );
+        const key = `${capabilityConfigId}/example`;
+        expect(allowed.rows.get(key)).toEqual(snapshot.rateLimits[0]);
+
+        const blocked = quotaHarness(true, {
+          cliType: 'builtin',
+          agentType,
+          env: { OP_TOKEN: 'synthetic', [accountKey]: 'synthetic' },
+        });
+        blocked.rows.set(key, 'previous');
+        expect((await blocked.service.refreshProviderRateLimits(capabilityConfigId)).success).toBe(
+          false
+        );
+        expect(blocked.rows.get(key)).toBe('previous');
+      } finally {
+        read.mockRestore();
+        status.mockRestore();
+      }
+    }
+  );
+
+  it.each(['empty', 'failure', 'push', 'deleted', 'changed', 'unsupported'] as const)(
     'preserves old quota on %s',
     async (mode) => {
       const pending = createDeferred<typeof snapshot>();
@@ -12522,6 +12842,7 @@ describe('Provider quota refresh', () => {
           harness.rows.set(key, 'newer-push');
         }
         if (mode === 'deleted') harness.remove();
+        if (mode === 'changed') harness.change();
         if (mode === 'failure') pending.reject(new Error('provider unavailable'));
         else pending.resolve(mode === 'empty' ? { rateLimits: [] } : snapshot);
         expect((await request).success).toBe(false);

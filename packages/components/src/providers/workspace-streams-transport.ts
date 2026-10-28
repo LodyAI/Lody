@@ -1,6 +1,4 @@
-import type {
-  RemoteCursorStore,
-} from '@loro-dev/streams-crdt';
+import type { RemoteCursorStore } from '@loro-dev/streams-crdt';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
 import { RepoSyncError, RepoTransportError } from 'loro-repo';
 import {
@@ -19,8 +17,14 @@ import {
   type StreamsRoomPayloadProtectionResolver,
 } from 'loro-repo/transport/streams';
 
-import { WorkspaceStreamsConfigurationError, type WorkspaceStreamsContent } from '@lody/shared/workspace-streams-content';
-export { WorkspaceStreamsConfigurationError, type WorkspaceStreamsContent } from '@lody/shared/workspace-streams-content';
+import {
+  WorkspaceStreamsConfigurationError,
+  type WorkspaceStreamsContent,
+} from '@lody/shared/workspace-streams-content';
+export {
+  WorkspaceStreamsConfigurationError,
+  type WorkspaceStreamsContent,
+} from '@lody/shared/workspace-streams-content';
 
 const { getLoroSyncDiagnostic } = createLoroSyncErrorTools({ RepoSyncError, RepoTransportError });
 
@@ -38,15 +42,17 @@ export type WorkspaceStreamsTransportOptions = {
   shardHostSuffix: string | undefined;
   /** Explicit transport policy, separate from workspace admission evidence. */
   content: WorkspaceStreamsContent;
+  bucketId?: string;
 };
 
 /** The key under which the transport checkpoints this workspace's Meta room. */
 export const getWorkspaceMetaStreamUrl = (
   workspaceId: WorkspaceId,
-  streamsBaseUrl: string
+  streamsBaseUrl: string,
+  bucketId: string = LORO_STREAMS_BUCKET_ID
 ): string =>
   createLoroStreamUrl({
-    bucketId: LORO_STREAMS_BUCKET_ID,
+    bucketId,
     streamId: getLoroMetaStreamId(workspaceId),
     baseUrl: streamsBaseUrl,
   });
@@ -61,7 +67,8 @@ export const createWorkspaceStreamsTransport = (
   }
   if (
     content?.mode === 'protected' &&
-    (typeof content.namespace !== 'string' ||
+    (!options.bucketId ||
+      typeof content.namespace !== 'string' ||
       content.namespace.length === 0 ||
       typeof content.resolve !== 'function' ||
       typeof content.snapshotUpload?.canUpload !== 'function' ||
@@ -82,7 +89,7 @@ export const createWorkspaceStreamsTransport = (
         });
       }
     },
-    bucketId: LORO_STREAMS_BUCKET_ID,
+    bucketId: options.bucketId ?? LORO_STREAMS_BUCKET_ID,
     metaStreamId: getLoroMetaStreamId(options.workspaceId),
     docStreamId: (docId) => getLoroStreamIdForDocId(options.workspaceId, docId),
     flockDocStreamId: (flockDocId) => flockDocId,

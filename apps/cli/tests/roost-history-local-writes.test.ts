@@ -3,13 +3,24 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { Identity, decodeJson } from '@loro-dev/roost';
+import { Identity, decodeBatch, decodeJson } from '@loro-dev/roost';
+import {
+  planAgentHistoryMutation,
+  prepareReplacement,
+  type SessionHistoryInput,
+} from '@lody/shared';
 import {
   fromApplicationJson,
   toApplicationJson,
   applicationJsonText,
 } from '@loro-dev/roost/lody-history';
-import { roostContentPatches, stageRoostContent } from '../src/session/roost-content-patches';
+import {
+  agentReceiptPut,
+  coalesceAgentTextAppends,
+  contentPathKey,
+  roostContentPatches,
+  stageRoostContent,
+} from '../src/session/roost-content-patches';
 import { createRoostHistoryReader } from '@lody/shared/session-data';
 import { createRoostReadPort } from '../src/session/roost-history-port';
 import {
@@ -20,6 +31,11 @@ import {
   encodeRoostHistoryChange,
   decodeRoostHistoryChange,
 } from '../src/session/roost-history-change-codec';
+import {
+  createRoostMessageState,
+  projectRoostMessageState,
+  roostMessageStatePatches,
+} from '../src/session/roost-message-state';
 
 const assistantContent = (text: string, finished = false) =>
   fromApplicationJson({
@@ -30,6 +46,277 @@ const assistantContent = (text: string, finished = false) =>
   });
 
 describe('local Roost history writes', () => {
+  it('persists a moved long state patch without copying text and recovers its receipt after reopen', async () => {
+    const { RoostNativeClient } = await import('@loro-dev/roost-node');
+    const directory = await mkdtemp(join(tmpdir(), 'lody-roost-state-move-'));
+    const seed = new Uint8Array(32).fill(74);
+    const options = {
+      dbPath: join(directory, 'history.db'),
+      seed,
+      allowedOwners: [Identity.fromSeed(seed).owner()],
+      maxQueuedRequests: 16,
+      maxQueuedBytes: 8 * 1024 * 1024,
+    };
+    let client = new RoostNativeClient(options);
+    try {
+      await client.ready;
+      let stream = client.stream('state-move');
+      const primary = { id: 'assistant', text: 'baseline', finished: true };
+      const primaryId = '01'.repeat(16);
+      const state = createRoostMessageState(primary, primaryId, {
+        ...primary,
+        text: primary.text + 'long🙂🚀'.repeat(4096),
+        finished: false,
+      });
+      const anchor = state.patches.find((patch) => patch.kind === 'appendText');
+      const flag = state.patches.find((patch) => patch !== anchor);
+      if (!anchor || !flag) throw new Error('Expected independent state patches');
+      const before = { ...state, patches: [flag, anchor] };
+      const next = { ...state, patches: [anchor, flag] };
+      const created = await stream.create([], applicationJsonText({ content: before }));
+      const id = created.updates[0]?.turnId;
+      if (!id) throw new Error('Expected state turn');
+      const ops = roostMessageStatePatches(before, next);
+      const receipt = agentReceiptPut(
+        {
+          kind: 'publication',
+          businessId: primary.id,
+          segmentId: `agent:${'ab'.repeat(32)}`,
+        },
+        'cd'.repeat(32)
+      );
+      const writes = [{ kind: 'edit' as const, turnId: id, expectedNextSeq: 1n, ops }];
+      const commitOptions = {
+        expectedEventCursor: 1n,
+        indexPuts: [receipt],
+        receiptChecks: [receipt],
+      };
+      await stream.writeBatch(writes, commitOptions);
+      const updates = await stream.exportUpdates(id, 1n, BigInt(ops.length));
+      expect(updates.byteLength).toBeLessThan(2048);
+      expect((await stream.writeBatch(writes, commitOptions)).replayed).toEqual([true]);
+      await client.close();
+      client = new RoostNativeClient(options);
+      await client.ready;
+      stream = client.stream('state-move');
+      const reopened = await stream.readTurn(id);
+      if (reopened.kind !== 'found') throw new Error('Expected reopened state');
+      const content: unknown = JSON.parse(reopened.turn.contentJson).content;
+      expect(content).toEqual(next);
+      expect(projectRoostMessageState(primary, primaryId, content)).toEqual({
+        ...primary,
+        text: primary.text + 'long🙂🚀'.repeat(4096),
+        finished: false,
+      });
+      expect((await stream.writeBatch(writes, commitOptions)).replayed).toEqual([true]);
+      expect(await stream.exportUpdates(id, 1n, BigInt(ops.length))).toEqual(updates);
+    } finally {
+      await client.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each([false, true])(
+    'keeps a parsed thought split through receipt retry, export and reopen (float fields: %s)',
+    async (floats) => {
+      const { RoostNativeClient } = await import('@loro-dev/roost-node');
+      const directory = await mkdtemp(join(tmpdir(), 'lody-roost-thought-split-'));
+      const seed = new Uint8Array(32).fill(73);
+      const options = {
+        dbPath: join(directory, 'history.db'),
+        seed,
+        allowedOwners: [Identity.fromSeed(seed).owner()],
+        maxQueuedRequests: 16,
+        maxQueuedBytes: 8 * 1024 * 1024,
+      };
+      let client = new RoostNativeClient(options);
+      const initial: SessionHistoryInput = {
+        id: 'synthetic-assistant',
+        role: 'assistant',
+        timestamp: '2026-10-25T00:00:00.000Z',
+        items: [
+          {
+            type: 'tool_call',
+            toolCallId: 'synthetic-tool',
+            status: 'completed',
+            title: 'Synthetic output',
+            rawOutput: {
+              text: 'tool output'.repeat(128),
+              safe: Number.MAX_SAFE_INTEGER,
+              unicode: '\u0000\n🙂🚀',
+              ownKeys: JSON.parse('{"__proto__":{"kept":true}}'),
+              ...(floats ? { fraction: 0.25, large: 1e21, tiny: 1e-7 } : {}),
+            },
+          },
+          { type: 'text', text: '' },
+        ],
+      };
+      const event = (text: string) => ({
+        kind: 'notification' as const,
+        value: {
+          sessionId: 'synthetic-acp',
+          update: {
+            sessionUpdate: 'agent_message_chunk' as const,
+            content: { type: 'text' as const, text },
+          },
+        },
+      });
+      const plan = (before: SessionHistoryInput, text: string) => {
+        const planned = planAgentHistoryMutation([before], [event(text)], undefined, {
+          targetAssistantEntryId: initial.id,
+        });
+        const after = planned.history[0];
+        if (!after) throw new Error('Expected synthetic assistant');
+        const hints = coalesceAgentTextAppends(planned.textAppends, initial.id);
+        return { after: prepareReplacement(before, after), hints, changes: planned.changes };
+      };
+      const body = Array.from({ length: 2048 }, (_, i) => `body-${i}🙂🚀\n`).join('');
+      const opened = plan(initial, `\n<thinking>\n${body}`);
+      const openingOps = roostContentPatches(initial, opened.after, opened.hints, opened.changes);
+      const stored = stageRoostContent(initial, openingOps, opened.hints);
+      if (!stored) throw new Error('Expected staged opening');
+      const closed = plan(stored, '\n</thinking>\nVisible tail 🚀');
+      const ops = roostContentPatches(stored, closed.after, closed.hints, closed.changes);
+      expect(stageRoostContent(stored, ops, closed.hints)).toEqual(closed.after);
+      expect(closed.after.items).toEqual([
+        initial.items[0],
+        { type: 'text', text: '\n' },
+        { type: 'thought', text: `\n${body}\n` },
+        { type: 'text', text: '\nVisible tail 🚀' },
+      ]);
+      try {
+        await client.ready;
+        let stream = client.stream('thought-split');
+        const created = await stream.create([], applicationJsonText({ content: initial }));
+        const id = created.updates[0]?.turnId;
+        if (!id) throw new Error('Expected native turn');
+        await stream.edit(id, 1n, openingOps);
+        const seq = 1n + BigInt(openingOps.length);
+        const digest = createHash('sha256').update('synthetic-close-notification').digest('hex');
+        const receipt = agentReceiptPut(
+          { kind: 'publication', businessId: initial.id, segmentId: `agent:${digest}` },
+          digest
+        );
+        const writes = [{ kind: 'edit' as const, turnId: id, expectedNextSeq: seq, ops }];
+        const commitOptions = {
+          expectedEventCursor: seq,
+          indexPuts: [receipt],
+          receiptChecks: [receipt],
+        };
+        const committed = await stream.writeBatch(writes, commitOptions);
+        expect(committed.updates).toHaveLength(ops.length);
+        expect(committed.through).toBe(seq + BigInt(ops.length));
+        const appendedFrames = await stream.exportUpdates(id, seq, BigInt(ops.length));
+        expect(decodeBatch(appendedFrames)).toHaveLength(ops.length);
+        // Exported retained operations contain only the new delimiters/tail and
+        // scalar edits, not another copy of the previously streamed 30+ KiB body.
+        expect(appendedFrames.byteLength).toBeLessThan(2048);
+        expect((await stream.writeBatch(writes, commitOptions)).replayed).toEqual([true]);
+        expect(await stream.exportUpdates(id, seq, BigInt(ops.length))).toEqual(appendedFrames);
+        await stream.seal(id, seq + BigInt(ops.length));
+        const exported = await stream.exportTurns([id]);
+        await client.close();
+        client = new RoostNativeClient(options);
+        await client.ready;
+        stream = client.stream('thought-split');
+        const reopened = await stream.readTurn(id);
+        if (reopened.kind !== 'found') throw new Error('Expected reopened split');
+        expect(JSON.parse(reopened.turn.contentJson).content).toEqual(closed.after);
+        expect(reopened.turn.sealed).not.toBeNull();
+        expect((await stream.writeBatch(writes, commitOptions)).replayed).toEqual([true]);
+        expect(await stream.exportTurns([id])).toEqual(exported);
+        const peerClient = new RoostNativeClient({
+          ...options,
+          dbPath: join(directory, 'peer.db'),
+        });
+        try {
+          await peerClient.ready;
+          const peer = peerClient.stream('thought-split');
+          await peer.importBatch(exported);
+          expect(await peer.readTurn(id)).toEqual(reopened);
+        } finally {
+          await peerClient.close();
+        }
+      } finally {
+        await client.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it('restricts text relocation to exact unique tail evidence and preserves unknown fields', () => {
+    const body = 'body🙂🚀'.repeat(1024);
+    const prefix = { type: 'future_item', opaque: { kept: true } };
+    const previous = `🧭header\n${body}`;
+    const value = `${previous}\nnew tail`;
+    const before = {
+      items: [prefix, { type: 'text', text: previous, opaque: { retained: ['value'] } }],
+      unknown: { retained: 'outside the authored items' },
+    };
+    const target = { type: 'thought', text: `${body}\n`, opaque: { retained: ['value'] } };
+    const after = {
+      ...before,
+      items: [
+        prefix,
+        { type: 'text', text: 'new prefix' },
+        target,
+        { type: 'text', text: 'new tail' },
+      ],
+    };
+    const key = contentPathKey([
+      { key: 'content' },
+      { key: 'items' },
+      { index: 1n },
+      { key: 'text' },
+    ]);
+    const hints = new Map([[key, { previous, value, text: '\nnew tail' }]]);
+    const saved = structuredClone(before);
+    const ops = roostContentPatches(before, after, hints);
+    expect(stageRoostContent(before, ops, hints)).toEqual(after);
+    expect(before).toEqual(saved);
+    const insertedBytes = (edits: typeof ops) =>
+      edits.reduce(
+        (sum, op) =>
+          sum +
+          Buffer.byteLength(
+            'text' in op
+              ? op.text
+              : 'valuesJson' in op
+                ? op.valuesJson
+                : 'contentJson' in op
+                  ? op.contentJson
+                  : ''
+          ),
+        0
+      );
+    expect(insertedBytes(ops)).toBeLessThan(1024);
+    expect(insertedBytes(roostContentPatches(before, after))).toBeGreaterThan(
+      Buffer.byteLength(body)
+    );
+    for (const invalid of [
+      new Map([[key, { previous: 'stale', value, text: '\nnew tail' }]]),
+      new Map([[key, { previous, value: previous, text: '\nnew tail' }]]),
+    ]) {
+      const fallback = roostContentPatches(before, after, invalid);
+      expect(fallback).toEqual(roostContentPatches(before, after));
+      expect(stageRoostContent(before, fallback)).toEqual(after);
+    }
+    const ambiguous = { ...after, items: [...after.items, target] };
+    expect(roostContentPatches(before, ambiguous, hints)).toEqual(
+      roostContentPatches(before, ambiguous)
+    );
+    const unrelated = { other: before.items },
+      next = { other: after.items };
+    expect(roostContentPatches(unrelated, next, hints)).toEqual(
+      roostContentPatches(unrelated, next)
+    );
+    for (const opaque of [{ value: '\uD800' }, { ['\uDC00']: 'value' }]) {
+      const invalidBefore = { ...before, unknown: opaque },
+        invalidAfter = { ...after, unknown: opaque };
+      expect(() => roostContentPatches(invalidBefore, invalidAfter, hints)).toThrow();
+    }
+  });
+
   it('appends and seals assistant output, merges late segments, and records permission separately', async () => {
     const [{ RoostNativeClient }, { NodeLodyHistory }] = await Promise.all([
       import('@loro-dev/roost-node'),

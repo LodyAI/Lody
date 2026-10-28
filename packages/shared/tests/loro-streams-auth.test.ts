@@ -117,6 +117,8 @@ describe('loro streams auth helpers', () => {
     await expect(provider.getToken()).resolves.toBe('jwt-1');
 
     expect(provider.getGatewayBaseUrl()).toBe('https://streams-api.example.com');
+    // A synchronous cached read must retire its credential reader before close.
+    await provider.close();
   });
 
   it('keeps auth plus diagnostic failure through the Legacy protocol callback', async () => {
@@ -1154,6 +1156,29 @@ function retainedRawOwners(cause: Cause.Cause<unknown>): Array<LoroStreamsTokenR
 }
 
 describe('native shared Streams token ownership', () => {
+  it('retires a reader cancelled before it starts when a native provider closes', async () => {
+    const scope = Effect.runSync(Scope.make());
+    const provider = await Effect.runPromise(
+      nativeProvider(
+        makeLoroStreamsTokenWebPorts({
+          credential: Effect.succeed('synthetic-credential'),
+          fetchImpl: async () => Response.json({ token: 'native-cached', expiresIn: 900 }),
+        })
+      ).pipe(Effect.provideService(Scope.Scope, scope))
+    );
+    const legacy = createLoroStreamsTokenProviderLegacy({ provider, executor: Effect });
+    expect(await legacy.getToken()).toBe('native-cached');
+    expect(await legacy.getToken()).toBe('native-cached');
+    const pending = legacy.getToken().then(
+      () => 'settled',
+      () => 'cancelled'
+    );
+    await legacy.close();
+    await pending;
+    expect((await Effect.runPromise(provider.health)).activeReads).toBe(0);
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+  });
+
   effectIt.effect(
     'borrowed Legacy auth shares the native producer and leaves its application executor alive',
     () =>
@@ -1898,6 +1923,43 @@ describe('native shared Streams token ownership', () => {
         yield* provider.retryCleanup;
         yield* provider.close;
       })
+  );
+
+  effectIt.effect('Legacy invalidation is idempotent after a retained close failure', () =>
+    Effect.gen(function* () {
+      const http = tokenHttpFixture();
+      const provider = yield* nativeProvider(
+        makeLoroStreamsTokenWebPorts({
+          credential: Effect.succeed('auth'),
+          fetchImpl: http.fetchImpl,
+          cleanupTimeoutMs: 50,
+        }),
+        { ...tokenOptions, cleanupTimeoutMs: 100 }
+      );
+      const application = ManagedRuntime.make(Layer.succeed(Clock.Clock, yield* Clock.Clock));
+      yield* Effect.addFinalizer(() => application.disposeEffect);
+      yield* Effect.addFinalizer(() => Effect.sync(() => http.finish()));
+      const legacy = createLoroStreamsTokenProviderLegacy({ provider, executor: application });
+      const waiter = yield* Effect.forkChild(Effect.exit(provider.getToken()));
+      yield* http.started;
+      const closing = yield* Effect.forkChild(Effect.exit(Effect.promise(() => legacy.close())));
+      yield* http.aborted;
+      yield* TestClock.adjust(150);
+      expect(Exit.isFailure(yield* Fiber.join(closing))).toBe(true);
+      expect(http.alive()).toBe(true);
+      legacy.invalidate();
+      legacy.invalidate();
+      expect(http.alive()).toBe(true);
+      http.finish();
+      yield* Effect.promise(() => legacy.retryCleanup());
+      legacy.invalidate();
+      yield* Effect.promise(() => legacy.close());
+      expect((yield* provider.health).state).toBe('closed');
+      expect(Exit.isFailure(yield* Fiber.join(waiter))).toBe(true);
+      expect(
+        yield* Effect.promise(() => application.runPromise(Effect.succeed('application-alive')))
+      ).toBe('application-alive');
+    })
   );
 
   effectIt.effect(

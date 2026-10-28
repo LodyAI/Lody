@@ -1,7 +1,18 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { appendLedgerHistory } from '../src/lib/e2ee-ledger-history';
+import { Effect, Result } from 'effect';
+import {
+  signLedgerSnapshot,
+  snapshotTrustFromView,
+  verifyLedgerSnapshot,
+  exportVerifiedState,
+  extendLedger,
+  hashRecordBytes,
+} from '@lody/e2ee-core/protocol';
+import { envelopeFixture } from '../../e2ee-core/test/keys/fixture';
+import { ledgerOverview } from '../src/lib/e2ee-ledger-overview';
+import { appendLedgerHistory, hostLedgerHistory, bytesToHex } from '../src/lib/e2ee-ledger-history';
 import {
   compareVerificationCode,
   groupHash,
@@ -13,16 +24,16 @@ import {
 const vector = JSON.parse(
   readFileSync(join(import.meta.dirname, '../../e2ee-core/test/ledger-v1-vector.json'), 'utf8')
 ) as { anchor: string; records: { hex: string }[] };
-const head = 'e7fe1ef3dfaa4e1001fd1a4df3a1af79f6c5d6cbc72b11502372b6030b813668';
+const head = '2d479a23a222cdb7c843845aa83ee36c9a6a773638db6db7bb0b57ac182628a3';
 const history = appendLedgerHistory(
   null,
   {
     workspaceId: 'w',
     genesisHash: vector.anchor,
-    checkpoint: { headHash: head, length: 9 },
+    checkpoint: { headHash: head, length: 11 },
     startIndex: 0,
     nextCursor: null,
-    recordsHex: vector.records.slice(0, 9).map((record) => record.hex),
+    recordsHex: vector.records.slice(0, 11).map((record) => record.hex),
   },
   { workspaceId: 'w', genesisHash: vector.anchor, localPin: vector.anchor }
 );
@@ -31,13 +42,13 @@ const code = ledgerVerificationCode(history);
 
 describe('ledger verification code', () => {
   it('is the core comparison digest at the verified head and round-trips through its QR', () => {
-    expect(code.version).toBe(9);
+    expect(code.version).toBe(11);
     expect(code.headHash).toBe(head);
     expect(code.stateDigest).toMatch(/^[0-9a-f]{64}$/);
     expect(code.stateDigest).not.toBe(head);
-    expect(code.payload).toBe(`lody-ledger:1:9:${head}:${code.stateDigest}`);
+    expect(code.payload).toBe(`lody-ledger:1:11:${head}:${code.stateDigest}`);
     expect(parseVerificationCode(code.payload)).toEqual({
-      version: 9,
+      version: 11,
       headHash: head,
       stateDigest: code.stateDigest,
     });
@@ -50,8 +61,8 @@ describe('ledger verification code', () => {
       version: 1234,
       stateDigest: code.stateDigest,
     });
-    expect(parseVerificationCode(`Ledger code (version 9)\n${grouped}`)).toEqual({
-      version: 9,
+    expect(parseVerificationCode(`Ledger code (version 11)\n${grouped}`)).toEqual({
+      version: 11,
       stateDigest: code.stateDigest,
     });
     expect(parseVerificationCode('e7fe 1ef3')).toBeNull();
@@ -60,14 +71,20 @@ describe('ledger verification code', () => {
   it('matches only the same digest at the same version', () => {
     expect(compareVerificationCode(history, { stateDigest: code.stateDigest })).toEqual({
       kind: 'match',
-      version: 9,
+      version: 11,
     });
-    expect(compareVerificationCode(history, { version: 9, stateDigest: 'ab'.repeat(32) })).toEqual({
-      kind: 'mismatch',
-    });
+    expect(compareVerificationCode(history, { version: 11, stateDigest: 'ab'.repeat(32) })).toEqual(
+      {
+        kind: 'mismatch',
+      }
+    );
     // The right head with a different state is still a mismatch.
     expect(
-      compareVerificationCode(history, { version: 9, headHash: head, stateDigest: 'ab'.repeat(32) })
+      compareVerificationCode(history, {
+        version: 11,
+        headHash: head,
+        stateDigest: 'ab'.repeat(32),
+      })
     ).toEqual({ kind: 'mismatch' });
     expect(compareVerificationCode(history, { stateDigest: 'ab'.repeat(32) })).toEqual({
       kind: 'unknown',
@@ -92,4 +109,71 @@ describe('ledger verification code', () => {
       version: 12,
     });
   });
+});
+
+it('displays genuine snapshot state with sparse absolute records without inventing a prefix or losing its safety code', async () => {
+  const fixture = envelopeFixture(),
+    origin = fixture.view();
+  const signed = await Effect.runPromise(
+    signLedgerSnapshot({ signer: fixture.owner.signer, ledger: () => Effect.succeed(origin) })
+  );
+  const trust = Result.getOrThrow(
+    snapshotTrustFromView(origin, fixture.owner.publicKey, signed.headSignature)
+  );
+  const snapshot = Result.getOrThrow(verifyLedgerSnapshot({ snapshot: signed.snapshot, trust }));
+  fixture.append([5, fixture.phone.raw]);
+  const suffix = fixture.records()[2]!;
+  const view = Result.getOrThrow(
+    extendLedger(snapshot, [suffix], { head: hashRecordBytes(suffix), length: 3 })
+  );
+  const retained = Result.getOrThrow(exportVerifiedState(view));
+  const state = view.inspectState();
+  const received = {
+    status: {
+      workspaceId: 'synthetic',
+      genesisHash: bytesToHex(view.genesis.toBytes()),
+      length: view.length,
+      headHash: bytesToHex(view.head.toBytes()),
+      stateDigest: bytesToHex(retained.stateDigest.toBytes()),
+      position: 'opaque-suffix',
+      epoch: state.epoch.number,
+      rotationRequired: state.epoch.rotationRequired,
+      deviceKind: 'personal' as const,
+      hasCurrentKey: true,
+      continuityPending: false,
+    },
+    stateHex: bytesToHex(retained.bytes),
+    recordsHex: [bytesToHex(fixture.genesisRecord), bytesToHex(suffix)],
+    recordPositions: [0, 2],
+  };
+  const loaded = hostLedgerHistory(received);
+  expect(loaded.records.map((record) => record.index)).toEqual([0, 2]);
+  const comparison = ledgerVerificationCode(loaded);
+  expect(comparison.headHash).toBe(bytesToHex(view.head.toBytes()));
+  expect(compareVerificationCode(loaded, comparison)).toEqual({ kind: 'match', version: 3 });
+  expect(
+    compareVerificationCode(loaded, {
+      version: 2,
+      headHash: bytesToHex(origin.head.toBytes()),
+      stateDigest: '00'.repeat(32),
+    })
+  ).toEqual({ kind: 'theirs-older', version: 2, prefixConfirmed: false });
+  expect(
+    compareVerificationCode(loaded, {
+      version: 1,
+      headHash: bytesToHex(view.genesis.toBytes()),
+      stateDigest: '00'.repeat(32),
+    })
+  ).toEqual({ kind: 'theirs-older', version: 1, prefixConfirmed: true });
+  expect(ledgerOverview(loaded).events[1]).toMatchObject({
+    type: 'revokeDevice',
+    actor: { membershipId: '0a'.repeat(16) },
+    owner: { membershipId: '0a'.repeat(16) },
+  });
+  expect(() => hostLedgerHistory({ ...received, recordPositions: [0, 0] })).toThrow(
+    'incomplete-local'
+  );
+  expect(() => hostLedgerHistory({ ...received, recordPositions: undefined })).toThrow(
+    'incomplete-local'
+  );
 });

@@ -179,6 +179,7 @@ each port's JSDoc):
 - Errors are `LocalStoreError` with `reason`: `storage` (I/O; retry may help),
   `corrupt`, `closed` (owner Scope closed), `conflict` (a precondition no
   longer holds), `capacity` (a bounded store is full) or `missing`.
+- SQLite setup and pin reads classify definite file corruption as `corrupt`; busy, locked and permission failures remain `storage`. No failed read resets a pin.
 - Stores never decide anything. Rows are re-validated by the workflow that
   reads them, and no stored byte grants authority.
 - Journals keep originals and results until the application acknowledges

@@ -20,6 +20,10 @@ records the minimal notification change and rejected storage experiments. Ordina
 Roost KV values already have independent compression; check the current source
 and retained-byte/page breakdown before proposing the same optimization again.
 
+The [producer text rewrite fix](../notes/proposed/bug-fix/2026-10-25-roost-producer-text-rewrites.md)
+records the isolated published-0.3.0 comparison for tag splits and state-patch
+movement. Keep these measurements separate from Native format experiments.
+
 ## Prepare once per source revision
 
 Use separate source clones with their own dependency directories for baseline

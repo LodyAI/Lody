@@ -1,3 +1,5 @@
+import { acceptSessionUserTurn } from '../src/lib/session-send-admission';
+import type { WorkspaceRuntime } from '../src/atoms/runtime';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { LoroDoc } from 'loro-crdt';
@@ -62,7 +64,9 @@ vi.mock('../src/lib/electron-session-file-sender', () => ({
 }));
 
 const cleanup: Array<() => Promise<void>> = [];
-beforeEach(() => { vi.stubGlobal('indexedDB', new IDBFactory()); });
+beforeEach(() => {
+  vi.stubGlobal('indexedDB', new IDBFactory());
+});
 afterEach(async () => {
   for (const close of cleanup.splice(0)) await close();
   Object.assign(local, { enabled: false, machineId: null, files: [], fail: false });
@@ -154,7 +158,7 @@ function fixture() {
       dispatchListeners.add(check);
       check();
     });
-  return { pending, turns, metas, delivered };
+  return { runtime, pending, turns, metas, delivered };
 }
 
 function until(
@@ -476,3 +480,43 @@ it.each(['remote', 'no-capability', 'canceled', 'file-limit', 'local-failure'])(
     expect(held.attachments[0]?.source).toBeInstanceOf(Blob);
   }
 );
+
+it('admits an already prepared local file in an encrypted workspace without uploading it', async () => {
+  const f = fixture();
+  const entry = {
+    id: 'prepared-local',
+    role: 'user',
+    userId: 'account',
+    timestamp: '2026-10-27T00:00:00Z',
+    items: [{ type: 'text', text: 'local file' }],
+    fileDiff: [],
+    inputConfig: { inputBlocks: [{ type: 'text', text: 'local file' }] },
+  };
+  const file = {
+    type: 'file',
+    transport: 'local',
+    fileId: '/local/private.txt',
+    fileName: 'private.txt',
+    mimeType: 'text/plain',
+    sizeBytes: 7,
+    sha256: 'a'.repeat(64),
+    textPreview: false,
+    uploadedAt: 1,
+    machineId: MACHINE,
+  };
+  const result = await acceptSessionUserTurn(
+    { ...f.runtime, workspaceId: 'workspace', contentMode: 'e2ee' } as unknown as WorkspaceRuntime,
+    SESSION,
+    entry as SessionHistory,
+    { kind: 'dispatch' },
+    undefined,
+    undefined,
+    [{ id: 'local', kind: 'file', name: 'private.txt', ready: file }] as never
+  );
+  expect(result).toBe('written');
+  expect(f.turns()[0]?.items).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ type: 'file', transport: 'local', fileId: '/local/private.txt' }),
+    ])
+  );
+});

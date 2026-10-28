@@ -41,6 +41,7 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
 - `./host-keys` is host-only and remains unconnected until the crypto and host
   adapters are reviewed. CLI assembly receives machine identity only; never grant
   it personal management operations. No generic private export or arbitrary signing.
+- Credential-confirmed member removal is the explicit retention exception: match the originating identity, drain only that workspace and erase its local content/keys. Ordinary failures never authorize deletion.
 - Failure, scope close, logout and ordinary cache cleanup must not delete identity
   keys. Preserve uncertain failure reasons and writes. Personal devices never use file protection; machine-only custody may select file protection at first creation under the owner-approved M1 policy, never on reopen.
 - Native fixtures use random UUIDs and isolated test keychains only. Verify exact
@@ -62,3 +63,15 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
 - Control-only encrypted workspaces must not acquire ordinary content/execution
   transports. Before changing creation, mode admission, cache cleanup or ledger UI,
   read the [bootstrap guide](../../.agents/docs/e2ee-workspace-bootstrap.md).
+
+- Optional `memberProfiles` is a display directory scoped to the live account and
+  workspace. Resolve its crypto user IDs through verified ledger members; it cannot
+  grant permissions, pin keys, identify the creator, or block ledger availability.
+
+- `e2eeMachineScope` is an explicit single-workspace machine-service composition.
+  It has no ordinary Streams/account capabilities or account catalog bootstrap.
+  Fleet admits only that encrypted workspace and pinned genesis; device-auth discovery
+  and the encrypted runtime own access and protected Streams tokens respectively.
+- Optional `runtime.readIdentity` returns only workspace ID/genesis from the expected
+  account's retained verified ledger, releasing its temporary read before replying.
+  Missing capability fails closed; never fall back to unleased `status`.

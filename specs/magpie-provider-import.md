@@ -47,6 +47,18 @@ The local daemon must advertise `magpieImport` v1 and `providerSetup`; Pi additi
 requires `builtinPi`. Successful partial writes survive failure; retry skips providers
 already bound to the same gateway and runtime. No existing provider is overwritten.
 
+## Headless CLI import
+
+Explicit `lody agent-config import-magpie` execution authorizes the same fixed
+provider mappings on the invoking server, without desktop confirmation. It never
+selects a remote machine, including through environment defaults. `--gateway`
+accepts a loopback origin; `--link` uses the existing bounded public envelope.
+An optional target subset can only narrow the offered set. All selected runtime
+capabilities are checked before writing. Existing providers and pending setup IDs
+are reused; failed setups may be explicitly retried by rerunning the command.
+Local durability and publication are reported separately; queued setup is not a
+successful model request. Desktop link handling retains its confirmation boundary.
+
 ## Runtime ownership
 
 The renderer generates only known environment mappings and persists through the

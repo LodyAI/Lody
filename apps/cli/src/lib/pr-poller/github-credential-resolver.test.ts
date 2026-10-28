@@ -60,6 +60,16 @@ function makeResolver(overrides: {
 }
 
 describe('GitHubCredentialResolver', () => {
+  it('uses ambient credentials for local members even when managed tokens exist', async () => {
+    const { resolver } = makeResolver({
+      harvestGhToken: async () => ({ outcome: 'token', token: 'native-token' }),
+      fetchGhUserId: async () => '7',
+    });
+    expect((await resolver.resolve('owner/local', true))?.token).toBe('native-token');
+    expect((await resolver.resolve('owner/managed', false))?.token).toBe('managed-token');
+    const missing = makeResolver({ harvestGhToken: async () => ({ outcome: 'not-authed' }) });
+    expect(await missing.resolver.resolve('owner/local', true)).toBeNull();
+  });
   it('prefers the managed workspace token over ambient gh auth', async () => {
     const harvestGhToken = vi.fn(async () => ({ outcome: 'token' as const, token: 'gh-token' }));
     const tokenManager = makeTokenManager('managed-token');

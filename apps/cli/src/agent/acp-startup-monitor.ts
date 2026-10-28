@@ -64,6 +64,7 @@ export interface StartupMonitoredProcess {
 
 export interface AcpStartupMonitor {
   abortPromise: Promise<never>;
+  resolveError(error: unknown): unknown;
   dispose(): void;
 }
 
@@ -94,6 +95,7 @@ export function createAcpStartupMonitor(
   }
 ): AcpStartupMonitor {
   let active = true;
+  let processFailure: AcpStartupProcessExitError | AcpStartupProcessError | undefined;
   let unsubscribeExit: (() => void) | null = null;
   let unsubscribeError: (() => void) | null = null;
 
@@ -116,16 +118,15 @@ export function createAcpStartupMonitor(
         return;
       }
       cleanup();
-      reject(
-        new AcpStartupProcessExitError({
-          sessionId: options.sessionId,
-          command: options.command,
-          args: options.args,
-          exitCode,
-          signal,
-          stderrTail: getStderrTail(),
-        })
-      );
+      processFailure = new AcpStartupProcessExitError({
+        sessionId: options.sessionId,
+        command: options.command,
+        args: options.args,
+        exitCode,
+        signal,
+        stderrTail: getStderrTail(),
+      });
+      reject(processFailure);
     });
 
     unsubscribeError = processHandle.onError((error) => {
@@ -133,20 +134,53 @@ export function createAcpStartupMonitor(
         return;
       }
       cleanup();
-      reject(
-        new AcpStartupProcessError({
-          sessionId: options.sessionId,
-          command: options.command,
-          args: options.args,
-          stderrTail: getStderrTail(),
-          cause: error,
-        })
-      );
+      processFailure = new AcpStartupProcessError({
+        sessionId: options.sessionId,
+        command: options.command,
+        args: options.args,
+        stderrTail: getStderrTail(),
+        cause: error,
+      });
+      reject(processFailure);
     });
   });
 
   return {
     abortPromise,
+    resolveError(error) {
+      // The ACP reader can reject on stdout EOF before the process exit event.
+      // Retain diagnostics already received without waiting for another event or
+      // changing protocol/authentication/cancellation errors.
+      if (
+        !(error instanceof Error) ||
+        error.name === 'AbortError' ||
+        typeof (error as { code?: unknown }).code === 'number' ||
+        isAcpStartupProcessFailure(error) ||
+        !isAcpTransportDisconnectMessage(error.message)
+      ) {
+        return error;
+      }
+      if (processFailure) return processFailure;
+      const stderrTail = options.getStderrTail?.().trim();
+      return stderrTail
+        ? new AcpStartupProcessError({ ...options, stderrTail, cause: error })
+        : error;
+    },
     dispose: cleanup,
   };
+}
+
+export function isAcpStartupProcessFailure(error: unknown): boolean {
+  return error instanceof AcpStartupProcessExitError || error instanceof AcpStartupProcessError;
+}
+
+export function isAcpTransportDisconnectMessage(message: string): boolean {
+  const text = message.toLowerCase();
+  return (
+    text.includes('connection is disposed') ||
+    text.includes('acp connection closed') ||
+    text.includes('not ready for writing') ||
+    text.includes('processtransport') ||
+    (text.includes('process') && text.includes('not ready'))
+  );
 }

@@ -1,3 +1,4 @@
+import type { ProjectLocalMemberProbe, SessionProjectRun } from './workspace-project';
 import type {
   MachineId,
   ACPSessionConfig,
@@ -69,6 +70,7 @@ export interface SessionCreateRequest {
   machineId: MachineId;
   workspaceId: WorkspaceId;
   project?: ProjectRef;
+  projectRun?: SessionProjectRun;
   meta?: SessionStartMeta;
   acpSessionConfig: ACPSessionConfig;
   worktreeSetup?: WorktreeSetupScriptConfig;
@@ -903,7 +905,14 @@ export interface SessionHistoryWriteResponse {
 }
 
 // Local CLI control (Electron -> local CLI) message subsets
+export type DshProvidersRequest = { type: 'machine/dsh-providers'; machineId: MachineId };
+export type DshProvidersResponse = {
+  type: 'machine/dsh-providers_response';
+  providers: Array<{ id: string; name: string }>;
+};
+
 export type LocalSessionControlRequest =
+  | DshProvidersRequest
   | SessionCreateRequest
   | SessionChatRequest
   | SessionCancelRequest
@@ -929,6 +938,7 @@ export type LocalSessionControlRequest =
   | SessionPreviewStatusRequest;
 
 export type LocalSessionControlResponse =
+  | DshProvidersResponse
   | SessionCreateAck
   | SessionCreateResponse
   | SessionChatAck
@@ -1101,6 +1111,7 @@ export type LocalProjectControlRequest =
       machineId: MachineId;
       workspaceId: WorkspaceId;
       rootPath: string;
+      inspect?: boolean;
     }
   | {
       type: 'local-project/list-roots';
@@ -1309,6 +1320,7 @@ export type LocalProjectControlResponse =
         name: string;
         rootPath: string;
         alreadyRegistered: boolean;
+        inspection?: ProjectLocalMemberProbe;
       }
     >
   | LocalProjectControlOkResponse<'local-project/list-roots', LocalProjectBrowseRootsResult>

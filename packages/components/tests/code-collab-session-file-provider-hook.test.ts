@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
+import { localProbeResultAtom } from '../src/atoms/local-probe';
 
 import { createElement, useEffect, type ReactNode } from 'react';
 import { act } from 'react';
@@ -174,17 +176,59 @@ describe('materializeCodeCollabV2FileIndexForFileProvider', () => {
     });
     expect(state?.files.map((entry) => entry.path)).toEqual(['.git', 'docs', 'large', 'README.md']);
   });
+
+  it('shows a member root at its directory and rebuilds when the mounts change', () => {
+    const fileIndex = {
+      'api/main.go': true as const,
+      '\0lody-root:member:docs/guide.md': {
+        kind: 'file' as const,
+        change: { diff: [2, 0] as [number, number] },
+      },
+    };
+    const mounts = [{ rootId: 'member:docs', memberId: 'docs', mountPath: 'docs' }] as never;
+    const state = materializeCodeCollabV2FileIndexForFileProvider({
+      fileIndex,
+      revision: 1,
+      sourceState: 'live-collaborative',
+      mounts,
+    });
+    expect(state?.files.map((entry) => entry.path)).toEqual(['api/main.go', 'docs/guide.md']);
+    expect(state?.allChanges).toEqual({ 'docs/guide.md': { diff: [2, 0] } });
+    // Same revision, new mounts: the display paths must not be reused.
+    const renamed = materializeCodeCollabV2FileIndexForFileProvider({
+      fileIndex,
+      revision: 1,
+      sourceState: 'live-collaborative',
+      previous: state,
+      mounts: [{ rootId: 'member:docs', memberId: 'docs', mountPath: 'notes' }] as never,
+    });
+    expect(renamed?.files.map((entry) => entry.path)).toContain('notes/guide.md');
+  });
 });
 
 describe('useCodeCollabSessionFileProvider', () => {
-  it.each([null, '/original/workspace'])(
-    'opens a desktop file while the daemon index is unavailable (root %s)',
-    async (workspaceRoot) => {
+  it.each([
+    [null, false],
+    ['/original/workspace', false],
+    [null, true],
+    ['/original/workspace', true],
+  ] as const)(
+    'opens a desktop file while the daemon index is unavailable (root %s, encrypted %s)',
+    async (workspaceRoot, encrypted) => {
       (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
       vi.stubGlobal('window', Object.assign(window, { __LODY_ELECTRON__: true }));
       const store = createStore();
       const sessionId = 'offline-session' as SessionId;
       const machineId = 'offline-machine' as MachineId;
+      if (encrypted) {
+        store.set(localProbeResultAtom, { ok: true, machineId });
+        store.set(workspaceContentModeAtom, {
+          accountId: 'user',
+          workspaceSlug: 'encrypted',
+          workspaceId: 'workspace-1',
+          descriptor: { contentMode: 'e2ee', contentModeVersion: 1 },
+        } as never);
+      }
       const ownerSessionId = 'offline-parent' as SessionId;
       store.set(
         runtimeAtom,
@@ -250,7 +294,7 @@ describe('useCodeCollabSessionFileProvider', () => {
         )
       );
       await flushMicrotasks(8);
-      expect(updates.at(-1)?.status).toBe('error');
+      expect(updates.at(-1)?.status).toBe(encrypted ? 'unavailable' : 'error');
       await expect(updates.at(-1)?.provider?.openFile('/absolute/notes.md')).resolves.toMatchObject(
         {
           status: 'ready',

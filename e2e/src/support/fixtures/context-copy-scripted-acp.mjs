@@ -40,8 +40,16 @@ function promptText(prompt) {
 }
 
 function classifyPrompt(text) {
-  if (text.includes('You generate titles for coding sessions.')) return 'title';
-  return Object.entries(prompts).find(([, prompt]) => text.includes(prompt))?.[0] ?? 'unknown';
+  // A recreated ACP session receives history before the current request. Old
+  // markers in that history must not choose the response to the new Turn.
+  const currentRequestMarker = '=== Current Request ===\n';
+  const currentRequestStart = text.lastIndexOf(currentRequestMarker);
+  const currentRequest =
+    currentRequestStart < 0 ? text : text.slice(currentRequestStart + currentRequestMarker.length);
+  if (currentRequest.includes('You generate titles for coding sessions.')) return 'title';
+  return (
+    Object.entries(prompts).find(([, prompt]) => currentRequest.includes(prompt))?.[0] ?? 'unknown'
+  );
 }
 
 async function emitText(client, sessionId, text) {

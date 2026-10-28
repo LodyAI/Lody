@@ -1,3 +1,4 @@
+import { E2eeSettingsIcon } from './settings/e2ee/security-state';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { buildSessionLink } from '@lody/shared/session-link';
 import { jsonValueEqual } from '@/lib/json-value-equal';
@@ -33,13 +34,11 @@ import {
   resolveSessionHistoryBackendKind,
   type LocalProjectId,
   type LocalProjectMeta,
-  type LocalProjectWorktreeCleanupPreflightResult,
   type MachineId,
   type PrStatus,
   type SessionId,
   type SessionMeta,
   type SessionStatus,
-  type WorkspaceId,
 } from '@lody/shared';
 import { useTranslation } from 'react-i18next';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -101,6 +100,7 @@ import {
   chatScopeAtom,
   chatsCollapsedAtom,
   githubWorktreesSectionCollapsedAtom,
+  projectGroupOrderAtom,
   localProjectCollapseStateAtom,
   localProjectOrderAtom,
   moveLocalProjectOrder,
@@ -128,6 +128,7 @@ import { pickLocalizedReleaseNotes, readUpdateBannerState } from '@/lib/electron
 import { useElectronUpdaterState } from '@/hooks/use-electron-updater-state';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useOpenSettings } from '@/hooks/use-open-settings';
+import { canManageWorkspaceProject, useWorkspaceProjects } from '@/hooks/use-workspace-projects';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useVisibleSessionMetas } from '@/hooks/use-visible-session-metas';
 import { useReportVisibleSessionsForEagerSync } from '@/hooks/use-report-visible-sessions-for-eager-sync';
@@ -138,9 +139,7 @@ import {
   type LoroSidebarWorkspace,
 } from '@/components/loro-sidebar';
 import { SidebarFilterPopover } from '@/components/sidebar-filter-popover';
-import { Dialog } from '@/ui/dialog';
 import { Button } from '@lody/ui/button';
-import { Checkbox } from '@lody/ui/checkbox';
 import { ContextMenu } from '@lody/ui/context-menu';
 import { Tooltip } from '@lody/ui/tooltip';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
@@ -150,9 +149,14 @@ import {
   SessionList,
   shallowEqualExceptKeys,
   type SessionListPullRequestOpen,
+  getProjectGroupSessionGroupKey,
+  type SessionListProjectGroupState,
   type SessionListRepoMove,
   type SessionListRepoState,
+  type SessionListRow,
 } from '@/components/session-list';
+import { projectEditorRequestAtom } from '@/atoms/project-editor';
+import { placeProjectGroups } from '@/lib/project-group-placement';
 import {
   buildChildSessionsByParent,
   buildSessionListRows,
@@ -183,6 +187,7 @@ import {
   GripVertical,
   MoreHorizontal,
   Settings2,
+  Folders,
   Pencil,
   Pin,
   PinOff,
@@ -194,7 +199,7 @@ import { Spinner } from '@lody/ui/spinner';
 import { toast } from '@/lib/toast';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { useStableNow } from '@/hooks/use-stable-now';
-import { writePreferredWorkspaceSlug } from '@/lib/workspace';
+import { useSidebarWorkspaceNavigation } from './sidebar-workspaces';
 import {
   SessionOpenedByTreeRow,
   SessionPrIcon,
@@ -214,6 +219,8 @@ import {
   withSessionSendStates,
   type SessionRowOpenedByTreeSlot,
   type SidebarGroupActivity,
+  SIDEBAR_HOVER_ACTION_CLASS,
+  SIDEBAR_MENU_TRIGGER_OPEN_CLASS,
   SIDEBAR_ROW_LIST_CLASS,
   SIDEBAR_UNSENT_TITLE_CLASS,
 } from '@/components/sidebar-row-shared';
@@ -264,34 +271,14 @@ export type LoroAppSidebarProps = {
   overlay?: boolean;
 };
 
-export type PendingLocalProjectRemoval = {
+type LocalProjectRemovalRequest = {
   machineId: MachineId;
   localProjectId: LocalProjectId;
   name: string;
-  pathLabel?: string | null;
   originalRootPath?: string | null;
-  conversationCount: number;
-  runningSessionCount: number;
 };
-type LocalProjectRemovalRequest = Omit<
-  PendingLocalProjectRemoval,
-  'conversationCount' | 'runningSessionCount'
->;
 
 export type LocalProjectRemovalState = 'removing' | 'waiting_for_device';
-
-export type RemoveLocalProjectDialogProps = {
-  open: boolean;
-  target: PendingLocalProjectRemoval | null;
-  isRemote: boolean;
-  machineName?: string | null;
-  deviceOnline: boolean;
-  canCleanupWorktrees: boolean;
-  isRemoving: boolean;
-  onOpenChange: (open: boolean) => void;
-  onPreflightCleanup: () => Promise<LocalProjectWorktreeCleanupPreflightResult>;
-  onConfirm: (options: { cleanupWorktrees: boolean }) => void;
-};
 
 type PendingSessionShare = {
   sessionId: string;
@@ -302,209 +289,6 @@ type PendingSessionShare = {
 const DOCS_LINK_FALLBACK_ORIGIN = 'https://lody.ai';
 const SIDEBAR_RELATIVE_TIME_REFRESH_MS = 30_000;
 const EMPTY_SESSION_SHARING_BY_ID: ReadonlyMap<string, SessionSharingState> = new Map();
-
-export function RemoveLocalProjectDialog({
-  open,
-  target,
-  isRemote,
-  machineName,
-  deviceOnline,
-  canCleanupWorktrees,
-  isRemoving,
-  onOpenChange,
-  onPreflightCleanup,
-  onConfirm,
-}: RemoveLocalProjectDialogProps) {
-  const { t } = useTranslation();
-  const [cleanupWorktrees, setCleanupWorktrees] = useState(false);
-  const [preflight, setPreflight] = useState(
-    null as LocalProjectWorktreeCleanupPreflightResult | null
-  );
-  const [preflightError, setPreflightError] = useState(null as string | null);
-  const [isPreflighting, setIsPreflighting] = useState(false);
-  const preflightGeneration = useRef(0);
-
-  useEffect(() => {
-    preflightGeneration.current += 1;
-    setCleanupWorktrees(false);
-    setPreflight(null);
-    setPreflightError(null);
-    setIsPreflighting(false);
-  }, [open, target?.localProjectId]);
-
-  const setCleanup = useCallback(
-    async (checked: boolean) => {
-      const generation = ++preflightGeneration.current;
-      setCleanupWorktrees(checked);
-      setPreflight(null);
-      setPreflightError(null);
-      if (!checked) return;
-      setIsPreflighting(true);
-      try {
-        const result = await onPreflightCleanup();
-        if (preflightGeneration.current === generation) setPreflight(result);
-      } catch (error) {
-        if (preflightGeneration.current === generation) {
-          setPreflightError(error instanceof Error ? error.message : String(error));
-        }
-      } finally {
-        if (preflightGeneration.current === generation) setIsPreflighting(false);
-      }
-    },
-    [onPreflightCleanup]
-  );
-
-  const cleanupBlocked = cleanupWorktrees && (isPreflighting || !preflight);
-  const device =
-    machineName?.trim() ||
-    t('sidebar.localProjects.remove.remoteFallbackDevice', 'the other device');
-
-  return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Content className="sm:max-w-lg">
-        <Dialog.Header>
-          <Dialog.Title>
-            {t('sidebar.localProjects.remove.title', 'Remove “{{name}}” from Lody?', {
-              name: target?.name ?? '',
-            })}
-          </Dialog.Title>
-          <Dialog.Description>
-            {isRemote
-              ? t('sidebar.localProjects.remove.remoteDescription', { device })
-              : t(
-                  'sidebar.localProjects.remove.description',
-                  'This removes the project from Lody.'
-                )}
-            {isRemote && !deviceOnline ? ` ${t('sidebar.localProjects.remove.offline')}` : null}
-          </Dialog.Description>
-        </Dialog.Header>
-
-        <div className={cn(SIDEBAR_ROW_TEXT_CLASS, 'space-y-4 text-muted-foreground')}>
-          <div className="space-y-1">
-            <p className="text-foreground/85">
-              {target && target.conversationCount > 0
-                ? t('sidebar.localProjects.remove.archiveDescription', {
-                    count: target.conversationCount,
-                  })
-                : t(
-                    'sidebar.localProjects.remove.archiveDescriptionEmpty',
-                    'Any conversations in this project will move to Archive.'
-                  )}
-            </p>
-            {target && target.runningSessionCount > 0 ? (
-              <p>
-                {t('sidebar.localProjects.remove.runningSessionsSummary', {
-                  count: target.runningSessionCount,
-                })}
-              </p>
-            ) : null}
-          </div>
-
-          <div className="rounded-lg bg-muted/60 px-3.5 py-3">
-            <p className="font-medium text-foreground/90">
-              {t(
-                'sidebar.localProjects.remove.originalDirectorySafe',
-                'Lody never deletes the original project folder or its files.'
-              )}
-            </p>
-            <p className={cn(SIDEBAR_HELPER_TEXT_CLASS, 'mt-1 break-all font-mono')}>
-              {(target?.pathLabel ?? target?.name) || ''}
-            </p>
-          </div>
-
-          <div className="rounded-lg border border-border/70 px-3.5 py-3">
-            <label className="flex items-start gap-3">
-              <Checkbox
-                className="mt-0.5"
-                checked={cleanupWorktrees}
-                disabled={!canCleanupWorktrees || isRemoving}
-                onCheckedChange={(checked) => void setCleanup(checked)}
-              />
-              <span>
-                <span className="block font-medium text-foreground">
-                  {t(
-                    'sidebar.localProjects.remove.cleanupWorktrees',
-                    'Also delete session worktrees created by Lody'
-                  )}
-                </span>
-                <span className={cn(SIDEBAR_HELPER_TEXT_CLASS, 'mt-1 block')}>
-                  {canCleanupWorktrees
-                    ? t(
-                        'sidebar.localProjects.remove.cleanupWorktreesHelper',
-                        'Only clean worktrees are deleted. Worktrees with changes stay on disk.'
-                      )
-                    : t(
-                        'sidebar.localProjects.remove.cleanupUnavailable',
-                        'Connect the device to inspect worktrees. You can still remove the project.'
-                      )}
-                </span>
-              </span>
-            </label>
-
-            {cleanupWorktrees ? (
-              <div className={cn(SIDEBAR_HELPER_TEXT_CLASS, 'mt-3 border-t pt-3')}>
-                {isPreflighting ? (
-                  <p className="flex items-center gap-2">
-                    <Spinner className="h-3.5 w-3.5" />
-                    {t(
-                      'sidebar.localProjects.remove.checkingWorktrees',
-                      'Checking each worktree for changes…'
-                    )}
-                  </p>
-                ) : preflightError ? (
-                  <p className="text-destructive">{preflightError}</p>
-                ) : preflight ? (
-                  <div className="space-y-2">
-                    <p>
-                      {t('sidebar.localProjects.remove.cleanWorktreesSummary', {
-                        count: preflight.clean.length,
-                      })}
-                    </p>
-                    {preflight.dirty.length > 0 ? (
-                      <div className="rounded-md bg-amber-500/10 p-2.5 text-amber-800 dark:text-amber-300">
-                        <p className="font-medium">
-                          {t('sidebar.localProjects.remove.dirtyWorktreesSummary', {
-                            count: preflight.dirty.length,
-                          })}
-                        </p>
-                        <p className="mt-1 break-words">
-                          {preflight.dirty.map((item) => item.title).join(', ')}
-                        </p>
-                      </div>
-                    ) : null}
-                    {preflight.failed.length > 0 ? (
-                      <p className="text-muted-foreground">
-                        {t('sidebar.localProjects.remove.inspectFailedSummary', {
-                          count: preflight.failed.length,
-                        })}
-                      </p>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        </div>
-
-        <Dialog.Footer>
-          <Button variant="secondary" onClick={() => onOpenChange(false)} disabled={isRemoving}>
-            {t('common.cancel', 'Cancel')}
-          </Button>
-          <Button
-            variant="destructive"
-            disabled={isRemoving || cleanupBlocked}
-            onClick={() => onConfirm({ cleanupWorktrees })}
-          >
-            {isRemoving ? <Spinner className="h-4 w-4" /> : null}
-            {isRemoving
-              ? t('common.processing', 'Processing...')
-              : t('sidebar.localProjects.remove.confirm', 'Remove project')}
-          </Button>
-        </Dialog.Footer>
-      </Dialog.Content>
-    </Dialog.Root>
-  );
-}
 
 function getDocsLinkOrigin(): string {
   const configuredSiteUrl = import.meta.env.VITE_SITE_URL?.trim();
@@ -1097,6 +881,8 @@ export type LocalProjectItemProps = {
   onNavigateProject: (machineId: MachineId, localProjectId: string) => void;
   onNewChatInProject?: (machineId: MachineId, localProjectId: string) => void;
   onOpenProjectSettings?: (machineId: MachineId, localProjectId: string) => void;
+  /** Opens the project editor seeded with this folder, to add more repositories. */
+  onEditProject?: (machineId: MachineId, localProjectId: string, name: string) => void;
   onRevealProject?: (rootPath: string) => void;
   onArchiveProjectChats?: (sessionIds: string[]) => void;
   onNavigateSession: (sessionId: string, tabSessionId?: string) => void;
@@ -1124,19 +910,8 @@ export type LocalProjectItemProps = {
   dragHandle?: ReactNode;
 };
 
-const hoverActionClassName = cn(
-  'inline-flex h-5 w-5 items-center justify-center rounded-sm',
-  'text-muted-foreground/70 transition-[opacity,background-color,color] duration-100',
-  'opacity-0 pointer-events-none',
-  'group-hover:opacity-100 group-hover:pointer-events-auto',
-  'group-data-[menu-open]:opacity-100 group-data-[menu-open]:pointer-events-auto',
-  'hover:text-foreground hover:bg-muted/30 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/60'
-);
-
-// The trigger itself stays pressed-looking while its menu is open, not just the
-// row around it. Only the ⋯ opens a menu — the compose button beside it does not.
-const menuTriggerOpenClassName =
-  'group-data-[menu-open]:bg-muted/30 group-data-[menu-open]:text-foreground';
+const hoverActionClassName = SIDEBAR_HOVER_ACTION_CLASS;
+const menuTriggerOpenClassName = SIDEBAR_MENU_TRIGGER_OPEN_CLASS;
 
 /**
  * Folded-group status for local-project Sessions: each one counted by the mark
@@ -1156,6 +931,20 @@ function summarizeLocalSessionsActivity(
     });
   }
   return summarizeSidebarGroupActivity(rows);
+}
+
+/** Two folded groups' marks as one, for a machine that folds both. */
+function addSidebarGroupActivity(
+  left: SidebarGroupActivity,
+  right: SidebarGroupActivity
+): SidebarGroupActivity {
+  return {
+    failed: left.failed + right.failed,
+    waiting: left.waiting + right.waiting,
+    working: left.working + right.working,
+    sending: left.sending + right.sending,
+    unread: left.unread + right.unread,
+  };
 }
 
 const LOCAL_PROJECT_SELECTION_PROP_KEYS: ReadonlySet<string> = new Set(['selectedSessionId']);
@@ -1200,6 +989,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   onNavigateProject,
   onNewChatInProject,
   onOpenProjectSettings,
+  onEditProject,
   onRevealProject,
   onArchiveProjectChats,
   onNavigateSession,
@@ -1320,10 +1110,12 @@ export const LocalProjectItem = memo(function LocalProjectItem({
     [sessionsForProject]
   );
   const revealPath = onRevealProject && formattedPath ? formattedPath : null;
+  const editProjectLabel = t('sidebar.localProjects.editProject', 'Edit project…');
   const showProjectMenu =
     !isMobile &&
     (canRemoveProject ||
       Boolean(onOpenProjectSettings) ||
+      Boolean(onEditProject) ||
       Boolean(revealPath) ||
       Boolean(onArchiveProjectChats));
   const showNewChatButton = Boolean(onNewChatInProject) && projectCanNavigate && !isMobile;
@@ -1512,6 +1304,16 @@ export const LocalProjectItem = memo(function LocalProjectItem({
           </Tooltip.Root>
           {showProjectMenu ? (
             <ContextMenu.Content className="min-w-[180px]">
+              {onEditProject && projectCanNavigate ? (
+                <ContextMenu.Item
+                  icon={Folders}
+                  onClick={() => {
+                    onEditProject(machineId, project.id, project.name);
+                  }}
+                >
+                  {editProjectLabel}
+                </ContextMenu.Item>
+              ) : null}
               {onOpenProjectSettings ? (
                 <ContextMenu.Item
                   icon={Settings2}
@@ -1555,7 +1357,6 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                       machineId,
                       localProjectId: project.id,
                       name: project.name,
-                      pathLabel: formattedPath,
                       originalRootPath: project.rootPath,
                     });
                   }}
@@ -1710,6 +1511,8 @@ export const hasWorkspaceSidebarTopContent = (
   showGithubWorktrees: boolean
 ): boolean => localProjectSectionCount > 0 || showGithubWorktrees;
 
+const EMPTY_REPO_STATES: SessionListRepoState[] = [];
+
 function VisibleSidebarEagerSync({
   sessions,
   allActiveSessions,
@@ -1788,6 +1591,21 @@ export function LoroAppSidebar({
 
   const { organizations, activeOrganization, switchOrganization } = useOrganization();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const navigateWorkspace = useCallback(
+    (slug: string) => {
+      void router.navigate({ to: '/$workspaceName/chat', params: { workspaceName: slug } });
+    },
+    [router]
+  );
+  const workspaceNavigation = useSidebarWorkspaceNavigation({
+    encryptedAccountId: runtime?.contentMode === 'e2ee' ? runtime.accountId : null,
+    organizations,
+    switchOrganization,
+    setContext: setWorkspaceContext,
+    navigate: navigateWorkspace,
+    close: closeMobileDrawer,
+  });
+
   const runtimeInitFailure = useAtomValue(workspaceRuntimeInitFailureAtom);
   const docMetaScope = useAtomValue(docMetaCacheScopeAtom);
   const organizationsReady = Array.isArray(organizations);
@@ -1956,8 +1774,7 @@ export function LoroAppSidebar({
   const sessionSidebarCodeChangesOnly = useAtomValue(sessionSidebarCodeChangesOnlyAtom);
   const { archiveSession, markSessionUnread, setSessionPinned, updateSessionTitle } =
     useSessionActions();
-  const { removeLocalProject, preflightLocalProjectRemoval, getRemoveLocalProjectImpact } =
-    useRemoveLocalProject();
+  const { removeLocalProject } = useRemoveLocalProject();
   const presenceStates = useAtomValue(lodyPresenceStatesAtom);
   const presenceNowMs = useAtomValue(lodyPresenceNowMsAtom);
 
@@ -2098,9 +1915,6 @@ export function LoroAppSidebar({
     t,
   ]);
 
-  const [pendingLocalProjectRemoval, setPendingLocalProjectRemoval] =
-    useState<PendingLocalProjectRemoval | null>(null);
-  const [isRemovingLocalProject, setIsRemovingLocalProject] = useState(false);
   // Rebuilt on every presence tick; keep the previous map while no status
   // changed, or every sidebar row is rebuilt and re-rendered several times a second.
   const liveSessionStatusesRef = useRef<Map<string, SessionStatus> | null>(null);
@@ -2144,7 +1958,9 @@ export function LoroAppSidebar({
 
   const tasks = useMemo(() => {
     const sourceSessions = sessionsListLoading ? [] : sessions;
-    const filteredSessions = sourceSessions.filter((session) => session.project?.kind !== 'local');
+    const filteredSessions = sourceSessions.filter(
+      (session) => session.project?.kind !== 'local' || session.projectRun !== undefined
+    );
     return buildSessionListRows(
       filteredSessions,
       {
@@ -2179,8 +1995,20 @@ export function LoroAppSidebar({
     userId,
   ]);
 
-  const chatSessions = useMemo(() => tasks.filter((task) => !task.repoFullName), [tasks]);
-  const repoSessions = useMemo(() => tasks.filter((task) => Boolean(task.repoFullName)), [tasks]);
+  const chatSessions = useMemo(
+    () => tasks.filter((task) => !task.repoFullName && !task.projectGroup),
+    [tasks]
+  );
+  const repoSessions = useMemo(
+    () => tasks.filter((task) => Boolean(task.repoFullName) && !task.projectGroup),
+    [tasks]
+  );
+  const { projects: workspaceProjects } = useWorkspaceProjects();
+  const projectGroupTasks = useMemo(() => tasks.filter((task) => task.projectGroup), [tasks]);
+  const projectGroupSessions = useMemo(
+    () => projectGroupTasks.filter((task) => !task.isPinned),
+    [projectGroupTasks]
+  );
   const workspaceChatSessions = useMemo(
     () => chatSessions.filter((task) => !task.isPinned),
     [chatSessions]
@@ -2327,47 +2155,33 @@ export function LoroAppSidebar({
     }
   }, [handleNavigateToProject, runtime, t]);
 
-  const handleConfirmRemoveLocalProject = useCallback(
-    async (options: { cleanupWorktrees: boolean }) => {
-      const pending = pendingLocalProjectRemoval;
-      if (!pending || isRemovingLocalProject) return;
+  const handleRequestRemoval = useCallback(
+    async (pending: LocalProjectRemovalRequest) => {
+      const removed = await removeLocalProject({
+        machineId: pending.machineId,
+        localProjectId: pending.localProjectId,
+        projectName: pending.name,
+        originalRootPath: pending.originalRootPath ?? undefined,
+      });
+      if (!removed) return;
 
-      setIsRemovingLocalProject(true);
-      try {
-        const removed = await removeLocalProject(
-          {
-            machineId: pending.machineId,
-            localProjectId: pending.localProjectId,
-            projectName: pending.name,
-            originalRootPath: pending.originalRootPath ?? undefined,
-          },
-          options
-        );
-        if (!removed) return;
+      setLocalProjectCollapseState((prev) => {
+        const key = `${pending.machineId}:${pending.localProjectId}`;
+        const { [key]: _, ...rest } = prev;
+        return rest;
+      });
 
-        setLocalProjectCollapseState((prev) => {
-          const key = `${pending.machineId}:${pending.localProjectId}`;
-          const { [key]: _, ...rest } = prev;
-          return rest;
+      if (
+        selectedLocalProjectKey === `${pending.machineId}:${pending.localProjectId}` &&
+        workspaceSlug
+      ) {
+        void router.navigate({
+          to: '/$workspaceName/chat',
+          params: { workspaceName: workspaceSlug },
         });
-
-        if (
-          selectedLocalProjectKey === `${pending.machineId}:${pending.localProjectId}` &&
-          workspaceSlug
-        ) {
-          void router.navigate({
-            to: '/$workspaceName/chat',
-            params: { workspaceName: workspaceSlug },
-          });
-        }
-        setPendingLocalProjectRemoval(null);
-      } finally {
-        setIsRemovingLocalProject(false);
       }
     },
     [
-      isRemovingLocalProject,
-      pendingLocalProjectRemoval,
       removeLocalProject,
       router,
       selectedLocalProjectKey,
@@ -2389,6 +2203,9 @@ export function LoroAppSidebar({
     for (const session of sourceSessions) {
       const project = session.project;
       if (!project || project.kind !== 'local') continue;
+      // A multi-repository Session belongs to its Project group, even though
+      // its legacy `project` projection names the first member's folder.
+      if (session.projectRun) continue;
       if (scope === 'my') {
         if (!userId) continue;
         if (session.userId !== userId) continue;
@@ -2462,19 +2279,17 @@ export function LoroAppSidebar({
     [closeMobileDrawer, router, workspaceSlug]
   );
 
-  const handleRequestRemoval = useCallback(
-    (info: LocalProjectRemovalRequest) => {
-      const impact = getRemoveLocalProjectImpact({
-        machineId: info.machineId,
-        localProjectId: info.localProjectId,
-      });
-      setPendingLocalProjectRemoval({
-        ...info,
-        conversationCount: impact.conversationCount,
-        runningSessionCount: impact.runningSessionCount,
+  const handleNewInProjectGroup = useCallback(
+    (projectId: string) => {
+      if (!workspaceSlug) return;
+      closeMobileDrawer();
+      void router.navigate({
+        to: '/$workspaceName/chat',
+        params: { workspaceName: workspaceSlug },
+        search: { context: 'group' as const, group: projectId },
       });
     },
-    [getRemoveLocalProjectImpact]
+    [closeMobileDrawer, router, workspaceSlug]
   );
 
   const localProjectSections = useMemo(() => {
@@ -2714,6 +2529,42 @@ export function LoroAppSidebar({
       });
     }
 
+    // A Project group conversation belongs to its group, not to the
+    // repository of its first member, so it is neither a chat nor a GitHub row.
+    const projectGroupsLabel = t('sidebar.projectGroups', 'Project groups');
+    for (const task of projectGroupTasks) {
+      const groupName = task.projectGroup?.name ?? '';
+      items.push({
+        id: task.sessionId,
+        kind: 'local',
+        projectGroup: true,
+        title: task.title,
+        sectionLabel: `${projectGroupsLabel} · ${groupName}`,
+        subtitle: groupName || null,
+        repoFullName: task.repoFullName ?? null,
+        branchName: task.branchName,
+        machineName: task.machineName ?? null,
+        historyBackend: task.historyBackend,
+        latestMessageAt: task.latestMessageAt,
+        isPinned: task.isPinned,
+        isWorking: task.isWorking,
+        isWorktree: task.isWorktree,
+        hasUnreadMessages: task.hasUnreadMessages,
+        isOffline: task.isOffline,
+        isWaitingPermission: task.isWaitingPermission,
+        prStatus: task.prStatus,
+        prCiState: task.prCiState,
+        prReadiness: task.prReadiness,
+        prNumber: task.prNumber,
+        prUrl: task.prUrl ?? null,
+        externalHistoryProvider: task.externalHistoryProvider ?? null,
+        owner: task.owner ?? null,
+        openedBySessionId: task.openedBySessionId ?? null,
+        openedByRowSessionId: task.openedByRowSessionId ?? null,
+        sharing: task.sharing,
+      });
+    }
+
     for (const section of localProjectSections) {
       const machineId = section.machineId;
       if (!machineId) continue;
@@ -2780,6 +2631,7 @@ export function LoroAppSidebar({
     localProjectSessionsByKey,
     liveSessionStatuses,
     onlineMachineIds,
+    projectGroupTasks,
     repoSessions,
     resolveOpenerRowId,
     resolveSessionAuthor,
@@ -2827,7 +2679,6 @@ export function LoroAppSidebar({
   );
 
   const showChats = sessionsListLoading || workspaceChatSessions.length > 0;
-  const showGithubWorktrees = sessionsListLoading || workspaceRepoSessions.length > 0;
   const filterLabels = useMemo(
     () => ({
       triggerAriaLabel: t('sidebar.filter.trigger', 'Filter sidebar'),
@@ -2879,6 +2730,164 @@ export function LoroAppSidebar({
       triggerSize="mini"
     />
   ) : null;
+  // Sidebar task rows render as real anchors on web so middle/Cmd-click open the
+  // session in a new browser tab. Electron deliberately returns undefined here:
+  // its main process installs `setWindowOpenHandler` returning `{ action: 'deny' }`
+  // (apps/electron/src/main/window.ts), so any anchor-driven `window.open` in
+  // Electron either no-ops or escapes to `shell.openExternal` — which would push
+  // the user out to the system browser instead of opening a second app window.
+  // Until Electron grows multi-window + an internal-route IPC, keep rows as the
+  // plain `<div role="button">` they were before this PR. See task-list.tsx anchor
+  // overlay comment for the row-level rationale.
+  const getSessionHref = useMemo(() => {
+    if (!workspaceSlug || isElectronRenderer()) return undefined;
+    return (sessionId: string) => `/${workspaceSlug}/sessions/${sessionId}`;
+  }, [workspaceSlug]);
+
+  const handleOpenTaskPullRequest = useCallback(
+    (request: SessionListPullRequestOpen) => {
+      if (!workspaceSlug) return;
+      closeMobileDrawer();
+      const prNumber =
+        typeof request.prNumber === 'number' && Number.isFinite(request.prNumber)
+          ? request.prNumber
+          : null;
+      void router.navigate({
+        to: '/$workspaceName/sessions/$sessionId',
+        params: { workspaceName: workspaceSlug, sessionId: request.sessionId as SessionId },
+        search: prNumber ? { pr: prNumber } : {},
+      });
+    },
+    [closeMobileDrawer, router, workspaceSlug]
+  );
+
+  // Multi-repository projects are projects: one that needs a machine (it holds
+  // a folder without a GitHub remote) sits under that machine with its
+  // folders; one that runs anywhere sits with the GitHub repositories.
+  // Collapse state shares the repo-group store, keyed by group key, so the
+  // keyboard model's group-header toggle needs no second path.
+  const [projectGroupOrder, setProjectGroupOrder] = useAtom(projectGroupOrderAtom);
+  const projectGroupStates = useMemo<SessionListProjectGroupState[]>(() => {
+    const rank = new Map(projectGroupOrder.map((id, index) => [id, index]));
+    const collapsedOf = (projectId: string) =>
+      repoCollapseState[getProjectGroupSessionGroupKey(projectId)] ?? false;
+    const defined = workspaceProjects
+      .map((project, index) => ({ project, index }))
+      .sort(
+        (left, right) =>
+          (rank.get(left.project.id) ?? projectGroupOrder.length + left.index) -
+          (rank.get(right.project.id) ?? projectGroupOrder.length + right.index)
+      )
+      .map(({ project }) => ({
+        projectId: project.id,
+        name: project.name,
+        collapsed: collapsedOf(project.id),
+        canDelete: canManageWorkspaceProject(project, userId),
+      }));
+    // A deleted project's conversations keep its name; it folds like any group.
+    const definedIds = new Set<string>(workspaceProjects.map((project) => project.id));
+    const removed = new Map<string, SessionListProjectGroupState>();
+    for (const session of projectGroupSessions) {
+      const group = session.projectGroup;
+      if (!group || definedIds.has(group.id) || removed.has(group.id)) continue;
+      removed.set(group.id, {
+        projectId: group.id,
+        name: group.name,
+        collapsed: collapsedOf(group.id),
+        removed: true,
+      });
+    }
+    return [
+      ...defined,
+      ...[...removed.values()].sort((left, right) => left.name.localeCompare(right.name)),
+    ];
+  }, [projectGroupOrder, projectGroupSessions, repoCollapseState, userId, workspaceProjects]);
+  const projectGroupPlacement = useMemo(
+    () =>
+      placeProjectGroups({
+        projects: workspaceProjects,
+        states: projectGroupStates,
+        sessions: projectGroupSessions,
+        listedMachineIds: new Set(
+          localProjectSections.flatMap((section) => (section.machineId ? [section.machineId] : []))
+        ),
+      }),
+    [localProjectSections, projectGroupSessions, projectGroupStates, workspaceProjects]
+  );
+  const showGithubWorktrees =
+    sessionsListLoading ||
+    workspaceRepoSessions.length > 0 ||
+    projectGroupPlacement.anywhere.states.length > 0 ||
+    projectGroupPlacement.anywhere.sessions.length > 0;
+  const requestProjectEditor = useSetAtom(projectEditorRequestAtom);
+  const handleMoveProjectGroup = useCallback(
+    (projectIds: string[]) => {
+      const listed = new Set(projectIds);
+      setProjectGroupOrder([...projectIds, ...projectGroupOrder.filter((id) => !listed.has(id))]);
+    },
+    [projectGroupOrder, setProjectGroupOrder]
+  );
+  const handleOpenProjectGroupSettings = useCallback(
+    (projectId: string) => requestProjectEditor({ kind: 'edit', projectId }),
+    [requestProjectEditor]
+  );
+  const handleDeleteProjectGroup = useCallback(
+    (projectId: string) => requestProjectEditor({ kind: 'delete', projectId }),
+    [requestProjectEditor]
+  );
+  const handleEditLocalProject = useCallback(
+    (machineId: MachineId, localProjectId: string, name: string) =>
+      requestProjectEditor({
+        kind: 'create',
+        seedSourceKey: `local:${machineId}:${localProjectId}`,
+        seedName: name,
+      }),
+    [requestProjectEditor]
+  );
+  const handleEditRepoProject = useCallback(
+    (repoFullName: string) =>
+      requestProjectEditor({
+        kind: 'create',
+        seedSourceKey: `github:${repoFullName.toLowerCase()}`,
+        seedName: repoFullName.split('/').pop() ?? repoFullName,
+      }),
+    [requestProjectEditor]
+  );
+  const handleToggleProjectGroupCollapsed = useCallback(
+    (groupKey: string) => {
+      setRepoCollapseState((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }));
+    },
+    [setRepoCollapseState]
+  );
+  const renderProjectGroupList = (
+    bucket: { states: SessionListProjectGroupState[]; sessions: SessionListRow[] } | undefined
+  ) =>
+    bucket && (bucket.states.length > 0 || bucket.sessions.length > 0) ? (
+      <SessionList
+        sessions={bucket.sessions}
+        repos={EMPTY_REPO_STATES}
+        projectGroups={bucket.states}
+        isLoading={false}
+        selectedSessionId={selectedSessionId}
+        activeGroupKey={activeNewSessionGroup}
+        onSelectSession={handleNavigateToSession}
+        onNavigateSessionTab={handleNavigateToSession}
+        onArchiveSession={handleArchiveSession}
+        onMarkSessionUnread={handleMarkSessionUnread}
+        onRenameSession={handleRenameSession}
+        onTogglePinSession={handleTogglePinSession}
+        onCopySessionUrl={handleCopySessionUrl}
+        onShareSessionWithTeam={handleRequestShareSession}
+        onToggleProjectGroupCollapsed={handleToggleProjectGroupCollapsed}
+        onNewInProjectGroup={handleNewInProjectGroup}
+        onOpenProjectGroupSettings={handleOpenProjectGroupSettings}
+        onDeleteProjectGroup={handleDeleteProjectGroup}
+        onArchiveProjectGroupChats={handleArchiveProjectChats}
+        onMoveProjectGroup={isMobile ? undefined : handleMoveProjectGroup}
+        onOpenPullRequest={handleOpenTaskPullRequest}
+        getSessionHref={getSessionHref}
+      />
+    ) : null;
   const firstSectionFilterAction = pinnedItems.length === 0 ? sidebarFilterPopover : null;
   const localProjectsTopContent =
     localProjectSections.length === 0 ? null : (
@@ -2912,18 +2921,28 @@ export function LoroAppSidebar({
               : null;
           // A folded machine says whether anything in its projects needs the
           // user; the mark sits where a row's would, the machine card says how many.
+          // Its multi-repository projects fold with it, so they count too.
           const sectionActivity =
             sectionCollapsed && section.machineId
-              ? summarizeLocalSessionsActivity(
-                  section.projects.flatMap(
-                    (project) =>
-                      workspaceLocalProjectSessionsByKey.get(
-                        `${section.machineId}:${project.id}`
-                      ) ?? []
+              ? addSidebarGroupActivity(
+                  summarizeLocalSessionsActivity(
+                    section.projects.flatMap(
+                      (project) =>
+                        workspaceLocalProjectSessionsByKey.get(
+                          `${section.machineId}:${project.id}`
+                        ) ?? []
+                    ),
+                    childSessionsByParent,
+                    liveSessionStatuses,
+                    sendStates
                   ),
-                  childSessionsByParent,
-                  liveSessionStatuses,
-                  sendStates
+                  summarizeSidebarGroupActivity(
+                    withSessionSendStates(
+                      projectGroupPlacement.byMachine.get(section.machineId)?.sessions ?? [],
+                      (row) => row.sessionId,
+                      sendStates
+                    )
+                  )
                 )
               : null;
           const dividerRight =
@@ -3000,96 +3019,106 @@ export function LoroAppSidebar({
               </div>
 
               {sectionCollapsed ? null : (
-                <DndContext
-                  sensors={localProjectSensors}
-                  collisionDetection={closestCenter}
-                  onDragEnd={(event) => handleMoveLocalProject(sectionProjectKeys, event)}
-                >
-                  <SortableContext
-                    items={sectionProjectKeys}
-                    strategy={verticalListSortingStrategy}
+                <>
+                  <DndContext
+                    sensors={localProjectSensors}
+                    collisionDetection={closestCenter}
+                    onDragEnd={(event) => handleMoveLocalProject(sectionProjectKeys, event)}
                   >
-                    <div className="space-y-0.5">
-                      {section.projects.map((project) => {
-                        const machineId = section.machineId;
-                        if (!machineId) return null;
-                        const projectKey = `${machineId}:${project.id}`;
-                        const collapsed = localProjectCollapseState[projectKey] ?? false;
-                        const sessionGroupKey = getLocalProjectSessionGroupKey(
-                          machineId,
-                          project.id
-                        );
-                        const sessionsForProject =
-                          workspaceLocalProjectSessionsByKey.get(projectKey) ?? [];
-                        const isSelected = projectKey === selectedLocalProjectKey;
-                        const rootPath =
-                          typeof project.rootPath === 'string' ? project.rootPath.trim() : '';
-                        const formattedPath = rootPath ? rootPath : null;
+                    <SortableContext
+                      items={sectionProjectKeys}
+                      strategy={verticalListSortingStrategy}
+                    >
+                      <div className="space-y-0.5">
+                        {section.projects.map((project) => {
+                          const machineId = section.machineId;
+                          if (!machineId) return null;
+                          const projectKey = `${machineId}:${project.id}`;
+                          const collapsed = localProjectCollapseState[projectKey] ?? false;
+                          const sessionGroupKey = getLocalProjectSessionGroupKey(
+                            machineId,
+                            project.id
+                          );
+                          const sessionsForProject =
+                            workspaceLocalProjectSessionsByKey.get(projectKey) ?? [];
+                          const isSelected = projectKey === selectedLocalProjectKey;
+                          const rootPath =
+                            typeof project.rootPath === 'string' ? project.rootPath.trim() : '';
+                          const formattedPath = rootPath ? rootPath : null;
 
-                        return (
-                          <SortableLocalProjectItem
-                            key={project.id}
-                            sortableId={projectKey}
-                            canReorder={canReorderProjects}
-                            machineId={machineId}
-                            machineName={section.machineDisplayName}
-                            project={project}
-                            canRemoveProject={section.canRemoveProject}
-                            removalState={
-                              pendingLocalProjectRemovals.has(projectKey)
-                                ? onlineMachineIds.has(machineId)
-                                  ? 'removing'
-                                  : 'waiting_for_device'
-                                : null
-                            }
-                            collapsed={collapsed}
-                            whetherShowFullList={showFullSessionGroups[sessionGroupKey] ?? false}
-                            isSelected={isSelected}
-                            sessionsForProject={sessionsForProject}
-                            childSessionsByParent={childSessionsByParent}
-                            liveSessionStatuses={liveSessionStatuses}
-                            resolveSessionAuthor={resolveSessionAuthor}
-                            formattedPath={formattedPath}
-                            defaultSessionTitle={defaultSessionTitle}
-                            selectedSessionId={selectedSessionId}
-                            removeProjectLabel={removeProjectLabel}
-                            newChatLabel={newChatLabel}
-                            archiveTooltipLabel={archiveTooltipLabel}
-                            archiveActionLabel={archiveActionLabel}
-                            archiveConfirmLabel={archiveConfirmLabel}
-                            isMobile={isMobile}
-                            toggleLabel={toggleLabel}
-                            onNavigateProject={handleNavigateToProject}
-                            // New Chat selects a target; it must not fork or clear
-                            // the workspace-owned Chat Landing draft.
-                            onNewChatInProject={handleNavigateToProject}
-                            onOpenProjectSettings={handleOpenProjectSettings}
-                            onRevealProject={
-                              isElectron && machineId === localMachineId
-                                ? handleRevealProject
-                                : undefined
-                            }
-                            onArchiveProjectChats={handleArchiveProjectChats}
-                            onNavigateSession={handleNavigateToSession}
-                            onArchive={handleArchiveSession}
-                            onMarkSessionUnread={handleMarkSessionUnread}
-                            onRenameSession={handleRenameSession}
-                            onToggleSessionPinned={handleTogglePinSession}
-                            onCopySessionUrl={handleCopySessionUrl}
-                            onShareSessionWithTeam={handleRequestShareSession}
-                            sessionSharingById={sessionSharingById}
-                            collapsedOpenedBySessionIds={collapsedOpenedBySessionIds}
-                            onToggleOpenedBySessions={handleToggleOpenedBySessions}
-                            resolveOpenerRowId={resolveOpenerRowId}
-                            onToggleCollapsed={toggleLocalProjectCollapsed}
-                            onToggleFullList={handleToggleLocalProjectFullList}
-                            onRequestRemoval={handleRequestRemoval}
-                          />
-                        );
-                      })}
-                    </div>
-                  </SortableContext>
-                </DndContext>
+                          return (
+                            <SortableLocalProjectItem
+                              key={project.id}
+                              sortableId={projectKey}
+                              canReorder={canReorderProjects}
+                              machineId={machineId}
+                              machineName={section.machineDisplayName}
+                              project={project}
+                              canRemoveProject={section.canRemoveProject}
+                              removalState={
+                                pendingLocalProjectRemovals.has(projectKey)
+                                  ? onlineMachineIds.has(machineId)
+                                    ? 'removing'
+                                    : 'waiting_for_device'
+                                  : null
+                              }
+                              collapsed={collapsed}
+                              whetherShowFullList={showFullSessionGroups[sessionGroupKey] ?? false}
+                              isSelected={isSelected}
+                              sessionsForProject={sessionsForProject}
+                              childSessionsByParent={childSessionsByParent}
+                              liveSessionStatuses={liveSessionStatuses}
+                              resolveSessionAuthor={resolveSessionAuthor}
+                              formattedPath={formattedPath}
+                              defaultSessionTitle={defaultSessionTitle}
+                              selectedSessionId={selectedSessionId}
+                              removeProjectLabel={removeProjectLabel}
+                              newChatLabel={newChatLabel}
+                              archiveTooltipLabel={archiveTooltipLabel}
+                              archiveActionLabel={archiveActionLabel}
+                              archiveConfirmLabel={archiveConfirmLabel}
+                              isMobile={isMobile}
+                              toggleLabel={toggleLabel}
+                              onNavigateProject={handleNavigateToProject}
+                              // New Chat selects a target; it must not fork or clear
+                              // the workspace-owned Chat Landing draft.
+                              onNewChatInProject={handleNavigateToProject}
+                              onOpenProjectSettings={handleOpenProjectSettings}
+                              onEditProject={handleEditLocalProject}
+                              onRevealProject={
+                                isElectron && machineId === localMachineId
+                                  ? handleRevealProject
+                                  : undefined
+                              }
+                              onArchiveProjectChats={handleArchiveProjectChats}
+                              onNavigateSession={handleNavigateToSession}
+                              onArchive={handleArchiveSession}
+                              onMarkSessionUnread={handleMarkSessionUnread}
+                              onRenameSession={handleRenameSession}
+                              onToggleSessionPinned={handleTogglePinSession}
+                              onCopySessionUrl={handleCopySessionUrl}
+                              onShareSessionWithTeam={handleRequestShareSession}
+                              sessionSharingById={sessionSharingById}
+                              collapsedOpenedBySessionIds={collapsedOpenedBySessionIds}
+                              onToggleOpenedBySessions={handleToggleOpenedBySessions}
+                              resolveOpenerRowId={resolveOpenerRowId}
+                              onToggleCollapsed={toggleLocalProjectCollapsed}
+                              onToggleFullList={handleToggleLocalProjectFullList}
+                              onRequestRemoval={(request) => {
+                                void handleRequestRemoval(request);
+                              }}
+                            />
+                          );
+                        })}
+                      </div>
+                    </SortableContext>
+                  </DndContext>
+                  {renderProjectGroupList(
+                    section.machineId
+                      ? projectGroupPlacement.byMachine.get(section.machineId)
+                      : undefined
+                  )}
+                </>
               )}
             </div>
           );
@@ -3170,7 +3199,7 @@ export function LoroAppSidebar({
     [paidPlanTiers]
   );
   const workspaces = useMemo<LoroSidebarWorkspace[]>(() => {
-    return (organizations ?? [])
+    return workspaceNavigation.workspaces
       .filter((org) => Boolean(org))
       .map((org) => ({
         id: org.id,
@@ -3181,38 +3210,12 @@ export function LoroAppSidebar({
         memberCount:
           org.id === activeOrganization?.id ? (activeOrganization.members?.length ?? null) : null,
       }));
-  }, [activeOrganization, multiWorkspaceAvailable, organizations, planTierByWorkspaceId]);
-
-  // Sidebar task rows render as real anchors on web so middle/Cmd-click open the
-  // session in a new browser tab. Electron deliberately returns undefined here:
-  // its main process installs `setWindowOpenHandler` returning `{ action: 'deny' }`
-  // (apps/electron/src/main/window.ts), so any anchor-driven `window.open` in
-  // Electron either no-ops or escapes to `shell.openExternal` — which would push
-  // the user out to the system browser instead of opening a second app window.
-  // Until Electron grows multi-window + an internal-route IPC, keep rows as the
-  // plain `<div role="button">` they were before this PR. See task-list.tsx anchor
-  // overlay comment for the row-level rationale.
-  const getSessionHref = useMemo(() => {
-    if (!workspaceSlug || isElectronRenderer()) return undefined;
-    return (sessionId: string) => `/${workspaceSlug}/sessions/${sessionId}`;
-  }, [workspaceSlug]);
-
-  const handleOpenTaskPullRequest = useCallback(
-    (request: SessionListPullRequestOpen) => {
-      if (!workspaceSlug) return;
-      closeMobileDrawer();
-      const prNumber =
-        typeof request.prNumber === 'number' && Number.isFinite(request.prNumber)
-          ? request.prNumber
-          : null;
-      void router.navigate({
-        to: '/$workspaceName/sessions/$sessionId',
-        params: { workspaceName: workspaceSlug, sessionId: request.sessionId as SessionId },
-        search: prNumber ? { pr: prNumber } : {},
-      });
-    },
-    [closeMobileDrawer, router, workspaceSlug]
-  );
+  }, [
+    activeOrganization,
+    multiWorkspaceAvailable,
+    workspaceNavigation.workspaces,
+    planTierByWorkspaceId,
+  ]);
 
   const handleHomeClicked = useCallback(() => {
     if (!workspaceSlug) return;
@@ -3313,24 +3316,7 @@ export function LoroAppSidebar({
     );
   }, [t]);
 
-  const handleWorkspaceSelected = useCallback(
-    (nextWorkspaceId: string) => {
-      const target = (organizations ?? []).find((org) => org.id === nextWorkspaceId);
-      const slug = target?.slug;
-      if (!slug) {
-        return;
-      }
-      writePreferredWorkspaceSlug(slug);
-      setWorkspaceContext({
-        slug,
-        workspaceId: target.id as WorkspaceId,
-      });
-      void switchOrganization(target.id);
-      closeMobileDrawer();
-      void router.navigate({ to: '/$workspaceName/chat', params: { workspaceName: slug } });
-    },
-    [closeMobileDrawer, organizations, router, setWorkspaceContext, switchOrganization]
-  );
+  const handleWorkspaceSelected = workspaceNavigation.select;
 
   const labels: Partial<LoroSidebarLabels> = useMemo(() => {
     return {
@@ -3480,8 +3466,19 @@ export function LoroAppSidebar({
 
   const sidebarSessionListProps = useMemo(
     () => ({
-      sessions: githubWorktreesSectionCollapsed ? [] : workspaceRepoSessions,
+      sessions: githubWorktreesSectionCollapsed
+        ? []
+        : [...workspaceRepoSessions, ...projectGroupPlacement.anywhere.sessions],
       repos: githubWorktreesSectionCollapsed ? [] : repos,
+      projectGroups: githubWorktreesSectionCollapsed ? [] : projectGroupPlacement.anywhere.states,
+      onToggleProjectGroupCollapsed: handleToggleProjectGroupCollapsed,
+      onNewInProjectGroup: handleNewInProjectGroup,
+      onOpenProjectGroupSettings: handleOpenProjectGroupSettings,
+      onDeleteProjectGroup: handleDeleteProjectGroup,
+      onArchiveProjectGroupChats: handleArchiveProjectChats,
+      onMoveProjectGroup: isMobile ? undefined : handleMoveProjectGroup,
+      onEditRepoProject: handleEditRepoProject,
+      onArchiveRepoChats: handleArchiveProjectChats,
       isLoading: githubWorktreesSectionCollapsed ? false : sessionsListLoading,
       selectedSessionId: selectedSessionId,
       activeGroupKey: activeNewSessionGroup,
@@ -3514,6 +3511,15 @@ export function LoroAppSidebar({
       handleOpenTaskPullRequest,
       handleNavigateToSession,
       handleToggleRepoCollapsed,
+      handleArchiveProjectChats,
+      handleEditRepoProject,
+      handleMoveProjectGroup,
+      handleNewInProjectGroup,
+      handleOpenProjectGroupSettings,
+      handleDeleteProjectGroup,
+      handleToggleProjectGroupCollapsed,
+      isMobile,
+      projectGroupPlacement,
       workspaceRepoSessions,
       repos,
       selectedSessionId,
@@ -3594,10 +3600,13 @@ export function LoroAppSidebar({
           })),
         });
       }
+      const groups = projectGroupPlacement.byMachine.get(machineId);
       result.push({
         collapsed:
           localProjectsSectionCollapseState[section.sectionKey] ?? section.defaultCollapsed,
         projects,
+        projectGroups: groups?.states,
+        projectGroupSessions: groups?.sessions,
       });
     }
     return result;
@@ -3606,6 +3615,7 @@ export function LoroAppSidebar({
     localProjectSections,
     localProjectCollapseState,
     localProjectsSectionCollapseState,
+    projectGroupPlacement,
     resolveOpenerRowId,
     showFullSessionGroups,
     workspaceLocalProjectSessionsByKey,
@@ -3638,6 +3648,7 @@ export function LoroAppSidebar({
         // Check cloud tasks
         const task = tasksRef.current.find((taskItem) => taskItem.sessionId === sessionId);
         if (task) {
+          if (task.projectGroup) return getProjectGroupSessionGroupKey(task.projectGroup.id);
           const repo = task.repoFullName?.trim();
           return repo || ONLY_CHATS_KEY;
         }
@@ -3680,7 +3691,8 @@ export function LoroAppSidebar({
         workspace: {
           localSections: keyboardNavLocalSections,
           githubSectionCollapsed: githubWorktreesSectionCollapsed,
-          repoSessions: workspaceRepoSessions,
+          repoSessions: [...workspaceRepoSessions, ...projectGroupPlacement.anywhere.sessions],
+          projectGroups: projectGroupPlacement.anywhere.states,
           repos,
           chatSessions: workspaceChatSessions,
           chatsCollapsed,
@@ -3695,6 +3707,7 @@ export function LoroAppSidebar({
       chatsCollapsed,
       collapsedOpenedBySessionIds,
       githubWorktreesSectionCollapsed,
+      projectGroupPlacement,
       keyboardNavLocalSections,
       organizeMode,
       pinnedItems,
@@ -3824,6 +3837,7 @@ export function LoroAppSidebar({
         onFeedbackClicked={handleFeedbackClicked}
         onBugReportClicked={handleBugReportClicked}
         onSettingsClicked={handleSettingsClicked}
+        settingsIcon={<E2eeSettingsIcon />}
         onInviteClicked={handleInviteClicked}
         onLinkRepoClicked={handleLinkRepoClicked}
         overlay={overlay}
@@ -3852,47 +3866,6 @@ export function LoroAppSidebar({
           onOpenChangelogSite={handleOpenChangelogSite}
         />
       ) : null}
-
-      <RemoveLocalProjectDialog
-        open={pendingLocalProjectRemoval != null}
-        target={pendingLocalProjectRemoval}
-        isRemote={
-          pendingLocalProjectRemoval != null &&
-          (!localMachineId || pendingLocalProjectRemoval.machineId !== localMachineId)
-        }
-        machineName={
-          pendingLocalProjectRemoval
-            ? machineMetaMap.get(pendingLocalProjectRemoval.machineId)?.name
-            : null
-        }
-        deviceOnline={
-          pendingLocalProjectRemoval != null &&
-          onlineMachineIds.has(pendingLocalProjectRemoval.machineId)
-        }
-        canCleanupWorktrees={
-          pendingLocalProjectRemoval != null &&
-          onlineMachineIds.has(pendingLocalProjectRemoval.machineId) &&
-          machineSupportsLocalProjectRemovalProtocol(
-            machineMetaMap.get(pendingLocalProjectRemoval.machineId)
-          )
-        }
-        isRemoving={isRemovingLocalProject}
-        onOpenChange={(open) => {
-          if (!open && !isRemovingLocalProject) setPendingLocalProjectRemoval(null);
-        }}
-        onPreflightCleanup={() => {
-          if (!pendingLocalProjectRemoval) {
-            return Promise.reject(new Error('No project selected.'));
-          }
-          return preflightLocalProjectRemoval({
-            machineId: pendingLocalProjectRemoval.machineId,
-            localProjectId: pendingLocalProjectRemoval.localProjectId,
-          });
-        }}
-        onConfirm={(options) => {
-          void handleConfirmRemoveLocalProject(options);
-        }}
-      />
     </FocusScope>
   );
 }

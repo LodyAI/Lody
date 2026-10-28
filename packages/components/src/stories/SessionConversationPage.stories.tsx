@@ -1,3 +1,4 @@
+import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 /**
  * INTEGRATION HARNESS — not production, and NOT a place to change UI appearance.
  *
@@ -15,8 +16,8 @@
  *   `session-detail.tsx` `if (isMobile)`); desktop top bar = ONE merged
  *   `SessionTabBar` row (tabs + "…" toolbar in `rightSlot`, mirrors
  *   `session-detail.tsx` desktop) with the context strip above the composer
- *   (mirrors `session-chat-interface.tsx`). File/diff viewers live exclusively
- *   in the right-side `SessionSidePanelTabBar`, covered by its dedicated story.
+ *   (mirrors `session-chat-interface.tsx`). Reading-review file clicks use the
+ *   real desktop side-panel layout or the mobile diff drawer.
  *   `useIsMobile()` reads `window.innerWidth`, so mobile stories resize the
  *   preview iframe (`withMobileViewport`) and render full-bleed — no fake bezel.
  * - After changing anything here, verify in the REAL app (mobile included);
@@ -27,7 +28,7 @@ import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
 import type { ComponentProps, CSSProperties, ReactNode } from 'react';
 import { Provider, createStore } from 'jotai';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { fn, userEvent, within } from 'storybook/test';
 import {
@@ -91,7 +92,6 @@ import {
 import { SessionChatInputArea } from '@/components/sessions/session-chat-input-area';
 import {
   Archive,
-  ChevronLeft,
   Copy,
   Ellipsis,
   FileText,
@@ -115,7 +115,10 @@ import {
   type MobileSessionMenuAction,
   type MobileSessionMenuInfoRow,
 } from '@/components/mobile/mobile-session-menu-sheet';
-import { GlassIconButton } from '@/components/mobile/glass-icon-button';
+import {
+  GlassIconButton,
+  MobileSessionHeaderBackButton,
+} from '@/components/mobile/glass-icon-button';
 import {
   buildAcpSelectorOptions,
   type AcpConfigOptionValue,
@@ -125,6 +128,20 @@ import type { LodyAuthClient } from '@/lib/auth';
 import type { SessionSharingState } from '@/lib/session-sharing';
 import { cn } from '@/lib/utils';
 import { AuthProvider } from '@/providers/convex-provider';
+import readingPreviewImage from '@/assets/onboarding/intro/continuous-scroll.png';
+import { DesktopSessionDetailLayout } from '@/components/sessions/desktop-session-detail-layout';
+import { SessionConversationDiffPanel } from '@/components/sessions/session-conversation-diff-panel';
+import {
+  SessionMobileDiffDrawer,
+  type MobileDiffView,
+} from '@/components/sessions/session-mobile-diff-drawer';
+import { SessionSidePanelTabBar } from '@/components/sessions/session-side-panel-tab-bar';
+import { SessionBrowserPanelView } from '@/components/sessions/session-browser-panel-view';
+import { ManagedPreviewSurface } from '@/components/sessions/managed-preview-surface';
+import { createFakeSessionFileProvider } from '@/lib/session-file-provider';
+import type { MinimalVisualAnnotationAnchor } from '@lody/shared/visual-annotation-types';
+import type { PreviewVisualComment } from '@lody/shared/preview-comment-types';
+import type { PreviewVisualCommentDocState, PreviewVisualCommentDocStore } from '@/atoms/runtime';
 
 const STORY_WORKSPACE_ID = 'workspace-storybook-session-page' as WorkspaceId;
 const STORY_WORKSPACE_SLUG = 'storybook';
@@ -154,7 +171,19 @@ const storyPlatform = createLocalPlatformProvider({
   }),
 });
 
-type PageState = 'idle' | 'working' | 'permission' | 'question' | 'plan' | 'reading';
+type PageState =
+  | 'idle'
+  | 'working'
+  | 'permission'
+  | 'question'
+  | 'plan'
+  | 'reading'
+  | 'reading-working'
+  | 'reading-permission'
+  | 'reading-question';
+
+const isReadingState = (state: PageState) => state.startsWith('reading');
+const isWorkingState = (state: PageState) => state === 'working' || state === 'reading-working';
 
 /** A finished conversation whose history is the point, not a pending state. */
 const isSettledState = (state: PageState) =>
@@ -323,6 +352,11 @@ const selectorOptions = buildAcpSelectorOptions({
   cliType: 'builtin',
   agentType: 'codex',
 });
+const readingSelectorOptions = buildAcpSelectorOptions({
+  configId: STORY_AGENT_CONFIG_ID,
+  cliType: 'builtin',
+  agentType: 'deepseek',
+});
 
 const buildSessionId = (state: PageState, frame: DeviceFrame): SessionId =>
   `session-storybook-${state}-${frame}` as SessionId;
@@ -335,7 +369,7 @@ const buildSession = (state: PageState, frame: DeviceFrame): SessionMeta => {
     // pending state.
     isSettledState(state)
       ? ({ type: 'idle' } as const)
-      : state === 'working'
+      : isWorkingState(state)
         ? ({ type: 'running' } as const)
         : ({ type: 'requestPermission' } as const);
   return {
@@ -346,7 +380,7 @@ const buildSession = (state: PageState, frame: DeviceFrame): SessionMeta => {
     userId: STORY_USER_ID,
     status,
     cliType: 'builtin',
-    agentType: 'codex',
+    agentType: isReadingState(state) ? 'deepseek' : 'codex',
     agentConfigId: STORY_AGENT_CONFIG_ID,
     repoFullName: 'loro-dev/lody',
     project: {
@@ -915,25 +949,138 @@ const READING_ANSWER = [
   'export const DEFAULT_CONVERSATION_FONT_SIZE = 14;',
   '```',
   '',
+  '### 其他 Markdown 内容',
+  '',
+  '**中文加粗。**接着是 *斜体*、~~删除线~~和 [普通链接](https://example.com)。',
+  '',
+  '- [x] 检查完成后的排版',
+  '- [ ] 检查流式输出和窄屏',
+  '',
+  '阅读栏宽度与字体大小的关系：',
+  '',
+  '$$',
+  String.raw`\text{characters per line} \approx \frac{\text{column width}}{\text{font size}}`,
+  '$$',
+  '',
+  `![会话滚动示意图](${readingPreviewImage})`,
+  '',
+  ':codex-file-citation{path="/tmp/exports/reading-report.pdf" purpose="output"}',
+  '',
   '需要的话，我可以继续把 Linear 和 Figma 链接也做成同样的小标签。',
 ].join('\n');
 
-const readingCommand = (id: string, command: string): MessageContent => ({
+const READING_FILE_DIFFS = [
+  { filePath: 'packages/components/src/lib/conversation-layout.ts', add: 4, del: 3 },
+  { filePath: 'packages/components/src/tailwind/index.css', add: 38, del: 2 },
+  { filePath: 'packages/components/src/atoms/settings.ts', add: 6, del: 3 },
+  { filePath: 'packages/components/src/components/ai-gui/markdown-table.tsx', add: 12, del: 4 },
+  { filePath: 'docs/reading-guide.md', add: 8, del: 1 },
+];
+
+const READING_DIFF_TEXT: Record<string, { oldText: string; newText: string }> = {
+  'packages/components/src/lib/conversation-layout.ts': {
+    oldText: 'export const readingWidth = 640;\n',
+    newText: 'export const readingWidth = 768;\n',
+  },
+  'packages/components/src/tailwind/index.css': {
+    oldText: '.reading-column { max-width: 40rem; }\n',
+    newText: '.reading-column { max-width: 48rem; }\n',
+  },
+  'packages/components/src/atoms/settings.ts': {
+    oldText: 'export const defaultFontSize = 13;\n',
+    newText: 'export const defaultFontSize = 14;\n',
+  },
+  'packages/components/src/components/ai-gui/markdown-table.tsx': {
+    oldText: 'export const tableOverflow = "visible";\n',
+    newText: 'export const tableOverflow = "auto";\n',
+  },
+  'docs/reading-guide.md': {
+    oldText: '# Reading\n\nUse the narrow layout.\n',
+    newText: '# Reading\n\nUse the responsive layout.\n',
+  },
+};
+
+const READING_ANNOTATION_ANCHOR: MinimalVisualAnnotationAnchor = {
+  version: 1,
+  page: {
+    url: 'http://localhost:5173/preview',
+    pathname: '/preview',
+    viewport: { width: 960, height: 620, scrollX: 0, scrollY: 0, devicePixelRatio: 2 },
+  },
+  click: {
+    clientX: 160,
+    clientY: 120,
+    pageX: 160,
+    pageY: 120,
+    viewportXRatio: 1 / 6,
+    viewportYRatio: 120 / 620,
+  },
+  target: {
+    tag: 'h1',
+    attributes: {},
+    text: '阅读样式',
+    rect: { x: 80, y: 80, width: 320, height: 80 },
+    rectRatio: { x: 1 / 12, y: 80 / 620, width: 1 / 3, height: 80 / 620 },
+    selector: 'main h1',
+  },
+  context: { ancestors: [{ tag: 'main', selector: 'main' }], nearbyText: ['阅读样式'] },
+};
+const READING_ANNOTATION: PreviewVisualComment = {
+  id: 'reading-visual-comment',
+  turnId: 'reading-user-2',
+  status: 'submitted',
+  body: '这里的标题与正文之间可以再留一点空间。',
+  authorId: 'reading-designer',
+  authorName: 'Designer',
+  createdAt: 1_800_000,
+  updatedAt: 1_800_000,
+  anchor: READING_ANNOTATION_ANCHOR,
+};
+
+const readingFileProvider = createFakeSessionFileProvider({
+  supportsHistoricalDiffs: true,
+  diffs: Object.fromEntries(
+    READING_FILE_DIFFS.map(({ filePath }) => [
+      filePath,
+      {
+        status: 'ready',
+        path: filePath,
+        oldSnapshot: { kind: 'text', text: READING_DIFF_TEXT[filePath]!.oldText },
+        newSnapshot: { kind: 'text', text: READING_DIFF_TEXT[filePath]!.newText },
+      },
+    ])
+  ),
+});
+readingFileProvider.getAllChangesDiff = async () => ({
+  status: 'ready',
+  base: 'synthetic-base',
+  truncated: false,
+  entries: READING_FILE_DIFFS.map(({ filePath }) => ({
+    path: filePath,
+    diff: { status: 'deferred' },
+  })),
+});
+
+const readingCommand = (
+  id: string,
+  command: string,
+  output: string,
+  exitCode = 0
+): MessageContent => ({
   type: 'tool_call',
   toolCallId: `reading-${id}`,
   title: command,
   kind: 'execute',
-  status: 'completed',
+  status: exitCode === 0 ? 'completed' : 'failed',
   content: [
     { type: 'terminal_command', command: '/bin/bash', args: ['-lc', command], cwd: '/repo' },
+    { type: 'terminal_output', stream: 'combined', output, exitStatus: { exitCode, signal: null } },
   ],
 });
 
 /**
- * A finished review turn with every reading surface in one place: CJK and
- * English prose, headings, lists, a quote, GitHub reference labels, wide and
- * narrow tables and diagrams, code, the process rows (commands, a context
- * compaction) and the edited-files card.
+ * Synthetic content for reviewing conversation surfaces in their real message
+ * layout. Running and permission states extend the same history below.
  */
 const buildReadingHistory = (): SessionHistoryParsed[] => [
   buildMessage({
@@ -954,17 +1101,79 @@ const buildReadingHistory = (): SessionHistoryParsed[] => [
     timestamp: '2026-07-09T09:31:20.000Z',
     finished: true,
     endedAt: Date.parse('2026-07-09T09:38:15.000Z'),
-    modelInfo: { modelId: 'gpt-5', name: 'GPT-5', description: null, _meta: null },
-    fileDiff: [
-      { filePath: 'packages/components/src/lib/conversation-layout.ts', add: 4, del: 3 },
-      { filePath: 'packages/components/src/tailwind/index.css', add: 38, del: 2 },
-      { filePath: 'packages/components/src/atoms/settings.ts', add: 6, del: 3 },
-    ],
+    modelInfo: { modelId: 'deepseek-chat', name: 'DeepSeek', description: null, _meta: null },
+    fileDiff: READING_FILE_DIFFS,
     items: [
+      { type: 'thought', text: '先确认阅读栏的宽度、正文间距和不同内容类型的渲染方式。' },
       { type: 'text', text: '先看一下当前的布局和字号设置。' },
-      readingCommand('cmd-1', 'rg CONVERSATION_CONTENT_WIDTH_CLASS packages/components/src'),
-      readingCommand('cmd-2', 'rg --files packages/components/src/tailwind'),
-      readingCommand('cmd-3', 'pnpm --filter @lody/components test -- conversation-layout'),
+      {
+        type: 'tool_call',
+        toolCallId: 'reading-read',
+        title: 'Read packages/components/src/lib/conversation-layout.ts',
+        kind: 'read',
+        status: 'completed',
+        locations: [{ path: 'packages/components/src/lib/conversation-layout.ts' }],
+        content: [
+          { type: 'content', content: { type: 'text', text: 'export const readingWidth = 640;' } },
+        ],
+      },
+      {
+        type: 'tool_call',
+        toolCallId: 'reading-search',
+        title: 'Search for reading width',
+        kind: 'search',
+        status: 'completed',
+        content: [{ type: 'content', content: { type: 'text', text: 'Found 3 matching files.' } }],
+      },
+      {
+        type: 'tool_call',
+        toolCallId: 'reading-mcp',
+        title: 'Inspect design tokens',
+        kind: 'mcp',
+        status: 'completed',
+        rawInput: { token: 'conversation.width' },
+        rawOutput: { value: '48rem' },
+        content: [{ type: 'content', content: { type: 'text', text: '{"value":"48rem"}' } }],
+      },
+      {
+        type: 'tool_call',
+        toolCallId: 'reading-fetch',
+        title: 'Fetch layout guidance',
+        kind: 'fetch',
+        status: 'completed',
+        content: [
+          {
+            type: 'content',
+            content: { type: 'text', text: 'Keep long-form content readable on narrow screens.' },
+          },
+        ],
+      },
+      readingCommand(
+        'cmd-1',
+        'rg CONVERSATION_CONTENT_WIDTH_CLASS packages/components/src',
+        'packages/components/src/lib/conversation-layout.ts: export const CONVERSATION_CONTENT_WIDTH_CLASS'
+      ),
+      readingCommand(
+        'cmd-2',
+        'pnpm --filter @lody/components test -- conversation-layout',
+        'Expected width 768, received 640. Updating the layout token.',
+        1
+      ),
+      {
+        type: 'tool_call',
+        toolCallId: 'reading-edit',
+        title: 'Edit packages/components/src/lib/conversation-layout.ts',
+        kind: 'edit',
+        status: 'completed',
+        content: [
+          {
+            type: 'diff',
+            path: 'packages/components/src/lib/conversation-layout.ts',
+            oldText: 'export const readingWidth = 640;\n',
+            newText: 'export const readingWidth = 768;\n',
+          },
+        ],
+      },
       {
         type: 'tool_call',
         toolCallId: 'reading-compaction',
@@ -973,8 +1182,12 @@ const buildReadingHistory = (): SessionHistoryParsed[] => [
         status: 'completed',
         activityKind: 'context_compaction',
       },
-      readingCommand('cmd-4', 'pnpm --filter @lody/components exec tsgo --noEmit'),
-      readingCommand('cmd-5', 'pnpm run docs check'),
+      readingCommand(
+        'cmd-4',
+        'pnpm --filter @lody/components test -- conversation-layout',
+        '1 test passed.'
+      ),
+      readingCommand('cmd-5', 'pnpm run docs check', 'Documentation links checked.'),
       { type: 'text', text: READING_ANSWER },
     ],
   }),
@@ -983,7 +1196,31 @@ const buildReadingHistory = (): SessionHistoryParsed[] => [
     role: 'user',
     userId: STORY_USER_ID,
     timestamp: '2026-07-09T09:40:00.000Z',
-    items: [{ type: 'text', text: '宽表格在窄窗口下会怎样？' }],
+    items: [
+      { type: 'text', text: '宽表格在窄窗口下会怎样？也看看这两条标注。' },
+      {
+        type: 'comment_reference',
+        source: 'lody',
+        path: 'packages/components/src/lib/conversation-layout.ts',
+        lineNumber: 12,
+        side: 'additions',
+        commentBody: '窄屏也要保留足够的阅读边距。',
+        authorName: 'Reviewer',
+        threadId: 'reading-review-comment',
+        turnId: 'reading-assistant-1',
+        mode: 'conversation',
+        replies: [{ authorName: 'Designer', body: '会一起检查移动端。' }],
+      },
+      {
+        type: 'visual_annotation_reference',
+        source: 'visual_annotation',
+        commentId: READING_ANNOTATION.id,
+        body: READING_ANNOTATION.body,
+        authorName: READING_ANNOTATION.authorName,
+        status: READING_ANNOTATION.status,
+        anchor: READING_ANNOTATION_ANCHOR,
+      },
+    ],
   }),
   buildMessage({
     id: 'reading-assistant-2',
@@ -991,7 +1228,7 @@ const buildReadingHistory = (): SessionHistoryParsed[] => [
     timestamp: '2026-07-09T09:40:10.000Z',
     finished: true,
     endedAt: Date.parse('2026-07-09T09:40:40.000Z'),
-    modelInfo: { modelId: 'gpt-5', name: 'GPT-5', description: null, _meta: null },
+    modelInfo: { modelId: 'deepseek-chat', name: 'DeepSeek', description: null, _meta: null },
     items: [
       {
         type: 'text',
@@ -1004,7 +1241,8 @@ const buildReadingHistory = (): SessionHistoryParsed[] => [
 const buildHistory = (
   state: PageState,
   streamChunkCount = 0,
-  showCapacityRetry = false
+  showCapacityRetry = false,
+  readingLiveTimestamp = '2026-07-09T09:41:00.000Z'
 ): SessionHistoryParsed[] => {
   if (state === 'working') {
     return buildWorkingHistory(streamChunkCount);
@@ -1012,8 +1250,73 @@ const buildHistory = (
   if (state === 'plan') {
     return buildPlanHistory();
   }
-  if (state === 'reading') {
-    return buildReadingHistory();
+  if (isReadingState(state)) {
+    const messages = buildReadingHistory();
+    if (state === 'reading-working') {
+      messages.push(
+        buildMessage({
+          id: 'reading-user-working',
+          role: 'user',
+          userId: STORY_USER_ID,
+          timestamp: readingLiveTimestamp,
+          items: [{ type: 'text', text: '继续检查窄屏布局。' }],
+        }),
+        buildMessage({
+          id: 'reading-assistant-working',
+          role: 'assistant',
+          timestamp: readingLiveTimestamp,
+          finished: false,
+          items: [
+            { type: 'thought', text: '先比较手机宽度下的表格和代码块。' },
+            {
+              type: 'text',
+              text: [
+                '正在检查移动端的阅读布局。\n\n**表格**会保留内部横向滚动。',
+                '\n\n| 内容 | 预期 |\n| --- | --- |\n| 表格 | 内部滚动 |',
+                '\n\n```ts\nconst readingWidth = 768;\n```',
+              ]
+                .slice(0, Math.max(1, streamChunkCount))
+                .join(''),
+            },
+            {
+              type: 'tool_call',
+              toolCallId: 'reading-running-command',
+              title: 'pnpm --filter @lody/components test -- mobile-layout',
+              kind: 'execute',
+              status: 'in_progress',
+              content: [
+                {
+                  type: 'terminal_command',
+                  command: '/bin/bash',
+                  args: ['-lc', 'pnpm --filter @lody/components test -- mobile-layout'],
+                  cwd: '/repo',
+                },
+                { type: 'terminal_output', stream: 'combined', output: 'Checking mobile layout…' },
+              ],
+            },
+          ],
+        })
+      );
+    } else if (state === 'reading-permission' || state === 'reading-question') {
+      messages.push(
+        buildMessage({
+          id: 'reading-user-pending',
+          role: 'user',
+          userId: STORY_USER_ID,
+          timestamp: '2026-07-09T09:41:00.000Z',
+          items: [{ type: 'text', text: '接下来请根据检查结果继续。' }],
+        }),
+        buildMessage({
+          id: 'reading-assistant-pending',
+          role: 'assistant',
+          timestamp: '2026-07-09T09:41:05.000Z',
+          items: [
+            state === 'reading-permission' ? pendingPermissionToolCall() : questionToolCall(),
+          ],
+        })
+      );
+    }
+    return messages;
   }
   const messages = baseMessages();
   if (state === 'permission') {
@@ -1109,12 +1412,72 @@ const renderMessageRow = (
   />
 );
 
+function createReadingRuntime(sessionId: SessionId): WorkspaceRuntime {
+  let comments = [READING_ANNOTATION];
+  const listeners = new Set<(state: PreviewVisualCommentDocState) => void>();
+  const getPreviewState = () =>
+    ({
+      meta: { sessionId },
+      turns: { 'reading-user-2': { turnId: 'reading-user-2', comments } },
+    }) as unknown as PreviewVisualCommentDocState;
+  const previewStore = {
+    getState: getPreviewState,
+    getSyncState: () => 'synced' as const,
+    subscribeSyncState: () => () => {},
+    subscribe: (listener: (state: PreviewVisualCommentDocState) => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    waitUntilSynced: async () => {},
+  } as unknown as PreviewVisualCommentDocStore;
+  const sessionStore = {
+    doc: undefined,
+    history: null,
+    getState: () => ({ session: { id: sessionId }, mq: [], humanInputReceipts: {} }),
+    getSyncState: () => 'synced' as const,
+    subscribeSyncState: () => () => {},
+    subscribe: () => () => {},
+    acquireSync: () => () => {},
+  };
+  const mutatePreviewVisualComments: WorkspaceRuntime['writer']['mutatePreviewVisualComments'] =
+    async (_sessionId, mutation) => {
+      if (mutation.kind === 'resolve') {
+        comments = comments.map((comment) =>
+          comment.id === mutation.commentId
+            ? { ...comment, resolvedAt: mutation.resolvedAt, resolvedBy: mutation.resolvedBy }
+            : comment
+        );
+      } else if (mutation.kind === 'unresolve') {
+        comments = comments.map((comment) => {
+          if (comment.id !== mutation.commentId) return comment;
+          const { resolvedAt: _resolvedAt, resolvedBy: _resolvedBy, ...remaining } = comment;
+          return remaining;
+        });
+      }
+      const nextState = getPreviewState();
+      listeners.forEach((listener) => listener(nextState));
+    };
+
+  return {
+    ...storyRuntime,
+    acquireSessionStore: async () => sessionStore,
+    releaseSessionStoreRef: () => {},
+    acquirePreviewVisualCommentStore: async () => previewStore,
+    releasePreviewVisualCommentStoreRef: () => {},
+    withPreviewVisualCommentStore: async <T,>(
+      _sessionId: SessionId,
+      operation: (store: PreviewVisualCommentDocStore) => T | Promise<T>
+    ): Promise<T> => operation(previewStore),
+    writer: { mutatePreviewVisualComments },
+  } as unknown as WorkspaceRuntime;
+}
+
 function createStoryStore(session: SessionMeta, state: PageState) {
   const store = createStore();
   store.set(currentWorkspaceIdAtom, STORY_WORKSPACE_ID);
   store.set(currentWorkspaceSlugAtom, STORY_WORKSPACE_SLUG);
   store.set(authTokenAtom, STORY_AUTH_TOKEN);
-  store.set(runtimeAtom, storyRuntime);
+  store.set(runtimeAtom, isReadingState(state) ? createReadingRuntime(session.id) : storyRuntime);
   store.set(userAtom, {
     id: STORY_USER_ID,
     name: 'Zixuan',
@@ -1125,17 +1488,18 @@ function createStoryStore(session: SessionMeta, state: PageState) {
     [getMachineRoomId(STORY_MACHINE_ID)]: machineMeta,
   });
   store.set(agentConfigMetaCacheAtom, {
-    [getAgentConfigRoomId(STORY_AGENT_CONFIG_ID)]: agentConfigMeta,
+    [getAgentConfigRoomId(STORY_AGENT_CONFIG_ID)]: isReadingState(state)
+      ? { ...agentConfigMeta, name: 'DeepSeek', agentType: 'deepseek' }
+      : agentConfigMeta,
   });
   store.set(sessionMetaCacheAtom, {
     [getSessionRoomId(session.id)]: session,
   });
   if (!isSettledState(state)) {
     const instanceId = `storybook-${state}` as LodyPresenceInstanceId;
-    const status =
-      state === 'working'
-        ? ({ type: 'running' } as const)
-        : ({ type: 'requestPermission' } as const);
+    const status = isWorkingState(state)
+      ? ({ type: 'running' } as const)
+      : ({ type: 'requestPermission' } as const);
     store.set(lodyPresenceStatesAtom, {
       [getLodySessionPresenceKey(session.id, instanceId)]: {
         kind: 'session',
@@ -1172,11 +1536,13 @@ function StoryInfoBar({
   machine,
   machineOnly = false,
   mobile = false,
+  onOpenAllChanges = action,
 }: {
   session: SessionMeta;
   machine?: SessionMachineInfo | null;
   machineOnly?: boolean;
   mobile?: boolean;
+  onOpenAllChanges?: () => void;
   /** Queued turns stacked on the bar, or on the composer when the bar is empty. */
   queued?: 'with-info-bar' | 'without-info-bar';
   /** The reading review: a merged PR with passing CI and the line totals. */
@@ -1209,7 +1575,7 @@ function StoryInfoBar({
         ]}
         onOpenPrCiRun={action}
         diffStat={{ add: 365, del: 102 }}
-        onOpenAllChanges={action}
+        onOpenAllChanges={onOpenAllChanges}
       />
     );
   }
@@ -1225,6 +1591,8 @@ function StoryInfoBar({
       onEditSave={fn()}
       onSteer={fn()}
       showSteerAction
+      roomy={mobile}
+      footerPosition={mobile ? 'inline' : 'below'}
     />
   ) : undefined;
   if (withoutBar) return <SessionInfoBar status={null} queue={queue} />;
@@ -1271,25 +1639,36 @@ function StoryComposer({
   isAgentBusy,
   onSendMessage,
   initialInputText = 'Tighten the mobile spacing after the permission flow is stable.',
+  modelLabel,
+  claimNavigationFocus,
 }: {
   session: SessionMeta;
   isAgentBusy: boolean;
   onSendMessage?: ComponentProps<typeof SessionChatInputArea>['onSendMessage'];
   initialInputText?: string;
+  modelLabel?: string;
+  claimNavigationFocus?: () => boolean;
 }) {
-  const [mode, setMode] = useState<string | null>(selectorOptions.modeOptions[0]?.value ?? null);
-  const [model, setModel] = useState<string | null>(selectorOptions.modelOptions[0]?.value ?? null);
+  const baseOptions = session.agentType === 'deepseek' ? readingSelectorOptions : selectorOptions;
+  const options = modelLabel
+    ? {
+        ...baseOptions,
+        modelOptions: [{ value: modelLabel, label: modelLabel }],
+        modeOptions: [{ value: 'auto', label: 'Auto' }],
+        configOptionSelectors: [],
+      }
+    : baseOptions;
+  const [mode, setMode] = useState<string | null>(options.modeOptions[0]?.value ?? null);
+  const [model, setModel] = useState<string | null>(options.modelOptions[0]?.value ?? null);
   const [configValues, setConfigValues] = useState<Record<string, AcpConfigOptionValue>>(() =>
     Object.fromEntries(
-      selectorOptions.configOptionSelectors.map((selector) => [
-        selector.configId,
-        selector.currentValue,
-      ])
+      options.configOptionSelectors.map((selector) => [selector.configId, selector.currentValue])
     )
   );
 
   return (
     <SessionChatInputArea
+      claimNavigationFocus={claimNavigationFocus}
       // The info bar above owns this gap, as on the session page.
       hideTopSpacer
       session={session}
@@ -1300,9 +1679,9 @@ function StoryComposer({
       isEmptyConversation={false}
       selectedModeId={mode}
       selectedModelId={model}
-      modeOptions={selectorOptions.modeOptions}
-      modelOptions={selectorOptions.modelOptions}
-      configOptionSelectors={selectorOptions.configOptionSelectors}
+      modeOptions={options.modeOptions}
+      modelOptions={options.modelOptions}
+      configOptionSelectors={options.configOptionSelectors}
       configOptionValues={configValues}
       isRepoPublic
       availableCommands={[]}
@@ -1316,6 +1695,162 @@ function StoryComposer({
       onRemoveQueueItem={async () => undefined}
       initialInputText={initialInputText}
       disableImageUpload
+    />
+  );
+}
+
+type ReadingPanelSelection =
+  | { kind: 'diff'; turnId: string; filePath?: string; mode?: 'base' | 'conversation' }
+  | { kind: 'preview' };
+
+const readingPreviewUrl = 'http://localhost:5173/preview';
+const readingPreviewHtml = `<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><style>body{margin:0;padding:48px;font:16px system-ui;background:#fff;color:#20242b}main{max-width:640px;margin:auto}h1{font-size:32px}p{line-height:1.7;color:#525b68}</style><main><h1>阅读样式</h1><p>这是一份用于展示视觉标注的合成预览页面。</p></main></html>`;
+const readingPreviewToolbar: ComponentProps<typeof SessionBrowserPanelView>['toolbar'] = {
+  address: readingPreviewUrl,
+  canGoBack: false,
+  canGoForward: false,
+  loading: false,
+  annotationEnabled: false,
+  annotationAvailable: false,
+  sharing: false,
+  shareAvailable: false,
+  hasShareUrl: false,
+  busy: false,
+  onAddressChange: action,
+  onRestoreAddress: action,
+  onNavigate: action,
+  onBack: action,
+  onForward: action,
+  onReload: action,
+  onStop: action,
+  onToggleAnnotation: action,
+  onShare: action,
+  onStopSharing: action,
+};
+
+function ReadingReviewDiffLayout({
+  enabled,
+  frame,
+  session,
+  selection,
+  onSelect,
+  onClose,
+  children,
+}: {
+  enabled: boolean;
+  frame: DeviceFrame;
+  session: SessionMeta;
+  selection: ReadingPanelSelection | null;
+  onSelect: (selection: ReadingPanelSelection) => void;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const { t } = useTranslation();
+  const [mobileView, setMobileView] = useState<MobileDiffView>('diff');
+  useLayoutEffect(() => {
+    if (selection) {
+      setMobileView(
+        selection.kind === 'diff' && selection.mode === 'base' && !selection.filePath
+          ? 'files'
+          : 'diff'
+      );
+    }
+  }, [selection]);
+
+  if (!enabled) return children;
+
+  const diff =
+    selection?.kind === 'diff' ? (
+      <SessionConversationDiffPanel
+        active={frame === 'desktop' || mobileView === 'diff'}
+        sessionId={session.id}
+        turnId={selection.turnId}
+        mode={selection.mode}
+        filePaths={READING_FILE_DIFFS.map((entry) => entry.filePath)}
+        fileDiffs={READING_FILE_DIFFS}
+        focusFilePath={selection.filePath}
+        fileProvider={readingFileProvider}
+      />
+    ) : null;
+
+  if (frame === 'mobile') {
+    return (
+      <>
+        {children}
+        <SessionMobileDiffDrawer
+          open={selection !== null}
+          onOpenChange={(open) => {
+            if (!open) onClose();
+          }}
+          view={mobileView}
+          onBackToFiles={() => setMobileView('files-with-diff')}
+          changes={{
+            ready: true,
+            synced: true,
+            changeEntries: READING_FILE_DIFFS,
+            changeFilePaths: READING_FILE_DIFFS.map((entry) => entry.filePath),
+            onOpenChangesDiff: (filePath) =>
+              onSelect({
+                kind: 'diff',
+                turnId: selection?.kind === 'diff' ? selection.turnId : 'reading-assistant-1',
+                mode: selection?.kind === 'diff' ? selection.mode : undefined,
+                filePath,
+              }),
+          }}
+        >
+          {diff}
+        </SessionMobileDiffDrawer>
+      </>
+    );
+  }
+
+  const isPreview = selection?.kind === 'preview';
+  const label = isPreview
+    ? t('sessions.sidebar.browser', 'Browser')
+    : t('sessions.diffTab', 'Conversation Diff');
+  const panel = isPreview ? (
+    <SessionBrowserPanelView toolbar={readingPreviewToolbar} onDismissError={action}>
+      <ManagedPreviewSurface
+        session={session}
+        viewerUrl={readingPreviewUrl}
+        logicalUrl={readingPreviewUrl}
+        documentHtml={readingPreviewHtml}
+        annotationEnabled={false}
+        onAnnotationAvailabilityChange={action}
+        onRuntimeError={action}
+        onLoadingChange={action}
+        onBrowserStateChange={action}
+        onNavigationRequest={action}
+      />
+    </SessionBrowserPanelView>
+  ) : (
+    diff
+  );
+  return (
+    <DesktopSessionDetailLayout
+      defaultSizes={{ main: selection ? 55 : 100, sidebar: 45 }}
+      topBar={null}
+      chatSurfaces={children}
+      terminalDock={null}
+      sidebarOpen={selection !== null}
+      onSidebarCollapse={onClose}
+      deleteConfirmDialog={null}
+      secondaryPanel={
+        <div className="flex h-full min-h-0 flex-col">
+          <SessionSidePanelTabBar
+            tabs={[
+              { id: 'reading-panel', label, kind: isPreview ? 'browser' : 'diff', closeable: true },
+            ]}
+            activeTabId="reading-panel"
+            onTabSelect={() => {}}
+            onTabClose={onClose}
+            closeTabLabel={(tabLabel) =>
+              t('sessions.fileViewer.closeTab', 'Close {{fileName}}', { fileName: tabLabel })
+            }
+          />
+          <div className="min-h-0 flex-1">{panel}</div>
+        </div>
+      }
     />
   );
 }
@@ -1336,6 +1871,11 @@ export function SessionConversationStoryHarness({
   wide = false,
   machineInfo,
   machineOnly = false,
+  annotationPreview = false,
+  firstUserMessage,
+  onPresented,
+  composerModelLabel,
+  claimNavigationFocus,
 }: {
   state: PageState;
   frame: DeviceFrame;
@@ -1351,11 +1891,30 @@ export function SessionConversationStoryHarness({
   queued?: 'with-info-bar' | 'without-info-bar';
   machineInfo?: SessionMachineInfo;
   machineOnly?: boolean;
+  annotationPreview?: boolean;
+  firstUserMessage?: string;
+  onPresented?: () => void;
+  composerModelLabel?: string;
+  claimNavigationFocus?: () => boolean;
   /** Mirrors the Settings > Appearance "Full width" switch. */
   wide?: boolean;
 }) {
   const { t } = useTranslation();
+  useLayoutEffect(() => {
+    onPresented?.();
+  }, [onPresented]);
   const [streamChunkCount, setStreamChunkCount] = useState(0);
+  const [readingLiveTimestamp] = useState(() => new Date(getServerNow() - 45_000).toISOString());
+  const [readingPanel, setReadingPanel] = useState<ReadingPanelSelection | null>(
+    annotationPreview ? { kind: 'preview' } : null
+  );
+  const openReadingDiff = useCallback((turnId: string, filePath: string) => {
+    setReadingPanel({ kind: 'diff', turnId, filePath });
+  }, []);
+  const openReadingAllChanges = useCallback(() => {
+    setReadingPanel({ kind: 'diff', turnId: 'all-changes', mode: 'base' });
+  }, []);
+  const closeReadingPanel = useCallback(() => setReadingPanel(null), []);
   const session = useMemo(() => {
     const baseSession = buildSession(state, frame);
     return {
@@ -1371,6 +1930,9 @@ export function SessionConversationStoryHarness({
       ...(branchName ? { branchName } : {}),
     };
   }, [branchName, frame, repoFullName, sessionTitle, shareImage, showCollaborators, state]);
+  useEffect(() => {
+    setReadingPanel(annotationPreview ? { kind: 'preview' } : null);
+  }, [annotationPreview, session.id]);
   const selection = useMessageSelection(session.id);
   const [preview, setPreview] = useState<ConversationMessage[] | null>(null);
   const [sentMessages, setSentMessages] = useState<SessionHistoryParsed[]>([]);
@@ -1382,39 +1944,68 @@ export function SessionConversationStoryHarness({
   }, [store, wide]);
   useEffect(() => {
     setStreamChunkCount(0);
-    if (state !== 'working') {
+    if (!isWorkingState(state)) {
       return undefined;
     }
-    const interval = window.setInterval(() => {
-      setStreamChunkCount((current) => {
-        if (current >= STREAM_CHUNK_TOTAL) {
-          window.clearInterval(interval);
-          return current;
-        }
-        return current + 1;
-      });
-    }, STREAM_INTERVAL_MS);
+    const total = state === 'reading-working' ? 3 : STREAM_CHUNK_TOTAL;
+    const interval = window.setInterval(
+      () => {
+        setStreamChunkCount((current) => {
+          if (current >= total) {
+            window.clearInterval(interval);
+            return current;
+          }
+          return current + 1;
+        });
+      },
+      state === 'reading-working' ? 600 : STREAM_INTERVAL_MS
+    );
     return () => window.clearInterval(interval);
   }, [state]);
   const history = useMemo(
     () =>
-      shareImage
-        ? [...buildShareHistory(), ...sentMessages]
-        : showCollaborators
-          ? collaborativeMessages()
-          : buildHistory(state, streamChunkCount, showCapacityRetry),
-    [shareImage, sentMessages, showCapacityRetry, showCollaborators, state, streamChunkCount]
+      firstUserMessage !== undefined
+        ? [
+            buildMessage({
+              id: 'new-chat-first-turn',
+              role: 'user',
+              userId: STORY_USER_ID,
+              timestamp: '2026-10-28T00:00:00.000Z',
+              items: [{ type: 'text', text: firstUserMessage }],
+            }),
+          ]
+        : shareImage
+          ? [...buildShareHistory(), ...sentMessages]
+          : showCollaborators
+            ? collaborativeMessages()
+            : buildHistory(state, streamChunkCount, showCapacityRetry, readingLiveTimestamp),
+    [
+      firstUserMessage,
+      shareImage,
+      sentMessages,
+      showCapacityRetry,
+      showCollaborators,
+      state,
+      streamChunkCount,
+      readingLiveTimestamp,
+    ]
   );
   const permissionHistory = history as unknown as SessionDoc['history'];
+  const lastReadingAssistant = isReadingState(state)
+    ? history.findLast((message) => message.role === 'assistant')?.id
+    : undefined;
+  const lastCompletedReadingAssistant = isReadingState(state)
+    ? history.findLast((message) => message.role === 'assistant' && message.finished)?.id
+    : undefined;
   const liveStatus =
     state === 'idle' || state === 'reading'
       ? undefined
-      : state === 'working'
+      : isWorkingState(state)
         ? ({ type: 'running' } as const)
         : ({ type: 'requestPermission' } as const);
   const shouldShowPermissionSurface = hasPendingPermissionRequest(liveStatus, permissionHistory);
   const translate = (key: string, fallback: string) => String(t(key, fallback));
-  const isWorking = state === 'working';
+  const isWorking = isWorkingState(state);
   const streamPhase =
     !isWorking || streamChunkCount === 0
       ? 'initializing'
@@ -1616,161 +2207,172 @@ export function SessionConversationStoryHarness({
                     : undefined
                 }
               >
-                <SessionConversationPage
-                  className="h-full"
-                  dropActive={dropActive}
-                  dropKind="session-mention"
-                  headerSlot={
-                    frame !== 'mobile' ? null : (
-                      // Mirrors the production mobile header (session-detail.tsx
-                      // `if (isMobile)`): a FLOATING frosted BaseHeader (absolute,
-                      // translucent + backdrop-blur, no border, 3rem tall) with
-                      // glass buttons; the conversation scrolls under it via the
-                      // `--conversation-top-inset` var set on the frame below.
-                      <BaseHeader
-                        hideMenuButton
-                        className="absolute inset-x-0 top-0 z-30 border-b-0 bg-background/55 backdrop-blur-xl"
-                        style={{ height: '3rem' }}
-                        leading={
-                          // Mirrors production `MobileSessionHeaderBackButton`.
-                          <GlassIconButton
-                            label={translate('common.back', 'Back')}
-                            onClick={action}
-                          >
-                            <ChevronLeft className="h-5 w-5" />
-                          </GlassIconButton>
-                        }
-                        title={mobileTitleNode}
-                        actions={mobileHeaderActions}
-                      />
-                    )
-                  }
-                  subHeaderSlot={
-                    // Mobile has no tab bar now (tabs live in the 💬 sheet); desktop keeps it.
-                    frame === 'mobile' ? null : (
-                      // Mirrors the production merged top row (session-detail
-                      // desktop): tabs + right-side toolbar ("…" menu) in ONE bar;
-                      // the old repo-title header row is gone.
-                      <SessionTabBar
-                        variant="session"
-                        parentSession={session}
-                        childSessions={shareImage ? [] : [childSession]}
-                        draftTabs={[]}
-                        archivedChildSessions={[]}
-                        activeTabSessionId={session.id}
-                        onTabSelect={action}
-                        onNewTab={action}
-                        onTabRename={action}
-                        onTabClose={action}
-                        tabOrder={[childSession.id]}
-                        rightSlot={
-                          <div className="flex h-full shrink-0 items-center gap-1 pl-1 pr-2">
-                            <SessionAccessControl state={storySharing} onShareWithTeam={action} />
-                            {headerMenuNode}
-                          </div>
-                        }
-                      />
-                    )
-                  }
-                  bodySlot={
-                    <SessionConversationPageBody
-                      streamSlot={
-                        <MessageSelectionContext.Provider value={selection.context}>
-                          <SessionChatStreamView
-                            sessionId={session.id}
-                            items={toStreamItems(session.id, history)}
-                            renderMessageRow={(row) => renderMessageRow(row, showCollaborators)}
-                            className="h-full"
-                            agentActivityLabel={
-                              isWorking
-                                ? translate('sessions.statusIndicator.thinking', 'Thinking')
-                                : shouldShowPermissionSurface
-                                  ? 'Waiting for your response'
-                                  : null
-                            }
-                            agentActivityTone={shouldShowPermissionSurface ? 'warning' : 'primary'}
-                          />
-                        </MessageSelectionContext.Provider>
-                      }
-                      permissionSlot={
-                        <FloatingPermissionRequest
-                          sessionId={session.id}
-                          sessionStatus={liveStatus}
-                          sessionHistory={permissionHistory}
+                <ReadingReviewDiffLayout
+                  enabled={isReadingState(state)}
+                  frame={frame}
+                  session={session}
+                  selection={readingPanel}
+                  onSelect={setReadingPanel}
+                  onClose={closeReadingPanel}
+                >
+                  <SessionConversationPage
+                    className="h-full"
+                    dropActive={dropActive}
+                    dropKind="session-mention"
+                    headerSlot={
+                      frame !== 'mobile' ? null : (
+                        // Mirrors the production mobile header (session-detail.tsx
+                        // `if (isMobile)`): a FLOATING frosted BaseHeader (absolute,
+                        // translucent + backdrop-blur, no border, 3rem tall) with
+                        // glass buttons; the conversation scrolls under it via the
+                        // `--conversation-top-inset` var set on the frame below.
+                        <BaseHeader
+                          hideMenuButton
+                          className="absolute inset-x-0 top-0 z-30 border-b-0 bg-background/55 backdrop-blur-xl"
+                          style={{ height: '3rem' }}
+                          leading={<MobileSessionHeaderBackButton onBack={action} />}
+                          title={mobileTitleNode}
+                          actions={mobileHeaderActions}
                         />
-                      }
-                      composerSlot={
-                        shouldShowPermissionSurface ? null : (
-                          <>
-                            <div hidden={selection.active}>
-                              {/* Mirrors the production info bar (cluster + stage)
-                              glued above the composer — desktop AND mobile. */}
-                              <StoryInfoBar
-                                session={session}
-                                queued={queued}
-                                reading={state === 'reading'}
-                                machineOnly={machineOnly}
-                                mobile={frame === 'mobile'}
-                                machine={
-                                  machineInfo ?? {
-                                    machineId: STORY_MACHINE_ID,
-                                    name: machineMeta.name,
-                                    isOwn: true,
-                                    isCurrent: frame === 'desktop' ? true : undefined,
-                                    onlineStatus: 'online',
-                                  }
-                                }
-                              />
-                              <StoryComposer
-                                session={session}
-                                isAgentBusy={isWorking}
-                                initialInputText={
-                                  shareImage
-                                    ? 'Can we compare the profiler results next?'
-                                    : composerText
-                                }
-                                onSendMessage={
-                                  shareImage
-                                    ? async (blocks) => {
-                                        const text = blocks
-                                          .filter((block) => block.type === 'text')
-                                          .map((block) => block.text)
-                                          .join('\n');
-                                        if (!text.trim()) return false;
-                                        setSentMessages((current) => [
-                                          ...current,
-                                          buildMessage({
-                                            id: `share-sent-${current.length}`,
-                                            role: 'user',
-                                            userId: STORY_USER_ID,
-                                            items: [{ type: 'text', text }],
-                                          }),
-                                        ]);
-                                        return true;
-                                      }
-                                    : undefined
-                                }
-                              />
+                      )
+                    }
+                    subHeaderSlot={
+                      // Mobile has no tab bar now (tabs live in the 💬 sheet); desktop keeps it.
+                      frame === 'mobile' ? null : (
+                        // Mirrors the production merged top row (session-detail
+                        // desktop): tabs + right-side toolbar ("…" menu) in ONE bar;
+                        // the old repo-title header row is gone.
+                        <SessionTabBar
+                          variant="session"
+                          parentSession={session}
+                          childSessions={shareImage ? [] : [childSession]}
+                          draftTabs={[]}
+                          archivedChildSessions={[]}
+                          activeTabSessionId={session.id}
+                          onTabSelect={action}
+                          onNewTab={action}
+                          onTabRename={action}
+                          onTabClose={action}
+                          tabOrder={[childSession.id]}
+                          rightSlot={
+                            <div className="flex h-full shrink-0 items-center gap-1 pl-1 pr-2">
+                              <SessionAccessControl state={storySharing} onShareWithTeam={action} />
+                              {headerMenuNode}
                             </div>
-                            <MessageSelectionToolbar selection={selection} />
-                          </>
-                        )
-                      }
-                    />
-                  }
-                  trailingSlot={
-                    shareImage ? (
-                      <ChatShareImageDialog
-                        open={preview !== null}
-                        onOpenChange={(open) => {
-                          if (!open) setPreview(null);
-                        }}
-                        session={session}
-                        messages={preview ?? []}
+                          }
+                        />
+                      )
+                    }
+                    bodySlot={
+                      <SessionConversationPageBody
+                        streamSlot={
+                          <MessageSelectionContext.Provider value={selection.context}>
+                            <SessionChatStreamView
+                              sessionId={session.id}
+                              items={toStreamItems(session.id, history)}
+                              renderMessageRow={(row) => renderMessageRow(row, showCollaborators)}
+                              onFileDiffClick={isReadingState(state) ? openReadingDiff : undefined}
+                              lastAssistantMessageId={lastReadingAssistant}
+                              lastCompletedAssistantMessageId={lastCompletedReadingAssistant}
+                              className="h-full"
+                              agentActivityLabel={
+                                isWorking
+                                  ? translate('sessions.statusIndicator.thinking', 'Thinking')
+                                  : shouldShowPermissionSurface
+                                    ? 'Waiting for your response'
+                                    : null
+                              }
+                              agentActivityTone={
+                                shouldShowPermissionSurface ? 'warning' : 'primary'
+                              }
+                            />
+                          </MessageSelectionContext.Provider>
+                        }
+                        permissionSlot={
+                          <FloatingPermissionRequest
+                            sessionId={session.id}
+                            sessionStatus={liveStatus}
+                            sessionHistory={permissionHistory}
+                          />
+                        }
+                        composerSlot={
+                          shouldShowPermissionSurface ? null : (
+                            <>
+                              <div hidden={selection.active}>
+                                {/* Mirrors the production info bar (cluster + stage)
+                              glued above the composer — desktop AND mobile. */}
+                                <StoryInfoBar
+                                  session={session}
+                                  queued={queued}
+                                  reading={isReadingState(state)}
+                                  onOpenAllChanges={
+                                    isReadingState(state) ? openReadingAllChanges : undefined
+                                  }
+                                  machineOnly={machineOnly}
+                                  mobile={frame === 'mobile'}
+                                  machine={
+                                    machineInfo ?? {
+                                      machineId: STORY_MACHINE_ID,
+                                      name: machineMeta.name,
+                                      isOwn: true,
+                                      isCurrent: frame === 'desktop' ? true : undefined,
+                                      onlineStatus: 'online',
+                                    }
+                                  }
+                                />
+                                <StoryComposer
+                                  claimNavigationFocus={claimNavigationFocus}
+                                  session={session}
+                                  isAgentBusy={isWorking}
+                                  modelLabel={composerModelLabel}
+                                  initialInputText={
+                                    shareImage
+                                      ? 'Can we compare the profiler results next?'
+                                      : composerText
+                                  }
+                                  onSendMessage={
+                                    shareImage
+                                      ? async (blocks) => {
+                                          const text = blocks
+                                            .filter((block) => block.type === 'text')
+                                            .map((block) => block.text)
+                                            .join('\n');
+                                          if (!text.trim()) return false;
+                                          setSentMessages((current) => [
+                                            ...current,
+                                            buildMessage({
+                                              id: `share-sent-${current.length}`,
+                                              role: 'user',
+                                              userId: STORY_USER_ID,
+                                              items: [{ type: 'text', text }],
+                                            }),
+                                          ]);
+                                          return true;
+                                        }
+                                      : undefined
+                                  }
+                                />
+                              </div>
+                              <MessageSelectionToolbar selection={selection} />
+                            </>
+                          )
+                        }
                       />
-                    ) : undefined
-                  }
-                />
+                    }
+                    trailingSlot={
+                      shareImage ? (
+                        <ChatShareImageDialog
+                          open={preview !== null}
+                          onOpenChange={(open) => {
+                            if (!open) setPreview(null);
+                          }}
+                          session={session}
+                          messages={preview ?? []}
+                        />
+                      ) : undefined
+                    }
+                  />
+                </ReadingReviewDiffLayout>
                 {frame === 'mobile' ? (
                   <>
                     <MobileSessionTabSheet
@@ -1852,7 +2454,7 @@ function makeMobileViewportDecorator(width: number, height?: number): Decorator 
         window.dispatchEvent(new Event('resize'));
       };
     }, []);
-    return <>{children}</>;
+    return <ForceMobileLayoutProvider force>{children}</ForceMobileLayoutProvider>;
   }
   return (Story) => (
     <MobileViewport>
@@ -1878,7 +2480,7 @@ const withDesktopViewport: Decorator = (Story) => {
       clearViewportLock(frame);
       window.dispatchEvent(new Event('resize'));
     }, []);
-    return <>{children}</>;
+    return <ForceMobileLayoutProvider force>{children}</ForceMobileLayoutProvider>;
   }
   return (
     <DesktopViewport>
@@ -1995,6 +2597,54 @@ export const DesktopReadingReviewWide: Story = {
   decorators: [withDesktopViewport],
 };
 
+export const DesktopReadingReviewWorking: Story = {
+  args: { ...DesktopReadingReview.args, state: 'reading-working' },
+  globals: { theme: 'dark' },
+  decorators: [withDesktopViewport],
+};
+
+export const DesktopReadingReviewAnnotations: Story = {
+  args: { ...DesktopReadingReview.args, annotationPreview: true },
+  globals: { theme: 'dark' },
+  decorators: [withDesktopViewport],
+};
+
+export const DesktopReadingReviewPermission: Story = {
+  args: { ...DesktopReadingReview.args, state: 'reading-permission' },
+  globals: { theme: 'dark' },
+  decorators: [withDesktopViewport],
+};
+
+export const DesktopReadingReviewQuestion: Story = {
+  args: { ...DesktopReadingReview.args, state: 'reading-question' },
+  globals: { theme: 'dark' },
+  decorators: [withDesktopViewport],
+};
+
+export const MobileReadingReview: Story = {
+  args: { ...DesktopReadingReview.args, frame: 'mobile' },
+  globals: { theme: 'dark' },
+  decorators: [withMobileViewport],
+};
+
+export const MobileReadingReviewWorking: Story = {
+  args: { ...DesktopReadingReviewWorking.args, frame: 'mobile' },
+  globals: { theme: 'dark' },
+  decorators: [withMobileViewport],
+};
+
+export const MobileReadingReviewPermission: Story = {
+  args: { ...DesktopReadingReviewPermission.args, frame: 'mobile' },
+  globals: { theme: 'dark' },
+  decorators: [withMobileViewport],
+};
+
+export const MobileReadingReviewQuestion: Story = {
+  args: { ...DesktopReadingReviewQuestion.args, frame: 'mobile' },
+  globals: { theme: 'dark' },
+  decorators: [withMobileViewport],
+};
+
 export const DesktopMultipleSenders: Story = {
   args: { showCollaborators: true },
   globals: { theme: 'light' },
@@ -2035,6 +2685,12 @@ export const DesktopQueuedMessages: Story = {
   args: { state: 'working', queued: 'with-info-bar' },
   globals: { theme: 'light' },
   decorators: [withDesktopViewport],
+};
+
+export const MobileQueuedMessages: Story = {
+  args: { frame: 'mobile', state: 'working', queued: 'with-info-bar' },
+  globals: { theme: 'light' },
+  decorators: [withMobileViewport],
 };
 
 /** With nothing for the info bar to show, the queue sits on the composer. */

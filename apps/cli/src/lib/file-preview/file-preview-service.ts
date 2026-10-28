@@ -1,7 +1,14 @@
 import { resolveMarkdownFileLink } from '@lody/shared/node/file-link-resolution';
 import type { LocalFileResolution } from '@lody/shared/local-file-preview';
 import { createHash } from 'node:crypto';
-import { open } from 'node:fs/promises';
+import {
+  FILE_DOWNLOAD_MAX_BYTES,
+  FILE_DOWNLOAD_CHUNK_BYTES,
+  FileDownloadRequestSchema,
+  type FileDownloadRequest,
+  type FileDownloadResponse,
+} from '@lody/shared';
+import { open, stat, realpath } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { gzip } from 'node:zlib';
 import {
@@ -17,6 +24,7 @@ import {
   type FilePreviewV3Response,
   type FilePreviewV3TextFormat,
   type SessionId,
+  type SessionFileRoot,
 } from '@lody/shared';
 import { formatErrorMessage } from '@/utils/format-error';
 import {
@@ -34,11 +42,15 @@ const gzipAsync = promisify(gzip);
  * resolver so `MessageHandler` can hand over the one it already owns — preview
  * needs the root and the ownership check, and nothing else from Code Collab.
  */
-export type FilePreviewWorkspaceResolver = (sessionId: SessionId) => Promise<
+export type FilePreviewWorkspaceResolver = (
+  sessionId: SessionId,
+  rootId?: string
+) => Promise<
   | {
       readonly ok: true;
       readonly ownerSessionId: SessionId;
       readonly workspaceRoot: string;
+      readonly fileRoots?: readonly SessionFileRoot[];
     }
   | {
       readonly ok: false;
@@ -54,15 +66,23 @@ export type FilePreviewWorkspaceResolver = (sessionId: SessionId) => Promise<
 
 /** Local ownership is required even when the session's workspace is unavailable. */
 export type FilePreviewLocalWorkspaceResolver = (
-  sessionId: SessionId
+  sessionId: SessionId,
+  rootId?: string
 ) => Promise<
-  | { readonly ok: true; readonly ownerSessionId: SessionId; readonly workspaceRoot: string | null }
+  | {
+      readonly ok: true;
+      readonly ownerSessionId: SessionId;
+      readonly workspaceRoot: string | null;
+      readonly fileRoots?: readonly SessionFileRoot[];
+    }
   | Extract<Awaited<ReturnType<FilePreviewWorkspaceResolver>>, { ok: false }>
 >;
 
 export type FilePreviewServiceOptions = {
   readonly onDiagnostic?: (event: Readonly<Record<string, unknown>>) => void;
   readonly resolveWorkspace: FilePreviewWorkspaceResolver;
+  /** Explicit paid entitlement; unavailable billing never grants the larger transfer. */
+  readonly canDownloadLargeFiles?: () => Promise<boolean>;
   readonly resolveLocalWorkspace: FilePreviewLocalWorkspaceResolver;
   readonly limits?: Partial<typeof FILE_PREVIEW_V3_LIMITS>;
   readonly pathPolicy?: FilePreviewPathPolicyOptions;
@@ -89,7 +109,11 @@ export class FilePreviewService {
 
   private resolvePath(
     request: FilePreviewV3Request,
-    workspace: { readonly ownerSessionId: SessionId; readonly workspaceRoot: string | null },
+    workspace: {
+      readonly ownerSessionId: SessionId;
+      readonly workspaceRoot: string | null;
+      readonly fileRoots?: readonly SessionFileRoot[];
+    },
     local: boolean
   ) {
     const failures: FilePreviewIoFailure[] = [];
@@ -97,6 +121,7 @@ export class FilePreviewService {
       workspaceRoot: workspace.workspaceRoot,
       requestedPath: request.path,
       extraRoots: this.deps.extraRoots,
+      sessionRoots: workspace.fileRoots,
       options: {
         ...this.deps.pathPolicy,
         allowArbitraryPaths: local,
@@ -130,7 +155,10 @@ export class FilePreviewService {
     request: FilePreviewV3Request,
     expectedOwnerSessionId?: string
   ): Promise<LocalFileResolution | import('@lody/shared').FilePreviewV3Error> {
-    const workspace = await this.deps.resolveLocalWorkspace(request.sessionId as SessionId);
+    const workspace = await this.deps.resolveLocalWorkspace(
+      request.sessionId as SessionId,
+      request.rootId
+    );
     if (!workspace.ok) {
       this.deps.onDiagnostic?.({
         stage: 'resolve-workspace',
@@ -173,9 +201,96 @@ export class FilePreviewService {
     };
   }
 
+  async downloadFileChunk(input: FileDownloadRequest): Promise<FileDownloadResponse> {
+    const parsed = FileDownloadRequestSchema.safeParse(input);
+    if (!parsed.success) return { status: 'error', code: 'invalid_path' };
+    const request = parsed.data;
+    try {
+      const workspace = await this.deps.resolveWorkspace(
+        request.sessionId as SessionId,
+        request.rootId
+      );
+      if (!workspace.ok) return { status: 'error', code: workspace.code };
+      if (!(await this.deps.canDownloadLargeFiles?.()))
+        return { status: 'error', code: 'paid_plan_required' };
+      const resolution = this.resolvePath(
+        { ...request, v: FILE_PREVIEW_PROTOCOL_VERSION },
+        workspace,
+        false
+      );
+      if (!resolution.ok) return { status: 'error', code: resolution.rejection.code };
+      const resolved = resolution.resolved;
+      const file = await open(resolved.absolutePath, 'r');
+      try {
+        const before = await file.stat({ bigint: true });
+        // Recheck the canonical path after open so a replaced symlink cannot
+        // turn a formerly allowed name into a read of a different file.
+        const current = this.resolvePath(
+          { ...request, v: FILE_PREVIEW_PROTOCOL_VERSION },
+          workspace,
+          false
+        );
+        if (
+          !current.ok ||
+          current.resolved.absolutePath !== resolved.absolutePath ||
+          (await realpath(resolved.absolutePath)) !== resolved.absolutePath
+        )
+          return { status: 'error', code: 'path_not_allowed' };
+        const currentStat = await stat(current.resolved.absolutePath, { bigint: true });
+        if (currentStat.dev !== before.dev || currentStat.ino !== before.ino)
+          return { status: 'error', code: 'file_changed' };
+        if (!before.isFile()) return { status: 'error', code: 'not_a_file' };
+        if (before.size > BigInt(FILE_DOWNLOAD_MAX_BYTES))
+          return { status: 'error', code: 'too_large' };
+        const revisionOf = (metadata: typeof before) =>
+          createHash('sha256')
+            .update(
+              [
+                resolved.absolutePath,
+                metadata.dev,
+                metadata.ino,
+                metadata.size,
+                metadata.mtimeNs,
+                metadata.ctimeNs,
+              ].join(':')
+            )
+            .digest('hex');
+        const revision = revisionOf(before);
+        if (request.revision && request.revision !== revision)
+          return { status: 'error', code: 'file_changed' };
+        const sizeBytes = Number(before.size);
+        if (request.offset > sizeBytes) return { status: 'error', code: 'file_changed' };
+        const bytes = Buffer.alloc(Math.min(FILE_DOWNLOAD_CHUNK_BYTES, sizeBytes - request.offset));
+        let read = 0;
+        while (read < bytes.length) {
+          const result = await file.read(bytes, read, bytes.length - read, request.offset + read);
+          if (result.bytesRead === 0) return { status: 'error', code: 'file_changed' };
+          read += result.bytesRead;
+        }
+        if (revisionOf(await file.stat({ bigint: true })) !== revision)
+          return { status: 'error', code: 'file_changed' };
+        return {
+          status: 'ok',
+          path: resolved.reportedPath,
+          revision,
+          sizeBytes,
+          offset: request.offset,
+          data: bytes.toString('base64'),
+        };
+      } finally {
+        await file.close();
+      }
+    } catch {
+      return { status: 'error', code: 'transient_io' };
+    }
+  }
+
   async previewFile(request: FilePreviewV3Request): Promise<FilePreviewV3Response> {
     const limits = this.limits;
-    const workspace = await this.deps.resolveWorkspace(request.sessionId as SessionId);
+    const workspace = await this.deps.resolveWorkspace(
+      request.sessionId as SessionId,
+      request.rootId
+    );
     if (!workspace.ok) {
       this.deps.onDiagnostic?.({
         stage: 'resolve-workspace',

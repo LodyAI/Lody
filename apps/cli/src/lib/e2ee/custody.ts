@@ -85,12 +85,17 @@ const native = <A>(work: () => Promise<A>) =>
   Effect.uninterruptible(
     Effect.tryPromise({
       try: work,
-      catch: (error) => (error instanceof NodeE2eeCustodyError ? error : failure('unavailable')),
+      catch: (error) =>
+        error instanceof NodeE2eeCustodyError
+          ? error
+          : ['EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException)?.code ?? '')
+            ? failure('permissions')
+            : failure('unavailable'),
     })
   );
 // Windows mode bits do not restrict a DACL. Protect a newly created directory
 // before publishing secrets; verify existing ACLs without silently repairing them.
-function windowsAcl(path: string, create = false) {
+function windowsAcl(path: string, create = false, nodeProcess?: NodeProcessApi) {
   if (process.platform !== 'win32') return Effect.void;
   const encoded = Buffer.from(path, 'utf8').toString('base64');
   const script = `
@@ -130,7 +135,11 @@ foreach ($r in $a.GetAccessRules($true, $true, [Security.Principal.SecurityIdent
     ],
     maxOutputBytes: 1024,
     timeout: 15_000,
-  }).pipe(Effect.provide(platformLayer({})), Effect.asVoid, Effect.catchCause(processFailure));
+  }).pipe(
+    Effect.provide(platformLayer({ nodeProcess })),
+    Effect.asVoid,
+    Effect.catchCause(processFailure)
+  );
 }
 async function exists(path: string) {
   try {
@@ -156,6 +165,11 @@ async function publish(path: string, value: string) {
 }
 async function privatePath(path: string, directory = false) {
   const info = await lstat(path);
+  if (
+    process.platform !== 'win32' &&
+    ((info.mode & 0o077) !== 0 || info.uid !== process.getuid?.())
+  )
+    throw failure('permissions');
   if (
     info.isSymbolicLink() ||
     (directory ? !info.isDirectory() : !info.isFile()) ||
@@ -186,18 +200,29 @@ async function readPrivate(path: string) {
  */
 export const makeCliE2eeCustody = Effect.fn('CliE2eeCustody.open')(function* (options: {
   readonly directory: string;
+  readonly requireOsProtection?: boolean;
   readonly keyring?: MachineKeyring;
   readonly nodeProcess?: NodeProcessApi;
+  /** Native DACL boundary; tests can model interrupted initialization on any OS. */
+  readonly directoryAcl?: (
+    directory: string,
+    initialize: boolean
+  ) => Effect.Effect<void, NodeE2eeCustodyError>;
 }) {
   const directory = options.directory;
   if (!isAbsolute(directory)) return yield* failure('invalid-input');
-  const createdDirectory = yield* native(async () => {
+  const initializeDirectory = yield* native(async () => {
     const created = !(await exists(directory));
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await privatePath(directory, true);
-    return created;
+    // An interruption before the first ACL publication leaves an empty directory.
+    // It has no originals to expose or reinterpret, so the next open can finish
+    // initialization. Once anything exists, ACL changes must never repair access.
+    return created || (await readdir(directory)).length === 0;
   });
-  yield* windowsAcl(directory, createdDirectory);
+  yield* options.directoryAcl
+    ? options.directoryAcl(directory, initializeDirectory)
+    : windowsAcl(directory, initializeDirectory, options.nodeProcess);
   const lockPath = join(directory, 'selection.sqlite');
   const mutex = yield* Effect.acquireRelease(
     Effect.gen(function* () {
@@ -263,7 +288,7 @@ export const makeCliE2eeCustody = Effect.fn('CliE2eeCustody.open')(function* (op
           !/^protection\.[a-f0-9]{32}\.tmp$/.test(name)
       )
     );
-    if (originals) return yield* failure('corrupt');
+    if (originals) return yield* failure('identity-lost');
     const probeId = `probe:${randomBytes(16).toString('hex')}`;
     const probe = randomBytes(32).toString('hex');
     const available = yield* Effect.gen(function* () {
@@ -278,17 +303,20 @@ export const makeCliE2eeCustody = Effect.fn('CliE2eeCustody.open')(function* (op
       yield* callKeyring(probeId, 'delete').pipe(Effect.catch(() => Effect.void));
       return Result.isSuccess(probed) && probed.success;
     });
+    if (!available && options.requireOsProtection) return yield* failure('unavailable');
     protection = available ? 'os-keystore' : 'file';
     yield* native(() => publish(marker, protection));
   }
   if (protection !== 'file' && protection !== 'os-keystore') return yield* failure('corrupt');
-  // Once a device exists, a lost KEK must preserve the remaining originals.
+  // Device and credential originals both forbid replacing a missing KEK.
   const missingKek = yield* native(
     async () =>
       !(await exists(join(directory, 'kek.safe-storage'))) &&
-      (await readdir(directory)).some((name) => name.endsWith('.device'))
+      (await readdir(directory)).some(
+        (name) => name.endsWith('.device') || name.endsWith('.sealed')
+      )
   );
-  if (missingKek) return yield* failure('corrupt');
+  if (missingKek) return yield* failure('identity-lost');
   let key: Uint8Array | undefined;
   yield* Effect.addFinalizer(() => Effect.sync(() => key?.fill(0)));
   if (protection === 'os-keystore') {
@@ -296,7 +324,7 @@ export const makeCliE2eeCustody = Effect.fn('CliE2eeCustody.open')(function* (op
     let encoded = yield* callKeyring(account, 'get');
     if (encoded === undefined) {
       if (yield* native(() => exists(join(directory, 'kek.safe-storage'))))
-        return yield* failure('unavailable');
+        return yield* failure('identity-lost');
       const original = randomBytes(32).toString('hex');
       yield* callKeyring(account, 'set', original);
       encoded = yield* callKeyring(account, 'get');
@@ -360,10 +388,16 @@ export const makeCliE2eeCustody = Effect.fn('CliE2eeCustody.open')(function* (op
     prepareDevice: () => custody.prepareDevice('machine'),
     retainDevice: custody.retainDevice,
     discardDevice: custody.discardDevice,
+    forgetDevice: (
+      genesis: Parameters<typeof custody.forgetDevice>[0],
+      signingKey: Parameters<typeof custody.forgetDevice>[1]
+    ) => custody.forgetDevice(genesis, signingKey, 'machine'),
     createDevice: (genesis: Parameters<typeof custody.createDevice>[0]) =>
       custody.createDevice(genesis, 'machine'),
     openDevice: (genesis: Parameters<typeof custody.openDevice>[0]) =>
       custody.openDevice(genesis, 'machine'),
+    prepareDeviceCredential: custody.prepareDeviceCredential,
+    deviceCredential: custody.deviceCredential,
     installed: custody.installed,
     candidate: custody.candidate,
     stop: custody.stop,

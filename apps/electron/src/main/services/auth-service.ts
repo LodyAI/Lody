@@ -1,5 +1,5 @@
 import { app, safeStorage, shell } from 'electron'
-import { authClient } from '../auth'
+import { authClient, offlineAuthIdentity } from '../auth'
 import { captureElectronMainException } from '../posthog-error-reporting'
 import { DesktopLogin, DesktopLoginFailure } from './desktop-login'
 import { isLocalPlatform, desktopInstallationProfile } from '../platform'
@@ -297,10 +297,17 @@ function hasResponseError(response: unknown): boolean {
 // surfacing ElectronAuthQueryTimeoutError to every consumer.
 const AUTH_SESSION_NETWORK_TIMEOUT_MS = 5_000
 
-async function withSessionNetworkTimeout<T>(promise: Promise<T>): Promise<T> {
+// The timeout bounds the caller's wait, not the request: a slow first request
+// (e.g. proxy resolution at startup) may still succeed, and `onLateResult`
+// receives that answer so it is not discarded.
+async function withSessionNetworkTimeout<T>(
+  promise: Promise<T>,
+  onLateResult?: (result: T) => void
+): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | null = null
   const timeoutPromise = new Promise<never>((_resolve, reject) => {
     timeoutId = setTimeout(() => {
+      if (onLateResult) promise.then(onLateResult, () => {})
       reject(
         new Error(`getSession network call timed out after ${AUTH_SESSION_NETWORK_TIMEOUT_MS}ms`)
       )
@@ -448,6 +455,8 @@ export class AuthService {
           this.authGeneration += 1
           this.rememberSessionToken(session.session.token)
           this.lastResolvedSessionResponse = session
+          this.retainOfflineIdentity(session.session.token, session.user.id)
+          this.notifyCachedSessionIdentity()
           return session
         }),
       publish: onLoginState,
@@ -482,6 +491,11 @@ export class AuthService {
   private lastKnownSessionToken: string | null = null
   private authOperation: Promise<void> = Promise.resolve()
   private authGeneration = 0
+  // Advances on every committed session answer (resolved or definitively
+  // rejected). A late reply commits only if no answer was committed after its
+  // request started: an empty cache alone cannot tell "never answered" from
+  // "rejected", and a rejection does not change the auth generation.
+  private sessionAnswerRevision = 0
 
   // Offline identity authority (specs/local-first-two-plane.md): the last
   // session response that actually resolved a user this run. Served when the
@@ -490,12 +504,72 @@ export class AuthService {
   // unauthenticated responses clear it; transport failures never sign the user
   // out by themselves.
   private lastResolvedSessionResponse: unknown = null
+  private identityListeners = new Set<() => void>()
 
-  /** Main-process identity only; never starts an authentication request. */
-  getCachedSessionIdentity(): { userId: string | null; generation: number } {
-    return {
-      userId: readSessionFromResponse(this.lastResolvedSessionResponse).userId,
-      generation: this.authGeneration
+  subscribeCachedSessionIdentity(listener: () => void): () => void {
+    this.identityListeners.add(listener)
+    return () => {
+      this.identityListeners.delete(listener)
+    }
+  }
+
+  private notifyCachedSessionIdentity(): void {
+    for (const listener of this.identityListeners) {
+      try {
+        listener()
+      } catch {
+        console.warn('[Auth] e2ee_identity_observer_failed')
+      }
+    }
+  }
+
+  /** Local E2EE identity only; never starts an authentication request. */
+  getCachedSessionIdentity(options?: unknown): {
+    userId: string | null
+    generation: number
+    source: 'network' | 'offline' | null
+  } {
+    const resolved = readSessionFromResponse(this.lastResolvedSessionResponse).userId
+    if (resolved) return { userId: resolved, generation: this.authGeneration, source: 'network' }
+    const supplied = readBearerTokenFromInput(options)
+    // An explicit renderer bearer must itself match. A different bearer cannot
+    // borrow a cookie's offline identity or choose another account's directory.
+    try {
+      let cookie: string | null = null
+      if (!supplied) {
+        try {
+          cookie = readSessionTokenFromCookieHeader(getElectronAuthCookieHeader())
+        } catch {
+          console.warn('[Auth] e2ee_identity_cookie_unavailable')
+        }
+      }
+      const userId = supplied
+        ? offlineAuthIdentity.read(supplied)
+        : (offlineAuthIdentity.read(cookie) ?? offlineAuthIdentity.read(this.lastKnownSessionToken))
+      if (userId && supplied) this.rememberSessionToken(supplied)
+      return { userId, generation: this.authGeneration, source: userId ? 'offline' : null }
+    } catch {
+      console.warn('[Auth] e2ee_offline_identity_read_failed')
+      return { userId: null, generation: this.authGeneration, source: null }
+    }
+  }
+
+  private retainOfflineIdentity(token: string | null, userId: string | null): void {
+    if (!token || !userId) return
+    try {
+      offlineAuthIdentity.remember(token, userId)
+    } catch {
+      // Saving an optional local identity cannot undo a successful cloud login.
+      console.warn('[Auth] e2ee_offline_identity_write_failed')
+    }
+  }
+
+  private clearOfflineIdentity(): void {
+    this.lastKnownSessionToken = null
+    try {
+      offlineAuthIdentity.clear()
+    } catch {
+      console.warn('[Auth] e2ee_offline_identity_clear_failed')
     }
   }
 
@@ -541,6 +615,8 @@ export class AuthService {
   async signOut(): Promise<void> {
     this.authGeneration += 1
     this.lastResolvedSessionResponse = null
+    this.clearOfflineIdentity()
+    this.notifyCachedSessionIdentity()
     this.login.cancel()
     await this.enqueueAuthOperation(async () => {
       try {
@@ -561,7 +637,18 @@ export class AuthService {
       // while getSession() stayed green. Mirror getSession()'s validate-and-fallback
       // here: resolve the session for this bearer and trust only the token it
       // actually yields, so both entry points agree on the same session.
-      const verified = await this.getSession(options)
+      let verified: unknown
+      try {
+        verified = await this.getSession(options)
+      } catch (error) {
+        // A transport failure is no verdict on either credential. Hand the
+        // request the durable cookie (else this bearer) for the server to
+        // authenticate, instead of failing it or waiting on a second hung check.
+        console.warn('[Auth] Session verification unavailable; using stored credential', error)
+        return (
+          readSessionTokenFromCookieHeader(getElectronAuthCookieHeader()) ?? explicitBearerToken
+        )
+      }
       const verifiedToken = readSessionTokenFromResponse(verified)
       if (verifiedToken) {
         return verifiedToken
@@ -623,14 +710,70 @@ export class AuthService {
     return null
   }
 
+  // Commits a session the server resolved. `sessionToken` is attached to the
+  // response when it lacks one; `confirmedToken` is the credential proven live.
+  private commitResolvedSession(
+    response: unknown,
+    sessionToken: string | null,
+    confirmedToken: string | null
+  ): unknown {
+    const resolved = withSessionTokenInResponse(response, sessionToken)
+    this.sessionAnswerRevision += 1
+    if (!confirmedToken) this.clearOfflineIdentity()
+    this.rememberSessionToken(confirmedToken)
+    this.lastResolvedSessionResponse = resolved
+    this.retainOfflineIdentity(confirmedToken, readSessionFromResponse(resolved).userId)
+    this.notifyCachedSessionIdentity()
+    return resolved
+  }
+
+  private commitDefinitiveRejection(): void {
+    this.sessionAnswerRevision += 1
+    this.lastResolvedSessionResponse = null
+    this.clearOfflineIdentity()
+    this.notifyCachedSessionIdentity()
+  }
+
+  // A session answer that arrived after its caller timed out still seeds the
+  // offline fallback, so the caller's retry is served instead of timing out
+  // again. It never overrides an answer committed after its request started
+  // (including a definitive rejection) or crosses an auth generation.
+  private commitLateSession(
+    generation: number,
+    answerRevision: number,
+    response: unknown,
+    token: string | null
+  ): void {
+    if (
+      generation !== this.authGeneration ||
+      answerRevision !== this.sessionAnswerRevision ||
+      this.lastResolvedSessionResponse !== null ||
+      !hasResolvedSession(response) ||
+      !token
+    ) {
+      return
+    }
+    this.commitResolvedSession(response, token, readSessionTokenFromResponse(response) ?? token)
+  }
+
   async getSession(options?: unknown) {
     const generation = this.authGeneration
+    const answerRevision = this.sessionAnswerRevision
     const parsedOptions = parseSessionQueryOptions(options)
+    const onLateResult = (late: unknown) => {
+      const cookie = readSessionTokenFromCookieHeader(getElectronAuthCookieHeader())
+      this.commitLateSession(
+        generation,
+        answerRevision,
+        late,
+        readBearerTokenFromInput(options) ?? cookie
+      )
+    }
     let response: unknown
     try {
       response = parsedOptions
-        ? await withSessionNetworkTimeout(authClient.getSession(parsedOptions))
-        : await withSessionNetworkTimeout(authClient.getSession())
+        ? await withSessionNetworkTimeout(authClient.getSession(parsedOptions), onLateResult)
+        : await withSessionNetworkTimeout(authClient.getSession(), onLateResult)
     } catch (error) {
       // Transport-level failure (offline, hung network, DNS): serve the last
       // resolved session instead of surfacing a timeout to every consumer.
@@ -648,28 +791,28 @@ export class AuthService {
     if (hasResolvedSession(response)) {
       // Remember whatever token resolved this session (response > cookie >
       // the bearer the caller supplied) so CLI bootstrap can reuse it.
-      const resolved = withSessionTokenInResponse(
-        response,
+      const sessionToken =
         !existingAuthorization || existingAuthorization === `Bearer ${cookieToken}`
           ? cookieToken
           : null
-      )
-      if (generation === this.authGeneration) {
-        this.rememberSessionToken(
-          readSessionTokenFromResponse(response) ?? cookieToken ?? readBearerTokenFromInput(options)
-        )
-        this.lastResolvedSessionResponse = resolved
+      if (generation !== this.authGeneration) {
+        return withSessionTokenInResponse(response, sessionToken)
       }
-      return resolved
+      return this.commitResolvedSession(
+        response,
+        sessionToken,
+        readSessionTokenFromResponse(response) ?? readBearerTokenFromInput(options) ?? cookieToken
+      )
     }
 
     if (!cookieToken || existingAuthorization === `Bearer ${cookieToken}`) {
       if (generation === this.authGeneration && isDefinitiveUnauthenticatedResponse(response)) {
-        this.lastResolvedSessionResponse = null
+        this.commitDefinitiveRejection()
       }
       return response
     }
 
+    const fallbackAnswerRevision = this.sessionAnswerRevision
     try {
       const fallbackResponse = await withSessionNetworkTimeout(
         authClient.getSession({
@@ -678,15 +821,14 @@ export class AuthService {
               Authorization: `Bearer ${cookieToken}`
             }
           }
-        })
+        }),
+        (late) => this.commitLateSession(generation, fallbackAnswerRevision, late, cookieToken)
       )
       if (hasResolvedSession(fallbackResponse)) {
-        const resolved = withSessionTokenInResponse(fallbackResponse, cookieToken)
-        if (generation === this.authGeneration) {
-          this.rememberSessionToken(cookieToken)
-          this.lastResolvedSessionResponse = resolved
+        if (generation !== this.authGeneration) {
+          return withSessionTokenInResponse(fallbackResponse, cookieToken)
         }
-        return resolved
+        return this.commitResolvedSession(fallbackResponse, cookieToken, cookieToken)
       }
       // The supplied bearer may be stale while the durable cookie is still
       // valid. A failed cookie check must retain its own result: returning the
@@ -700,7 +842,7 @@ export class AuthService {
         generation === this.authGeneration &&
         isDefinitiveUnauthenticatedResponse(unresolvedResponse)
       ) {
-        this.lastResolvedSessionResponse = null
+        this.commitDefinitiveRejection()
       }
       return unresolvedResponse
     } catch (error) {

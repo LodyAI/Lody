@@ -1,3 +1,4 @@
+import { requireWorkspaceFeature } from './workspace-feature';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import {
   getMachineRoomId,
@@ -34,12 +35,27 @@ export async function acceptSessionUserTurn(
   attachments?: SessionAttachmentDraft[],
   onAccepted?: () => void
 ): Promise<'written' | 'pending'> {
+  if (
+    attachments?.some(
+      (attachment) =>
+        !attachment.ready ||
+        attachment.ready.type !== 'file' ||
+        attachment.ready.transport !== 'local'
+    )
+  ) {
+    requireWorkspaceFeature(
+      { mode: runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+      'attachments'
+    );
+  }
   const pending = runtime.pendingSends;
   const unprepared = attachments?.some((attachment) => !attachment.ready) ?? false;
   const found = creation ? undefined : await runtime.repo.getDocMeta(getSessionRoomId(sessionId));
   if (isLoroRepoDocDeleted(found)) throw new Error('Target conversation was deleted');
   const meta = creation ?? (found?.meta as SessionMeta | undefined);
   const roostBackend = meta?.historyBackend === 'roost';
+  if (runtime.contentMode === 'e2ee' && roostBackend)
+    throw new Error('e2ee_history_backend_unavailable');
   if (pending && (unprepared || pending.hasSession(sessionId) || roostBackend)) {
     let targetMachineId = creation?.machineId;
     if (!targetMachineId) {

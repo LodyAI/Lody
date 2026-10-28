@@ -10,7 +10,6 @@ import { currentWorkspaceIdAtom } from '@/atoms';
 import { getMachineMetaMapAtom } from '@/atoms/machines';
 import { useLocalProjectsAdmin } from '@/hooks/use-local-projects-admin';
 import { useRemoveLocalProject } from '@/hooks/use-remove-local-project';
-import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { getLocalProjectVisibilityKey } from '@/lib/visible-local-project-index';
 import type { ProjectSkillsSource } from '@/hooks/use-project-skills';
 import {
@@ -21,7 +20,6 @@ import {
 import { MobileAcpHistorySheet } from '@/components/mobile/mobile-acp-history-sheet';
 import { MobileWorktreeConfigSheet } from '@/components/mobile/mobile-worktree-config-sheet';
 import { MobileProjectSkillsRow } from '@/components/mobile/mobile-project-skills-sheet';
-import { MobileRemoveLocalProjectSheet } from '@/components/mobile/mobile-remove-local-project-sheet';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { getHistoryProviderLabel } from '@/components/settings/project-settings';
 import { useAppCapability } from '@/lib/app-platform';
@@ -62,7 +60,6 @@ export function MobileLocalProjectSettings({
   const { t } = useTranslation();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const machineMeta = useAtomValue(getMachineMetaMapAtom).get(machineId as MachineId);
-  const onlineMachineIds = useOnlineMachineIds();
   // Team sharing is cloud-only; the whole sharing section hides on the local
   // (open-source) platform.
   const teamSharingAvailable = useAppCapability('teamSharing');
@@ -77,9 +74,7 @@ export function MobileLocalProjectSettings({
     onWorktreeSetupChange,
     onWorktreeCleanupChange,
   } = useLocalProjectsAdmin();
-  const { removeLocalProject, preflightLocalProjectRemoval, getRemoveLocalProjectImpact } =
-    useRemoveLocalProject();
-  const [removeSheetOpen, setRemoveSheetOpen] = useState(false);
+  const { removeLocalProject } = useRemoveLocalProject();
 
   const projectKey = getLocalProjectVisibilityKey(machineId, projectId);
   const skillsSource: ProjectSkillsSource | null = workspaceId
@@ -98,16 +93,6 @@ export function MobileLocalProjectSettings({
   /* Worktree setup + cleanup live behind a single drill-in row that opens
      this sheet, so the Settings tab's first level stays a short list. */
   const [worktreeSheetOpen, setWorktreeSheetOpen] = useState(false);
-  const removeImpact = useMemo(
-    () =>
-      row
-        ? getRemoveLocalProjectImpact({
-            machineId: row.machineId,
-            localProjectId: row.project.id,
-          })
-        : { conversationCount: 0, runningSessionCount: 0 },
-    [getRemoveLocalProjectImpact, row]
-  );
 
   if (isLoading && !row) {
     return (
@@ -229,47 +214,22 @@ export function MobileLocalProjectSettings({
         <MobileSettingsSection>
           <button
             type="button"
-            onClick={() => setRemoveSheetOpen(true)}
+            onClick={() => {
+              void removeLocalProject({
+                machineId: row.machineId,
+                localProjectId: row.project.id,
+                projectName: row.project.name,
+                originalRootPath: projectPath ?? undefined,
+              }).then((removed) => {
+                if (removed) onRemoved?.();
+              });
+            }}
             className="block w-full px-4 py-3 text-center text-[0.95rem] font-medium text-destructive transition-colors active:bg-destructive/10"
           >
             {t('workspace.projects.delete', 'Delete project')}
           </button>
         </MobileSettingsSection>
       ) : null}
-
-      <MobileRemoveLocalProjectSheet
-        open={removeSheetOpen}
-        onOpenChange={setRemoveSheetOpen}
-        projectName={row.project.name}
-        pathLabel={projectPath}
-        deviceName={row.machineName}
-        deviceOnline={onlineMachineIds.has(row.machineId)}
-        conversationCount={removeImpact.conversationCount}
-        runningSessionCount={removeImpact.runningSessionCount}
-        canCleanupWorktrees={
-          onlineMachineIds.has(row.machineId) &&
-          machineSupportsLocalProjectRemovalProtocol(machineMeta)
-        }
-        onPreflightCleanup={() =>
-          preflightLocalProjectRemoval({
-            machineId: row.machineId,
-            localProjectId: row.project.id,
-          })
-        }
-        onConfirm={async (options) => {
-          const removed = await removeLocalProject(
-            {
-              machineId: row.machineId,
-              localProjectId: row.project.id,
-              projectName: row.project.name,
-              originalRootPath: projectPath ?? undefined,
-            },
-            options
-          );
-          if (removed) onRemoved?.();
-          return removed;
-        }}
-      />
 
       <MobileWorktreeConfigSheet
         open={worktreeSheetOpen}

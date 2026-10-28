@@ -1,3 +1,5 @@
+import { requireWorkspaceFeature } from '@/lib/workspace-feature';
+import { type WorkspaceStreamsMode } from '@lody/shared/workspace-streams-content';
 import {
   buildSessionFileApiUrl,
   buildSessionFileUploadMetadataHeaders,
@@ -200,6 +202,7 @@ const MAX_PART_ATTEMPTS = 3;
 export type SessionFileUploadProgress = SessionFileTransferProgress;
 
 export type UploadSessionFileArgs = {
+  content: WorkspaceStreamsMode;
   workspaceId: WorkspaceId;
   sessionId: SessionId;
   token: string;
@@ -622,6 +625,7 @@ const uploadMultipart = async (args: UploadSessionFileArgs): Promise<SessionFile
 export const uploadSessionFile = async (
   args: UploadSessionFileArgs
 ): Promise<SessionFilePayload> => {
+  requireWorkspaceFeature(args.content, 'attachments');
   // Defensive re-check; the composer validates (and translates) before upload.
   const validationError = validateSessionFile(args.file);
   if (validationError === 'empty') {

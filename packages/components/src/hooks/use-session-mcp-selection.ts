@@ -1,6 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useAtomValue } from 'jotai';
-import { usePlatform } from '@lody/platform/react';
 import {
   getEffectiveDefaultMcpIds,
   getProjectMcpKey,
@@ -20,8 +19,8 @@ export type SessionMcpSelection = {
   menu: AttachmentAddMenuMcp | undefined;
   /**
    * Whether `selectedIds` can be sent. False only while a new conversation's
-   * selection still comes from defaults that have not been read: sending then
-   * would silently author a turn with no MCP servers.
+   * selection still comes from a local catalog that has not been read: sending
+   * then would silently author a turn with no MCP servers.
    */
   ready: boolean;
   /** The defaults this selection depends on could not be read at all. */
@@ -63,7 +62,6 @@ export function useSessionMcpSelection(
 ): SessionMcpSelection {
   const { existingSession, disabled, scopeKey, defaultsTarget } = options;
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
-  const { sync } = usePlatform();
   const { servers, synced, loaded, failed, projectMcpDefaults } = useWorkspaceCatalog();
   const projectKey = existingSession
     ? undefined
@@ -98,11 +96,10 @@ export function useSessionMcpSelection(
 
   const dependsOnDefaults =
     !existingSession && scopedOverride === undefined && persistedIds === undefined;
-  // A locally loaded cloud document can still lack remote project preferences,
-  // even when it already contains servers. Local-only composition has no cloud
-  // authority to wait for and keeps using its durable local snapshot.
-  const ready =
-    !dependsOnDefaults || (runtime != null && loaded && (sync.mode === 'local' || synced));
+  // Defaults come from the locally read snapshot. Remote catch-up never gates a
+  // send: a slow or offline room would otherwise block every new conversation,
+  // and the selection stays visible and editable in the composer meanwhile.
+  const ready = !dependsOnDefaults || (runtime != null && loaded);
 
   // Stable per scope so menu props built from this selection do not churn every render.
   const setSelectedIds = useCallback(

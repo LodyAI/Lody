@@ -6,6 +6,7 @@ import {
   MAX_VISIBLE_SESSIONS,
   sessionGroupOverflowsPreview,
   type SessionRowGroup,
+  type SessionListProjectGroupState,
   type SessionListRepoState,
   type SessionListRow,
 } from '@/components/session-list';
@@ -38,6 +39,12 @@ export function getLocalProjectSessionGroupKey(machineId: string, localProjectId
 export type SidebarNavigationLocalSection = {
   collapsed: boolean;
   projects: SidebarNavigationLocalProject[];
+  /**
+   * Multi-repository projects that need this machine, listed after its
+   * folders, with the conversations filed under them.
+   */
+  projectGroups?: SessionListProjectGroupState[];
+  projectGroupSessions?: SessionListRow[];
 };
 
 export type SidebarNavigationModelOptions = {
@@ -53,8 +60,11 @@ export type SidebarNavigationModelOptions = {
   workspace: {
     localSections: SidebarNavigationLocalSection[];
     githubSectionCollapsed: boolean;
+    /** Includes the conversations of the multi-repository projects listed here. */
     repoSessions: SessionListRow[];
     repos: SessionListRepoState[];
+    /** Multi-repository projects that run on any machine, listed with GitHub. */
+    projectGroups?: SessionListProjectGroupState[];
     chatSessions: SessionListRow[];
     chatsCollapsed: boolean;
   };
@@ -87,39 +97,59 @@ function emitSessionGroup(
 function emitLocalSections(
   items: SidebarNavItem[],
   sections: SidebarNavigationLocalSection[],
+  showFullSessionGroups: Record<string, boolean>,
   collapsedOpenedBySessions: Record<string, boolean>
 ): void {
   for (const section of sections) {
     if (section.collapsed) continue;
-    for (const project of section.projects) {
-      const projectKey = getLocalProjectSessionGroupKey(project.machineId, project.localProjectId);
-      items.push({
-        kind: 'local-project',
-        machineId: project.machineId,
-        localProjectId: project.localProjectId,
-        collapsed: project.collapsed,
-      });
-      if (project.collapsed) continue;
-      // Same opened-by tree the local project section renders, so arrow keys
-      // never land on a row hidden behind a collapsed opener.
-      const nodes = buildOpenedBySessionTree(project.sessions, {
+    emitLocalProjects(items, section, collapsedOpenedBySessions);
+    if (section.projectGroups?.length) {
+      for (const group of buildGroups(
+        section.projectGroupSessions ?? [],
+        [],
+        false,
+        undefined,
+        section.projectGroups
+      )) {
+        emitSessionGroup(items, group, showFullSessionGroups, collapsedOpenedBySessions);
+      }
+    }
+  }
+}
+
+function emitLocalProjects(
+  items: SidebarNavItem[],
+  section: SidebarNavigationLocalSection,
+  collapsedOpenedBySessions: Record<string, boolean>
+): void {
+  for (const project of section.projects) {
+    const projectKey = getLocalProjectSessionGroupKey(project.machineId, project.localProjectId);
+    items.push({
+      kind: 'local-project',
+      machineId: project.machineId,
+      localProjectId: project.localProjectId,
+      collapsed: project.collapsed,
+    });
+    if (project.collapsed) continue;
+    // Same opened-by tree the local project section renders, so arrow keys
+    // never land on a row hidden behind a collapsed opener.
+    const nodes = buildOpenedBySessionTree(project.sessions, {
+      getId: (session) => session.id,
+      getOpenedBySessionId: (session) => session.openedByRowSessionId ?? null,
+      isCollapsed: (openerId) => collapsedOpenedBySessions[openerId] === true,
+      rootRank: (session) => session.rootRankMs ?? 0,
+      ...(project.showFull ? {} : { maxRoots: MAX_VISIBLE_SESSIONS }),
+    });
+    for (const node of nodes) {
+      items.push({ kind: 'session', sessionId: node.item.id, groupKey: projectKey });
+    }
+    if (
+      countOpenedByTreeRoots(project.sessions, {
         getId: (session) => session.id,
         getOpenedBySessionId: (session) => session.openedByRowSessionId ?? null,
-        isCollapsed: (openerId) => collapsedOpenedBySessions[openerId] === true,
-        rootRank: (session) => session.rootRankMs ?? 0,
-        ...(project.showFull ? {} : { maxRoots: MAX_VISIBLE_SESSIONS }),
-      });
-      for (const node of nodes) {
-        items.push({ kind: 'session', sessionId: node.item.id, groupKey: projectKey });
-      }
-      if (
-        countOpenedByTreeRoots(project.sessions, {
-          getId: (session) => session.id,
-          getOpenedBySessionId: (session) => session.openedByRowSessionId ?? null,
-        }) > MAX_VISIBLE_SESSIONS
-      ) {
-        items.push({ kind: 'show-more', groupKey: projectKey, expanded: project.showFull });
-      }
+      }) > MAX_VISIBLE_SESSIONS
+    ) {
+      items.push({ kind: 'show-more', groupKey: projectKey, expanded: project.showFull });
     }
   }
 }
@@ -162,10 +192,21 @@ export function buildSidebarNavigationItems({
     return items;
   }
 
-  emitLocalSections(items, workspace.localSections, collapsedOpenedBySessions);
+  emitLocalSections(
+    items,
+    workspace.localSections,
+    showFullSessionGroups,
+    collapsedOpenedBySessions
+  );
 
   if (!workspace.githubSectionCollapsed) {
-    for (const group of buildGroups(workspace.repoSessions, workspace.repos, false)) {
+    for (const group of buildGroups(
+      workspace.repoSessions,
+      workspace.repos,
+      false,
+      undefined,
+      workspace.projectGroups
+    )) {
       emitSessionGroup(items, group, showFullSessionGroups, collapsedOpenedBySessions);
     }
   }
