@@ -56,7 +56,10 @@ before touching gestures.
   element, so never hand it to `VList`.
 - `MobileChatListCard` renders the sidebar's opened-by tree
   (`lib/session-opened-by-tree.ts`, the same two unmerged fields and the shared
-  `sidebarCollapsedOpenedBySessionsAtom`; `../AGENTS.md`) over EACH bucket. Its
+  `sidebarCollapsedOpenedBySessionsAtom`; `../AGENTS.md`) over EACH bucket.
+  `groupChats` first moves an opened Session into its topmost unpinned
+  ancestor's bucket: the ancestor's project, or the date of the tree's freshest
+  member. A bucket's project heading comes only from its own rows. Its
   leading slot owns ONE node — chevron, ├/└, or status indicator, status
   winning; never draw both. A top-level row keeps flat geometry (`px-4`, `w-4`);
   only an opened Session widens the slot (`w-8 justify-start`, CONTENT indented

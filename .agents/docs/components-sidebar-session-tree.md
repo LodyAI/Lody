@@ -59,7 +59,9 @@ moved row's own Machine rather than the project's. Two alternatives were rejecte
 making the remote Session a `parentSessionId` child, which would break the child
 contract of one shared machine and workspace, and showing the row in both groups,
 which would duplicate navigation targets. Updated mode is one list and already nests
-across contexts; mobile lists still nest per bucket.
+across contexts. Mobile project buckets follow the same placement, and mobile date
+buckets file a whole tree under the day of its freshest member, the time that already
+ranks its opener, so a stale opener and its fresh fan-out are not split across days.
 
 Every list here is sorted by latest activity, so each surface passes `rootRank` and an
 opener is ranked by its freshest opened Session. Without that, nesting would bury a
