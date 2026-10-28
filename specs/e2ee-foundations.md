@@ -1,7 +1,11 @@
 # E2EE foundation boundary
 
-Status: draft
+Status: approved
 Translation: current
+
+Approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
+Approval: 2026-10-28, reviewed and approved by the owner-authorized coordinator
+(session `b12f1597`); [approval record](https://github.com/LodyAI/Lody/pull/1894).
 
 [中文](e2ee-foundations.zh.md)
 
@@ -34,7 +38,7 @@ validates XChaCha20-Poly1305 tags using caller-supplied context/header and bindi
 New encryption requires a secure random 24-byte nonce. Tag validity alone does
 not establish author identity or authority. It does not expose a signer, private-key export, platform storage,
 transport or production feature switch. Platform custody and full content opening
-remain separate work. This draft is not product or all-platform acceptance.
+remain separate work. Spec approval is not product or all-platform acceptance.
 
 The separate HPKE epoch primitive preserves Base X25519/HKDF-SHA-256/ChaCha20-Poly1305,
 info `lody-e2ee/hpke-epoch/v1\0` and canonical four-field ledger AAD. It seals only
@@ -43,6 +47,298 @@ and exposes no delivery or installation workflow. Host secure randomness is
 required; async native completion precedes temporary-buffer cleanup and cancellation
 completion. Outer signatures, current eligibility and epoch commitments remain
 mandatory caller responsibilities; HPKE validity does not establish sender identity.
+
+## Realtime RPC and presence (M5 review draft)
+
+Remote execution needs the same authority and execution evidence whichever route
+wins. For the MVP, use **encrypted Streams RPC → encrypted history/Meta durable
+dispatch** as the final fallback. Keep that durable path available when Streams
+RPC fails; it must reach the same actual-start claim, not a second execution path.
+Iroh is a later acceleration layer, outside the MVP. Ordinary workspaces keep
+their existing behavior. RPC and durable content never fall back to plaintext;
+MVP presence is the separately approved minimal plaintext metadata channel below.
+
+**This concrete byte revision is approved as recorded above.** The owner approved both format
+choices below on **2026-10-28**: the 1 MiB RPC limit includes content v0's
+143-byte overhead, and
+RPC resources use canonical unpadded base64url of the ledger machineId bytes.
+The RPC body layout follows PR-25, merged as
+`c7b3c71512e2bdf26b14817fc8ff56cbd730f509`, with source pinned at
+`daee5751fde6698e50960ca6a5627191c887e297`; that code is evidence of candidate
+bytes, not final Spec approval or a shipped realtime capability.
+
+### Shared content frame and resource bytes
+
+Each encrypted RPC message carries exactly one content v0 frame:
+`header39 || nonce24 || ciphertext || tag16 || signature64`. Derive with the
+existing `deriveContentKey`: pinned genesis, current epoch, `docEpoch=0`, purpose
+8/9 and the exact resource. Purpose is authenticated despite being absent from
+the header. Use no extra content additionalData in this profile. Request,
+response, presence and document leaves never substitute for each other.
+Transport metadata supplies no authority; the host separately checks the fixed
+genesis-to-workspace binding and independently trusted target/signer.
+
+**Resource choice — owner approved (2026-10-28):** requests and responses use
+`rpc:<encodedMachineId>`, where encodedMachineId is RFC 4648 section 5 base64url
+of the exact ledger machineId's strict UTF-8 bytes, **without `=` padding**. The
+ledger permits 1..256 bytes, preserves a leading BOM, rejects lone surrogates and
+malformed UTF-8, and performs no Unicode normalization. Encode those original
+bytes without trimming, case folding, URL decoding or other normalization.
+The encoded segment uses only `A-Z a-z 0-9 - _`, is 2..342 ASCII bytes, and the
+complete resource is at most **346 ASCII bytes** including `rpc:`. For example,
+`a` becomes `rpc:YQ`, and `机器` becomes `rpc:5py65Zmo`.
+Reject padding, alternate alphabets, whitespace, impossible lengths, nonzero
+unused pad bits and any spelling that fails exact decode/re-encode equality;
+also validate the decoded 1..256-byte strict UTF-8 ledger identity. Thus every
+valid ledger ID has exactly one lossless resource spelling, including IDs longer
+than 128 bytes or containing non-ASCII characters. A decoded name alone grants
+no machine authority. This resource codec is absent from PR-25's body codec.
+
+### MVP presence: minimal plaintext (owner approved 2026-10-28)
+
+Encrypted workspaces use the existing plaintext `presence` ephemeral channel
+with its **90-second TTL** (`LODY_PRESENCE_TTL_MS = 90_000`), not encrypted
+presence. Keep the existing 30-second heartbeat and bounded publication rules.
+These IDs, state enums and timestamps are metadata the service can infer from
+connections, traffic and accounts; encrypting them offers little additional
+privacy while adding complexity and availability risk. This is the selected
+metadata disclosure, not a plaintext fallback for RPC or document content.
+
+Before any encrypted-workspace presence publication, construct a new record by
+this **closed allowlist**, including its nested status fields:
+
+| Record kind       | Allowed fields                                                        |
+| ----------------- | --------------------------------------------------------------------- |
+| `machine`         | `kind`, `machineId`, `instanceId`, `updatedAt`                        |
+| `session`         | `kind`, `sessionId`, `machineId`, `instanceId`, `status`, `updatedAt` |
+| `session-viewing` | `kind`, `userId`, `instanceId`, `sessionId`, `since`, `updatedAt`     |
+
+`kind` is one of the three literal tags above. Session `status` contains only
+`type` = `running` / `requestPermission` / `initializing`, plus the existing
+optional enum fields: `activity` = `image_generation`, `phase` = `finalizing`,
+and `stage` = `git-clone` / `managed-runtime` / `acp` / `resuming`, where valid
+for that status type. IDs must remain actual existing identifiers, not labels
+or text carriers; `since` and `updatedAt` are validated timestamps.
+
+**Strip every unlisted field before it enters the local ephemeral store or any
+local/cloud presence publisher.** In particular, never publish `status.detail`,
+free-text progress/errors, machine/user/session names, titles, paths, commands,
+prompts or content snippets. A length limit or read-side stripping is insufficient:
+the plaintext must already be filtered before transmission. Preserve existing
+room/account access checks, freshness and online/offline/unknown semantics;
+presence grants no execution authority, enters no journal/history, and a malformed
+entry cannot block unrelated documents. Ordinary-workspace payloads are unchanged.
+
+**Encrypted presence is outside the MVP.** Purpose 7 seal/open primitives and the
+presence body codec merged by [#1990](https://github.com/LodyAI/Lody/pull/1990)
+are **reserved, unused by the MVP**. Their 64 KiB body and ≤60-second encrypted-body
+TTL belong only to that reserved codec; they are not MVP presence limits and must
+not replace the existing 90-second TTL. No `presence:<roomId>` content resource or
+purpose-7 frame is sent by the MVP. RPC continues to use purposes 8/9 unchanged.
+
+### RPC body bytes and limits
+
+Bodies use fixed fields, not an outer JSON object. Integers are unsigned big
+endian; u64 values must be at most `2^53-1`. `text16` is a u16 byte length and
+exact ASCII bytes (a strict UTF-8 subset); `bytes32` is a u32 byte length and
+exact opaque bytes. Reject truncation, trailing bytes, unknown tags, invalid
+text/integers and size limits before allocation/copying. Decoded byte fields
+own their storage, including for offset Buffer inputs.
+
+| Purpose    | Plaintext field order                                                                  | Limit                                                                       |
+| ---------- | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| 8 request  | `version:u8=0, requestId:16, expiresAt:u64, method:text16, params:bytes32`             | Complete sealed frame ≤1,048,576 bytes; method 1..128 bytes in `0x21..0x7e` |
+| 9 response | `version:u8=0, requestId:16, requestDigest:32, kind:u8, sequence:u32, payload:bytes32` | Each complete sealed frame ≤1,048,576 bytes                                 |
+
+**RPC limit choice — owner approved (2026-10-28):** body size is at most **1,048,433 bytes**
+(`1,048,576 - 143`), not 1 MiB plus content overhead. Request body size is
+`31 + methodBytes + paramsBytes`; response body size is `58 + payloadBytes`.
+Transport envelopes are outside these RPC content-frame bounds. Generic document
+content limits do not change.
+
+Response kind is exactly 0 progress, 1 final success, or 2 final error. A final
+error's entire payload is `code:text16, detail:bytes32`, **without another version
+byte**. Code is 1..64 ASCII letters, digits, `_` or `-`; payload size is
+`6 + codeBytes + detailBytes` and at most 1,048,375 bytes, leaving the response's
+58-byte prefix inside the RPC body bound. Both response encoding and decoding
+validate this nested error layout. Empty params, success/progress payloads
+and error detail are permitted by the RPC body codec; the method schema applies
+its own requirements after authentication.
+
+Request IDs are host-generated secure random 16-byte values. RPC timestamps are
+nonnegative Unix UTC milliseconds. Expired means `now >= expiresAt`. The RPC body
+codec does not check current time, replay state, permissions or request freshness.
+
+Method params, success/progress and error details remain exact opaque bytes for
+the authorized method codec; JSON methods use their explicit UTF-8 JSON codec,
+without reserialization for hashing. Binary output requires an explicit codec.
+Decoded payloads cannot select another method, signer, target, ID or deadline.
+Error detail is an explicitly permitted encrypted method DTO; raw exceptions,
+paths, stacks and provider output stay in the trusted host's diagnostics unless
+explicitly part of that DTO.
+
+`requestDigest` is SHA-256 of the **entire original signed encrypted request**.
+Sequence starts at zero and strictly increases per request without u32 wrapping;
+exact duplicate frames are ignored, different bytes at the same sequence
+conflict. A terminal frame ends progress; gaps allow lost progress but never
+create success. Stateful correlation and sequencing belong to integration, not
+the pure body codec.
+
+One durable response owner atomically saves each exact sealed response frame and
+its allocated sequence **before publication**, then retries those original bytes.
+Restart never re-encrypts under a committed sequence. An uncertain commit must be
+reconciled before another seal or publication. If the response outbox is
+unavailable/invalid, use a separately authorized result query rather than inventing
+another original response. Publication or cleanup failure cannot replace a saved
+business outcome. No response evidence is automatically collected.
+
+Responses/progress must match the caller's retained original ID/digest, genesis,
+target and epoch, signed by the independently bound target device **while it
+remains valid**. Another member holding the epoch key cannot reply for it.
+Request expiry blocks a new start, not delivery/query of a retained result.
+Lookup itself needs authentication and read authorization; an ID/digest grants
+no access. A retained outcome may become a fresh response to a separate authorized
+query; that does not re-sign/re-encrypt the original request for retry.
+
+### Machine binding and current-only development state
+
+Machine `AdmitDevice` signs the exact machineId and device public keys together;
+machine possession also covers that machineId. Obtain `machineId → signing key`
+only from a genuine locally verified ledger, never directory rows, addresses or
+possession of an epoch key. Keep existing member/account and machine
+ownership/sharing checks. Credential-binding/v1 still binds the pairing exchange
+to its session; it is not the machineId proof.
+
+At most one active device binds a machineId in a workspace. Replacement names the
+same member's currently active device with that machineId and revokes its key in
+the same signed record. The current pre-freeze machine tag4/possession format is
+already implemented; it adds no new operation or capability declaration. See the
+[permission-ledger contract](e2ee/permission-ledger.zh.md) and the public
+[machine binding decision](../.agents/notes/proposed/architecture/2026-10-27-e2ee-machine-ledger-binding.md).
+
+Old development ledgers without the required machineId are unsupported: recreate
+them with the current format. They do not retain a document-sync compatibility
+path; do not add legacy decoding, migration, metadata guesses or re-signing of
+history. Production has no encrypted workspaces requiring that compatibility.
+This does not authorize erasing uncertain operations or execution evidence.
+
+### Permission freshness and the separate durable expiry clock
+
+A verified ledger proves continuity, not a fresh latest read. Tokens, timestamps,
+forwarded proofs and received frames do not grant execution freshness. Before a
+new start **and each later action**, check current member/device roles and existing
+machine ownership/sharing rules; Guest and recovery devices cannot execute.
+Read queries need read permissions. Known revocation, an incompatible epoch or
+conflicting evidence stops affected sends/execution across all delivery routes.
+**`rotationRequired` is an administrator advisory only:** keep prompting for key
+rotation, but the flag alone blocks neither new sealing, sending nor execution.
+Current verified authorization and usable epoch keys remain necessary.
+
+The execution machine initiates its own authenticated latest-ledger read and
+records local start time **before network I/O**. Verify through that read's latest
+boundary; cache only the remaining part of a maximum **15 minutes from that
+start**, in memory. Slow or failed reads and forwarded/cached pages cannot renew
+it. Intersect with request/upstream deadlines and reserve clock/stop margin;
+never wait on network under a global account lock. Restart discards this grant
+and requires online authenticated revalidation before new remote execution.
+Rollback or uncertain suspend/resume elapsed time invalidates the live cache.
+Retained checkpoints and journal timestamps cannot restore execution freshness.
+Offline documents/editing and retained results remain available; expired freshness
+blocks new remote execution, not unrelated local work. Revalidation never restarts
+an uncertain operation.
+
+The journal's **persistent expiry clock is a different mechanism**, not an
+execution grant. Current schema 3 retains a nondecreasing floor per
+`(genesis, workspaceId)` across reopen. With an independently authenticated current
+reference, claim rejects local time or the retained floor more than 600,000 ms
+ahead; accepted claims use `max(reference, retainedFloor)`. Without a reference,
+use `max(localNow, retainedFloor)` in that workspace. Never use frame timestamps
+as trusted time. Explicit evidence-preserving reset can clear a poisoned floor
+while retaining retired request IDs; it neither renews original deadlines nor
+restores freshness or replay authority. Follow the public
+[journal recovery decision](../.agents/notes/proposed/bug-fix/2026-10-27-e2ee-realtime-journal-recovery.md).
+
+### MVP routes and latency acceptance
+
+The MVP uses encrypted Streams RPC as its realtime path. If it is unusable, retain
+**encrypted history/Meta durable dispatch as the final fallback**. Retry the
+original ID and exact signed ciphertext. Durable dispatch retains the same
+business identity (`userTurnId` where applicable) and original request correlation;
+both routes pass the same actual-start claim and current authorization. A durable
+arrival does not refresh the original deadline or start a second operation.
+MVP delivery and acceptance must not depend on an iroh connection or SDK.
+
+The acceptance target is **send-to-actual-execution-start ≤1 second**, measured
+from sender acceptance of the send to the machine's actual-start boundary, not
+to a receipt ACK or business completion. Measure ordinary/encrypted paths and
+transport/fallback selection separately under stated conditions. Offline durable
+catch-up has no one-second delivery guarantee; a passed deadline still forbids
+a new start. No latency result is claimed by this documentation revision.
+
+### Later acceleration: iroh (outside the MVP)
+
+The owner deferred iroh from the MVP on **2026-10-28**. The identity decision is
+retained for that later layer: iroh reuses the workspace device's Ed25519
+identity, so EndpointId equals its signing public key. Only the trusted host supplies the private key, with no renderer
+export or arbitrary-sign IPC. A connected peer still passes shared-frame,
+verified-binding, current-permission, freshness and execution-journal checks.
+The 2026-10-28 owner decision records that the domain-separation review found no
+confusion between the signing protocols. That finding is not native SDK/key
+lifetime or installed-platform acceptance. A later iroh accelerator must preserve
+the same original ID/ciphertext, authorization and actual-start claim, and must
+not delay usable encrypted Streams RPC or its durable fallback.
+
+### Durable identities, actual start and retained outcomes
+
+Before a realtime send, retain the exact signed ciphertext and fixed ID. Before
+receipt ACK, save the original in the shared journal. Identity is
+`(genesis, workspace, targetMachineId, requestId)`; requester, original bytes and
+original expiry are immutable. Another requester or another original at that
+identity is a conflict, not another execution. Forwarding never renews expiry.
+
+The journal retains received, started, completed and uncertain outcomes. Atomically
+claim received **immediately before the first business side effect**; one winner
+gets a start permit. A crash after claim remains uncertain even if no side effect
+can be proved. Never automatically take over or replay. Reconcile using existing
+userTurnId/steer/fork evidence, including arrivals through encrypted history/Meta.
+A reception-only journal cannot fence durable dispatch after restart.
+
+`session/dispatch-turn` returns an `offerRpcTurn` delivery ACK, not completed agent
+work. Accepted/queued is progress tied to the original userTurnId, not journal
+completion. The actual agent-start boundary claims the journal; business completion
+saves the final outcome. Other methods retain their documented completion semantics.
+
+Persist the business outcome before response delivery or auxiliary cleanup.
+Completed results remain immutable and queryable after response loss or expiry.
+Journal errors block only dependent work; preserve evidence and original causes,
+allow reopening after I/O recovery, and never treat unreadable state as empty.
+Timeouts cannot steal ownership.
+
+**No automatic collection:** expiry or acknowledgement deletes neither originals,
+results, responses nor deduplication evidence, and never makes an ID reusable.
+Later bounded retention needs an approved policy for result consumption, uncertain
+work, durable retired IDs and backup rollback. Until then, exhausted capacity
+rejects new work without evicting evidence. MVP presence follows the separate
+minimal-plaintext allowlist and 90-second ephemeral channel contract above.
+
+### Revision evidence and limits
+
+The [public source audit](../.agents/notes/proposed/architecture/2026-10-26-e2ee-realtime-contract.md#source-audit-and-integration-boundary)
+pins merged primitives, machine binding and schema-3 journal to public main
+`76a4f28e8f22c0b405e57b731fb0a1e49c42d8a3`. Candidate body bytes and independent
+vectors from merged #1990 are pinned to [PR-25 source](https://github.com/LodyAI/Lody/blob/daee5751fde6698e50960ca6a5627191c887e297/packages/loro-streams-rpc/src/e2ee-wire.ts)
+and its [vectors](https://github.com/LodyAI/Lody/blob/daee5751fde6698e50960ca6a5627191c887e297/packages/loro-streams-rpc/tests/fixtures/e2ee-wire-v0.json).
+Existing presence fields and 90-second TTL are defined in
+[shared presence](../packages/shared/src/presence.ts) and the
+[channel contract](loro-ephemeral-presence-channel.md). Its general schema still
+allows free-text `status.detail`; the encrypted-workspace publish allowlist is
+an integration requirement, not behavior established by this documentation.
+Resource encoding, authenticated transport/freshness, sender outbox, actual
+execution and durable fallback wiring, result-query authorization, iroh custody,
+installed-platform and latency acceptance are not established by those subsets.
+The complete Spec revision `e4351fda` was approved on 2026-10-28 through the
+owner-authorized coordinator review recorded above. Spec approval does not enable
+product channels or establish runtime acceptance.
 
 ## Format compatibility
 
@@ -109,8 +405,8 @@ independent commitment verification. Failure must never claim reported installat
 Native settlement and temporary cleanup precede cancellation/Scope completion.
 No plaintext fallback or production composition is allowed. Native adapter choice,
 recovery file/wrapping/concurrency and native custody remain separate decisions; publisher availability uses
-[stage-before-CAS](e2ee/publisher-key-recoverability.md). This Spec revision stays draft; accepted boundary direction
-and executed synthetic tests do not approve this entire revision or native custody.
+[stage-before-CAS](e2ee/publisher-key-recoverability.md). This Spec revision is approved as recorded above; boundary approval
+and executed synthetic tests do not establish native custody acceptance.
 
 [Host contract and validation boundary](../packages/e2ee-core/docs/workflows.md#installedepochkeys-and-installedepochhistory).
 
@@ -138,8 +434,8 @@ by clients. Native boundary lookup is a host capability, not snapshot authority.
 
 Generic ASCII offsets use the u16 length bound; the released SDK's 4096-byte
 sealing-overhead limit imposes a smaller adapter bound. A snapshot plus subsequent
-updates bootstraps through actual Loro/Flock consumers. These design decisions do
-not mark this revised draft approved or enable product encryption.
+updates bootstraps through actual Loro/Flock consumers. This revision
+is approved as recorded above; approval does not enable product encryption.
 
 ## Local SQLite persistence
 
