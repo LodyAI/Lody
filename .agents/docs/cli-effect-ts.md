@@ -506,6 +506,13 @@ shared execution facades are:
 `terminateTree`, `childProcessTree`, `isPidAlive` and `probePid` retain their names.
 The guard rejects retired facade imports/exports and aliases that hide Legacy.
 
+`createEncryptedPresenceAdaptorLegacy` in `@lody/shared/encrypted-presence-adaptor-legacy`
+is shared by the CLI's existing presence facade and the renderer ephemeral transport.
+The native CLI generation Scope owns its actual crypto drain; the platform consumes
+only that scoped adaptor and its native retirement Effect. Delete this Promise bridge
+when both SDK callback consumers migrate together; see the
+[boundary decision](../notes/proposed/architecture/2026-10-28-encrypted-ephemeral-presence.md#failure-containment-and-effect-boundary).
+
 ## Testing
 
 - Use `@effect/vitest` (`it.effect`, `it.live`) with `TestClock` from

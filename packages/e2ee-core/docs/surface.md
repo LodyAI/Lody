@@ -89,7 +89,7 @@ repository's tests and the Lab, with no compatibility promise.
 `streamsLedgerLog`, `makeStreamsLedgerLog`, `StreamsLedgerLogOptions`,
 `LedgerSubmissionStream`, `streamsLedgerFeedSource`, `makeLedgerStreamReader`,
 `LedgerStreamReader`, `streamsDocumentBinding`, `StreamsDocumentBindingOptions`,
-`makeStreamsUpdateBinding`.
+`makeStreamsUpdateBinding`, `makePresenceContentBinding`.
 
 ## `@lody/e2ee-core/cloudflare`
 

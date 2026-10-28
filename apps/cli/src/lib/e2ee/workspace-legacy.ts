@@ -595,6 +595,17 @@ async function openWorkspaceOwned(
     throw error;
   });
   const initialStatus = await run(opened.runtime.status());
+  const presenceListeners = new Set<() => void>();
+  let presenceHead = initialStatus.headHash;
+  const invalidatePresence = () => {
+    for (const listener of presenceListeners) {
+      try {
+        listener();
+      } catch {
+        /* Observational only. */
+      }
+    }
+  };
   const tokensInUse = new Set<
     Awaited<Effect.Success<ReturnType<NonNullable<CloudE2eePort['createContentTokenProvider']>>>>
   >();
@@ -904,8 +915,13 @@ async function openWorkspaceOwned(
             // Unexpected defects are fenced too, without classifying them as
             // transient storage or weakening the verification boundary.
             ledgerBlocked = true;
+            invalidatePresence();
             throw error;
           });
+          if (status.headHash !== presenceHead) {
+            presenceHead = status.headHash;
+            invalidatePresence();
+          }
           ledgerBlocked = false;
           ledgerRetryAttempts = 0;
           epochTransition.observe(status);
@@ -993,6 +1009,24 @@ async function openWorkspaceOwned(
         pairingSessionId,
       }) ?? Promise.resolve(),
     content,
+    presence: {
+      subscribeInvalidation: (listener: () => void) => {
+        presenceListeners.add(listener);
+        return () => {
+          presenceListeners.delete(listener);
+        };
+      },
+      seal: (
+        input: Parameters<
+          import('@lody/shared/encrypted-presence').EncryptedPresencePort['seal']
+        >[0]
+      ) => {
+        if (closed || ledgerBlocked) return Promise.reject(new Error('e2ee_presence_unavailable'));
+        return run(opened.runtime.sealPresence(input));
+      },
+      open: (frame: Uint8Array) =>
+        closed || ledgerBlocked ? Promise.resolve(null) : run(opened.runtime.openPresence(frame)),
+    },
     tokens,
     bucketId: () => bucket?.(),
     status: () =>

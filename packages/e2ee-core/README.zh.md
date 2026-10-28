@@ -150,3 +150,7 @@ pnpm --filter @lody/e2ee-core check:docs  # 公开导出、命名空间与 servi
 
 Streams 适配器与 Lab 使用当前 workspace catalog 版本。Node 宿主可共用
 [node-custody](docs/surface.zh.md) 保管实现，并分别提供经过核对的系统包装器。
+
+Streams 入口还提供 `makePresenceContentBinding`：在当前成员校验下处理用途 7，
+由 Scope 管理密钥和明文的生命周期。在线状态正文、重放、身份和时间检查仍由应用层负责；
+参见 [适配器](src/adapters/loro-streams/README.md#ephemeral-presence)。

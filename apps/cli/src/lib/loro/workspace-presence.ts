@@ -46,6 +46,15 @@ export interface PresenceStream {
   readonly stats: PresenceStats;
 }
 export interface PresenceRemoteOptions {
+  readonly encryptedPresence?: (store: EphemeralStore) => Effect.Effect<
+    {
+      adaptor: import('@loro-dev/streams-crdt').EphemeralStreamAdaptor;
+      retire: Effect.Effect<void>;
+    },
+    never,
+    Scope.Scope
+  >;
+  readonly bucketId?: string;
   readonly streamsBaseUrl: string;
   readonly shardHostSuffix?: string;
   /** Borrowed from the workspace token owner. Remote detach never closes it. */
@@ -340,6 +349,7 @@ export const makeWorkspacePresence = Effect.fnUntraced(function* (
         cause: Cause.empty,
       };
       generation = g;
+      if (remote.encryptedPresence) replica.useEncryptedPresence();
       const made = yield* Scope.provide(
         transport.create(workspaceId, replica.store, remote, g.id),
         g.scope

@@ -57,6 +57,7 @@ const EPHEMERAL_JOIN_WATCHDOG_BASE_MS = 20_000;
 const EPHEMERAL_JOIN_WATCHDOG_MAX_MS = 120_000;
 
 export type EphemeralRoomStartArgs = {
+  bucketId?: string;
   baseUrl: string;
   auth: EphemeralRoomAuthCallback;
   /** Hosted shard topology (bare host suffix) injected at runtime; absent for unsharded gateways. */
@@ -132,7 +133,7 @@ export abstract class EphemeralRoomTransport<
     this.lastStartArgs = args;
     const generation = (this.generation += 1);
     const durableStreamUrl = createLoroStreamUrl({
-      bucketId: LORO_STREAMS_BUCKET_ID,
+      bucketId: args.bucketId ?? LORO_STREAMS_BUCKET_ID,
       streamId: getLoroMetaStreamId(this.options.workspaceId),
       baseUrl: getLoroStreamsPresenceBaseUrl(
         args.baseUrl,

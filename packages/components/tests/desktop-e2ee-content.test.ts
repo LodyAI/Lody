@@ -312,3 +312,45 @@ it.each(['token', 'snapshot'] as const)(
     }
   }
 );
+
+it('requires an explicit native presence capability and retires projections when verified membership changes', async () => {
+  const { EphemeralStore } = await import('loro-crdt');
+  const { createEncryptedPresenceAdaptorLegacy } =
+    await import('@lody/shared/encrypted-presence-adaptor-legacy');
+  vi.useFakeTimers();
+  vi.setSystemTime(1000);
+  const runtime = {
+    sealPresence: async () => new Uint8Array([77]),
+    openPresence: async () => ({
+      key: 'author:machine:m:i',
+      state: { kind: 'machine', machineId: 'm', instanceId: 'i', updatedAt: 1000 },
+      expiresAt: 61000,
+    }),
+  } as unknown as E2eeWorkspaceRuntime;
+  const input = {
+    workspaceId: 'workspace',
+    genesisHash: '11'.repeat(32),
+    epoch: 0,
+    authToken: () => 'account',
+    runtime,
+  };
+  const unsupported = createDesktopE2eeContent(input);
+  const supported = createDesktopE2eeContent({ ...input, encryptedPresence: true });
+  const store = new EphemeralStore(90000);
+  expect(unsupported.e2ee.presence).toBeUndefined();
+  if (!supported.e2ee.presence) throw new Error('Expected the explicit native presence capability');
+  const bridge = createEncryptedPresenceAdaptorLegacy(store, supported.e2ee.presence);
+  try {
+    supported.updateStatus({ epoch: 0, rotationRequired: false, headHash: 'first' });
+    await bridge.adaptor.applyRemoteUpdates([new Uint8Array([77])]);
+    expect(store.get('author:machine:m:i')).toBeDefined();
+    supported.updateStatus({ epoch: 0, rotationRequired: false, headHash: 'next' });
+    expect(store.get('author:machine:m:i')).toBeUndefined();
+  } finally {
+    await bridge.close();
+    store.destroy();
+    await unsupported.close();
+    await supported.close();
+    vi.useRealTimers();
+  }
+});

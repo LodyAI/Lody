@@ -225,6 +225,7 @@ export function resolveWorkspaceRuntimeCacheIdentity(
 }
 
 export type WorkspaceE2eeTransport = {
+  presence?: import('@lody/shared/encrypted-presence').EncryptedPresencePort;
   createTokenProvider(signal: AbortSignal): ReturnType<typeof createLoroStreamsTokenProviderLegacy>;
   bucketId(): string | null;
 };
@@ -675,6 +676,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     deps.onPresenceSnapshot?.(latestPresenceStates);
   };
   const presenceTransport = new WorkspacePresenceTransport({
+    encryptedPresence: protectedContent ? deps.e2ee?.presence : undefined,
     workspaceId,
     onSnapshot: (states) => {
       latestCloudPresenceStates = states;
@@ -3040,7 +3042,13 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   };
 
   const startPresenceTransport = () => {
-    if (protectedContent) return;
+    if (
+      protectedContent &&
+      (!deps.e2ee?.presence ||
+        !deps.e2ee.bucketId() ||
+        deps.e2ee.bucketId() === LORO_STREAMS_BUCKET_ID)
+    )
+      return;
     if (!streamsTokenProvider) {
       console.warn(
         'createWorkspaceRuntime: cannot start presence transport without token provider',
@@ -3064,15 +3072,17 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       shardHostSuffix,
     });
     presenceTransport.start({
+      ...(protectedContent ? { bucketId: deps.e2ee?.bucketId() ?? undefined } : {}),
       baseUrl: durableBaseUrl,
       auth: streamsTokenProvider.createAuthCallback(),
       shardHostSuffix,
     });
-    machineMonitorTransport.start({
-      baseUrl: durableBaseUrl,
-      auth: streamsTokenProvider.createAuthCallback(),
-      shardHostSuffix,
-    });
+    if (!protectedContent)
+      machineMonitorTransport.start({
+        baseUrl: durableBaseUrl,
+        auth: streamsTokenProvider.createAuthCallback(),
+        shardHostSuffix,
+      });
   };
 
   const attachLocalLoroDataPlaneTransport = async () => {
@@ -5502,6 +5512,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     workspaceSlug: deps.workspaceSlug,
     workspaceId,
     contentMode: protectedContent ? 'e2ee' : 'plaintext',
+    presenceAvailable: !protectedContent || !!deps.e2ee?.presence,
     repo,
     accountId: deps.accountId ?? null,
     pendingSends,
@@ -5532,7 +5543,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       targetMachineMonitor.subscribeMachine(machineId, listener),
     forceMachineMonitorSample: (machineId) => targetMachineMonitor.forceSample(machineId),
     publishSessionViewing: (args: { sessionId: SessionId; userId: string } | null) =>
-      protectedContent ? undefined : presenceTransport.publishSessionViewing(args),
+      protectedContent && !deps.e2ee?.presence
+        ? undefined
+        : presenceTransport.publishSessionViewing(args),
     ensureDocStream,
     // Every store access must be ref-counted so eviction cannot dispose+unload
     // a doc mid-use. releaseRef only starts the warm-release timer, so this

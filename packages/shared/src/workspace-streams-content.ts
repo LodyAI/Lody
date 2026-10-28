@@ -27,7 +27,10 @@ export class WorkspaceStreamsConfigurationError extends Error {
 }
 
 /** A cloneable mode marker for paths that cannot yet protect content. */
-export type WorkspaceStreamsMode = Pick<WorkspaceStreamsContent, 'mode'>;
+export type WorkspaceStreamsMode = Pick<WorkspaceStreamsContent, 'mode'> & {
+  /** Verified native capability of this live workspace runtime, never a persisted mode hint. */
+  encryptedPresence?: boolean;
+};
 
 /** Reject before any cache, authentication, or transport side effect. */
 export function requirePlaintextWorkspaceStreamsContent(content: WorkspaceStreamsMode): void {
@@ -105,9 +108,11 @@ export type WorkspaceRestrictedFeature =
   | 'presence';
 export function workspaceSupports(
   content: WorkspaceStreamsMode,
-  _feature: WorkspaceRestrictedFeature
+  feature: WorkspaceRestrictedFeature
 ): boolean {
-  return content.mode === 'plaintext';
+  return (
+    content.mode === 'plaintext' || (feature === 'presence' && content.encryptedPresence === true)
+  );
 }
 
 /** Verified host facts only. This state never supplies ledger authority. */

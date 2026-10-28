@@ -686,3 +686,43 @@ describe('WorkspacePresenceTransport', () => {
     });
   });
 });
+
+it('selects the protected bucket and retains authenticated expiry only for an encrypted presence transport', async () => {
+  const store = new FakePresenceStore();
+  let streamUrl = '';
+  const snapshots: unknown[] = [];
+  const transport = new FakePresenceTransport();
+  const presence = new WorkspacePresenceTransport({
+    workspaceId: 'workspace-1' as WorkspaceId,
+    encryptedPresence: { seal: async () => new Uint8Array(), open: async () => null },
+    createStore: () => store,
+    createTransport: (args) => {
+      streamUrl = args.streamUrl;
+      return transport;
+    },
+    onSnapshot: (snapshot) => snapshots.push(snapshot),
+  });
+  presence.start({
+    baseUrl: 'https://streams.example.test',
+    bucketId: 'protected-bucket',
+    auth: async () => 'token',
+  });
+  expect(new URL(streamUrl).pathname).toContain('/protected-bucket/');
+  store.set('author:machine:m:i', {
+    kind: 'machine',
+    machineId: 'm',
+    instanceId: 'i',
+    updatedAt: 1000,
+    expiresAt: 61000,
+  });
+  expect(snapshots.at(-1)).toEqual({
+    'author:machine:m:i': {
+      kind: 'machine',
+      machineId: 'm',
+      instanceId: 'i',
+      updatedAt: 1000,
+      expiresAt: 61000,
+    },
+  });
+  await presence.stop();
+});

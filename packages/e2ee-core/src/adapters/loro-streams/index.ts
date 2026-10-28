@@ -27,3 +27,4 @@ export {
   streamsDocumentBinding,
   type StreamsDocumentBindingOptions,
 } from './document-binding';
+export { makePresenceContentBinding } from '../../internal/content/presence';

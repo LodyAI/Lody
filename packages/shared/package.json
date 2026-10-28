@@ -184,7 +184,9 @@
       "types": "./src/local-loro-writer/legacy.ts",
       "import": "./src/local-loro-writer/legacy.ts"
     },
-    "./e2ee-remote-pairing": "./src/e2ee-remote-pairing.ts"
+    "./e2ee-remote-pairing": "./src/e2ee-remote-pairing.ts",
+    "./encrypted-presence": "./src/encrypted-presence.ts",
+    "./encrypted-presence-adaptor-legacy": "./src/encrypted-presence-adaptor-legacy.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",

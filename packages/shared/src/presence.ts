@@ -28,6 +28,8 @@ export type LodyMachinePresenceState = {
   machineId: MachineId;
   instanceId: LodyPresenceInstanceId;
   updatedAt: number;
+  /** Authenticated expiry for encrypted presence; absent on ordinary channels. */
+  expiresAt?: number;
 };
 
 export type LodySessionPresenceState = {
@@ -37,6 +39,8 @@ export type LodySessionPresenceState = {
   instanceId: LodyPresenceInstanceId;
   status: Exclude<SessionStatus, { type: 'idle' }>;
   updatedAt: number;
+  /** Authenticated expiry for encrypted presence; absent on ordinary channels. */
+  expiresAt?: number;
 };
 
 /**
@@ -56,6 +60,8 @@ export type LodySessionViewingPresenceState = {
   /** When viewing of this session started (epoch ms, server clock). */
   since: number;
   updatedAt: number;
+  /** Authenticated expiry for encrypted presence; absent on ordinary channels. */
+  expiresAt?: number;
 };
 
 export type LodyPresenceState =
@@ -174,22 +180,39 @@ export const toLodyPresenceStreamUrl = (durableStreamUrl: string): string => {
   return url.toString();
 };
 
-export const parseLodyPresenceStates = (states: Record<string, unknown>): LodyPresenceStateMap => {
+const AuthenticatedPresenceExpiry = z.number().int().nonnegative().safe();
+export const parseLodyPresenceStates = (
+  states: Record<string, unknown>,
+  options?: { authenticatedExpiry: true }
+): LodyPresenceStateMap => {
   const parsed: LodyPresenceStateMap = {};
   for (const [key, value] of Object.entries(states)) {
     const result = LodyPresenceStateSchema.safeParse(value);
     if (!result.success) continue;
-    parsed[key] = result.data;
+    if (
+      options?.authenticatedExpiry &&
+      typeof value === 'object' &&
+      value !== null &&
+      'expiresAt' in value
+    ) {
+      const expiry = AuthenticatedPresenceExpiry.safeParse(value.expiresAt);
+      if (!expiry.success) continue;
+      parsed[key] = { ...result.data, expiresAt: expiry.data };
+    } else parsed[key] = result.data;
   }
   return parsed;
 };
 
 export const isFreshLodyPresenceState = (
-  state: Pick<LodyPresenceState, 'updatedAt'>,
+  state: Pick<LodyPresenceState, 'updatedAt' | 'expiresAt'>,
   nowMs: number,
   ttlMs: number = LODY_PRESENCE_TTL_MS
 ): boolean => {
-  return Number.isFinite(state.updatedAt) && nowMs - state.updatedAt < ttlMs;
+  return (
+    Number.isFinite(state.updatedAt) &&
+    nowMs - state.updatedAt < ttlMs &&
+    (state.expiresAt === undefined || (state.updatedAt <= nowMs && nowMs < state.expiresAt))
+  );
 };
 
 export const findFreshMachinePresenceState = (

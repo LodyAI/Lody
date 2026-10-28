@@ -1,3 +1,6 @@
+import { EphemeralStreamCrdt } from '@loro-dev/streams-crdt/loro';
+import { createEncryptedPresenceAdaptorLegacy } from '@lody/shared/encrypted-presence-adaptor-legacy';
+import type { EncryptedPresencePort } from '@lody/shared/encrypted-presence';
 import { EphemeralStore, type Value } from 'loro-crdt';
 import {
   LODY_PRESENCE_HEARTBEAT_MS,
@@ -54,6 +57,7 @@ export type WorkspacePresenceDebugGlobal = {
 };
 
 export type WorkspacePresenceTransportOptions = EphemeralRoomBaseOptions & {
+  encryptedPresence?: EncryptedPresencePort;
   onSnapshot?: (states: LodyPresenceStateMap) => void;
   createStore?: () => PresenceStoreLike;
   createTransport?: (args: {
@@ -205,7 +209,28 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
     auth: PresenceAuthCallback;
     store: PresenceStoreLike;
   }): PresenceTransportLike {
-    return this.options.createTransport?.(args) ?? super.createTransport(args);
+    if (this.options.createTransport) return this.options.createTransport(args);
+    if (!this.options.encryptedPresence) return super.createTransport(args);
+    const encrypted = createEncryptedPresenceAdaptorLegacy(
+      args.store as EphemeralStore,
+      this.options.encryptedPresence
+    );
+    const transport = new EphemeralStreamCrdt({
+      streamUrl: args.streamUrl,
+      auth: args.auth,
+      adaptor: encrypted.adaptor,
+    });
+    return {
+      join: (options) => transport.join(options),
+      close: async () => {
+        encrypted.retire();
+        try {
+          await transport.close();
+        } finally {
+          await encrypted.close();
+        }
+      },
+    };
   }
 
   protected tagStreamUrl(durableStreamUrl: string): string {
@@ -214,7 +239,12 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
 
   protected onStoreChange(store: PresenceStoreLike): void {
     this.lastSnapshotAtMs = Date.now();
-    this.options.onSnapshot?.(parseLodyPresenceStates(store.getAllStates()));
+    this.options.onSnapshot?.(
+      parseLodyPresenceStates(
+        store.getAllStates(),
+        this.options.encryptedPresence ? { authenticatedExpiry: true } : undefined
+      )
+    );
   }
 
   protected override onRoomStarted(store: PresenceStoreLike): void {
@@ -298,13 +328,21 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
         return owner.store?.getAllStates() ?? {};
       },
       getParsedStates() {
-        return parseLodyPresenceStates(owner.store?.getAllStates() ?? {});
+        return parseLodyPresenceStates(
+          owner.store?.getAllStates() ?? {},
+          owner.options.encryptedPresence ? { authenticatedExpiry: true } : undefined
+        );
       },
       subscribe(listener) {
         const store = owner.store;
         if (!store) return () => {};
         return store.subscribe(() => {
-          listener(parseLodyPresenceStates(store.getAllStates()));
+          listener(
+            parseLodyPresenceStates(
+              store.getAllStates(),
+              owner.options.encryptedPresence ? { authenticatedExpiry: true } : undefined
+            )
+          );
         });
       },
     };

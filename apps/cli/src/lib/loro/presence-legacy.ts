@@ -1,3 +1,5 @@
+import { createEncryptedPresenceAdaptorLegacy } from '@lody/shared/encrypted-presence-adaptor-legacy';
+import type { EncryptedPresencePort } from '@lody/shared/encrypted-presence';
 import { Cause, Effect, Exit, Scope } from 'effect';
 import {
   getServerNow,
@@ -66,7 +68,28 @@ export const createCliPresenceRuntimeLegacy = async (workspaceId: WorkspaceId) =
         legacy: createLoroStreamsTokenProviderLegacy({ provider: native, executor: root.runtime }),
       };
     },
-    attachStreams: (options: PresenceRemoteOptions) => run(owner.attach(options)),
+    attachStreams: (
+      options: Omit<PresenceRemoteOptions, 'encryptedPresence'> & {
+        encryptedPresence?: EncryptedPresencePort;
+      }
+    ) => {
+      const protection = options.encryptedPresence;
+      return run(
+        owner.attach({
+          ...options,
+          encryptedPresence: protection
+            ? (store) =>
+                Effect.gen(function* () {
+                  const bridge = yield* Effect.acquireRelease(
+                    Effect.sync(() => createEncryptedPresenceAdaptorLegacy(store, protection)),
+                    (ownedBridge) => Effect.promise(() => ownedBridge.close())
+                  );
+                  return { adaptor: bridge.adaptor, retire: Effect.sync(bridge.retire) };
+                })
+            : undefined,
+        })
+      );
+    },
     detachStreams: () => run(owner.detach),
     stop: () => run(owner.stop),
     retryCleanup: () => run(owner.retryCleanup),

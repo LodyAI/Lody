@@ -1446,6 +1446,34 @@ export class E2eeIpc extends IpcService {
     )
   }
   @IpcMethod()
+  async sealPresence(
+    workspaceId: string,
+    input: Parameters<NonNullable<E2eeWorkspaceRuntime['sealPresence']>>[1]
+  ) {
+    const id = sender()
+    return withDesktopE2eeAccount(
+      (owner) =>
+        owner.readers.get(workspaceId)?.has(id)
+          ? owner.host.sealPresence(workspaceId, input)
+          : Effect.fail(new Error('e2ee_not_open')),
+      workspaceId,
+      false
+    )
+  }
+  @IpcMethod()
+  async openPresence(workspaceId: string, frame: Uint8Array) {
+    const id = sender()
+    const receiver = getIpcContext().event.sender
+    return withDesktopE2eeAccount(
+      (owner) =>
+        owner.readers.get(workspaceId)?.has(id)
+          ? owner.host.openPresence(workspaceId, frame, receiver)
+          : Effect.fail(new Error('e2ee_not_open')),
+      workspaceId,
+      false
+    )
+  }
+  @IpcMethod()
   async resetLocalAgent(input: { workspaceId: string; resetId: string; confirm: true }) {
     const id = sender()
     if (

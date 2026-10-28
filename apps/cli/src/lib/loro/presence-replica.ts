@@ -22,6 +22,7 @@ export class PresenceReplica {
   private machineId: MachineId | undefined;
   private machineKey: string | undefined;
   private closed = false;
+  private encrypted = false;
   private destroyed = false;
 
   constructor(readonly instanceId: LodyPresenceInstanceId) {}
@@ -91,8 +92,14 @@ export class PresenceReplica {
       if (state) this.write(key, { ...state, updatedAt: now });
     }
   }
+  useEncryptedPresence(): void {
+    this.encrypted = true;
+  }
   getPresenceStates(): LodyPresenceStateMap {
-    return parseLodyPresenceStates(this.store.getAllStates() as Record<string, unknown>);
+    return parseLodyPresenceStates(
+      this.store.getAllStates() as Record<string, unknown>,
+      this.encrypted ? { authenticatedExpiry: true } : undefined
+    );
   }
   encodeLocalOriginPresence(): Uint8Array {
     return this.local.encodeAll();

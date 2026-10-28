@@ -76,6 +76,8 @@ export interface E2eeRuntimeStatus {
   readonly memberRole?: 'owner' | 'admin' | 'member' | 'guest' | null;
   readonly deviceKind: 'personal' | 'machine' | 'recovery' | null;
   readonly hasCurrentKey: boolean;
+  /** This native host supports purpose-7 ephemeral presence; absent means unavailable. */
+  readonly encryptedPresence?: boolean;
   /** Confirmed retained key usable for sends while current-key reception retries. */
   readonly writeEpoch?: number | null;
   /** Local credential availability only; the credential remains in the host. */
@@ -221,6 +223,16 @@ export interface E2eeWorkspaceRuntime {
     input: E2eeContentSeal
   ): Promise<{ header: Uint8Array; sealed: Uint8Array }>;
   openContent(workspaceId: string, input: E2eeContentOpen): Promise<Uint8Array>;
+  /** Optional purpose-7 liveness capability; keys/room/author/clock remain host-owned. */
+  sealPresence?(
+    workspaceId: string,
+    input: Parameters<import('@lody/shared/encrypted-presence').EncryptedPresencePort['seal']>[0]
+  ): Promise<Uint8Array>;
+  /** Drops malformed, expired, replayed or currently unauthorized ephemeral state. */
+  openPresence?(
+    workspaceId: string,
+    frame: Uint8Array
+  ): Promise<import('@lody/shared/encrypted-presence').EncryptedPresenceEntry | null>;
   /** Explicitly archive local originals and require fresh independently approved pairing. */
   resetIdentity?(input: {
     workspaceId?: string;

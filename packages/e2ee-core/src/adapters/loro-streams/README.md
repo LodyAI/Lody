@@ -44,3 +44,12 @@ Bound the SDK's timeouts. Close this Scope before destroying the borrowed SDK.
 Tests (`test/submission/streams.test.ts`) use the real registry SDK, a loopback
 synthetic HTTP gateway and real SQLite, including another OS process reopening
 the journal. They are not deployed-backend acceptance.
+
+## Ephemeral presence
+
+`makePresenceContentBinding` binds purpose 7 to a caller-selected workspace resource.
+It checks genuine current membership before and after cryptography, verifies the
+signature before reading an epoch key, checks its published commitment, and wipes
+owned keys/plaintext. Its open callback borrows plaintext only for that callback.
+The caller owns body schemas, machine/viewer identity, replay and TTL. Closing its
+Scope retires admission and drains active operations. This uses no document stream.

@@ -21,7 +21,8 @@ import {
   prepareScheduledMessage,
   saveScheduledMessage,
 } from '../src/components/schedules/scheduled-message-write';
-import type { WorkspaceRuntime } from '../src/atoms/runtime';
+import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
+import { useWorkspaceFeature } from '../src/hooks/use-workspace-feature';
 import type { SessionMeta } from '@lody/shared';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -157,4 +158,46 @@ it('hides remote machine controls and provider forms with the same explanation',
     Array(2).fill('Encrypted workspaces do not yet support remote machine operations.')
   );
   expect(container.querySelector('button')).toBeNull();
+});
+
+it('removes the unsupported-presence notice only for the matching capable encrypted runtime', async () => {
+  function PresenceStatus() {
+    const available = useWorkspaceFeature('presence');
+    return (
+      <SessionStatusStrip
+        state={resolveSessionStatusStripState({
+          browserOnline: true,
+          machineRemoved: false,
+          machineOnlineStatus: 'unknown',
+          presenceAvailable: available,
+        })}
+      />
+    );
+  }
+  const store = encryptedStore();
+  const capable = {
+    workspaceId: 'workspace',
+    accountId: 'user',
+    presenceAvailable: true,
+  } as WorkspaceRuntime;
+  await act(async () =>
+    root.render(
+      <Provider store={store}>
+        <PresenceStatus />
+      </Provider>
+    )
+  );
+  expect(container.textContent).toBe('Encrypted workspaces do not yet provide online status.');
+  await act(async () => {
+    store.set(runtimeAtom, capable);
+  });
+  expect(container.textContent).toBe('');
+  await act(async () => {
+    store.set(runtimeAtom, { ...capable, presenceAvailable: false });
+  });
+  expect(container.textContent).toBe('Encrypted workspaces do not yet provide online status.');
+  await act(async () => {
+    store.set(runtimeAtom, { ...capable, accountId: 'another-account' });
+  });
+  expect(container.textContent).toBe('Encrypted workspaces do not yet provide online status.');
 });

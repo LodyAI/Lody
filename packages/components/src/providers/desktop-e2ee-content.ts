@@ -18,6 +18,7 @@ export function createDesktopE2eeContent(input: {
   epoch: number;
   authToken: () => string | null | undefined;
   rotationRequired?: boolean;
+  encryptedPresence?: boolean;
   onKeyUpdateRequired?: () => void;
   onMemberRemoved?: () => void;
   onSnapshotRecoveryChange?: (pending: boolean) => void;
@@ -71,11 +72,25 @@ export function createDesktopE2eeContent(input: {
       if (phase !== 'ready' && phase !== 'closed') input.onKeyUpdateRequired?.();
     },
   });
+  const presenceListeners = new Set<() => void>();
+  let presenceHead: string | undefined;
   const updateStatus = (status: {
+    headHash?: string;
     epoch: number;
     rotationRequired: boolean;
     hasCurrentKey?: boolean;
   }) => {
+    if (status.headHash && status.headHash !== presenceHead) {
+      if (presenceHead)
+        for (const listener of presenceListeners) {
+          try {
+            listener();
+          } catch {
+            /* Observational only. */
+          }
+        }
+      presenceHead = status.headHash;
+    }
     transition.observe({ ...status, hasCurrentKey: status.hasCurrentKey ?? false });
     if (transition.needsUpdate()) input.onKeyUpdateRequired?.();
   };
@@ -125,6 +140,23 @@ export function createDesktopE2eeContent(input: {
     needsUpdate: transition.needsUpdate,
     close: transition.close,
     e2ee: {
+      presence:
+        input.encryptedPresence && input.runtime.sealPresence && input.runtime.openPresence
+          ? {
+              subscribeInvalidation: (listener: () => void) => {
+                presenceListeners.add(listener);
+                return () => {
+                  presenceListeners.delete(listener);
+                };
+              },
+              seal: (
+                publication: Parameters<
+                  import('@lody/shared/encrypted-presence').EncryptedPresencePort['seal']
+                >[0]
+              ) => input.runtime.sealPresence!(input.workspaceId, publication),
+              open: (frame: Uint8Array) => input.runtime.openPresence!(input.workspaceId, frame),
+            }
+          : undefined,
       bucketId: () => bucketId,
       createTokenProvider: (signal: AbortSignal) => {
         const token = createLoroStreamsTokenProviderLegacy({

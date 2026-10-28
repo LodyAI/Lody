@@ -235,6 +235,8 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
                 native.contentStreamsToken(workspaceId, rejectedToken),
               seal: (workspaceId, input) => native.seal(workspaceId, input),
               openContent: (workspaceId, input) => native.openContent(workspaceId, input),
+              sealPresence: (workspaceId, input) => native.sealPresence(workspaceId, input),
+              openPresence: (workspaceId, frame) => native.openPresence(workspaceId, frame),
               account: (options) => native.account(options),
               resetIdentity: (request) => native.resetIdentity(request),
               resetLocalAgent: (request) => native.resetLocalAgent(request),

@@ -58,39 +58,61 @@ export const presencePlatformLayer = (logger: Logger, fetchImpl = getCliHttpFetc
             (Cause.isDieReason(reason) && reason.defect instanceof EphemeralReleaseFailure)
         ),
       create: (workspaceId, store, options, generation) =>
-        makeEphemeralStream({
-          streamUrl: toLodyPresenceStreamUrl(
-            createLoroStreamUrl({
-              bucketId: LORO_STREAMS_BUCKET_ID,
-              streamId: getLoroMetaStreamId(workspaceId),
-              baseUrl: getLoroStreamsPresenceBaseUrl(
-                options.streamsBaseUrl,
-                undefined,
-                options.shardHostSuffix
-              ),
+        Effect.gen(function* () {
+          if (
+            options.encryptedPresence &&
+            (!options.bucketId || options.bucketId === LORO_STREAMS_BUCKET_ID)
+          )
+            return yield* Effect.die(new Error('e2ee_presence_configuration'));
+          const encrypted = options.encryptedPresence
+            ? yield* options.encryptedPresence(store)
+            : undefined;
+          const stream = yield* makeEphemeralStream({
+            streamUrl: toLodyPresenceStreamUrl(
+              createLoroStreamUrl({
+                bucketId: options.bucketId ?? LORO_STREAMS_BUCKET_ID,
+                streamId: getLoroMetaStreamId(workspaceId),
+                baseUrl: getLoroStreamsPresenceBaseUrl(
+                  options.streamsBaseUrl,
+                  undefined,
+                  options.shardHostSuffix
+                ),
+              })
+            ),
+            adaptor: encrypted?.adaptor ?? EphemeralStoreAdaptor(store),
+            fetch: fetchImpl,
+          }).pipe(
+            Effect.provideService(EphemeralAuth, { getToken: (context) => options.auth(context) }),
+            Effect.provideService(EphemeralDiagnostics, {
+              emit: (event) =>
+                Effect.sync(() => {
+                  const level = event.code ? 'debug' : 'trace';
+                  logger[level](
+                    `[${workspaceId}] Loro presence SDK${formatSafeLogFields({
+                      generation,
+                      stage: event.stage,
+                      room: event.status,
+                      code: event.code,
+                      pendingLocalCount: event.pendingLocalCount,
+                      physicalEntries: event.physicalEntries,
+                      queuedBytes: event.queuedBytes,
+                    })}`
+                  );
+                }),
             })
-          ),
-          adaptor: EphemeralStoreAdaptor(store),
-          fetch: fetchImpl,
-        }).pipe(
-          Effect.provideService(EphemeralAuth, { getToken: (context) => options.auth(context) }),
-          Effect.provideService(EphemeralDiagnostics, {
-            emit: (event) =>
-              Effect.sync(() => {
-                const level = event.code ? 'debug' : 'trace';
-                logger[level](
-                  `[${workspaceId}] Loro presence SDK${formatSafeLogFields({
-                    generation,
-                    stage: event.stage,
-                    room: event.status,
-                    code: event.code,
-                    pendingLocalCount: event.pendingLocalCount,
-                    physicalEntries: event.physicalEntries,
-                    queuedBytes: event.queuedBytes,
-                  })}`
-                );
-              }),
-          })
-        ),
+          );
+          if (encrypted) yield* Effect.addFinalizer(() => encrypted.retire);
+          return encrypted
+            ? {
+                get stats() {
+                  return stream.stats;
+                },
+                join: stream.join,
+                rejoin: stream.rejoin,
+                close: encrypted.retire.pipe(Effect.andThen(stream.close)),
+                retryRelease: stream.retryRelease,
+              }
+            : stream;
+        }),
     })
   );

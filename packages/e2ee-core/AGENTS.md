@@ -88,3 +88,6 @@ whitepaper, Specs, decisions and this package's docs. Contract:
   inside the worker; `--import tsx` alone does not resolve their imports on Node 22.
 
 Module rules: [ledger](src/internal/ledger/AGENTS.md), [keys](src/internal/keys/AGENTS.md).
+
+`makePresenceContentBinding` borrows plaintext only within its open callback;
+application codecs, machine/viewer identity, replay and expiry remain outside core.

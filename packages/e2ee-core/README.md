@@ -195,3 +195,7 @@ processes; the `test/generate-*.py` scripts regenerate vectors (optional).
 
 Streams adapters and the Lab use the workspace catalog version. Node hosts can share
 [KEK custody](docs/surface.md#lodye2ee-coreadaptersnode-custody) while supplying their own OS wrapper.
+
+The Streams entry also offers `makePresenceContentBinding`: current-member purpose-7
+crypto with scoped key/plaintext ownership. Application liveness codecs, replay,
+identity and time checks remain outside core; see the [adapter](src/adapters/loro-streams/README.md#ephemeral-presence).

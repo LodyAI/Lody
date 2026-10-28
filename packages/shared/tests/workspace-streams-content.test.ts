@@ -5,6 +5,7 @@ import { getWorkspaceFlockDocId } from '../src/workspace-flock';
 import type { MachineId, WorkspaceId } from '../src/ids';
 import {
   encryptedWorkspaceRoom,
+  workspaceSupports,
   createWorkspaceEpochTransitionLegacy,
 } from '../src/workspace-streams-content';
 
@@ -157,4 +158,11 @@ describe('availability-first epoch selection', () => {
     expect(await gate.transition({ install: async () => ({ ...status, epoch: 2 }) })).toBe(true);
     await gate.close();
   });
+});
+
+it('requires explicit native capability for encrypted presence without enabling other side channels', () => {
+  expect(workspaceSupports({ mode: 'protected' }, 'presence')).toBe(false);
+  expect(workspaceSupports({ mode: 'protected', encryptedPresence: true }, 'presence')).toBe(true);
+  expect(workspaceSupports({ mode: 'protected', encryptedPresence: true }, 'rpc')).toBe(false);
+  expect(workspaceSupports({ mode: 'plaintext' }, 'presence')).toBe(true);
 });

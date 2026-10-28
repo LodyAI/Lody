@@ -45,3 +45,15 @@ pnpm test:integration
 
 The integration command starts a local server through `loro dev --db-path ...` and
 then runs the transport tests against it.
+
+## Encrypted ephemeral presence
+
+The host-only `@lody/loro-streams-rpc/encrypted-presence` entry composes purpose-7
+crypto with the presence body codec from [#1990](https://github.com/LodyAI/Lody/pull/1990).
+That dependency is locally overlaid for validation until it lands on main; its
+codec is not duplicated here. `makeEncryptedPresence` validates bounded existing
+liveness DTOs, derives machine/viewer authority from the current ledger, limits
+validity to 60 seconds, and keeps bounded per-receiver replay floors through expiry.
+Document synchronization and ordinary RPC are independent. See the
+[decision](../../.agents/notes/proposed/architecture/2026-10-28-encrypted-ephemeral-presence.md)
+for transport ownership and remaining acceptance limits.

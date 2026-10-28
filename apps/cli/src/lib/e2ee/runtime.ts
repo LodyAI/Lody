@@ -1,4 +1,7 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomBytes } from 'node:crypto';
+import { makeEncryptedPresence } from '@lody/loro-streams-rpc/encrypted-presence';
+import { getServerNow } from '@lody/shared/time-sync';
+import type { EncryptedPresencePort } from '@lody/shared/encrypted-presence';
 import { mkdir, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -424,6 +427,15 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
       protection: options.custody.protection,
     };
   });
+  const presence = yield* makeEncryptedPresence({
+    workspaceId: options.workspaceId,
+    genesis,
+    signer: options.device,
+    ledger: () => verified.current(),
+    readEpochKey: (epoch) => history.read(epoch),
+    now: getServerNow,
+    incarnation: randomBytes(16),
+  });
   // Fence new callers, then drain admitted local writes before SQLite closes.
   yield* Effect.addFinalizer(() =>
     Effect.gen(function* () {
@@ -433,6 +445,14 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
   );
   return {
     status: () => serial.withPermit(status()),
+    sealPresence: (input: Parameters<EncryptedPresencePort['seal']>[0]) =>
+      Effect.gen(function* () {
+        yield* guard();
+        const selected = yield* status();
+        if (selected.writeEpoch === null) return yield* failure('invalid-input');
+        return yield* presence.seal(input, selected.writeEpoch);
+      }),
+    openPresence: (frame: Uint8Array) => presence.open(frame),
     pairingEvidence: () =>
       serial.withPermit(
         Effect.gen(function* () {

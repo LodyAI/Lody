@@ -204,6 +204,7 @@ export type WorkspaceRuntime = {
   readonly workspaceId: WorkspaceId;
   /** Missing only on older ordinary test/embedded ports; encrypted runtimes set it explicitly. */
   readonly contentMode?: 'plaintext' | 'e2ee';
+  readonly presenceAvailable?: boolean;
   readonly sendResources: SessionSendResources;
   /** In-memory sends whose attachments are still preparing; lost with the page. */
   readonly pendingSends: PendingSessionSends | null;

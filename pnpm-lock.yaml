@@ -524,6 +524,9 @@ importers:
 
   apps/electron:
     dependencies:
+      '@lody/loro-streams-rpc':
+        specifier: workspace:*
+        version: link:../../packages/loro-streams-rpc
       '@better-auth/electron':
         specifier: 'catalog:'
         version: 1.6.33(patch_hash=222834fca69f7b6e53d590cf72f14cb0460c0fa0df5f835f13339d4b389ac038)(799dfb73f31767234728134e54654a7d)
@@ -1701,6 +1704,12 @@ importers:
 
   packages/loro-streams-rpc:
     dependencies:
+      '@lody/e2ee-core':
+        specifier: workspace:*
+        version: link:../e2ee-core
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.2
       '@lody/shared':
         specifier: workspace:*
         version: link:../shared

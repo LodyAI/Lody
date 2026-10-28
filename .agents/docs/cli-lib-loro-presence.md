@@ -198,3 +198,37 @@ separate P6/P7 ownership work; this does not finish Session/Turn lifecycle migra
 3. Enable trace for individual local/auth/POST/barrier events when needed. Check the diagnostic generation and attempt, never interpret a barrier as that heartbeat's exact send or a peer receipt. Slow/failed branches remain available without trace.
 4. Check publishers against the rate/size budget. Coalescing helps same-key unsent writes, but distinct-key traffic and in-flight bytes remain independent. Do not infer physical POST counts from `pendingLocalCount`.
 5. Keep transport status, local writes, server response, snapshot barrier completion and peer observation separate. Restarting destroys the evidence and does not fix a flooding writer.
+
+## Encrypted workspaces
+
+An encrypted workspace explicitly supplies a purpose-7 presence capability and its
+protected bucket. It uses the same ephemeral channel and SDK, with a separate
+adaptor; the ordinary adaptor, room and TTL remain unchanged. The Legacy facade
+owns its Promise crypto bridge in the native generation Scope. The bridge limits
+pending distinct keys to 128, coalesces before signing, prioritizes machine heartbeats,
+and emits at most four frames/second, each with at most 4096 plaintext DTO bytes
+(plus 41 body bytes and 143 content-v0 bytes). Slow signing lowers that ceiling.
+The SDK remains the only POST/SSE queue. Old queued state keeps its original issue
+time and cannot gain another lifetime when finally delivered.
+
+The host binds the verified genesis and `presence:<workspaceId>` resource, selects
+an installed published epoch and rechecks current membership around crypto. Machine
+and session claims match the ledger's machine device; personal viewing uses the
+ledger crypto user ID. The host rejects wrong scope/purpose, signature, body,
+identity, future issue time, expired state and sequence/incarnation rollback.
+Receivers keep a maximum of 4096 logical-key replay floors through their full signed
+validity. Native windows have independent weakly owned receiver contexts so one
+window cannot consume another's receipt.
+
+Received state carries an authenticated expiry, honored by existing freshness
+readers and a store expiry timer. A verified ledger change clears cached remote
+receipts and fences in-flight projections. This can temporarily show missing
+presence until the next heartbeat; it cannot clear local-origin production or
+change document readiness. Invalid frames and crypto failures are discarded inside
+the ephemeral adaptor. Desktop crypto runs outside the short workspace-admission
+lock, so paused presence key I/O cannot hold document admission. Failed encrypted
+presence attachment logs a bounded warning
+without detaching durable sync. Retirement synchronously cancels admission/timers,
+then joins the actual crypto work before destroying its store. The native owner
+retains failed release as before. UI support requires the native host's explicit
+`encryptedPresence` status plus both purpose-limited IPC methods.

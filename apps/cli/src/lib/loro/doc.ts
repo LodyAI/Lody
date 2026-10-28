@@ -345,7 +345,7 @@ export interface LoroDocumentManagerOptions {
   remoteStreamsAttached?: boolean;
   encryptedWorkspace?: Pick<
     CliE2eeWorkspaceLegacy,
-    'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory'
+    'content' | 'presence' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory'
   >;
   streamsTokens?: CloudStreamsTokenPort | null;
   cloudBilling?: CloudBillingPort | null;
@@ -395,7 +395,7 @@ export class LoroDocumentManager {
   private remoteTransportOpQueue: Promise<unknown> = Promise.resolve();
   private readonly encryptedWorkspace?: Pick<
     CliE2eeWorkspaceLegacy,
-    'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory'
+    'content' | 'presence' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory'
   >;
   private readonly streamsTokens: CloudStreamsTokenPort | null;
   public readonly cloudBilling: CloudBillingPort | null;
@@ -431,7 +431,7 @@ export class LoroDocumentManager {
       documentCursorScope?: DocumentCursorScope;
       encryptedWorkspace?: Pick<
         CliE2eeWorkspaceLegacy,
-        'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory'
+        'content' | 'presence' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory'
       >;
       streamsTokens?: CloudStreamsTokenPort | null;
       cloudBilling?: CloudBillingPort | null;
@@ -774,7 +774,18 @@ export class LoroDocumentManager {
       // The presence runtime already exists (created at repo init and producing
       // presence locally); attaching the cloud Streams sink additionally mirrors
       // it to the cloud presence stream.
-      if (!this.encryptedWorkspace) {
+      if (this.encryptedWorkspace?.presence) {
+        // Presence is independently degradable; a failed ephemeral attach cannot undo durable sync.
+        await this.presenceRuntime
+          .attachStreams({
+            streamsBaseUrl: streamsTransport.gatewayBaseUrl,
+            auth: streamsTokens.native.createAuthCallback(),
+            shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
+            bucketId: this.encryptedWorkspace.bucketId() ?? undefined,
+            encryptedPresence: this.encryptedWorkspace.presence,
+          })
+          .catch(() => this.logger.warn(`[${this.workspaceId}] Encrypted presence unavailable`));
+      } else if (!this.encryptedWorkspace) {
         await this.presenceRuntime.attachStreams({
           streamsBaseUrl: streamsTransport.gatewayBaseUrl,
           auth: streamsTokens.native.createAuthCallback(),

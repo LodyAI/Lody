@@ -3865,3 +3865,140 @@ void test('member operation history releases on workspace close without reenteri
     })
   )
 })
+
+void test('purpose-limited host presence encrypts viewing, drops bad/replayed frames and preserves document sealing', async (t) => {
+  const directory = await fixture(t)
+  t.mock.method(Date, 'now', () => 100000)
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory)
+      yield* bind(owner)
+      yield* owner.host.open(workspaceId)
+      const frame = yield* owner.host.sealPresence(workspaceId, {
+        key: 'viewing:cloud-user:window-one',
+        state: {
+          kind: 'session-viewing',
+          userId: 'cloud-user',
+          instanceId: 'window-one',
+          sessionId: 'session-one',
+          since: 100000,
+          updatedAt: 100000
+        }
+      })
+      assert.equal(new TextDecoder().decode(frame).includes('session-one'), false)
+      assert.equal(yield* owner.host.openPresence(workspaceId, new Uint8Array([0])), null)
+      const entry = yield* owner.host.openPresence(workspaceId, frame)
+      assert.equal(entry.state.userId, 'aa'.repeat(32))
+      assert.equal(entry.state.sessionId, 'session-one')
+      assert.equal(entry.expiresAt, 160000)
+      assert.equal(yield* owner.host.openPresence(workspaceId, frame), null)
+      assert.equal(
+        (yield* owner.host.openPresence(workspaceId, frame, {})).state.sessionId,
+        'session-one'
+      )
+      const room = { kind: 'doc', docId: 'healthy-document' }
+      const context = {
+        protocol: 'loro-streams-crdt-payload-protection',
+        version: 2,
+        kind: 'update_batch'
+      }
+      const plaintext = new Uint8Array([1, 2, 3])
+      const additionalData = new Uint8Array([4])
+      const sealed = yield* owner.host.seal(workspaceId, {
+        epoch: 0,
+        room,
+        context,
+        plaintext,
+        additionalData
+      })
+      assert.deepEqual(
+        yield* owner.host.openContent(workspaceId, { room, context, ...sealed, additionalData }),
+        plaintext
+      )
+    })
+  )
+})
+
+void test('paused presence key I/O does not hold the document admission lock', async (t) => {
+  const directory = await fixture(t)
+  const entered = Promise.withResolvers()
+  const release = Promise.withResolvers()
+  let hold = false
+  let presenceSettled = false
+  try {
+    await execute(
+      Effect.gen(function* () {
+        const base = yield* openOwner(directory)
+        const custody = {
+          ...base.custody,
+          installed: {
+            ...base.custody.installed,
+            unprotect: async (blob) => {
+              if (hold) {
+                hold = false
+                entered.resolve()
+                await release.promise
+              }
+              return base.custody.installed.unprotect(blob)
+            }
+          }
+        }
+        const host = yield* makeDesktopE2eeRuntimeHost({
+          directory,
+          bootstrap: base.bootstrap,
+          custody
+        })
+        yield* bind({ ...base, host })
+        yield* host.open(workspaceId)
+        hold = true
+        const publishing = yield* Effect.forkChild(
+          host
+            .sealPresence(workspaceId, {
+              key: 'viewing:user:window',
+              state: {
+                kind: 'session-viewing',
+                userId: 'user',
+                instanceId: 'window',
+                sessionId: 'session',
+                since: Date.now(),
+                updatedAt: Date.now()
+              }
+            })
+            .pipe(
+              Effect.tap(() =>
+                Effect.sync(() => {
+                  presenceSettled = true
+                })
+              )
+            )
+        )
+        yield* Effect.promise(() => entered.promise)
+        const room = { kind: 'doc', docId: 'independent' }
+        const context = {
+          protocol: 'loro-streams-crdt-payload-protection',
+          version: 2,
+          kind: 'update_batch'
+        }
+        const plaintext = new Uint8Array([8])
+        const additionalData = new Uint8Array()
+        const sealed = yield* host.seal(workspaceId, {
+          epoch: 0,
+          room,
+          context,
+          plaintext,
+          additionalData
+        })
+        assert.deepEqual(
+          yield* host.openContent(workspaceId, { room, context, ...sealed, additionalData }),
+          plaintext
+        )
+        assert.equal(presenceSettled, false)
+        release.resolve()
+        yield* Fiber.join(publishing)
+        assert.equal(presenceSettled, true)
+      })
+    )
+  } finally {
+    release.resolve()
+  }
+})

@@ -1,3 +1,6 @@
+import { makeEncryptedPresence } from '@lody/loro-streams-rpc/encrypted-presence'
+import { getServerNow } from '@lody/shared/time-sync'
+import type { EncryptedPresencePort } from '@lody/shared/encrypted-presence'
 import { makeDesktopRemotePairing } from './e2ee-remote-pairing.mjs'
 import { EpochCandidateStore, SubmissionJournal } from '@lody/e2ee-core/services'
 import {
@@ -215,6 +218,13 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           input: E2eeContentSeal
         ) => Effect.Effect<{ header: Uint8Array; sealed: Uint8Array }, unknown>
         openContent: (input: E2eeContentOpen) => Effect.Effect<Uint8Array, unknown>
+        sealPresence: (
+          input: Parameters<EncryptedPresencePort['seal']>[0]
+        ) => Effect.Effect<Uint8Array, unknown>
+        openPresence: (
+          frame: Uint8Array,
+          receiver?: object
+        ) => Effect.Effect<Awaited<ReturnType<EncryptedPresencePort['open']>>, unknown>
         ingest: (page: E2eeWorkspaceHistoryPage) => Effect.Effect<E2eeRuntimeStatus, unknown>
       }
     >()
@@ -832,6 +842,15 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           return yield* result
         }, Effect.uninterruptible)
         const history = Context.get(historyContext, InstalledEpochHistory)
+        const presence = yield* makeEncryptedPresence({
+          workspaceId,
+          genesis,
+          signer: device,
+          ledger: () => verified.current(),
+          readEpochKey: (epoch) => history.read(epoch),
+          now: getServerNow,
+          incarnation: crypto.getRandomValues(new Uint8Array(16))
+        }).pipe(Scope.provide(scope))
         const bindings = new Map<
           string,
           Effect.Success<ReturnType<typeof makeStreamsUpdateBinding>>
@@ -953,6 +972,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               ? (publicState.members.get(hex(ownDevice.membershipId.toBytes()))?.role ?? null)
               : null,
             deviceKind: ownDevice?.kind ?? null,
+            encryptedPresence: true,
             hasCurrentKey: Result.isSuccess(checked),
             hasDeviceCredential: Result.isSuccess(
               yield* Effect.result(options.bootstrap.deviceCredential(workspaceId))
@@ -1224,6 +1244,13 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           observe,
           seal,
           openContent,
+          sealPresence: (input: Parameters<EncryptedPresencePort['seal']>[0]) =>
+            Effect.gen(function* () {
+              const selected = yield* status()
+              if (selected.writeEpoch == null) return yield* fail('invalid-input')
+              return yield* presence.seal(input, selected.writeEpoch)
+            }),
+          openPresence: presence.open,
           keyRound,
           stop,
           isClosing: () => closing,
@@ -1460,6 +1487,22 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             )
           ),
           (entry) => entry.keyRound(mailbox, staging)
+        ),
+      sealPresence: (workspaceId: string, input: Parameters<EncryptedPresencePort['seal']>[0]) =>
+        Effect.flatMap(run(openWorkspace(workspaceId)), (entry) =>
+          boundary(
+            Effect.suspend(() =>
+              entry.isClosing() ? Effect.fail(fail('closed')) : entry.sealPresence(input)
+            )
+          )
+        ),
+      openPresence: (workspaceId: string, frame: Uint8Array, receiver?: object) =>
+        Effect.flatMap(run(openWorkspace(workspaceId)), (entry) =>
+          boundary(
+            Effect.suspend(() =>
+              entry.isClosing() ? Effect.fail(fail('closed')) : entry.openPresence(frame, receiver)
+            )
+          )
         ),
       seal: (workspaceId: string, input: E2eeContentSeal) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.seal(input))),

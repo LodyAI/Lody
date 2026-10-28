@@ -826,6 +826,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               return;
             }
             encryptedAccess = createDesktopE2eeContent({
+              encryptedPresence: status.encryptedPresence,
               runtime: native,
               workspaceId: effectiveWorkspaceId,
               genesisHash: descriptor.genesisHash,
