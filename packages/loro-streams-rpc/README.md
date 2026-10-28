@@ -50,6 +50,14 @@ if an appended Roost input has no receipt after two seconds. This retains the
 request and its deadline, works with existing daemons, and still requires a real
 owner response before confirming delivery. Explicit transport pins disable it.
 
+## Manual latency comparison
+
+The synthetic [loopback benchmark](../../apps/cli/scripts/benchmark-e2ee-rpc.ts)
+compares existing ordinary RPC with encrypted dispatch through real Streams,
+crypto and SQLite journals. It records every send/append/receive/verify/claim stage.
+Its final handler and authorization are fixtures; it does not measure real ACP
+startup. Run it against an explicitly started HTTP/1 local dev gateway.
+
 ## Development
 
 ```bash

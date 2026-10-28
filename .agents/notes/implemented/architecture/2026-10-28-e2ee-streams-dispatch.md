@@ -12,7 +12,7 @@ This implementation adds a bounded encrypted Streams receipt channel while
 retaining the durable delivery path. Trusted hosts retain original signed frames;
 both arrivals reuse the same execution claim and current ledger authorization.
 Receipt ACKs never count as successful execution. Local behavioral checks pass;
-packaged two-device acceptance and latency comparison remain unverified.
+a loopback comparison is measured, while packaged two-device acceptance remains unverified.
 
 ## Decision and ownership
 
@@ -53,8 +53,37 @@ passes after it. UI tests preserve encrypted document originals and durable
 activation on success and failures. Existing runtime/registration checks and
 affected package typechecks were run locally; hosted CI has not been awaited.
 
-These tests do not establish packaged Electron/CLI two-device behavior or the
-one-second latency target. Trace markers identify send, append, target receive,
-verification, receipt journal, actual-start journal and handler start. A local
-loopback gateway has been started for a separate controlled comparison; no
-latency result is claimed by this commit. Plain workspace envelopes are unchanged.
+## Controlled latency comparison
+
+The [manual benchmark](../../../../apps/cli/scripts/benchmark-e2ee-rpc.ts) ran
+100 alternating samples per mode after ten warmups on Node 24.22.1, against the
+pinned local `loro dev` gateway with SQLite WAL and HTTP/1. All 200 measured
+requests reached their synthetic handler and returned accepted ACKs. The sender,
+receiver and gateway use loopback; real encryption, signature verification,
+original persistence and the production `agent-start` claim remain in the path.
+The authorization callback returns a warm synthetic Authorized result.
+
+| Milliseconds                             |   p50 |    p95 |    p99 |
+| ---------------------------------------- | ----: | -----: | -----: |
+| Ordinary send → synthetic handler        | 0.729 |  1.134 |  3.572 |
+| Encrypted send → synthetic handler       | 8.832 | 11.182 | 11.692 |
+| Encrypted prepare + original save        | 2.545 |  2.978 |  3.289 |
+| Encrypted send → append start            | 2.569 |  3.010 |  3.329 |
+| Append start → target receive            | 0.535 |  0.824 |  2.851 |
+| Target receive → verified                | 0.899 |  1.044 |  1.086 |
+| Verified → receipt journal               | 2.165 |  2.675 |  2.849 |
+| Receipt journal → actual-start journal   | 2.712 |  3.408 |  3.520 |
+| Actual-start journal → synthetic handler | 0.007 |  0.015 |  0.017 |
+
+Percentiles use nearest rank; segment percentiles are not additive. Each sample
+also records append completion. The send timestamp precedes native preparation,
+not just the network append. Ordinary dispatch uses the existing machine RPC
+client/server and the same valid synthetic input. Plain workspace envelopes are
+unchanged by the implementation.
+
+This is a component comparison, not the one-second product acceptance. UI,
+encrypted-document commit, watcher scheduling, Electron IPC, authenticated cold
+ledger refresh, WAN conditions and actual ACP/model startup are absent. No paired
+packaged Electron/CLI agent environment was exercised; therefore real
+send-to-agent-start p50/p95/p99 remains unmeasured. The fixture handler is entered
+after the production claim, without representing a running agent.
