@@ -106,7 +106,9 @@ export async function saveScheduledMessage(args: {
   return args.runtime.withScheduleStore(
     args.scheduleId,
     () =>
-      new ScheduleRepository(args.runtime.repo, args.runtime.workspaceId).save({ ...args, now }),
+      new ScheduleRepository(args.runtime.repo, args.runtime.workspaceId, {
+        protectedContent: args.runtime.contentMode === 'e2ee',
+      }).save({ ...args, now }),
     { create: args.create }
   );
 }

@@ -1,3 +1,4 @@
+import type { ScheduleAuthorizationRequest } from '@lody/shared';
 import { existsSync } from 'node:fs';
 import { Clock, Effect } from 'effect';
 import { z } from 'zod';
@@ -36,6 +37,7 @@ export type VerifiedExecutionOriginal = {
   /** Historical ledger actor, never the UI account ID. */
   requesterCryptoUserId: string;
   expiresAt: number;
+  schedule?: ScheduleAuthorizationRequest;
 };
 export type PendingExecutionOriginal = { state: 'pending-evidence'; expiresAt: number };
 export type ResolveVerifiedExecutionOriginal = (
@@ -55,6 +57,9 @@ export function makeEncryptedAgentExecution(options: {
   targetMachineId: string;
   journal: () => RealtimeJournal;
   authorizeExecution?: AuthorizeEncryptedExecution;
+  authorizeSchedule?: (
+    request: ScheduleAuthorizationRequest
+  ) => Effect.Effect<ExecutionAuthorization, unknown>;
   isExecutionOpen?: () => boolean;
   resolveVerifiedOriginal: ResolveVerifiedExecutionOriginal;
   /** Observation only, after the committed actual-start claim. */
@@ -115,6 +120,19 @@ export function makeEncryptedAgentExecution(options: {
       return authorization.reason === 'e2ee_machine_not_owned'
         ? { state: 'denied', reason: 'e2ee_machine_not_owned' }
         : { state: 'denied' };
+    if (verified.schedule) {
+      if (!options.authorizeSchedule) return { state: 'denied' };
+      const schedule = yield* options.authorizeSchedule(verified.schedule);
+      if (schedule._tag !== 'Authorized')
+        return {
+          state:
+            schedule.reason === 'e2ee_schedule_evidence_pending'
+              ? (yield* Clock.currentTimeMillis) < verified.expiresAt
+                ? 'pending-evidence'
+                : 'expired'
+              : 'denied',
+        };
+    }
     // Authorization can yield. Re-read before receive so concurrent channels
     // reuse the first expiry instead of replacing or extending its evidence.
     retained = yield* attempt(read);

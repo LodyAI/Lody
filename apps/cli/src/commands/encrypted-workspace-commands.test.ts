@@ -89,7 +89,9 @@ describe('encrypted workspaces in one-shot data commands', () => {
         { from: 'user' }
       );
       expect(seen.exported).toEqual(['protected']);
-      expect(seen.flock).toEqual([]);
+      expect(seen.flock).toEqual(
+        offline ? [] : [getScheduleRegistryFlockDocId('protected' as never)]
+      );
     }
   );
 

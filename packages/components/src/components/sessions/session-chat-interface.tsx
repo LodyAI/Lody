@@ -5547,9 +5547,9 @@ export const SessionChatInterface = memo(
       async (item: ScheduledQueueItem) => {
         if (!runtime || !currentUser) return;
         try {
-          const document = await new ScheduleRepository(runtime.repo, runtime.workspaceId).read(
-            item.scheduleId
-          );
+          const document = await new ScheduleRepository(runtime.repo, runtime.workspaceId, {
+            protectedContent: runtime.contentMode === 'e2ee',
+          }).read(item.scheduleId);
           if (!document?.message) throw new Error('Scheduled message unavailable');
           setScheduledTimeEdit({ item, document });
         } catch {
@@ -5602,7 +5602,9 @@ export const SessionChatInterface = memo(
         if (!runtime || !currentUser) return;
         try {
           await runtime.withScheduleStore(item.scheduleId, () =>
-            new ScheduleRepository(runtime.repo, runtime.workspaceId).setEnabled({
+            new ScheduleRepository(runtime.repo, runtime.workspaceId, {
+              protectedContent: runtime.contentMode === 'e2ee',
+            }).setEnabled({
               scheduleId: item.scheduleId,
               actorId: currentUser.id,
               enabled: false,

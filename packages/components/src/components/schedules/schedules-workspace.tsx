@@ -268,7 +268,12 @@ function SupportedSchedulesWorkspace({
   }>();
   const { machines } = useVisibleMachineMetas({ includeMachineFlock: true });
   const repository = useMemo(
-    () => (runtime ? new ScheduleRepository(runtime.repo, runtime.workspaceId) : null),
+    () =>
+      runtime
+        ? new ScheduleRepository(runtime.repo, runtime.workspaceId, {
+            protectedContent: runtime.contentMode === 'e2ee',
+          })
+        : null,
     [runtime]
   );
   // Phone list lives on the home schedules tab (workspace switch, search,
@@ -441,7 +446,9 @@ function SupportedSchedulesWorkspace({
           onCancel={async () => {
             if (!runtime || !user) return;
             await runtime.withScheduleStore(row.scheduleId, () =>
-              new ScheduleRepository(runtime.repo, runtime.workspaceId).setEnabled({
+              new ScheduleRepository(runtime.repo, runtime.workspaceId, {
+                protectedContent: runtime.contentMode === 'e2ee',
+              }).setEnabled({
                 scheduleId: row.scheduleId,
                 actorId: user.id,
                 enabled: false,
@@ -803,7 +810,9 @@ function ScheduleEditor({
       await runtime.withScheduleStore(
         identity.scheduleId,
         () =>
-          new ScheduleRepository(runtime.repo, runtime.workspaceId).save({
+          new ScheduleRepository(runtime.repo, runtime.workspaceId, {
+            protectedContent: runtime.contentMode === 'e2ee',
+          }).save({
             ...identity,
             actorId: user.id,
             now: getServerNow(),

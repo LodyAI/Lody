@@ -4,7 +4,10 @@
 
 - Encrypted workspaces sync definitions and Registry through the existing protected
   Repo. Generated turns use the ordinary verified-signer execution gate and shared
-  userTurnId journal claim; Schedule ownership fields never grant execution.
+  userTurnId journal claim. Both handoff and actual start require the definition's
+  verified original signer, and manual runs also require the request signer.
+  Schedule ownership fields and machine-derived turn signatures never grant that
+  authority. [Origin contract](../../../../../.agents/notes/implemented/bug-fix/2026-10-28-e2ee-schedule-origin-authorization.md).
 - Schedule definitions live in `schedule-<id>` Loro docs. The workspace `:sr`
   Flock Registry is the execution gate. A definition must match its published
   fingerprint; existence discovery must never republish or enable an orphan.

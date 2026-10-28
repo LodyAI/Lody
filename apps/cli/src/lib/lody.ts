@@ -6,6 +6,8 @@ import { MachineRuntime } from '@/lib/machine-runtime';
 import { Logger } from '@/utils/logger';
 import {
   CliType,
+  getScheduleRoomId,
+  type ScheduleAuthorizationRequest,
   getManagedBuiltinRuntimeByAgentType,
   type LocalProjectId,
   MachineId,
@@ -152,6 +154,28 @@ export class Lody {
         journal: lazyExecutionJournal(join(e2ee.repositoryDirectory, 'execution.sqlite'), Date.now),
         authorizeExecution: options.authorizeEncryptedExecution ?? e2ee.authorizeExecution,
         isExecutionOpen: e2ee.isExecutionOpen,
+        authorizeSchedule: (request) =>
+          Effect.gen(function* () {
+            const owner = manager;
+            if (!owner || !e2ee) return { _tag: 'Denied' as const, reason: 'unavailable' };
+            const handle = yield* Effect.tryPromise({
+              try: () => owner.repo.openPersistedDoc(getScheduleRoomId(request.scheduleId)),
+              catch: (cause) => cause,
+            });
+            const synced = yield* Effect.result(
+              Effect.tryPromise({
+                try: () =>
+                  owner.syncDocOrThrow(getScheduleRoomId(request.scheduleId), {
+                    reason: 'schedule:execution-source',
+                    timeoutMs: 8_000,
+                  }),
+                catch: (cause) => cause,
+              })
+            );
+            if (synced._tag === 'Failure')
+              return { _tag: 'Denied' as const, reason: 'e2ee_schedule_evidence_pending' };
+            return yield* e2ee.authorizeScheduleExecution(request, handle.doc);
+          }),
         onClaim: (userTurnId) =>
           options.logger.debug('[e2ee-rpc-timing]', {
             stage: 'journal',
@@ -502,6 +526,19 @@ export class Lody {
 
   getActiveSessionCount(): number {
     return this.runtime.getActiveSessionCount();
+  }
+
+  async authorizeScheduleExecution(request: ScheduleAuthorizationRequest): Promise<boolean> {
+    if (this.options.contentMode !== 'e2ee') return true;
+    if (!this.encryptedWorkspace || this.cleanedUp) return false;
+    const handle = await this.documentManager.repo.openPersistedDoc(
+      getScheduleRoomId(request.scheduleId)
+    );
+    const result = await this.encryptedWorkspace.authorizeScheduleExecutionLegacy(
+      request,
+      handle.doc
+    );
+    return result._tag === 'Authorized';
   }
 
   hasAutomationSessionWork(sessionId: SessionId): boolean {
