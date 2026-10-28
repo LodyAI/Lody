@@ -128,7 +128,6 @@ import {
   evaluateBillingQuota,
   FREE_SESSION_TURN_LIMIT,
   FREE_SESSION_TURN_WARNING_REMAINING,
-  getAcpCapabilityCacheEntryAuthority,
   getAcpCapabilityCacheKey,
   getDeviceTimeZone,
   getMachineFlockLocalProjects,
@@ -3656,8 +3655,7 @@ export const SessionChatInterface = memo(
         if (entry.finished !== true || !entry.acpTurnId || !session.agentConfigId) return null;
         const capability =
           sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)];
-        return getAcpCapabilityCacheEntryAuthority(capability, undefined) === 'authoritative' &&
-          capability?.sessionFork === true
+        return capabilityAuthority === 'authoritative' && capability?.sessionFork === true
           ? userMessage.id
           : null;
       }
@@ -3665,6 +3663,7 @@ export const SessionChatInterface = memo(
       // The first user message uses session/new and therefore has no fork boundary.
       return userMessage.id;
     }, [
+      capabilityAuthority,
       rpcReason,
       isGoalActive,
       session.agentConfigId,
