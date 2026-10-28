@@ -1448,6 +1448,37 @@ export class E2eeIpc extends IpcService {
     )
   }
   @IpcMethod()
+  async prepareFeatureRpc(
+    workspaceId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput
+  ) {
+    const id = sender()
+    return withDesktopE2eeAccount(
+      (owner) =>
+        owner.readers.get(workspaceId)?.has(id)
+          ? owner.host.prepareFeatureRpc(workspaceId, input)
+          : Effect.fail(new Error('e2ee_not_open')),
+      workspaceId,
+      false
+    )
+  }
+  @IpcMethod()
+  async acceptFeatureRpcResponse(
+    workspaceId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput,
+    frame: string
+  ) {
+    const id = sender()
+    return withDesktopE2eeAccount(
+      (owner) =>
+        owner.readers.get(workspaceId)?.has(id)
+          ? owner.host.acceptFeatureRpcResponse(workspaceId, input, frame)
+          : Effect.fail(new Error('e2ee_not_open')),
+      workspaceId,
+      false
+    )
+  }
+  @IpcMethod()
   async prepareDispatch(
     workspaceId: string,
     targetMachineId: string,

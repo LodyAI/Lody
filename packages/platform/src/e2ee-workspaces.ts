@@ -222,6 +222,15 @@ export interface E2eeWorkspaceRuntime {
   ): Promise<{ header: Uint8Array; sealed: Uint8Array }>;
   openContent(workspaceId: string, input: E2eeContentOpen): Promise<Uint8Array>;
   /** Purpose-bound native preparation; persists the original before returning ciphertext. */
+  prepareFeatureRpc?(
+    workspaceId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput
+  ): Promise<import('@lody/shared/e2ee-rpc').E2eePreparedDispatch>;
+  acceptFeatureRpcResponse?(
+    workspaceId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput,
+    frame: string
+  ): Promise<import('@lody/shared/e2ee-rpc').E2eeFeatureResponsePart>;
   prepareDispatch?(
     workspaceId: string,
     targetMachineId: string,

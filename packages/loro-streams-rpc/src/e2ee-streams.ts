@@ -71,16 +71,17 @@ const readOwned = (
 /** One scoped shared response reader, with independently bounded pending calls.
  * Native verification runs before a receipt can settle a waiter. A timeout leaves
  * the saved original and durable dispatch intact, and never resends a new intent. */
-export const makeEncryptedStreamsRpc = Effect.fnUntraced(function* (options: {
+export const makeEncryptedStreamsChannel = Effect.fnUntraced(function* <Input, Output>(options: {
   workspaceId: string;
   requesterDevice: string;
   client: LoroStreamsJsonStreamClient;
   acceptResponse: (
     prepared: E2eePreparedDispatch,
-    input: E2eeDispatchInput,
+    input: Input,
     frame: string
-  ) => Promise<E2eeDispatchAck>;
+  ) => Promise<Output | undefined>;
   trace?: (event: E2eeRpcTiming) => void;
+  traceInput?: (input: Input) => string | undefined;
 }) {
   const scope = yield* Effect.scope;
   const responseStream = e2eeRpcResponseStream(options.workspaceId, options.requesterDevice);
@@ -88,8 +89,8 @@ export const makeEncryptedStreamsRpc = Effect.fnUntraced(function* (options: {
     string,
     {
       prepared: E2eePreparedDispatch;
-      input: E2eeDispatchInput;
-      result: Deferred.Deferred<E2eeDispatchAck>;
+      input: Input;
+      result: Deferred.Deferred<Output>;
     }
   >();
   const state: LoroJsonStreamState = { nextOffset: '0' };
@@ -111,22 +112,23 @@ export const makeEncryptedStreamsRpc = Effect.fnUntraced(function* (options: {
             try: () => options.acceptResponse(call.prepared, call.input, envelope.frame),
             catch: () => new Error('e2ee_rpc_response_invalid'),
           }).pipe(Effect.result);
-          if (verified._tag === 'Success' && !closed && pending.get(envelope.id) === call)
+          if (
+            verified._tag === 'Success' &&
+            verified.success !== undefined &&
+            !closed &&
+            pending.get(envelope.id) === call
+          )
             yield* Deferred.succeed(call.result, verified.success);
         }
       }),
       scope
     );
-  const trace = (
-    stage: E2eeRpcTiming['stage'],
-    prepared: E2eePreparedDispatch,
-    input: E2eeDispatchInput
-  ) => {
+  const trace = (stage: E2eeRpcTiming['stage'], prepared: E2eePreparedDispatch, input: Input) => {
     try {
       options.trace?.({
         stage,
         requestId: prepared.requestId,
-        userTurnId: input.userTurnId,
+        userTurnId: options.traceInput?.(input),
         at: Date.now(),
       });
     } catch {
@@ -174,7 +176,7 @@ export const makeEncryptedStreamsRpc = Effect.fnUntraced(function* (options: {
   );
   return {
     /** Receipt timeout is an acceleration budget; the caller always keeps durable dispatch active. */
-    send: (prepared: E2eePreparedDispatch, input: E2eeDispatchInput, timeoutMs = 800) =>
+    send: (prepared: E2eePreparedDispatch, input: Input, timeoutMs = 800) =>
       Effect.gen(function* () {
         if (
           closed ||
@@ -183,7 +185,7 @@ export const makeEncryptedStreamsRpc = Effect.fnUntraced(function* (options: {
           pending.has(prepared.requestId)
         )
           return null;
-        const result = yield* Deferred.make<E2eeDispatchAck>();
+        const result = yield* Deferred.make<Output>();
         const call = { prepared, input, result };
         return yield* Effect.acquireUseRelease(
           Effect.sync(() => {
@@ -199,10 +201,11 @@ export const makeEncryptedStreamsRpc = Effect.fnUntraced(function* (options: {
                     options.workspaceId,
                     prepared.targetMachineId
                   );
-                  await options.client.appendJson(
-                    stream,
-                    e2eeRpcEnvelope({ id: prepared.requestId, frame: prepared.frameHex })
-                  );
+                  for (const frame of prepared.frames ?? [prepared.frameHex])
+                    await options.client.appendJson(
+                      stream,
+                      e2eeRpcEnvelope({ id: prepared.requestId, frame })
+                    );
                 },
                 catch: () => new Error('e2ee_rpc_append'),
               });
@@ -220,6 +223,23 @@ export const makeEncryptedStreamsRpc = Effect.fnUntraced(function* (options: {
       }),
   };
 });
+
+/** Dispatch keeps its typed receipt contract over the shared encrypted channel. */
+export const makeEncryptedStreamsRpc = (options: {
+  workspaceId: string;
+  requesterDevice: string;
+  client: LoroStreamsJsonStreamClient;
+  acceptResponse: (
+    prepared: E2eePreparedDispatch,
+    input: E2eeDispatchInput,
+    frame: string
+  ) => Promise<E2eeDispatchAck>;
+  trace?: (event: E2eeRpcTiming) => void;
+}) =>
+  makeEncryptedStreamsChannel({
+    ...options,
+    traceInput: (input: E2eeDispatchInput) => input.userTurnId,
+  });
 
 /** Native receive owner: four bounded handlers, one stream reader, no network wait
  * in workspace startup. A bad request or failed ACK never stops sibling intake. */

@@ -102,7 +102,7 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   unknown ownership remains pending.
 - Presence: local origin/absence wins over cloud; UI uses display state, recovery raw state.
   Encrypted presence uses its authorized bucket and shared minimal plaintext allowlist
-  on publish/cloud/local read; other protected side channels stay disabled.
+  on publish/cloud/local read; unimplemented protected side channels stay disabled.
 - Doc-metadata bootstrap and the live repo watch overlap by design: merge per field with
   live winning (`mergeBootstrapMetaCache`), never letting the snapshot undo an archive
   already applied live.

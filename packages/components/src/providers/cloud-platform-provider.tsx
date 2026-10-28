@@ -233,6 +233,10 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
               refresh: (workspaceId, options) => native.refresh(workspaceId, options),
               contentStreamsToken: (workspaceId, rejectedToken) =>
                 native.contentStreamsToken(workspaceId, rejectedToken),
+              prepareFeatureRpc: (workspaceId, input) =>
+                native.prepareFeatureRpc(workspaceId, input),
+              acceptFeatureRpcResponse: (workspaceId, input, frame) =>
+                native.acceptFeatureRpcResponse(workspaceId, input, frame),
               prepareDispatch: (workspaceId, machineId, input) =>
                 native.prepareDispatch(workspaceId, machineId, input),
               acceptDispatchResponse: (workspaceId, machineId, input, frame) =>

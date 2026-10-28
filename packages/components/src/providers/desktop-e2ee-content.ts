@@ -125,6 +125,19 @@ export function createDesktopE2eeContent(input: {
     needsUpdate: transition.needsUpdate,
     close: transition.close,
     e2ee: {
+      prepareFeatureRpc: (args: import('@lody/shared/e2ee-rpc').E2eeFeatureInput) => {
+        if (!input.runtime.prepareFeatureRpc)
+          return Promise.reject(new Error('e2ee_rpc_unavailable'));
+        return input.runtime.prepareFeatureRpc(input.workspaceId, args);
+      },
+      acceptFeatureRpcResponse: (
+        args: import('@lody/shared/e2ee-rpc').E2eeFeatureInput,
+        frame: string
+      ) => {
+        if (!input.runtime.acceptFeatureRpcResponse)
+          return Promise.reject(new Error('e2ee_rpc_unavailable'));
+        return input.runtime.acceptFeatureRpcResponse(input.workspaceId, args, frame);
+      },
       prepareDispatch: (
         machineId: string,
         args: import('@lody/shared/e2ee-rpc').E2eeDispatchInput

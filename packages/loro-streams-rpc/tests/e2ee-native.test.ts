@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildSessionTurnInputConfig } from '../../shared/src/session-input';
@@ -231,4 +231,124 @@ describe('trusted-host encrypted dispatch originals', () => {
       Effect.runPromise(f.receiver.openDispatch('other-machine', first.frameHex))
     ).rejects.toThrow();
   });
+});
+
+it('protects feature requests and chunked results with workspace signatures and exact retained originals', async () => {
+  const f = fixture();
+  const input = {
+    requestId: '77'.repeat(16),
+    request: {
+      workspaceId: f.workspaceId,
+      machineId: f.machineId,
+      method: 'code-collab/open-text' as const,
+      params: { sessionId: f.input.sessionId, path: 'private.ts' },
+    },
+  };
+  const original = await Effect.runPromise(f.sender.prepareFeature(input));
+  expect(await Effect.runPromise(f.sender.prepareFeature(input))).toEqual(original);
+  const opened = await Effect.runPromise(f.receiver.openFeature(f.machineId, original.frameHex));
+  expect(opened?.input).toEqual(input);
+  const result = { ok: false as const, error: 'SYNTHETIC_PRIVATE_FILE'.repeat(60_000) };
+  const frames = await Effect.runPromise(
+    f.receiver.sealFeatureResult(f.machineId, opened!, result)
+  );
+  expect(frames.length).toBeGreaterThan(1);
+  const parts: Uint8Array[] = [];
+  for (const frame of frames) {
+    expect(Buffer.from(frame).includes(Buffer.from('SYNTHETIC_PRIVATE_FILE'))).toBe(false);
+    const part = await Effect.runPromise(
+      f.sender.acceptFeatureResponse(input, Buffer.from(frame).toString('hex'))
+    );
+    expect(part.sequence).toBe(parts.length);
+    parts.push(part.bytes);
+    expect(part.final).toBe(parts.length === frames.length);
+  }
+  expect(JSON.parse(Buffer.concat(parts).toString('utf8'))).toEqual(result);
+  await expect(
+    Effect.runPromise(
+      f.sender.prepareFeature({
+        ...input,
+        request: {
+          ...input.request,
+          method: 'file/resolve-local',
+        },
+      } as never)
+    )
+  ).rejects.toThrow();
+  await expect(
+    Effect.runPromise(
+      f.sender.prepareFeature({
+        ...input,
+        request: {
+          ...input.request,
+          params: { ...input.request.params, path: 'changed.ts' },
+        },
+      })
+    )
+  ).rejects.toThrow('intent_conflict');
+});
+
+it('reassembles a large save from signed chunks and rejects a response from another request', async () => {
+  const f = fixture();
+  const text = 'SYNTHETIC_LARGE_SAVE_'.repeat(80_000);
+  const input = {
+    requestId: '66'.repeat(16),
+    request: {
+      workspaceId: f.workspaceId,
+      machineId: f.machineId,
+      method: 'code-collab/save-text' as const,
+      params: {
+        sessionId: f.input.sessionId,
+        requestedByUserId: 'owner',
+        path: 'private.ts',
+        baseDigest: 'sha256:' + '11'.repeat(32),
+        text: { encoding: 'plain' as const, text, rawBytes: text.length },
+      },
+    },
+  };
+  const original = await Effect.runPromise(f.sender.prepareFeature(input));
+  expect(original.frames!.length).toBeGreaterThan(1);
+  let opened;
+  for (const frame of [...original.frames!].reverse()) {
+    opened = await Effect.runPromise(f.receiver.openFeature(f.machineId, frame));
+  }
+  expect(opened?.input).toEqual(input);
+  const frames = await Effect.runPromise(
+    f.receiver.sealFeatureResult(f.machineId, opened!, { ok: false, error: 'synthetic outcome' })
+  );
+  const changed = { ...input, requestId: '88'.repeat(16) };
+  await Effect.runPromise(f.sender.prepareFeature(changed));
+  await expect(
+    Effect.runPromise(
+      f.sender.acceptFeatureResponse(changed, Buffer.from(frames[0]!).toString('hex'))
+    )
+  ).rejects.toThrow('response_binding');
+  const reopened = f.native('owner');
+  expect(await Effect.runPromise(reopened.prepareFeature(input))).toEqual(original);
+  expect(readFileSync(join(f.directory, 'owner.sqlite')).includes(Buffer.from(text))).toBe(false);
+});
+
+it('rejects expired feature requests before admitting even a single chunk', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(1000);
+  const f = fixture();
+  try {
+    const original = await Effect.runPromise(
+      f.sender.prepareFeature({
+        requestId: '99'.repeat(16),
+        request: {
+          workspaceId: f.workspaceId,
+          machineId: f.machineId,
+          method: 'code-collab/open-text',
+          params: { sessionId: f.input.sessionId, path: 'private.ts' },
+        },
+      })
+    );
+    vi.setSystemTime(original.expiresAt);
+    await expect(
+      Effect.runPromise(f.receiver.openFeature(f.machineId, original.frameHex))
+    ).rejects.toThrow('e2ee_feature_expiry');
+  } finally {
+    vi.useRealTimers();
+  }
 });

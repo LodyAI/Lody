@@ -48,8 +48,9 @@ Managed preview tunnels and the local proxy. [apps/cli/AGENTS.md](../../AGENTS.m
   Lifecycle writes are serialized per Session; revoke cancels acquisition before
   joining that queue. One-hour activity deadlines stay in memory. Machine slots
   span workspaces in the singleton Worker, never a PID registry on disk.
-- Remote create/revoke/status must pass `authorizeRemoteControl` before touching
-  endpoint state. Workspace RPC does not authenticate a claimed user id. Its
+- Ordinary remote create/revoke/status must pass `authorizeRemoteControl` before touching
+  endpoint state. Verified encrypted feature ingress instead uses the existing fresh
+  same-member machine authorization and binds the claimed user to that machine owner. Workspace RPC does not authenticate a claimed user id. Its
   short-lived signed proof binds the exact command and runtime nonce; the authority
   consumes each request id once, including concurrent duplicates. Verify project
   access from CLI-resolved metadata, never a caller-supplied project. Local controls

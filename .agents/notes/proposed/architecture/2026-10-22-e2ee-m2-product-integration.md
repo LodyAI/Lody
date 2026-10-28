@@ -27,7 +27,7 @@ with signed native content snapshots and explicit replay/trim recovery.
 
 ## Unencrypted exits
 
-M2 uses Loro history and its durable dispatch pointer. Cloud RPC, presence, snapshots, cloud attachments, schedules, shortcuts, Code Collab indexes, sharing, remote preview, exports and notification bodies remain unavailable in encrypted workspaces. Background PR polling, hosted GitHub credentials and cloud PR association are also disabled to prevent repository and branch metadata escaping through an independent path. Trusted same-user local IPC can carry necessary local control; it must not fall back to a network RPC. Loro permission outcomes already persist in the protected session document. File custody is machine-only and must be disclosed before explicit pairing approval.
+M2 uses Loro history and its durable dispatch pointer. Ordinary cloud RPC, cloud attachments, schedules, shortcuts, public-link sharing and notification bodies remain unavailable in encrypted workspaces. The [file and preview availability decision](../../implemented/feature/2026-10-28-e2ee-file-preview-availability.md) supersedes the original Code Collab/preview restrictions; device-local export is tracked independently in PR #2011. Background PR polling, hosted GitHub credentials and cloud PR association are also disabled to prevent repository and branch metadata escaping through an independent path. Trusted same-user local IPC can carry necessary local control; it must not fall back to a network RPC. Loro permission outcomes already persist in the protected session document. File custody is machine-only and must be disclosed before explicit pairing approval.
 
 ## Evidence and limits
 
