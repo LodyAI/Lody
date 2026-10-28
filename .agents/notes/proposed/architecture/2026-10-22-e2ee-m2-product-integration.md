@@ -27,7 +27,7 @@ with signed native content snapshots and explicit replay/trim recovery.
 
 ## Unencrypted exits
 
-M2 uses Loro history and its durable dispatch pointer. Cloud RPC, presence, snapshots, cloud attachments, schedules, shortcuts, Code Collab indexes, sharing, remote preview, exports and notification bodies remain unavailable in encrypted workspaces. Background PR polling, hosted GitHub credentials and cloud PR association are also disabled to prevent repository and branch metadata escaping through an independent path. Trusted same-user local IPC can carry necessary local control; it must not fall back to a network RPC. Loro permission outcomes already persist in the protected session document. File custody is machine-only and must be disclosed before explicit pairing approval.
+M2 uses Loro history and its durable dispatch pointer. Schedule documents and the workspace Schedule Registry use the same protected CRDT transport. Machine-generated scheduled turns retain the existing verified-signer authorization and shared execution journal claim; display ownership does not grant execution. Cloud RPC, presence, snapshots, cloud attachments, shortcuts, Code Collab indexes, sharing, remote preview, exports and notification bodies remain unavailable in encrypted workspaces. Background PR polling, hosted GitHub credentials and cloud PR association are also disabled to prevent repository and branch metadata escaping through an independent path. Trusted same-user local IPC can carry necessary local control; it must not fall back to a network RPC. Loro permission outcomes already persist in the protected session document. File custody is machine-only and must be disclosed before explicit pairing approval.
 
 ## Evidence and limits
 

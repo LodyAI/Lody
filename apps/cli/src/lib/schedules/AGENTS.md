@@ -2,6 +2,9 @@
 
 `CLAUDE.md` is a symlink to this file.
 
+- Encrypted workspaces sync definitions and Registry through the existing protected
+  Repo. Generated turns use the ordinary verified-signer execution gate and shared
+  userTurnId journal claim; Schedule ownership fields never grant execution.
 - Schedule definitions live in `schedule-<id>` Loro docs. The workspace `:sr`
   Flock Registry is the execution gate. A definition must match its published
   fingerprint; existence discovery must never republish or enable an orphan.

@@ -2439,7 +2439,12 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
 
     await runtime.dispose();
   });
-  it('opens protected content offline, then enables only minimal presence on authentication', async () => {
+  it('opens protected schedules offline through the production store cache and retains encrypted transport assembly', async () => {
+    const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
+    const repo = await RealRepo.create({});
+    mocks.repoOverride = repo;
+    vi.spyOn(repo, 'addTransport').mockImplementation(mocks.addTransport as never);
+    vi.spyOn(repo, 'joinMetaRoom').mockImplementation(mocks.joinMetaRoom as never);
     const provider = () =>
       createLoroStreamsTokenProviderLegacy({
         endpoint: 'https://encrypted.example.test/token',
@@ -2478,9 +2483,10 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
         status: 'error',
         message: 'Encrypted workspaces do not yet support remote machine operations.',
       });
-      await expect(runtime.acquireScheduleStore('schedule-1')).rejects.toThrow(
-        'Encrypted workspaces do not yet support scheduled messages.'
-      );
+      const schedule = await runtime.acquireScheduleStore('schedule-1');
+      expect(schedule.roomId).toBe('schedule-schedule-1');
+      expect(await repo.openPersistedDoc(schedule.roomId)).toBeDefined();
+      runtime.releaseScheduleStoreRef('schedule-1');
       expect(cloudAttachCalls()).toEqual([]);
       expect(mocks.authInvocations).toEqual([]);
       mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));

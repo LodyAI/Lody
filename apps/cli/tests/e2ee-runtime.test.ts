@@ -1,3 +1,23 @@
+import { LoroRepo } from 'loro-repo';
+import { SessionDocument, type LoroDocumentManager } from '../src/lib/loro/doc';
+import { prepareSessionInput, resolveTurnDispatchConfig } from '../src/commands/session';
+import {
+  materializePreparedSessionInput,
+  commitPreparedSessionDispatch,
+} from '../src/lib/prepared-session-input';
+import {
+  buildScheduleRunTarget,
+  buildScheduleSessionCreateOptions,
+  withScheduledMessageInput,
+} from '../src/lib/schedules/schedule-run-preparation';
+import {
+  getSessionRoomId,
+  type SessionId,
+  type MachineMeta,
+  type AgentConfigMeta,
+} from '@lody/shared';
+import type { AuthContext } from '../src/lib/command-runtime';
+import type { WorkspaceSummary } from '../src/lib/workspace';
 import { makeStreamsUpdateBinding } from '@lody/e2ee-core/adapters/loro-streams';
 import { makeExecutionOriginRecovery } from '../src/lib/e2ee/execution-origin-recovery';
 import { ExecutionOrigins } from '../src/lib/e2ee/execution-origins';
@@ -4431,6 +4451,149 @@ const executionFixture = Effect.fnUntraced(function* (directory: string, count =
 });
 
 describe('machine execution authorization freshness', () => {
+  effectIt.effect(
+    'authorizes the machine-signed scheduled turn after production preparation and handoff, with one shared claim',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const directory = yield* Effect.acquireRelease(
+            Effect.promise(() => mkdtemp(join(tmpdir(), 'scheduled-execution-'))),
+            (path) => Effect.promise(() => rm(path, { recursive: true, force: true }))
+          );
+          const { fixture, gate: authorization, device } = yield* executionFixture(directory);
+          const repo = yield* Effect.acquireRelease(
+            Effect.promise(() => LoroRepo.create({})),
+            (ownedRepo) => Effect.promise(() => ownedRepo.destroy())
+          );
+          const sessionId = 'scheduled-chat' as SessionId;
+          const handle = yield* Effect.promise(() =>
+            repo.openPersistedDoc(getSessionRoomId(sessionId))
+          );
+          const session = new SessionDocument(repo, sessionId, async () => {});
+          session.handle = handle;
+          session.composeSessionData(handle.doc, undefined, { historyBackend: 'loro' });
+          yield* Effect.addFinalizer(() =>
+            Effect.promise(() => session.destroy({ preserveStatus: true }))
+          );
+          const manager = {
+            repo,
+            syncMetaOrThrow: async () => {},
+            getOrCreateSessionDoc: async () => session,
+          } as unknown as LoroDocumentManager;
+          const prepared = withScheduledMessageInput(
+            yield* Effect.promise(() =>
+              prepareSessionInput(
+                { userId: 'display-owner', machineId: 'machine' } as AuthContext,
+                { id: 'workspace', contentMode: 'e2ee' } as WorkspaceSummary,
+                manager,
+                'Scheduled hello',
+                buildScheduleSessionCreateOptions({
+                  sessionId,
+                  userTurnId: 'scheduled-turn',
+                  agentConfigId: 'agent',
+                  title: 'Scheduled',
+                }),
+                { ...resolveTurnDispatchConfig({}), inheritSessionDefaults: false },
+                buildScheduleRunTarget({
+                  targetMachine: {
+                    id: 'machine',
+                    ownerUserId: 'display-owner',
+                    protocolCapabilities: {},
+                  } as MachineMeta,
+                  agentConfig: {
+                    id: 'agent',
+                    machineId: 'machine',
+                    cliType: 'claude',
+                    agentType: 'claude',
+                  } as AgentConfigMeta,
+                })
+              )
+            ),
+            { inputBlocks: [{ type: 'text', text: 'Scheduled hello' }] }
+          );
+          prepared.userTurn.timestamp = new Date(yield* Clock.currentTimeMillis).toISOString();
+          prepared.userTurn.scheduleRun = {
+            scheduleId: 'reserved-message',
+            turnId: prepared.userTurn.id,
+            title: 'Scheduled',
+          };
+          yield* Effect.promise(() => materializePreparedSessionInput(manager, prepared));
+          expect(
+            (yield* Effect.promise(() => repo.getDocMeta(getSessionRoomId(sessionId))))?.meta
+              .latestUserMsgId
+          ).toBeUndefined();
+          yield* Effect.promise(() => commitPreparedSessionDispatch(manager, prepared));
+          expect(
+            (yield* Effect.promise(() => repo.getDocMeta(getSessionRoomId(sessionId))))?.meta
+              .latestUserMsgId
+          ).toBe('scheduled-turn');
+          const binding = yield* makeStreamsUpdateBinding({
+            genesis: fixture.genesis,
+            resource: `doc:${getSessionRoomId(sessionId)}`,
+            model: 'loro',
+            writeEpoch: 'current',
+            signer: device,
+            ledger: () => Effect.succeed(fixture.current),
+            readEpochKey: () => Effect.fromResult(Bytes.epochKey(new Uint8Array(32).fill(20))),
+          });
+          const origins = new ExecutionOrigins(join(directory, 'origins.sqlite'));
+          const storedTurn = (yield* Effect.sync(() => session.sessionData.history.readAll())).find(
+            (turn) => turn.id === prepared.userTurn.id
+          );
+          const intent = {
+            workspaceId: 'workspace',
+            sessionId,
+            userTurnId: prepared.userTurn.id,
+            requesterUserId: 'display-owner',
+            inputConfig: storedTurn?.inputConfig,
+          };
+          const makeExecution = () =>
+            makeEncryptedAgentExecution({
+              genesis: hex(fixture.genesis.toBytes()),
+              workspaceId: 'workspace',
+              targetMachineId: 'machine',
+              journal: lazyExecutionJournal(join(directory, 'execution.sqlite'), () => 0),
+              resolveVerifiedOriginal: (input) =>
+                Effect.scoped(origins.resolve(input, handle.doc, binding.openAuthenticated)),
+              authorizeExecution: authorization.authorizeExecution,
+            });
+          const execution = makeExecution();
+          expect((yield* execution.claim(intent)).state).toBe('pending-evidence');
+          const update = handle.doc.export({ mode: 'update' });
+          const plaintext = new Uint8Array(4 + update.length);
+          new DataView(plaintext.buffer).setUint32(0, update.length, false);
+          plaintext.set(update, 4);
+          const context = {
+            protocol: 'loro-streams-crdt-payload-protection',
+            version: 2,
+            kind: 'update_batch',
+          } as const;
+          const sealed = yield* binding.seal({
+            context,
+            plaintext,
+            additionalData: (header) => Uint8Array.from([...header, 9]),
+          });
+          const request = {
+            ...sealed,
+            context,
+            additionalData: Uint8Array.from([...sealed.header, 9]),
+          };
+          const opened = yield* binding.openAuthenticated(request);
+          origins.retain(`doc:${getSessionRoomId(sessionId)}`, request, opened.plaintext);
+          opened.plaintext.fill(0);
+          expect(
+            yield* Effect.scoped(origins.resolve(intent, handle.doc, binding.openAuthenticated))
+          ).toMatchObject({ requesterDevice: hex(device.publicKey.toBytes()) });
+          const claim = yield* execution.claim(intent);
+          expect(claim.state).toBe('claimed');
+          expect((yield* makeExecution().claim(intent)).state).toBe('uncertain');
+          if (claim.state !== 'claimed') throw new Error('expected execution permit');
+          yield* execution.complete(claim.permit);
+          expect((yield* makeExecution().claim(intent)).state).toBe('completed');
+        })
+      )
+  );
+
   it('requires its own authenticated read, expires at 15 minutes from read start, and rechecks after restart', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'execution-authorization-'));
     let sender = '';

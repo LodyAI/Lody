@@ -11,8 +11,8 @@ A code review of the merged M2 CLI integration found paths where an encrypted
 workspace could be handled as plaintext or leak its owner. The local catalog now
 never caches a workspace whose content mode this client does not implement, so an
 offline daemon restart cannot open it as plaintext; `lody export` refuses encrypted
-workspaces and `lody sync` skips their schedule rooms, matching the restricted-feature
-contract. One-shot commands close an opened encrypted workspace when manager creation
+workspaces. `lody sync` includes schedule rooms and their Registry through the
+protected CRDT transport. One-shot commands close an opened encrypted workspace when manager creation
 fails, and the CLI E2EE cloud port validates history and mailbox replies with Zod
 instead of trusting or casting them. Two related findings that depend on the pending
 machine-pairing change are handed to that line rather than patched here.
@@ -27,9 +27,10 @@ machine-pairing change are handed to that line rather than patched here.
 - **Export is a restricted feature.** `workspaceSupports(..., 'export')` gates both
   `--workspace` (explicit refusal) and `--all-workspace` (skip with a visible notice).
   No decrypted session content reaches disk through export until its E2EE milestone.
-- **Sync keeps the protected replica and skips schedules.** Encrypted workspaces still
-  sync meta, session and machine docs; the schedule registry and schedule rooms, which
-  have no encrypted channel, are skipped rather than reported as failures.
+- **Sync keeps the protected replica.** Encrypted workspaces sync metadata, session,
+  machine and Schedule documents plus the Schedule Registry. The Registry is an
+  explicitly admitted workspace Flock room; it uses the same encryption, signatures
+  and snapshot machinery as the other protected CRDT rooms.
 - **Creation failure owns cleanup.** As in `Lody.create`, one-shot manager creation
   failure closes the opened custody/history/refresh owner. The original error is kept;
   a cleanup failure is logged, not substituted.
