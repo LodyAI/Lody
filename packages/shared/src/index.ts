@@ -509,3 +509,5 @@ export * from './project-path';
 export * from './session-pull-requests';
 
 export * from './prompt-suggestions';
+
+export * from './encrypted-attachment';

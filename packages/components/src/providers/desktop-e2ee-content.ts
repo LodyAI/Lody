@@ -125,6 +125,12 @@ export function createDesktopE2eeContent(input: {
     needsUpdate: transition.needsUpdate,
     close: transition.close,
     e2ee: {
+      attachmentToken: async () => {
+        if (memberRemoved || transition.phase() === 'closed') throw new Error('e2ee_closed');
+        const result = await input.runtime.contentStreamsToken(input.workspaceId).catch((error) => { observeRemoval(error); throw error; });
+        if (!result.attachmentToken) throw new Error('e2ee_attachment_unavailable');
+        return result.attachmentToken;
+      },
       prepareDispatch: (
         machineId: string,
         args: import('@lody/shared/e2ee-rpc').E2eeDispatchInput

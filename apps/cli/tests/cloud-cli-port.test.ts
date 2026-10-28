@@ -465,10 +465,10 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
       'bugReports',
       'sessionSharing',
       'prAssociation',
-      'attachmentUpload',
       'remotePreview',
     ] as const)
       expect(port[name]).toBeNull();
+    expect(port.attachmentUpload).toEqual({ serverBaseUrl: expect.any(String) });
     const authorized = {
       status: 'authorized',
       userId: account,

@@ -6388,6 +6388,7 @@ function useImageBlobUrls(
 ) {
   const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
   const authToken = useAtomValue(authTokenAtom);
+  const attachmentRuntime = useAtomValue(runtimeAtom);
   const [blobUrls, setBlobUrls] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
@@ -6418,6 +6419,7 @@ function useImageBlobUrls(
         workspaceId,
         sessionId: entry.sessionId,
         imageId: entry.imageId,
+        encryption: entry.encryption, attachmentToken: attachmentRuntime?.workspaceId === workspaceId ? attachmentRuntime.attachmentToken : undefined,
         token: authToken,
         variant: 'original',
       })
@@ -6440,7 +6442,7 @@ function useImageBlobUrls(
     return () => {
       active = false;
     };
-  }, [activeIndex, authToken, entries, open, workspaceId]);
+  }, [activeIndex, authToken, entries, open, workspaceId, attachmentRuntime]);
 
   return blobUrls;
 }
@@ -6527,6 +6529,7 @@ export const WorkspaceUserImageBlock = ({
   const previewPortalAnchorRef = useRef<HTMLDivElement>(null);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
   const authToken = useAtomValue(authTokenAtom);
+  const attachmentRuntime = useAtomValue(runtimeAtom);
   const [thumbnailBlobUrl, setThumbnailBlobUrl] = useState<string | null>(null);
   const [thumbnailLoadingError, setThumbnailLoadingError] = useState<string | null>(null);
   const [isThumbnailLoading, setIsThumbnailLoading] = useState(true);
@@ -6591,6 +6594,7 @@ export const WorkspaceUserImageBlock = ({
       workspaceId,
       sessionId: entry.sessionId,
       imageId: entry.imageId,
+      encryption: entry.encryption, attachmentToken: attachmentRuntime?.workspaceId === workspaceId ? attachmentRuntime.attachmentToken : undefined,
       token: authToken,
       variant: 'thumbnail',
       thumbnailWidth,
@@ -6618,6 +6622,8 @@ export const WorkspaceUserImageBlock = ({
   }, [
     authToken,
     entry.imageId,
+    entry.encryption,
+    attachmentRuntime,
     entry.sessionId,
     imageLoadFailedLabel,
     imageLoadUnavailableLabel,
@@ -6843,6 +6849,7 @@ const WorkspaceSessionFileGroup = ({
   const { t } = useTranslation();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
   const authToken = useAtomValue(authTokenAtom);
+  const attachmentRuntime = useAtomValue(runtimeAtom);
   const { openHtmlFile } = useContext(SessionChatActionContext);
   const postHog = usePostHog();
   const [previewFile, setPreviewFile] = useState<SessionFilePayload | null>(null);
@@ -6862,6 +6869,7 @@ const WorkspaceSessionFileGroup = ({
         workspaceId,
         sessionId: file.storageSessionId ?? sessionId,
         fileId: file.fileId,
+        encryption: file.encryption, attachmentToken: attachmentRuntime?.workspaceId === workspaceId ? attachmentRuntime.attachmentToken : undefined,
         token: authToken,
         fileName: file.fileName,
         mimeType: file.mimeType,
@@ -6871,7 +6879,7 @@ const WorkspaceSessionFileGroup = ({
         })
         .finally(() => setDownloadingId((current) => (current === file.fileId ? null : current)));
     },
-    [authToken, postHog, sessionId, t, workspaceId]
+    [authToken, postHog, sessionId, t, workspaceId, attachmentRuntime]
   );
 
   const handlePreview = useCallback(
@@ -6899,6 +6907,7 @@ const WorkspaceSessionFileGroup = ({
         workspaceId,
         sessionId: file.storageSessionId ?? sessionId,
         fileId: file.fileId,
+        encryption: file.encryption, attachmentToken: attachmentRuntime?.workspaceId === workspaceId ? attachmentRuntime.attachmentToken : undefined,
         token: authToken,
         sizeBytes: file.sizeBytes,
       })
@@ -6919,7 +6928,7 @@ const WorkspaceSessionFileGroup = ({
           });
         });
     },
-    [authToken, openHtmlFile, postHog, sessionId, t, workspaceId]
+    [authToken, openHtmlFile, postHog, sessionId, t, workspaceId, attachmentRuntime]
   );
 
   // The send path caps at 8 files/message, but a block list synced from another

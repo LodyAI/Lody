@@ -226,6 +226,7 @@ export function resolveWorkspaceRuntimeCacheIdentity(
 }
 
 export type WorkspaceE2eeTransport = {
+  attachmentToken?: () => Promise<string>;
   createTokenProvider(signal: AbortSignal): ReturnType<typeof createLoroStreamsTokenProviderLegacy>;
   bucketId(): string | null;
   prepareDispatch?: (
@@ -5539,6 +5540,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       requestSessionDispatchTurn,
       requestSessionSteer,
       contentMode: protectedContent ? 'e2ee' : 'plaintext',
+    attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
       ...(prepareEncryptedDispatch ? { prepareEncryptedDispatch } : {}),
       isMachineRpcUnreachable,
     },
@@ -5568,6 +5570,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           requestSessionDispatchTurn,
           requestSessionSteer,
           contentMode: protectedContent ? 'e2ee' : 'plaintext',
+    attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
         },
       }).catch((error: unknown) => {
         console.warn('Legacy pending messages could not be migrated', error);
@@ -5607,6 +5610,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     workspaceSlug: deps.workspaceSlug,
     workspaceId,
     contentMode: protectedContent ? 'e2ee' : 'plaintext',
+    attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
     ...(prepareEncryptedDispatch ? { prepareEncryptedDispatch } : {}),
     repo,
     accountId: deps.accountId ?? null,

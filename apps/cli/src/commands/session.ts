@@ -3736,7 +3736,10 @@ export async function prepareSessionInput(
         ? {
             relay: createCommandAttachmentTransfer(
               auth.token,
-              Boolean(getSessionCommandEnvironment())
+              Boolean(getSessionCommandEnvironment()),
+              manager.isEncryptedWorkspace()
+                ? { token: () => manager.getEncryptedAttachmentToken() }
+                : undefined
             ),
           }
         : {}),
@@ -4101,7 +4104,10 @@ export async function sendSessionChatResult(
         ? {
             relay: createCommandAttachmentTransfer(
               auth.token,
-              Boolean(getSessionCommandEnvironment())
+              Boolean(getSessionCommandEnvironment()),
+              manager.isEncryptedWorkspace()
+                ? { token: () => manager.getEncryptedAttachmentToken() }
+                : undefined
             ),
           }
         : {}),

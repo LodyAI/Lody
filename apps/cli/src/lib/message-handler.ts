@@ -1,3 +1,8 @@
+import {
+  readEncryptedAttachment,
+  encryptedAttachmentPath,
+  type EncryptedAttachment,
+} from '@lody/shared';
 import type { EncryptedAgentExecution } from './e2ee/agent-execution';
 import { isScheduledMessageFile } from './schedules/scheduled-message-files';
 import {
@@ -246,7 +251,7 @@ import {
   getSessionFileBlobPath,
   listPendingLocalSessionFiles,
   markSessionFileBlobBackfilled,
-  readSessionFileBlobBackfillMarker,
+  readSessionFileBlobBackfillReceipt,
   removeSessionFileBlob,
   sessionFileBlobExists,
   writeSessionFileBlobBackfillMarker,
@@ -754,6 +759,7 @@ export class MessageHandler {
   }
   private hasShownHappyCodingMessage = false;
   private readonly cloudPort: CloudPort;
+  private readonly encryptedAttachments: boolean;
   private notificationService: CloudNotificationsPort | null;
   private usageTrackingService: CloudUsagePort | null;
   private readonly turnTokenUsage = new TurnTokenUsageLedger();
@@ -1710,7 +1716,10 @@ export class MessageHandler {
   private attachmentTransfer(): SessionAttachmentTransfer {
     return new SessionAttachmentTransfer(
       this.token,
-      this.cloudPort.attachmentUpload?.serverBaseUrl
+      this.cloudPort.attachmentUpload?.serverBaseUrl,
+      this.encryptedAttachments
+        ? { token: () => this.workspaceDocument.getEncryptedAttachmentToken() }
+        : undefined
     );
   }
 
@@ -1852,10 +1861,12 @@ export class MessageHandler {
     sessionId: SessionId;
     imageId: string;
     expectedMimeType: string;
+    encryption?: EncryptedAttachment;
   }): Promise<DownloadedSessionImagePromptBlock> {
     return await downloadSessionImageForPrompt({
       ...args,
       serverBaseUrl: this.resolveServerBaseUrl(),
+      attachmentToken: () => this.workspaceDocument.getEncryptedAttachmentToken(),
       token: this.token,
       logger: this.logger,
     });
@@ -2119,8 +2130,48 @@ export class MessageHandler {
     sessionId: SessionId;
     fileId: string;
     expectedSha256?: string;
+    encryption?: EncryptedAttachment;
     destPath: string;
   }): Promise<{ ok: true } | { ok: false; reason: 'not_found' | 'error'; message: string }> {
+    if (args.encryption) {
+      const tempPath = `${args.destPath}.${uuidV4()}.part`;
+      let handle: fs.promises.FileHandle | undefined;
+      try {
+        const token = await this.workspaceDocument.getEncryptedAttachmentToken();
+        const chunks = readEncryptedAttachment({
+          ...args,
+          encryption: args.encryption,
+          fetchPart: (fileId) =>
+            fetch(
+              buildSessionFileApiUrl(
+                this.resolveServerBaseUrl(),
+                encryptedAttachmentPath(
+                  getSessionFileDownloadApiPath(args.workspaceId, args.sessionId, fileId)
+                )
+              ),
+              {
+                headers: { Authorization: `Bearer ${token}` },
+              }
+            ),
+        });
+        const hash = crypto.createHash('sha256');
+        handle = await fs.promises.open(tempPath, 'wx', 0o600);
+        for await (const bytes of chunks) {
+          hash.update(bytes);
+          await handle.writeFile(bytes);
+        }
+        await handle.close();
+        handle = undefined;
+        if (args.expectedSha256 && hash.digest('hex') !== args.expectedSha256)
+          throw new Error('Downloaded encrypted file failed sha256 verification');
+        await fs.promises.rename(tempPath, args.destPath);
+        return { ok: true };
+      } catch (error) {
+        await handle?.close().catch(() => {});
+        await fs.promises.unlink(tempPath).catch(() => {});
+        return { ok: false, reason: 'error', message: formatErrorMessage(error) };
+      }
+    }
     const serverBaseUrl = this.resolveServerBaseUrl();
     const fileUrl = buildSessionFileApiUrl(
       serverBaseUrl,
@@ -2299,6 +2350,7 @@ export class MessageHandler {
             sessionId: storageSessionId,
             fileId: block.fileId,
             expectedSha256: block.sha256,
+            encryption: block.encryption,
             destPath,
           });
           if (!result.ok) {
@@ -2394,6 +2446,7 @@ export class MessageHandler {
           sessionId: block.storageSessionId ?? args.sessionId,
           imageId: block.imageId,
           expectedMimeType: block.mimeType,
+          encryption: block.encryption,
         });
         return { inputBlock: block, downloaded };
       })
@@ -2828,6 +2881,7 @@ export class MessageHandler {
     config: MessageHandlerConfig
   ) {
     this.sessionManager = sessionManager;
+    this.encryptedAttachments = config.encryptedWorkspace === true;
     // Create a child logger with workspace context for file logging
     this.logger = logger.child({
       workspaceName: config.workspaceSlug || config.workspaceId,
@@ -8378,7 +8432,11 @@ export class MessageHandler {
     // flip→mark window (R5.3): the flip rewrites the fileId, so after it the
     // local block is gone and a naive re-run would throw "not yet persisted"
     // forever, stranding the blob and its quota.
-    const markerRelayFileId = await readSessionFileBlobBackfillMarker(blobArgs);
+    const receipt = await readSessionFileBlobBackfillReceipt(blobArgs).catch((error) => {
+      if (this.encryptedAttachments) throw error;
+      return null;
+    });
+    const markerRelayFileId = receipt?.relayFileId;
 
     if (!target) {
       if (markerRelayFileId) {
@@ -8408,6 +8466,9 @@ export class MessageHandler {
     // Reuse a prior upload recorded by the marker (crash before flip) instead of
     // re-uploading; otherwise upload now and record the relay key before flipping.
     let relayFileId = markerRelayFileId;
+    let encryption = receipt?.encryption;
+    if (relayFileId && this.encryptedAttachments && !encryption)
+      throw new Error('e2ee_attachment_receipt_unprotected');
     if (!relayFileId) {
       const uploaded = await this.uploadValidatedSessionFile({
         workspaceId: this.workspaceId,
@@ -8427,7 +8488,8 @@ export class MessageHandler {
       // sees a plain pending blob — never the "flip committed" R5.3 window.
       this.throwIfBackfillSuperseded(generation);
       relayFileId = uploaded.fileId;
-      await writeSessionFileBlobBackfillMarker({ ...blobArgs, relayFileId });
+      encryption = uploaded.encryption;
+      await writeSessionFileBlobBackfillMarker({ ...blobArgs, relayFileId, encryption });
     }
 
     // Last gate before the point of no return. Past the flip we always
@@ -8440,6 +8502,7 @@ export class MessageHandler {
       kind: 'file-backfilled',
       fileId,
       relayFileId,
+      ...(encryption ? { encryption } : {}),
     });
     await markSessionFileBlobBackfilled(blobArgs);
     this.logger.info(`[${sessionId}] Backfilled local file ${fileId} -> relay ${relayFileId}`);

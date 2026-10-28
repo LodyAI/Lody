@@ -71,7 +71,8 @@ describe('AttachmentAddMenu', () => {
     await act(async () => items[0]!.click());
     expect(onAddAttachment).toHaveBeenCalledOnce();
   });
-  it.each([false, true])('explains disabled encrypted actions (mobile %s)', async (isMobile) => {
+  it.each([false, true])('enables encrypted attachments while keeping schedules disabled (mobile %s)', async (isMobile) => {
+    const onAddAttachment = vi.fn();
     const store = createStore();
     store.set(workspaceContentModeAtom, {
       accountId: 'user',
@@ -85,9 +86,7 @@ describe('AttachmentAddMenu', () => {
           <AttachmentAddMenu
             isMobile={isMobile}
             scheduleDisabledReason="ordinary machine reason"
-            onAddAttachment={() => {
-              throw new Error('attachment must stay disabled');
-            }}
+            onAddAttachment={onAddAttachment}
             onScheduleSend={() => {
               throw new Error('schedule must stay disabled');
             }}
@@ -107,17 +106,14 @@ describe('AttachmentAddMenu', () => {
     });
     const items = [...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')];
     expect(items).toHaveLength(2);
-    for (const item of items) {
-      expect(item.getAttribute('aria-disabled')).toBe('true');
-      await act(async () => item.click());
-    }
-    expect(document.body.textContent).toContain(
-      'Encrypted workspaces do not yet support attachments.'
-    );
+    expect(items[0]?.getAttribute('aria-disabled')).not.toBe('true');
+    expect(items[1]?.getAttribute('aria-disabled')).toBe('true');
     expect(document.body.textContent).toContain(
       'Encrypted workspaces do not yet support scheduled messages.'
     );
     expect(document.body.textContent).not.toContain('ordinary machine reason');
+    await act(async () => items[0]?.click());
+    expect(onAddAttachment).toHaveBeenCalledOnce();
   });
   it('explains a disabled schedule send on hover', async () => {
     const reason = 'Update the target machine CLI to schedule messages.';
