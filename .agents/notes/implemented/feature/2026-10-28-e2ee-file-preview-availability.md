@@ -7,7 +7,7 @@ Translation: current
 
 ## Abstract
 
-Encrypted workspaces can use Code Collab and remote preview through the existing workspace keys, signatures and same-member machine authority. Code Collab v2 synchronizes file-index and signal Flocks; its file text, saves, diffs and LSP results travel over RPC rather than synced text documents. Those Flocks now use the normal protected document provider, including snapshots. The file and preview RPC methods use the existing encrypted request/response wire and journal. Public-link sharing remains unavailable because it publishes a plaintext static copy outside workspace membership; enabling that behavior needs a separate owner decision.
+Encrypted workspaces can use Code Collab and remote preview through the existing workspace keys, signatures and same-member machine authority. Code Collab v2 synchronizes file-index and signal Flocks; its file text, saves, diffs and LSP results travel over RPC rather than synced text documents. Those Flocks now use the normal protected document provider, including snapshots. The file and preview RPC methods use the existing encrypted request/response wire and journal. Public-link sharing publishes a server-readable static copy outside workspace membership after the [explicit encrypted-workspace confirmation](2026-10-28-e2ee-share-plaintext-consent.md).
 
 ## Decisions
 

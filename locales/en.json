@@ -1,4 +1,7 @@
 {
+  "sharing.e2ee.title": "Publish outside E2EE?",
+  "sharing.e2ee.disclosure": "Sharing publishes a decrypted copy outside E2EE, where the server can read it. Revoking the share cannot take back content that has already been viewed or copied.",
+  "sharing.e2ee.confirm": "Publish decrypted copy",
   "e2ee.identity.restartTitle": "Restart Lody to release encrypted resources",
   "e2ee.identity.restartHelp": "The old encrypted runtime has not confirmed release. Quit and reopen Lody before retrying. A replacement identity cannot start while the old writer is unresolved.",
   "e2ee.identity.historyTitle": "Local encrypted history needs recovery",

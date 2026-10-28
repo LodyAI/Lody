@@ -16,7 +16,7 @@ import {
   type PreparedSharePackage,
 } from '@lody/shared/session-sharing';
 import { userAtom } from '@/atoms';
-import { activeWorkspaceRuntimeAtom, authTokenAtom } from '@/atoms/runtime';
+import { activeWorkspaceRuntimeAtom, authTokenAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
@@ -223,7 +223,10 @@ export function useSessionShareStatus(
   sessionId: string | null | undefined
 ): SessionPublicShareStatus {
   const sharingAllowed = useWorkspaceFeature('sharing');
-  const scope = useResolvedWorkspaceScope({ workspaceId: workspaceId ?? null, enabled: sharingAllowed });
+  const scope = useResolvedWorkspaceScope({
+    workspaceId: workspaceId ?? null,
+    enabled: sharingAllowed,
+  });
   const userId = useAtomValue(userAtom)?.id;
   const entry = useCloudQuery(
     operations.getManagement,
@@ -295,6 +298,13 @@ export function useSessionShareManagement(
   const [progress, setProgress] = useState(0);
   const [phase, setPhase] = useState<SharePublishPhase>('idle');
   const [result, setResult] = useState<SharePublishResult | null>(null);
+  const [plaintextConfirmation, setPlaintextConfirmation] = useState(false);
+  // Consent belongs to this editor's current runtime, never to an account or workspace preference.
+  const plaintextConsentRuntime = useRef<WorkspaceRuntime | null>(null);
+  const cancelPlaintextConfirmation = () => {
+    plaintextConsentRuntime.current = null;
+    setPlaintextConfirmation(false);
+  };
   // Publication is one uninterrupted async unit, so it must read the retry
   // credentials it just created rather than a state value from a stale render.
   const pendingRef = useRef<PendingPublication | null>(null);
@@ -315,6 +325,7 @@ export function useSessionShareManagement(
     lifetime.current = controller;
     return () => {
       controller.abort();
+      plaintextConsentRuntime.current = null;
     };
   }, []);
   const selected =
@@ -472,6 +483,7 @@ export function useSessionShareManagement(
   return {
     entry,
     selected,
+    plaintextConfirmation,
     hasPending: pending !== null,
     conflict,
     progress,
@@ -491,12 +503,33 @@ export function useSessionShareManagement(
     hasSecret: !!entry && !!actions.secretFor(entry),
     onSelect(ids: string[]) {
       if (!actions.busy && !confirmation) {
+        cancelPlaintextConfirmation();
         setSelected(ids);
         setPending(null);
       }
     },
-    onPublish: publishNow,
-    onDiscard: () => setPending(null),
+    onPublish: () => {
+      const runtime = store.get(activeWorkspaceRuntimeAtom);
+      if (runtime?.workspaceId === workspaceId && runtime.contentMode === 'e2ee') {
+        if (!actions.busy) {
+          plaintextConsentRuntime.current = runtime;
+          setPlaintextConfirmation(true);
+        }
+        return Promise.resolve();
+      }
+      return publishNow();
+    },
+    onConfirmPlaintextPublish: () => {
+      const runtime = plaintextConsentRuntime.current;
+      cancelPlaintextConfirmation();
+      if (!runtime || runtime !== store.get(activeWorkspaceRuntimeAtom)) return Promise.resolve();
+      return publishNow();
+    },
+    onCancelPlaintextPublish: cancelPlaintextConfirmation,
+    onDiscard: () => {
+      cancelPlaintextConfirmation();
+      setPending(null);
+    },
     onCopy: () =>
       result
         ? actions.run(async () => {

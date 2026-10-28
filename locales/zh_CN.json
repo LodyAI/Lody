@@ -1,4 +1,7 @@
 {
+  "sharing.e2ee.title": "发布到 E2EE 之外？",
+  "sharing.e2ee.disclosure": "分享会把一份解密后的副本发布到 E2EE 之外（服务器可读），撤销分享不会撤回已被看过或复制的内容。",
+  "sharing.e2ee.confirm": "确认发布解密副本",
   "e2ee.identity.restartTitle": "请重启 Lody 以释放加密资源",
   "e2ee.identity.restartHelp": "旧加密运行时尚未确认释放。请退出并重新打开 Lody 后重试。旧写入者的状态未解决前，不能启动替代身份。",
   "e2ee.identity.historyTitle": "本机加密历史需要恢复",

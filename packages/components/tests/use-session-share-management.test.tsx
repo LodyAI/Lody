@@ -12,6 +12,7 @@ const cloud = vi.hoisted(() => ({
   mutation: vi.fn(),
   capture: vi.fn(),
   upload: vi.fn(),
+  language: 'en',
 }));
 vi.mock('@lody/platform/react', () => ({
   useCloudQuery: (_op: unknown, args: unknown) => (args === 'skip' ? undefined : cloud.state),
@@ -35,14 +36,21 @@ vi.mock('../src/atoms/doc-meta', async () => ({
     'session-root': { id: 'root', title: 'Root' },
   }),
 }));
+// The browser WASM loader needs a browser URL; this jsdom boundary exercises the uncompressed package variant.
+vi.mock('@loro-dev/streams-crdt/zstd', () => ({ compress: async (bytes: Uint8Array) => bytes }));
 vi.mock('../src/lib/session-share-publisher', () => ({
   captureSessionShare: (...args: unknown[]) => cloud.capture(...args),
 }));
 vi.mock('react-i18next', async () => {
   const { createInstance } = await import('i18next');
   const i18n = createInstance();
-  await i18n.init({ lng: 'en', resources: {} });
-  return { useTranslation: () => ({ t: i18n.t.bind(i18n) }) };
+  const en = (await import('../../../locales/en.json')).default;
+  const zh = (await import('../../../locales/zh_CN.json')).default;
+  await i18n.init({
+    lng: 'en',
+    resources: { en: { translation: en }, zh_CN: { translation: zh } },
+  });
+  return { useTranslation: () => ({ t: i18n.getFixedT(cloud.language) }) };
 });
 vi.mock('@lody/shared/session-sharing', async (original) => ({
   ...(await original<object>()),
@@ -54,8 +62,12 @@ import {
   prepareSharePackage,
   createShareDeliveryKey,
   decryptShareDelivery,
+  decodeShareHistoryBytes,
+  type PreparedSharePackage,
 } from '@lody/shared/session-sharing';
 import { userAtom } from '../src/atoms';
+import { activeWorkspaceRuntimeAtom } from '../src/atoms/runtime';
+import { SessionShareManager } from '../src/components/sharing/session-share-manager';
 import {
   useSessionShareManagement,
   useSessionShareStatus,
@@ -88,6 +100,8 @@ describe('static publication client lifecycle', () => {
   let root: Root, container: HTMLDivElement, store: ReturnType<typeof createStore>;
   let control: ReturnType<typeof useSessionShareManagement>;
   let recipient: Awaited<ReturnType<typeof createShareDeliveryKey>>;
+  let showEditor = false;
+  let publication: Promise<void> | undefined;
   let confirmation:
     | { requestId: string; sessionIds: string[]; deliveryPublicKey: string }
     | undefined;
@@ -99,7 +113,18 @@ describe('static publication client lifecycle', () => {
       undefined,
       confirmation
     );
-    return null;
+    return showEditor ? (
+      <SessionShareManager
+        embedded
+        sessionId="root"
+        candidates={[{ sessionId: 'root', title: 'Root' }]}
+        {...control}
+        onConfirmPlaintextPublish={() => {
+          publication = control.onConfirmPlaintextPublish();
+          return publication;
+        }}
+      />
+    ) : null;
   }
   const render = () =>
     act(async () =>
@@ -113,7 +138,10 @@ describe('static publication client lifecycle', () => {
     vi.stubGlobal('crypto', webcrypto);
     recipient = await createShareDeliveryKey();
     cloud.state = null;
+    cloud.language = 'en';
     confirmation = undefined;
+    showEditor = false;
+    publication = undefined;
     cloud.enabled = true;
     cloud.mutation.mockReset();
     cloud.capture.mockReset();
@@ -147,6 +175,126 @@ describe('static publication client lifecycle', () => {
     container.remove();
     vi.unstubAllEnvs();
   });
+  it.each(['en', 'zh_CN'])(
+    'confirms encrypted copies before real capture and HTTP upload (%s)',
+    async (language) => {
+      cloud.language = language;
+      showEditor = true;
+      const history = [
+        {
+          id: 't',
+          role: 'assistant',
+          items: [{ type: 'text', text: 'Synthetic encrypted conversation' }],
+        },
+      ];
+      const held = new Set<string>();
+      store.set(activeWorkspaceRuntimeAtom, {
+        workspaceId: 'workspace',
+        contentMode: 'e2ee',
+        prepareSessionTarget: async () => {},
+        acquireSessionStore: async (id: string) => {
+          held.add(id);
+          return {
+            sessionId: id,
+            firstSynced: Promise.resolve(),
+            acquireSync: () => () => {},
+            sessionData: { history: { readAll: async () => history } },
+          };
+        },
+        releaseSessionStoreRef: (id: string) => held.delete(id),
+      } as never);
+      const { captureSessionShare } = await vi.importActual<
+        typeof import('../src/lib/session-share-publisher')
+      >('../src/lib/session-share-publisher');
+      const { uploadPreparedShare } = await vi.importActual<
+        typeof import('@lody/shared/session-sharing')
+      >('@lody/shared/session-sharing');
+      cloud.capture.mockImplementation(captureSessionShare);
+      const uploads = new Map<string, Uint8Array>();
+      let sealed: unknown = null;
+      const fetch = async (url: string, init?: RequestInit) => {
+        const bytes = new Uint8Array(init!.body as ArrayBuffer);
+        if (init?.method === 'PUT') uploads.set(url, bytes);
+        else sealed = JSON.parse(new TextDecoder().decode(bytes));
+        return new Response(null, { status: 204 });
+      };
+      cloud.upload.mockImplementation((options) => uploadPreparedShare({ ...options, fetch }));
+      const click = async (name: string) => {
+        const button = [...container.querySelectorAll('button')].find(
+          (node) => node.textContent === name
+        );
+        expect(button, `missing button: ${name}`).toBeTruthy();
+        await act(async () => {
+          button!.click();
+          await publication;
+        });
+      };
+      const disclosure =
+        language === 'en'
+          ? 'Sharing publishes a decrypted copy outside E2EE, where the server can read it.'
+          : '分享会把一份解密后的副本发布到 E2EE 之外（服务器可读）';
+      const publishLabel = language === 'en' ? 'Share conversation' : '分享对话';
+      const cancelLabel = language === 'en' ? 'Cancel' : '取消';
+      const confirmLabel = language === 'en' ? 'Publish decrypted copy' : '确认发布解密副本';
+      await render();
+      await click(publishLabel);
+      expect(container.textContent).toContain(disclosure);
+      expect(container.textContent).toContain(
+        language === 'en'
+          ? 'Revoking the share cannot take back content that has already been viewed or copied.'
+          : '撤销分享不会撤回已被看过或复制的内容'
+      );
+      expect(control.phase).toBe('idle');
+      expect(control.result).toBeNull();
+      expect(uploads.size).toBe(0);
+      expect(sealed).toBeNull();
+      expect(cloud.capture).not.toHaveBeenCalled();
+      expect(cloud.mutation).not.toHaveBeenCalled();
+      const staleConfirm = control.onConfirmPlaintextPublish;
+      await click(cancelLabel);
+      await act(async () => staleConfirm());
+      expect(container.textContent).not.toContain(disclosure);
+      expect(control.result).toBeNull();
+      expect(uploads.size).toBe(0);
+      expect(cloud.capture).not.toHaveBeenCalled();
+      expect(cloud.mutation).not.toHaveBeenCalled();
+      await click(publishLabel);
+      await click(confirmLabel);
+      const prepared: PreparedSharePackage = await cloud.capture.mock.results[0]!.value;
+      expect(control.error).toBeNull();
+      expect(control.result?.url).toContain('https://share.test/s/share');
+      expect(sealed).toEqual(prepared.manifest);
+      const descriptor = prepared.manifest.objects.find(
+        (candidate) => candidate.id === prepared.manifest.conversations[0]!.historyObjectId
+      )!;
+      const bytes = uploads.get(
+        `https://api.test/api/share-deployments/deployment/objects/${descriptor.id}`
+      )!;
+      expect(
+        JSON.parse(new TextDecoder().decode(decodeShareHistoryBytes(bytes, descriptor)))
+      ).toEqual(history);
+      expect(held.size).toBe(0);
+      expect(control.hasPending).toBe(false);
+    }
+  );
+
+  it('rejects consent from a replaced encrypted runtime', async () => {
+    store.set(activeWorkspaceRuntimeAtom, {
+      workspaceId: 'workspace',
+      contentMode: 'e2ee',
+    } as never);
+    await render();
+    await act(async () => control.onPublish());
+    store.set(activeWorkspaceRuntimeAtom, {
+      workspaceId: 'workspace',
+      contentMode: 'e2ee',
+    } as never);
+    await act(async () => control.onConfirmPlaintextPublish());
+    expect(control.result).toBeNull();
+    expect(cloud.capture).not.toHaveBeenCalled();
+    expect(cloud.mutation).not.toHaveBeenCalled();
+  });
+
   it.each([
     [
       'share_quota_exceeded',

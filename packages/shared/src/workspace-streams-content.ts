@@ -112,7 +112,8 @@ export function workspaceSupports(
   if (
     feature === 'preview-comments' ||
     feature === 'code-collab-index' ||
-    feature === 'remote-preview'
+    feature === 'remote-preview' ||
+    feature === 'sharing'
   )
     return true;
   return content.mode === 'plaintext' || feature === 'presence' || feature === 'export';
