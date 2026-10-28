@@ -399,6 +399,56 @@ describe('CloudPlatformProvider', () => {
     ).toBe('true');
   });
 
+  it.each(['withdrawn', 'readmitted', 'pending'] as const)(
+    'rechecks a stale re-sign surface before writing when the latest policy is %s',
+    async (latest) => {
+      let view: import('@lody/platform').E2eeMachineSharingView = {
+        ...policyView(),
+        needsResign: true,
+        sharedWithTeam: true,
+      };
+      const writes: unknown[][] = [];
+      fixture.invoke = async (channel, ...args) => {
+        if (channel === 'e2ee.readMachineSharing') return view;
+        writes.push(args);
+        view = {
+          ...view,
+          pendingRequest: undefined,
+          needsResign: false,
+          sharedWithTeam: false,
+          head: { revision: 3, digest: '88'.repeat(32) },
+        };
+        return { status: 'saved', requestId: args[3] };
+      };
+      await renderSharing();
+      const pendingChange = { kind: 'machine', sharedWithTeam: false } as const;
+      const pendingId = '99'.repeat(16);
+      view =
+        latest === 'readmitted'
+          ? { ...policyView(), generation: '77'.repeat(32), head: null }
+          : latest === 'withdrawn'
+            ? { ...policyView(), head: { revision: 2, digest: '88'.repeat(32) } }
+            : { ...view, pendingRequest: { requestId: pendingId, change: pendingChange } };
+      await clickSharing('Re-sign with this device');
+      expect(writes).toHaveLength(0);
+      if (latest === 'pending') {
+        expect(container.textContent).toContain('Retry change');
+        await clickSharing('Retry change');
+        expect(writes).toEqual([
+          ['workspace-a', 'machine-a', view.generation, pendingId, pendingChange],
+        ]);
+        expect(container.textContent).toContain('v3');
+      } else {
+        expect(container.textContent).not.toContain('Re-sign with this device');
+        expect(
+          container
+            .querySelector('[aria-label="Share with the whole team"]')
+            ?.getAttribute('aria-checked')
+        ).toBe('false');
+      }
+    }
+  );
+
   it.each(['en', 'zh_CN'] as const)(
     'shows native non-owner refusal as read-only friendly text (%s)',
     async (language) => {

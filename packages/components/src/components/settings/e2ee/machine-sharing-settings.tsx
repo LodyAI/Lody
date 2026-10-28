@@ -207,6 +207,7 @@ export function MachineSharingController({
             !next?.canManage ||
             !next.needsResign ||
             next.unavailable ||
+            next.pendingRequest ||
             next.generation !== view.generation
           )
             return;
