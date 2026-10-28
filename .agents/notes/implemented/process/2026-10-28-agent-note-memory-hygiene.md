@@ -111,7 +111,9 @@ proposal-era heading (`## Plan`,
 `## Acceptance criteria`, and their Chinese forms) in an implemented note. It
 warns at 90% of a ceiling and on run-log phrases. Heading and phrase checks apply
 only to notes changed against `--base` (CI) or `HEAD` (local), so history is not
-reopened; a lifecycle move is not a new note. `status` lists active notes whose
+reopened. CI passes the first parent of the checked-out merge commit, because
+`pull_request.base.sha` can predate main commits merged since and would attribute
+their notes to the PR; a lifecycle move is not a new note. `status` lists active notes whose
 backticked repository paths are gone (`staleReferences`) and those without an owner
 link (`unlinkedNotes`, 589 at introduction, 309 of them `bug-fix`): the work queue
 for maintenance on read and topic audits.

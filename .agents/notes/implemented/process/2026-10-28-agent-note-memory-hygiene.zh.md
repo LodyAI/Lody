@@ -85,7 +85,8 @@ note 目录：
 `Supersedes` 目标未归档、新 note 没有归属文档链接、已实施 note 含有提案阶段标题（`## Plan`、`## Acceptance
 criteria` 及其中文形式）。它在达到上限 90% 时和出现运行日志短语时给出警告。标题和
 短语检查只作用于相对 `--base`（CI）或 `HEAD`（本地）改动过的 note，不会重新打开历史
-记录；生命周期移动不算新 note。`status` 列出所引用的反引号仓库路径已不存在的活跃 note
+记录。CI 传入的是所检出合并提交的第一个父提交，因为 `pull_request.base.sha` 可能早于之后
+合并进 main 的提交，会把那些提交里的 note 算到本 PR 头上；生命周期移动不算新 note。`status` 列出所引用的反引号仓库路径已不存在的活跃 note
 （`staleReferences`），以及没有归属文档链接的活跃 note（`unlinkedNotes`，引入时 589 篇，
 其中 309 篇是 `bug-fix`），作为读时维护和按主题审查的工作队列。
 

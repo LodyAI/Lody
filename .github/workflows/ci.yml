@@ -81,12 +81,15 @@ jobs:
         run: node --test .github/scripts/*.test.mjs
 
       - name: Check document maintenance
-        env:
-          DOCS_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          if [ -n "$DOCS_BASE_SHA" ]; then
-            git fetch --no-tags --depth=1 origin "$DOCS_BASE_SHA"
-            pnpm run docs check --base "$DOCS_BASE_SHA"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # Gates apply to files this PR changed, so compare against the main commit
+            # the checked-out merge commit was built on (its first parent), not the
+            # possibly stale pull_request.base.sha. The shallow checkout still records
+            # the parent ids; fetch only that commit.
+            base="$(git cat-file -p HEAD | sed -n 's/^parent //p' | head -n 1)"
+            git fetch --no-tags --depth=1 origin "$base"
+            pnpm run docs check --base "$base"
           else
             pnpm run docs check
           fi
