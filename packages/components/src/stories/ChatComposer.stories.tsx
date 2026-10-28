@@ -1,4 +1,5 @@
 import { SessionInfoBar } from '../components/sessions/session-info-bar';
+import { ConversationColumn } from '../components/shared/conversation-column';
 import { ScheduledMessageTimeDialog } from '../components/schedules/scheduled-message-time';
 import { formatUpcoming } from '../components/schedules/schedule-format';
 import type { Meta, StoryObj } from '@storybook/react';
@@ -594,36 +595,38 @@ function ScheduledSendPreview({ pickerInitiallyOpen = false }: { pickerInitially
             onlineStatus: 'online',
           }}
         />
-        <ChatComposer
-          variant="session"
-          promptRef={promptRef}
-          tone="light"
-          promptValue={text}
-          onPromptChange={setText}
-          onAttachmentAddClick={() => {}}
-          onScheduleSend={() => setPicker(true)}
-          secondaryAction={
-            at
-              ? {
-                  label: t('scheduledMessage.composerAction', {
-                    time: formatUpcoming(
-                      Date.parse(at),
-                      'Asia/Shanghai',
-                      Date.parse('2026-10-27T08:00:00Z'),
-                      i18n.language
-                    ),
-                  }),
-                  onClick: () => setPicker(true),
-                }
-              : undefined
-          }
-          primaryAction={
-            <Button icon aria-label="Send">
-              <ArrowUp size={16} />
-            </Button>
-          }
-          autoResize
-        />
+        <ConversationColumn>
+          <ChatComposer
+            variant="session"
+            promptRef={promptRef}
+            tone="light"
+            promptValue={text}
+            onPromptChange={setText}
+            onAttachmentAddClick={() => {}}
+            onScheduleSend={() => setPicker(true)}
+            secondaryAction={
+              at
+                ? {
+                    label: t('scheduledMessage.composerAction', {
+                      time: formatUpcoming(
+                        Date.parse(at),
+                        'Asia/Shanghai',
+                        Date.parse('2026-10-27T08:00:00Z'),
+                        i18n.language
+                      ),
+                    }),
+                    onClick: () => setPicker(true),
+                  }
+                : undefined
+            }
+            primaryAction={
+              <Button icon aria-label="Send">
+                <ArrowUp size={16} />
+              </Button>
+            }
+            autoResize
+          />
+        </ConversationColumn>
       </div>
       {picker ? (
         <ScheduledMessageTimeDialog

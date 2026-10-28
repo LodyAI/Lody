@@ -14,6 +14,8 @@ import {
   type SessionAttachmentDraft,
 } from '@/lib/session-attachment-draft';
 import { useSchedules } from '@/hooks/use-schedules';
+import { ScheduledMessageTimeDialog } from '../schedules/scheduled-message-time';
+import { saveScheduledMessage } from '../schedules/scheduled-message-write';
 import { windowPreparationAtom } from '@/lib/window-preparation';
 import { conversationCopyRange } from '@/lib/conversation-copy-range';
 import { describeCopiedConversation } from '@/lib/describe-copied-conversation';
@@ -149,7 +151,9 @@ import {
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
   decodeProjectPreparationProgress,
+  ScheduleRepository,
   type McpServerId,
+  type ScheduleDocument,
 } from '@lody/shared';
 import { useIsMobile } from '../../hooks/use-mobile';
 import { useStableCallback } from '@/hooks/use-stable-callback';
@@ -5530,6 +5534,69 @@ export const SessionChatInterface = memo(
       sessionMachine?.timeZone,
     ]);
 
+    const [scheduledTimeEdit, setScheduledTimeEdit] = useState<{
+      item: ScheduledQueueItem;
+      document: ScheduleDocument;
+    } | null>(null);
+
+    useEffect(() => {
+      setScheduledTimeEdit(null);
+    }, [session.id]);
+
+    const openScheduledTimeEditor = useCallback(
+      async (item: ScheduledQueueItem) => {
+        if (!runtime || !currentUser) return;
+        try {
+          const document = await new ScheduleRepository(runtime.repo, runtime.workspaceId).read(
+            item.scheduleId
+          );
+          if (!document?.message) throw new Error('Scheduled message unavailable');
+          setScheduledTimeEdit({ item, document });
+        } catch {
+          if (!workspaceSlug) return;
+          void router.navigate({
+            to: '/$workspaceName/schedules/$scheduleId',
+            params: { workspaceName: workspaceSlug, scheduleId: item.scheduleId },
+          });
+        }
+      },
+      [currentUser, router, runtime, workspaceSlug]
+    );
+
+    const applyScheduledTime = useCallback(
+      async (at: string) => {
+        if (!scheduledTimeEdit || !runtime || !currentUser) return;
+        const { document, item } = scheduledTimeEdit;
+        setScheduledTimeEdit(null);
+        const definition = document.definition;
+        try {
+          await saveScheduledMessage({
+            runtime,
+            actorId: currentUser.id,
+            scheduleId: item.scheduleId,
+            activationId: uuidv4(),
+            activityId: uuidv4(),
+            create: false,
+            draft: {
+              title: definition.title,
+              machineId: definition.machineId,
+              agent: definition.agent,
+              destination: definition.destination,
+              misfirePolicy: definition.misfirePolicy,
+              overlapPolicy: definition.overlapPolicy,
+              retryPolicy: definition.retryPolicy,
+              prompt: document.prompt,
+              ...(document.message ? { message: document.message } : {}),
+              trigger: { kind: 'once', at },
+            },
+          });
+        } catch {
+          toast.error(t('scheduledMessage.saveError'));
+        }
+      },
+      [currentUser, runtime, scheduledTimeEdit, t]
+    );
+
     // Presentation-only "opened by" provenance (MCP `lody_session_create`).
     // Read from the already-loaded session meta cache, so it costs no extra
     // document. `parentSessionId` children are excluded by the atom — they are
@@ -7296,6 +7363,9 @@ export const SessionChatInterface = memo(
                                 },
                               });
                             }}
+                            onEditScheduledTime={(item) => {
+                              void openScheduledTimeEditor(item);
+                            }}
                             onRemove={handleRemoveQueueItem}
                             onReorder={handleReorderQueueItem}
                             onEditStart={handleStartQueueItemEdit}
@@ -7318,6 +7388,21 @@ export const SessionChatInterface = memo(
                     {/* Input area - isolated component to prevent full re-renders on typing.
                       Hidden while a permission is pending so the response buttons claim
                       the bottom surface; chat queue is bypassed for the same reason. */}
+                    {scheduledTimeEdit ? (
+                      <ScheduledMessageTimeDialog
+                        at={
+                          scheduledTimeEdit.document.definition.trigger.kind === 'once'
+                            ? scheduledTimeEdit.document.definition.trigger.at
+                            : null
+                        }
+                        timeZone={getDeviceTimeZone(sessionMachine?.timeZone)}
+                        now={getServerNow()}
+                        onClose={() => setScheduledTimeEdit(null)}
+                        onApply={(at) => {
+                          void applyScheduledTime(at);
+                        }}
+                      />
+                    ) : null}
                     <MessageSelectionToolbar selection={shareSelection} />
                     <div
                       {...stylex.props(

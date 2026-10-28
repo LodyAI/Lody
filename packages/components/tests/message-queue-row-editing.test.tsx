@@ -151,20 +151,58 @@ describe('queued message editing commits', () => {
       );
     });
     expect(container!.textContent).toContain('Scheduled');
-    const scheduledRows = [...container!.querySelectorAll<HTMLButtonElement>('button[title]')];
+    const scheduledRows = [...container!.querySelectorAll<HTMLElement>('[data-scheduled-row]')];
     expect(scheduledRows.map((row) => row.title)).toEqual([
       'Earlier scheduled message',
       'Later scheduled message',
     ]);
-    expect(scheduledRows[0]!.textContent).toContain('Not sent');
-    expect(scheduledRows[1]!.textContent).toContain('Pending');
+    expect(container!.textContent).not.toContain('Not sent');
+    expect(container!.textContent).not.toContain('Pending');
     expect(scheduledRows[0]!.className).not.toContain('border-t');
     expect(scheduledRows[1]!.className).toContain('border-t');
     for (const row of scheduledRows) {
       expect(row.querySelector('[aria-label="Drag to reorder"]')).toBeNull();
+      expect(row.querySelector('button[aria-label*="Edit scheduled time"]')).not.toBeNull();
     }
-    await act(async () => scheduledRows[0]!.click());
+    await act(async () => scheduledRows[0]!.querySelector<HTMLButtonElement>('button')!.click());
     expect(opened).toEqual(['earlier']);
+  });
+
+  it('routes the underlined scheduled time to the time editor rather than details', async () => {
+    const edited: string[] = [];
+    const opened: string[] = [];
+    await act(async () => {
+      root?.render(
+        createElement(MessageQueueDisplay, {
+          sessionId: 'session-test' as SessionId,
+          items: [],
+          scheduledItems: [
+            {
+              scheduleId: 'scheduled-only',
+              title: 'Send the weekly summary',
+              at: Date.parse('2026-10-27T09:00:00Z'),
+              timeZone: 'UTC',
+              state: 'pending',
+            },
+          ],
+          onOpenScheduled: (item) => opened.push(item.scheduleId),
+          onEditScheduledTime: (item) => edited.push(item.scheduleId),
+          onRemove: () => {},
+          onReorder: () => {},
+          onEditStart: () => {},
+          onEditCancel: () => {},
+          onEditSave: () => {},
+          onSteer: () => {},
+        })
+      );
+    });
+    const row = container!.querySelector<HTMLElement>('[data-scheduled-row]')!;
+    const time = row.querySelector<HTMLButtonElement>('button')!;
+    expect(time.textContent).toContain('9:00');
+    expect(time.className).not.toContain('clock');
+    await act(async () => time.click());
+    expect(edited).toEqual(['scheduled-only']);
+    expect(opened).toEqual([]);
   });
 
   // The save promise stays pending until the test releases it, so the row is

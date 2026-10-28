@@ -24,7 +24,7 @@ import {
 } from '@dnd-kit/sortable';
 import { useTranslation } from 'react-i18next';
 import type { MessageQueueItem, SessionId } from '@lody/shared';
-import { ChevronDown, ChevronRight, Clock } from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Collapsible } from '@lody/ui/collapsible';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
@@ -59,6 +59,7 @@ export type MessageQueueDisplayProps = {
   /** Dedicated reservations, kept out of the executable mq list. */
   scheduledItems?: readonly ScheduledQueueItem[];
   onOpenScheduled?: (item: ScheduledQueueItem) => void;
+  onEditScheduledTime?: (item: ScheduledQueueItem) => void;
   footerPosition?: 'below' | 'start' | 'end' | 'inline';
   roomy?: boolean | 'airy';
   title?: string;
@@ -126,6 +127,7 @@ export function MessageQueueDisplay({
   renderItemFooter,
   scheduledItems: dedicatedScheduledItems = [],
   onOpenScheduled,
+  onEditScheduledTime,
   footerPosition = 'below',
   roomy = false,
   title,
@@ -361,7 +363,6 @@ export function MessageQueueDisplay({
                   {...scheduledSectionProps}
                   className={cn(scheduledSectionProps.className, 'border-t border-border/30')}
                 >
-                  <Clock size={12} aria-hidden="true" />
                   {t('sessions.messageQueue.scheduledTitle', 'Scheduled')}
                 </div>
               ) : null}
@@ -370,6 +371,7 @@ export function MessageQueueDisplay({
                   key={item.scheduleId}
                   item={item}
                   onOpen={onOpenScheduled}
+                  onEditTime={onEditScheduledTime}
                   divided={index > 0}
                 />
               ))}

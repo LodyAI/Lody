@@ -1,6 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
-import { Clock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatUpcoming } from '../../schedules/schedule-format';
 import { queueSurface } from './surface';
@@ -20,38 +19,33 @@ export type ScheduledQueueItem = {
 export function ScheduledQueueRow({
   item,
   onOpen,
+  onEditTime,
   divided = true,
 }: {
   item: ScheduledQueueItem;
   onOpen?: (item: ScheduledQueueItem) => void;
+  onEditTime?: (item: ScheduledQueueItem) => void;
   divided?: boolean;
 }) {
   const { t, i18n } = useTranslation();
   const rowProps = stylex.props(queueSurface.scheduledRow);
+  const time = formatUpcoming(item.at, item.timeZone, Date.now(), i18n.language);
   return (
-    <button
-      type="button"
-      onClick={() => onOpen?.(item)}
-      disabled={!onOpen}
+    <div
+      data-scheduled-row=""
       title={item.title}
       {...rowProps}
       className={cn(rowProps.className, divided && 'border-t border-border/30')}
     >
-      <Clock size={12} aria-hidden="true" {...stylex.props(queueSurface.scheduledIcon)} />
-      <span {...stylex.props(queueSurface.scheduledTime)}>
-        {formatUpcoming(item.at, item.timeZone, Date.now(), i18n.language)}
-      </span>
-      <span {...stylex.props(queueSurface.scheduledTitle)}>{item.title}</span>
-      <span
-        {...stylex.props(
-          queueSurface.scheduledState,
-          item.state === 'failed' && queueSurface.scheduledFailed
-        )}
+      <button
+        type="button"
+        onClick={() => (onEditTime ?? onOpen)?.(item)}
+        aria-label={`${time} · ${t('sessions.messageQueue.editScheduledTime', 'Edit scheduled time')}`}
+        {...stylex.props(queueSurface.scheduledTimeButton)}
       >
-        {item.state === 'failed'
-          ? t('sessions.messageQueue.scheduledFailed', 'Not sent')
-          : t('sessions.messageQueue.scheduledPending', 'Pending')}
-      </span>
-    </button>
+        {time}
+      </button>
+      <span {...stylex.props(queueSurface.scheduledTitle)}>{item.title}</span>
+    </div>
   );
 }
