@@ -453,6 +453,14 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
         return yield* presence.seal(input, selected.writeEpoch);
       }),
     openPresence: (frame: Uint8Array) => presence.open(frame),
+    /** Current verified authority only; execution freshness must come from an authenticated read. */
+    executionLedger: () =>
+      serial.withPermit(
+        Effect.gen(function* () {
+          yield* guard();
+          return yield* verified.current();
+        })
+      ),
     pairingEvidence: () =>
       serial.withPermit(
         Effect.gen(function* () {
