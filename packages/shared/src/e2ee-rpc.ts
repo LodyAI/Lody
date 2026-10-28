@@ -23,25 +23,16 @@ export type E2eeDispatchAck = {
   disposition: 'accepted' | 'duplicate' | 'already-terminal' | 'not-owned' | 'error';
 };
 
-/** Closed set of machine reads. No installs, saves, agent execution or preview lease renewal. */
+/** Closed set of reads with no machine writes, process/worker starts or lazy storage setup. */
 export const E2EE_READ_QUERY_METHODS = [
   'machine/status',
   'machine/ping',
   'machine/acp-binary-status',
-  'machine/pi-extensions',
-  'machine/memory',
-  'project/probe-local-member',
-  'local-project/git-state',
   'session/live-status',
-  'session/history-read',
-  'session/history-watch',
   'file/preview',
   'file/download-chunk',
   'code-collab/open-text',
   'code-collab/refresh-text',
-  'code-collab/open-current-diff',
-  'code-collab/open-all-changes-diff',
-  'code-collab/open-turn-diff',
   'code-collab/lsp-definition',
   'code-collab/lsp-references',
 ] as const;
@@ -53,14 +44,6 @@ export type E2eeQueryResult =
   | { result: unknown; error?: never }
   | { error: { code: string; message: string; data?: unknown }; result?: never };
 
-/** Methods with mixed actions admit only their explicitly read-only operation. */
-export function isE2eeReadQuery(method: string, params: unknown): method is E2eeReadQueryMethod {
-  return (
-    (E2EE_READ_QUERY_METHODS as readonly string[]).includes(method) &&
-    (method !== 'machine/memory' ||
-      (typeof params === 'object' &&
-        params !== null &&
-        'action' in params &&
-        params.action === 'list'))
-  );
+export function isE2eeReadQuery(method: string, _params: unknown): method is E2eeReadQueryMethod {
+  return (E2EE_READ_QUERY_METHODS as readonly string[]).includes(method);
 }

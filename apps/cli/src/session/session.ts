@@ -205,6 +205,11 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     return this.getWorkdir();
   }
 
+  peekHostWorkdir(): string | null {
+    const candidate = this.fixedWorkdir ?? getDefaultSessionWorkdir(this.sessionId);
+    return fs.statSync(candidate, { throwIfNoEntry: false })?.isDirectory() ? candidate : null;
+  }
+
   getParentSessionId(): SessionId | undefined {
     return this.config.parentSessionId;
   }

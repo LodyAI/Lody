@@ -83,7 +83,12 @@ then runs the transport tests against it.
 ## Encrypted read queries
 
 Encrypted workspaces route existing machine reads through the same purpose-8/9 channel.
-The closed method/action allowlist lives in `@lody/shared/e2ee-rpc`; mutations stay disabled.
+The closed allowlist in `@lody/shared/e2ee-rpc` admits ten state/file/text/LSP method names.
+LSP keeps its existing unsupported result. Pi extension discovery, memory list, project Git
+queries, history and diff reads stay disabled: their handlers can install/run commands,
+initialize storage or flush writes. File reads observe existing paths and already-open
+project catalogs, without directory creation, link repair, watchers or sync-on-miss.
+Markdown worktree discovery returns an explicit unsupported error; direct file paths remain readable.
 Hosts authenticate current readers and the target machine's ledger membership, and target
 responses must carry that machine device's signature. Reads never claim an execution journal.
 

@@ -3,7 +3,11 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildSessionTurnInputConfig } from '../../shared/src/session-input';
 import { Effect } from 'effect';
-import { decodeE2eeRpcResponseBody, encodeE2eeRpcResponseBody } from '../src/e2ee-wire';
+import {
+  decodeE2eeRpcResponseBody,
+  encodeE2eeRpcResponseBody,
+  encodeE2eeRpcRequestBody,
+} from '../src/e2ee-wire';
 import { e2eeRpcResource } from '../src/e2ee-resource';
 import { encryptedRpcFixture } from './fixtures/e2ee-native-fixture';
 import { makeRealtimeContentBinding } from '@lody/e2ee-core/adapters/loro-streams';
@@ -22,6 +26,39 @@ afterEach(() => {
 });
 
 describe('trusted-host encrypted dispatch originals', () => {
+  it('rejects a valid old Guest-signed Pi query at the receiving host before retaining or executing it', async () => {
+    const f = encryptedRpcFixture({ guest: true });
+    fixtures.push(f);
+    const frame = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const binding = yield* makeRealtimeContentBinding({
+            genesis: f.ledger.context.genesis,
+            resource: e2eeRpcResource(f.machineId),
+            signer: f.ledger.owner.signer,
+            ledger: f.ledger.ledger,
+            readEpochKey: () =>
+              Effect.sync(() =>
+                Result.getOrThrow(Bytes.epochKey(copyEpochKeyBytes(f.ledger.secret)))
+              ),
+          });
+          return yield* binding.sealRequest(
+            encodeE2eeRpcRequestBody({
+              requestId: new Uint8Array(16).fill(42),
+              expiresAt: 60_000,
+              method: 'machine/pi-extensions',
+              params: new TextEncoder().encode(
+                JSON.stringify({ queryId: 'old-guest', params: {} })
+              ),
+            })
+          );
+        })
+      )
+    );
+    await expect(
+      Effect.runPromise(f.receiver.openQuery(f.machineId, Buffer.from(frame).toString('hex')))
+    ).rejects.toThrow();
+  });
   it('retains signed read-query originals and final responses without an execution journal', async () => {
     const f = fixture();
     const input = { queryId: 'synthetic-query', method: 'machine/status' as const, params: {} };
@@ -65,7 +102,7 @@ describe('trusted-host encrypted dispatch originals', () => {
       Effect.runPromise(
         f.sender.prepareQuery(f.machineId, {
           queryId: 'forbidden-memory-write',
-          method: 'machine/memory',
+          method: 'machine/memory' as never,
           params: {
             action: 'create',
             providerId: 'synthetic',

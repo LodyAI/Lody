@@ -295,7 +295,7 @@ import {
   type ImageGenerationEndEvent,
 } from 'src/agent/agent-client';
 import type { RateLimit, SessionUsageUpdate } from 'acp-extension-core';
-import { getWorktreeManager } from '@/session/worktree/worktree-manager';
+import { getWorktreeManager, WorktreeManager } from '@/session/worktree/worktree-manager';
 import { WorktreeGarbageCollector, type WorktreeOwnerState } from '@/session/worktree/worktree-gc';
 import { createWorktreeScriptHistoryRecorder } from '@/session/worktree/worktree-script-history';
 import { runWorktreeCleanup } from '@/session/worktree/worktree-setup-runner';
@@ -754,6 +754,7 @@ export class MessageHandler {
   }
   private hasShownHappyCodingMessage = false;
   private readonly cloudPort: CloudPort;
+  private readonly encryptedWorkspace: boolean;
   private notificationService: CloudNotificationsPort | null;
   private usageTrackingService: CloudUsagePort | null;
   private readonly turnTokenUsage = new TurnTokenUsageLedger();
@@ -2481,13 +2482,10 @@ export class MessageHandler {
     }
   }
 
-  private async getLocalProjectGitStateForRpc(
-    args: {
-      localProjectId: LocalProjectId;
-      requestedByUserId: string;
-    },
-    verifiedOwner = false
-  ): Promise<LocalProjectGitStateRpcResponse> {
+  private async getLocalProjectGitStateForRpc(args: {
+    localProjectId: LocalProjectId;
+    requestedByUserId: string;
+  }): Promise<LocalProjectGitStateRpcResponse> {
     const failure = (error: string, message: string): LocalProjectGitStateRpcResponse => ({
       type: 'local-project/git-state_response',
       machineId: this.machineId,
@@ -2498,24 +2496,20 @@ export class MessageHandler {
       message,
     });
 
-    // The encrypted server is reachable only after signed same-member read authorization.
-    // Ordinary/local callers retain their existing account/project access check.
-    if (!verifiedOwner) {
-      let access: Awaited<ReturnType<CloudPort['access']['verifyMachineAccess']>>;
-      try {
-        access = await this.cloudPort.access.verifyMachineAccess({
-          workspaceId: this.workspaceId,
-          machineId: this.machineId,
-          requesterUserId: args.requestedByUserId,
-          localProjectId: args.localProjectId,
-        });
-      } catch (error) {
-        return failure('access_check_failed', formatErrorMessage(error));
-      }
+    let access: Awaited<ReturnType<CloudPort['access']['verifyMachineAccess']>>;
+    try {
+      access = await this.cloudPort.access.verifyMachineAccess({
+        workspaceId: this.workspaceId,
+        machineId: this.machineId,
+        requesterUserId: args.requestedByUserId,
+        localProjectId: args.localProjectId,
+      });
+    } catch (error) {
+      return failure('access_check_failed', formatErrorMessage(error));
+    }
 
-      if (!access.allowed) {
-        return failure('access_denied', access.reason);
-      }
+    if (!access.allowed) {
+      return failure('access_denied', access.reason);
     }
 
     const rootPath = await resolveWorkspaceLocalProjectRootPathWithRetry(
@@ -2879,6 +2873,7 @@ export class MessageHandler {
       `[machine-lifecycle] launchMode=${this.machineLifecycleCapability.launchMode} canRestart=${this.machineLifecycleCapability.canRemoteRestart} canUpgrade=${this.machineLifecycleCapability.canRemoteUpgrade}`
     );
     this.cloudPort = config.cloudPort;
+    this.encryptedWorkspace = config.encryptedWorkspace === true;
     this.notificationService = this.cloudPort.notifications;
     this.usageTrackingService = this.cloudPort.usage;
     this.localProjectControlService = new LocalProjectControlService(this.logger);
@@ -2954,6 +2949,7 @@ export class MessageHandler {
       },
     });
     this.filePreviewService = new FilePreviewService({
+      allowGitDiscovery: !config.encryptedWorkspace,
       canDownloadLargeFiles: async () => {
         const entitlement = await this.cloudPort.billing?.getWorkspaceEntitlement(this.workspaceId);
         return Boolean(
@@ -3581,25 +3577,20 @@ export class MessageHandler {
           });
         },
         probeLocalProjectMember: async ({ localProjectId, requestedByUserId }) => {
-          if (!config.encryptedWorkspace) {
-            const access = await this.cloudPort.access.verifyMachineAccess({
-              workspaceId: this.workspaceId,
-              machineId: this.machineId,
-              requesterUserId: requestedByUserId,
-              localProjectId,
-            });
-            if (!access.allowed) throw new Error('Project group member access denied');
-          }
+          const access = await this.cloudPort.access.verifyMachineAccess({
+            workspaceId: this.workspaceId,
+            machineId: this.machineId,
+            requesterUserId: requestedByUserId,
+            localProjectId,
+          });
+          if (!access.allowed) throw new Error('Project group member access denied');
           return this.probeProjectLocalMember(localProjectId);
         },
         getLocalProjectGitState: async ({ localProjectId, requestedByUserId }) =>
-          await this.getLocalProjectGitStateForRpc(
-            {
-              localProjectId,
-              requestedByUserId,
-            },
-            config.encryptedWorkspace
-          ),
+          await this.getLocalProjectGitStateForRpc({
+            localProjectId,
+            requestedByUserId,
+          }),
         dispatchLocalProjectControl: async (request) =>
           await this.dispatchLocalProjectControlViaRpc(request),
         onFatalAuthFailure: (error) => this.onFatalAuthFailure?.(error),
@@ -6528,12 +6519,83 @@ export class MessageHandler {
     };
   }
 
+  /** Observe existing paths only. Ordinary Session getters may mkdir, and the
+   * live local-project resolver may create/subscribe a Flock or repair links. */
+  private async resolveEncryptedFileWorkspaceRoot(
+    sessionId: SessionId
+  ): Promise<CodeCollabWorkspaceRootResolution> {
+    const meta = await this.resolveCodeCollabOwnerSessionMeta(sessionId);
+    if (!meta)
+      return { ok: false, error: 'session_not_found', message: 'Session metadata is unavailable.' };
+    const ownerSessionId = meta.parentSessionId ?? sessionId;
+    const owner =
+      ownerSessionId === sessionId
+        ? meta
+        : await this.resolveCodeCollabOwnerSessionMeta(ownerSessionId);
+    if (
+      !owner ||
+      meta.isArchived ||
+      owner.isArchived ||
+      owner.parentSessionId ||
+      meta.machineId !== this.machineId ||
+      owner.machineId !== this.machineId
+    )
+      return {
+        ok: false,
+        error: 'permission_denied',
+        message: 'Session file ownership is invalid.',
+      };
+
+    let workspaceRoot = this.sessionManager.getSession(ownerSessionId)?.peekHostWorkdir?.() ?? null;
+    if (!workspaceRoot) {
+      const project = owner.project;
+      if (owner.projectRun) {
+        workspaceRoot = path.join(
+          projectGroupDirectory(owner.projectRun),
+          'worktrees',
+          ownerSessionId
+        );
+      } else if (project?.kind === 'local') {
+        const root = this.workspaceDocument.peekLocalProjectRootPath(
+          this.machineId,
+          project.localProjectId
+        );
+        if (root)
+          workspaceRoot =
+            owner.isWorktree || project.useWorktree
+              ? new WorktreeManager({
+                  repoId: deriveRepoIdFromLocalProjectPath(root),
+                  logger: this.logger,
+                }).getWorktreeHostPath(ownerSessionId)
+              : root;
+      } else {
+        const repo = resolveProjectGitHubRepo(project) ?? owner.repoFullName?.trim();
+        if (repo)
+          workspaceRoot = new WorktreeManager({
+            repoId: deriveRepoIdFromGitHubRepo(repo),
+            logger: this.logger,
+          }).getWorktreeHostPath(ownerSessionId);
+        else if (!project && !owner.isWorktree)
+          workspaceRoot = getDefaultSessionWorkdir(ownerSessionId);
+      }
+    }
+    if (!workspaceRoot || !fs.statSync(workspaceRoot, { throwIfNoEntry: false })?.isDirectory())
+      return {
+        ok: false,
+        error: 'workspace_unavailable',
+        message: 'Session file workspace is unavailable.',
+      };
+    return { ok: true, ownerSessionId, workspaceRoot, source: 'encrypted-existing-files' };
+  }
+
   private readonly resolveCodeCollabV2Workspace: CodeCollabV2WorkspaceResolver = async (
     sessionId,
     options?: CodeCollabV2WorkspaceResolveOptions
   ) => {
     try {
-      const resolved = await this.resolveCodeCollabWorkspaceRoot(sessionId);
+      const resolved = await (this.encryptedWorkspace
+        ? this.resolveEncryptedFileWorkspaceRoot(sessionId)
+        : this.resolveCodeCollabWorkspaceRoot(sessionId));
       if (resolved.ok) {
         const ownerSessionId = resolved.ownerSessionId ?? sessionId;
         const ownerMeta = await this.resolveCodeCollabOwnerSessionMeta(ownerSessionId);
@@ -6554,8 +6616,12 @@ export class MessageHandler {
           resolved.workspaceRoot,
           ownerMeta?.projectRun,
           this.machineId,
-          (id) => this.sessionManager.resolveLocalProjectRootPath(id),
-          (id) => this.logger.debug(`Project group file root unavailable: ${id}`)
+          (id) =>
+            this.encryptedWorkspace
+              ? Promise.resolve(this.workspaceDocument.peekLocalProjectRootPath(this.machineId, id))
+              : this.sessionManager.resolveLocalProjectRootPath(id),
+          (id) => this.logger.debug(`Project group file root unavailable: ${id}`),
+          !this.encryptedWorkspace
         );
         const rootId = options?.rootId ?? 'main';
         const selected = fileRoots.find((root) => root.id === rootId);
