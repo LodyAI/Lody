@@ -588,7 +588,7 @@ export function ChatComposer({
   // is a one-shot handoff, not a rendered mode.
   const acceptedPromptSuggestionRef = useRef<string | null>(null);
   const acceptPromptSuggestion = useCallback(() => {
-    if (visiblePromptSuggestion === null || promptDisabled) return;
+    if (visiblePromptSuggestion === null) return;
     // Focus inside the press itself: the mobile Apply control is a real
     // gesture, and iOS only raises the keyboard for focus it sees there.
     const textarea =
@@ -598,7 +598,7 @@ export function ChatComposer({
     textarea?.focus();
     acceptedPromptSuggestionRef.current = visiblePromptSuggestion;
     onPromptChange(visiblePromptSuggestion);
-  }, [onPromptChange, promptDisabled, promptRef, visiblePromptSuggestion]);
+  }, [onPromptChange, promptRef, visiblePromptSuggestion]);
   useEffect(() => {
     const accepted = acceptedPromptSuggestionRef.current;
     if (accepted === null) return;
@@ -615,8 +615,20 @@ export function ChatComposer({
     textarea.focus();
     textarea.setSelectionRange(caret, caret);
   }, [promptRef, promptValue]);
-  const handlePromptKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLTextAreaElement>) => {
+  const promptInputProps = {
+    disabled: promptDisabled && !preservePromptFocus,
+    'aria-disabled': promptDisabled || undefined,
+    onValueChange: (value: string) => {
+      if (!promptDisabled) onPromptChange(value);
+    },
+    onBeforeInput: (event: React.FormEvent<HTMLTextAreaElement>) => {
+      if (promptDisabled) event.preventDefault();
+    },
+    onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (promptDisabled) {
+        if (event.key !== 'Tab') event.preventDefault();
+        return;
+      }
       if (
         event.key === 'Tab' &&
         !isMobile &&
@@ -636,25 +648,6 @@ export function ChatComposer({
         return;
       }
       onPromptKeyDown?.(event);
-    },
-    [acceptPromptSuggestion, isMobile, onPromptKeyDown, visiblePromptSuggestion]
-  );
-
-  const promptInputProps = {
-    disabled: promptDisabled && !preservePromptFocus,
-    'aria-disabled': promptDisabled || undefined,
-    onValueChange: (value: string) => {
-      if (!promptDisabled) onPromptChange(value);
-    },
-    onBeforeInput: (event: React.FormEvent<HTMLTextAreaElement>) => {
-      if (promptDisabled) event.preventDefault();
-    },
-    onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => {
-      if (promptDisabled) {
-        if (event.key !== 'Tab') event.preventDefault();
-        return;
-      }
-      handlePromptKeyDown(event);
     },
     onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => {
       if (promptDisabled) event.preventDefault();

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { atom, useAtomValue } from 'jotai';
 import { getSessionRoomId, type SessionId } from '@lody/shared';
 import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
@@ -11,11 +11,9 @@ const noSessionMeta = atom(undefined);
 export function useSessionPromptSuggestion(sessionId: SessionId | null | undefined): string | null {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const scope = useResolvedWorkspaceScope();
-  const metaAtom = useMemo(
-    () => (sessionId ? sessionMetaAtomFamily(getSessionRoomId(sessionId)) : noSessionMeta),
-    [sessionId]
+  const meta = useAtomValue(
+    sessionId ? sessionMetaAtomFamily(getSessionRoomId(sessionId)) : noSessionMeta
   );
-  const meta = useAtomValue(metaAtom);
   const machineId = meta?.machineId;
   const enabled = scope.enabled && runtime?.workspaceId === scope.workspaceId;
   const [snapshot, setSnapshot] = useState<{

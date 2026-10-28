@@ -58,6 +58,21 @@ Local diagnostic logs show negotiated v1 and normal prompt completion, but no na
 
 Evidence: [0.164.0 request dispatch](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server/src/message_processor.rs#L1482), [protocol types](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server-protocol/src/protocol/v2/thread_prediction.rs).
 
+## Ablation review
+
+Candidate removals were tested separately before the combined regression run. Keep the following simplifications:
+
+| Removed candidate | Why it is redundant | Behavioral evidence |
+| --- | --- | --- |
+| Renderer `onJoined` override | Base `onJoined` already calls `onStoreChange` | Cloud bootstrap delivers its hint; local/unknown routes never fall back to cloud |
+| Hook `useMemo` around the session atom | `sessionMetaAtomFamily` already caches each atom | Session/workspace switching still clears the old subscription and suggestion |
+| Acceptance's second disabled check | A disabled composer already has no visible suggestion | Disabled focus-preserving input stays empty; mobile Apply and desktop Tab still accept |
+| Separate memoized key handler | Its only caller is the newly created input handler | Inline handling preserves modified Tab, IME, focus, sheet and submission behavior |
+
+Negative control: removing the publisher's no-op remote-update adaptor makes the existing isolation test expose `foreign` text in the local snapshot. Restore and retain that boundary. No ownership, reconnect, retention, identity or caret guards were removed. The renderer test uses an explicit fake clock between consecutive writes instead of relying on elapsed milliseconds. The new cloud bootstrap case exercises the inherited delivery behavior; no source-string or call-count-only tests were added.
+
+Combined regression: 82 renderer/composer, 46 CLI and 21 shared boundary tests passed (149 total). Changed-file lint has no errors; formatting and docs check pass. Root check remains blocked by missing Devin dependencies; components typecheck retains the installed Streams patch type mismatch.
+
 ## Evidence
 
 - [Core contract and negotiation](../../../../packages/acp-extension-core/README.md#prompt-suggestions).

@@ -84,9 +84,6 @@ export class WorkspacePromptSuggestions extends EphemeralRoomTransport<Ephemeral
   protected onStoreChange(): void {
     this.refreshRoutes();
   }
-  protected override onJoined(): void {
-    this.refreshRoutes();
-  }
   private emit(subscription: Subscription): void {
     const plane = this.options.resolvePlane(subscription.machineId);
     const source = plane === 'local' ? this.localStore : plane === 'cloud' ? this.store : null;

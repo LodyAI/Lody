@@ -73,6 +73,21 @@ Core 0.3.0 在干净的独立 adapter 克隆中使用 `npm ci` 验证：Codex �
 
 证据：[0.164.0 请求分发](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server/src/message_processor.rs#L1482)、[协议类型](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server-protocol/src/protocol/v2/thread_prediction.rs)。
 
+## 消融审查
+
+各候选项单独删除并验证后，再进行组合回归。保留以下精简：
+
+| 删除候选 | 冗余原因 | 行为证据 |
+| --- | --- | --- |
+| Renderer 的 `onJoined` 覆盖 | 基类默认调用 `onStoreChange` | 云端 bootstrap 能交付建议，本地／未知路由不回退到云端 |
+| hook 对 session atom 的 `useMemo` | `sessionMetaAtomFamily` 已按 key 缓存 atom | 切换会话／工作区仍清除旧订阅与建议 |
+| 接受建议时第二次禁用检查 | 禁用 composer 已无可见建议 | 保留焦点的禁用输入保持为空，移动端应用和桌面 Tab 仍能接受 |
+| 独立 memoized 键盘回调 | 唯一调用方是每次新建的输入处理函数 | 合并后仍保留修饰键、IME、焦点、sheet 和提交行为 |
+
+负对照：删除发布器禁止远端写回的 adaptor 后，既有隔离测试在本地快照读到 `foreign`，因此恢复并保留该边界。未删除所有权、重连、保留上限、身份或光标保护。Renderer 测试在连续写入间显式推进假时钟，不依赖真实毫秒流逝。新增云端 bootstrap 用例验证继承的交付行为，没有新增源码字符串或仅检查调用次数的测试。
+
+组合回归：82 项 renderer/composer、46 项 CLI 和 21 项共享边界测试通过，共 149 项。改动文件 lint 无错误，格式化和文档检查通过；全仓检查仍受 Devin 依赖缺失阻塞，components 类型检查仍受本地 Streams 补丁类型缺失阻塞。
+
 ## 证据
 
 - [Core 契约与协商](../../../../packages/acp-extension-core/README.zh.md#下一条提示建议)。
