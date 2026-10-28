@@ -386,7 +386,8 @@ describe('SessionHeaderMenu', () => {
     await act(async () => menuItem('Cursor').click());
     expect(onSelect).toHaveBeenCalledWith(cursorLauncher);
   });
-  it('disables encrypted export, sharing and remote controls even with callbacks supplied', async () => {
+  it('enables local encrypted export while keeping sharing and remote controls restricted', async () => {
+    let exported = false;
     const store = createStore();
     store.set(workspaceContentModeAtom, {
       accountId: 'user',
@@ -414,7 +415,7 @@ describe('SessionHeaderMenu', () => {
               projectName: null,
             }}
             onShareAsImage={() => {
-              throw new Error('must not export');
+              exported = true;
             }}
           />
         </Provider>
@@ -422,7 +423,6 @@ describe('SessionHeaderMenu', () => {
     );
     await openMenu();
     for (const reason of [
-      'Encrypted workspaces do not yet support exports.',
       'Encrypted workspaces do not yet support sharing.',
       'Encrypted workspaces do not yet support remote preview.',
       'Encrypted workspaces do not yet support remote machine operations.',
@@ -431,9 +431,15 @@ describe('SessionHeaderMenu', () => {
       expect(item.getAttribute('aria-disabled')).toBe('true');
       await act(async () => item.click());
     }
-    expect(document.body.textContent).not.toContain('Fork session');
     expect(document.body.textContent).not.toContain('Share with team');
     expect(container?.querySelector('[data-testid="copy-result"]')?.textContent).toBe('not copied');
     expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe('none');
+    await act(async () => menuItem('Fork session').click());
+    await act(async () => menuItem('Copy context as Markdown').click());
+    expect(container?.querySelector('[data-testid="copy-result"]')?.textContent).toBe('copied');
+    expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe('none');
+    await openMenu();
+    await act(async () => menuItem('Share as image').click());
+    expect(exported).toBe(true);
   });
 });
