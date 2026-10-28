@@ -67,6 +67,9 @@ Parent instructions apply. Background: [README.md](README.md).
   syncs unless `--offline`. Use active Turn identity and `canReadAgentRole`;
   explicit creation keeps its separate grant contract. Keep unavailable readable Roles,
   three-state presence and credential allowlists.
+- Default MCP selection and Session startup reuse the daemon's workspace catalog after
+  its first baseline, including during reconnects. A cold default catalog returns retryable
+  `SYNC_UNAVAILABLE` before Operation acceptance; request waits never stop its reader.
 - Directory cursors bind resource, workspace, user and filters. Operations additionally
   bind requester Session and query only that user's machine-local rows; list replies
   contain no canonical prompt or assistant output. See

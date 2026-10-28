@@ -37,20 +37,19 @@ const catalogFlock = flockWithRows([
 ]);
 
 describe('loadSessionMcpCatalog', () => {
-  it('does not open or sync a document for an empty selection', async () => {
-    const openFlockDoc = vi.fn();
-    const syncFlockDoc = vi.fn();
+  it('does not need a catalog for an empty selection', async () => {
+    const unexpectedRead = async (): Promise<never> => {
+      throw new Error('Empty selections must not access the catalog');
+    };
     const select = await loadSessionMcpCatalog({
-      repo: { openFlockDoc },
-      syncFlockDoc,
+      repo: { openFlockDoc: unexpectedRead },
+      waitForCatalogBaseline: unexpectedRead,
       workspaceId,
       sessionId,
       selectedIds: [],
       logger: { debug: vi.fn() },
     });
     expect(select(undefined)).toEqual({ servers: [], problems: [] });
-    expect(openFlockDoc).not.toHaveBeenCalled();
-    expect(syncFlockDoc).not.toHaveBeenCalled();
   });
 
   it('reads the catalog and expands target-daemon environment variables', async () => {
@@ -102,27 +101,43 @@ describe('loadSessionMcpCatalog', () => {
     ]);
   });
 
-  it('refreshes first and falls back to local rows if refresh fails', async () => {
-    const order: string[] = [];
-    const syncFlockDoc = vi.fn(async () => {
-      order.push('sync');
-      throw new Error('offline');
-    });
-    const openFlockDoc = vi.fn(async () => {
-      order.push('open');
-      return { flock: catalogFlock };
-    });
-    const select = await loadSessionMcpCatalog({
-      repo: { openFlockDoc },
-      syncFlockDoc,
+  it('waits for the shared baseline and then loads the selected server', async () => {
+    const baseline = Promise.withResolvers<void>();
+    let ready = false;
+    const loading = loadSessionMcpCatalog({
+      repo: {
+        openFlockDoc: async () => {
+          if (!ready) throw new Error('Read before the baseline');
+          return { flock: catalogFlock };
+        },
+      },
+      waitForCatalogBaseline: () => baseline.promise,
       workspaceId,
       sessionId,
       selectedIds: [selectedId],
       logger: { debug: vi.fn() },
       env: { NODE_BIN: 'node', ENTRYPOINT: 'server.js' },
     });
-    expect(order).toEqual(['sync', 'open']);
-    expect(syncFlockDoc).toHaveBeenCalledWith('workspace-1:wf:workspace', { timeoutMs: 5_000 });
+    ready = true;
+    baseline.resolve();
+    const select = await loading;
     expect(select(undefined).servers).toHaveLength(1);
+  });
+
+  it('reports an unconfirmed baseline as unavailable instead of missing selected ids', async () => {
+    const select = await loadSessionMcpCatalog({
+      repo: { openFlockDoc: async () => ({ flock: flockWithRows([]) }) },
+      waitForCatalogBaseline: async () => {
+        throw new Error('Catalog is still syncing');
+      },
+      workspaceId,
+      sessionId,
+      selectedIds: [selectedId],
+      logger: { debug: () => {} },
+    });
+    expect(select(undefined)).toEqual({
+      servers: [],
+      problems: [{ kind: 'catalog_unavailable', reason: 'Catalog is still syncing' }],
+    });
   });
 });

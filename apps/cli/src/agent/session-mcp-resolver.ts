@@ -27,7 +27,7 @@ export type LoadSessionMcpCatalogInput = {
   repo: {
     openFlockDoc(docId: string): Promise<{ flock: WorkspaceFlockReadableFlock }>;
   };
-  syncFlockDoc?: (docId: string, options: { timeoutMs: number }) => Promise<void>;
+  waitForCatalogBaseline?: () => Promise<void>;
   workspaceId: WorkspaceId;
   sessionId: SessionId;
   selectedIds: readonly McpServerId[];
@@ -39,16 +39,14 @@ export type LoadSessionMcpCatalogInput = {
   ) => Promise<ResolvedMcpServer>;
 };
 
-const CATALOG_SYNC_TIMEOUT_MS = 5_000;
-
 const EMPTY_SELECTION: SessionMcpCatalogSelector = () => ({ servers: [], problems: [] });
 
 /**
  * Loads the workspace MCP catalog for an ACP session start.
  *
  * Deliberately split from selection: the only thing selection needs from the
- * agent is its advertised `http` capability, so this — a remote catalog sync
- * plus a document read — can overlap process spawn and the ACP handshake
+ * agent is its advertised `http` capability, so the initial baseline wait and
+ * document read can overlap process spawn and the ACP handshake
  * instead of adding a round trip between `initialize` and `newSession`.
  *
  * Best effort. Configuration failures come back as problems on the selector so
@@ -63,17 +61,9 @@ export const loadSessionMcpCatalog = async (
   }
 
   const docId = getWorkspaceFlockDocId(input.workspaceId);
-  if (input.syncFlockDoc) {
-    try {
-      await input.syncFlockDoc(docId, { timeoutMs: CATALOG_SYNC_TIMEOUT_MS });
-    } catch (error) {
-      logger.debug(
-        `[${sessionId}] Workspace MCP catalog refresh failed; using local rows: ${formatErrorMessage(error)}`
-      );
-    }
-  }
-
   try {
+    // An unconfirmed catalog must not turn selected ids into false "missing" results.
+    await input.waitForCatalogBaseline?.();
     const handle = await input.repo.openFlockDoc(docId);
     const catalog = getWorkspaceMcpCatalog(readWorkspaceFlockRowsFromFlock(handle.flock));
     const env = input.env ?? process.env;

@@ -42,6 +42,15 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   Standalone CLI calls synchronize unless `--offline`. Authorization and cloud presence
   remain online-aware independently of the catalog read policy.
   Intent and limits: [resource discovery](../../../../specs/resource-discovery.md).
+- `workspace-mcp-store.ts` — workspace MCP persistence, default selection reads and
+  the shared first-baseline wait. Daemon-hosted creation resolves defaults from its
+  existing reader without an explicit network sync. Until that document's first
+  baseline, a bounded wait returns retryable `SYNC_UNAVAILABLE` before acceptance.
+  Startup uses the same wait before loading selected connections; an unconfirmed
+  catalog is unavailable rather than evidence that selected ids are missing.
+  Once confirmed, temporary disconnects keep the current replica readable while
+  its owner recovers. Explicit selections bypass default resolution, and accepted
+  Operations retain their selected ids. Standalone CLI sync remains explicit.
 - `agent-role-create.ts` — Agent Role catalog read and create-path resolution
   shared by the MCP create tools and CLI `session create --agent-role`: the Role
   row is authoritative for machine, agent config, run config and prompt prefix,

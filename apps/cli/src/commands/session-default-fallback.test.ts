@@ -157,6 +157,7 @@ function createFixture(agentType: 'codex' | 'claude', capability?: AcpCapability
     getAgentConfigById: async () => agentConfig,
     syncMetaOrThrow: async () => undefined,
     syncDocOrThrow: async () => undefined,
+    catalogBaselineReady: async () => true,
     syncFlockDocOrThrow: async (docId: string) => {
       if (docId === getWorkspaceFlockDocId(workspaceId)) return;
       if (!freshnessConfirmed) {

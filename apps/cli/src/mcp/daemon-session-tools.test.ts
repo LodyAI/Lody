@@ -20,9 +20,11 @@ import {
   readMachineFlockRowsFromFlock,
   SessionStatusFactory,
   writeWorkspaceAgentRoleToFlock,
+  writeWorkspaceMcpServerToFlock,
   type AgentConfigId,
   type AgentRoleId,
   type MachineId,
+  type McpServerId,
   type SessionId,
   type SessionMeta,
   type WorkspaceId,
@@ -33,6 +35,8 @@ import * as workspaceApi from '@/lib/workspace';
 import * as commandRuntime from '@/lib/command-runtime';
 import * as sessionCommands from '@/commands/session';
 import { createResourceDiscovery } from '@/lib/resource-discovery-runtime';
+import { waitForMcpCatalogBaseline } from '@/lib/workspace-mcp-store';
+import { loadSessionMcpCatalog } from '@/agent/session-mcp-resolver';
 import { createSessionBackend } from '@/session/session-backend';
 import { LocalControlHandler } from '@/lib/local-control-handler';
 import { LoroDocumentManager } from '@/lib/loro/doc';
@@ -160,6 +164,120 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
     await manager.repo.flush();
     return agentConfigId;
   }
+
+  it('authors concurrent creates and loads startup MCP from the live daemon catalog during sync failure', async () => {
+    const agentConfigId = await seedRoles();
+    const agentConfig = await manager.getAgentConfigById(agentConfigId);
+    if (!agentConfig) throw new Error('Missing seeded Agent config');
+    const id = 'synthetic-mcp' as McpServerId;
+    const handle = await manager.repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId));
+    const entry = {
+      id,
+      name: 'Synthetic MCP',
+      transport: 'stdio' as const,
+      connection: { transport: 'stdio' as const, command: 'synthetic-command' },
+      enabledByDefault: true,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    writeWorkspaceMcpServerToFlock(handle.flock, entry);
+    await manager.repo.flush();
+    await waitForMcpCatalogBaseline(manager, workspaceId);
+    vi.spyOn(manager, 'syncFlockDocOrThrow').mockRejectedValue(new Error('ECONNRESET'));
+    const resolve = (dispatchConfig = {}) =>
+      runWithDaemonWorkspace(daemon, () =>
+        sessionCommands.resolveEffectiveSessionCreateDispatchConfig({
+          manager,
+          workspaceId,
+          agentConfig,
+          dispatchConfig,
+        })
+      );
+    const configs = await Promise.all(Array.from({ length: 4 }, () => resolve()));
+    expect(configs.map((config) => config.mcpServerIds)).toEqual([[id], [id], [id], [id]]);
+    const select = await loadSessionMcpCatalog({
+      repo: manager.repo,
+      waitForCatalogBaseline: () => waitForMcpCatalogBaseline(manager, workspaceId),
+      workspaceId,
+      sessionId,
+      selectedIds: [id],
+      logger: createSilentLogger(),
+    });
+    expect(select(undefined)).toMatchObject({
+      servers: [{ name: 'Synthetic MCP', command: 'synthetic-command' }],
+      problems: [],
+    });
+    writeWorkspaceMcpServerToFlock(handle.flock, {
+      ...entry,
+      enabledByDefault: false,
+      updatedAt: 2,
+    });
+    expect((await resolve()).mcpServerIds).toEqual([]);
+    expect((await resolve(configs[0])).mcpServerIds).toEqual([id]);
+  });
+
+  it.each(['lody_session_create', 'lody_session_create_many'] as const)(
+    'keeps a cold default catalog retryable before accepting %s',
+    async (tool) => {
+      const agentConfigId = await seedRoles();
+      const environment = createLocalSessionCommandEnvironment({
+        manager,
+        workspaceId,
+        machineId,
+        machineName: 'Daemon',
+        userId: ownerUserId,
+        host: {
+          readInvocation: (id) => ({
+            type: 'session/active-invocation-context',
+            active: true,
+            sessionId: id,
+            requesterUserId: ownerUserId,
+            sourceTurnId: 'synthetic-turn',
+            inputConfig: { cliType: 'custom', agentType: 'claude' },
+          }),
+          readLiveStatus: async () => {
+            throw new Error('No live-status query');
+          },
+          cancelSession: async () => {
+            throw new Error('No cancellation');
+          },
+          dispatchSession: async () => {},
+        },
+      });
+      vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
+      const baseline = vi.spyOn(manager, 'catalogBaselineReady').mockResolvedValue(false);
+      const item = { prompt: 'Review synthetic code.', machineId, agentConfigId };
+      const create = () =>
+        runWithSessionCommandEnvironment(environment, () =>
+          executeDaemonSessionTool(
+            context(),
+            tool,
+            tool === 'lody_session_create'
+              ? { operationId: 'cold-defaults', ...item }
+              : { operationId: 'cold-defaults', items: [item, item] }
+          )
+        );
+      const result = await create();
+      expect(JSON.parse(result.content[0]?.text ?? '{}')).toMatchObject({
+        ok: false,
+        error: { code: 'SYNC_UNAVAILABLE', retryable: true },
+      });
+      const operations = await runWithSessionCommandEnvironment(environment, () =>
+        executeDaemonSessionTool(context(), 'lody_operation_list', {})
+      );
+      expect(JSON.parse(operations.content[0]?.text ?? '{}')).toMatchObject({ items: [] });
+      baseline.mockRestore();
+      const recovered = await create();
+      expect(JSON.parse(recovered.content[0]?.text ?? '{}')).toMatchObject({
+        id: 'cold-defaults',
+        state: 'active',
+        items: Array.from({ length: tool === 'lody_session_create' ? 1 : 2 }, () => ({
+          status: 'active',
+          inputDurable: true,
+        })),
+      });
+    }
+  );
 
   it.each(['metadata', 'flock'] as const)(
     'reads daemon catalogs for the active user when %s synchronization fails',

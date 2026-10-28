@@ -130,11 +130,13 @@ the MCP child with `session/close` or Agent teardown.
 
 ### Workspace MCP resolution is two phases
 
-`loadExternalMcpServers` (catalog sync + document read) runs BEFORE `initialize` so its
-remote round trip overlaps spawn and the handshake, and the selector it resolves to applies
-the agent's advertised `http` capability at `newSession`. Awaiting the load between
-`initialize` and `newSession` would put a remote sync — up to its 5s budget — on the
-critical path of every session establishment while the agent process sits idle.
+`loadExternalMcpServers` runs BEFORE `initialize`, and the selector it resolves to applies
+the agent's advertised `http` capability at `newSession`. Loading reuses the daemon's
+live workspace catalog: only its first baseline may wait, for up to one second,
+overlapping spawn and the handshake. Later starts read the current replica even during
+reconnects without forcing a remote round trip. An unconfirmed baseline becomes a
+`catalog_unavailable` problem rather than missing-server diagnostics. Empty selections
+skip the catalog entirely.
 
 ### Steer delivery classification
 

@@ -357,6 +357,10 @@ unhydrated turn ends the group. The row retains its final turn index so visible
 range reporting keeps every grouped turn hydrated. Failure summaries
 remain outside the bounded card list, and card navigation/title/status remain live.
 Message-selection mode keeps original rows so each selected id matches one record.
+Completion summaries aggregate the original item results: all-failed batches show
+failure, all-cancelled batches show cancellation, and mixed outcomes show counts.
+Progress deduplication hides duplicate cards without removing successes from those
+counts. A result envelope alone does not imply successful work.
 See the [decision note](../../../../../.agents/notes/implemented/feature/2026-10-11-created-session-list.md).
 
 Coverage: `SessionRelationCard.stories.tsx`, `tests/session-relation-card.test.tsx`,

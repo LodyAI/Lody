@@ -15,6 +15,19 @@ import {
   type WorkspaceMcpServerMeta,
 } from '@lody/shared';
 import { formatErrorMessage } from '@/utils/format-error';
+import { WorkspaceSyncUnavailableError } from './command-runtime';
+
+/** Wait only for the daemon-owned reader's first baseline, never force a refresh. */
+export async function waitForMcpCatalogBaseline(
+  manager: {
+    catalogBaselineReady(docId: string, timeoutMs: number): Promise<boolean>;
+  },
+  workspaceId: WorkspaceId
+): Promise<void> {
+  if (!(await manager.catalogBaselineReady(getWorkspaceFlockDocId(workspaceId), 1_000))) {
+    throw new WorkspaceSyncUnavailableError({ message: 'Workspace MCP catalog is still syncing.' });
+  }
+}
 
 export type McpCatalogWriteResult = {
   changed: boolean;
