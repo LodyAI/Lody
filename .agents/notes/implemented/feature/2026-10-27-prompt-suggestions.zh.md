@@ -9,7 +9,7 @@ PRs: [Lody #1951](https://github.com/LodyAI/Lody/pull/1951), [Core #24](https://
 
 ## 摘要
 
-Core 新增经过协商的下一条用户提示预测通知，Codex 和 Claude adapter 已转发原生事件。Codex 保留来源 turn 与成功／空结果／失败；Claude 保留建议文本和消息标识，不虚构来源 turn。用户接受过期建议，随后授权实现 Lody 同步与 composer 集成。Lody 通过独立 ephemeral 通道交付最新参考建议；桌面 Tab 与移动端“应用”将它填入可编辑草稿，不自动发送。真实模型端到端交付仍未验证。
+Core 新增经过协商的下一条用户提示预测通知，Codex 和 Claude adapter 已转发原生事件。Codex 保留来源 turn 与成功／空结果／失败；Claude 保留建议文本和消息标识，不虚构来源 turn。用户接受过期建议，随后授权实现 Lody 同步与 composer 集成。Lody 通过独立 ephemeral 通道交付最新参考建议；桌面 Tab 与移动端“应用”将它填入可编辑草稿，不自动发送。Codex 0.164.0 虽定义预测协议，但请求处理尚未实现，该运行时无法通过此路径生成原生预测；Claude 真实模型端到端交付仍未验证。
 
 ## 契约与映射
 
@@ -66,6 +66,14 @@ Core 0.3.0 在干净的独立 adapter 克隆中使用 `npm ci` 验证：Codex �
 合并 main 后，Lody 的 46 项 CLI、21 项共享边界及 80 项 renderer/composer 测试通过；扩展后的 6 项建议测试也通过，覆盖 sheet 接受和禁用时保留焦点。此前共享包全量 1,688 项测试通过。合并 main 前 shared、CLI、components 类型检查通过；合并后 components 类型检查因已安装的 Streams 依赖缺少 main 的 `onSnapshotRecovery` 补丁阻塞，相关 E2EE 消费代码与 main 一致。根格式化和文档检查通过。根 `pnpm check` 在 Devin adapter 准备阶段因该 checkout 缺少依赖阻塞，不能视为全仓检查通过。根 lint 也遇到其他 checkout 范围缺少 Node/React/Vite 类型定义。Storybook 浏览器检查覆盖桌面 Tab、移动端应用、输入隐藏与清空恢复，控制台无错误；数据为合成组件输入，并非真实模型或完整应用会话。
 
 临时诊断统一使用 `prompt-suggestion-debug` 标记，覆盖原生接收、adapter 转发、ACP 协商及接收、发布尝试、前端订阅和来源路由；只记录标识、状态与文本长度，不记录正文。用户调试后删除所有同标记代码。Codex stderr 进入 daemon 日志，前端记录在 Console。相关 52 项测试与 adapter 构建通过。
+
+## Codex 运行时可用性纠正
+
+存在预测 schema 不代表发布的运行时会产生预测。准确版本 `rust-v0.164.0` 将 `thread/prediction/request` 直接返回 method-not-found，消息为 “thread/prediction/request is not implemented yet”；该版本源码只有通知定义，没有生成发送点。对 Lody 本机安装的 Codex 0.164.0 做隔离探测，在 `experimentalApi: true` 初始化后，请求返回相同消息和错误码 `-32601`。探测使用合成 thread/turn ID、临时 Codex home，没有发起模型 turn，也未复制用户会话或凭据。
+
+本机诊断日志显示 v1 协商成功、prompt 正常完成，但没有原生预测接收记录；已核对正在运行的打包 adapter 包含诊断代码。这解释了转发测试通过而输入框没有建议。协商说明 adapter 能转发此契约，不证明原生运行时具备生成功能。不能将这种静默判断为模型返回空建议或主动抑制；不要猜测开关，也不要自动调用尚未实现的请求。升级前需验证新运行时的实际支持；自行额外调用模型预测则是独立的产品和费用决策。
+
+证据：[0.164.0 请求分发](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server/src/message_processor.rs#L1482)、[协议类型](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server-protocol/src/protocol/v2/thread_prediction.rs)。
 
 ## 证据
 

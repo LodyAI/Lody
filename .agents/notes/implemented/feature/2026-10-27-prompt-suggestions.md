@@ -9,7 +9,7 @@ PRs: [Lody #1951](https://github.com/LodyAI/Lody/pull/1951), [Core #24](https://
 
 ## Abstract
 
-Core now defines a negotiated notification for predictions of the next user prompt, and the Codex and Claude adapters forward their native events. Codex preserves its source turn and success/empty/failure result; Claude preserves suggestion text and message identity without inventing a source turn. The user accepted stale suggestions and subsequently authorized Lody synchronization and composer integration. Lody delivers the latest advisory state through an independent ephemeral channel; desktop Tab and mobile Apply copy it into an editable draft without submitting it. Real-model end-to-end delivery remains unverified.
+Core now defines a negotiated notification for predictions of the next user prompt, and the Codex and Claude adapters forward their native events. Codex preserves its source turn and success/empty/failure result; Claude preserves suggestion text and message identity without inventing a source turn. The user accepted stale suggestions and subsequently authorized Lody synchronization and composer integration. Lody delivers the latest advisory state through an independent ephemeral channel; desktop Tab and mobile Apply copy it into an editable draft without submitting it. Codex 0.164.0 defines the prediction protocol but its request handler is unimplemented; native Codex generation is therefore not available through this runtime. Claude real-model end-to-end delivery remains unverified.
 
 ## Contract and mapping
 
@@ -51,6 +51,14 @@ Core 0.3.0 was also checked in clean standalone adapter clones using `npm ci`: C
 Lody verification after merging main: 46 CLI tests, 21 shared boundary tests, and 80 renderer/composer tests passed; the expanded six-case suggestion suite also passed with sheet acceptance and disabled focus preservation. The shared full suite previously passed 1,688 tests. Shared, CLI and components typechecks passed before the main merge. After merging main, components typecheck is blocked by the installed Streams dependency missing main's `onSnapshotRecovery` patch; the E2EE consumer is unchanged from main. Root formatting and documentation checks passed. Root `pnpm check` is blocked during Devin adapter preparation because that checkout lacks dependencies; this is not a passing full-workspace check. Root lint also encounters missing Node/React/Vite type definitions in other checkout scopes. Storybook browser checks cover desktop Tab, mobile Apply, hiding while typing and restoration after clearing without console errors. These use synthetic component data, not a live model or full application session.
 
 Temporary diagnostics use the `prompt-suggestion-debug` marker for native receipt, adapter forwarding, ACP negotiation/receipt, publication attempts and renderer subscriptions/routing. They record identities, status and text lengths, never content. Remove all marked code after user debugging. Codex stderr reaches daemon logs; renderer messages appear in Console. The 52 related tests and adapter build passed.
+
+## Codex runtime availability correction
+
+The presence of the prediction schema does not establish that the shipped runtime produces predictions. The exact `rust-v0.164.0` source routes `thread/prediction/request` directly to method-not-found with “thread/prediction/request is not implemented yet”; searching that source finds the notification definition but no producer. An isolated probe against Lody's installed Codex 0.164.0, after `initialize` with `experimentalApi: true`, returned error `-32601` with that message. The probe used synthetic thread/turn IDs, a temporary Codex home and no model turn; no user conversation or credentials were copied.
+
+Local diagnostic logs show negotiated v1 and normal prompt completion, but no native prediction receipt. The running packaged adapter was checked to contain the diagnostic code. This explains why the forwarding tests pass while the composer receives no suggestion. Negotiation advertises the adapter's ability to forward this contract, not proof of native generation. Do not infer an empty prediction or model suppression from this silence, and do not add a guessed feature flag or automatically invoke the unimplemented request. Native support needs to be verified before selecting a newer runtime; an independent prediction model call would be a separate product/cost decision.
+
+Evidence: [0.164.0 request dispatch](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server/src/message_processor.rs#L1482), [protocol types](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/app-server-protocol/src/protocol/v2/thread_prediction.rs).
 
 ## Evidence
 
