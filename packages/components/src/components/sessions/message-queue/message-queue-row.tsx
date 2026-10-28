@@ -364,7 +364,8 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
         )}
         style={{
           display: '-webkit-box',
-          WebkitLineClamp: props.footerPosition === 'inline' ? 1 : 2,
+          // A narrow sheet keeps every row to one line, like the phone layout.
+          WebkitLineClamp: props.footerPosition === 'inline' || props.compact ? 1 : 2,
           WebkitBoxOrient: 'vertical',
         }}
       >
@@ -474,7 +475,7 @@ function RowActions(props: MessageQueueRowProps) {
 
 /**
  * A row's More button; its menu carries every row action. Touch rows get a real
- * 44 px box; `fine` is the compact desktop trigger for a narrow sheet.
+ * 40 × 36 px box; `fine` is the compact desktop trigger for a narrow sheet.
  */
 export function MoreTrigger({ fine, ...props }: ComponentProps<'button'> & { fine?: boolean }) {
   const { t } = useTranslation();
@@ -485,7 +486,7 @@ export function MoreTrigger({ fine, ...props }: ComponentProps<'button'> & { fin
       {...props}
       {...stylex.props(queueSurface.more, fine && queueSurface.compactMore)}
     >
-      <MoreHorizontal size={fine ? 14 : 18} strokeWidth={1.75} aria-hidden="true" />
+      <MoreHorizontal size={fine ? 14 : 16} strokeWidth={1.75} aria-hidden="true" />
     </button>
   );
 }

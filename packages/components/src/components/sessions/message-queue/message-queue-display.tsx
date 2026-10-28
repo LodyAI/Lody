@@ -81,7 +81,7 @@ const styles = stylex.create({
     alignItems: 'center',
     gap: space[2],
     width: '100%',
-    minHeight: { default: 30, [TOUCH]: 40 },
+    minHeight: { default: 30, [TOUCH]: 32 },
     paddingInline: `calc(${space[1]} + ${space[1.5]})`,
     backgroundColor: 'transparent',
     color: colors.secondaryLabel,
@@ -90,7 +90,6 @@ const styles = stylex.create({
     cursor: 'pointer',
     boxShadow: { default: 'none', ':focus-visible': `inset 0 0 0 2px ${colors.accent}` },
   },
-  roomyHeader: { fontSize: text.subheadlineSize },
   chevron: {
     display: 'flex',
     flexShrink: 0,
@@ -268,7 +267,7 @@ export function MessageQueueDisplay({
         )}
       >
         <Collapsible.Trigger
-          {...stylex.props(styles.header, roomy && styles.roomyHeader)}
+          {...stylex.props(styles.header)}
           data-message-queue-toggle=""
           onPointerDown={(event) => {
             if (event.button === 0) event.currentTarget.focus();

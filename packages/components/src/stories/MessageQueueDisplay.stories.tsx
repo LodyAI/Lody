@@ -196,7 +196,7 @@ export const ScheduledSectionMobile: Story = {
     footerPosition: 'inline',
   },
   decorators: mobileDecorator,
-  parameters: { containerWidth: 'w-[342px]' },
+  parameters: { containerWidth: 'w-[calc(100vw-48px)]' },
 };
 
 export const ScheduledOnlyMobile: Story = {
@@ -209,7 +209,7 @@ export const ScheduledOnlyMobile: Story = {
     footerPosition: 'inline',
   },
   decorators: mobileDecorator,
-  parameters: { containerWidth: 'w-[342px]' },
+  parameters: { containerWidth: 'w-[calc(100vw-48px)]' },
 };
 
 export const EditingFirstItem: Story = {

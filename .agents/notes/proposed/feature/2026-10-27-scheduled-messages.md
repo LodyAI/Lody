@@ -191,8 +191,9 @@ share a 16px gutter (index, or empty for a reservation) aligned with the chevron
 Scheduled label; phones keep #1989's index-free single line. When the sheet is
 narrower than 520px, or on phones, every row folds its actions into one More
 button: queued rows keep Steer, move-to-top, edit and delete; scheduled rows offer
-Edit scheduled time, Edit (details) and Cancel. Touch More buttons are real 44px
-boxes; the previous Button-based trigger rendered at 32px. Data path, ordering and
+Edit scheduled time, Edit (details) and Cancel. Phone rows are dense: 32px header,
+13/18 text, 36px rows and a real 40 × 36px More box (the touch-actions Spec was
+revised from 44 × 44 at the owner's request; WCAG 2.2 AA asks for 24 × 24). Data path, ordering and
 callbacks are unchanged.
 
 Presentation ordering is now specified: ordinary rows retain manual order, local attachment-preparation rows follow them, and scheduled rows always form the final section sorted by ascending send instant (ties retain input order). A time edit re-sorts the view. Scheduled rows are excluded from sortable IDs, drag sources/targets, move-to-top and steer. The display uses an explicit scheduled-time accessor; it does not infer scheduling from rendered text or add reservations to durable mq. Component tests cover sorting, changed times and the absence of scheduled drag handles. Backend reservation synchronization remains separate and unimplemented for this queue proposal.

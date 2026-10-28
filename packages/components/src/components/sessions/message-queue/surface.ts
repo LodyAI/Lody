@@ -4,6 +4,9 @@ import { duration, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 
 const TOUCH = '@media (pointer: coarse), (max-width: 600px)';
 const NO_HOVER = '@media (hover: none)';
+/** Touch row height and its More box: non-overlapping, see the touch-actions Spec. */
+const TOUCH_ROW = 36;
+const TOUCH_MORE_WIDTH = 40;
 
 /** One line of queue text; the gutter, index and actions center on this box. */
 export const QUEUE_LINE = text.subheadlineLeading;
@@ -32,20 +35,22 @@ export const queueSurface = stylex.create({
     transitionProperty: 'background-color',
     transitionDuration: duration.fast,
   },
+  // Touch rows are dense: 36 px tall, matching the 40 × 36 More box, so a short
+  // sheet shows every row without scrolling.
   roomyRow: {
-    minHeight: 44,
+    minHeight: { default: 40, [TOUCH]: TOUCH_ROW },
     alignItems: 'center',
     paddingInlineStart: space[1.5],
     paddingInlineEnd: { default: space[1.5], [TOUCH]: 0 },
     paddingBlock: { default: space[1], [TOUCH]: 0 },
-    columnGap: space[2],
+    columnGap: { default: space[2], [TOUCH]: space[1] },
     backgroundColor: {
       default: 'transparent',
       ':hover': { default: colors.hoverFill, [NO_HOVER]: 'transparent' },
     },
     flexWrap: 'wrap',
     display: { default: 'flex', [TOUCH]: 'grid' },
-    gridTemplateColumns: { default: null, [TOUCH]: 'minmax(0, 1fr) 44px' },
+    gridTemplateColumns: { default: null, [TOUCH]: `minmax(0, 1fr) ${TOUCH_MORE_WIDTH}px` },
   },
   airyRow: { minHeight: 48, paddingInline: space[3], paddingBlock: space[1.5] },
   editingRow: { backgroundColor: { default: colors.hoverFill, ':hover': colors.hoverFill } },
@@ -66,7 +71,10 @@ export const queueSurface = stylex.create({
     opacity: 0.86,
   },
   preparingText: { opacity: 0.55 },
-  roomyText: { fontSize: text.bodySize, lineHeight: text.bodyLeading },
+  roomyText: {
+    fontSize: { default: text.bodySize, [TOUCH]: text.subheadlineSize },
+    lineHeight: { default: text.bodyLeading, [TOUCH]: QUEUE_LINE },
+  },
   editorText: { fontSize: text.subheadlineSize, lineHeight: QUEUE_LINE },
   actions: {
     display: 'flex',
@@ -84,18 +92,21 @@ export const queueSurface = stylex.create({
     gridColumn: { default: null, [TOUCH]: 2 },
     gridRow: { default: null, [TOUCH]: 1 },
   },
-  roomyAction: { minHeight: { default: 32, [TOUCH]: 44 }, minWidth: { default: 32, [TOUCH]: 44 } },
+  roomyAction: {
+    minHeight: { default: 32, [TOUCH]: TOUCH_ROW },
+    minWidth: { default: 32, [TOUCH]: TOUCH_MORE_WIDTH },
+  },
   action: {
-    minHeight: { default: null, [TOUCH]: 44 },
-    minWidth: { default: null, [TOUCH]: 44 },
+    minHeight: { default: null, [TOUCH]: TOUCH_ROW },
+    minWidth: { default: null, [TOUCH]: TOUCH_MORE_WIDTH },
   },
   more: {
     display: 'flex',
     appearance: 'none',
     alignItems: 'center',
     justifyContent: 'center',
-    width: 44,
-    height: 44,
+    width: TOUCH_MORE_WIDTH,
+    height: TOUCH_ROW,
     flexShrink: 0,
     padding: 0,
     borderWidth: 0,
@@ -131,8 +142,8 @@ export const queueSurface = stylex.create({
     alignItems: 'center',
     gap: space[2],
     paddingInline: space[1.5],
-    paddingTop: space[2],
-    paddingBottom: 2,
+    paddingTop: { default: space[2], [TOUCH]: space[1.5] },
+    paddingBottom: { default: 2, [TOUCH]: 0 },
     fontSize: text.captionSize,
     lineHeight: text.captionLeading,
     fontWeight: 500,
@@ -147,7 +158,6 @@ export const queueSurface = stylex.create({
     alignItems: 'center',
     gap: 3,
     marginInlineStart: -4,
-    marginInlineEnd: 2,
     paddingInline: 4,
     borderWidth: 0,
     borderRadius: radius.mini,
@@ -157,7 +167,6 @@ export const queueSurface = stylex.create({
     fontFamily: 'inherit',
     fontSize: 'inherit',
     lineHeight: 'inherit',
-    fontWeight: 500,
     fontVariantNumeric: 'tabular-nums',
     whiteSpace: 'nowrap',
     cursor: 'pointer',

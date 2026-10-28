@@ -24,7 +24,7 @@ has nothing to show; never with a gap, and never inside the input area.
 
 Rows are inset tiles without hairline dividers; desktop rows share a 16 px index
 gutter, mobile rows drop it. Actions always end the row. Mobile rows, and any sheet
-narrower than 520 px, fold them into one More button (a real 44 px box on touch)
+narrower than 520 px, fold them into one More button (a real 40 × 36 px box on 36 px touch rows)
 whose menu preserves Steer, move-to-top, edit and delete when applicable. Prior intent:
 [queue touch actions](../../../../../../specs/message-queue-touch-actions.md).
 

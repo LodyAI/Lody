@@ -74,7 +74,7 @@ export function ScheduledQueueRow({
         )}
         style={{
           display: '-webkit-box',
-          WebkitLineClamp: roomy ? 1 : 2,
+          WebkitLineClamp: roomy || compact ? 1 : 2,
           WebkitBoxOrient: 'vertical',
         }}
       >
