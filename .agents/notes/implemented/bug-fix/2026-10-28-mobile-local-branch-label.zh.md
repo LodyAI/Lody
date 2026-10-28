@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1997](https://github.com/LodyAI/Lody/pull/1997)
 
 [English](2026-10-28-mobile-local-branch-label.md)
 
