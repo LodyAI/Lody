@@ -141,6 +141,7 @@ describe('queued message editing commits', () => {
             },
           ],
           onOpenScheduled: (item) => opened.push(item.scheduleId),
+          onCancelScheduled: () => {},
           onRemove: () => {},
           onReorder: () => {},
           onEditStart: () => {},
@@ -163,7 +164,8 @@ describe('queued message editing commits', () => {
     for (const row of scheduledRows) {
       expect(row.querySelector('[aria-label="Drag to reorder"]')).toBeNull();
       expect(row.querySelector('button[aria-label*="Edit scheduled time"]')).not.toBeNull();
-      expect(row.querySelector('button[aria-label="More"]')).not.toBeNull();
+      expect(row.querySelector('button[aria-label="Edit"]')).not.toBeNull();
+      expect(row.querySelector('button[aria-label="Cancel scheduled message"]')).not.toBeNull();
     }
     await act(async () => scheduledRows[0]!.querySelector<HTMLButtonElement>('button')!.click());
     expect(opened).toEqual(['earlier']);

@@ -90,7 +90,7 @@ const styles = stylex.create({
     paddingInline: { default: space[4], '@media (max-width: 600px)': space[2] },
     fontSize: text.footnoteSize,
   },
-  onlyScheduledHeader: { minHeight: 36, paddingBlock: 2 },
+  onlyScheduledHeader: { minHeight: 32, paddingBlock: 2 },
   title: { fontWeight: 500 },
   count: { marginInlineStart: space[1.5] },
   status: {
