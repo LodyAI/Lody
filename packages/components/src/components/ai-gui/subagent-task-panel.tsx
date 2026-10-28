@@ -148,7 +148,11 @@ function TaskRows({
   );
 }
 
-/** A tab's label, with a spinner while any of its tasks is still live. */
+/**
+ * A tab's label, with a spinner while any of its tasks is still live. The mark
+ * is cut to the label's cap height: at its usual size it outweighs the 13px
+ * label beside it and pulls the eye off the text's centre.
+ */
 function GroupTab({ group, tasks }: { group: TaskGroup; tasks: readonly SubagentTask[] }) {
   const { t } = useTranslation();
   const running = tasks.some(isRunning);
@@ -158,7 +162,7 @@ function GroupTab({ group, tasks }: { group: TaskGroup; tasks: readonly Subagent
       : t('sessions.subagentTasks.tasksTab', 'Tasks');
   return (
     <Tabs.Tab value={group} data-subagent-task-tab={group}>
-      {running ? <Spinner size="small" /> : null}
+      {running ? <Spinner size="small" label={null} className="size-3" /> : null}
       <span>{label}</span>
     </Tabs.Tab>
   );
