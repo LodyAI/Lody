@@ -2311,6 +2311,8 @@
   "sessions.subagentTasks.backgroundCount": "{{count}} in background",
   "sessions.subagentTasks.backgroundCount_one": "{{count}} in background",
   "sessions.subagentTasks.backgroundCount_other": "{{count}} in background",
+  "sessions.subagentTasks.subagentsTab": "Subagents",
+  "sessions.subagentTasks.tasksTab": "Tasks",
   "sessions.subagentTasks.cancelling": "Cancelling…",
   "sessions.subagentTasks.cancelFailed": "Could not cancel the subagent.",
   "sessions.subagentTasks.defaultActor": "Task",

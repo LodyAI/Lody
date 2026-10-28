@@ -242,6 +242,54 @@ describe('SubagentTaskPanel', () => {
     expect(container.textContent).toContain('2 tasks · 1 in background');
   });
 
+  it('splits subagents from other tasks into tabs only when a turn has both', async () => {
+    const shownIds = () =>
+      Array.from(container.querySelectorAll('[data-subagent-task-id]')).map((node) =>
+        node.getAttribute('data-subagent-task-id')
+      );
+    const tab = (group: string) =>
+      container.querySelector<HTMLElement>(`[data-subagent-task-tab="${group}"]`);
+    const agent = task({
+      taskId: 'agent',
+      actor: 'Explore',
+      taskKind: 'background',
+      isBackgrounded: true,
+      status: 'in_progress',
+      run: run('running'),
+    });
+    const doneAgent = task({ taskId: 'done-agent', subagentType: 'Plan', status: 'completed' });
+    const shell = task({ taskId: 'shell', actor: 'local_bash', status: 'completed' });
+    const monitor = task({ taskId: 'monitor', taskType: 'monitor_mcp', status: 'completed' });
+    const wakeup = task({ taskId: 'wakeup', taskKind: 'scheduled', status: 'pending' });
+
+    // One kind is one list, with no strip to choose from.
+    render([agent, doneAgent]);
+    expect(tab('subagents')).toBeNull();
+    expect(shownIds()).toEqual(['agent', 'done-agent']);
+    render([shell, { ...monitor, status: 'in_progress' }]);
+    expect(tab('tasks')).toBeNull();
+    expect(shownIds()).toEqual(['shell', 'monitor']);
+
+    // A backgrounded agent is still a subagent; Subagents is chosen first, and
+    // each tab says whether anything on it is still running.
+    render([shell, agent, doneAgent, monitor]);
+    expect(shownIds()).toEqual(['agent', 'done-agent']);
+    expect(container.textContent).toContain('Waiting on 1 task');
+    expect(tab('subagents')?.textContent).toBe('Subagents1');
+    expect(tab('subagents')?.querySelector('[data-slot="spinner"]')).not.toBeNull();
+    expect(tab('tasks')?.textContent).toBe('Tasks2');
+    expect(tab('tasks')?.querySelector('[data-slot="spinner"]')).toBeNull();
+
+    await act(async () => tab('tasks')?.click());
+    expect(shownIds()).toEqual(['shell', 'monitor']);
+
+    // The chosen tab survives the tasks changing under it.
+    render([shell, agent, doneAgent, monitor, wakeup]);
+    expect(shownIds()).toEqual(['shell', 'monitor', 'wakeup']);
+    expect(tab('tasks')?.textContent).toBe('Tasks1');
+    expect(tab('tasks')?.querySelector('[data-slot="spinner"]')).not.toBeNull();
+  });
+
   it('links a Core background task to its full command while retaining its brief', async () => {
     const command = 'pnpm install\npnpm run build --filter @lody/components 2>&1';
     const background = task({

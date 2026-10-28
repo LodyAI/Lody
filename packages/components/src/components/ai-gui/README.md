@@ -289,7 +289,13 @@ second line with its latest step, taken from the last `run.items` entry, then
 `run.progress`, then the legacy `summary`/`lastToolName`, so older tasks keep
 working. While any task is pending or running, the finished turn keeps this
 panel after its answer; once every task is terminal, the panel returns to the
-folded work details. A row opens the panel's ONE dialog by task id (not a snapshot), so a
+folded work details. When a turn has both agent runs and other tasks (shell
+commands, MCP tasks, monitors, scheduled wakeups), the rows split into a Subagents
+tab, selected first, and a Tasks tab; each tab shows a spinner and its running
+count while live. `groupOf` infers the split from task types because `taskKind`
+marks backgrounding, not agent versus command
+([decision](../../../../../.agents/notes/implemented/feature/2026-10-28-subagent-task-tabs.md)).
+A row opens the panel's ONE dialog by task id (not a snapshot), so a
 streaming run keeps updating inside it and the view follows the end only while
 the reader is there. `subagent-run-history.tsx` groups `run.items` with the conversation's
 `buildAssistantTurnRenderBlocks`; `view.tsx` supplies the same activity headers,
