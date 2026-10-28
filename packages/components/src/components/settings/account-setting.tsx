@@ -5,6 +5,8 @@ import { useRouter } from '@tanstack/react-router';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { cloudOperations } from '@/lib/cloud-api-operations';
+import { usePlatform } from '@lody/platform/react';
+import { E2eeTeamSettingsHost } from './e2ee-team-settings';
 import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
 import { Invitation } from 'better-auth/plugins';
 import { toast } from '@/lib/toast';
@@ -100,21 +102,27 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
   const currentUser = session?.user ?? null;
   const currentUserId = currentUser?.id ?? null;
   const activeOrganizationId = activeOrganization?.id;
+  const encrypted = Boolean(
+    activeOrganization &&
+    'contentMode' in activeOrganization &&
+    activeOrganization.contentMode === 'e2ee'
+  );
+  const platform = usePlatform();
   const memberLimitState = useCloudQuery(
     cloudOperations.billing.getWorkspaceMemberLimitState,
-    activeOrganizationId ? { workspaceId: activeOrganizationId } : 'skip'
+    activeOrganizationId && !encrypted ? { workspaceId: activeOrganizationId } : 'skip'
   );
   // Admission accrues any additional seat fee; collection is deferred to the billing date.
   const seatInvitePreview = useCloudQuery(
     cloudOperations.billing.getWorkspaceSeatInvitePreview,
-    activeOrganizationId ? { workspaceId: activeOrganizationId } : 'skip'
+    activeOrganizationId && !encrypted ? { workspaceId: activeOrganizationId } : 'skip'
   );
   // Deleting a paid workspace needs a billing-aware guard: a live subscription
   // blocks deletion (cancel first); a cancel-scheduled one gets a warning that
   // deletion preserves its scheduled end and any accrued charges.
   const billingOverview = useCloudQuery(
     cloudOperations.billing.getBillingOverview,
-    activeOrganizationId ? { workspaceId: activeOrganizationId } : 'skip'
+    activeOrganizationId && !encrypted ? { workspaceId: activeOrganizationId } : 'skip'
   );
   const deleteBillingGuard: WorkspaceDeleteBillingGuard | null = useMemo(() => {
     if (
@@ -195,7 +203,7 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
   );
 
   useEffect(() => {
-    if (!activeOrganizationId) {
+    if (!activeOrganizationId || encrypted) {
       setPendingInvitations([]);
       return;
     }
@@ -206,7 +214,7 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
       );
     };
     void fetchPendingInvitations();
-  }, [activeOrganizationId, listOrganizationInvitations]);
+  }, [activeOrganizationId, encrypted, listOrganizationInvitations]);
 
   useEffect(() => {
     if (memberLimitState?.canInvite === true) {
@@ -715,7 +723,7 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
       currentUser={currentUser}
       organization={activeOrganization}
       role={role as 'owner' | 'admin' | 'member'}
-      hasAdminPermission={hasAdminPermission}
+      hasAdminPermission={hasAdminPermission && !encrypted}
       members={sortedMembers}
       pendingInvitations={pendingInvitations}
       accountMachinesSlot={surface === 'account' ? <AccountMachinesOverview /> : undefined}
@@ -723,7 +731,7 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
         surface === 'account' && billingUiAvailable ? <DeletedWorkspaceBilling /> : undefined
       }
       workspaceOwnershipSlot={
-        role === 'owner' && currentUserId ? (
+        !encrypted && role === 'owner' && currentUserId ? (
           <WorkspaceOwnershipTransfer
             key={activeOrganization.id}
             workspaceName={activeOrganization.name}
@@ -741,7 +749,20 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
         ) : undefined
       }
       workspaceJoinRequestsSlot={
-        role === 'owner' ? (
+        encrypted && platform.e2eeWorkspaces?.runtime && currentUserId ? (
+          <E2eeTeamSettingsHost
+            runtime={platform.e2eeWorkspaces.runtime}
+            workspaceId={activeOrganization.id}
+            accountId={currentUserId}
+            labels={
+              new Map(
+                activeOrganization.members.map(
+                  (member) => [member.id, member.user.name || member.user.email] as const
+                )
+              )
+            }
+          />
+        ) : role === 'owner' && !encrypted ? (
           <WorkspaceJoinRequestsSettings workspaceId={activeOrganization.id} />
         ) : undefined
       }

@@ -1,6 +1,7 @@
 # 明确 Agent Note 的更新条件
 
 Status: implemented
+Archived: 2026-10-28
 Translation: current
 PR: https://github.com/LodyAI/Lody/pull/466
 

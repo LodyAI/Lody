@@ -57,8 +57,9 @@ gated local Machine RPC, never a remote fallback. Secret fields do not read back
 `@napi-rs/keyring` uses Keychain, Credential Manager or Linux Secret Service. Missing or
 locked secure storage reports failure without plaintext fallback. Anonymous services
 work without a secure-store backend; OS interaction still needs platform acceptance.
-Sign-out closes local connections and deletes the local record. Provider-side consent
-revocation is not implemented.
+Sign-out closes HTTP relays and deletes the local record. Already running stdio
+processes retain their environment until restarted. Provider-side consent revocation
+and automatic vault deletion on catalog removal are not implemented.
 
 HTTP relays bind selected entry, exact runtime instance and requester. Agents receive
 random local capabilities. The relay rejects Origin/foreign Host; Linux also proves
@@ -72,42 +73,31 @@ Browser codes/verifiers remain attempt-local; UI status contains no tokens.
 
 ## Evidence and limits
 
-Synthetic tests exercise the real SDK authorization-code/PKCE and refresh flow,
-callback state/replay/refusal, cancellation and late UI replies, target/principal
-isolation, relayed credentials/header filtering, local-only RPC, shared-write rejection
-and legacy normalization. Existing discovery and Session lifecycle suites also run;
-final commands/results belong to the task report. HTTP, listener and vault ports are
-injected; tests do not contact live providers.
+[Service fixtures](../../../../apps/cli/src/mcp/authentication/service.test.ts) exercise
+the real SDK authorization-code/PKCE and refresh flow with injected provider HTTP,
+clocks and vault ports. They cover cancellation, late exchange results, earlier-login
+preservation and destination/principal/issuer isolation.
+[Listener fixtures](../../../../apps/cli/src/mcp/authentication/io.test.ts) cover callback
+state, replay/refusal and relay admission. [Settings tests](../../../../packages/components/tests/mcp-setting.test.tsx),
+[local RPC routing](../../../../packages/components/tests/workspace-machine-rpc-facade.test.ts)
+and [catalog tests](../../../../packages/shared/tests/workspace-flock.test.ts) cover
+explicit authorization, late replies, local-only credential transport, shared-write
+rejection and legacy normalization. [Session cleanup tests](../../../../apps/cli/tests/session-terminate-cleanup.test.ts)
+cover independent release. Tests do not contact live providers or exercise real OS vaults.
 
 Earlier public [Slim Tools metadata](https://slim.tools/.well-known/oauth-authorization-server)
-advertised registration, authorization-code/refresh grants and S256. A later Python
-initialize probe returned Cloudflare 403 without an OAuth challenge. No real account
-consent, authenticated Slim call or production token persistence was performed.
+advertised registration, authorization-code/refresh grants and S256. An initialize
+probe also returned Cloudflare 403 without an OAuth challenge. Live Slim consent,
+authenticated provider calls, production token persistence and secure-store acceptance
+on each supported OS remain unverified. The independent authorization view has
+[Storybook states](../../../../packages/components/src/stories/McpAuthentication.stories.tsx);
+this does not establish a full Electron smoke test.
+
 [Magpie](https://github.com/yetone/magpie/blob/main/internal/mcpauth/mcpauth.go) was a
 reference for local custody/relaying, not proof of universal compatibility. Standards:
 [RFC 8252](https://www.rfc-editor.org/rfc/rfc8252.html),
 [MCP authorization](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization).
+Remote callback management, provider revocation and credential sharing remain outside
+this implementation.
 
-The isolated checkout reuses installed dependencies and pinned metadata for uninitialized
-ACP submodules. Required context/local-agent-ownership.md and context/message-flow.md
-are absent in this revision; current scoped contracts and identity/peer-uid code supplied
-the available evidence. Remote callback management, OS acceptance, provider revocation
-and credential sharing remain outside this implementation. Draft PR: [#1938](https://github.com/LodyAI/Lody/pull/1938).
-
-The independent authorization view was rendered with a minimal Storybook wrapper;
-required, unsaved, waiting and authorized states were checked in-browser. The full
-shared Storybook shell hit an existing Loro WASM initialization error in this
-symlinked dependency checkout; this is not a full Electron smoke test.
-
-On the latest-main PR base, 40 CLI authentication/discovery/configuration/selection,
-81 component and 46 shared tests passed (167 total). Shared typecheck, scoped lint,
-`pnpm format`, i18n and all eight boundary guards passed. Documentation check retains
-six missing Kimi/Pi submodule links, with no new errors or protected topics.
-
-Full `pnpm check` and CLI/components typechecks were attempted but remain blocked by
-reused dependencies: missing newer E2EE/Streams packages and stale Roost/ACP APIs.
-After loading current pinned ACP sources, three Session suites still fail during
-module initialization because cached Claude SDK metadata is older than the runtime
-manifest. Effect patch lint cannot load missing `@effect/tsgo`. Local Node 24.14.0 is
-below latest main's runtime floor. Before rebasing, all three package typechecks and
-157 focused tests passed; those results do not validate the newer dependency graph.
+PR: [#1938](https://github.com/LodyAI/Lody/pull/1938).

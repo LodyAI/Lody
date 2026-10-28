@@ -6,7 +6,7 @@
 
 ## VerifiedLedger
 
-*需要 `WorkspaceScope`、`LedgerViewSource`、`LedgerPinStore`。*
+_需要 `WorkspaceScope`、`LedgerViewSource`、`LedgerPinStore`。_
 
 唯一的回滚与分叉守卫。`current()` 获取视图后，只有同时满足以下条件才接受：
 
@@ -19,13 +19,13 @@
 
 ## LedgerFeed
 
-*需要 `WorkspaceScope`、`LedgerFeedStore`。选项：起点、期望检查点、预算。*
+_需要 `WorkspaceScope`、`LedgerFeedStore`。选项：起点、期望检查点、预算。_
 
 本地已验证的账本副本。起点是创世记录，或经过背书的快照（每次打开都要重新提供 `trust`）。打开时重新验证所有已存字节，直到独立提供的 `expected` 检查点。`accept(page, checkpoint)` 验证一页 `LedgerFeedSource` 数据（拒绝重复、过旧或回退的页面）并原子追加；内存中的视图只在写入提交后才改变。预算超限时失败关闭，从不删除已提交历史。`LedgerFeed.viewSource` 把 feed 转为 `LedgerViewSource`。
 
 ## LedgerSubmission
 
-*需要 `WorkspaceScope`、`SubmissionJournal`、`LedgerLog`。*
+_需要 `WorkspaceScope`、`SubmissionJournal`、`LedgerLog`。_
 
 每个工作区一次只提交一条签名记录，且恰好一次：
 
@@ -41,7 +41,7 @@ acknowledge(r):  释放已完成的结果
 
 ## InstalledEpochKeys 与 InstalledEpochHistory
 
-*需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`KeyProtector`、`InstalledKeyStore`。*
+_需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`KeyProtector`、`InstalledKeyStore`。_
 
 本地密钥材料的唯一所有者。`saveAndReload(epoch, key)` 按以下顺序执行：
 
@@ -56,7 +56,7 @@ acknowledge(r):  释放已完成的结果
 
 ## KeyReceiver
 
-*需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`InstalledEpochKeys`、`KeyMailbox`、`ReceiveJournal`。*
+_需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`InstalledEpochKeys`、`KeyMailbox`、`ReceiveJournal`。_
 
 安装本设备收到的密钥并报告安装结果。
 
@@ -76,17 +76,18 @@ results() / acknowledge(id)   已结束任务保留到确认为止
 
 - 报告是签名的安装声明，不是托管证明。
 - `fetchAndInstall` 在写入任何内容前复制并校验整页；任一安装失败时不返回 `next`。`MailboxInstallError` 指明失败的帧（发送者、`frameDigest`），由应用决定是否请求修复。
+- 邮箱页中的路由无法解析，或 sender/工作区/epoch/收件人提示与信封原件不一致时，仅跳过本次，不登记任务、不拒绝 digest；正常元数据恢复后仍可重试。同页后续信封继续通过完整验签、权限、HPKE、commitment 检查。`processed` 是扫描行数，不是已安装密钥数量；实际安装失败仍不返回 `next`。
 - 只有真实的账本变化才把任务结束为 `Obsolete` 或 `Revoked`。
 
 ## KeyRepair
 
-*需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`KeyMailbox`、`RepairJournal`。*
+_需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`KeyMailbox`、`RepairJournal`。_
 
 当本设备无法安装当前密钥时，请求发送者重新投递。`enqueue(id, rejectedDigest?)` 在发送任何内容之前，把调用方选定的稳定 ID 与当前纪元及可选的被拒帧持久绑定；以不同字段复用同一 ID 会以 `replay` 失败。`flush` 发送待处理请求（邮箱按 ID 去重），并以 `Repaired`、`Obsolete` 或 `Revoked` 结束。`Repaired` 只记录请求成功，绝不表示已安装。
 
 ## KeyDistributor
 
-*需要接收者的全部端口，外加 `KeyReceiver`、`DeliveryOutbox`、`DistributionJournal`、`EpochPublicationSource`。*
+_需要接收者的全部端口，外加 `KeyReceiver`、`DeliveryOutbox`、`DistributionJournal`、`EpochPublicationSource`。_
 
 确保每台当前设备都能拿到当前密钥。
 
@@ -102,7 +103,7 @@ results() / acknowledge()   已完成任务保留到确认为止
 
 ## EpochPublisher
 
-*需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`InstalledEpochKeys`、`CandidateProtector`、`EpochStagingStore`、`LedgerSubmission`、`EpochCandidateStore`。*
+_需要 `WorkspaceScope`、`DeviceIdentity`、`VerifiedLedger`、`InstalledEpochKeys`、`CandidateProtector`、`EpochStagingStore`、`LedgerSubmission`、`EpochCandidateStore`。_
 
 换代纪元密钥（`publish`），或在一条签名记录中移除成员并换代（`publishRemoving`，仅 owner）。
 
@@ -114,13 +115,30 @@ results() / acknowledge()   已完成任务保留到确认为止
 → Committed：经 InstalledEpochKeys 安装 | Conflict：丢弃候选密钥
 ```
 
-`resume` 在崩溃后完成同一个候选，不再签名。`cleanupStaged` 在该纪元被不同承诺占用后删除本设备的暂存组。`acknowledge` 释放已完成的结果。只有 owner 或 admin 的个人设备可以换代。绕过暂存直接追加的管理者可以扣留密钥：这是已知的可用性限制，不破坏机密性。
+`resume` 在崩溃后完成同一个候选，不再签名。匹配的 publication 原件进入 `LedgerSubmission` 后，恢复跳过重复暂存／读回，直接对账同一 CAS，不再依赖暂存服务可用。只有 candidate、尚无 submission 时，首次提交仍须完整暂存并精确读回。`cleanupStaged` 在该纪元被不同承诺占用后删除本设备的暂存组。`acknowledge` 释放已完成的结果。只有 owner 或 admin 的个人设备可以换代。绕过暂存直接追加的管理者可以扣留密钥：这是已知的可用性限制，不破坏机密性。
+
+MVP 独立移除在 capability 1 的 `DeclareCapabilities` 命令入账后，使用 `WorkspaceControl.execute({ _tag: "RemoveMember", membershipId })`。它撤销全部设备，保留 epoch 并提示手动换代；`EpochPublisher.publishRemoving` 仍保留独立的 tag8 原子契约。
+
+Candidate 丢失时，只有真实提交或冲突证明后才能对账同一 submission 原件，
+parent 未变化时不能因此发 CAS。正常 receiver 可独立安装已提交密钥；已安装密钥
+允许终态确认，无须重新打开 candidate blob。未发布密钥不得绕过 CandidateProtector，
+未知结果不得重新签署。
 
 ## WorkspaceControl 与密钥轮次
 
-`WorkspaceControl`（*需要 `DeviceIdentity`、`LedgerSubmission`、`LedgerSync`*）在刚刷新的视图上签名普通命令（接纳成员或设备、设置角色、吊销、转移 owner），每条只提交一次。存在待处理或未确认的提交时禁止新的签名；只有本地 feed 已包含提交时观察到的检查点，结果才会被确认。
+`WorkspaceControl`（_需要 `DeviceIdentity`、`LedgerSubmission`、`LedgerSync`_）在刚刷新的视图上签名普通命令（接纳成员或设备、设置角色、吊销、转移 owner），每条只提交一次。存在待处理或未确认的提交时禁止新的签名；只有本地 feed 已包含提交时观察到的检查点，结果才会被确认。
 
-`runWorkspaceKeyRound(limit, cursors)`（*需要 `KeyRepair`、`KeyReceiver`、`KeyDistributor`*）是一轮有限的维护：发送修复、恢复安装、获取一页邮箱、发送报告、协调并投递、再次发送报告、列出结果。每个队列各自保留游标提示。
+`runWorkspaceKeyRound(limit, cursors)`（_需要 `KeyRepair`、`KeyReceiver`、`KeyDistributor`_）是一轮有限的维护：发送修复、恢复安装、获取一页邮箱、发送报告、协调并投递、再次发送报告、列出结果。每个队列各自保留游标提示。
+
+
+收钥（包括已提交的暂存组）与发钥是分别尝试的有限阶段。收钥失败不能阻止协调和投递。
+`WorkspaceKeyRoundFailure` 分别保留 `receive`、`distribution` 的 Result、发钥后报告的 Result
+和重试 `cursors`；成功阶段可前进，失败阶段保留输入游标。整轮成功时沿用原结果字段。
+
+邮箱获取会跳过非当前 sender，不安装或保存其密钥。只有精确路由上的严格签名和真实账本中
+已退出当前成员状态的历史身份，才能产生 `retiredDigests`，由轮次提交按摘要绑定的修复。
+未知 sender 只设置 `refreshRequired`，不拒绝摘要。宿主必须刷新已验证账本后重试；工作区
+门面已有账本源刷新，桌面维护则在独立发钥之后，通过现有已验证历史摄入路径每次最多刷新一次。
 
 ## E2eeWorkspace
 
@@ -130,15 +148,15 @@ results() / acknowledge()   已完成任务保留到确认为止
 
 ## 恢复
 
-`RecoveryVaults`（*需要 `RecoveryVaultStore`、`RecoveryVaultLocalStore`*）创建并解锁 vault-v1：离线保存的恢复文件，或 passkey PRF。`makeWorkspaceRecovery` 维护某个工作区的恢复条目（设置、测试、替换、跳过）并执行恢复：恢复设备接纳新的个人设备，再由该设备安装所有纪元密钥。方案见白皮书的备份与恢复一节及[恢复 vault](../../../specs/e2ee/recovery-vault.zh.md)。
+`RecoveryVaults`（_需要 `RecoveryVaultStore`、`RecoveryVaultLocalStore`_）创建并解锁 vault-v1：离线保存的恢复文件，或 passkey PRF。`makeWorkspaceRecovery` 维护某个工作区的恢复条目（设置、测试、替换、跳过）并执行恢复：恢复设备接纳新的个人设备，再由该设备安装所有纪元密钥。方案见白皮书的备份与恢复一节及[恢复 vault](../../../specs/e2ee/recovery-vault.zh.md)。
 
 ## 文档
 
 文档内容使用 content v0：签名头部，以由纪元密钥派生的文档密钥做 XChaCha20-Poly1305 加密，AAD 绑定用途。
 
 - **Loro / streams-crdt**：`streamsDocumentBinding({ resource, model, writeEpoch })`（`@lody/e2ee-core/adapters/loro-streams`）是 `@loro-dev/streams-crdt` 文档的载荷保护绑定。它封装更新（头部 3）与快照（头部 4，续读 offset 位于签名头部内），并打开读到的内容。签名器、账本视图与密钥分别取自 `DeviceIdentity`、`VerifiedLedger` 与 `InstalledEpochHistory`。
-- **其他传输**：`sealDocument`、`openDocument` 与 `authenticateDocument`（`/protocol`）接收文档密钥、签名器和已验证视图的查询函数。新的封装要求在确切的当前纪元具有当前写权限，加密前与签名后各检查一次；每次执行都重新加密，因此重试必须重发返回的字节。
-- 读取时先认证历史作者再解密：被吊销作者的旧内容仍可打开并归属到原成员（快照之后同样如此），但这不授予当前写权限。
+- **其他传输**：`sealDocument`、`openDocument` 与 `authenticateDocument`（`/protocol`）接收文档密钥、签名器和已验证视图的查询函数。新的封装要求当前写权限及不晚于当前的已验证发布纪元，加密前与签名后各检查一次；待手动换代时仍可使用保留密钥发送；每次执行都重新加密，因此重试必须重发返回的字节。
+- 读取时先认证历史作者再解密：被吊销作者的旧内容仍可打开并归属到原成员（账本快照之后同样如此），但这不授予当前写权限。Streams 快照和增量都要求历史账本准入、有效签名、可解 epoch 与 AEAD；读取不要求作者当前仍有效。
 
 ## 投递（分发器内部）
 
@@ -170,3 +188,5 @@ retained 起点包含本调用方导出的完整 v2 状态，以及紧接其后�
 原始凭证的 SHA-256（32）。调用方必须传入可信的会话和 genesis；签名有效不代表设备已入账，
 也不能代替持钥证明。验证沿用严格 Ed25519 规则。创建者的第一台设备不需要这份证明。
 `test/foundation.test.ts` 保存固定签名向量，并检查所有上下文字段被替换时都拒绝。
+
+桌面维护的错误分类、独立分页与终态消费见[收发钥可用性](../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-key-maintenance-availability.zh.md)。`MailboxInstallError.cryptographicRejection` 仅标记信封验证阶段确定的拒绝；本地写入、报告签名和未知原生错误不能授权拒绝信封。

@@ -66,7 +66,8 @@
     "react": "catalog:",
     "react-dom": "catalog:",
     "zod": "catalog:",
-    "@lody/cloud-api": "workspace:*"
+    "@lody/cloud-api": "workspace:*",
+    "@lody/loro-streams-rpc": "workspace:*"
   },
   "devDependencies": {
     "@lody/e2ee-core": "workspace:*",

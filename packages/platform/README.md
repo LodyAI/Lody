@@ -66,3 +66,11 @@ The file-keychain fixture does not validate app entitlements, signed Electron/CL
 packaging, screen lock, a human denying access, upgrades or unattended operation.
 Windows/Linux stores and actual Web/iOS/Android devices need separate adapters and
 validation; none inherit this macOS result. All-platform Beta remains unaccepted.
+
+## Team membership
+
+The optional runtime member methods submit a native signed KeyPackage, inspect
+pending applications, approve/reject, revoke an invitation and reconcile key
+installation. Email automatic admission and link approval remain distinct.
+Callers must retain the original request on a lost response; membership and key
+readiness are separate. Credentials and private keys never cross this port.

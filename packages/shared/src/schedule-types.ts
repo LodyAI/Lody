@@ -1,7 +1,12 @@
 import { MemoryBindingSchema } from './memory-provider';
 import { z } from 'zod';
 
-import { AcpConfigOptionValueSchema, ProjectRefSchema } from './message-schemas';
+import {
+  AcpConfigOptionValueSchema,
+  ProjectRefSchema,
+  SessionInputBlocksSchema,
+  ACPTurnConfigSchema,
+} from './message-schemas';
 import type { ProjectRef } from './project';
 import { classifyPermissionModeFace, type AcpConfigOptionSummary } from './ai';
 import { isSensitiveAcpConfigOptionId } from './acp-config-option-sensitivity';
@@ -11,6 +16,12 @@ export const SCHEDULE_PROMPT_MAX_BYTES = 32 * 1024;
 export { SCHEDULES_PROTOCOL_VERSION as SCHEDULE_PROTOCOL_VERSION } from './machine-protocol-capabilities';
 export const SCHEDULE_DISPATCH_MAX_ATTEMPTS = 5;
 export const SCHEDULE_DISPATCH_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+/**
+ * Completed one-time messages keep their definition and Registry row for a
+ * quiet period, then the owner purges the document. The tombstone remains to
+ * reject stale offline writes.
+ */
+export const SCHEDULED_MESSAGE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export const SCHEDULE_MISFIRE_GRACE_MS = 2 * 60 * 1000;
 export const SCHEDULE_RETRY_DELAYS_MS = [30_000, 120_000, 600_000, 1_800_000] as const;
 
@@ -124,6 +135,7 @@ export function normalizeLegacyScheduleAgent(
 export const ScheduleDefinitionSchema = z
   .object({
     scheduleId: identifier,
+    messageVersion: z.literal(1).optional(),
     title: z.string().trim().min(1).max(200),
     ownerId: z.string().min(1),
     // Pin execution to the machine that the human authorized. Moving an Agent
@@ -164,9 +176,35 @@ export const ScheduleActivitySchema = z
   .strict();
 export type ScheduleActivity = z.infer<typeof ScheduleActivitySchema>;
 
+/** Frozen human-authored message; absent on legacy prompt-only tasks. */
+export const ScheduledMessageSchema = ACPTurnConfigSchema.pick({
+  mcpServerIds: true,
+  agentRoleId: true,
+  agentRoleRevision: true,
+  agentRoleSnapshot: true,
+})
+  .extend({
+    inputBlocks: SessionInputBlocksSchema.min(1).refine(
+      (blocks) => blocks.some((block) => block.type !== 'text' || block.text.trim().length > 0),
+      'Message must contain content'
+    ),
+    rolePromptPrefix: z.string().max(32768).optional(),
+  })
+  .strict();
+export type ScheduledMessage = z.infer<typeof ScheduledMessageSchema>;
+
+/** The prompt projection of a complete message; writers and readers must agree byte for byte. */
+export function scheduledMessagePrompt(message: Pick<ScheduledMessage, 'inputBlocks'>): string {
+  return message.inputBlocks
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text)
+    .join('\n');
+}
+
 export type ScheduleDocument = {
   definition: ScheduleDefinition;
   prompt: string;
+  message?: ScheduledMessage;
   timeline: ScheduleActivity[];
 };
 
@@ -184,6 +222,7 @@ export const ScheduleRegistryRowSchema = ScheduleDefinitionSchema.pick({
   updatedAt: true,
 }).extend({
   elevatedPermissions: z.boolean().default(false),
+  scheduledMessage: z.literal(true).optional(),
   definitionFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
   agentConfigId: z.string().min(1),
   projectKind: z.enum(['local', 'github']).optional(),
@@ -199,6 +238,7 @@ export const ScheduleRuntimeRowSchema = z.object({
   nextScheduledAt: timestamp.optional(),
   queueState: z.enum(['due', 'waiting_for_agent', 'retrying', 'blocked']).optional(),
   blockedCode: z.string().max(100).optional(),
+  messageState: z.enum(['pending', 'sent', 'cancelled', 'failed']).optional(),
   lastDispatch: z
     .object({ scheduledFor: timestamp, dispatchedAt: timestamp, sessionId: z.string() })
     .optional(),

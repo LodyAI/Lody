@@ -121,5 +121,5 @@ Keep history requests and receipts aligned in the Zod protocol and both lightwei
 TS/CJS guards. The declared-operation suite must admit each supported operation;
 advertising a capability alone does not prove the local IPC path accepts it.
 
-E2EE pairing (`../e2ee-local-pairing.ts`) stays on the same-user socket; no secrets
-or network listener.
+E2EE: same-user socket only. `e2ee-identity.ts` holds sibling SQLite leases;
+reset drains native owners, archives whole dirs and retains idempotent receipts.

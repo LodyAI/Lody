@@ -241,6 +241,11 @@ export type WorkspaceRuntime = {
     sessionIds: readonly SessionId[] | null
   ) => void;
   setAuthToken: (token: string | null) => Promise<void>;
+  subscribePromptSuggestion: (
+    machineId: MachineId,
+    sessionId: SessionId,
+    listener: (text: string | null) => void
+  ) => () => void;
   subscribeMachineMonitor: (
     machineId: MachineId,
     listener: (snapshot: import('@lody/shared').MachineMonitorSnapshot | null) => void
@@ -405,6 +410,14 @@ export type WorkspaceRuntime = {
     },
     options?: { timeoutMs?: number }
   ) => Promise<SessionDispatchTurnResponse | null>;
+  /** Native original preparation plus an encrypted acceleration attempt; durable activation remains independent. */
+  prepareEncryptedDispatch?: (
+    machineId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
+  ) => Promise<{
+    original: import('@lody/shared/e2ee-rpc').E2eePreparedDispatch;
+    send: () => Promise<import('@lody/shared/e2ee-rpc').E2eeDispatchAck | null>;
+  }>;
   requestSessionPreviewCreate: (
     machineId: MachineId,
     sessionId: SessionId,
@@ -598,7 +611,7 @@ export type WorkspaceRuntimeInitFailure = {
   errorType: string;
   /** Present only when content-mode admission failed. Encryption wording is shown
    * only when the workspace is known to be encrypted or encrypted creation is on. */
-  modeAdmission?: { knownEncrypted: boolean };
+  modeAdmission?: { knownEncrypted: boolean; workspaceId?: string };
 };
 
 export const workspaceRuntimeInitFailureAtom = atom<WorkspaceRuntimeInitFailure | null>(null);

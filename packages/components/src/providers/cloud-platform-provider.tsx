@@ -1,3 +1,4 @@
+import { E2eeTeamInboxHost } from '@/components/e2ee/email-admission-worker';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
 import {
@@ -186,6 +187,18 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
         ? {
             prepareCreation: (request) => native.prepareCreation(request),
             runtime: {
+              createMemberInvitation: (input) => native.createMemberInvitation(input),
+              prepareMemberJoin: (offer) => native.prepareMemberJoin(offer),
+              pendingMemberJoin: (workspaceId) => native.pendingMemberJoin(workspaceId),
+              memberJoinRequests: (workspaceId) => native.memberJoinRequests(workspaceId),
+              approveMemberJoin: (workspaceId, requestId, mode) =>
+                native.approveMemberJoin(workspaceId, requestId, mode),
+              rejectMemberJoin: (workspaceId, requestId) =>
+                native.rejectMemberJoin(workspaceId, requestId),
+              revokeMemberInvitation: (workspaceId, token) =>
+                native.revokeMemberInvitation(workspaceId, token),
+              claimMemberJoin: (workspaceId, requestId) =>
+                native.claimMemberJoin(workspaceId, requestId),
               personalPairingOffer: (workspaceId) => native.personalPairingOffer(workspaceId),
               preparePersonalJoin: (offer) => native.preparePersonalJoin(offer),
               pendingPersonalJoin: (workspaceId) => native.pendingPersonalJoin(workspaceId),
@@ -197,18 +210,44 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
                 native.claimPersonalJoin(workspaceId, pairingSessionId),
               cancelPersonalJoin: (workspaceId, pairingSessionId) =>
                 native.cancelPersonalJoin(workspaceId, pairingSessionId),
+              removeMember: (workspaceId, membershipId) =>
+                native.removeMember(workspaceId, membershipId),
+              setMemberRole: (workspaceId, membershipId, role) =>
+                native.setMemberRole(workspaceId, membershipId, role),
+
+              beginRemoteMachinePairing: (workspaceId) =>
+                native.beginRemoteMachinePairing(workspaceId),
+              inspectRemoteMachinePairing: (workspaceId, pairingSessionId) =>
+                native.inspectRemoteMachinePairing(workspaceId, pairingSessionId),
+              approveRemoteMachinePairing: (workspaceId, pairingSessionId, summary) =>
+                native.approveRemoteMachinePairing(workspaceId, pairingSessionId, summary),
+              cancelRemoteMachinePairing: (workspaceId, pairingSessionId) =>
+                native.cancelRemoteMachinePairing(workspaceId, pairingSessionId),
               prepareLocalAgent: (workspaceId) => native.prepareLocalAgent(workspaceId),
               admitLocalAgent: (workspaceId, pairingSessionId) =>
                 native.admitLocalAgent(workspaceId, pairingSessionId),
-              refresh: (workspaceId) => native.refresh(workspaceId),
+              managementState: (workspaceId) => native.managementState(workspaceId),
+              updateKeys: (workspaceId) => native.updateKeys(workspaceId),
+              revokeDevice: (workspaceId, signingPublicKey) =>
+                native.revokeDevice(workspaceId, signingPublicKey),
+              refresh: (workspaceId, options) => native.refresh(workspaceId, options),
               contentStreamsToken: (workspaceId, rejectedToken) =>
                 native.contentStreamsToken(workspaceId, rejectedToken),
+              prepareDispatch: (workspaceId, machineId, input) =>
+                native.prepareDispatch(workspaceId, machineId, input),
+              acceptDispatchResponse: (workspaceId, machineId, input, frame) =>
+                native.acceptDispatchResponse(workspaceId, machineId, input, frame),
               seal: (workspaceId, input) => native.seal(workspaceId, input),
               openContent: (workspaceId, input) => native.openContent(workspaceId, input),
               account: (options) => native.account(options),
+              resetIdentity: (request) => native.resetIdentity(request),
+              resetLocalAgent: (request) => native.resetLocalAgent(request),
               recordCreated: (request) => native.recordCreated(request),
-              open: (workspaceId, observed) => native.open(workspaceId, observed),
-              close: (workspaceId) => native.close(workspaceId),
+              open: (workspaceId, observed, expectedAccountId) =>
+                native.open(workspaceId, observed, expectedAccountId),
+              close: (workspaceId, expectedAccountId, readerOwner) =>
+                native.close(workspaceId, expectedAccountId, readerOwner),
+              readIdentity: (input) => native.readIdentity(input),
               status: (workspaceId) => native.status(workspaceId),
               ingestLedgerRecords: (workspaceId, page) =>
                 native.ingestLedgerRecords(workspaceId, page),
@@ -276,5 +315,25 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
     [e2eeWorkspaces, localAgentSyncMode, sessionStore, workspacesStore]
   );
 
-  return <PlatformContext.Provider value={provider}>{children}</PlatformContext.Provider>;
+  const memberAccountId = session.data?.user.id;
+  return (
+    <PlatformContext.Provider value={provider}>
+      {memberAccountId &&
+        e2eeWorkspaces.runtime &&
+        organization.organizations?.map((workspace) =>
+          'contentMode' in workspace &&
+          workspace.contentMode === 'e2ee' &&
+          'role' in workspace &&
+          ['owner', 'admin'].includes(String(workspace.role)) ? (
+            <E2eeTeamInboxHost
+              key={`${memberAccountId}:${workspace.id}`}
+              runtime={e2eeWorkspaces.runtime!}
+              workspaceId={workspace.id}
+              accountId={memberAccountId}
+            />
+          ) : null
+        )}
+      {children}
+    </PlatformContext.Provider>
+  );
 }

@@ -22,6 +22,7 @@ import {
   type RateLimitsGetRequest,
   type RateLimitsSnapshot,
   type SessionUsageUpdate,
+  type LodyPromptSuggestion,
 } from 'acp-extension-core';
 import {
   ACPSessionId,
@@ -596,6 +597,7 @@ export interface AgentClientOptions {
   onUsageUpdate?(usage: SessionUsageUpdate, accountingId?: string): void;
   onContextWindowUsageUpdate?(usage: SessionContextWindowUsage): void;
   onRateLimitUpdate?(limits: RateLimit): void;
+  onPromptSuggestion?(suggestion: LodyPromptSuggestion): void;
   onThreadGoalUpdated?(goal: SessionGoalContent): void;
   onThreadGoalCleared?(threadId: string): void;
   onSessionTitleUpdate?(title: string): void;
@@ -1588,6 +1590,15 @@ export class AgentClient implements acp.Client {
         );
         return;
       }
+      case 'promptSuggestion':
+        if (
+          this.lodyExtensionCapabilities.promptSuggestions?.version === 1 &&
+          this.acpSessionId !== null &&
+          event.update.sessionId === this.acpSessionId
+        ) {
+          this.options.onPromptSuggestion?.(event.update);
+        }
+        return;
       case 'sessionActivity':
         if (
           this.reportsSessionActivity() &&
@@ -1978,6 +1989,7 @@ export class AgentClient implements acp.Client {
                 lody: {
                   elicitation: { version: 1, answerNotes: true },
                   subagentEvents: { version: 1 },
+                  promptSuggestions: { version: 1 },
                 } satisfies LodyClientExtensionCapabilities,
               },
             },

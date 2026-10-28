@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import { Effect } from 'effect';
+import { makeLocalControlClientAuto } from '@lody/shared/node/local-ipc';
 import { Command } from 'commander';
 import {
   getAuthContextOrThrow,
@@ -65,3 +68,43 @@ export const workspaceCommand = new Command('workspace')
         });
       })
   );
+
+workspaceCommand.addCommand(
+  new Command('reset-identity')
+    .description(
+      'Archive this machine identity and require fresh approved pairing for one encrypted workspace'
+    )
+    .argument('<workspace-id>')
+    .requiredOption(
+      '--confirm',
+      'Confirm archival; another authorized device must approve the new identity'
+    )
+    .option('--reset-id <uuid>', 'Reuse this ID when retrying an uncertain reset result')
+    .option('--json', 'Print JSON output')
+    .action(
+      async (
+        workspaceId: string,
+        options: { confirm: boolean; json?: boolean; resetId?: string }
+      ) => {
+        await runOneShotCommand('workspace-reset-identity', options, async () => {
+          if (options.confirm !== true) throw new Error('Explicit --confirm is required');
+          const auth = getAuthContextOrThrow('workspace-reset-identity');
+          const resetId = options.resetId ?? randomUUID();
+          console.error(`Reset ID: ${resetId}. Reuse --reset-id if the reply is lost.`);
+          const result = await Effect.runPromise(
+            makeLocalControlClientAuto().e2eeReset({
+              machineId: auth.machineId,
+              accountId: auth.userId,
+              workspaceId,
+              resetId,
+            })
+          );
+          if (options.json) printJson(result);
+          else
+            console.log(
+              `Old identity archived at ${result.archive ?? '(already empty)'}. Open this workspace in Lody and pair again; another authorized device must approve.`
+            );
+        });
+      }
+    )
+);

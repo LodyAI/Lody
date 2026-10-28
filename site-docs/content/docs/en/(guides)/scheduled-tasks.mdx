@@ -19,6 +19,22 @@ Scheduled tasks do not run in the cloud. **One of your own machines** owns each 
 
 You can view and manage scheduled tasks on the web, desktop and phone, but only the owning machine executes them.
 
+## Schedule a message from a conversation
+
+In an existing conversation, choose **+ → Schedule send…**, pick a future date and time on the target machine's clock, then press the composer's scheduled-send button. This entry sends once and is unavailable on the new-chat page.
+
+Text, images, files and references are saved together after attachment preparation succeeds. The info bar keeps one scheduled-message icon. Click it to see the send time and the Edit pill. Edit opens the date/time controls, with 30-minute, 1-hour and 5-hour presets; Remove time returns to ordinary sending without losing the draft. Failed saves also keep the draft.
+
+The pending-message summary above the composer opens Schedule details, where you can edit the message and time or cancel it. Cancellation waits for the owning machine's confirmation; if dispatch already committed, the message shows as sent. Sent means handed to the conversation, independently of the Agent's eventual result.
+
+Use your own machine with a CLI that supports complete messages. If it is asleep or offline at the requested time, it sends one catch-up when it returns. A busy conversation finishes its current work first. Model, permission, MCP and Role settings are frozen at acceptance.
+
+## Continue after a Claude quota reset
+
+When Claude reports a session limit and its 5-hour quota is exhausted, a **Send continue after reset** shortcut appears above the composer if a future reset time is available. Click once to schedule the literal message `continue` one second after that reset, in this conversation, using the failed turn's run settings. Your current composer draft stays intact.
+
+The shortcut uses the provider's quota timestamp, not the clock text in the error. It does not infer dates or treat a weekly limit as a 5-hour limit. A still-exhausted longer quota also prevents the shortcut. After saving, **View scheduled continue** opens the existing message details for changes or cancellation. No continuation is scheduled until you click.
+
 ## Create a scheduled task
 
 Open **Schedules** in the sidebar and choose **New schedule** (or search "New Schedule" in the command palette). The editor is shaped like the composer:

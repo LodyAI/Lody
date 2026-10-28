@@ -42,7 +42,8 @@ PKCE S256 和校验 state、仅接受一次授权码的本机回调。网络步�
 手动秘密与共享表单值拆分，只通过能力门控的本机 Machine RPC 发送，不回退到远程接口。
 秘密输入框不读回 token。`@napi-rs/keyring` 使用 Keychain、Credential Manager 或 Linux Secret
 Service；凭证库缺失或锁定时报错，不回退明文。匿名服务不要求安全存储后端可用，系统交互仍需
-逐平台验收。“退出授权”关闭本机连接并删除本机记录，尚未实现服务方的同意撤销。
+逐平台验收。“退出授权”关闭 HTTP 中继并删除本机记录；已启动的 stdio 进程保留环境变量，直到重启。
+尚未实现服务方同意撤销，也不会在删除目录条目时自动删除凭证库记录。
 
 HTTP 中继绑定选中的条目、确切运行实例及请求者，Agent 拿到随机本机能力凭证。中继拒绝 Origin
 和异主机 Host，Linux 还复用完整 socket 四元组查询验证 peer uid。它保留 GET/SSE，限制请求体
@@ -53,33 +54,25 @@ HTTP 中继绑定选中的条目、确切运行实例及请求者，Agent 拿到
 
 ## 证据与限制
 
-模拟测试覆盖真实 SDK 的授权码、PKCE 和刷新，回调 state、重放、拒绝，取消和迟到界面回复，
-目标及用户隔离，中继凭证及请求头过滤，本机 RPC 路由，共享写入拒绝和旧值归一化；同时运行
-既有发现和 Session 生命周期测试。最终命令与结果见任务报告。测试注入 HTTP、监听器和凭证库，
-不访问真实服务方。
+[服务测试](../../../../apps/cli/src/mcp/authentication/service.test.ts) 使用真实 SDK 的授权码、
+PKCE 与刷新逻辑，注入服务方 HTTP、时钟和凭证库。它们覆盖取消、迟到的交换结果、保留既有
+登录，以及目标、用户和 issuer 隔离。[监听器测试](../../../../apps/cli/src/mcp/authentication/io.test.ts)
+覆盖回调 state、重放、拒绝和中继准入。[设置测试](../../../../packages/components/tests/mcp-setting.test.tsx)、
+[本机 RPC 路由](../../../../packages/components/tests/workspace-machine-rpc-facade.test.ts) 和
+[目录测试](../../../../packages/shared/tests/workspace-flock.test.ts) 覆盖显式授权、迟到回复、
+仅本机传输凭证、共享写入拒绝和旧值归一化。
+[Session 清理测试](../../../../apps/cli/tests/session-terminate-cleanup.test.ts) 覆盖独立释放。
+测试不访问真实服务方，也不操作真实系统凭证库。
 
 此前公开的 [Slim Tools 元数据](https://slim.tools/.well-known/oauth-authorization-server) 声明
-支持注册、授权码、刷新及 S256。较晚的 Python initialize 探测收到没有 OAuth challenge 的
-Cloudflare 403。本次没有真实账户同意、Slim 认证调用或生产 token 持久化。
+支持注册、授权码、刷新及 S256；initialize 探测也曾收到没有 OAuth challenge 的 Cloudflare 403。
+Slim 真实账户同意、认证调用、生产 token 持久化和各系统凭证库验收仍未完成。独立授权视图有
+[Storybook 状态](../../../../packages/components/src/stories/McpAuthentication.stories.tsx)，
+这不代表完整 Electron 冒烟测试。
+
 [Magpie](https://github.com/yetone/magpie/blob/main/internal/mcpauth/mcpauth.go) 仅作本机保管和
 中继参考，不证明所有服务兼容。标准参考：[RFC 8252](https://www.rfc-editor.org/rfc/rfc8252.html)、
 [MCP 授权](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)。
+远程回调管理、服务方撤销和凭证分享仍不在本次实现范围内。
 
-独立检出复用现有依赖及未初始化 ACP 子模块的锁定元数据。当前修订缺少要求阅读的
-context/local-agent-ownership.md 和 context/message-flow.md，因此以现有作用域契约、身份和
-peer uid 代码为可用依据。远程回调管理、系统验收、服务方撤销和凭证分享不在本次实现内。
-草稿 PR：[#1938](https://github.com/LodyAI/Lody/pull/1938)。
-
-独立授权视图已在精简 Storybook 包装中渲染，浏览器验证了需要授权、未保存、等待及已授权
-状态。复用依赖的检出中，完整共享 Storybook 外壳遇到已有的 Loro WASM 初始化错误；
-本次浏览器验证不等同于完整 Electron 冒烟测试。
-
-在最新 main 的 PR 基线上，CLI 授权/发现/配置/选择 40 项、组件 81 项、共享包 46 项测试
-通过，共 167 项。共享包类型检查、范围内 lint、`pnpm format`、i18n 和全部八项边界检查
-通过。文档检查仍有 6 处 Kimi/Pi 子模块缺失链接，没有新增错误或受保护主题。
-
-已尝试全仓 `pnpm check` 及 CLI/组件类型检查，但复用依赖缺少较新的 E2EE/Streams 包，
-Roost/ACP API 也落后于当前代码。加载当前锁定的 ACP 源码后，三个 Session 测试文件仍因
-缓存的 Claude SDK 元数据落后于运行时清单，在模块初始化时失败。Effect patch lint 缺少
-`@effect/tsgo`，本机 Node 24.14.0 也低于最新 main 的运行时下限。变基前三个包的类型检查
-和 157 项相关测试通过；这些结果不代表新的依赖图已经验证。
+PR：[#1938](https://github.com/LodyAI/Lody/pull/1938)。

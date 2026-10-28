@@ -1,4 +1,4 @@
-import { CipherSuite, DhkemX25519HkdfSha256, HkdfSha256 } from '@hpke/core';
+import { CipherSuite, DhkemX25519HkdfSha256, HkdfSha256, OpenError } from '@hpke/core';
 import { Chacha20Poly1305 } from '@hpke/chacha20poly1305';
 import { Data, Effect, Result } from 'effect';
 import * as Bytes from '../foundation/bytes';
@@ -6,9 +6,12 @@ import { encodeCbor } from '../foundation/cbor';
 import { copyEpochKeyBytes } from '../foundation/epoch-key';
 import { ValidationError } from '../foundation/errors';
 
-/** The fixed epoch-key HPKE primitive failed (bad key, context or ciphertext); carries no secret detail. */
+/** The fixed epoch-key HPKE primitive failed; carries no secret detail.
+ * `open-failed` identifies AEAD rejection; ambiguous native setup/decapsulation
+ * errors are `native-unavailable` and must not authorize rejecting a frame. */
 export class HpkePrimitiveError extends Data.TaggedError('HpkePrimitiveError')<{
   readonly code:
+    | 'native-unavailable'
     | 'random-unavailable'
     | 'invalid-input'
     | 'recipient-mismatch'
@@ -179,7 +182,10 @@ export function openEpochKeyHpke(
               plaintext?.fill(0);
             }
           },
-          catch: (cause) => (cause instanceof HpkePrimitiveError ? cause : error('open-failed')),
+          catch: (cause) =>
+            cause instanceof HpkePrimitiveError
+              ? cause
+              : error(cause instanceof OpenError ? 'open-failed' : 'native-unavailable'),
         })
       )
     );

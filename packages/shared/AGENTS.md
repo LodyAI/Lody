@@ -8,12 +8,10 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
 
 ## Session history
 
-- Session history storage tolerates unknown string item types from newer peers without
-  rewriting them or blocking unrelated writes. Keep known-type guards and external-input
-  parsing; `tests/session-doc-forward-compat.test.ts` covers this separately from unknown root keys.
-- `createSessionMirror` is the renderer/CLI session entrypoint. Its `HistoryWriter`
-  owns local history writes, including legacy callback updates; no raw history writes
-  or second Mirror writer. Read-path feature flags must never change this owner.
+- History tolerates unknown string item types without rewriting or blocking unrelated writes.
+  Keep known-type guards and input parsing; test: `tests/session-doc-forward-compat.test.ts`.
+- `createSessionMirror` owns renderer/CLI history through one `HistoryWriter`, including
+  legacy callbacks. No raw history writes or second writer; read flags never change ownership.
 - Validate new turns and changed known fields/items before applying a command, never
   unchanged history. Invalid commands preserve the old values and throw content-free
   diagnostics; they must not leave partial history writes. Keep stored unknown fields
@@ -34,8 +32,7 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
   edits in that range, except pending-to-seen on newly inserted user rows.
   External ACP imports remain new input.
 - Session data ports (`src/session-data`): UI/CLI business depends on `SessionData`
-  (explicit set/clear and shared writer validation), never a second history writer.
-  Invariants: [session-data scope](src/session-data/AGENTS.md).
+  (set/clear and shared validation), never a second writer. Invariants: [session-data scope](src/session-data/AGENTS.md).
 - Tool fields other than type/toolCallId are independent
   edits: derive their parsers from the tool message schema and validate changed fields,
   not untouched stored payloads. Content-list edits retain unchanged blocks and parse
@@ -72,7 +69,7 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
   change permission policy.
 
 - Daemon workflows gate on `MachineMeta.protocolCapabilities`, never CLI version.
-  Missing means unsupported; keep key/version pairs in `machine-protocol-capabilities.ts`.
+  Missing means unsupported. Full-message schedules require v3 and `messageVersion: 1`.
 - ACP capability `cacheVersion` controls refresh freshness, never readability. Consumers
   preserve understood fields from parsed older or newer entries during mixed-version
   operation, adapting only fields with known incompatible semantics; runtime-override source
@@ -119,3 +116,6 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
   [memory contract](../../specs/agent-role-memory.md).
 - Keep `author`, human `userId`, and recipient execution config separate.
   [Contract](../../specs/message-author-identity.md).
+
+Presence: E2EE requires UUID session IDs and bounded plaintext allowlists on publish/receive;
+ordinary behavior stays unchanged. [Contract](../../.agents/docs/cli-lib-loro-presence.md).

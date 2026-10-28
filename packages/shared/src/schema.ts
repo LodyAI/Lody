@@ -1356,6 +1356,8 @@ const sessionAcpRuntimeConfigDocSchema = schema.LoroMap(
 export const sessionDocSchema = schema({
   session: sessionSchema,
   history: schema.LoroList(sessionHistorySchema, (item) => item.id),
+  /** Exact purpose-8 originals keyed by business turn; encrypted durable fallback, never authority. */
+  rpcDispatchOriginals: schema.LoroMap({}, { required: false }).catchall(schema.String()),
   mq: schema.LoroMovableList(messageQueueItemSchema, (item) => item.$cid, { required: false }),
   /** Explicit human-send outbox. Never inferred from user role or Agent authors. */
   humanInputReceipts: schema
@@ -1460,7 +1462,9 @@ export const getMachineHostType = (meta: Pick<MachineMeta, 'hostType'>): Machine
   meta.hostType ?? 'user';
 
 export type SessionDoc = InferInputType<typeof sessionDocSchema>;
-export type SessionDocMeta = Omit<SessionDoc, '$cid' | 'history'> & {
+export type SessionDocMeta = Omit<SessionDoc, '$cid' | 'history' | 'rpcDispatchOriginals'> & {
+  /** Omitted by control-only readers; execution reads the selected original from the document. */
+  rpcDispatchOriginals?: Record<string, string>;
   session: { id: SessionId };
   history: SessionHistory[];
   mq?: MessageQueueItem[];

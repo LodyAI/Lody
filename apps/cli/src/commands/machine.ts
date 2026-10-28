@@ -1,3 +1,4 @@
+import { machinePairCommand } from './machine-pair';
 import { Command } from 'commander';
 import { addDiscoveryOptions, runDiscoveryList, type DiscoveryCommandOptions } from './discovery';
 import {
@@ -262,7 +263,8 @@ function printHumanMachineList(
 }
 
 export const machineCommand = new Command('machine')
-  .description('Inspect registered machines')
+  .description('Inspect and pair machines')
+  .addCommand(machinePairCommand)
   .addCommand(
     addDiscoveryOptions(new Command('list'))
       .description('List machines in a workspace')

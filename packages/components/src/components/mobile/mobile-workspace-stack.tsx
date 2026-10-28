@@ -1,7 +1,8 @@
-import { useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { useParams, useRouter, useSearch } from '@tanstack/react-router';
 import type { SessionId } from '@lody/shared';
+import { useMobileComposerPresentation } from '@/components/chat/submission/use-composer-navigation-focus';
 import { ChatLanding } from '@/components/chat/chat-landing';
 import SessionDetail from '@/components/sessions/session-detail';
 import { AppThemeShell } from '@/components/app-theme-shell';
@@ -92,6 +93,17 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
   const sessionSearch = useSearch({ from: SESSION_ROUTE_ID, shouldThrow: false });
   const sessionId = sessionParams?.sessionId as SessionId | undefined;
   const open = sessionId != null;
+  const composerPresentation = useMobileComposerPresentation(sessionId);
+  const [presentedSessionId, setPresentedSessionId] = useState<string>();
+  const { onPresented } = composerPresentation;
+  const acknowledgeSession = useCallback(
+    (id: string) => {
+      if (id !== sessionId) return;
+      setPresentedSessionId(id);
+      onPresented();
+    },
+    [sessionId, onPresented]
+  );
 
   // Keep the last opened session's props sticky so the drawer still renders its
   // content while it slides *out* (the route — and thus `sessionId` — is gone
@@ -133,6 +145,7 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
     <>
       <ChatLanding
         workspaceSlug={workspaceName}
+        mobilePresentedSessionId={open ? presentedSessionId : undefined}
         preSelectedContext={base.context}
         preSelectedMachine={base.machine}
         preSelectedProject={base.project}
@@ -145,6 +158,11 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
          browser (`interactive-widget=resizes-content`); Vaul's cached height
          previously left the composer lifted after keyboard dismissal (#2761). */}
       <Drawer
+        // A newly created session replaces the composer in one paint. Mounting
+        // already open uses Vaul's own non-animated entry; later Back/swipe and
+        // ordinary session opens keep their existing transitions.
+        key={composerPresentation.key}
+        defaultOpen={composerPresentation.defaultOpen}
         direction="right"
         repositionInputs={isNativeAppShell()}
         open={open}
@@ -157,6 +175,7 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
            the same offset on this portal'd drawer would stack both offsets and
            push the composer up by roughly two keyboard heights. */}
         <DrawerContent
+          skipOpenAnimation={open && composerPresentation.skipOpenAnimation}
           className="safe-areas w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
           data-sidebar-swipe-open-disabled
         >
@@ -184,6 +203,7 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
                   urlBrowser={open ? rendered.browser : false}
                   urlSimulator={open ? rendered.simulator : false}
                   onMobileBack={handleClose}
+                  onMobilePresented={open ? acknowledgeSession : undefined}
                 />
               </AppThemeShell>
             )}

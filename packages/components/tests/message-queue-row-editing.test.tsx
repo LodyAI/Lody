@@ -11,6 +11,7 @@ import { currentWorkspaceIdAtom } from '../src/atoms';
 import { authTokenAtom, runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import type { PendingSessionSend } from '../src/lib/session-pending-sends';
 import { initI18n } from '../src/i18n';
+import { ForceMobileLayoutProvider } from '../src/hooks/use-mobile';
 
 // Each variant resolves to a distinct URL so the test can tell the row's
 // thumbnail from the full-size image the preview loads.
@@ -73,6 +74,268 @@ describe('queued message editing commits', () => {
     }
     container?.remove();
     container = undefined;
+  });
+
+  it('keeps mobile steer available for the queue head', async () => {
+    const steered: string[] = [];
+    await act(async () => {
+      root?.render(
+        createElement(
+          ForceMobileLayoutProvider,
+          { force: true },
+          createElement(MessageQueueDisplay, {
+            sessionId: 'session-test' as SessionId,
+            items: [makeItem()],
+            roomy: true,
+            showSteerAction: true,
+            onRemove: () => {},
+            onReorder: () => {},
+            onEditStart: () => {},
+            onEditCancel: () => {},
+            onEditSave: () => {},
+            onSteer: (item: MessageQueueItem) => {
+              steered.push(item.$cid);
+            },
+          })
+        )
+      );
+    });
+    const trigger = container!.querySelector<HTMLButtonElement>('.group\\/row button')!;
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+      trigger.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0 }));
+      trigger.click();
+    });
+    const steer = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (item) => item.textContent?.trim() === 'Steer'
+    );
+    expect(steer).toBeDefined();
+    await act(async () => {
+      steer!.click();
+    });
+    expect(steered).toEqual(['cid-0']);
+  });
+
+  it('renders dedicated scheduled rows in a final section without queue affordances', async () => {
+    const opened: string[] = [];
+    const cancelledRows: string[] = [];
+    const items = [makeItem()];
+    await act(async () => {
+      root?.render(
+        createElement(MessageQueueDisplay, {
+          sessionId: 'session-test' as SessionId,
+          items,
+          scheduledItems: [
+            {
+              scheduleId: 'later',
+              title: 'Later scheduled message',
+              at: 30,
+              timeZone: 'UTC',
+              state: 'pending',
+            },
+            {
+              scheduleId: 'earlier',
+              title: 'Earlier scheduled message',
+              at: 10,
+              timeZone: 'UTC',
+              state: 'failed',
+            },
+          ],
+          onOpenScheduled: (item) => opened.push(item.scheduleId),
+          onCancelScheduled: (item) => cancelledRows.push(item.scheduleId),
+          onRemove: () => {},
+          onReorder: () => {},
+          onEditStart: () => {},
+          onEditCancel: () => {},
+          onEditSave: () => {},
+          onSteer: () => {},
+        })
+      );
+    });
+    expect(container!.textContent).toContain('Scheduled');
+    const scheduledRows = [...container!.querySelectorAll<HTMLElement>('[data-scheduled-row]')];
+    expect(scheduledRows.map((row) => row.title)).toEqual([
+      'Earlier scheduled message',
+      'Later scheduled message',
+    ]);
+    // Failure is marked on the time itself, never as a separate status column.
+    expect(container!.textContent).not.toContain('Not sent');
+    expect(container!.textContent).not.toContain('Pending');
+    const timeButton = (row: HTMLElement) =>
+      row.querySelector<HTMLButtonElement>('button[aria-label*="Edit scheduled time"]')!;
+    expect(timeButton(scheduledRows[0]!).getAttribute('aria-label')).toContain('Not sent');
+    expect(timeButton(scheduledRows[1]!).getAttribute('aria-label')).not.toContain('Not sent');
+    for (const row of scheduledRows) {
+      expect(row.querySelector('[aria-label="Drag to reorder"]')).toBeNull();
+      expect(row.querySelector('[aria-label*="Steer"]')).toBeNull();
+      expect(timeButton(row)).not.toBeNull();
+    }
+    await act(async () =>
+      scheduledRows[0]!.querySelector<HTMLButtonElement>('button[aria-label="Edit"]')!.click()
+    );
+    await act(async () =>
+      scheduledRows[1]!
+        .querySelector<HTMLButtonElement>('button[aria-label="Cancel scheduled message"]')!
+        .click()
+    );
+    expect(opened).toEqual(['earlier']);
+    expect(cancelledRows).toEqual(['later']);
+  });
+
+  it('leads a mobile scheduled row with its time and folds actions into More', async () => {
+    const edited: string[] = [];
+    const opened: string[] = [];
+    const cancelledRows: string[] = [];
+    await act(async () => {
+      root?.render(
+        createElement(
+          ForceMobileLayoutProvider,
+          { force: true },
+          createElement(MessageQueueDisplay, {
+            sessionId: 'session-test' as SessionId,
+            items: [],
+            roomy: true,
+            scheduledItems: [
+              {
+                scheduleId: 'mobile',
+                title: 'Send the weekly summary',
+                at: Date.parse('2026-10-27T09:00:00Z'),
+                timeZone: 'UTC',
+                state: 'pending',
+              },
+            ],
+            onOpenScheduled: (item) => opened.push(item.scheduleId),
+            onEditScheduledTime: (item) => edited.push(item.scheduleId),
+            onCancelScheduled: (item) => cancelledRows.push(item.scheduleId),
+            onRemove: () => {},
+            onReorder: () => {},
+            onEditStart: () => {},
+            onEditCancel: () => {},
+            onEditSave: () => {},
+            onSteer: () => {},
+          })
+        )
+      );
+    });
+    const row = container!.querySelector<HTMLElement>('[data-scheduled-row]')!;
+    const target = row.querySelector<HTMLButtonElement>(
+      'button[aria-label*="Edit scheduled time"]'
+    )!;
+    expect(target.textContent).toContain('9:00');
+    expect(row.textContent!.indexOf('9:00')).toBeLessThan(
+      row.textContent!.indexOf('Send the weekly summary')
+    );
+    expect(row.querySelector('button[aria-label="Edit"]')).toBeNull();
+    await act(async () => target.click());
+    expect(edited).toEqual(['mobile']);
+
+    const more = row.querySelector<HTMLButtonElement>('button[aria-label="More"]')!;
+    const openMenu = async () => {
+      await act(async () => {
+        more.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+        more.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0 }));
+        more.click();
+      });
+    };
+    const menuItem = (label: string) =>
+      [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+        (item) => item.textContent?.trim() === label
+      );
+    await openMenu();
+    expect(menuItem('Edit scheduled time')).toBeDefined();
+    await act(async () => menuItem('Cancel scheduled message')!.click());
+    expect(cancelledRows).toEqual(['mobile']);
+    expect(opened).toEqual([]);
+  });
+
+  it('folds desktop row actions into More when the sheet is narrow', async () => {
+    const width = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth')!;
+    Object.defineProperty(Element.prototype, 'clientWidth', {
+      configurable: true,
+      get: () => 400,
+    });
+    const removed: string[] = [];
+    try {
+      await act(async () => {
+        root?.render(
+          createElement(MessageQueueDisplay, {
+            sessionId: 'session-test' as SessionId,
+            items: [makeItem()],
+            scheduledItems: [
+              {
+                scheduleId: 'narrow',
+                title: 'Send the weekly summary',
+                at: Date.parse('2026-10-27T09:00:00Z'),
+                timeZone: 'UTC',
+                state: 'pending',
+              },
+            ],
+            onOpenScheduled: () => {},
+            onCancelScheduled: () => {},
+            onRemove: (cid) => {
+              removed.push(cid);
+            },
+            onReorder: () => {},
+            onEditStart: () => {},
+            onEditCancel: () => {},
+            onEditSave: () => {},
+            onSteer: () => {},
+          })
+        );
+      });
+      expect(container!.querySelector('button[aria-label="Remove from queue"]')).toBeNull();
+      expect(container!.querySelector('button[aria-label="Cancel scheduled message"]')).toBeNull();
+      const mores = container!.querySelectorAll<HTMLButtonElement>('button[aria-label="More"]');
+      expect(mores).toHaveLength(2);
+      await act(async () => {
+        mores[0]!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+        mores[0]!.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0 }));
+        mores[0]!.click();
+      });
+      const remove = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+        (entry) => entry.textContent?.trim() === 'Delete'
+      );
+      await act(async () => remove!.click());
+      expect(removed).toEqual(['cid-0']);
+    } finally {
+      Object.defineProperty(Element.prototype, 'clientWidth', width);
+    }
+  });
+
+  it('routes the scheduled time to the time editor rather than details', async () => {
+    const edited: string[] = [];
+    const opened: string[] = [];
+    await act(async () => {
+      root?.render(
+        createElement(MessageQueueDisplay, {
+          sessionId: 'session-test' as SessionId,
+          items: [],
+          scheduledItems: [
+            {
+              scheduleId: 'scheduled-only',
+              title: 'Send the weekly summary',
+              at: Date.parse('2026-10-27T09:00:00Z'),
+              timeZone: 'UTC',
+              state: 'pending',
+            },
+          ],
+          onOpenScheduled: (item) => opened.push(item.scheduleId),
+          onEditScheduledTime: (item) => edited.push(item.scheduleId),
+          onRemove: () => {},
+          onReorder: () => {},
+          onEditStart: () => {},
+          onEditCancel: () => {},
+          onEditSave: () => {},
+          onSteer: () => {},
+        })
+      );
+    });
+    const row = container!.querySelector<HTMLElement>('[data-scheduled-row]')!;
+    const time = row.querySelector<HTMLButtonElement>('button[aria-label*="Edit scheduled time"]')!;
+    expect(time.textContent).toContain('9:00');
+    await act(async () => time.click());
+    expect(edited).toEqual(['scheduled-only']);
+    expect(opened).toEqual([]);
   });
 
   // The save promise stays pending until the test releases it, so the row is

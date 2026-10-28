@@ -1,3 +1,31 @@
+import { CloudE2eeMemberRemoved, CloudE2eeDeviceRevoked } from '../src/lib/cloud-e2ee-errors';
+import { encodeStreamsRoomAdditionalData } from 'loro-repo/transport/streams';
+import { bindTestPresenceApplication } from './presence-application-fixture';
+import { Lody } from '../src/lib/lody';
+import type { MachineRuntimeOptions } from '../src/lib/machine-runtime';
+import type { CliE2eeWorkspaceLegacy } from '../src/lib/e2ee/workspace-legacy';
+import { makeCliE2eeCustody } from '../src/lib/e2ee/custody';
+import {
+  retainCliE2eeWorkspaceBinding,
+  cliE2eeIdentityDirectory,
+} from '../src/lib/e2ee/workspace-legacy';
+import { makeNodeE2eeCustody } from '@lody/e2ee-core/adapters/node-custody';
+import {
+  Bytes,
+  signGenesisRecord,
+  prepareDeviceAdmission,
+  prepareJoinRequest,
+  signLedgerRecord,
+  prepareLedgerCommand,
+  verifyLedger,
+  extendLedger,
+  hashRecordBytes,
+  prepareEpochEnvelope,
+} from '@lody/e2ee-core/protocol';
+import { makeStreamsUpdateBinding } from '@lody/e2ee-core/adapters/loro-streams';
+import { createTestCloudPort } from './test-cloud-port';
+import { makeEncryptedAgentExecution, lazyExecutionJournal } from '../src/lib/e2ee/agent-execution';
+import { RealtimeJournal } from '../src/lib/e2ee/realtime-journal';
 import { AcpStartupProcessError } from '../src/agent/acp-startup-monitor';
 import * as quotaRunner from '../src/agent/acp-runner';
 import { ProviderQuotaRefreshCache } from '../src/session/provider-quota-refresh-cache';
@@ -40,10 +68,10 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import Database from 'better-sqlite3';
-import { Data, Effect, Fiber } from 'effect';
+import { Data, Effect, Fiber, Result } from 'effect';
 import type { LoroRepo } from 'loro-repo';
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -2578,6 +2606,9 @@ describe('SessionExecutionService', () => {
   // left the user with an unanswered message and no error anywhere.
   const runSilentPromptTurn = async (options: {
     sessionId: string;
+    userTurnId?: string;
+    workspaceId?: WorkspaceId;
+    requesterUserId?: string;
     inputAuthor?: SessionHistoryInput['author'];
     earlierInputAuthor?: SessionHistoryInput['author'];
     attempts?: number;
@@ -2589,6 +2620,10 @@ describe('SessionExecutionService', () => {
     onTurnOutcome?: (fact: TurnOutcomeFact) => Promise<void>;
     onTurnClaimed?: () => Promise<boolean>;
     onTurnStarted?: () => Promise<boolean>;
+    encryptedExecution?: ReturnType<typeof makeEncryptedAgentExecution>;
+    prepared?: boolean;
+    create?: boolean;
+    onPrompt?: () => Promise<void>;
   }) => {
     let history: Array<Record<string, unknown>> = [
       ...(options.earlierInputAuthor
@@ -2602,7 +2637,7 @@ describe('SessionExecutionService', () => {
           ]
         : []),
       {
-        id: 'turn-user-1',
+        id: options.userTurnId ?? 'turn-user-1',
         role: 'user',
         author: options.inputAuthor,
         status: 'pending',
@@ -2613,6 +2648,7 @@ describe('SessionExecutionService', () => {
       isCreated: vi.fn(() => true),
       cancel: vi.fn(async () => {}),
       prompt: vi.fn(async () => {
+        await options.onPrompt?.();
         if (options.promptFailure) throw options.promptFailure;
         return { stopReason: 'end_turn' };
       }),
@@ -2639,11 +2675,13 @@ describe('SessionExecutionService', () => {
         status = next;
       }),
       setLastMessageAt: vi.fn(async () => {}),
+      waitUntilSynced: async () => {},
       getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
     });
+    const failureMessages: string[] = [];
     const notificationFacts: TurnOutcomeFact[] = [];
     const onTurnOutcome = vi.fn(async (fact: TurnOutcomeFact) => {
       await options.onTurnOutcome?.(fact);
@@ -2652,6 +2690,11 @@ describe('SessionExecutionService', () => {
     const finalizationOwners: boolean[] = [];
     const upsertDocMeta = vi.fn(async () => {});
     const deps = createBaseDeps({
+      workspaceId: options.workspaceId ?? 'workspace-1',
+      encryptedExecution: options.encryptedExecution,
+      recordChatFailure: vi.fn(async (_doc, _reason, message) => {
+        if (message) failureMessages.push(message);
+      }),
       beginConversationTurn: vi.fn(
         (_sessionId: SessionId, parentTurnId?: string) => `assistant:${parentTurnId ?? 'unbound'}`
       ),
@@ -2700,26 +2743,47 @@ describe('SessionExecutionService', () => {
 
     const service = new SessionExecutionService(deps);
     for (let attempt = 0; attempt < (options.attempts ?? 1); attempt += 1) {
-      await service.continueSession(
-        {
-          type: 'session/chat',
-          sessionId: options.sessionId as SessionId,
-          machineId: 'machine-1',
-          workspaceId: 'workspace-1' as WorkspaceId,
-          project: undefined,
-          acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
-          userTurnId: 'turn-user-1',
-          userId: 'user-1',
-          userName: 'User',
-          userEmail: 'user@example.com',
-        },
-        {
+      const message = {
+        type: 'session/chat' as const,
+        sessionId: options.sessionId as SessionId,
+        machineId: 'machine-1',
+        workspaceId: options.workspaceId ?? 'workspace-1',
+        project: undefined,
+        acpSessionConfig: { prompt: 'hi', cliType: 'builtin' as const, agentType: 'codex' },
+        userTurnId: options.userTurnId ?? 'turn-user-1',
+        userId: options.requesterUserId ?? 'user-1',
+        userName: 'User',
+        userEmail: 'user@example.com',
+      };
+      if (options.prepared) {
+        await service.dispatchPreparedSessionTurn({
+          sessionId: message.sessionId,
+          sessionDoc,
+          userTurnId: message.userTurnId,
+          invocation: {
+            sourceTurnId: message.userTurnId,
+            requesterUserId: message.userId,
+            inputConfig: message.acpSessionConfig,
+          },
+          dispatchSource: options.dispatchSource ?? 'crdt',
+          accessPromise: Promise.resolve({ outcome: 'allowed' }),
+          requestPromise: Promise.resolve(
+            options.create
+              ? { mode: 'create', request: { ...message, type: 'session/create' } }
+              : { mode: 'continue', request: message }
+          ),
+          onAccessAllowed: async () => {},
+          onAccessDenied: async () => {},
+          onAccessIndeterminate: async () => {},
+        });
+      } else {
+        await service.continueSession(message, {
           notificationAudience: options.notificationAudience ?? { kind: 'user' },
           ...(options.dispatchSource ? { dispatchSource: options.dispatchSource } : {}),
           ...(options.onTurnClaimed ? { onTurnClaimed: options.onTurnClaimed } : {}),
           ...(options.onTurnStarted ? { onTurnStarted: options.onTurnStarted } : {}),
-        }
-      );
+        });
+      }
     }
 
     await service.drainInboxExecutions();
@@ -2727,6 +2791,7 @@ describe('SessionExecutionService', () => {
       deps,
       sessionDoc,
       notificationFacts,
+      failureMessages,
       upsertDocMeta,
       agentClient,
       getHistory: () => history,
@@ -2735,6 +2800,778 @@ describe('SessionExecutionService', () => {
       service,
     });
   };
+
+  const encryptedExecutionFixture = () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'encrypted-execution-'));
+    const filename = path.join(directory, 'execution.sqlite');
+    const gate = (
+      authorization: 'authorized' | 'denied' | 'expired' = 'authorized',
+      file = filename,
+      workspaceId = 'workspace-1'
+    ) =>
+      makeEncryptedAgentExecution({
+        genesis: 'genesis',
+        workspaceId,
+        targetMachineId: 'machine-1',
+        journal: lazyExecutionJournal(file, () => 100),
+        resolveVerifiedOriginal: () =>
+          Effect.succeed({
+            requesterDevice: 'ab'.repeat(32),
+            requesterCryptoUserId: 'user-1',
+            expiresAt: authorization === 'expired' ? 100 : 1000,
+          }),
+        authorizeExecution: () =>
+          Effect.succeed(
+            authorization === 'denied'
+              ? { _tag: 'Denied', reason: 'not-authorized' }
+              : { _tag: 'Authorized' }
+          ),
+      });
+    const intent = {
+      workspaceId: 'workspace-1',
+      sessionId: 'encrypted-session',
+      userTurnId: 'turn-user-1',
+      requesterUserId: 'user-1',
+    };
+    return {
+      directory,
+      filename,
+      gate,
+      intent,
+      close: () => fs.rmSync(directory, { recursive: true, force: true }),
+    };
+  };
+
+  const runProductionSignedTurn = async (
+    mode:
+      | 'account'
+      | 'snapshot'
+      | 'delayed'
+      | 'expired'
+      | 'revoked-device'
+      | 'guest'
+      | 'removed-member'
+      | 'same-member'
+      | 'other-member'
+      | 'backfill-member-removed'
+      | 'backfill-device-revoked'
+      | 'backfill-network'
+  ) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-native-execution-'));
+    vi.stubEnv('LODY_DATA_DIR', directory);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.parse('2026-10-28T02:00:00Z'));
+    const hex = (value: Uint8Array) => Buffer.from(value).toString('hex');
+    const accountId = 'synthetic-account';
+    const workspaceId = 'workspace-1' as WorkspaceId;
+    const sessionId = 'production-session' as SessionId;
+    // The real encrypted UI writes runtime.accountId, not the ledger's crypto user ID.
+    const user = accountId;
+    const backfillFailure = mode.startsWith('backfill-');
+    const terminalBackfill =
+      mode === 'backfill-member-removed' || mode === 'backfill-device-revoked';
+    const removalReleased = Promise.withResolvers<void>();
+    const snapshotOnly =
+      mode === 'snapshot' || mode === 'delayed' || mode === 'expired' || backfillFailure;
+    const deniedSigner =
+      mode === 'revoked-device' ||
+      mode === 'guest' ||
+      mode === 'removed-member' ||
+      mode === 'other-member';
+    const identity = cliE2eeIdentityDirectory(accountId, workspaceId);
+    const noKeyring = async () => {
+      throw new Error('synthetic missing keyring');
+    };
+    const wrapKey = Buffer.alloc(32, 7);
+    let lody: Lody | undefined;
+    const { LoroDoc, LoroMap } = await import('loro-crdt');
+    const source = new LoroDoc();
+    const submitted: string[] = [];
+    const presence = bindTestPresenceApplication(createSilentLogger());
+    const execute = <A, E>(effect: Effect.Effect<A, E, import('effect').Scope.Scope>) =>
+      Effect.runPromise(Effect.scoped(effect));
+    try {
+      const fixture = await execute(
+        Effect.gen(function* () {
+          const ownerCustody = yield* makeNodeE2eeCustody({
+            directory: path.join(directory, 'owner'),
+            wrapper: {
+              protection: 'os-keystore',
+              wrap: async (value) => {
+                const nonce = randomBytes(12);
+                const cipher = createCipheriv('aes-256-gcm', wrapKey, nonce);
+                return Buffer.concat([
+                  nonce,
+                  cipher.update(value),
+                  cipher.final(),
+                  cipher.getAuthTag(),
+                ]);
+              },
+              unwrap: async (value) => {
+                const cipher = createDecipheriv('aes-256-gcm', wrapKey, value.subarray(0, 12));
+                cipher.setAuthTag(value.subarray(-16));
+                return {
+                  result: Buffer.concat([
+                    cipher.update(value.subarray(12, -16)),
+                    cipher.final(),
+                  ]).toString(),
+                  shouldReEncrypt: false,
+                };
+              },
+            },
+          });
+          const prepared = yield* ownerCustody.prepareDevice();
+          const membershipId = Result.getOrThrow(Bytes.membershipId(new Uint8Array(16).fill(10)));
+          const genesis = yield* signGenesisRecord({
+            signer: prepared,
+            encryptionPublicKey: prepared.enc,
+            initialKey: Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(20))),
+            userId: Result.getOrThrow(Bytes.userId(new Uint8Array(32).fill(30))),
+            membershipId,
+          });
+          const owner = yield* ownerCustody.retainDevice(genesis.genesis, prepared);
+          const custody = yield* makeCliE2eeCustody({
+            directory: path.join(identity, 'custody'),
+            keyring: noKeyring,
+          });
+          const machine = yield* custody.createDevice(genesis.genesis);
+          let view = Result.getOrThrow(
+            verifyLedger({
+              anchor: genesis.genesis,
+              records: [genesis.record],
+              checkpoint: { length: 1, head: hashRecordBytes(genesis.record) },
+            })
+          );
+          const admission = yield* prepareDeviceAdmission({
+            genesis: genesis.genesis,
+            membershipId,
+            signer: machine,
+            encryptionPublicKey: machine.enc,
+            kind: 'machine',
+            machineId: 'machine-1',
+          });
+          const record = yield* signLedgerRecord(
+            Result.getOrThrow(prepareLedgerCommand(view, owner.publicKey, admission)),
+            owner
+          );
+          view = Result.getOrThrow(
+            extendLedger(view, [record], { length: 2, head: hashRecordBytes(record) })
+          );
+          const records = [genesis.record, record];
+          const append = Effect.fnUntraced(function* (
+            command: Parameters<typeof prepareLedgerCommand>[2]
+          ) {
+            const next = yield* signLedgerRecord(
+              Result.getOrThrow(prepareLedgerCommand(view, owner.publicKey, command)),
+              owner
+            );
+            records.push(next);
+            view = Result.getOrThrow(
+              extendLedger(view, [next], { length: records.length, head: hashRecordBytes(next) })
+            );
+          });
+          let originalSigner:
+            | typeof owner
+            | Effect.Success<ReturnType<typeof ownerCustody.prepareDevice>> = owner;
+          const senderMemberId = Result.getOrThrow(Bytes.membershipId(new Uint8Array(16).fill(40)));
+          if (deniedSigner || mode === 'same-member') {
+            const other = yield* ownerCustody.prepareDevice();
+            originalSigner = other;
+            if (mode === 'revoked-device' || mode === 'same-member') {
+              yield* append(
+                yield* prepareDeviceAdmission({
+                  genesis: genesis.genesis,
+                  membershipId,
+                  signer: other,
+                  encryptionPublicKey: other.enc,
+                  kind: 'personal',
+                })
+              );
+            } else {
+              const request = yield* prepareJoinRequest({
+                genesis: genesis.genesis,
+                requestId: Result.getOrThrow(Bytes.requestId(new Uint8Array(16).fill(50))),
+                userId: Result.getOrThrow(Bytes.userId(new Uint8Array(32).fill(60))),
+                encryptionPublicKey: other.enc,
+                expiresAt: null,
+                signer: other,
+              });
+              yield* append({ _tag: 'AdmitMember', membershipId: senderMemberId, request });
+            }
+          }
+          yield* custody.prepareDeviceCredential(genesis.genesis, machine.publicKey);
+          const frame = yield* prepareEpochEnvelope({
+            context: {
+              genesis: genesis.genesis,
+              epoch: Result.getOrThrow(Bytes.epochNumber(0)),
+              sender: owner.publicKey,
+              recipient: machine.publicKey,
+            },
+            key: Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(20))),
+            signer: owner,
+            ledger: () => Effect.succeed(view),
+          });
+          const binding = yield* makeStreamsUpdateBinding({
+            genesis: genesis.genesis,
+            resource: 'doc:session-production-session',
+            model: 'loro',
+            writeEpoch: 'current',
+            signer: originalSigner,
+            ledger: () => Effect.succeed(view),
+            readEpochKey: () => Effect.fromResult(Bytes.epochKey(new Uint8Array(32).fill(20))),
+          });
+          const inputConfig = { prompt: 'hi', cliType: 'builtin', agentType: 'codex' };
+          const row = source.getList('history').insertContainer(0, new LoroMap());
+          row.set('id', 'turn-user-1');
+          row.set('role', 'user');
+          row.set('userId', user);
+          row.set('timestamp', new Date().toISOString());
+          row.set('status', 'pending');
+          row.set('inputConfig', inputConfig);
+          row.set('items', [{ type: 'text', text: 'hi' }]);
+          if (backfillFailure) {
+            const next = source.getList('history').insertContainer(1, new LoroMap());
+            for (const [key, value] of Object.entries({
+              id: 'turn-user-2',
+              role: 'user',
+              userId: user,
+              timestamp: new Date().toISOString(),
+              status: 'pending',
+              inputConfig,
+              items: [{ type: 'text', text: 'hi' }],
+            }))
+              next.set(key, value);
+          }
+          source.commit();
+          const update = source.export({ mode: 'update' });
+          const plaintext = new Uint8Array(update.length + 4);
+          new DataView(plaintext.buffer).setUint32(0, update.length, false);
+          plaintext.set(update, 4);
+          const context = {
+            protocol: 'loro-streams-crdt-payload-protection',
+            version: 2,
+            kind: 'update_batch',
+          } as const;
+          const envelopePrefix = Uint8Array.of(76, 83, 67, 69, 2, 1, 0, 1, 0, 0, 3);
+          const protocolPrefix = new TextEncoder().encode(
+            'loro-streams-crdt-payload-protection/v2\0'
+          );
+          const envelopeAAD = new Uint8Array(protocolPrefix.length + envelopePrefix.length);
+          envelopeAAD.set(protocolPrefix);
+          envelopeAAD.set(envelopePrefix, protocolPrefix.length);
+          const aad = encodeStreamsRoomAdditionalData(
+            `lody-e2ee:${hex(genesis.genesis.toBytes())}`,
+            { kind: 'doc', docId: 'session-production-session' },
+            envelopeAAD
+          );
+          const sealed = yield* binding.seal({ context, plaintext, additionalData: () => aad });
+          const message = new Uint8Array(4 + envelopePrefix.length + sealed.sealed.length);
+          new DataView(message.buffer).setUint32(0, message.length - 4, false);
+          message.set(envelopePrefix, 4);
+          message.set(sealed.sealed, 4 + envelopePrefix.length);
+          const snapshotBinding = yield* makeStreamsUpdateBinding({
+            genesis: genesis.genesis,
+            resource: 'doc:session-production-session',
+            model: 'loro',
+            writeEpoch: 'current',
+            signer: machine,
+            ledger: () => Effect.succeed(view),
+            readEpochKey: () => Effect.fromResult(Bytes.epochKey(new Uint8Array(32).fill(20))),
+          });
+          const snapshotPrefix = Uint8Array.from(envelopePrefix);
+          snapshotPrefix[5] = 2;
+          snapshotPrefix[10] = 4;
+          const snapshotEnvelopeAAD = new Uint8Array(envelopeAAD);
+          snapshotEnvelopeAAD.set(snapshotPrefix, protocolPrefix.length);
+          const snapshotAAD = encodeStreamsRoomAdditionalData(
+            `lody-e2ee:${hex(genesis.genesis.toBytes())}`,
+            { kind: 'doc', docId: 'session-production-session' },
+            snapshotEnvelopeAAD
+          );
+          const snapshotContext = {
+            ...context,
+            kind: 'snapshot',
+            continuationOffset: '00000000000000000000',
+          } as const;
+          const snapshot = yield* snapshotBinding.seal({
+            context: snapshotContext,
+            plaintext: source.export({ mode: 'snapshot' }),
+            additionalData: () => snapshotAAD,
+          });
+          if (mode === 'revoked-device')
+            yield* append({ _tag: 'RevokeDevice', target: originalSigner.publicKey });
+          if (mode === 'guest')
+            yield* append({ _tag: 'SetRole', membershipId: senderMemberId, role: 'guest' });
+          if (mode === 'removed-member')
+            yield* append({ _tag: 'DeclareCapabilities', capabilities: [1] });
+          if (mode === 'removed-member')
+            yield* append({ _tag: 'RemoveMember', membershipId: senderMemberId });
+          return {
+            genesis,
+            snapshot,
+            snapshotAAD,
+            snapshotContext,
+            records,
+            checkpoint: {
+              length: records.length,
+              headHash: hex(hashRecordBytes(records.at(-1) ?? genesis.record).toBytes()),
+            },
+            frame,
+            sender: hex(owner.publicKey.toBytes()),
+            machine: hex(machine.publicKey.toBytes()),
+            sealed,
+            context,
+            aad,
+            message,
+          };
+        })
+      );
+      await retainCliE2eeWorkspaceBinding(accountId, {
+        workspaceId,
+        genesisHash: hex(fixture.genesis.genesis.toBytes()),
+        genesisRecordHex: hex(fixture.genesis.record),
+      });
+      fs.writeFileSync(
+        path.join(identity, 'activation.json'),
+        JSON.stringify({
+          genesisHash: hex(fixture.genesis.genesis.toBytes()),
+          signingPublicKey: fixture.machine,
+        })
+      );
+      const historyReads: string[] = [];
+      let originalAvailable = mode !== 'delayed' && !backfillFailure;
+      const recoveredRooms: string[] = [];
+      const cloud = {
+        readExecutionOriginPage: async (input: { docId: string }) => {
+          recoveredRooms.push(input.docId);
+          if (!originalAvailable && mode === 'backfill-member-removed')
+            throw new CloudE2eeMemberRemoved();
+          if (!originalAvailable && mode === 'backfill-device-revoked')
+            throw new CloudE2eeDeviceRevoked();
+          if (!originalAvailable && mode === 'backfill-network')
+            throw new Error('synthetic network failure');
+          return {
+            messages: originalAvailable ? [fixture.message] : [],
+            before: '0',
+            atStart: true,
+          };
+        },
+        getHistory: async (request: { credential: string }) => {
+          historyReads.push(request.credential);
+          return {
+            startIndex: 0,
+            recordsHex: fixture.records.map(hex),
+            position: `p1:workspace-1:${fixture.records.length}:fixture`,
+            nextCursor: null,
+            checkpoint: fixture.checkpoint,
+          };
+        },
+        mailboxCall: async (method: string, input: { slot?: unknown }) => {
+          if (method === 'fetch')
+            return {
+              items: [{ sender: fixture.sender, frameHex: hex(fixture.frame) }],
+              next: null,
+            };
+          if (method === 'status')
+            return { ...(input.slot as object), revision: 0, status: 'EnvelopeStored' };
+          if (method === 'report') return null;
+          throw new Error('unexpected mailbox request');
+        },
+      };
+      lody = await Lody.create({
+        logger: createSilentLogger(),
+        workspaceId,
+        contentMode: 'e2ee',
+        genesisHash: hex(fixture.genesis.genesis.toBytes()),
+        token: 'synthetic-token',
+        userId: accountId,
+        machineId: 'machine-1',
+        machineName: 'Synthetic',
+        cloudPort: createTestCloudPort({ kind: 'cloud', e2ee: cloud as never }),
+        memoryPressure: {} as never,
+        ...(terminalBackfill
+          ? {
+              onEncryptedMemberRemoved: async () => {
+                await removalReleased.promise;
+              },
+            }
+          : {}),
+        machineLifecycleCapability: {
+          launchMode: 'foreground',
+          canRemoteRestart: false,
+          canRemoteUpgrade: false,
+          reason: 'not_daemon',
+        },
+      });
+      const composed = lody as unknown as {
+        runtime: { options: MachineRuntimeOptions };
+        encryptedWorkspace: CliE2eeWorkspaceLegacy;
+      };
+      const host = composed.encryptedWorkspace;
+      await host.refresh();
+      const sessionDoc = await lody.documentManager.getOrCreateSessionDoc(sessionId);
+      const protection = host.content.resolve({
+        kind: 'doc',
+        docId: 'session-production-session',
+      });
+      if (protection.mode !== 'protected' || !sessionDoc.handle)
+        throw new Error('missing signed session');
+      if (!snapshotOnly)
+        await protection.config.provider.open({
+          ...fixture.sealed,
+          context: fixture.context,
+          additionalData: fixture.aad,
+        });
+      // First connection/restart can reconstruct the state from a snapshot
+      // without ever opening the author's signed creation update locally.
+      if (!snapshotOnly) sessionDoc.handle.doc.import(source.export({ mode: 'update' }));
+      else {
+        const snapshot = await protection.config.provider.open({
+          ...fixture.snapshot,
+          context: fixture.snapshotContext,
+          additionalData: fixture.snapshotAAD,
+        });
+        sessionDoc.handle.doc.import(snapshot);
+        snapshot.fill(0);
+      }
+      const dispatch = (userTurnId = 'turn-user-1') =>
+        runSilentPromptTurn({
+          sessionId,
+          workspaceId,
+          requesterUserId: user,
+          userTurnId,
+          hasPromptEventsForTurn: true,
+          prepared: true,
+          encryptedExecution: composed.runtime.options.handlerConfig.encryptedExecution,
+          onPrompt: async () => {
+            submitted.push('hi');
+          },
+        });
+      if (backfillFailure) {
+        expect(
+          await Effect.runPromise(host.authorizeExecution(workspaceId, fixture.sender))
+        ).toEqual({ _tag: 'Authorized' });
+        const waiting = await dispatch();
+        expect(submitted).toEqual([]);
+        expect(recoveredRooms).toEqual(['session-production-session']);
+        expect(
+          await Effect.runPromise(host.authorizeExecution(workspaceId, fixture.sender))
+        ).toMatchObject({ _tag: terminalBackfill ? 'Denied' : 'Authorized' });
+        if (terminalBackfill)
+          await expect(host.status()).rejects.toThrow(
+            mode === 'backfill-member-removed' ? 'e2ee_member_removed' : 'e2ee_device_revoked'
+          );
+        if (!terminalBackfill) {
+          expect(waiting.getHistory()[0]?.status).toBe('pending');
+          expect(waiting.failureMessages).toEqual([]);
+        }
+        originalAvailable = true;
+        await protection.config.provider
+          .open({ ...fixture.sealed, context: fixture.context, additionalData: fixture.aad })
+          .catch(() => undefined);
+        const later = await dispatch('turn-user-2');
+        expect(submitted).toEqual(terminalBackfill ? [] : ['hi']);
+        if (!terminalBackfill) expect(later.getHistory()[0]?.status).toBe('handled');
+        return;
+      }
+      if (mode === 'delayed' || mode === 'expired') {
+        if (mode === 'expired') vi.setSystemTime(Date.parse('2026-10-28T02:15:00Z'));
+        const waiting = await dispatch();
+        expect(submitted).toEqual([]);
+        if (mode === 'expired') {
+          expect(waiting.getHistory()[0]?.status).toBe('failed');
+          expect(waiting.failureMessages[0]).toContain('expired');
+          expect(recoveredRooms).toEqual([]);
+          return;
+        }
+        expect(waiting.getHistory()[0]?.status).toBe('pending');
+        expect(waiting.failureMessages).toEqual([]);
+        originalAvailable = true;
+      }
+      const before = historyReads.length;
+      const result = await dispatch();
+      expect(submitted).toEqual(deniedSigner ? [] : ['hi']);
+      expect(result.getHistory()[0]?.status).toBe(deniedSigner ? 'failed' : 'handled');
+      expect(result.failureMessages).toEqual(
+        mode === 'other-member'
+          ? [expect.stringContaining('e2ee_machine_not_owned')]
+          : deniedSigner
+            ? [expect.stringContaining('not authorized')]
+            : []
+      );
+      expect(recoveredRooms).toEqual(
+        !snapshotOnly
+          ? []
+          : mode === 'delayed'
+            ? ['session-production-session', 'session-production-session']
+            : ['session-production-session']
+      );
+      expect(historyReads.length).toBeGreaterThan(before);
+      expect(
+        historyReads.every(
+          (credential) => credential.length > 0 && credential !== 'synthetic-token'
+        )
+      ).toBe(true);
+    } finally {
+      removalReleased.resolve();
+      if (lody)
+        await (
+          lody as unknown as { encryptedWorkspace: CliE2eeWorkspaceLegacy }
+        ).encryptedWorkspace.removalCleanup();
+      if (mode === 'backfill-device-revoked')
+        expect(fs.existsSync(path.join(identity, 'custody'))).toBe(true);
+      await lody?.documentManager.cleanUp();
+      await presence.closeLegacy();
+      source.free();
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  };
+
+  it('executes the real UI account ID through production Lody construction without injected authorization', () =>
+    runProductionSignedTurn('account'));
+  it.each([
+    'snapshot',
+    'delayed',
+    'expired',
+    'same-member',
+    'other-member',
+    'revoked-device',
+    'guest',
+    'removed-member',
+    'backfill-member-removed',
+    'backfill-device-revoked',
+    'backfill-network',
+  ] as const)(
+    'executes a signed durable turn through production Lody construction (%s)',
+    runProductionSignedTurn
+  );
+
+  it('keeps a snapshot turn pending until its original signed update becomes available', async () => {
+    const f = encryptedExecutionFixture();
+    let originalAvailable = false;
+    const submitted: string[] = [];
+    const gate = makeEncryptedAgentExecution({
+      genesis: 'genesis',
+      workspaceId: 'workspace-1',
+      targetMachineId: 'machine-1',
+      journal: lazyExecutionJournal(f.filename, () => 100),
+      resolveVerifiedOriginal: () =>
+        Effect.succeed(
+          originalAvailable
+            ? { requesterDevice: 'ab'.repeat(32), requesterCryptoUserId: 'user-1', expiresAt: 1000 }
+            : ({ state: 'pending-evidence', expiresAt: Date.now() + 1000 } as const)
+        ),
+      authorizeExecution: () => Effect.succeed({ _tag: 'Authorized' }),
+    });
+    try {
+      const pending = await runSilentPromptTurn({
+        sessionId: 'snapshot-pending',
+        prepared: true,
+        encryptedExecution: gate,
+        onPrompt: async () => {
+          submitted.push('hi');
+        },
+      });
+      expect(submitted).toEqual([]);
+      expect(pending.failureMessages).toEqual([]);
+      expect(pending.getHistory()[0]?.status).toBe('pending');
+      originalAvailable = true;
+      const retried = await runSilentPromptTurn({
+        sessionId: 'snapshot-pending',
+        prepared: true,
+        encryptedExecution: gate,
+        hasPromptEventsForTurn: true,
+        onPrompt: async () => {
+          submitted.push('hi');
+        },
+      });
+      expect(submitted).toEqual(['hi']);
+      expect(retried.getHistory()[0]?.status).toBe('handled');
+    } finally {
+      f.close();
+    }
+  });
+
+  it('shares the encrypted execution claim across RPC, durable dispatch and restart', async () => {
+    const f = encryptedExecutionFixture();
+    const started = createDeferred<void>();
+    const finished = createDeferred<void>();
+    const submissions: string[] = [];
+    const onPrompt = async () => {
+      submissions.push('hi');
+      started.resolve();
+      await finished.promise;
+    };
+    const first = runSilentPromptTurn({
+      sessionId: 'encrypted-session',
+      hasPromptEventsForTurn: true,
+      attempts: 2,
+      dispatchSource: 'rpc',
+      encryptedExecution: f.gate(),
+      onPrompt,
+    });
+    try {
+      await started.promise;
+      const duplicate = await runSilentPromptTurn({
+        sessionId: 'encrypted-session',
+        hasPromptEventsForTurn: true,
+        prepared: true,
+        encryptedExecution: f.gate(),
+        onPrompt,
+      });
+      expect(submissions).toEqual(['hi']);
+      expect(duplicate.failureMessages).toEqual([expect.stringContaining('Result unknown')]);
+      finished.resolve();
+      const completed = await first;
+      expect(completed.getHistory()[0]?.status).toBe('handled');
+      expect(completed.failureMessages).toEqual([]);
+      const restart = await runSilentPromptTurn({
+        sessionId: 'encrypted-session',
+        hasPromptEventsForTurn: true,
+        prepared: true,
+        encryptedExecution: f.gate(),
+        onPrompt,
+      });
+      expect(submissions).toEqual(['hi']);
+      expect(restart.failureMessages).toEqual([expect.stringContaining('already finished')]);
+      expect(
+        new RealtimeJournal(f.filename, () => 100).read({
+          genesis: 'genesis',
+          workspaceId: 'workspace-1',
+          targetMachineId: 'machine-1',
+          requestId: 'agent-start:turn-user-1',
+        })?.state
+      ).toBe('completed');
+    } finally {
+      finished.resolve();
+      await first;
+      f.close();
+    }
+  });
+
+  it('leaves a claimed encrypted turn uncertain after restart without replaying it', async () => {
+    const f = encryptedExecutionFixture();
+    const submissions: string[] = [];
+    try {
+      expect((await Effect.runPromise(f.gate().claim(f.intent))).state).toBe('claimed');
+      const recovered = await runSilentPromptTurn({
+        sessionId: 'encrypted-session',
+        hasPromptEventsForTurn: true,
+        prepared: true,
+        encryptedExecution: f.gate(),
+        onPrompt: async () => {
+          submissions.push('hi');
+        },
+      });
+      expect(submissions).toEqual([]);
+      expect(recovered.failureMessages).toEqual([expect.stringContaining('Result unknown')]);
+      expect(recovered.getHistory()[0]?.status).toBe('failed');
+    } finally {
+      f.close();
+    }
+  });
+
+  it.each(['denied', 'expired'] as const)(
+    'does not start a %s encrypted turn from durable history',
+    async (authorization) => {
+      const f = encryptedExecutionFixture();
+      const submissions: string[] = [];
+      try {
+        const result = await runSilentPromptTurn({
+          sessionId: 'encrypted-session',
+          hasPromptEventsForTurn: true,
+          prepared: true,
+          create: true,
+          encryptedExecution: f.gate(authorization),
+          onPrompt: async () => {
+            submissions.push('hi');
+          },
+        });
+        expect(submissions).toEqual([]);
+        expect(result.failureMessages).toEqual([
+          expect.stringContaining(authorization === 'denied' ? 'not authorized' : 'expired'),
+        ]);
+        expect(result.getHistory()[0]?.status).toBe('failed');
+        expect(
+          result.service.getExecutionSnapshot('encrypted-session' as SessionId).hasActiveTurn
+        ).toBe(false);
+      } finally {
+        f.close();
+      }
+    }
+  );
+
+  it('does not retry an encrypted prompt whose submission disconnected before output', async () => {
+    const f = encryptedExecutionFixture();
+    const submissions: string[] = [];
+    try {
+      const result = await runSilentPromptTurn({
+        sessionId: 'encrypted-session',
+        hasPromptEventsForTurn: false,
+        prepared: true,
+        encryptedExecution: f.gate(),
+        promptFailure: new Error('ACP connection closed'),
+        onPrompt: async () => {
+          submissions.push('hi');
+        },
+      });
+      expect(submissions).toEqual(['hi']);
+      expect((await Effect.runPromise(f.gate().claim(f.intent))).state).toBe('uncertain');
+      expect(
+        result.service.getExecutionSnapshot('encrypted-session' as SessionId).hasActiveTurn
+      ).toBe(false);
+    } finally {
+      f.close();
+    }
+  });
+
+  it('contains a broken encrypted journal while ordinary and healthy dispatch continue', async () => {
+    const f = encryptedExecutionFixture();
+    const submissions: string[] = [];
+    fs.writeFileSync(f.filename, 'damaged execution evidence');
+    try {
+      const broken = await runSilentPromptTurn({
+        sessionId: 'encrypted-session',
+        hasPromptEventsForTurn: true,
+        prepared: true,
+        encryptedExecution: f.gate(),
+        onPrompt: async () => {
+          submissions.push('broken');
+        },
+      });
+      const ordinary = await runSilentPromptTurn({
+        sessionId: 'ordinary-session',
+        hasPromptEventsForTurn: true,
+        prepared: true,
+        onPrompt: async () => {
+          submissions.push('ordinary');
+        },
+      });
+      const healthy = await runSilentPromptTurn({
+        sessionId: 'healthy-session',
+        workspaceId: 'workspace-2',
+        hasPromptEventsForTurn: true,
+        prepared: true,
+        encryptedExecution: f.gate(
+          'authorized',
+          path.join(f.directory, 'healthy.sqlite'),
+          'workspace-2'
+        ),
+        onPrompt: async () => {
+          submissions.push('healthy');
+        },
+      });
+      expect(submissions).toEqual(['ordinary', 'healthy']);
+      expect(ordinary.getHistory()[0]?.status).toBe('handled');
+      expect(healthy.getHistory()[0]?.status).toBe('handled');
+      expect(broken.getHistory()[0]?.status).toBe('failed');
+      expect(fs.readFileSync(f.filename, 'utf8')).toBe('damaged execution evidence');
+    } finally {
+      f.close();
+    }
+  });
 
   it.each([
     { output: true, outcome: { kind: 'succeeded' } },

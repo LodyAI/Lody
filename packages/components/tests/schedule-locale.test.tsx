@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18next from 'i18next';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
 import en from '../../../locales/en.json';
 import zh from '../../../locales/zh_CN.json';
 import { ScheduleForm, ScheduleListView } from '../src/components/schedules/schedule-view';
+import { ScheduledQueueRow } from '../src/components/sessions/message-queue/scheduled-queue-row';
 import {
   describeTrigger,
   formatInstant,
@@ -87,6 +88,31 @@ describe('Chinese is a product language, not an Intl locale', () => {
       ).not.toThrow();
       expect(() => describeTrigger({ kind: 'manual' }, instance.t, language)).not.toThrow();
     }
+  });
+
+  it('renders a persisted scheduled queue row under zh_CN', () => {
+    // A reservation re-renders on every load, so a throw here took down the app.
+    vi.useFakeTimers({ toFake: ['Date'], now: NOW });
+    try {
+      const at = NOW + 86_400_000;
+      render(
+        <ScheduledQueueRow
+          item={{
+            scheduleId: 's',
+            title: '每天回顾',
+            at,
+            timeZone: 'Asia/Shanghai',
+            state: 'pending',
+          }}
+        />
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+    const time = container.querySelector('[data-scheduled-row] button');
+    expect(time?.textContent).toBe(formatUpcoming(NOW + 86_400_000, 'Asia/Shanghai', NOW, 'zh-CN'));
+    expect(time?.textContent).toContain('明天');
+    expect(container.textContent).toContain('每天回顾');
   });
 
   it('renders the schedule list in Chinese', () => {

@@ -116,6 +116,18 @@ describe('mobile layout selection', () => {
     expect(container?.textContent).toBe('desktop:full');
   });
 
+  it('keeps a portrait iPad on the desktop renderer at 834', () => {
+    setNavigatorIdentity(
+      'Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1'
+    );
+    setViewportWidth(834);
+    renderLayoutProbe();
+
+    // A large tablet is a desktop interaction surface, not a stretched phone:
+    // the mobile new-chat sheet is reserved for the narrow split-view case.
+    expect(container?.textContent).toBe('desktop:full');
+  });
+
   it('keeps a narrow desktop browser window on the compact desktop renderer', () => {
     setNavigatorIdentity(
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/140 Safari/537.36'

@@ -76,10 +76,23 @@ export function envelopeFixture(kind: 0 | 1 | 2 = 0, org = 100) {
     records.push(
       signed([Ledger.hashRecordBytes(records[records.length - 1]!).toBytes(), owner.raw, operation])
     );
+  const machineId = new TextEncoder().encode('fixture-machine');
   const proof = phone.signBytes(
-    tag('possess/v2', ok(encodeCbor([genesis.toBytes(), member, phone.raw, bytes(v.pkR), kind])))
+    tag(
+      'possess/v2',
+      ok(
+        encodeCbor([
+          genesis.toBytes(),
+          member,
+          phone.raw,
+          bytes(v.pkR),
+          kind,
+          ...(kind === 1 ? [machineId] : []),
+        ])
+      )
+    )
   );
-  append([4, kind, phone.raw, bytes(v.pkR), proof]);
+  append([4, kind, phone.raw, bytes(v.pkR), proof, ...(kind === 1 ? [machineId, null] : [])]);
   const envelopeContext: Envelopes.EpochEnvelopeContext = {
     genesis,
     epoch: ok(Public.Bytes.epochNumber(0)),
@@ -101,6 +114,7 @@ export function envelopeFixture(kind: 0 | 1 | 2 = 0, org = 100) {
   return {
     owner,
     phone,
+    ed,
     secret,
     view,
     append,

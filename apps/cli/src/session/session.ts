@@ -19,7 +19,7 @@ import { Logger } from '@/utils/logger';
 import { ndJsonStream } from '@agentclientprotocol/sdk';
 import * as fs from 'fs';
 import type { AcpStartupTimeoutOptions, AgentClient } from '@/agent/agent-client';
-import { createAcpClient } from '@/agent/acp-runner';
+import { createAcpClient, prepareAcpProcessEnvironmentLegacy } from '@/agent/acp-runner';
 import { withAcpSessionStartSlot } from '@/agent/acp-session-start-gate';
 import {
   AcpStartupProcessError,
@@ -624,15 +624,21 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         closeBroker = prepared.close;
         Object.assign(prepared.env, memoryEnvironment(this.config.memory));
         if (releaseProfile) prepared.env.LODY_CODEX_PROCESS_TOKEN = releaseProfile.token;
+        const startupEnv = await prepareAcpProcessEnvironmentLegacy(
+          { command: callbacks.command, args: callbacks.args ?? [], env: callbacks.env },
+          prepared.env,
+          { logger: this.logger, signal: callbacks.abortSignal, cwd: this.getWorkdir() }
+        );
+        callbacks.abortSignal?.throwIfAborted();
         const executable = resolveDeepSeekHarnessSpawn({
           command: callbacks.command,
           args: callbacks.args ?? [],
-          env: prepared.env,
+          env: startupEnv,
           workdir: this.getWorkdir(),
         });
         agentProcessHandle = await this.sandbox.spawn(executable.command, executable.args, {
           cwd: this.getWorkdir(),
-          env: prepared.env,
+          env: startupEnv,
           stdio: ['pipe', 'pipe', 'pipe'],
         });
         agentProcessHandle.onExit(() => {
@@ -750,6 +756,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           onUsageUpdate: callbacks.onUsageUpdate,
           onContextWindowUsageUpdate: callbacks.onContextWindowUsageUpdate,
           onRateLimitUpdate: callbacks.onRateLimitUpdate,
+          onPromptSuggestion: callbacks.onPromptSuggestion,
           onThreadGoalUpdated: callbacks.onThreadGoalUpdated,
           onThreadGoalCleared: callbacks.onThreadGoalCleared,
           onSessionTitleUpdate: callbacks.onSessionTitleUpdate,

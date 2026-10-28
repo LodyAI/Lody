@@ -1,3 +1,4 @@
+import { compareUnifiedProjectOptions } from './chat-landing-derived';
 import { useDeferredValue, useMemo, useState, type ReactNode } from 'react';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 import {
@@ -13,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { toast } from '@/lib/toast';
 
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
@@ -33,22 +35,43 @@ import { contextPill } from './context-pill-class';
 import { Menu, MenuSearchInput } from '@/ui/menu';
 import { Tooltip } from '@lody/ui/tooltip';
 
-function GitHubOwnerAvatarIcon({ repoFullName }: { repoFullName: string }) {
-  const ownerHandle = (repoFullName.split('/')[0] ?? '').trim();
-  const [failed, setFailed] = useState(false);
+const ownerAvatarStyles = stylex.create({
+  frame: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: space[4],
+    height: space[4],
+    flexShrink: 0,
+  },
+});
 
-  if (!ownerHandle || failed) {
+export function GitHubOwnerAvatarIcon({ repoFullName }: { repoFullName: string }) {
+  const ownerHandle = (repoFullName.split('/')[0] ?? '').trim();
+  const [loadedOwner, setLoadedOwner] = useState<string | null>(null);
+  const [failedOwner, setFailedOwner] = useState<string | null>(null);
+
+  if (!ownerHandle || failedOwner === ownerHandle) {
     return <Github className="h-4 w-4 shrink-0 opacity-70" />;
   }
 
   return (
-    <CachedAvatarImg
-      src={getGitHubOwnerAvatarUrl(ownerHandle)}
-      alt=""
-      aria-hidden="true"
-      className="h-4 w-4 shrink-0 rounded-sm object-cover"
-      onError={() => setFailed(true)}
-    />
+    <span {...stylex.props(ownerAvatarStyles.frame)}>
+      {loadedOwner !== ownerHandle && <Github className="h-4 w-4 opacity-70" />}
+      <CachedAvatarImg
+        key={ownerHandle}
+        src={getGitHubOwnerAvatarUrl(ownerHandle)}
+        alt=""
+        aria-hidden="true"
+        className={cn(
+          'absolute inset-0 h-4 w-4 rounded-sm object-cover',
+          loadedOwner !== ownerHandle && 'opacity-0'
+        )}
+        onLoad={() => setLoadedOwner(ownerHandle)}
+        onError={() => setFailedOwner(ownerHandle)}
+      />
+    </span>
   );
 }
 
@@ -99,20 +122,7 @@ export type UnifiedLocalProjectOption = {
   sharing?: SessionSharingState;
 };
 
-export function compareUnifiedProjectOptions(
-  left: Pick<UnifiedProjectOption, 'label' | 'value' | 'lastUsedAt'>,
-  right: Pick<UnifiedProjectOption, 'label' | 'value' | 'lastUsedAt'>
-): number {
-  if (left.lastUsedAt !== undefined && right.lastUsedAt !== undefined) {
-    if (left.lastUsedAt !== right.lastUsedAt) return right.lastUsedAt - left.lastUsedAt;
-  } else if (left.lastUsedAt !== undefined) {
-    return -1;
-  } else if (right.lastUsedAt !== undefined) {
-    return 1;
-  }
-  const labelComparison = left.label.localeCompare(right.label);
-  return labelComparison !== 0 ? labelComparison : left.value.localeCompare(right.value);
-}
+export { compareUnifiedProjectOptions } from './chat-landing-derived';
 
 function selectUnifiedProjectOptionsForRender<
   TOption extends Pick<UnifiedProjectOption, 'label' | 'description' | 'selection'>,

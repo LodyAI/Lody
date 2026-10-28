@@ -21,7 +21,9 @@
   requires the initial and current connection sync; a previously resolved
   first-sync promise is insufficient after reconnect. Pure local bypasses only
   this cloud gate, never ownership/config validation.
-- `AgentExecutionSlots` is host-local, per-Agent-config Schedule admission.
+- `AgentExecutionSlots` is host-local, per-Agent-config generic Schedule admission.
+  Complete messages never reserve or restore these slots; only their destination
+  session busy check gates admission. Keep their ledger completion tracking.
   Restore accepted occupancy before evaluating; retain it while Session
   dispatch, queues, Operations or deliveries still have work. Release before
   prehandoff retry.
@@ -76,3 +78,19 @@
   Timers and active evaluations must not survive workspace revocation.
 - Deterministic tests use injected clocks, explicit sync barriers and temporary
   SQLite files. Do not add wall-clock sleep or live-provider timing assertions.
+
+- Complete-message reservations require schedules v3 and `messageVersion: 1`.
+  Preserve their payload in the fingerprint and frozen ledger; never dispatch a
+  prompt-only projection. Published reservations retain staged local attachment
+  bytes. Cancellation is acknowledged only after durable dispatch reconciliation;
+  a committed dispatch wins. Busy destination chats defer handoff without interruption.
+- Terminal one-time messages keep their document and Registry row for seven days
+  from the terminal runtime projection, then the owner purges the document, removes
+  schedule/runtime/manual rows and leaves a tombstone. A busy doc retries next pass;
+  pending/active messages and generic Schedules are never swept. Remote/CRDT history
+  compaction is separate.
+- A complete-message Schedule ID is consumed by durable dispatch across all later
+  activations. Consult the persistent ledger before planning/processing another run;
+  derive cross-activation sent state from that ledger, never a cached runtime row.
+  Complete-message prompt reads derive from atomic input blocks, and their activation
+  floor is the once instant so concurrent same-reservation creates share a fingerprint.

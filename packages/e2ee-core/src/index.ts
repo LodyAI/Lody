@@ -101,6 +101,7 @@ export {
   runWorkspaceKeyRound,
   WorkspaceKeyRoundCursors,
   WorkspaceKeyRoundError,
+  WorkspaceKeyRoundFailure,
   issueWorkspaceInvitation,
   verifyWorkspaceInvitationSnapshot,
   verifyRetainedWorkspaceGenesis,

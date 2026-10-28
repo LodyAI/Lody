@@ -1,3 +1,4 @@
+import { requireWorkspaceFeature } from '@/lib/workspace-feature';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { FileLinkCandidateDialog } from './file-link-candidate-dialog';
 import {
@@ -15,7 +16,6 @@ import {
   Archive,
   ArchiveRestore,
   ArrowLeft,
-  ChevronLeft,
   Copy,
   Ellipsis,
   FileText,
@@ -169,7 +169,10 @@ import type {
 } from '@/components/mobile/mobile-session-menu-sheet';
 import { SessionShareMobileMenu } from '@/components/sharing/session-share-mobile-menu';
 import { MobileFileViewerDrawer } from '@/components/mobile/mobile-file-viewer-drawer';
-import { GlassIconButton } from '@/components/mobile/glass-icon-button';
+import {
+  GlassIconButton,
+  MobileSessionHeaderBackButton,
+} from '@/components/mobile/glass-icon-button';
 import { toast } from '@/lib/toast';
 
 import { SessionConversationDiffPanel } from './session-conversation-diff-panel';
@@ -715,9 +718,6 @@ const detailStyles = stylex.create({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  leftNudge: {
-    marginInlineStart: '-4px',
-  },
   iconCurrent: {
     width: '20px',
     height: '20px',
@@ -915,25 +915,6 @@ const MobileProjectInfo = memo(function MobileProjectInfo({
   );
 });
 
-/* Glass back chevron for the mobile floating header. `onBack` leaves the
-   session route, which closes the `MobileWorkspaceStack` drawer — Vaul then
-   plays the slide-out and the home/project base beneath is revealed. */
-function MobileSessionHeaderBackButton({ onBack }: { onBack: () => void }) {
-  const { t } = useTranslation();
-  return (
-    /* -ml-1: glass disc is 36px inside a 44px hit target, so without this the
-       disc sits 4px right of the conversation gutter. Shift so the disc's left
-       edge lines up with the agent avatar below (ConversationColumn px-3). */
-    <GlassIconButton
-      label={t('common.back', 'Back')}
-      onClick={onBack}
-      className={stylex.props(detailStyles.leftNudge).className}
-    >
-      <ChevronLeft {...stylex.props(detailStyles.iconCurrent)} strokeWidth={1.75} />
-    </GlassIconButton>
-  );
-}
-
 // Toggles the bottom terminal dock, which is hidden by default and only mounted
 // in the desktop app (Electron). Shown only when a terminal-capable local session
 // is active — the dock publishes its controller only for local projects on this
@@ -1044,6 +1025,7 @@ const SessionDetail = ({
   urlBrowser,
   urlSimulator,
   onMobileBack,
+  onMobilePresented,
 }: {
   sessionId: SessionId;
   urlTab?: string;
@@ -1051,6 +1033,7 @@ const SessionDetail = ({
   urlBrowser?: boolean;
   urlSimulator?: boolean;
   onMobileBack?: () => void;
+  onMobilePresented?: (sessionId: string) => void;
 }) => {
   const { t } = useTranslation();
   const router = useRouter();
@@ -3253,7 +3236,10 @@ const SessionDetail = ({
   }, [activeSession, machineDotlodyPath, resolvedLocalProjectMeta?.rootPath, sessionMachine]);
 
   const handleCopyConversationHistory = useCallback(() => {
-    if (runtime?.contentMode === 'e2ee') throw new Error('e2ee_export_unavailable');
+    requireWorkspaceFeature(
+      { mode: runtime?.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+      'export'
+    );
     if (activeDraftTab) {
       return;
     }
@@ -3275,7 +3261,10 @@ const SessionDetail = ({
   }, [runtime?.contentMode, activeDraftTab, activeTabSessionId, captureSessionDetailEvent, t]);
 
   const handleShareAsImage = useCallback(async () => {
-    if (runtime?.contentMode === 'e2ee') throw new Error('e2ee_export_unavailable');
+    requireWorkspaceFeature(
+      { mode: runtime?.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+      'export'
+    );
     if (activeDraftTab) {
       return;
     }
@@ -3926,7 +3915,10 @@ const SessionDetail = ({
 
   const handleOpenBrowser = useCallback(
     (tabSessionId?: SessionId, navigateCandidate = false) => {
-      if (runtime?.contentMode === 'e2ee') throw new Error('e2ee_preview_unavailable');
+      requireWorkspaceFeature(
+        { mode: runtime?.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+        'remote-preview'
+      );
       const browserSessionId = tabSessionId ?? activeBrowserSession?.id;
       if (tabSessionId) {
         navigateToSessionTab(tabSessionId, { push: true });
@@ -5777,6 +5769,12 @@ const SessionDetail = ({
     sessionId,
     sessionPresenceState,
   ]);
+
+  const mobileSurfaceResolved =
+    isMobile && Boolean(activeSession) && sessionPresenceState === 'resolved';
+  useLayoutEffect(() => {
+    if (mobileSurfaceResolved) onMobilePresented?.(sessionId);
+  }, [mobileSurfaceResolved, sessionId, onMobilePresented]);
 
   if (sessionPresenceState === 'loading') {
     return (

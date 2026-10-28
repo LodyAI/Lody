@@ -94,6 +94,7 @@ export const conversationSurface = stylex.create({
     paddingBlock: conversation.activityPadding,
     paddingInline: conversation.railInset,
   },
+  thoughtStep: { paddingInline: 0 },
   userRow: { display: 'flex', width: '100%', flexDirection: 'row-reverse', columnGap: space[2] },
   mobileUserRow: { paddingLeft: '28px' },
   author: {

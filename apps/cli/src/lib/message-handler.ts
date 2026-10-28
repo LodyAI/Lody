@@ -1,3 +1,5 @@
+import type { EncryptedAgentExecution } from './e2ee/agent-execution';
+import { isScheduledMessageFile } from './schedules/scheduled-message-files';
 import {
   getWorkspaceFlockDocId,
   listWorkspaceProjects,
@@ -324,6 +326,7 @@ import {
   getSessionCommandEnvironment,
   runWithDaemonWorkspace,
   runWithSessionCommandEnvironment,
+  type DaemonWorkspaceAccess,
 } from './session-command-environment';
 import { getLodyOperationStorePath, LodyOperationStore } from '@/orchestration/operation-store';
 import {
@@ -600,6 +603,7 @@ function formatLiveActivityUpdatedAt(value: number, nowMs: number): string {
 
 export interface MessageHandlerConfig {
   encryptedWorkspace?: boolean;
+  encryptedExecution?: EncryptedAgentExecution;
   token: string;
   workspaceId: WorkspaceId;
   workspaceSlug?: string;
@@ -627,6 +631,8 @@ export interface MessageHandlerConfig {
    */
   onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
   workspaceWatchCoordinator?: WorkspaceWatchCoordinatorApi;
+  /** The fleet's access verdict for this workspace; cloud daemon commands resolve from it. */
+  readWorkspaceAccess?: () => DaemonWorkspaceAccess;
   cloudPort: CloudPort;
 }
 
@@ -710,6 +716,7 @@ export class MessageHandler {
   ) => Promise<void>;
   private onFatalAuthFailure?: (error: Error) => void;
   private onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
+  private readonly readWorkspaceAccess?: () => DaemonWorkspaceAccess;
   private readonly machineLifecycleCapability: MachineLifecycleCapability;
   private pendingProcessLifecycleAction: MachineProcessLifecycleAction | null = null;
   private readonly store = new SessionTransientStore();
@@ -2843,6 +2850,7 @@ export class MessageHandler {
     this.onFatalAuthFailure = config.onFatalAuthFailure;
     this.localWorkspaceCatalog = config.localWorkspaceCatalog ?? makeLocalWorkspaceCatalog();
     this.onProcessLifecycleAction = config.onProcessLifecycleAction;
+    this.readWorkspaceAccess = config.readWorkspaceAccess;
     this.machineLifecycleCapability = config.machineLifecycleCapability ?? {
       launchMode: 'foreground',
       canRemoteRestart: false,
@@ -2963,6 +2971,8 @@ export class MessageHandler {
       prAssociation: this.cloudPort.prAssociation,
     });
     this.executionService = new SessionExecutionService({
+      encryptedExecution: config.encryptedWorkspace ? config.encryptedExecution : undefined,
+      encryptedWorkspace: config.encryptedWorkspace,
       logger: this.logger,
       sessionManager: this.sessionManager,
       workspaceDocument: this.workspaceDocument,
@@ -3134,6 +3144,7 @@ export class MessageHandler {
     });
     this.worktreeGc = new WorktreeGarbageCollector({
       reposDir: path.join(getLodyDataDir(), 'repos'),
+      chatsDir: path.join(getLodyDataDir(), 'chats'),
       logger: this.logger,
       // Local mode has no remote to lag behind; in cloud mode the first full
       // metadata sync is what separates "deleted" from "not seen yet".
@@ -3581,6 +3592,7 @@ export class MessageHandler {
       this.userId
     );
     this.sessionDispatchWatcher = new SessionDispatchWatcher({
+      encryptedWorkspace: config.encryptedWorkspace,
       logger: this.logger,
       machineId: this.machineId,
       workspaceId: this.workspaceId,
@@ -3811,6 +3823,10 @@ export class MessageHandler {
       void promise.finally(() => {
         usageState.pendingUsageHandlers.delete(promise);
       });
+    });
+
+    this.sessionManager.on('onPromptSuggestion', (sessionId, suggestion) => {
+      this.workspaceDocument.publishPromptSuggestion(this.machineId, sessionId, suggestion);
     });
 
     this.sessionManager.on('onContextWindowUsageUpdate', (sessionId, usage) => {
@@ -6689,6 +6705,7 @@ export class MessageHandler {
           machineId: this.machineId,
           manager: this.workspaceDocument,
           readInvocation: (sessionId) => this.readActiveInvocation(sessionId),
+          ...(this.readWorkspaceAccess ? { readAccess: this.readWorkspaceAccess } : {}),
         },
         run
       );
@@ -6758,6 +6775,32 @@ export class MessageHandler {
       }
       return { ok: false, error: formatErrorMessage(error) };
     }
+  }
+
+  /** Native verified ingress. Never call this with an ordinary workspace RPC request. */
+  async offerEncryptedRpcTurn(
+    input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
+  ): Promise<import('@lody/shared/e2ee-rpc').E2eeDispatchAck> {
+    const inputConfig = normalizeSessionTurnInputConfig(input.inputConfig);
+    if (!this.executionService || !inputConfig) throw new Error('e2ee_rpc_input');
+    const sessionId = input.sessionId as SessionId;
+    const disposition = await this.sessionDispatchWatcher.offerRpcTurn({
+      sessionId,
+      userTurnId: input.userTurnId,
+      userId: input.userId,
+      timestamp: input.timestamp,
+      inputConfig,
+    });
+    return {
+      type: 'session/dispatch-turn_response',
+      sessionId,
+      userTurnId: input.userTurnId,
+      accepted:
+        disposition === 'accepted' ||
+        disposition === 'duplicate' ||
+        disposition === 'already-terminal',
+      disposition,
+    };
   }
 
   private async dispatchLocalMachineRpc(
@@ -8361,6 +8404,8 @@ export class MessageHandler {
       // so a staged-but-never-sent file cannot hold quota forever.
       const ageMs = await getSessionFileBlobAgeMs(blobArgs);
       if (ageMs !== null && ageMs > getDraftSessionFileBlobMaxAgeMs()) {
+        if (await isScheduledMessageFile({ repo: this.workspaceDocument.repo, ...blobArgs }))
+          return;
         await removeSessionFileBlob(blobArgs);
         this.logger.warn(
           `[${sessionId}] Reclaimed abandoned draft file blob ${fileId} (age ${Math.round(ageMs / 1000)}s)`
@@ -10452,7 +10497,8 @@ export class MessageHandler {
     void this.sessionDispatchWatcher.enqueueSessionCheck(sessionId);
   }
 
-  // =====================================================================  // GC-related public methods
+  // =====================================================================
+  // GC-related public methods
   // =====================================================================
   /**
    * Check if a session has pending ACP updates that haven't been flushed yet.

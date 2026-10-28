@@ -99,6 +99,8 @@ import {
 } from 'loro-repo';
 import { createCliPresenceRuntimeLegacy, type CliPresenceRuntimeLegacy } from './presence-legacy';
 import { CliMachineMonitorRuntime } from './machine-monitor';
+import { CliPromptSuggestions } from './prompt-suggestions';
+import type { LodyPromptSuggestion } from 'acp-extension-core';
 import {
   attachAutoMarkLatestUserHistoryAsRead,
   type AutoMarkLatestUserHistoryAsReadHandle,
@@ -183,7 +185,8 @@ const createLocalLoroDataPlaneServer = (
   repo: LoroRepo,
   workspaceId: WorkspaceId,
   presenceRuntime: CliPresenceRuntimeLegacy,
-  machineMonitorRuntime: CliMachineMonitorRuntime
+  machineMonitorRuntime: CliMachineMonitorRuntime,
+  promptSuggestions: CliPromptSuggestions
 ): LocalLoroDataPlaneServerLegacy =>
   new LocalLoroDataPlaneServerLegacy({
     workspaceId,
@@ -200,6 +203,10 @@ const createLocalLoroDataPlaneServer = (
     presenceSource: {
       encodeLocalOrigin: () => presenceRuntime.encodeLocalOriginPresence(),
       subscribeLocalOrigin: (listener) => presenceRuntime.subscribeLocalOriginPresence(listener),
+    },
+    promptSuggestionSource: {
+      encodeAll: () => promptSuggestions.state.encode(),
+      subscribe: (listener) => promptSuggestions.state.subscribe(listener),
     },
     machineMonitorSource: {
       apply: (update) => machineMonitorRuntime.applyLocalState(update),
@@ -338,12 +345,16 @@ export interface LoroDocumentManagerOptions {
   initialMetaSyncCompleted?: boolean;
   presenceRuntime?: CliPresenceRuntimeLegacy | null;
   machineMonitorRuntime?: CliMachineMonitorRuntime | null;
+  promptSuggestions?: CliPromptSuggestions | null;
   localLoroDataPlaneServer?: LocalLoroDataPlaneServerLegacy | null;
   sqliteRepoStore?: CliSqliteRepoStore | null;
   /** LoroDoc Streams cursors for this process; see `DocumentCursorScope`. */
   documentRemoteCursorStore?: RemoteCursorStore | null;
   remoteStreamsAttached?: boolean;
-  encryptedWorkspace?: Pick<CliE2eeWorkspaceLegacy, 'content' | 'bucketId' | 'refresh' | 'close'>;
+  encryptedWorkspace?: Pick<
+    CliE2eeWorkspaceLegacy,
+    'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory'
+  >;
   streamsTokens?: CloudStreamsTokenPort | null;
   cloudBilling?: CloudBillingPort | null;
   /** One-shot clients route history to the owner; daemons use installed local factories. */
@@ -385,6 +396,7 @@ export class LoroDocumentManager {
   private readonly initialMetaSyncPromise: Promise<boolean>;
   private presenceRuntime: CliPresenceRuntimeLegacy | null;
   private machineMonitorRuntime: CliMachineMonitorRuntime | null;
+  private readonly promptSuggestions: CliPromptSuggestions | null;
   private remoteStreamsTokens: Awaited<
     ReturnType<CliPresenceRuntimeLegacy['createStreamsTokens']>
   > | null = null;
@@ -392,7 +404,7 @@ export class LoroDocumentManager {
   private remoteTransportOpQueue: Promise<unknown> = Promise.resolve();
   private readonly encryptedWorkspace?: Pick<
     CliE2eeWorkspaceLegacy,
-    'content' | 'bucketId' | 'refresh' | 'close'
+    'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory'
   >;
   private readonly streamsTokens: CloudStreamsTokenPort | null;
   public readonly cloudBilling: CloudBillingPort | null;
@@ -428,7 +440,7 @@ export class LoroDocumentManager {
       documentCursorScope?: DocumentCursorScope;
       encryptedWorkspace?: Pick<
         CliE2eeWorkspaceLegacy,
-        'content' | 'bucketId' | 'refresh' | 'close'
+        'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory'
       >;
       streamsTokens?: CloudStreamsTokenPort | null;
       cloudBilling?: CloudBillingPort | null;
@@ -444,11 +456,18 @@ export class LoroDocumentManager {
     // the Streams token is fetched only when the remote bridge attaches later
     // (attachRemoteStreamsTransport), not eagerly here.
     installCliHttpGlobalDispatcher({ logger });
+    if (options.encryptedWorkspace && !options.encryptedWorkspace.repositoryDirectory)
+      throw new Error('e2ee_invalid_input');
     const cliSqliteRepoStore = await traceAsync(
       logger,
       'startup.loro_sqlite_store',
       { workspaceId },
-      async () => await createCliSqliteRepoStore(workspaceId, options.onStorageWriteFailure)
+      async () =>
+        await createCliSqliteRepoStore(
+          workspaceId,
+          options.onStorageWriteFailure,
+          options.encryptedWorkspace?.repositoryDirectory
+        )
     );
     const createRepoTimeoutMs = readTimeoutEnv('LODY_LORO_CREATE_REPO_TIMEOUT_MS', 30_000);
     const joinMetaTimeoutMs = readTimeoutEnv('LODY_LORO_JOIN_META_TIMEOUT_MS', 30_000);
@@ -486,8 +505,11 @@ export class LoroDocumentManager {
       // Presence is produced locally regardless of remote sync so local-first
       // renderers get machine/session liveness over the data plane; the cloud
       // Streams sink is attached later by the remote bridge.
-      presenceRuntime = await createCliPresenceRuntimeLegacy(workspaceId);
+      presenceRuntime = await createCliPresenceRuntimeLegacy(workspaceId, {
+        minimal: !!options.encryptedWorkspace,
+      });
       const machineMonitorRuntime = new CliMachineMonitorRuntime({ workspaceId, logger });
+      const promptSuggestions = new CliPromptSuggestions(workspaceId, logger);
       // No transport is registered at startup: rooms stay pending/detached
       // while offline, and renderer↔CLI document sync is served out-of-band by
       // the data-plane server engine. The cloud Streams transport is added
@@ -496,7 +518,8 @@ export class LoroDocumentManager {
         createdRepo,
         workspaceId,
         presenceRuntime,
-        machineMonitorRuntime
+        machineMonitorRuntime,
+        promptSuggestions
       );
       const metaSub = await traceAsync(
         logger,
@@ -523,6 +546,7 @@ export class LoroDocumentManager {
         initialMetaSyncCompleted: false,
         presenceRuntime,
         machineMonitorRuntime,
+        promptSuggestions,
         localLoroDataPlaneServer,
         sqliteRepoStore: cliSqliteRepoStore,
         documentRemoteCursorStore: createDocumentRemoteCursorStore(
@@ -627,6 +651,7 @@ export class LoroDocumentManager {
     this.remoteStreamsGeneration = this.remoteStreamsAttached ? 1 : 0;
     this.presenceRuntime = options.presenceRuntime ?? null;
     this.machineMonitorRuntime = options.machineMonitorRuntime ?? null;
+    this.promptSuggestions = options.promptSuggestions ?? null;
     const initialTransportStatus = options.initialTransportStatus ?? 'disconnected';
     const initialMetaSyncPromise = options.initialMetaSyncPromise ?? Promise.resolve(false);
     const initialMetaSyncCompleted = options.initialMetaSyncCompleted ?? false;
@@ -764,10 +789,22 @@ export class LoroDocumentManager {
       // The presence runtime already exists (created at repo init and producing
       // presence locally); attaching the cloud Streams sink additionally mirrors
       // it to the cloud presence stream.
-      if (!this.encryptedWorkspace) {
-        await this.presenceRuntime.attachStreams({
+      const presenceAttach = this.presenceRuntime.attachStreams({
+        streamsBaseUrl: streamsTransport.gatewayBaseUrl,
+        auth: streamsTokens.native.createAuthCallback(),
+        shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
+        ...(this.encryptedWorkspace ? { bucketId: this.encryptedWorkspace.bucketId() } : {}),
+      });
+      if (this.encryptedWorkspace) {
+        // Liveness failure remains unknown and cannot roll back protected document sync.
+        await presenceAttach.catch(() => {
+          this.logger.warn(`[${this.workspaceId}] Presence unavailable; machine status is unknown`);
+        });
+      } else {
+        await presenceAttach;
+        this.promptSuggestions?.attachStreams({
           streamsBaseUrl: streamsTransport.gatewayBaseUrl,
-          auth: streamsTokens.native.createAuthCallback(),
+          auth: streamsTransport.tokenProvider.createAuthCallback(),
           shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
         });
         this.machineMonitorRuntime?.attachStreams({
@@ -808,6 +845,7 @@ export class LoroDocumentManager {
       const detached = await Promise.allSettled([
         this.presenceRuntime?.detachStreams(),
         this.machineMonitorRuntime?.detachStreams(),
+        this.promptSuggestions?.detachStreams(),
       ]);
       for (const result of detached) if (result.status === 'rejected') failures.push(result.reason);
       // Registration happens before connect, so remove and close both boundaries.
@@ -849,6 +887,7 @@ export class LoroDocumentManager {
     const detached = await Promise.allSettled([
       this.presenceRuntime?.detachStreams(),
       this.machineMonitorRuntime?.detachStreams(),
+      this.promptSuggestions?.detachStreams(),
     ]);
     for (const result of detached) if (result.status === 'rejected') failures.push(result.reason);
     try {
@@ -1877,10 +1916,10 @@ export class LoroDocumentManager {
       throw error;
     }
     try {
-      await this.machineMonitorRuntime?.stop();
+      await Promise.all([this.machineMonitorRuntime?.stop(), this.promptSuggestions?.stop()]);
     } catch (error) {
       this.logger.debug(
-        `[${this.workspaceId}] Failed to stop machine monitor runtime: ${formatErrorMessage(error)}`
+        `[${this.workspaceId}] Failed to stop advisory workspace runtimes: ${formatErrorMessage(error)}`
       );
     }
     if (this.remoteStreamsTokens) {
@@ -1939,6 +1978,14 @@ export class LoroDocumentManager {
     await this.destroyRepo({ fast: options.fast });
     await this.encryptedWorkspace?.close();
     if (presenceCleanupFailure) throw presenceCleanupFailure;
+  }
+
+  publishPromptSuggestion(
+    machineId: MachineId,
+    sessionId: SessionId,
+    suggestion: LodyPromptSuggestion
+  ): void {
+    this.promptSuggestions?.state.publish(machineId, { ...suggestion, sessionId });
   }
 
   configureMachineMonitor(

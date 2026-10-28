@@ -12,8 +12,9 @@ Checkpoint selection is independent of hostile transport. A failed read or
 SQLite write retains both verified history and its read cursor. Every client
 has its own durable file; replay never silently skips already committed hashes.
 
-Content native state and exact SDK cursor commit atomically per document. Remote
-authentication/decryption/format failures and local corruption stop only that document.
+Content native state and exact SDK cursor commit atomically per document.
+Unrecoverable content/format failures and local corruption stop only that document;
+native snapshot rejection may replay/retry as described in README.
 Network, timeout, 5xx, 409 and permission errors retain active state for retry; failed
 recovery preserves both its prior stopped/active status and the durable pair.
 SDK subscription precedes local edits; abort is not proof of stopped native work.

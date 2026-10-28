@@ -1,3 +1,9 @@
+import { WorkspaceFeatureReasonText } from '@/components/workspace-feature-notice';
+import {
+  useWorkspaceFeature,
+  useWorkspaceFeatureReason,
+  useMachineRpcFeatureReason,
+} from '@/hooks/use-workspace-feature';
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
 import type { DocumentSelection } from '@/lib/document-selection';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
@@ -8,6 +14,8 @@ import {
   type SessionAttachmentDraft,
 } from '@/lib/session-attachment-draft';
 import { useSchedules } from '@/hooks/use-schedules';
+import { ScheduledMessageTimeDialog } from '../schedules/scheduled-message-time';
+import { saveScheduledMessage } from '../schedules/scheduled-message-write';
 import { windowPreparationAtom } from '@/lib/window-preparation';
 import { conversationCopyRange } from '@/lib/conversation-copy-range';
 import { describeCopiedConversation } from '@/lib/describe-copied-conversation';
@@ -84,6 +92,7 @@ import {
 import { useSessionMcpSelection } from '@/hooks/use-session-mcp-selection';
 import {
   MessageQueueDisplay,
+  type ScheduledQueueItem,
   shouldRequestNativeQueueSteer,
   useHasPendingQueueRecords,
 } from './message-queue';
@@ -121,6 +130,7 @@ import {
   FREE_SESSION_TURN_WARNING_REMAINING,
   getAcpCapabilityCacheEntryAuthority,
   getAcpCapabilityCacheKey,
+  getDeviceTimeZone,
   getMachineFlockLocalProjects,
   getProjectRefBranch,
   getSessionPullRequestLegacyFields,
@@ -141,7 +151,9 @@ import {
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
   decodeProjectPreparationProgress,
+  ScheduleRepository,
   type McpServerId,
+  type ScheduleDocument,
 } from '@lody/shared';
 import { useIsMobile } from '../../hooks/use-mobile';
 import { useStableCallback } from '@/hooks/use-stable-callback';
@@ -1319,7 +1331,7 @@ export function SessionHeaderMenu({
   onShareWithTeam,
   onShareAsImage,
   onOpenSearch,
-  onFork,
+  onFork: requestedFork,
   isForking = false,
   forkWorktreeAvailability = 'hidden',
   onForkMenuOpen,
@@ -1370,6 +1382,11 @@ export function SessionHeaderMenu({
   };
   t: SessionSharingTranslator;
 }) {
+  const rpcReason = useMachineRpcFeatureReason(session.machineId);
+  const onFork = rpcReason ? undefined : requestedFork;
+  const exportReason = useWorkspaceFeatureReason('export');
+  const sharingReason = useWorkspaceFeatureReason('sharing');
+  const previewReason = useWorkspaceFeatureReason('remote-preview');
   const isArchived = !!session.isArchived;
   const project = session.project as
     | { kind: 'github'; repoFullName?: string; branch?: string }
@@ -1706,7 +1723,7 @@ export function SessionHeaderMenu({
 
           {openInIdeMenu}
 
-          {onOpenPublicShare && (
+          {onOpenPublicShare && !sharingReason && (
             <Menu.Item icon={Share2} onClick={onOpenPublicShare}>
               {t('sharing.manager.title', 'Share')}
             </Menu.Item>
@@ -1723,7 +1740,7 @@ export function SessionHeaderMenu({
             </Menu.Item>
           )}
 
-          {onFork || onCopyConversationHistory ? (
+          {onFork || (onCopyConversationHistory && !exportReason) ? (
             <Menu.Submenu>
               <Menu.SubmenuTrigger
                 icon={isForking ? <Spinner size="small" label={null} /> : GitFork}
@@ -1774,7 +1791,7 @@ export function SessionHeaderMenu({
                       </SessionForkOptionTooltip>
                     );
                   })}
-                {onCopyConversationHistory && (
+                {onCopyConversationHistory && !exportReason && (
                   <Menu.Item
                     icon={Copy}
                     onClick={() => {
@@ -1845,7 +1862,7 @@ export function SessionHeaderMenu({
           {/* Copy URL stays in the Copy submenu even for private sessions (the
               link still works for the owner); sharing is a separate action that
               only appears while the conversation isn't team-visible. */}
-          {sharing && sharing.visibility !== 'team' ? (
+          {sharing && !sharingReason && sharing.visibility !== 'team' ? (
             <Menu.Item
               disabled={shareActionDisabled}
               onClick={() => {
@@ -1916,14 +1933,15 @@ export function SessionHeaderMenu({
                 onClick={() => {
                   void onCopyConversationHistory?.();
                 }}
-                disabled={!onCopyConversationHistory}
+                disabled={!!exportReason || !onCopyConversationHistory}
                 title={
-                  onCopyConversationHistory
+                  exportReason ??
+                  (onCopyConversationHistory
                     ? undefined
                     : t(
                         'sessions.copyConversationHistoryUnavailable',
                         'Conversation history is unavailable for this tab'
-                      )
+                      ))
                 }
                 icon={Copy}
               >
@@ -1941,14 +1959,35 @@ export function SessionHeaderMenu({
           </Menu.Submenu>
 
           <Menu.Item
-            disabled={!onShareAsImage}
+            disabled={!!exportReason || !onShareAsImage}
+            title={exportReason}
             onClick={() => {
               onShareAsImage?.();
             }}
             icon={Image}
           >
-            {t('sessions.shareAsImage', 'Share as image…')}
+            {exportReason ? (
+              <WorkspaceFeatureReasonText reason={exportReason} />
+            ) : (
+              t('sessions.shareAsImage', 'Share as image…')
+            )}
           </Menu.Item>
+
+          {rpcReason ? (
+            <Menu.Item disabled>
+              <WorkspaceFeatureReasonText reason={rpcReason} />
+            </Menu.Item>
+          ) : null}
+          {sharingReason ? (
+            <Menu.Item disabled icon={Share2}>
+              <WorkspaceFeatureReasonText reason={sharingReason} />
+            </Menu.Item>
+          ) : null}
+          {previewReason ? (
+            <Menu.Item disabled>
+              <WorkspaceFeatureReasonText reason={previewReason} />
+            </Menu.Item>
+          ) : null}
 
           {/* Archive / Restore + Delete */}
           {isArchived
@@ -2465,7 +2504,9 @@ export const SessionChatInterface = memo(
     const postHog = usePostHog();
     const localeObj = i18n.language?.startsWith('zh') ? zhCN : enUS;
     const workspaceId = useAtomValue(currentWorkspaceIdAtom);
-    const publicSharingAvailable = useAppCapability('teamSharing');
+    const rpcReason = useMachineRpcFeatureReason(session.machineId);
+    const sharingAllowed = useWorkspaceFeature('sharing');
+    const publicSharingAvailable = useAppCapability('teamSharing') && sharingAllowed;
     // One owner for the static-share editor, because both the header control
     // and the "…" menu open the same one.
     const publicShareWorkspaceId = publicSharingAvailable && workspaceId ? workspaceId : undefined;
@@ -2695,10 +2736,8 @@ export const SessionChatInterface = memo(
     const steerCapability = session.agentConfigId
       ? sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)]
       : undefined;
-    const nativeSteerAvailable = shouldRequestNativeQueueSteer(
-      capabilityAuthority,
-      steerCapability
-    );
+    const nativeSteerAvailable =
+      !rpcReason && shouldRequestNativeQueueSteer(capabilityAuthority, steerCapability);
     const { selectedModeId, selectedModelId, configOptionValues } =
       useResolvedAcpSessionConfigSelection(sessionConfigSelection, selectorOptions, {
         cliType: session.cliType,
@@ -3144,15 +3183,23 @@ export const SessionChatInterface = memo(
 
     // Session status strip above the composer: one priority-ordered slot for
     // "will my message run?" (self offline > machine removed > machine offline).
+    const presenceAvailable = useWorkspaceFeature('presence');
     const statusStripState = useMemo(
       () =>
         resolveSessionStatusStripState({
           browserOnline,
+          presenceAvailable,
           machineRemoved: isMachineRemoved,
           machineOnlineStatus: sessionMachineOnlineStatus,
           machineName: sessionMachine?.name ?? null,
         }),
-      [browserOnline, isMachineRemoved, sessionMachineOnlineStatus, sessionMachine?.name]
+      [
+        browserOnline,
+        presenceAvailable,
+        isMachineRemoved,
+        sessionMachineOnlineStatus,
+        sessionMachine?.name,
+      ]
     );
 
     // Keyboard cyclers (⇧Tab mode + rebindable model / thinking). The agent provider is
@@ -3354,7 +3401,10 @@ export const SessionChatInterface = memo(
     const goalCapability = session.agentConfigId
       ? sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)]
       : undefined;
-    const goalCommands = useMemo(() => getSessionGoalCommands(goalCapability), [goalCapability]);
+    const goalCommands = useMemo(
+      () => (rpcReason ? [] : getSessionGoalCommands(goalCapability)),
+      [rpcReason, goalCapability]
+    );
     const canPauseGoal = goalCommands.includes('pause');
 
     useEffect(() => {
@@ -3572,6 +3622,7 @@ export const SessionChatInterface = memo(
     ]);
     const editableLastUserMessageId = useMemo(() => {
       if (
+        rpcReason ||
         session.isArchived ||
         isGoalActive ||
         session.cliType !== 'builtin' ||
@@ -3614,6 +3665,7 @@ export const SessionChatInterface = memo(
       // The first user message uses session/new and therefore has no fork boundary.
       return userMessage.id;
     }, [
+      rpcReason,
       isGoalActive,
       session.agentConfigId,
       session.agentType,
@@ -5437,6 +5489,134 @@ export const SessionChatInterface = memo(
     const router = useRouter();
     const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
     const scheduleRegistry = useSchedules();
+    const scheduledQueueItems = useMemo<ScheduledQueueItem[]>(() => {
+      const runtimeFor = (row: (typeof scheduleRegistry.rows)[number]) =>
+        scheduleRegistry.runtimes.find(
+          (candidate) =>
+            candidate.scheduleId === row.scheduleId &&
+            candidate.machineId === row.machineId &&
+            candidate.activationId === row.activationId &&
+            candidate.observedDefinitionFingerprint === row.definitionFingerprint
+        );
+      const timeZone = getDeviceTimeZone(sessionMachine?.timeZone);
+      return scheduleRegistry.rows
+        .filter(
+          (row) =>
+            row.scheduledMessage &&
+            row.enabled &&
+            row.ownerId === currentUser?.id &&
+            row.destination.kind === 'existing_session' &&
+            row.destination.sessionId === session.id &&
+            row.trigger.kind === 'once'
+        )
+        .map((row) => ({ row, scheduledRuntime: runtimeFor(row) }))
+        .filter(
+          ({ scheduledRuntime }) =>
+            !['sent', 'cancelled'].includes(scheduledRuntime?.messageState ?? '')
+        )
+        .map(({ row, scheduledRuntime }) => ({
+          scheduleId: row.scheduleId,
+          title: row.title,
+          at: Date.parse(row.trigger.kind === 'once' ? row.trigger.at : ''),
+          timeZone,
+          state:
+            scheduledRuntime?.messageState === 'failed'
+              ? ('failed' as const)
+              : ('pending' as const),
+        }))
+        .filter((item) => Number.isFinite(item.at))
+        .sort((a, b) => a.at - b.at);
+    }, [
+      currentUser?.id,
+      scheduleRegistry.rows,
+      scheduleRegistry.runtimes,
+      session.id,
+      sessionMachine?.timeZone,
+    ]);
+
+    const [scheduledTimeEdit, setScheduledTimeEdit] = useState<{
+      item: ScheduledQueueItem;
+      document: ScheduleDocument;
+    } | null>(null);
+
+    useEffect(() => {
+      setScheduledTimeEdit(null);
+    }, [session.id]);
+
+    const openScheduledTimeEditor = useCallback(
+      async (item: ScheduledQueueItem) => {
+        if (!runtime || !currentUser) return;
+        try {
+          const document = await new ScheduleRepository(runtime.repo, runtime.workspaceId).read(
+            item.scheduleId
+          );
+          if (!document?.message) throw new Error('Scheduled message unavailable');
+          setScheduledTimeEdit({ item, document });
+        } catch {
+          if (!workspaceSlug) return;
+          void router.navigate({
+            to: '/$workspaceName/schedules/$scheduleId',
+            params: { workspaceName: workspaceSlug, scheduleId: item.scheduleId },
+          });
+        }
+      },
+      [currentUser, router, runtime, workspaceSlug]
+    );
+
+    const applyScheduledTime = useCallback(
+      async (at: string) => {
+        if (!scheduledTimeEdit || !runtime || !currentUser) return;
+        const { document, item } = scheduledTimeEdit;
+        setScheduledTimeEdit(null);
+        const definition = document.definition;
+        try {
+          await saveScheduledMessage({
+            runtime,
+            actorId: currentUser.id,
+            scheduleId: item.scheduleId,
+            activationId: uuidv4(),
+            activityId: uuidv4(),
+            create: false,
+            draft: {
+              title: definition.title,
+              machineId: definition.machineId,
+              agent: definition.agent,
+              destination: definition.destination,
+              misfirePolicy: definition.misfirePolicy,
+              overlapPolicy: definition.overlapPolicy,
+              retryPolicy: definition.retryPolicy,
+              prompt: document.prompt,
+              ...(document.message ? { message: document.message } : {}),
+              trigger: { kind: 'once', at },
+            },
+          });
+        } catch {
+          toast.error(t('scheduledMessage.saveError'));
+        }
+      },
+      [currentUser, runtime, scheduledTimeEdit, t]
+    );
+
+    const cancelScheduledMessage = useCallback(
+      async (item: ScheduledQueueItem) => {
+        if (!runtime || !currentUser) return;
+        try {
+          await runtime.withScheduleStore(item.scheduleId, () =>
+            new ScheduleRepository(runtime.repo, runtime.workspaceId).setEnabled({
+              scheduleId: item.scheduleId,
+              actorId: currentUser.id,
+              enabled: false,
+              now: getServerNow(),
+              activationId: uuidv4(),
+              requestId: uuidv4(),
+            })
+          );
+        } catch {
+          toast.error(t('scheduledMessage.saveError'));
+        }
+      },
+      [currentUser, runtime, t]
+    );
 
     // Presentation-only "opened by" provenance (MCP `lody_session_create`).
     // Read from the already-loaded session meta cache, so it costs no extra
@@ -7185,12 +7365,31 @@ export const SessionChatInterface = memo(
                       // bar is empty). Hidden with the composer: a pending
                       // permission bypasses the queue, as does share selection.
                       queue={
-                        (messageQueue.length > 0 || hasPendingQueueRecords) &&
+                        (messageQueue.length > 0 ||
+                          hasPendingQueueRecords ||
+                          scheduledQueueItems.length > 0) &&
                         !shouldReplaceComposerWithPermission &&
                         !shareSelection.active ? (
                           <MessageQueueDisplay
                             sessionId={session.id}
                             items={messageQueue}
+                            scheduledItems={scheduledQueueItems}
+                            onOpenScheduled={(item) => {
+                              if (!workspaceSlug) return;
+                              void router.navigate({
+                                to: '/$workspaceName/schedules/$scheduleId',
+                                params: {
+                                  workspaceName: workspaceSlug,
+                                  scheduleId: item.scheduleId,
+                                },
+                              });
+                            }}
+                            onEditScheduledTime={(item) => {
+                              void openScheduledTimeEditor(item);
+                            }}
+                            onCancelScheduled={(item) => {
+                              void cancelScheduledMessage(item);
+                            }}
                             onRemove={handleRemoveQueueItem}
                             onReorder={handleReorderQueueItem}
                             onEditStart={handleStartQueueItemEdit}
@@ -7203,6 +7402,8 @@ export const SessionChatInterface = memo(
                               !isExternalHistoryRefreshing
                             }
                             nativeSteerAvailable={nativeSteerAvailable}
+                            roomy={isMobile}
+                            footerPosition={isMobile ? 'inline' : 'below'}
                           />
                         ) : undefined
                       }
@@ -7211,6 +7412,21 @@ export const SessionChatInterface = memo(
                     {/* Input area - isolated component to prevent full re-renders on typing.
                       Hidden while a permission is pending so the response buttons claim
                       the bottom surface; chat queue is bypassed for the same reason. */}
+                    {scheduledTimeEdit ? (
+                      <ScheduledMessageTimeDialog
+                        at={
+                          scheduledTimeEdit.document.definition.trigger.kind === 'once'
+                            ? scheduledTimeEdit.document.definition.trigger.at
+                            : null
+                        }
+                        timeZone={getDeviceTimeZone(sessionMachine?.timeZone)}
+                        now={getServerNow()}
+                        onClose={() => setScheduledTimeEdit(null)}
+                        onApply={(at) => {
+                          void applyScheduledTime(at);
+                        }}
+                      />
+                    ) : null}
                     <MessageSelectionToolbar selection={shareSelection} />
                     <div
                       {...stylex.props(

@@ -1,454 +1,832 @@
+import { useTranslation } from 'react-i18next';
 import type { Meta, StoryObj } from '@storybook/react';
-import { useState } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { Provider, createStore } from 'jotai';
 import {
   ArrowUp,
-  Folder,
+  ChevronsUpDown,
+  Folders,
+  FolderOpen,
+  CircleSlash2,
   GitBranch,
-  Github,
-  MessageCircle,
   Monitor,
-  ShieldCheck,
-  Sparkles,
 } from 'lucide-react';
 
-import { MobileNewChatSheet } from '@/components/mobile/mobile-new-chat-sheet';
+import {
+  ChatComposer,
+  type ChatComposerFileItem,
+  type ChatComposerImageItem,
+} from '@/components/chat/chat-composer';
+import {
+  GitHubOwnerAvatarIcon,
+  type UnifiedProjectSelection,
+} from '@/components/chat/unified-project-selector';
+import { readChatLandingDefaults, recordChatLandingProjectUse } from '@/lib/chat-landing-defaults';
+import { MOBILE_NEW_CHAT_PROMPT_ID } from '@/components/chat/submission/use-composer-navigation-focus';
+import {
+  AGENT_ROLE_VERSION,
+  getAgentConfigRoomId,
+  type AgentConfigMeta,
+  type AcpCommandSummary,
+  type AgentConfigId,
+  type AgentRoleId,
+  type LocalProjectId,
+  type MachineId,
+} from '@lody/shared';
+import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
+import type {
+  FileWorkspaceProvider,
+  FileWorkspaceProviderEntry,
+} from '@/lib/file-workspace-provider';
+import type { MobileNativeSelectOption } from '@/components/mobile/mobile-native-select';
+import { MobileSessionRunConfig } from '@/components/mobile/mobile-session-run-config';
+import { agentConfigMetaCacheAtom } from '@/atoms/doc-meta';
+import type { AgentSelection } from '@/components/shared/agent-selector';
+import type {
+  AcpConfigOptionSelector,
+  AcpConfigOptionValue,
+} from '@/components/shared/acp-selector-options';
 import {
   MobileInlinePicker,
   MobileInlinePickerCoordinator,
-  MobileInlinePickerRowSlot,
-  type MobileInlinePickerOption,
 } from '@/components/mobile/mobile-inline-picker';
 import {
-  MobileModelPickerLabel,
-  mobileModelPickerTriggerClassName,
-} from '@/components/mobile/mobile-session-composer-footer';
+  getMobileProjectOptions,
+  resolveMobileNewChatDefaultProject,
+} from '@/components/mobile/mobile-new-chat-project-options';
+import { resolveMobileNewChatBranchLabel } from '@/components/mobile/mobile-new-chat-target';
+import { getLocalProjectBranchLabel } from '@/lib/chat-landing-git-state';
+import { MobileNewChatSheet } from '@/components/mobile/mobile-new-chat-sheet';
+import type {
+  MobileProjectFolder,
+  MobileProjectGroup,
+  MobileProjectMachine,
+  MobileProjectRepo,
+} from '@/components/mobile/mobile-new-chat-project-sheet';
+import { WorktreeCheckboxPill } from '@/components/shared';
 import { Button } from '@lody/ui/button';
-import { cn } from '@/lib/utils';
-import type { AcpConfigOptionValue } from '@/components/shared/acp-selector-options';
-import { Tabs } from '@lody/ui/tabs';
+import { Spinner } from '@lody/ui/spinner';
+import { SettingsStoryProviders } from './settings-story-shell';
+import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 
 const meta = {
   title: 'Mobile/MobileNewChatSheet',
   component: MobileNewChatSheet,
   parameters: { layout: 'fullscreen' },
+  decorators: [
+    (Story) => (
+      <ForceMobileLayoutProvider force>
+        <SettingsStoryProviders>
+          <Story />
+        </SettingsStoryProviders>
+      </ForceMobileLayoutProvider>
+    ),
+  ],
   tags: ['autodocs'],
 } satisfies Meta<typeof MobileNewChatSheet>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/* The story wires real `MobileInlinePicker`s for the row chips so the
-   drawer-from-behind animation, single-open coordination, and trigger
-   styling are screenshot-verifiable. Composer-internal chips (model /
-   thinking) still need a real `ChatComposer` to test fully; the mock
-   composer here renders just the picker triggers so we can see them
-   inline in the footer row. */
-
-const machineOptions: MobileInlinePickerOption[] = [
-  { value: 'zx-macbook', label: 'zx-macbook', icon: <Monitor className="h-3.5 w-3.5" /> },
-  { value: 'lab-m2', label: 'lab-m2', icon: <Monitor className="h-3.5 w-3.5" /> },
+const projectMachines: MobileProjectMachine[] = [
+  { id: 'spikes' as MachineId, name: 'spikes-PowerBook.local', online: true },
+  { id: 'zx' as MachineId, name: 'zx-macbook', online: true },
+  { id: 'lab' as MachineId, name: 'lab-m2', online: false, disabledReason: 'Offline' },
 ];
 
-const githubRepoOptions: MobileInlinePickerOption[] = [
+const projectFolders: MobileProjectFolder[] = [
   {
-    value: 'loro-dev/lody',
-    label: 'loro-dev/lody',
+    machineId: 'spikes' as MachineId,
+    localProjectId: 'blog' as LocalProjectId,
+    name: 'blog',
+    rootPath: '~/code/blog',
+    lastUsedAt: 5,
+  },
+  {
+    machineId: 'spikes' as MachineId,
+    localProjectId: 'lody' as LocalProjectId,
+    name: 'lody',
+    rootPath: '~/code/lody',
+    lastUsedAt: 3,
+  },
+  {
+    machineId: 'spikes' as MachineId,
+    localProjectId: 'docs' as LocalProjectId,
+    name: 'docs',
+    rootPath: '~/code/docs',
+    lastUsedAt: 1,
+  },
+  {
+    machineId: 'zx' as MachineId,
+    localProjectId: 'loro' as LocalProjectId,
+    name: 'loro',
+    rootPath: '~/code/loro',
+    lastUsedAt: 4,
+  },
+];
+
+const projectGroups: MobileProjectGroup[] = [
+  { projectId: 'loro-stack', name: 'Loro stack', memberCount: 3, lastUsedAt: 4 },
+];
+
+const projectRepos: MobileProjectRepo[] = [
+  {
+    fullName: 'loro-dev/lody',
     description: 'AI-native local-first coding companion',
-    icon: <Github className="h-3.5 w-3.5" />,
+    lastUsedAt: 5,
+  },
+  { fullName: 'loro-dev/loro', description: 'High-performance CRDT framework', lastUsedAt: 2 },
+  { fullName: 'loro-dev/lody-web', description: 'Web shell for Lody', lastUsedAt: 1 },
+];
+
+const branchOptions: MobileNativeSelectOption[] = [
+  { value: 'main', label: 'main' },
+  { value: 'feat/audit-mobile-coupling', label: 'feat/audit-mobile-coupling' },
+];
+
+const imagePreviewDataUri = (label: string, color: string): string =>
+  `data:image/svg+xml;utf8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160"><rect width="160" height="160" fill="${color}"/><text x="80" y="86" font-family="sans-serif" font-size="20" fill="white" text-anchor="middle">${label}</text></svg>`
+  )}`;
+
+const sampleImageItems: ChatComposerImageItem[] = [
+  {
+    id: 'img-1',
+    name: 'compose-chat.png',
+    previewUrl: imagePreviewDataUri('PNG', '#2563eb'),
+    status: 'uploaded',
+    progress: 100,
   },
   {
-    value: 'loro-dev/loro',
-    label: 'loro-dev/loro',
-    description: 'High-performance CRDT framework',
-    icon: <Github className="h-3.5 w-3.5" />,
+    id: 'img-2',
+    name: 'compose-local.png',
+    previewUrl: imagePreviewDataUri('PNG', '#7c3aed'),
+    status: 'uploading',
+    progress: 45,
   },
 ];
 
-const localProjectOptions: MobileInlinePickerOption[] = [
+const sampleFileItems: ChatComposerFileItem[] = [
   {
-    value: 'zx-macbook:lody',
-    label: 'lody',
-    description: '~/code/lody',
-    icon: <Folder className="h-3.5 w-3.5" />,
+    id: 'file-1',
+    name: 'new-chat-notes.pdf',
+    sizeLabel: '1.2 MB',
+    status: 'uploaded',
+    progress: 100,
   },
 ];
 
-const branchOptions: MobileInlinePickerOption[] = [
-  { value: 'main', label: 'main', icon: <GitBranch className="h-3.5 w-3.5" /> },
+const demoFileEntries: FileWorkspaceProviderEntry[] = [
+  { path: 'src/components/chat/chat-landing.tsx', kind: 'text', sourceState: 'live-readonly' },
   {
-    value: 'feat/audit-mobile-coupling',
-    label: 'feat/audit-mobile-coupling',
-    icon: <GitBranch className="h-3.5 w-3.5" />,
+    path: 'src/components/mobile/mobile-new-chat-sheet.tsx',
+    kind: 'text',
+    sourceState: 'live-readonly',
   },
+  { path: 'src/lib/feature-flags.ts', kind: 'text', sourceState: 'live-readonly' },
+  { path: 'README.md', kind: 'text', sourceState: 'live-readonly' },
 ];
 
-const modelOptions: MobileInlinePickerOption[] = [
-  { value: 'claude-3.5-sonnet', label: 'claude-3.5-sonnet', description: 'Fast & balanced' },
-  { value: 'claude-opus-4', label: 'claude-opus-4', description: 'Highest quality' },
-];
-
-const longModelName = 'MiniMax Token Plan (minimaxi.com)/MiniMax-M3';
-const longModelOptions: MobileInlinePickerOption[] = [
-  { value: longModelName, label: longModelName, description: 'Long provider display name' },
-  ...modelOptions,
-];
-
-const thinkingOptions: MobileInlinePickerOption[] = [
-  { value: 'low', label: 'low' },
-  { value: 'medium', label: 'medium' },
-  { value: 'high', label: 'high' },
-];
-
-const agentOptions: MobileInlinePickerOption[] = [
-  { value: 'claude-code', label: 'Claude Code', icon: <Sparkles className="h-3.5 w-3.5" /> },
-  { value: 'codex', label: 'Codex', icon: <Sparkles className="h-3.5 w-3.5" /> },
-];
-
-const permissionOptions: MobileInlinePickerOption[] = [
-  {
-    value: 'askPermission',
-    label: 'Ask permission',
-    icon: <ShieldCheck className="h-3.5 w-3.5" />,
+const demoProvider: FileWorkspaceProvider = {
+  kind: 'none',
+  getState: () => ({ kind: 'none', ready: true, sourceState: 'live-readonly' }),
+  listFiles: async () => demoFileEntries,
+  searchFiles: async (query) =>
+    demoFileEntries.filter((entry) => entry.path.toLowerCase().includes(query.toLowerCase())),
+  getFile: async (path) => demoFileEntries.find((entry) => entry.path === path) ?? null,
+  openFile: async (path) => {
+    const entry = demoFileEntries.find((candidate) => candidate.path === path);
+    return entry
+      ? { status: 'ready', entry, snapshot: { kind: 'text', text: '// demo' } }
+      : { status: 'unavailable', reason: 'deleted' };
   },
+  saveText: async (path, text) => {
+    const entry = demoFileEntries.find((candidate) => candidate.path === path);
+    return entry
+      ? { status: 'ready', entry, snapshot: { kind: 'text', text } }
+      : { status: 'unavailable', reason: 'deleted' };
+  },
+};
+
+const demoMentionSource: MentionProjectSource = { kind: 'provider', provider: demoProvider };
+const demoCommands: AcpCommandSummary[] = [
+  { name: 'clear', description: 'Clear the conversation' },
+  { name: 'review', description: 'Review the current changes' },
+  { name: 'compact', description: 'Compact the context' },
 ];
 
-function MockContextTypeNode({
-  value,
-  onChange,
-}: {
-  value: 'local' | 'github' | 'chat';
-  onChange: (next: 'local' | 'github' | 'chat') => void;
-}) {
-  const triggerClassName = cn(
-    'flex-1 inline-flex items-center justify-start gap-1.5 rounded-md px-2 py-1 text-sm font-medium transition-all',
-    'data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs',
-    'text-muted-foreground'
-  );
-  return (
-    <Tabs.Root
-      value={value}
-      onValueChange={(v) => onChange(v as 'local' | 'github' | 'chat')}
-      className="w-full"
-    >
-      <Tabs.List className="flex h-10 w-full rounded-md bg-muted p-1">
-        <Tabs.Tab value="local" className={triggerClassName}>
-          <Folder className="h-3.5 w-3.5" />
-          <span>Local</span>
-        </Tabs.Tab>
-        <Tabs.Tab value="github" className={triggerClassName}>
-          <Github className="h-3.5 w-3.5" />
-          <span>GitHub</span>
-        </Tabs.Tab>
-        <Tabs.Tab value="chat" className={triggerClassName}>
-          <MessageCircle className="h-3.5 w-3.5" />
-          <span>Chat</span>
-        </Tabs.Tab>
-      </Tabs.List>
-    </Tabs.Root>
-  );
-}
-
-function MockWorkdirModeNode({ contextType }: { contextType: 'local' | 'github' | 'chat' }) {
-  if (contextType !== 'local') return null;
-  const triggerClassName =
-    'flex-1 inline-flex items-center justify-start gap-1.5 rounded-md px-2 py-1 text-sm font-medium transition-all';
-  return (
-    <div className="flex h-10 w-full rounded-md bg-muted p-1">
-      <button type="button" className={cn(triggerClassName, 'text-muted-foreground')}>
-        <Folder className="h-3.5 w-3.5" />
-        <span>本地文件</span>
-      </button>
-      <button
-        type="button"
-        className={cn(triggerClassName, 'bg-background text-foreground shadow-xs')}
-      >
-        <GitBranch className="h-3.5 w-3.5" />
-        <span>新工作树</span>
-      </button>
-    </div>
-  );
-}
-
-function MockComposer({
-  configOptionValues: _configOptionValues,
-  onConfigOptionChange: _onConfigOptionChange,
-  selectedModel,
-  setSelectedModel,
-  modelPickerOptions = modelOptions,
-  selectedThinking,
-  setSelectedThinking,
-}: {
-  configOptionValues: Record<string, AcpConfigOptionValue>;
-  onConfigOptionChange: (configId: string, value: AcpConfigOptionValue) => void;
-  selectedModel: string;
-  setSelectedModel: (v: string) => void;
-  modelPickerOptions?: MobileInlinePickerOption[];
-  selectedThinking: string;
-  setSelectedThinking: (v: string) => void;
-}) {
-  return (
-    <MobileInlinePickerRowSlot>
-      <div className="rounded-2xl border border-input-border/70 bg-input/90 p-3">
-        <textarea
-          rows={2}
-          placeholder="描述你的需求。"
-          className="input-scrollbar w-full resize-none bg-transparent text-sm leading-6 text-input-foreground placeholder:text-input-placeholder focus:outline-none"
-        />
-        {/* Mirrors the real composer footer: the configOptions cluster
-            fills the row (`w-full` inside the `flex-1` wrapper) so each
-            config shows in full, and only the model shrinks/truncates
-            (keeping its tail) once the row is too narrow — thinking is
-            pinned `shrink-0`. The send button sits at the far right. */}
-        <div className="flex items-center pt-1">
-          <div className="flex min-w-0 flex-1 items-center">
-            <div className="flex w-full min-w-0 items-center">
-              <div className="min-w-0">
-                <MobileInlinePicker
-                  id="story-model"
-                  value={selectedModel}
-                  onChange={setSelectedModel}
-                  options={modelPickerOptions}
-                  ariaLabel="Model"
-                  triggerClassName={mobileModelPickerTriggerClassName}
-                  triggerContent={<MobileModelPickerLabel>{selectedModel}</MobileModelPickerLabel>}
-                />
-              </div>
-              <div className="ml-1 shrink-0">
-                <MobileInlinePicker
-                  id="story-thinking"
-                  value={selectedThinking}
-                  onChange={setSelectedThinking}
-                  options={thinkingOptions}
-                  ariaLabel="Thinking"
-                  triggerClassName="h-8 px-2 py-1 text-sm"
-                  triggerContent={<span className="truncate">{selectedThinking}</span>}
-                />
-              </div>
-            </div>
-          </div>
-          <Button
-            type="button"
-            variant="primary"
-            aria-label="Send"
-            icon
-            shape="pill"
-            className="ml-2 shrink-0"
-          >
-            <ArrowUp className="h-5 w-5" />
-          </Button>
-        </div>
-      </div>
-    </MobileInlinePickerRowSlot>
-  );
-}
-
-function StoryHarness({
-  initialOpen = true,
-  initialContextType = 'github' as 'local' | 'github' | 'chat',
-  initialModel = 'claude-3.5-sonnet',
-  modelPickerOptions = modelOptions,
-}) {
-  const [open, setOpen] = useState(initialOpen);
-  const [contextType, setContextType] = useState<'local' | 'github' | 'chat'>(initialContextType);
-  const [configOptionValues, setConfigOptionValues] = useState<
-    Record<string, AcpConfigOptionValue>
-  >({});
-  const [machine, setMachine] = useState('zx-macbook');
-  const [repo, setRepo] = useState('loro-dev/lody');
-  const [localProject, setLocalProject] = useState('zx-macbook:lody');
-  const [branch, setBranch] = useState('main');
-  const [model, setModel] = useState(initialModel);
-  const [thinking, setThinking] = useState('high');
-  const [agent, setAgent] = useState('claude-code');
-  const [permission, setPermission] = useState('askPermission');
-  const handleConfigOptionChange = (configId: string, value: AcpConfigOptionValue) => {
-    setConfigOptionValues((prev) => ({ ...prev, [configId]: value }));
-  };
-
-  return (
-    <div className="relative h-[956px] w-full bg-background text-foreground">
-      <div className="flex h-full items-end justify-center">
-        <Button type="button" onClick={() => setOpen(true)} className="mb-6">
-          Open
-        </Button>
-      </div>
-      <MobileNewChatSheet
-        open={open}
-        onOpenChange={setOpen}
-        coordinator={MobileInlinePickerCoordinator}
-        machineNode={
-          <MobileInlinePicker
-            id="story-machine"
-            value={machine}
-            onChange={setMachine}
-            options={machineOptions}
-            ariaLabel="Machine"
-            triggerContent={
-              <>
-                <Monitor className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                <span className="truncate">{machine}</span>
-              </>
-            }
-          />
-        }
-        contextTypeNode={<MockContextTypeNode value={contextType} onChange={setContextType} />}
-        perTypeNode={
-          contextType === 'chat' ? null : (
-            <div className="flex w-full items-start gap-2">
-              <div className="min-w-0 flex-1">
-                {contextType === 'github' ? (
-                  <MobileInlinePicker
-                    id="story-repo"
-                    value={repo}
-                    onChange={setRepo}
-                    options={githubRepoOptions}
-                    ariaLabel="Repository"
-                    triggerContent={
-                      <>
-                        <Github className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                        <span className="truncate">{repo}</span>
-                      </>
-                    }
-                  />
-                ) : (
-                  <MobileInlinePicker
-                    id="story-local-project"
-                    value={localProject}
-                    onChange={setLocalProject}
-                    options={localProjectOptions}
-                    ariaLabel="Project"
-                    triggerContent={
-                      <>
-                        <Folder className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                        <span className="truncate">{localProject.split(':')[1] ?? 'lody'}</span>
-                      </>
-                    }
-                  />
-                )}
-              </div>
-              <div className="min-w-0 flex-1">
-                <MobileInlinePicker
-                  id="story-branch"
-                  value={branch}
-                  onChange={setBranch}
-                  options={branchOptions}
-                  ariaLabel="Branch"
-                  triggerContent={
-                    <>
-                      <GitBranch className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                      <span className="truncate">{branch}</span>
-                    </>
-                  }
-                />
-              </div>
-            </div>
-          )
-        }
-        secondaryPerTypeNode={
-          contextType === 'local' ? <MockWorkdirModeNode contextType={contextType} /> : null
-        }
-        composer={
-          <MockComposer
-            configOptionValues={configOptionValues}
-            onConfigOptionChange={handleConfigOptionChange}
-            selectedModel={model}
-            setSelectedModel={setModel}
-            modelPickerOptions={modelPickerOptions}
-            selectedThinking={thinking}
-            setSelectedThinking={setThinking}
-          />
-        }
-        belowComposerNode={
-          <MobileInlinePickerRowSlot>
-            <div className="flex w-full items-start gap-2">
-              <div className="min-w-0">
-                <MobileInlinePicker
-                  id="story-agent"
-                  value={agent}
-                  onChange={setAgent}
-                  options={agentOptions}
-                  ariaLabel="Agent"
-                  triggerContent={
-                    <>
-                      <Sparkles className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                      <span className="truncate">
-                        {agentOptions.find((o) => o.value === agent)?.label ?? agent}
-                      </span>
-                    </>
-                  }
-                />
-              </div>
-              <div className="ml-auto min-w-0">
-                <MobileInlinePicker
-                  id="story-permission"
-                  value={permission}
-                  onChange={setPermission}
-                  options={permissionOptions}
-                  ariaLabel="Permission"
-                  triggerContent={
-                    <>
-                      <ShieldCheck className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                      <span className="truncate">
-                        {permissionOptions.find((o) => o.value === permission)?.label ?? permission}
-                      </span>
-                    </>
-                  }
-                />
-              </div>
-            </div>
-          </MobileInlinePickerRowSlot>
-        }
-      />
-    </div>
-  );
-}
-
-export const GitHubContext: Story = {
-  args: {
-    open: true,
-    onOpenChange: () => {},
-    machineNode: null,
-    contextTypeNode: null,
-    composer: null,
-  },
-  render: () => <StoryHarness initialContextType="github" />,
+export const ChatContext: Story = {
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <InlinePageReview initialProject="none" />,
 };
 
 export const LocalContext: Story = {
-  args: {
-    open: true,
-    onOpenChange: () => {},
-    machineNode: null,
-    contextTypeNode: null,
-    composer: null,
-  },
-  render: () => <StoryHarness initialContextType="local" />,
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <InlinePageReview initialProject="blog" />,
 };
 
-export const ChatContext: Story = {
-  args: {
-    open: true,
-    onOpenChange: () => {},
-    machineNode: null,
-    contextTypeNode: null,
-    composer: null,
-  },
-  render: () => <StoryHarness initialContextType="chat" />,
+export const GitHubContext: Story = {
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <InlinePageReview />,
 };
 
 export const LongModelName: Story = {
-  args: {
-    open: true,
-    onOpenChange: () => {},
-    machineNode: null,
-    contextTypeNode: null,
-    composer: null,
-  },
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
   render: () => (
-    <StoryHarness
-      initialContextType="chat"
-      initialModel={longModelName}
-      modelPickerOptions={longModelOptions}
+    <InlinePageReview initialProject="blog" initialModel="MiniMax-M3 · 1M context window" />
+  ),
+};
+
+export const WithAttachments: Story = {
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <InlinePageReview initialProject="blog" withAttachments />,
+};
+
+export const Closed: Story = {
+  args: { open: false, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => (
+    <MobileNewChatSheet open={false} onOpenChange={() => {}} targetNode={null} composer={null} />
+  ),
+};
+
+export const WithMenus: Story = {
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <InlinePageReview initialProject="blog" />,
+};
+
+/** Review of the requested page layout using the production composer and pickers.
+ * Selection state is synthetic; this story is not the production landing wiring. */
+const expandedConfigSelectors: AcpConfigOptionSelector[] = [
+  {
+    type: 'select',
+    configId: 'reasoning_effort',
+    category: 'thought_level',
+    label: 'Reasoning effort',
+    currentValue: 'medium',
+    options: ['low', 'medium', 'high', 'xhigh'].map((value) => ({ value, label: value })),
+  },
+  {
+    type: 'select',
+    configId: 'interaction_mode',
+    category: 'interaction',
+    label: 'Interaction mode',
+    currentValue: 'agent',
+    options: [
+      { value: 'agent', label: 'Agent' },
+      { value: 'plan', label: 'Plan' },
+      { value: 'ask', label: 'Ask' },
+    ],
+  },
+  {
+    type: 'select',
+    configId: 'agent_preset',
+    category: 'other',
+    label: 'Profile',
+    currentValue: 'default',
+    options: [
+      { value: 'default', label: 'Default' },
+      { value: 'review', label: 'Code review' },
+      { value: 'docs', label: 'Documentation' },
+    ],
+  },
+];
+const expandedAgentConfigs: AgentConfigMeta[] = [
+  {
+    id: 'agent-codex' as AgentConfigId,
+    machineId: 'spikes' as MachineId,
+    name: 'Codex Primary',
+    description: 'Synthetic Codex configuration',
+    cliType: 'builtin',
+    agentType: 'codex',
+    env: {},
+  },
+  {
+    id: 'agent-claude' as AgentConfigId,
+    machineId: 'spikes' as MachineId,
+    name: 'Claude Code',
+    description: 'Synthetic Claude configuration',
+    cliType: 'builtin',
+    agentType: 'claude',
+    env: {},
+  },
+];
+function ExpandedConfigStory() {
+  const store = useMemo(() => {
+    const value = createStore();
+    value.set(
+      agentConfigMetaCacheAtom,
+      Object.fromEntries(
+        expandedAgentConfigs.map((agent) => [getAgentConfigRoomId(agent.id), agent])
+      )
+    );
+    return value;
+  }, []);
+  return (
+    <Provider store={store}>
+      <InlinePageReview fullRunConfig />
+    </Provider>
+  );
+}
+
+export function InlinePageReview({
+  longNames = false,
+  initialLocalWorktree = false,
+  initialProject = 'loro-dev/loro',
+  initialText = '',
+  initialModel = 'Opus 4.8 1M',
+  onSend,
+  submissionPending = false,
+  withAttachments = false,
+  initialRole = false,
+  fullRunConfig = false,
+  manyBranches = false,
+}: {
+  longNames?: boolean;
+  initialLocalWorktree?: boolean;
+  initialProject?: string;
+  initialText?: string;
+  initialModel?: string;
+  onSend?: (
+    text: string,
+    model: string,
+    preserveFocus: boolean,
+    project: UnifiedProjectSelection
+  ) => void;
+  submissionPending?: boolean;
+  withAttachments?: boolean;
+  initialRole?: boolean;
+  fullRunConfig?: boolean;
+  manyBranches?: boolean;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(true);
+  const [machineId, setMachineId] = useState<MachineId>('spikes' as MachineId);
+  const [project, setProject] = useState(initialLocalWorktree ? 'blog' : initialProject);
+  const [worktree, setWorktree] = useState(initialLocalWorktree);
+  const [branch, setBranch] = useState('main');
+  const branchLabels = {
+    local: t('chat.branchLocal'),
+    remote: t('chat.branchRemote'),
+    placeholder: t('chat.branchPlaceholder', 'Branch'),
+  };
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const [roleId, setRoleId] = useState<AgentRoleId | null>(
+    initialRole ? ('reviewer' as AgentRoleId) : null
+  );
+  const [model, setModel] = useState(initialModel);
+  const [mode, setMode] = useState('auto');
+  const [agent, setAgent] = useState<AgentSelection>({
+    agentId: 'agent-codex' as AgentConfigId,
+    machineId: 'spikes' as MachineId,
+  });
+  const [configValues, setConfigValues] = useState<Record<string, AcpConfigOptionValue>>(
+    Object.fromEntries(
+      expandedConfigSelectors.map((selector) => [selector.configId, selector.currentValue])
+    )
+  );
+  const selectors = fullRunConfig ? expandedConfigSelectors : [];
+  const models = [
+    { value: initialModel, label: initialModel },
+    { value: 'GPT 5.6-Luna', label: 'GPT 5.6-Luna' },
+    ...(fullRunConfig
+      ? Array.from({ length: 14 }, (_, index) => ({
+          value: `example-model-${index + 1}`,
+          label: `Example model ${index + 1}`,
+        }))
+      : []),
+  ];
+  const branches = manyBranches
+    ? [
+        ...branchOptions,
+        ...Array.from({ length: 30 }, (_, index) => ({
+          value: `feature/mobile-layout-${index + 1}`,
+          label: `feature/mobile-layout-${index + 1}`,
+        })),
+      ]
+    : branchOptions;
+  const [prompt, setPrompt] = useState(initialText);
+  const [images, setImages] = useState(withAttachments ? sampleImageItems : []);
+  const [files, setFiles] = useState(withAttachments ? sampleFileItems : []);
+  const roleKey = 'reviewer' as AgentRoleId;
+  const role = {
+    v: AGENT_ROLE_VERSION as 1,
+    id: roleKey,
+    name: 'Code Reviewer',
+    emoji: '🔍',
+    ownerUserId: 'user-1',
+    visibility: 'private' as const,
+    machineId: 'spikes' as MachineId,
+    agentConfigId: 'agent-codex' as AgentConfigId,
+    runConfig: {},
+    revision: 1,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  const valueFace = (icon: ReactNode, value: string) => (
+    <span className="flex min-w-0 w-full items-center gap-2 text-start">
+      <span className="shrink-0 text-muted-foreground">{icon}</span>
+      <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-sm text-foreground">
+        {value}
+      </span>
+      <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+    </span>
+  );
+  const trigger = 'min-h-11 rounded-xl bg-foreground/[0.04] px-3 py-2';
+  const panel = 'shadow-none bg-muted/45 border-border/30';
+  const localProject = projectFolders.find((entry) => entry.localProjectId === project);
+  const isLocal = !!localProject;
+  const projectGroup = projectGroups.find((entry) => `group:${entry.projectId}` === project);
+  const isGroup = !!projectGroup;
+  const isGitLocal = isLocal && project !== 'docs';
+  const hasBranch = isGitLocal || (!isLocal && !isGroup && project !== 'none');
+  const toBranchSelector = (name: string) => `lody:branch:local:${encodeURIComponent(name)}`;
+  const selectedBranch = isGitLocal ? toBranchSelector(branch) : branch;
+  const displayBranch = resolveMobileNewChatBranchLabel({
+    contextType: isGitLocal ? 'local' : 'github',
+    currentBranch: toBranchSelector('main'),
+    selectedBranch,
+    useWorktree: worktree,
+    labels: branchLabels,
+  });
+  return (
+    <MobileNewChatSheet
+      open={open}
+      onOpenChange={setOpen}
+      labels={{ title: 'New chat' }}
+      targetNode="New chat"
+      coordinator={MobileInlinePickerCoordinator}
+      summary={
+        <div className="flex flex-col gap-2 py-3">
+          <MobileInlinePicker
+            id="preview-machine"
+            value={machineId}
+            onChange={(next) => {
+              setMachineId(next as MachineId);
+              if (next !== 'spikes') {
+                setRoleId(null);
+                if (isLocal) setProject('none');
+              }
+            }}
+            ariaLabel="Machine"
+            triggerClassName={trigger}
+            expansionPanelClassName={panel}
+            triggerContent={valueFace(
+              <Monitor className="size-4" />,
+              longNames
+                ? 'MacBook-Pro-for-long-running-development-and-review.local'
+                : (projectMachines.find((x) => x.id === machineId)?.name ?? 'Machine')
+            )}
+            options={projectMachines.map((x) => ({
+              value: x.id,
+              label: x.name,
+              disabled: !x.online,
+              description:
+                x.disabledReason ??
+                (roleId && x.id !== machineId
+                  ? 'Changing machine clears the selected Role'
+                  : undefined),
+            }))}
+          />
+          <MobileInlinePicker
+            id="preview-project"
+            value={project}
+            onChange={(next) => {
+              setProject(next);
+              setBranch('main');
+              setWorktree(false);
+            }}
+            ariaLabel="Project"
+            searchable
+            searchPlaceholder="Search projects"
+            triggerClassName={trigger}
+            expansionPanelClassName={panel}
+            triggerContent={valueFace(
+              isGroup ? (
+                <Folders className="size-4" />
+              ) : project === 'none' ? (
+                <CircleSlash2 className="size-4" />
+              ) : isLocal ? (
+                <FolderOpen className="size-4" />
+              ) : (
+                <GitHubOwnerAvatarIcon repoFullName={project} />
+              ),
+              longNames
+                ? 'organization/very-long-repository-name-for-mobile-layout-validation'
+                : project === 'none'
+                  ? 'No project selected'
+                  : (projectGroup?.name ?? project)
+            )}
+            preserveOptionOrder
+            options={[
+              {
+                value: 'none',
+                label: 'No project selected',
+                icon: <CircleSlash2 className="size-4" />,
+              },
+              ...getMobileProjectOptions({
+                folders: projectFolders,
+                repositories: projectRepos,
+                groups: projectGroups,
+                machineId,
+                query: '',
+              }).map((option) => ({
+                ...option,
+                value:
+                  option.selection.kind === 'local'
+                    ? option.selection.localProjectId
+                    : option.selection.kind === 'github'
+                      ? option.selection.repoFullName
+                      : option.value,
+                icon:
+                  option.selection.kind === 'group' ? (
+                    <Folders className="size-4" />
+                  ) : option.selection.kind === 'local' ? (
+                    <FolderOpen className="size-4" />
+                  ) : (
+                    <GitHubOwnerAvatarIcon repoFullName={option.selection.repoFullName} />
+                  ),
+              })),
+            ]}
+          />
+          {hasBranch ? (
+            <div className="flex min-w-0 items-start gap-2 px-1">
+              {isGitLocal ? (
+                <div className="pt-1">
+                  <WorktreeCheckboxPill checked={worktree} onCheckedChange={setWorktree} />
+                </div>
+              ) : null}
+              <div className="min-w-0 flex-1">
+                <MobileInlinePicker
+                  id="preview-branch"
+                  value={selectedBranch}
+                  onChange={(value) =>
+                    setBranch(
+                      isGitLocal
+                        ? decodeURIComponent(value.slice('lody:branch:local:'.length))
+                        : value
+                    )
+                  }
+                  disabled={isGitLocal && !worktree}
+                  options={
+                    isGitLocal
+                      ? branches.map((option) => ({
+                          value: toBranchSelector(option.value),
+                          label: getLocalProjectBranchLabel(
+                            toBranchSelector(option.value),
+                            branchLabels
+                          ),
+                        }))
+                      : branches
+                  }
+                  ariaLabel="Branch"
+                  searchable
+                  triggerClassName="h-8 rounded-lg bg-transparent px-2 hover:bg-transparent"
+                  expansionPanelClassName={panel}
+                  triggerContent={
+                    <>
+                      <GitBranch className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 truncate">{displayBranch}</span>
+                      <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
+                    </>
+                  }
+                />
+              </div>
+            </div>
+          ) : null}
+        </div>
+      }
+      composer={
+        <ChatComposer
+          variant="session"
+          promptRef={promptRef}
+          promptId={MOBILE_NEW_CHAT_PROMPT_ID}
+          promptValue={submissionPending ? '' : prompt}
+          promptDisabled={submissionPending}
+          preservePromptFocus
+          onPromptChange={setPrompt}
+          promptPlaceholder="Message, @files, /commands"
+          promptRows={2}
+          maxRows={11}
+          autoResize
+          onAttachmentAddClick={() => {}}
+          imageItems={images}
+          onImageRemove={(id) => setImages((items) => items.filter((item) => item.id !== id))}
+          fileItems={files}
+          onFileRemove={(id) => setFiles((items) => items.filter((item) => item.id !== id))}
+          mentionSource={demoMentionSource}
+          availableCommands={demoCommands}
+          footerSelector={
+            <MobileSessionRunConfig
+              disabled={submissionPending}
+              agentSelection={fullRunConfig ? agent : null}
+              allowedMachineIds={['spikes' as MachineId]}
+              onAgentConfigChange={setAgent}
+              configOptionSelectors={selectors}
+              configOptionValues={configValues}
+              onConfigOptionChange={(id, value) =>
+                setConfigValues((previous) => ({ ...previous, [id]: value }))
+              }
+              modelOptions={models}
+              selectedModelId={model}
+              onModelChange={setModel}
+              modeOptions={[
+                { value: 'auto', label: 'Auto' },
+                { value: 'full', label: 'Full access' },
+              ]}
+              selectedModeId={mode}
+              onModeChange={setMode}
+              fallbackAgent={{ cliType: 'builtin', agentType: 'codex' }}
+              agentRoles={{
+                items:
+                  machineId === 'spikes'
+                    ? [
+                        { role, availability: { kind: 'available' } },
+                        {
+                          role: {
+                            ...role,
+                            id: 'retired-role' as AgentRoleId,
+                            name: 'Retired Reviewer',
+                            emoji: '🗃️',
+                          },
+                          availability: {
+                            kind: 'unavailable',
+                            reason: 'agent_config_missing',
+                          },
+                        },
+                      ]
+                    : [],
+                selectedRoleId: roleId,
+                onSelect: setRoleId,
+              }}
+            />
+          }
+
+          primaryAction={
+            <Button
+              type="button"
+              icon
+              variant="ghost"
+              size="medium"
+              shape="pill"
+              aria-label="Send"
+              onClick={() => {
+                onSend?.(
+                  prompt,
+                  model,
+                  promptRef.current === document.activeElement,
+                  project === 'none'
+                    ? { kind: 'none' }
+                    : projectGroup
+                      ? { kind: 'group', projectId: projectGroup.projectId }
+                      : localProject
+                        ? {
+                            kind: 'local',
+                            machineId: localProject.machineId,
+                            localProjectId: localProject.localProjectId,
+                          }
+                        : { kind: 'github', repoFullName: project }
+                );
+              }}
+              onMouseDown={(event) => event.preventDefault()}
+              disabled={
+                submissionPending ||
+                !prompt.trim() ||
+                images.some((item) => item.status !== 'uploaded') ||
+                files.some((item) => item.status !== 'uploaded')
+              }
+              className="shadow-xs transition-all bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]"
+            >
+              {submissionPending ? <Spinner size="medium" /> : <ArrowUp className="h-5 w-5" />}
+            </Button>
+          }
+        />
+      }
+    />
+  );
+}
+
+export const InlinePageReviewStory: Story = {
+  name: 'Inline page review',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <InlinePageReview />,
+};
+
+export const InlinePageLongNames: Story = {
+  name: 'Inline page long names',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <InlinePageReview longNames />,
+};
+
+export const InlinePageLocalWorktree: Story = {
+  name: 'Inline page local Git worktree',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <InlinePageReview initialLocalWorktree />,
+};
+
+export const InlinePageNoProject: Story = {
+  name: 'Inline page no project',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <InlinePageReview initialProject="none" />,
+};
+export const InlinePageLocalDirect: Story = {
+  name: 'Inline page local Git direct',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <InlinePageReview initialProject="blog" />,
+};
+export const InlinePagePlainFolder: Story = {
+  name: 'Inline page plain folder',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <InlinePageReview initialProject="docs" />,
+};
+export const InlinePageAttachments: Story = {
+  name: 'Inline page attachments',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => (
+    <InlinePageReview
+      initialLocalWorktree
+      withAttachments
+      initialText="Please review the attached screenshot and notes."
     />
   ),
+};
+export const InlinePageLongDraft: Story = {
+  name: 'Inline page long draft',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => (
+    <InlinePageReview
+      initialProject="none"
+      initialText={
+        'Please review this change.\n\nCheck the mobile message composer on a short screen.\nKeep the draft and attachments when switching projects.\nVerify that the keyboard does not cover Send.\n\nPay attention to long machine and repository names.\nTry both light and dark themes.\nOpen every picker and return to the draft.\nCheck the worktree and branch controls.\n\nWrite down any remaining device-only limitations.'
+      }
+    />
+  ),
+};
+export const InlinePageSelectedRole: Story = {
+  name: 'Inline page selected Role',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <InlinePageReview initialProject="none" initialRole />,
+};
+
+export const InlinePageProjectGroup: Story = {
+  name: 'Inline page project group',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <InlinePageReview initialProject="group:loro-stack" />,
+};
+
+export const InlinePageExpandedConfig: Story = {
+  name: 'Inline page full run configuration',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <ExpandedConfigStory />,
+};
+export const InlinePageManyBranches: Story = {
+  name: 'Inline page many local branches',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <InlinePageReview initialLocalWorktree manyBranches />,
+};
+
+/** Synthetic home/acceptance; real page, selectors and persisted target resolver. */
+function RememberedProjectReview() {
+  const [open, setOpen] = useState(false);
+  const [target, setTarget] = useState('none');
+  return open ? (
+    <InlinePageReview
+      initialProject={target}
+      onSend={(_text, _model, _focus, project) => {
+        recordChatLandingProjectUse('storybook-last-project', project);
+        setOpen(false);
+      }}
+    />
+  ) : (
+    <Button
+      onClick={() => {
+        const selection = resolveMobileNewChatDefaultProject(
+          readChatLandingDefaults('storybook-last-project')?.lastUsedProject,
+          getMobileProjectOptions({
+            folders: projectFolders,
+            repositories: projectRepos,
+            groups: projectGroups,
+            machineId: 'spikes' as MachineId,
+            query: '',
+          })
+        );
+        setTarget(
+          selection.kind === 'github'
+            ? selection.repoFullName
+            : selection.kind === 'local'
+              ? selection.localProjectId
+              : selection.kind === 'group'
+                ? `group:${selection.projectId}`
+                : 'none'
+        );
+        setOpen(true);
+      }}
+    >
+      New conversation
+    </Button>
+  );
+}
+export const RememberedProject: Story = {
+  name: 'Restore last sent project',
+  args: { open: true, onOpenChange: () => {}, targetNode: null, composer: null },
+  render: () => <RememberedProjectReview />,
 };

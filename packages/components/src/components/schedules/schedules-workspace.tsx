@@ -1,3 +1,6 @@
+import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
+import { WorkspaceFeatureNotice } from '@/components/workspace-feature-notice';
+import { ScheduledMessageEditor } from './scheduled-message-editor';
 import type { AgentRunRef } from '@/components/shared/agent-run-ref';
 import { AlertDialog } from '@/ui/dialog';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -16,6 +19,7 @@ import {
   getDeviceTimeZone,
   getServerNow,
   machineSupportsSchedulesProtocol,
+  machineSupportsScheduledMessagesProtocol,
   scheduleOwnSessionId,
   ScheduleRepository,
   type SessionId,
@@ -210,7 +214,7 @@ const styles = stylex.create({
   },
 });
 
-export function SchedulesWorkspace({
+function SupportedSchedulesWorkspace({
   scheduleId,
   insetSafeArea = false,
   hideHeader = false,
@@ -379,7 +383,7 @@ export function SchedulesWorkspace({
     title: t('commands.schedules.pause', 'Pause Schedule'),
     category: 'Workspace',
     keybindings: [],
-    when: () => isOwner && row?.enabled === true,
+    when: () => isOwner && row?.enabled === true && !row.scheduledMessage,
     run: () => {
       if (row) toggle(row);
     },
@@ -421,19 +425,49 @@ export function SchedulesWorkspace({
             </span>
           </p>
         ))}
-      <ScheduleEditor
-        key={`${runtime?.workspaceId}:${scheduleId}:${row.activationId}`}
-        document={detail.document}
-        disabledReason={
-          !isOwner
-            ? t('schedules.ownerOnly', 'Only the schedule owner can save changes.')
-            : !canManage
-              ? t('schedules.upgrade', 'Update the target machine’s CLI to edit schedules.')
-              : undefined
-        }
-        onSaved={() => open()}
-        onOpenSession={openSession}
-      />
+      {detail.document.message ? (
+        <ScheduledMessageEditor
+          key={`${runtime?.workspaceId}:${scheduleId}:${row.activationId}`}
+          document={detail.document}
+          disabledReason={
+            !isOwner
+              ? t('schedules.ownerOnly')
+              : !machineSupportsScheduledMessagesProtocol(machines.get(row.machineId as MachineId))
+                ? t('scheduledMessage.upgrade')
+                : undefined
+          }
+          sent={!!matchingScheduleRuntime(row, registry.runtimes)?.lastDispatch}
+          state={matchingScheduleRuntime(row, registry.runtimes)?.messageState}
+          onCancel={async () => {
+            if (!runtime || !user) return;
+            await runtime.withScheduleStore(row.scheduleId, () =>
+              new ScheduleRepository(runtime.repo, runtime.workspaceId).setEnabled({
+                scheduleId: row.scheduleId,
+                actorId: user.id,
+                enabled: false,
+                now: getServerNow(),
+                activationId: uuid(),
+                requestId: uuid(),
+              })
+            );
+          }}
+          onSaved={() => open()}
+        />
+      ) : (
+        <ScheduleEditor
+          key={`${runtime?.workspaceId}:${scheduleId}:${row.activationId}`}
+          document={detail.document}
+          disabledReason={
+            !isOwner
+              ? t('schedules.ownerOnly', 'Only the schedule owner can save changes.')
+              : !canManage
+                ? t('schedules.upgrade', 'Update the target machine’s CLI to edit schedules.')
+                : undefined
+          }
+          onSaved={() => open()}
+          onOpenSession={openSession}
+        />
+      )}
       <ScheduleSessionHistory scheduleId={scheduleId} />
     </>
   );
@@ -443,7 +477,7 @@ export function SchedulesWorkspace({
         onClose={() => open()}
         paused={row ? !row.enabled : false}
         actions={
-          row && scheduleId !== 'new'
+          row && !row.scheduledMessage && scheduleId !== 'new'
             ? {
                 enabled: row.enabled,
                 canToggle: row.enabled ? isOwner : canManage,
@@ -972,5 +1006,15 @@ function ScheduleHistoryRow({ session: s, onOpen }: { session: SessionMeta; onOp
         })}
       </time>
     </button>
+  );
+}
+
+/** Also guards deep links, before the editor can subscribe or start writes. */
+export function SchedulesWorkspace(props: Parameters<typeof SupportedSchedulesWorkspace>[0]) {
+  const allowed = useWorkspaceFeature('schedules');
+  return allowed ? (
+    <SupportedSchedulesWorkspace {...props} />
+  ) : (
+    <WorkspaceFeatureNotice feature="schedules" />
   );
 }

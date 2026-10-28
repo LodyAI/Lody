@@ -7,13 +7,14 @@ import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import type { PendingSessionSend } from '@/lib/session-pending-sends';
 import { deriveSessionSendProgress } from '@/lib/session-send-status';
 import { cn } from '@/lib/utils';
-import { queueSurface } from './surface';
+import { QUEUE_LINE, queueSurface } from './surface';
 import { IconAction, TextAction } from './message-queue-row';
 
 const MAX_INLINE_ATTACHMENTS = 3;
 
 /** Same first-line box as a queued row's index and actions. */
-const FIRST_LINE_BOX_CLASS = 'flex h-[calc(0.75rem*1.375)] shrink-0 items-center';
+const FIRST_LINE_BOX_CLASS = 'flex shrink-0 items-center';
+const FIRST_LINE_BOX_STYLE = { height: QUEUE_LINE };
 
 function LocalThumbnail({ attachment }: { attachment: SessionAttachmentDraft }) {
   const [url, setUrl] = useState<string | null>(null);
@@ -56,15 +57,12 @@ function queuedText(record: PendingSessionSend): string {
 export function PendingQueueRow({
   record,
   index,
-  divided,
   busy,
   onRetry,
   onCancel,
 }: {
   record: PendingSessionSend;
   index: number;
-  /** Draw the divider above: a row, local or real, precedes this one. */
-  divided: boolean;
   busy: boolean;
   onRetry: () => void;
   onCancel: () => void;
@@ -84,19 +82,16 @@ export function PendingQueueRow({
 
   return (
     <div
-      className={cn(
-        'relative gap-2 px-2 py-1.5',
-        stylex.props(queueSurface.row).className,
-        divided && 'border-t border-border/30'
-      )}
+      {...stylex.props(queueSurface.row)}
       data-pending-queue-row={record.id}
       data-pending-queue-state={status.state}
     >
       <div
         aria-hidden="true"
+        style={FIRST_LINE_BOX_STYLE}
         className={cn(
           FIRST_LINE_BOX_CLASS,
-          'w-4 justify-center text-[10px] font-medium tabular-nums text-muted-foreground/60'
+          'w-4 translate-y-px justify-center text-[11px] font-medium tabular-nums text-muted-foreground/70'
         )}
       >
         {index + 1}
@@ -117,9 +112,8 @@ export function PendingQueueRow({
         {/* Muted until it is a real queue item, like an unsent conversation's title. */}
         <div
           className={cn(
-            'min-w-0 flex-1 overflow-hidden text-xs leading-snug',
-            stylex.props(queueSurface.text).className,
-            instant ? 'text-foreground/80' : 'text-foreground/55'
+            'min-w-0 flex-1 overflow-hidden',
+            stylex.props(queueSurface.text, !instant && queueSurface.preparingText).className
           )}
           style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}
         >
@@ -127,10 +121,7 @@ export function PendingQueueRow({
         </div>
       </div>
       <div
-        className={cn(
-          'flex shrink-0 items-center',
-          stylex.props(queueSurface.actions, queueSurface.pendingActions).className
-        )}
+        className={cn('flex shrink-0 items-center', stylex.props(queueSurface.actions).className)}
       >
         {failed ? (
           <>

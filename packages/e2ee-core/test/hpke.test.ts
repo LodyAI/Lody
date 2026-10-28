@@ -59,6 +59,20 @@ afterEach(() => {
 });
 
 describe('fixed Base HPKE epoch primitive through the public entry', () => {
+  it('does not classify a temporary native failure as rejected ciphertext', async () => {
+    const keys = await pair();
+    vi.spyOn(globalThis.crypto.subtle, 'deriveBits').mockRejectedValueOnce(
+      new Error('synthetic native unavailable')
+    );
+    expect(
+      await failure(Public.openEpochKeyHpke(keys, recipient, context, payload()))
+    ).toMatchObject({ code: 'native-unavailable' });
+    const opened = await Effect.runPromise(
+      Public.openEpochKeyHpke(keys, recipient, context, payload())
+    );
+    expect(hex(copyEpochKeyBytes(opened))).toBe(v.pt);
+  });
+
   it('matches independent RFC 9180 A.2.1 encryption and decryption', async () => {
     const r = vector.rfc;
     const cipher = suite();

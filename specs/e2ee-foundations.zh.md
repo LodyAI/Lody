@@ -1,7 +1,11 @@
 # E2EE 基础模块边界
 
-Status: draft
+Status: approved
 Translation: current
+
+Approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
+Approval: 2026-10-28，owner 授权总调度（会话 `b12f1597`）审核后批准；
+[批准记录](https://github.com/LodyAI/Lody/pull/1894)。
 
 [English](e2ee-foundations.md)
 
@@ -32,6 +36,225 @@ info `lody-e2ee/hpke-epoch/v1\0` 与账本规范四字段 AAD。只把 32 字节
 封装必须取得宿主安全随机数；异步原生操作完成后清理临时副本，取消等待清理。
 外层签名、当前双方资格与代次承诺仍由调用方验证；HPKE 有效不证明发送者身份。
 
+## 实时 RPC 与 presence（M5 评审草案）
+
+远程执行无论从哪条路径到达，都必须使用相同权限和执行证据。MVP 采用**加密 Streams
+RPC → 加密 history/Meta 持久派发最终回退**。Streams RPC 失效时必须保留持久路径，
+并进入同一个实际启动 claim，不能形成第二条执行入口。Iroh 为后续加速层，不在 MVP
+中。普通工作区保持原行为；RPC 和持久内容不回退明文，MVP presence 是下文单独
+批准的最小明文元数据通道。
+
+**本具体字节修订已批准，记录见上。** 下文两点已获 **owner 于 2026-10-28 批准**：RPC 的
+1 MiB 包含 content v0 的 143 字节开销；RPC 资源使用账本 machineId 字节的规范
+无填充 base64url。RPC 正文布局对齐已合入 PR-25（merge
+`c7b3c71512e2bdf26b14817fc8ff56cbd730f509`），源码钉在
+`daee5751fde6698e50960ca6a5627191c887e297`；候选代码只是具体字节证据，不代表完整 Spec 批准或已上线实时能力。
+
+### 共用内容帧与资源字节
+
+每条加密 RPC 消息携带一份完整 content v0：
+`header39 || nonce24 || ciphertext || tag16 || signature64`。复用
+`deriveContentKey`，绑定钉住的 genesis、当前 epoch、`docEpoch=0`、用途 8/9
+和精确资源。本 profile 不用额外 content additionalData。用途虽不在包头里仍受认证；
+请求、响应、presence 和文档派生叶不能互换。传输元数据不产生权限；宿主另行核对固定
+的 genesis／工作区对应关系和独立可信的目标／签名者。
+
+**资源选择——owner 已批准（2026-10-28）：** 请求与响应使用 `rpc:<encodedMachineId>`，其中
+encodedMachineId 是账本 machineId 的精确严格 UTF-8 字节按 RFC 4648 第 5 节编码
+的 base64url，**不带 `=` 填充**。账本允许 1..256 字节，保留开头 BOM，拒绝孤立代理
+项和非法 UTF-8，不做 Unicode 归一化。编码原字节，不 trim、不折叠大小写、不 URL
+解码，也不做其他归一化。编码段仅含 `A-Z a-z 0-9 - _`，长 2..342 个 ASCII 字节；
+含 `rpc:` 的完整资源最多 **346 个 ASCII 字节**。例如 `a` 对应 `rpc:YQ`，`机器`
+对应 `rpc:5py65Zmo`。
+
+拒绝填充、替代字母表、空白、不可能的长度、非零未使用填充位，以及解码后重新编码
+无法逐字节相等的写法；同时验证解码结果是账本允许的 1..256 字节严格 UTF-8 身份。
+因此每个合法账本 ID 都只有一种无损资源写法，包含非 ASCII 或超过 128 字节的 ID
+也能表示。解码名称本身不授予机器权限。PR-25 正文 codec 尚未实现此资源编码。
+
+### MVP presence：最小明文（owner 已批准，2026-10-28）
+
+加密工作区沿用现有明文 `presence` 临时通道和 **90 秒 TTL**
+（`LODY_PRESENCE_TTL_MS = 90_000`），不做加密 presence。保留现有 30 秒心跳和
+有界发布规则。这些 ID、状态枚举和时间戳是服务端可从连接、流量和账号推断的元数据；
+加密收益小，却增加复杂度和可用性风险。这是明确选择公开的元数据范围，不是 RPC 或
+文档内容的明文回退。
+
+加密工作区每次发布 presence 前，按以下**封闭白名单**重新构造记录，包括嵌套 status：
+
+| 记录 kind         | 允许字段                                                              |
+| ----------------- | --------------------------------------------------------------------- |
+| `machine`         | `kind`, `machineId`, `instanceId`, `updatedAt`                        |
+| `session`         | `kind`, `sessionId`, `machineId`, `instanceId`, `status`, `updatedAt` |
+| `session-viewing` | `kind`, `userId`, `instanceId`, `sessionId`, `since`, `updatedAt`     |
+
+kind 只能是上述三个固定标签。session 的 status 只包含 type 枚举
+`running` / `requestPermission` / `initializing`，以及原状态类型允许的可选枚举：
+activity 为 `image_generation`，phase 为 `finalizing`，stage 为
+`git-clone` / `managed-runtime` / `acp` / `resuming`。ID 必须是真实既有标识，不能
+用来承载名称或文本；since 与 updatedAt 是经验证的时间戳。
+
+**任何本地临时 store 或本地／云端 presence 发布入口收到数据前，先去掉所有不在
+白名单中的字段。** 特别是不发布 status.detail、自由文本进度／错误、机器／用户／
+session 名称、标题、路径、命令、prompt 或内容片段。限制长度或只在读取侧去字段
+都不够；发送前明文就必须过滤完成。保留既有房间／账号访问检查、新鲜度和
+online/offline/unknown 语义。Presence 不授予执行权，不进 journal/history；坏条目
+不阻断无关文档。普通工作区 payload 不变。
+
+**加密 presence 不在 MVP。** 用途 7 的 seal/open 原语及
+[#1990](https://github.com/LodyAI/Lody/pull/1990) 已合入的 presence 正文 codec
+均为**预留、MVP 不使用**。其 64 KiB 正文和 ≤60 秒加密正文 TTL 只属于预留 codec，
+不是 MVP presence 上限，也不能取代现有 90 秒 TTL。MVP 不发送
+`presence:<roomId>` 内容资源或用途 7 帧。RPC 继续使用用途 8/9，不变。
+
+### RPC 正文字节与上限
+
+正文使用固定字段，不是外层 JSON。整数无符号、大端；u64 不超过 `2^53-1`。
+`text16` 是 u16 字节长度加精确 ASCII 字节（严格 UTF-8 的子集）；`bytes32` 是 u32
+字节长度加原始不透明字节。分配／复制前检查截断、尾随字节、未知标签、非法文本／
+整数和大小上限。解码字节字段拥有独立存储，偏移 Buffer 输入也一样。
+
+| 用途   | 明文字段顺序                                                                           | 上限                                                             |
+| ------ | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| 8 请求 | `version:u8=0, requestId:16, expiresAt:u64, method:text16, params:bytes32`             | 完整封装帧 ≤1,048,576 字节；method 为 1..128 字节的 `0x21..0x7e` |
+| 9 响应 | `version:u8=0, requestId:16, requestDigest:32, kind:u8, sequence:u32, payload:bytes32` | 每个完整封装帧 ≤1,048,576 字节                                   |
+
+**RPC 上限选择——owner 已批准（2026-10-28）：** 正文最多 **1,048,433 字节**（`1,048,576 - 143`），
+不是 1 MiB 另加内容帧开销。请求正文大小是 `31 + methodBytes + paramsBytes`；响应
+正文是 `58 + payloadBytes`。传输外层封装不计入上述 RPC 内容帧上限；通用文档
+内容上限不变。
+
+响应 kind 精确为 0 progress、1 最终成功、2 最终错误。最终错误的整个 payload 是
+`code:text16, detail:bytes32`，**不另加 version 字节**。code 限 1..64 个 ASCII
+字母、数字、`_` 或 `-`；payload 大小为 `6 + codeBytes + detailBytes`，最多
+1,048,375 字节，为 RPC 正文内的 58 字节响应前缀留出空间。响应编码和解码都验证此
+嵌套错误布局。RPC 正文 codec 允许空 params、成功／progress payload 和错误 detail；
+认证后由方法 schema 再检查各自要求。
+
+请求 ID 由宿主安全随机生成 16 字节。RPC 时间戳为非负 Unix UTC 毫秒，
+`now >= expiresAt` 即过期。RPC 正文 codec 不检查当前时间、重放状态、权限或请求
+新鲜度。
+
+方法 params、成功／progress 和错误 detail 保留为授权方法 codec 使用的精确不透明
+字节；JSON 方法显式采用自己的 UTF-8 JSON codec，计算摘要不重新序列化。二进制
+输出必须明确 codec。解码 payload 不能选择另一个方法、签名者、目标、ID 或期限。
+错误 detail 是明确允许的加密方法 DTO；原异常、路径、栈和 provider 输出留在可信
+宿主诊断边界，除非明确属于该 DTO。
+
+requestDigest 是**完整原签名加密请求**的 SHA-256。sequence 每请求从零严格递增，
+不得 u32 回绕；相同帧重复可忽略，同序号不同字节是冲突。终态结束 progress；允许
+丢失中间 progress，但缺帧不产生成功。状态关联与序号检查属于接线，不属于纯正文 codec。
+
+一个持久响应 owner **先原子保存每帧完整原签名密文及分配序号，再发布**，重试原字节。
+重启不在已提交序号下重新加密；提交不确定时先核实，再封装或发布。响应 outbox 不可用／
+无效时另走经授权的结果查询，不能编造另一份原响应。发布或清理失败不能替换已保存
+业务结果；不自动回收响应证据。
+
+响应／progress 必须匹配调用方保留的原 ID／摘要、genesis、目标和 epoch，并由独立
+绑定的目标设备在**当前仍有效**时签署。同 epoch 持钥成员不能冒充。请求过期阻止新
+启动，不阻止交付／查询已有结果。查询自身仍需认证和读取授权；知道 ID／摘要不授予
+访问权。保留结果可以成为另一次授权查询的新响应，不是为了重试而重签／重加密原请求。
+
+### 机器绑定与 current-only 开发状态
+
+机器 `AdmitDevice` 在签名下绑定精确 machineId 与设备公钥；机器 possession 也覆盖
+同一 machineId。只有真实的本地已验证账本提供 `machineId → 签名公钥`；目录行、
+地址或持有 epoch 钥不能代替。保留既有成员／账号及机器所有权／共享检查。
+credential-binding/v1 继续将配对交互绑定到 session，不是 machineId 证明。
+
+同工作区同 machineId 最多一台有效设备。替换须指定同成员、同 machineId 当前有效
+设备，在同一签名记录撤销旧钥。当前冻结前机器 tag4／possession 格式已经实现，不
+新增操作或 capability 声明。见[权限账本契约](e2ee/permission-ledger.zh.md)和公开
+[机器绑定决定](../.agents/notes/proposed/architecture/2026-10-27-e2ee-machine-ledger-binding.zh.md)。
+
+缺少所需 machineId 的旧开发账本不受支持：按当前格式重建。不保留旧机器文档同步
+兼容路径，不加旧解码器、迁移、元数据猜测或重签历史。生产没有需要兼容的加密工作区。
+这不授权擦除不确定操作或执行证据。
+
+### 权限新鲜度与独立的持久过期时钟
+
+已验证账本证明连续性，不证明刚读取了最新状态。token、时间戳、转发证明和收到帧
+不授予执行新鲜度。新开始**及每个后续动作**前检查当前成员／设备角色和既有机器
+所有权／共享规则；Guest／恢复设备不能执行。只读查询需要读取权限。已知撤销、不兼容
+的 epoch 或证据冲突停止各条派发路径中受影响的发送／执行。**`rotationRequired` 只提示
+管理员换钥：该标志本身不阻断新封装、发送或执行。** 当前已验证授权和可用 epoch 钥
+仍然必需。
+
+执行机器自己发起经认证的最新账本读取，在**网络 I/O 前**记录本机开始时间。验证到
+该读取的最新边界；仅在内存缓存从该开始时刻计最多 **15 分钟**的剩余窗口。慢读取、
+失败或转发／缓存页不续期。与请求／上游期限取交集并留时钟／停止余量；全局账号锁内
+不等网络。重启丢弃该授权，新远程执行前必须联网认证重查。时钟回退或无法确定休眠／
+恢复耗时时失效。retained checkpoint 和 journal 时间戳不能恢复执行新鲜度。离线
+文档／编辑及保留结果仍可用；过期只阻断新远程执行，不阻断无关本地工作；重新验证
+不会重启不确定操作。
+
+journal 的**持久过期时钟是另一种机制**，不是执行授权。当前 schema 3 按
+`(genesis, workspaceId)` 保存跨 reopen 的单调不减下限。有独立认证的当前参考时间时，
+claim 拒绝本机或已保存下限超前超过 600,000 ms 的情形；接受时使用
+`max(reference, retainedFloor)`。无参考时仅在该工作区用 `max(localNow, retainedFloor)`。
+不得信任帧时间。显式保留证据的 reset 可清除中毒下限，但保留已退役请求 ID；不延长
+原期限，不恢复新鲜度，也不授予重放权限。遵循公开
+[journal 恢复决定](../.agents/notes/proposed/bug-fix/2026-10-27-e2ee-realtime-journal-recovery.zh.md)。
+
+### MVP 路由与延迟验收
+
+MVP 实时主路径为加密 Streams RPC；不可用时必须保留**加密 history/Meta 持久派发
+最终回退**。重试保留原 ID 和完整原签名密文；持久派发保留同一业务身份（适用时为
+userTurnId）与原请求关联。两路都经过同一实际启动 claim 和当前授权。持久到达不
+刷新原期限，也不产生第二次操作。MVP 交付和验收不依赖 iroh 连接或 SDK。
+
+验收目标为**发送到实际执行开始 ≤1 秒**：从发送方接受 send 到机器实际启动边界，
+不是到交付 ACK，也不是业务完成。按明确条件分别测普通／加密路径、通道和回退选择。
+离线持久补同步不保证一秒交付；期限已过仍禁止新启动。本次文档修订不声称测量通过。
+
+### 后续加速层：iroh（非 MVP）
+
+Owner 于 **2026-10-28** 将 iroh 延后至 MVP 之后。保留其身份决定：复用工作区设备
+Ed25519 身份，EndpointId 等于其签名公钥。只有可信宿主交付私钥，不导出给 renderer，不开放任意签名 IPC。连接对端仍须通过共用帧、已验证绑定、
+当前权限、新鲜度和执行 journal 检查。2026-10-28 的 owner 决定记录域隔离审查未
+发现签名协议混淆；这不等于原生 SDK／密钥生命周期或安装平台验收通过。后续 iroh
+加速层须保留相同原 ID／密文、授权和实际启动 claim，不能拖住可用的加密 Streams
+RPC 或持久回退。
+
+### 持久身份、实际启动与结果保留
+
+实时发送前保存原签名密文和固定 ID；接收 ACK 前写入共用 journal。身份为
+`(genesis, workspace, targetMachineId, requestId)`；请求者、原字节和原期限不可变。
+同身份不同请求者或原件都是冲突，不是另一轮执行；转发不续期。
+
+journal 保留 received、started、completed 和不确定结果。**紧邻首个业务副作用前**
+原子 claim received，只有赢家获得启动凭据。claim 后崩溃，即使无法证明副作用也为
+待确认，不自动接管／重跑。复用 userTurnId／steer／fork 证据核对，包括加密 history／
+Meta 到达；只在接收层去重不能阻止重启后的持久派发。
+
+`session/dispatch-turn` 的 offerRpcTurn 返回交付 ACK，不是 agent 完成。
+accepted／queued 是关联原 userTurnId 的 progress，不是 journal completion。
+实际 agent 启动门才 claim，业务完成保存最终结果；其他方法保留各自明确的完成语义。
+
+先持久保存业务结果，再交付响应或辅助清理。完成结果不可覆盖，丢响应或过期后仍可查。
+journal 错误只阻断依赖它的工作；保留证据和原 cause，I/O 恢复后允许重开，不可读不能
+当空库，超时不能抢占拥有权。
+
+**不自动回收：** 过期或确认不删除原件、结果、响应或去重证据，也不使 ID 可复用。
+后续有限留存须批准结果消费、不确定操作、持久退役 ID 和备份回滚政策。在此之前容量
+耗尽拒绝新工作，不驱逐证据。MVP presence 遵循上文独立的最小明文白名单和
+90 秒临时通道契约。
+
+### 修订证据与限制
+
+[公开源码审计](../.agents/notes/proposed/architecture/2026-10-26-e2ee-realtime-contract.zh.md#源码审计与接线边界)
+将已合入原语、机器绑定和 schema-3 journal 钉在公开 main
+`76a4f28e8f22c0b405e57b731fb0a1e49c42d8a3`。已合入 #1990 的正文字节与独立向量钉在
+[PR-25 源码](https://github.com/LodyAI/Lody/blob/daee5751fde6698e50960ca6a5627191c887e297/packages/loro-streams-rpc/src/e2ee-wire.ts)
+和[向量](https://github.com/LodyAI/Lody/blob/daee5751fde6698e50960ca6a5627191c887e297/packages/loro-streams-rpc/tests/fixtures/e2ee-wire-v0.json)。
+现有 presence 字段和 90 秒 TTL 见[共享 presence](../packages/shared/src/presence.ts)
+与[通道契约](loro-ephemeral-presence-channel.zh.md)。其通用 schema 仍允许自由文本
+status.detail；加密工作区发布白名单是接线要求，不是本次文档已经实现的行为。
+这些子集不证明资源编码、认证传输／新鲜度、发送 outbox、实际执行及持久回退接线、
+结果查询授权、iroh 托管、安装平台或延迟验收。完整 Spec revision `e4351fda` 已于
+2026-10-28 经 owner 授权总调度审核后批准，记录见上。Spec 批准不代表开启产品通道
+或运行时验收通过。
+
 ## 格式兼容性
 
 **冻结点。** 账本 v1（记录版本号 1、`sig/v1` 和 `rec/v1` 签名域，以及[权限账本规范](e2ee/permission-ledger.zh.md)中的操作码）在生产部署第一次开放加密工作区创建时才成为永久格式，因为只有那时才会出现绝不能失效的账本。合入代码本身不会冻结格式。在此之前格式仍可修改，但须经所有者批准，并在同一改动中用独立生成器重新生成 `packages/e2ee-core/test/ledger-v1-vector.json`；此前在开发和测试环境创建的账本可能无法再通过验证。开放生产创建之前，必须先完成一次格式审查，确认记录结构、操作码、签名域，以及权限账本 §9 中的待定事项（恢复库与可信锚编码、自撤设备后的换代衔接、恢复设备的登记顺序），都不需要改变现有记录的编码或验证方式。冻结之后，样例永不重新生成。
@@ -43,13 +266,29 @@ info `lody-e2ee/hpke-epoch/v1\0` 与账本规范四字段 AAD。只把 32 字节
 - 新操作只有在同一账本更早的位置出现能力声明（操作标签 9）之后才合法。声明列出严格递增、非零的 u32 能力码，由 Owner 或 Admin 的个人设备签署，只增不减。不支持某项已声明能力的客户端，验证声明之前的记录，并在声明处以 `upgrade-required` 停止；不报告账本损坏，也不跳过这条记录。写入方和服务端拒绝自己不支持的声明，也拒绝使用此前未声明能力的操作。
 - 更换密码套件或其他创世级参数时，新建一个带新创世记录的账本。旧账本永不改写，只在末尾通过一项能力追加指向新账本的链接记录，与 MLS ReInit 关联替代组的方式相同。
 
-其余格式仍只支持当前格式。内容、日志、本地存储和快照格式都没有线上数据：每个入口仅支持当前格式；不增加旧格式解码、双读者、schema 升级、旧数据导入或兼容门面。快照总能从完整的 v1 历史重建，所以快照格式变化不会破坏账本兼容。不支持的格式直接失败，应用不得改写其 schema 或已提交证据。SQLite 在打开或关闭数据库时可以自行回滚未完成事务、执行 WAL checkpoint，包括应用尚未识别并拒绝不支持的版本之前；这些原生操作可以改变物理文件，但必须保留已提交的逻辑数据与格式。这不允许应用迁移、替换或重建不支持的存储。当前存储的正常重开、同一当前格式内的账本历史验证与代次密钥历史恢复仍须保留。这项范围决定不选择待定的新格式，也不批准生产启用。
+其余格式仍只支持当前格式。内容、日志、本地存储和快照格式都没有线上数据：每个入口仅支持当前格式；不增加旧格式解码、双读者、schema 升级、旧数据导入或兼容门面。快照总能从完整的 v1 历史重建，所以快照格式变化不会破坏账本兼容。不支持的格式直接失败，应用不得改写其 schema 或已提交证据。SQLite 在打开或关闭数据库时可以自行回滚未完成事务、执行 WAL checkpoint，包括应用尚未识别并拒绝不支持的版本之前；这些原生操作可以改变物理文件，但必须保留已提交的逻辑数据与格式。这不允许应用迁移或重建不支持的存储。宿主执行日志有一个窄范围的人工恢复例外：将不支持的库改名保留，报告证据路径，只有显式执行本机重置才新建日志。重置不导入或自动重执行归档请求；当前格式的请求 ID 在重置后仍禁止再次执行。可证明为空的首次创建中断可以继续初始化。详见 [MVP 恢复决定](../.agents/notes/proposed/bug-fix/2026-10-27-e2ee-realtime-journal-recovery.zh.md)。当前存储的正常重开、同一当前格式内的账本历史验证与代次密钥历史恢复仍须保留。这项范围决定不选择待定的新格式，也不批准生产启用。
 
 ## 证据
 
 [模块入口](../packages/e2ee-core/README.md)、
 [固定向量与负例](../packages/e2ee-core/test/foundation.test.ts)、
 [来源指纹](https://github.com/LodyAI/Lody/blob/5f97599e60700d6185834632df85922ea0d73ec6/packages/e2ee-core/provenance.json)。
+
+## 账本冻结前的机器身份
+
+Owner 批准在冻结前扩展现有机器 AdmitDevice（tag4），不新增操作、能力码或 tag9。
+批准记录和机器持钥证明使用同一严格 UTF-8 字节串绑定 machineId，长度 1–256 字节，
+不做 Unicode 归一化。编码端拒绝无效字符串，验证端拒绝非法 UTF-8、空值和超长值；
+不同字节的 ID 保持不同。个人设备的持钥证明不变。sessionId 是由独立 bindingSignature
+约束的一次性配对上下文，不进入永久账本或持钥消息。
+
+同一工作区一个 machineId 同时只能绑定一台有效设备。替换沿用同成员个人设备的
+现有权限，在一条记录中撤销准确的旧钥并登记新钥。历史钥不可复用；rotationRequired
+仅提示管理员完成密钥更新，不阻止新内容封装或工作区使用。快照、保留状态和摘要版本 4
+保留机器绑定与历史种类。
+旧开发机器记录需要重建工作区，不增加旧格式读取或迁移。独立 v1 向量依本次明确的
+冻结前批准重新生成。本项不批准生产启用。通用提示权限规则采用已合入的
+[#1956](https://github.com/LodyAI/Lody/pull/1956)，本账本变更不增加发送门禁。
 
 ## 保留的已验证状态（提议）
 
@@ -63,7 +302,7 @@ info `lody-e2ee/hpke-epoch/v1\0` 与账本规范四字段 AAD。只把 32 字节
 - **统一状态编码。** 保留状态、背书快照和比对摘要共用同一种授权状态编码，因此三种来源（完整重放、合格快照导入、保留状态恢复）在同一位置的状态、摘要和每台设备的作者都一致。保留状态外层只多一项验证来源，往返后保持不变，也绝不升级；恢复点之前的已验证哈希不保留。布局与验收见[紧凑状态记录](../.agents/notes/proposed/architecture/2026-10-20-e2ee-compact-ledger-state.zh.md)。
 - **摘要的用途。** `stateDigest` 用于跨方比对（comparison note）和后台审计。只有调用方提供时，恢复才校验它，代价是一次哈希，不做重新验证。
 - **后台审计（暂缓）。** 从创世全量重放并与保留的摘要比对，可以发现程序错误或存储损坏。它是可选项，不在本次范围内，也可以放在服务端请求运行时之外（例如读取已存账本和保留摘要的独立 worker）。若日后加入，不一致即视为事故，在解决前停止该账本的写入。
-- **格式。** 保留编码只支持当前格式，并带显式版本：保留状态外层版本 2、快照正文版本 2、摘要域 `snapshot-digest/v2`（版本 1 是紧凑布局之前的格式）。其他版本以 `unknown-version` 失败；此时丢弃保留状态，并对 v1 历史做一次全量重放来重建。编码变化时提升这些版本。
+- **格式。** 保留编码只支持当前格式，并带显式版本：保留状态外层版本 4、快照正文版本 4、摘要域 `snapshot-digest/v4`（版本 1 是紧凑布局之前的格式）。其他版本以 `unknown-version` 失败；此时丢弃保留状态，并对 v1 历史做一次全量重放来重建。编码变化时提升这些版本。
 - **读取。** 服务端返回历史分页时无需在读路径上验证，客户端会验证收到的内容。服务端的验证属于写入准入。
 - **本地存储。** 若采纳，客户端打开时可以恢复本地保留状态，而不必重新验证全部已存记录，这将取代下文所述的全量重新验证。
 
@@ -78,8 +317,8 @@ info `lody-e2ee/hpke-epoch/v1\0` 与账本规范四字段 AAD。只把 32 字节
 安装报告须晚于持久保存、实际回读／解封和独立 commitment 校验。失败不得
 宣称已报告安装。原生工作结束和临时清理须晚于取消请求、早于取消／Scope
 完成。禁止明文降级或生产装配。原生适配器选择、恢复文件／包装／并发仍单独验收。
-发布者窗口改用先暂存后提交；vault 与真实平台保管仍单独验收。本 Spec 修订保持 draft；边界方向已定和合成
-测试通过，不代表整份修订获批或原生存钥通过验收。
+发布者窗口改用先暂存后提交；vault 与真实平台保管仍单独验收。本 Spec 修订已批准，记录见上；边界批准和合成
+测试通过，不代表原生存钥通过验收。
 
 [Host 契约与验证边界](../packages/e2ee-core/docs/workflows.md#installedepochkeys-and-installedepochhistory)。
 
@@ -99,7 +338,7 @@ SDK provider 头仅为 [4]，不再在 provider 头里编码 offset，无旧格�
 
 通用 ASCII offset 使用 u16 长度界；已发布 SDK 的 4096B sealing-overhead
 限制使适配器上限更小。真实 Loro/Flock 消费者用快照和后续增量 bootstrap。
-以上方向已确定，修订稿仍为 draft，待用户审批，不代表产品启用。发布者密钥
+本修订已批准，记录见上，不代表产品启用。发布者密钥
 可用性改用[先暂存后提交](e2ee/publisher-key-recoverability.zh.md)，不再保留旧 A/B 提案。
 
 ## 本地 SQLite 持久化

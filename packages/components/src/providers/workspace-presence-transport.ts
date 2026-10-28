@@ -1,6 +1,7 @@
 import { EphemeralStore, type Value } from 'loro-crdt';
 import {
   LODY_PRESENCE_HEARTBEAT_MS,
+  MinimalLodyPresenceStateSchema,
   LODY_PRESENCE_TTL_MS,
   getLodySessionViewingPresenceKey,
   getServerNow,
@@ -55,6 +56,7 @@ export type WorkspacePresenceDebugGlobal = {
 
 export type WorkspacePresenceTransportOptions = EphemeralRoomBaseOptions & {
   onSnapshot?: (states: LodyPresenceStateMap) => void;
+  minimal?: boolean;
   createStore?: () => PresenceStoreLike;
   createTransport?: (args: {
     streamUrl: string;
@@ -176,6 +178,21 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
       return;
     }
     if (
+      this.options.minimal &&
+      !MinimalLodyPresenceStateSchema.safeParse({
+        kind: 'session-viewing',
+        sessionId: args.sessionId,
+        userId: args.userId,
+        instanceId: this.viewingInstanceId,
+        since: 0,
+        updatedAt: 0,
+      }).success
+    ) {
+      // An unchecked route must not publish text or keep heartbeating the previous session.
+      this.publishSessionViewing(null);
+      return;
+    }
+    if (
       this.viewing &&
       this.viewing.sessionId === args.sessionId &&
       this.viewing.userId === args.userId
@@ -214,7 +231,9 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
 
   protected onStoreChange(store: PresenceStoreLike): void {
     this.lastSnapshotAtMs = Date.now();
-    this.options.onSnapshot?.(parseLodyPresenceStates(store.getAllStates()));
+    this.options.onSnapshot?.(
+      parseLodyPresenceStates(store.getAllStates(), { minimal: this.options.minimal })
+    );
   }
 
   protected override onRoomStarted(store: PresenceStoreLike): void {
@@ -268,9 +287,13 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
       since: this.viewing.since,
       updatedAt: getServerNow(),
     };
+    const minimal = this.options.minimal
+      ? MinimalLodyPresenceStateSchema.safeParse(state)
+      : undefined;
+    if (minimal && !minimal.success) return;
     this.store.set(
       getLodySessionViewingPresenceKey(this.viewing.userId, this.viewingInstanceId),
-      state as unknown as Value
+      (minimal?.data ?? state) as unknown as Value
     );
   }
 
@@ -298,13 +321,17 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
         return owner.store?.getAllStates() ?? {};
       },
       getParsedStates() {
-        return parseLodyPresenceStates(owner.store?.getAllStates() ?? {});
+        return parseLodyPresenceStates(owner.store?.getAllStates() ?? {}, {
+          minimal: owner.options.minimal,
+        });
       },
       subscribe(listener) {
         const store = owner.store;
         if (!store) return () => {};
         return store.subscribe(() => {
-          listener(parseLodyPresenceStates(store.getAllStates()));
+          listener(
+            parseLodyPresenceStates(store.getAllStates(), { minimal: owner.options.minimal })
+          );
         });
       },
     };

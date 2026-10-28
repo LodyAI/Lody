@@ -28,7 +28,8 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import { bindTestPresenceApplication } from '../../tests/presence-application-fixture';
-import { withWorkspaceManager } from '@/lib/command-runtime';
+import { resolveWorkspaceOrThrow, withWorkspaceManager } from '@/lib/command-runtime';
+import * as workspaceApi from '@/lib/workspace';
 import * as commandRuntime from '@/lib/command-runtime';
 import * as sessionCommands from '@/commands/session';
 import { createResourceDiscovery } from '@/lib/resource-discovery-runtime';
@@ -40,6 +41,7 @@ import {
   runWithDaemonWorkspace,
   runWithSessionCommandEnvironment,
   type DaemonWorkspace,
+  type DaemonWorkspaceAccess,
 } from '@/lib/session-command-environment';
 import type { Logger } from '@/utils/logger';
 import { executeDaemonSessionTool } from './daemon-session-tools';
@@ -361,6 +363,82 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
         );
     }
   );
+
+  it('serves bound Session tools from the daemon access verdict while workspace discovery is down', async () => {
+    const list = vi
+      .spyOn(workspaceApi, 'listWorkspacesForToken')
+      .mockRejectedValue(new Error('Synthetic workspace discovery outage'));
+    vi.spyOn(commandRuntime, 'getAuthContextOrThrow').mockImplementation(createAuth);
+    vi.spyOn(sessionCommands, 'readSessionMachineAccess').mockResolvedValue({ allowed: true });
+    vi.spyOn(manager, 'syncMetaOrThrow').mockResolvedValue();
+    vi.spyOn(manager, 'waitUntilMetaSynced').mockResolvedValue(true);
+    const authorized: DaemonWorkspaceAccess = {
+      status: 'authorized',
+      workspace: { id: workspaceId, name: 'Synthetic', slug: 'synthetic', role: 'member' },
+    };
+    let access: DaemonWorkspaceAccess = authorized;
+    const call = (name: string, args: Record<string, unknown>) =>
+      runWithDaemonWorkspace({ ...daemon, readAccess: () => access }, () =>
+        executeDaemonSessionTool(context(), name, args)
+      );
+    const text = (result: Awaited<ReturnType<typeof call>>) => result.content[0]?.text ?? '';
+
+    const listed = await call('lody_session_list', {});
+    expect(listed.isError, text(listed)).not.toBe(true);
+    expect(JSON.parse(text(listed))).toMatchObject({
+      items: [expect.objectContaining({ id: sessionId })],
+    });
+
+    // A confirmed revocation denies; it never falls back to cache or discovery.
+    access = { status: 'revoked' };
+    const denied = await call('lody_session_archive', { sessionId });
+    expect(denied.isError).toBe(true);
+    expect(text(denied)).toContain('Workspace access was revoked');
+    expect((await manager.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta).toMatchObject({
+      isArchived: false,
+    });
+
+    // Restored access is used by the next call without restarting the daemon.
+    access = authorized;
+    const archived = await call('lody_session_archive', { sessionId });
+    expect(archived.isError, text(archived)).not.toBe(true);
+    expect(list).not.toHaveBeenCalled();
+
+    // Without a verdict the command still discovers, and keeps that failure visible.
+    access = { status: 'unknown' };
+    const undiscovered = await call('lody_session_list', {});
+    expect(undiscovered.isError).toBe(true);
+    expect(text(undiscovered)).toContain('Synthetic workspace discovery outage');
+    expect(list).toHaveBeenCalledTimes(1);
+  });
+
+  it('binds daemon workspace resolution to the daemon identity and workspace', async () => {
+    const list = vi.spyOn(workspaceApi, 'listWorkspacesForToken');
+    const workspace = { id: workspaceId, name: 'Synthetic', slug: 'synthetic', role: 'member' };
+    let access: DaemonWorkspaceAccess = { status: 'authorized', workspace };
+    const auth = createAuth();
+    await runWithDaemonWorkspace({ ...daemon, readAccess: () => access }, async () => {
+      await expect(resolveWorkspaceOrThrow(auth)).resolves.toEqual(workspace);
+      await expect(resolveWorkspaceOrThrow(auth, 'synthetic')).resolves.toEqual(workspace);
+      // An explicit other workspace is refused, never replaced by the current one.
+      await expect(resolveWorkspaceOrThrow(auth, 'other-workspace')).rejects.toThrow(
+        'Daemon command workspace mismatch'
+      );
+      for (const other of [{ userId: 'other-user' }, { machineId: 'other-machine' as MachineId }])
+        await expect(resolveWorkspaceOrThrow({ ...auth, ...other }, workspaceId)).rejects.toThrow(
+          'restart the daemon'
+        );
+      access = { status: 'authorized', workspace: { ...workspace, id: 'other-workspace' } };
+      await expect(resolveWorkspaceOrThrow(auth, workspaceId)).rejects.toThrow(
+        'Daemon command workspace mismatch'
+      );
+      access = { status: 'unauthorized' };
+      await expect(resolveWorkspaceOrThrow(auth, workspaceId)).rejects.toThrow(
+        'CLI token is invalid or expired'
+      );
+    });
+    expect(list).not.toHaveBeenCalled();
+  });
 
   it('executes a Session tool for another requester against the daemon replica', async () => {
     const result = await runWithDaemonWorkspace(daemon, () =>
@@ -819,6 +897,11 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
       await expect(
         withWorkspaceManager({ ...auth, userId: 'other-user' }, workspace, 'test', async () => 1)
       ).rejects.toThrow('restart the daemon');
+      await expect(
+        withWorkspaceManager(auth, workspace, 'test', async () => {
+          throw new Error('Synthetic command failure');
+        })
+      ).rejects.toThrow('Synthetic command failure');
     });
     // The borrowing command never cleans up the daemon's replica.
     expect((await manager.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta).toMatchObject({

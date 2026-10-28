@@ -1,5 +1,10 @@
+import { SessionInfoBar } from '../components/sessions/session-info-bar';
+import { ConversationColumn } from '../components/shared/conversation-column';
+import { ScheduledMessageTimeDialog } from '../components/schedules/scheduled-message-time';
+import { formatUpcoming } from '../components/schedules/schedule-format';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowUp, Bot, Github } from 'lucide-react';
 
 import {
@@ -14,6 +19,7 @@ import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 import { getPastedTextCharacterCount, type PastedTextDraft } from '@/lib/pasted-text-draft';
 import { registerBuiltInCommands } from '@/lib/commands';
+import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 import { SettingsStoryProviders } from './settings-story-shell';
 
 // So session.focusInput has a binding — the desktop ⌘L focus hint reads it.
@@ -342,6 +348,47 @@ function DemoComposer({
   );
 }
 
+function PromptSuggestionPreview({ mobile = false }: { mobile?: boolean }) {
+  const [prompt, setPrompt] = useState('');
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const composer = (
+    <ChatComposer
+      tone="light"
+      variant="session"
+      promptRef={promptRef}
+      promptValue={prompt}
+      onPromptChange={setPrompt}
+      promptSuggestion="Add a regression test for the reconnect path, then run the focused suite."
+      primaryAction={
+        <Button icon aria-label="Send">
+          <ArrowUp size={16} />
+        </Button>
+      }
+      autoResize
+      maxRows={11}
+    />
+  );
+  return (
+    <div className="flex min-h-screen flex-col justify-end bg-background px-4 pb-6">
+      <div className={cn('mx-auto w-full', mobile ? 'max-w-[390px]' : 'max-w-3xl')}>
+        {mobile ? (
+          <ForceMobileLayoutProvider force>{composer}</ForceMobileLayoutProvider>
+        ) : (
+          composer
+        )}
+      </div>
+    </div>
+  );
+}
+
+export const SessionPromptSuggestion: Story = {
+  render: () => <PromptSuggestionPreview />,
+};
+
+export const SessionPromptSuggestionMobile: Story = {
+  render: () => <PromptSuggestionPreview mobile />,
+};
+
 export const LandingDark: Story = {
   render: () => (
     <div className="relative min-h-screen bg-[#050b1d] text-white">
@@ -527,4 +574,89 @@ export const LandingWithPastedText: Story = {
       </div>
     </div>
   ),
+};
+
+function ScheduledSendPreview({ pickerInitiallyOpen = false }: { pickerInitiallyOpen?: boolean }) {
+  const { t, i18n } = useTranslation();
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const [text, setText] = useState(
+    'Review these files tomorrow morning and summarize the remaining issues.'
+  );
+  const [at, setAt] = useState<string | null>('2026-10-28T01:00:00.000Z');
+  const [picker, setPicker] = useState(pickerInitiallyOpen);
+  return (
+    <div className="min-h-screen bg-background p-4 flex items-center justify-center">
+      <div className="w-full max-w-2xl">
+        <SessionInfoBar
+          status={null}
+          machine={{
+            machineId: 'story-machine' as never,
+            name: 'MacBook Pro',
+            onlineStatus: 'online',
+          }}
+        />
+        <ConversationColumn>
+          <ChatComposer
+            variant="session"
+            promptRef={promptRef}
+            tone="light"
+            promptValue={text}
+            onPromptChange={setText}
+            onAttachmentAddClick={() => {}}
+            onScheduleSend={() => setPicker(true)}
+            secondaryAction={
+              at
+                ? {
+                    label: t('scheduledMessage.composerAction', {
+                      time: formatUpcoming(
+                        Date.parse(at),
+                        'Asia/Shanghai',
+                        Date.parse('2026-10-27T08:00:00Z'),
+                        i18n.language
+                      ),
+                    }),
+                    onClick: () => setPicker(true),
+                  }
+                : undefined
+            }
+            primaryAction={
+              <Button icon aria-label="Send">
+                <ArrowUp size={16} />
+              </Button>
+            }
+            autoResize
+          />
+        </ConversationColumn>
+      </div>
+      {picker ? (
+        <ScheduledMessageTimeDialog
+          finalFocus={promptRef}
+          onRemoveTime={
+            at
+              ? () => {
+                  setAt(null);
+                  setPicker(false);
+                }
+              : undefined
+          }
+          at={at}
+          timeZone="Asia/Shanghai"
+          now={Date.parse('2026-10-27T08:00:00Z')}
+          onClose={() => setPicker(false)}
+          onApply={(value) => {
+            setAt(value);
+            setPicker(false);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+export const ScheduledSend: Story = { render: () => <ScheduledSendPreview /> };
+export const ScheduledSendTimePicker: Story = {
+  render: () => <ScheduledSendPreview pickerInitiallyOpen />,
+};
+export const ScheduledSendDark: Story = {
+  globals: { theme: 'dark' },
+  render: () => <ScheduledSendPreview />,
 };
