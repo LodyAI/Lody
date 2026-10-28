@@ -23,6 +23,8 @@ import {
 } from '@/lib/git-credential-helper-script';
 import { EventEmitter } from 'eventemitter3';
 import os from 'os';
+import { randomUUID } from 'node:crypto';
+import { McpAuthenticationLegacy } from '@/mcp/authentication/legacy';
 
 import {
   SessionId,
@@ -214,6 +216,8 @@ export interface ISession {
    * Returns null if the session has no host path mapping.
    */
   getHostWorkdir(): string | null;
+  /** Existing host path only; never creates a directory or prepares a runtime. */
+  peekHostWorkdir?(): string | null;
   getParentSessionId(): SessionId | undefined;
   applyExecutionPlaneLimits(limits: SessionSandboxLimits): Promise<void>;
   getMonitorRuntimeInfo(): Promise<SessionMonitorRuntimeInfo>;
@@ -247,6 +251,7 @@ export interface ISession {
    */
   updateEnv(env: Record<string, string | undefined>): void;
   getGitHubCredentials(): SessionCredentials;
+  validateMcpRequester?(userId: string): Promise<void>;
 }
 
 export type SessionMonitorRuntimeInfo = {
@@ -296,6 +301,7 @@ export interface CreateAgentConfig {
   onSessionTitleUpdate: (title: string) => void;
   onAgentWarning: (warning: AgentSessionWarning) => void;
   loadExternalMcpServers: NonNullable<AgentClientOptions['loadExternalMcpServers']>;
+  releaseExternalMcpServers?: () => Promise<void>;
   onImageGenerationBegin: (event: ImageGenerationBeginEvent) => void;
   onImageGenerationEnd: (event: ImageGenerationEndEvent) => void;
   onWriteTextFile: (event: AcpWriteTextFileEvidence) => void | Promise<void>;
@@ -372,6 +378,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   private readonly cloudPort: CloudPort;
   private detachSpeculativeWorktreeRecovery: (() => void) | null = null;
   private speculativeWorktreeRecoveryChain: Promise<void> = Promise.resolve();
+  readonly mcpAuthentication: McpAuthenticationLegacy;
   /** Coalescing latch for {@link enqueueSpeculativeWorktreeRecovery}. */
   private speculativeWorktreeRecoveryQueued = false;
   private speculativeWorktreeRecoveryGeneration = 0;
@@ -406,6 +413,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       throw new Error('SessionManager requires an assembled CloudPort');
     }
     this.cloudPort = options.cloudPort;
+    this.mcpAuthentication = new McpAuthenticationLegacy({
+      machineId,
+      workspaceId,
+      userId: options.cloudPort.identity.userId,
+    });
     this.sessionSandboxFactory =
       options.sessionSandboxFactory ?? createSessionSandboxFactory({ logger: this.logger });
   }
@@ -654,6 +666,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     }
   ): CreateAgentConfig {
     const sessionId = config.sessionId!;
+    const mcpOwner = randomUUID();
+    const mcpRequesterUserId = config.requesterUserId;
     const localProjectId =
       config.project?.kind === 'local' ? config.project.localProjectId : undefined;
     return {
@@ -779,7 +793,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
           sessionId,
           selectedIds: config.mcpServerIds,
           logger: this.logger,
+          env: mcpRequesterUserId === this.cloudPort.identity.userId ? process.env : {},
+          prepare: (entry, resolved) =>
+            this.mcpAuthentication.prepare(entry, resolved, mcpOwner, mcpRequesterUserId),
         }),
+      releaseExternalMcpServers: () => this.mcpAuthentication.release(mcpOwner),
       onImageGenerationBegin: (event) => this.emit('onImageGenerationBegin', sessionId, event),
       onImageGenerationEnd: (event) => this.emit('onImageGenerationEnd', sessionId, event),
       onWriteTextFile: (event) => {
@@ -1244,6 +1262,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   }
 
   async validateSessionCredentials(session: ISession, requesterUserId: string): Promise<void> {
+    await session.validateMcpRequester?.(requesterUserId);
     const credentials = session.getGitHubCredentials();
     if (credentials.mode === 'native') return;
     const { lease } = credentials;
@@ -1845,6 +1864,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     if (options.keepWorkspaceDocumentOpen) {
       return;
     }
+    await this.mcpAuthentication.close();
     await this.workspaceDocument.cleanUp();
     await this.gitCredentialBroker?.shutdown();
     this.gitCredentialBroker = null;

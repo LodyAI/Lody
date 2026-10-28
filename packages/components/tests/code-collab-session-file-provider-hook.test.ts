@@ -294,7 +294,7 @@ describe('useCodeCollabSessionFileProvider', () => {
         )
       );
       await flushMicrotasks(8);
-      expect(updates.at(-1)?.status).toBe(encrypted ? 'unavailable' : 'error');
+      expect(updates.at(-1)?.status).toBe('error');
       await expect(updates.at(-1)?.provider?.openFile('/absolute/notes.md')).resolves.toMatchObject(
         {
           status: 'ready',

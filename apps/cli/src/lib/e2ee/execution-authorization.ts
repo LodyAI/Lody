@@ -11,6 +11,7 @@ export type ExecutionAuthorization =
       readonly reason:
         | 'invalid-request'
         | 'not-authorized'
+        | 'e2ee_machine_not_owned'
         | 'e2ee_machine_not_shared'
         | 'unavailable'
         | 'closed';
@@ -122,10 +123,11 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         return yield* restore(Fiber.join(flight));
       })
     );
-    const authorizeExecution = Effect.fn('CliE2eeExecutionAuthorization.authorizeExecution')(
+    const authorize = Effect.fn('CliE2eeExecutionAuthorization.authorize')(
       function* (
         workspaceId: string,
         requesterDevice: string,
+        access: 'read' | 'execute' | 'owned-execute',
         localProjectId?: string
       ): Effect.fn.Return<ExecutionAuthorization, unknown> {
         if (closed) return denied('closed');
@@ -151,7 +153,12 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         if (!local || !state.members.has(Buffer.from(local.membershipId.toBytes()).toString('hex')))
           return denied('not-authorized');
         const permissions = yield* Effect.fromResult(contentPermissions(view, requester.success));
-        if (!permissions.mayWriteDocument) {
+        const reader = state.devices.get(requesterDevice);
+        const mayRead =
+          reader &&
+          reader.kind !== 'recovery' &&
+          state.members.has(Buffer.from(reader.membershipId.toBytes()).toString('hex'));
+        if (access === 'read' ? !mayRead : !permissions.mayWriteDocument) {
           grants.delete(requesterDevice);
           return denied('not-authorized');
         }
@@ -163,6 +170,7 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
           )
         ) {
           grants.delete(requesterDevice);
+          if (access !== 'execute') return denied('e2ee_machine_not_owned');
           if (!options.sharing) return denied('e2ee_machine_not_shared');
           const shared = yield* options
             .sharing(requesterDevice, localProjectId)
@@ -178,6 +186,7 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         // Bounded cache; eviction can only require an earlier authenticated reread.
         if (grants.size >= 1024) grants.clear();
         grants.set(requesterDevice, start);
+        if (access !== 'execute') return { _tag: 'Authorized' };
         return {
           _tag: 'Authorized',
           isCurrent: () =>
@@ -195,10 +204,15 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
       )
     );
     return {
-      authorizeExecution,
+      authorizeExecution: (workspaceId: string, requesterDevice: string, localProjectId?: string) =>
+        authorize(workspaceId, requesterDevice, 'execute', localProjectId),
+      authorizeOwnedExecution: (workspaceId: string, requesterDevice: string) =>
+        authorize(workspaceId, requesterDevice, 'owned-execute'),
       refreshLedger: refreshOnce.pipe(
         Effect.flatMap((value) => (value ? Effect.void : Effect.fail('unavailable' as const)))
       ),
+      authorizeRead: (workspaceId: string, requesterDevice: string) =>
+        authorize(workspaceId, requesterDevice, 'read'),
       invalidate,
     };
   }

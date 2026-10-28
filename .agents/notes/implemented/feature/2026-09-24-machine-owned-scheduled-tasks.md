@@ -60,13 +60,21 @@ chat landing's machine, project and worktree pills sit under it; where runs go i
 its own card above the time rule. This replaced four property rows. A new
 schedule opens with the chat landing's last machine and Agent and that Agent's
 remembered model, options and permission, so nothing starts empty; times are
-typed, with no picker popup. On desktop a schedule opens beside the list (revised
-2026-09-25, replacing a dialog): the schedule slides in like a sidebar
-beside the full table, which scrolls sideways, across a resizable boundary, with a compact icon header and run history at its
-bottom; saving returns to the list. Where runs go and when share one card. The list itself is
-worked from directly: manual rows carry a Run button, every row has a context menu
-(open, run, pause/resume, last run, delete — delete confirms), and columns resize
-from the header. There is no time zone control: the CLI publishes
+typed, with no picker popup. On desktop an open schedule is a 720px modal over
+the list (revised 2026-10-28, replacing the 2026-09-25 side panel, whose drag
+boundary and squeezed table made the list hard to read); a phone pushes a page.
+Its header states the kind, name and status, an enable switch (Run for a manual
+task) and a ⋯ menu with delete; Settings and Run history are tabs, and saving
+returns to the list. Where runs go and when share one card. The list itself is
+worked from directly: status is words rather than pills, chat destinations open
+their chat, project and status filters and sort sit above two sections (tasks and
+scheduled messages; only messages carry an info popover saying they send once), and every row has a ⋯
+menu matching its context menu (open, run, pause/resume, open chat, last run,
+delete — delete confirms); finished scheduled messages can be cleared together.
+Columns no longer resize. Run history of a schedule that posts into one chat is
+read from that chat: each run's user turn already carries `scheduleRun`, so the
+history needs no new stored or synced record (a runtime list of recent dispatches
+was rejected because it would change the synced Registry). There is no time zone control: the CLI publishes
 its IANA zone as `MachineMeta.timeZone` (under 50 bytes, written at registration),
 wall-clock rules and one-off times are read on that clock, and older CLIs fall
 back to the viewer's zone. Save problems are marked where they are fixed — an

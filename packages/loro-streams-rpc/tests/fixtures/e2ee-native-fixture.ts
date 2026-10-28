@@ -6,12 +6,32 @@ import { Bytes } from '@lody/e2ee-core/protocol';
 import { makeRealtimeContentBinding } from '@lody/e2ee-core/adapters/loro-streams';
 import { copyEpochKeyBytes } from '../../../e2ee-core/src/internal/foundation/epoch-key';
 import { envelopeFixture } from '../../../e2ee-core/test/keys/fixture';
+import { encodeCbor } from '../../../e2ee-core/src/internal/foundation/cbor';
 import { makeE2eeRpcNative, E2eeRpcOriginals } from '../../src/e2ee-native';
 
 /** Fixed synthetic ledger/signers and real host SQLite, never a keychain or network. */
-export function encryptedRpcFixture() {
+export function encryptedRpcFixture(options: { guest?: boolean } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'lody-rpc-'));
   const ledger = envelopeFixture(1);
+  if (options.guest) {
+    // Retain an independent admin before demoting the original member and its
+    // already-admitted machine. These are real signed and verified ledger rows.
+    const admin = ledger.ed(12);
+    const membership = new Uint8Array(16).fill(12);
+    const request = [
+      membership,
+      new Uint8Array(32).fill(12),
+      admin.raw,
+      new Uint8Array(32).fill(12),
+      null,
+    ] as const;
+    const body = Result.getOrThrow(encodeCbor([ledger.context.genesis.toBytes(), ...request]));
+    const proof = admin.signBytes(Buffer.concat([Buffer.from('lody-e2ee/join/v1\0'), body]));
+    ledger.append([1, membership, [...request, proof]]);
+    ledger.append([3, membership, 1]);
+    ledger.append([6, membership]);
+    ledger.append([3, new Uint8Array(16).fill(10), 3], admin);
+  }
   const machineId = 'fixture-machine';
   const workspaceId = 'synthetic-workspace';
   const native = (who: 'owner' | 'phone', filename = who) =>

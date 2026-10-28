@@ -58,6 +58,10 @@ const envelopes = z.object({
 })
 const contentToken = z.object({
   token: z.string().min(1),
+  attachmentToken: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
   bucketId: z.string().min(1),
   gatewayBaseUrl: z.string().url(),
   expiresIn: z.number().int().positive().max(900),

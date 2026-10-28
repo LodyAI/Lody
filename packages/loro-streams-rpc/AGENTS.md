@@ -7,6 +7,10 @@ Machine RPC contracts: [transport map](../../.agents/docs/rpc-loro-streams-rpc.m
 
 ## Invariants
 
+- Encrypted machine RPC uses one feature DTO/chunk codec and native complete-response assembler.
+  The closed pure-read list uses fresh read authority, never execution journals; other admitted
+  Code Collab/preview actions require write authority and execution claims. Keep same-member
+  machine binding, exact originals and explicit size errors; never fall back to ordinary RPC.
 - Encrypted dispatch retains exact frames across retry/fallback. Receipt ACK never
   completes the shared execution claim. [Ownership/close](README.md#encrypted-dispatch).
 - Request stream ids are workspace/machine scoped:

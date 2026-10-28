@@ -91,10 +91,10 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
 
 ## Workspace MCP / Roles
 
-- MCP catalog/project defaults live in workspace Flock; selections live in turns.
-  Absent project rows inherit workspace defaults; `[]` disables all. Resolve defaults
-  at authoring only. No MCP machine bindings.
-  Preserve explicit `mcpServerIds: []`; dispatch the driving turn's selection to ACP,
+- MCP/UI: read [auth contracts](src/AGENTS.md).
+  Catalog/defaults: workspace Flock; selections: turns. Missing project rows inherit
+  workspace defaults; `[]` disables all. Resolve defaults only at authoring; no machine
+  bindings. Preserve `mcpServerIds: []`; send the driving turn's selection to ACP,
   never reread history.
 - MCP/Role catalog writes resolve on local Flock durability, followed by explicit
   upload. Settings neither await nor report upload; its failure never fails or rolls
@@ -119,3 +119,5 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
 
 Presence: E2EE requires UUID session IDs and bounded plaintext allowlists on publish/receive;
 ordinary behavior stays unchanged. [Contract](../../.agents/docs/cli-lib-loro-presence.md).
+
+Encrypted attachment manifests contain secret per-file keys and belong only in protected conversation content or local recovery receipts. Relay requests use opaque metadata and attachment-only grants; never publish a manifest or key in a URL. Format and recovery rationale: [attachment decision](../../.agents/notes/proposed/architecture/2026-10-28-encrypted-attachments.md).

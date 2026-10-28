@@ -281,3 +281,13 @@ cloud conversations/settings, and disables execution of imported sessions/schedu
 Roost and unsupported formats fail before record uploads. Source data is retained;
 rerunning resumes the frozen snapshot. It does not copy code directories or native
 agent credentials. See [migration and recovery](src/lib/oss-migration/README.md).
+
+## Local export
+
+`lody export` includes encrypted workspaces, including `--all-workspace`. The
+workspace manager reads verified, decrypted session documents through the same
+protected replica used by chat, then writes JSON and Markdown on this device.
+`--offline` reads its retained local cache. Unsupported encrypted schedule rooms
+are omitted; ordinary workspace exports keep their existing schedule data.
+Desktop conversation copy and image export likewise use the local history and
+save/clipboard bridges, without publishing a share.

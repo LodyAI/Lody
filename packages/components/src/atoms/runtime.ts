@@ -204,6 +204,7 @@ export type WorkspaceRuntime = {
   readonly workspaceId: WorkspaceId;
   /** Missing only on older ordinary test/embedded ports; encrypted runtimes set it explicitly. */
   readonly contentMode?: 'plaintext' | 'e2ee';
+  readonly attachmentToken?: () => Promise<string>;
   readonly sendResources: SessionSendResources;
   /** In-memory sends whose attachments are still preparing; lost with the page. */
   readonly pendingSends: PendingSessionSends | null;
@@ -556,8 +557,16 @@ export type WorkspaceRuntime = {
   ) => Promise<LocalProjectControlResponse | null>;
   requestLocalMcpTools: (
     machineId: MachineId,
-    server: WorkspaceMcpServerMeta
+    server: WorkspaceMcpServerMeta,
+    requesterUserId?: string
   ) => Promise<McpToolListResult>;
+  requestLocalMcpAuthentication: (
+    machineId: MachineId,
+    params: Extract<
+      import('@lody/shared').LocalMachineRpcRequest,
+      { method: 'mcp/authentication' }
+    >['params']
+  ) => Promise<import('@lody/shared').McpAuthenticationResult>;
   requestMachineBugReport: (
     machineId: MachineId,
     args: {

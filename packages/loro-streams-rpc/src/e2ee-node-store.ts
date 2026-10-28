@@ -127,6 +127,46 @@ export class E2eeRpcOriginals {
       }
     });
   }
+  readResponse(key: string, sequence: number): Uint8Array | undefined {
+    return this.database((db) => {
+      const row = db
+        .prepare('SELECT frame,digest FROM responses WHERE key=? AND sequence=?')
+        .get(key, sequence);
+      if (!row) return undefined;
+      if (
+        !(row.frame instanceof Uint8Array) ||
+        createHash('sha256').update(row.frame).digest('hex') !== row.digest
+      )
+        throw new Error('e2ee_rpc_response_corrupt');
+      return Uint8Array.from(row.frame);
+    });
+  }
+  /** Atomically retain the complete paged outcome before the first publication. */
+  retainResponsePages(key: string, frames: readonly Uint8Array[]): void {
+    this.database((db) => {
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        for (const [sequence, frame] of frames.entries()) {
+          const hash = createHash('sha256').update(frame).digest('hex');
+          db.prepare('INSERT OR IGNORE INTO responses VALUES(?,?,?,?)').run(
+            key,
+            sequence,
+            frame,
+            hash
+          );
+          if (
+            db.prepare('SELECT digest FROM responses WHERE key=? AND sequence=?').get(key, sequence)
+              ?.digest !== hash
+          )
+            throw new Error('e2ee_rpc_response_conflict');
+        }
+        db.exec('COMMIT');
+      } catch (cause) {
+        db.exec('ROLLBACK');
+        throw cause;
+      }
+    });
+  }
   /** Correlated authenticated replies keep immutable sequence bytes across reopen. */
   retainResponse(key: string, sequence: number, frame: Uint8Array): void {
     const hash = createHash('sha256').update(frame).digest('hex');

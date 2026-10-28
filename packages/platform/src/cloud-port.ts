@@ -75,6 +75,7 @@ export interface CloudE2eePort {
   createContentTokenProvider?(input: {
     workspaceId: string;
     credential: string;
+    rpcOnly?: true;
   }): Effect.Effect<
     LoroStreamsTokenProvider & { getBucketId(): string | undefined },
     never,

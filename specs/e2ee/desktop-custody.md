@@ -1,6 +1,6 @@
 # Desktop E2EE key custody
 
-Status: draft
+Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md)
 Translation: current
 
 [中文](desktop-custody.zh.md)
@@ -17,7 +17,7 @@ Publish complete encrypted files atomically and preserve the first original. Cor
 
 ## Acceptance boundary
 
-Owning tests use real native crypto/files/OS-child reopen and a synthetic authenticated safeStorage boundary. They verify backend rejection, tamper/AAD rejection, absence of generated secret bytes on disk and actual close waiting. This is not a claim that an OS keychain was exercised. Before product activation, packaged Electron must be verified against actual safeStorage on each supported desktop OS.
+Owning tests use real native crypto/files/OS-child reopen and a synthetic authenticated safeStorage boundary. They verify backend rejection, tamper/AAD rejection, absence of generated secret bytes on disk and actual close waiting. This is not a claim that an OS keychain was exercised. Before product activation, real-device acceptance must verify packaged Electron against actual system keychains on macOS and Windows, and actual safeStorage on each supported desktop OS.
 
 ## Confirmed membership removal
 

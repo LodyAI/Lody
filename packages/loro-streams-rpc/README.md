@@ -79,3 +79,14 @@ pnpm test:integration
 
 The integration command starts a local server through `loro dev --db-path ...` and
 then runs the transport tests against it.
+
+## Encrypted file and preview features
+
+Encrypted workspaces route Code Collab, restricted file preview and preview controls
+through the existing signed workspace RPC domain. The native host retains request
+and response originals and validates all result pages before returning a complete DTO;
+the renderer shares dispatch's response owner. Audited machine/file reads use that same
+codec with read authority and no execution journal. See the
+[read boundary](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-read-queries.md). The format,
+room boundaries and acceptance limits are recorded in the
+[availability decision](../../.agents/notes/implemented/feature/2026-10-28-e2ee-file-preview-availability.md).

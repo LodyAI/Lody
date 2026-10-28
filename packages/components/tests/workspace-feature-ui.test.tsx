@@ -116,7 +116,7 @@ it('shows the schedule restriction before readiness, machine or save errors', as
   expect(container.textContent).toBe('Encrypted workspaces do not yet support scheduled messages.');
 });
 
-it('renders a Code Collab restriction instead of an endless loading state', async () => {
+it('keeps encrypted Code Collab available while its runtime is starting', async () => {
   function FileStatus() {
     const state = useCodeCollabSessionFileProvider({
       sessionId: 'session',
@@ -136,9 +136,9 @@ it('renders a Code Collab restriction instead of an endless loading state', asyn
       </Provider>
     )
   );
-  expect(container.querySelector('output')?.dataset.status).toBe('unavailable');
+  expect(container.querySelector('output')?.dataset.status).toBe('checking');
   expect(container.querySelector('output')?.dataset.provider).toBe('false');
-  expect(container.textContent).toBe('Encrypted workspaces do not yet support Code Collab.');
+  expect(container.textContent).not.toContain('Encrypted workspaces do not yet support');
 });
 
 it('blocks a schedule deep link before mounting its editor', async () => {
@@ -172,4 +172,14 @@ it('hides remote machine controls and provider forms with the same explanation',
     Array(2).fill('Encrypted workspaces do not yet support remote machine operations.')
   );
   expect(container.querySelector('button')).toBeNull();
+});
+
+it.each(['en', 'zh_CN'])('enables local export controls in encrypted workspaces in %s', async (language) => {
+  await initI18n(language);
+  function ExportControl() {
+    const available = useWorkspaceFeature('export');
+    return <button disabled={!available}>Export</button>;
+  }
+  await act(async () => root.render(<Provider store={encryptedStore()}><ExportControl /></Provider>));
+  expect(container.querySelector('button')?.disabled).toBe(false);
 });

@@ -169,8 +169,7 @@ Owner-personal-signed transition. The original candidate and P09 paths are reuse
 retired member/device facts and history remain, while distribution excludes the
 removed devices. The existing snapshot auth state already represents that exact
 post-state; no old-client capability negotiation or second decoder is introduced.
-The encoding remains experimental. Related protocol Specs remain drafts for review;
-implementation and tests do not grant approval.
+The encoding remains experimental. The [atomic removal Spec](../../../../specs/e2ee/atomic-removal.md) is approved; implementation and tests alone do not grant approval.
 
 Snapshot content v0 carries a u16be byte length and raw ASCII continuation offset
 immediately after the signing public key; the complete field enters signature/AEAD.
@@ -254,4 +253,4 @@ the Lab's native SQLite boundary implementation is not that production API.
 
 ## Workspace, vault and desktop round
 
-The user selected vault-v1, per-workspace encrypted R entries plus index CAS, inviter-pinned snapshot joining and desktop-only safeStorage-wrapped KEK custody. Corresponding Specs remain draft for revision approval; product E2EE remains disabled. Web/mobile/CLI custody and strict deadline B are not enabled. The public workspace facade owns common workflows and Lab is its first consumer. Staging deletion checks its original signer and deletes in one transaction; absence succeeds. Streams boundary queries are content blind. Manual model exploration counts replay-confirmed measured violations; benchmarks have no CI thresholds.
+The user selected vault-v1, per-workspace encrypted R entries plus index CAS, inviter-pinned snapshot joining and desktop-only safeStorage-wrapped KEK custody. The snapshot join and desktop custody Specs are approved, while recovery vault remains draft; product E2EE remains disabled. Web/mobile/CLI custody and strict deadline B are not enabled. The public workspace facade owns common workflows and Lab is its first consumer. Staging deletion checks its original signer and deletes in one transaction; absence succeeds. Streams boundary queries are content blind. Manual model exploration counts replay-confirmed measured violations; benchmarks have no CI thresholds.

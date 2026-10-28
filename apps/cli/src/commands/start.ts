@@ -582,6 +582,9 @@ async function startAgentService(
 
   let cloudPort: CloudPort;
   if (options.pairedWorkspace) {
+    if (!LODY_SERVER_URL) {
+      throw new Error('Cloud platform startup requires LODY_SERVER_URL');
+    }
     const { loadCliE2eeMachineBootstrapLegacy } = await import('@/lib/e2ee/workspace-legacy');
     const paired = await loadCliE2eeMachineBootstrapLegacy(options.pairedWorkspace, machineId);
     const { createCloudE2eeMachinePort } = await import('@/lib/cloud-cli-port');
@@ -592,6 +595,7 @@ async function startAgentService(
       machineId,
       credential: paired.credential,
       authBaseUrl: paired.bootstrap.deploymentUrl,
+      serverBaseUrl: LODY_SERVER_URL,
       logger,
     });
   } else if (platformKind === 'local') {

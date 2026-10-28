@@ -12,7 +12,9 @@ import {
   E2EE_RPC_MAX_FRAME_BYTES,
 } from './e2ee-wire';
 import { E2eeRpcOriginals } from './e2ee-node-store';
+import { makeE2eeFeatureRpcNative } from './e2ee-feature-native';
 import { e2eeRpcResource, e2eeRpcResponseStream } from './e2ee-resource';
+import { isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
 import type {
   E2eeDispatchInput,
   E2eePreparedDispatch,
@@ -59,7 +61,8 @@ type Binding = Effect.Success<ReturnType<typeof makeRealtimeContentBinding>>;
 
 /** Native workspace adapter. Purpose-bound preparation persists one original before
  * the caller may transmit it. Reopen/retry verifies and reuses those bytes. No
- * renderer-supplied signer, method, deadline, private export or arbitrary sign API. */
+ * renderer-supplied signer/deadline, private export or arbitrary sign API. Feature
+ * methods are restricted to the fixed product allowlist. */
 export function makeE2eeRpcNative(options: {
   workspaceId: string;
   requesterDevice: string;
@@ -69,7 +72,7 @@ export function makeE2eeRpcNative(options: {
   ledger: () => Effect.Effect<LedgerView, unknown>;
   binding: (resource: string) => Effect.Effect<Binding, unknown, Scope.Scope>;
 }) {
-  const targetSigner = Effect.fnUntraced(function* (machineId: string) {
+  const targetSigner = Effect.fnUntraced(function* (machineId: string, sharedDispatch = false) {
     const view = yield* options.ledger();
     const state = view.inspectState();
     const own = state.devices.get(options.requesterDevice);
@@ -77,7 +80,7 @@ export function makeE2eeRpcNative(options: {
       ([, device]) => device.kind === 'machine' && device.machineId === machineId
     );
     const candidate = candidates[0];
-    if (!own || candidates.length !== 1 || !candidate)
+    if (!own || candidates.length !== 1 || !candidate || (!sharedDispatch && !own.membershipId.equals(candidate[1].membershipId)))
       return yield* Effect.fail(new Error('e2ee_machine_not_owned'));
     return candidate[0];
   });
@@ -117,6 +120,29 @@ export function makeE2eeRpcNative(options: {
       opened.plaintext.fill(0);
     }
   });
+  const requireDispatchWriter = Effect.fnUntraced(function* () {
+    const state = (yield* options.ledger()).inspectState();
+    const device = state.devices.get(options.requesterDevice);
+    const member = device && state.members.get(hex(device.membershipId.toBytes()));
+    if (!device || device.kind === 'recovery' || !member || member.role === 'guest')
+      return yield* Effect.fail(new Error('e2ee_rpc_denied'));
+    return yield* Effect.void;
+  });
+  const authorizeRequest = Effect.fnUntraced(function* (
+    input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput
+  ) {
+    if (!isE2eeReadQuery(input.request.method, input.request.params))
+      return yield* requireDispatchWriter();
+    const state = (yield* options.ledger()).inspectState();
+    const device = state.devices.get(options.requesterDevice);
+    if (
+      !device ||
+      device.kind === 'recovery' ||
+      !state.members.has(hex(device.membershipId.toBytes()))
+    )
+      return yield* Effect.fail(new Error('e2ee_rpc_denied'));
+    return yield* Effect.void;
+  });
   const prepareDispatch = (
     machineId: string,
     input: E2eeDispatchInput,
@@ -124,8 +150,9 @@ export function makeE2eeRpcNative(options: {
   ) =>
     Effect.scoped(
       Effect.gen(function* () {
+        yield* requireDispatchWriter();
         const args = yield* attempt(() => normalizeInput(input));
-        const signer = yield* targetSigner(machineId);
+        const signer = yield* targetSigner(machineId, true);
         const state = (yield* options.ledger()).inspectState();
         const sameOwner = state.devices
           .get(options.requesterDevice)
@@ -162,7 +189,7 @@ export function makeE2eeRpcNative(options: {
         if (
           saved.target !== machineId ||
           saved.signer !== signer ||
-          saved.signer !== (yield* targetSigner(machineId))
+          saved.signer !== (yield* targetSigner(machineId, true))
         )
           return yield* Effect.fail(new Error('e2ee_rpc_target_changed'));
         const checked = yield* open(machineId, saved.frame);
@@ -188,7 +215,7 @@ export function makeE2eeRpcNative(options: {
         if (
           !saved ||
           saved.target !== machineId ||
-          saved.signer !== (yield* targetSigner(machineId))
+          saved.signer !== (yield* targetSigner(machineId, true))
         )
           return yield* Effect.fail(new Error('e2ee_rpc_original_missing'));
         const original = yield* open(machineId, saved.frame);
@@ -229,9 +256,15 @@ export function makeE2eeRpcNative(options: {
         }
       })
     );
+  const features = makeE2eeFeatureRpcNative({ ...options, targetSigner, authorizeRequest });
   return {
+    ...features,
     /** Terminal native store cleanup; failed owners remain available for another close attempt. */
-    close: () => attempt(() => options.originals.close()),
+    close: () =>
+      attempt(() => {
+        features.clearFeatureParts();
+        options.originals.close();
+      }),
     prepareDispatch,
     acceptResponse,
     openDispatch: (machineId: string, frameHex: string) =>

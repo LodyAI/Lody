@@ -79,6 +79,8 @@ export type FilePreviewLocalWorkspaceResolver = (
 >;
 
 export type FilePreviewServiceOptions = {
+  /** Encrypted readers cannot authorize Git subprocess discovery. */
+  readonly allowGitDiscovery?: boolean;
   readonly onDiagnostic?: (event: Readonly<Record<string, unknown>>) => void;
   readonly resolveWorkspace: FilePreviewWorkspaceResolver;
   /** Explicit paid entitlement; unavailable billing never grants the larger transfer. */
@@ -286,6 +288,12 @@ export class FilePreviewService {
   }
 
   async previewFile(request: FilePreviewV3Request): Promise<FilePreviewV3Response> {
+    if (request.resolveMarkdownLink && this.deps.allowGitDiscovery === false)
+      return filePreviewV3Error('unsupported_protocol', {
+        message:
+          'Markdown worktree discovery is unavailable for encrypted read queries. Open an explicit file path.',
+        path: request.path,
+      });
     const limits = this.limits;
     const workspace = await this.deps.resolveWorkspace(
       request.sessionId as SessionId,

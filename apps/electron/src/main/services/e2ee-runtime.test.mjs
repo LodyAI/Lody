@@ -1105,7 +1105,10 @@ for (const kind of ['update_batch', 'snapshot'])
           { kind: 'meta' },
           { kind: 'doc', docId: 'session' },
           { kind: 'flock', flockDocId: `${workspaceId}:mf:local` },
-          { kind: 'flock', flockDocId: `${workspaceId}:wf:workspace` }
+          { kind: 'flock', flockDocId: `${workspaceId}:wf:workspace` },
+          { kind: 'doc', docId: 'preview-comment-synthetic' },
+          { kind: 'flock', flockDocId: `${workspaceId}:fi:synthetic` },
+          { kind: 'flock', flockDocId: `${workspaceId}:fis:synthetic` }
         ]) {
           const sealed = yield* owner.host.seal(workspaceId, {
             epoch: 0,

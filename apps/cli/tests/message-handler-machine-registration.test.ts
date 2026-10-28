@@ -203,6 +203,7 @@ describe('MessageHandler machine registration', () => {
       sessionInputAcceptance: 1,
       sessionInputDispatch: 1,
       mcpToolDiscovery: 1,
+      mcpLocalAuthentication: 1,
       codexAuthProfiles: 1,
       ...(hostCapabilities.builtinPi ? { builtinPi: 1 } : {}),
       ...(hostCapabilities.piExtensions ? { piExtensions: 1 } : {}),
