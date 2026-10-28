@@ -99,6 +99,8 @@ import {
 } from 'loro-repo';
 import { createCliPresenceRuntimeLegacy, type CliPresenceRuntimeLegacy } from './presence-legacy';
 import { CliMachineMonitorRuntime } from './machine-monitor';
+import { CliPromptSuggestions } from './prompt-suggestions';
+import type { LodyPromptSuggestion } from 'acp-extension-core';
 import {
   attachAutoMarkLatestUserHistoryAsRead,
   type AutoMarkLatestUserHistoryAsReadHandle,
@@ -183,7 +185,8 @@ const createLocalLoroDataPlaneServer = (
   repo: LoroRepo,
   workspaceId: WorkspaceId,
   presenceRuntime: CliPresenceRuntimeLegacy,
-  machineMonitorRuntime: CliMachineMonitorRuntime
+  machineMonitorRuntime: CliMachineMonitorRuntime,
+  promptSuggestions: CliPromptSuggestions
 ): LocalLoroDataPlaneServerLegacy =>
   new LocalLoroDataPlaneServerLegacy({
     workspaceId,
@@ -200,6 +203,10 @@ const createLocalLoroDataPlaneServer = (
     presenceSource: {
       encodeLocalOrigin: () => presenceRuntime.encodeLocalOriginPresence(),
       subscribeLocalOrigin: (listener) => presenceRuntime.subscribeLocalOriginPresence(listener),
+    },
+    promptSuggestionSource: {
+      encodeAll: () => promptSuggestions.state.encode(),
+      subscribe: (listener) => promptSuggestions.state.subscribe(listener),
     },
     machineMonitorSource: {
       apply: (update) => machineMonitorRuntime.applyLocalState(update),
@@ -338,6 +345,7 @@ export interface LoroDocumentManagerOptions {
   initialMetaSyncCompleted?: boolean;
   presenceRuntime?: CliPresenceRuntimeLegacy | null;
   machineMonitorRuntime?: CliMachineMonitorRuntime | null;
+  promptSuggestions?: CliPromptSuggestions | null;
   localLoroDataPlaneServer?: LocalLoroDataPlaneServerLegacy | null;
   sqliteRepoStore?: CliSqliteRepoStore | null;
   /** LoroDoc Streams cursors for this process; see `DocumentCursorScope`. */
@@ -388,6 +396,7 @@ export class LoroDocumentManager {
   private readonly initialMetaSyncPromise: Promise<boolean>;
   private presenceRuntime: CliPresenceRuntimeLegacy | null;
   private machineMonitorRuntime: CliMachineMonitorRuntime | null;
+  private readonly promptSuggestions: CliPromptSuggestions | null;
   private remoteStreamsTokens: Awaited<
     ReturnType<CliPresenceRuntimeLegacy['createStreamsTokens']>
   > | null = null;
@@ -498,6 +507,7 @@ export class LoroDocumentManager {
       // Streams sink is attached later by the remote bridge.
       presenceRuntime = await createCliPresenceRuntimeLegacy(workspaceId);
       const machineMonitorRuntime = new CliMachineMonitorRuntime({ workspaceId, logger });
+      const promptSuggestions = new CliPromptSuggestions(workspaceId, logger);
       // No transport is registered at startup: rooms stay pending/detached
       // while offline, and renderer↔CLI document sync is served out-of-band by
       // the data-plane server engine. The cloud Streams transport is added
@@ -506,7 +516,8 @@ export class LoroDocumentManager {
         createdRepo,
         workspaceId,
         presenceRuntime,
-        machineMonitorRuntime
+        machineMonitorRuntime,
+        promptSuggestions
       );
       const metaSub = await traceAsync(
         logger,
@@ -533,6 +544,7 @@ export class LoroDocumentManager {
         initialMetaSyncCompleted: false,
         presenceRuntime,
         machineMonitorRuntime,
+        promptSuggestions,
         localLoroDataPlaneServer,
         sqliteRepoStore: cliSqliteRepoStore,
         documentRemoteCursorStore: createDocumentRemoteCursorStore(
@@ -637,6 +649,7 @@ export class LoroDocumentManager {
     this.remoteStreamsGeneration = this.remoteStreamsAttached ? 1 : 0;
     this.presenceRuntime = options.presenceRuntime ?? null;
     this.machineMonitorRuntime = options.machineMonitorRuntime ?? null;
+    this.promptSuggestions = options.promptSuggestions ?? null;
     const initialTransportStatus = options.initialTransportStatus ?? 'disconnected';
     const initialMetaSyncPromise = options.initialMetaSyncPromise ?? Promise.resolve(false);
     const initialMetaSyncCompleted = options.initialMetaSyncCompleted ?? false;
@@ -780,6 +793,11 @@ export class LoroDocumentManager {
           auth: streamsTokens.native.createAuthCallback(),
           shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
         });
+        this.promptSuggestions?.attachStreams({
+          streamsBaseUrl: streamsTransport.gatewayBaseUrl,
+          auth: streamsTransport.tokenProvider.createAuthCallback(),
+          shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
+        });
         this.machineMonitorRuntime?.attachStreams({
           streamsBaseUrl: streamsTransport.gatewayBaseUrl,
           auth: streamsTransport.tokenProvider.createAuthCallback(),
@@ -818,6 +836,7 @@ export class LoroDocumentManager {
       const detached = await Promise.allSettled([
         this.presenceRuntime?.detachStreams(),
         this.machineMonitorRuntime?.detachStreams(),
+        this.promptSuggestions?.detachStreams(),
       ]);
       for (const result of detached) if (result.status === 'rejected') failures.push(result.reason);
       // Registration happens before connect, so remove and close both boundaries.
@@ -859,6 +878,7 @@ export class LoroDocumentManager {
     const detached = await Promise.allSettled([
       this.presenceRuntime?.detachStreams(),
       this.machineMonitorRuntime?.detachStreams(),
+      this.promptSuggestions?.detachStreams(),
     ]);
     for (const result of detached) if (result.status === 'rejected') failures.push(result.reason);
     try {
@@ -1887,10 +1907,10 @@ export class LoroDocumentManager {
       throw error;
     }
     try {
-      await this.machineMonitorRuntime?.stop();
+      await Promise.all([this.machineMonitorRuntime?.stop(), this.promptSuggestions?.stop()]);
     } catch (error) {
       this.logger.debug(
-        `[${this.workspaceId}] Failed to stop machine monitor runtime: ${formatErrorMessage(error)}`
+        `[${this.workspaceId}] Failed to stop advisory workspace runtimes: ${formatErrorMessage(error)}`
       );
     }
     if (this.remoteStreamsTokens) {
@@ -1949,6 +1969,14 @@ export class LoroDocumentManager {
     await this.destroyRepo({ fast: options.fast });
     await this.encryptedWorkspace?.close();
     if (presenceCleanupFailure) throw presenceCleanupFailure;
+  }
+
+  publishPromptSuggestion(
+    machineId: MachineId,
+    sessionId: SessionId,
+    suggestion: LodyPromptSuggestion
+  ): void {
+    this.promptSuggestions?.state.publish(machineId, { ...suggestion, sessionId });
   }
 
   configureMachineMonitor(

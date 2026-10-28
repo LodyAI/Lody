@@ -246,13 +246,26 @@ vi.mock('loro-repo/transport/streams', () => ({
   },
 }));
 
-vi.mock('@loro-dev/streams-crdt/loro', () => ({
-  StreamsCrdt: class StreamsCrdt {
-    createStream = vi.fn(async () => ({ ok: true }));
-    close = vi.fn(async () => {});
-  },
-  createLoroDocAdapter: vi.fn(() => ({})),
-}));
+vi.mock('@loro-dev/streams-crdt/loro', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@loro-dev/streams-crdt/loro')>();
+  return {
+    ...actual,
+    StreamsCrdt: class StreamsCrdt {
+      createStream = vi.fn(async () => ({ ok: true }));
+      close = vi.fn(async () => {});
+    },
+    // Keep the suggestion owner's real lifecycle and store, but never open a
+    // network stream in this Meta recovery fixture.
+    EphemeralStreamCrdt: class EphemeralStreamCrdt {
+      async join(options: Parameters<InstanceType<typeof actual.EphemeralStreamCrdt>['join']>[0]) {
+        options?.onStatusChange?.('joined');
+        return { ok: true, value: { unsubscribe() {} } };
+      }
+      async close() {}
+    },
+    createLoroDocAdapter: vi.fn(() => ({})),
+  };
+});
 
 vi.mock('../src/providers/resilient-remote-cursor-store', () => ({
   createResilientRemoteCursorStore: vi.fn(() => ({

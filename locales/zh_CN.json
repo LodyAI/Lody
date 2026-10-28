@@ -732,6 +732,8 @@
   "chat.capabilities.binaryRequired": "需要下载",
   "chat.capabilities.binaryVerifying": "校验中",
   "chat.composer.focusHint": "按 {{shortcut}} 聚焦输入框",
+  "chat.composer.promptSuggestion.apply": "应用",
+  "chat.composer.promptSuggestion.applyAria": "应用建议",
   "chat.cliHint.daemonStarting": "守护进程好像还没有完成启动。如果你遇到问题，可以点击下方按钮向我们报告 Bug。",
   "chat.cliHint.discordLink": "Discord",
   "chat.cliHint.discordMessage": "遇到问题？加入 Discord 社区获取帮助。",

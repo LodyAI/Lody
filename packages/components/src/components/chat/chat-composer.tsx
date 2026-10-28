@@ -62,8 +62,11 @@ import {
   getChatComposerMobilePromptPlaceholderKey,
 } from '@/lib/chat-composer-placeholder';
 import { Kbd } from '@/components/commands/kbd';
+import { Kbd as KbdPrimitive } from '@lody/ui/kbd';
 import { commands, formatKeyBinding } from '@/lib/commands';
+import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import { text as textScale, space } from '@lody/ui/tokens/scales.stylex';
 
 const typography = stylex.create({
@@ -72,6 +75,44 @@ const typography = stylex.create({
   helper: { fontSize: textScale.footnoteSize, lineHeight: textScale.footnoteLeading },
   code: { fontSize: textScale.subheadlineSize, lineHeight: textScale.subheadlineLeading },
   caption: { fontSize: textScale.captionSize, lineHeight: textScale.captionLeading },
+});
+
+const promptSuggestionStyles = stylex.create({
+  // The hint rides over the empty textarea's first line, so its text sits where
+  // typing will appear. Only the mobile "Apply" control takes pointer events;
+  // everything else lets the press reach the input.
+  anchor: { position: 'relative' },
+  anchorSheet: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' },
+  overlaySheet: { insetInlineStart: '1.25rem', insetInlineEnd: '1.25rem', top: space[4] },
+  overlay: {
+    position: 'absolute',
+    insetInlineStart: space[1],
+    insetInlineEnd: space[1],
+    top: 0,
+    zIndex: 20,
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    minWidth: 0,
+    pointerEvents: 'none',
+    userSelect: 'none',
+    color: colors.secondaryLabel,
+    fontSize: textScale.bodySize,
+    lineHeight: textScale.bodyLeading,
+  },
+  overlayLanding: { insetInlineStart: 0, insetInlineEnd: 0 },
+  text: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  apply: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    pointerEvents: 'auto',
+  },
 });
 
 type ChatComposerTone = 'light' | 'dark';
@@ -125,6 +166,13 @@ export interface ChatComposerProps {
   onPromptChange: (value: string) => void;
   onPromptKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onPromptPaste?: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
+  /**
+   * Advisory next-prompt text for an empty composer. Desktop accepts it with
+   * Tab; mobile only through the inline Apply control. Accepting writes the
+   * text as an ordinary editable draft and never sends or consumes the source
+   * suggestion, so clearing the draft reveals it again.
+   */
+  promptSuggestion?: string | null;
   promptPlaceholder?: string;
   /** Agent or role name for the compact-width placeholder ("Work with {{name}}"). */
   compactPlaceholderName?: string | null;
@@ -264,6 +312,7 @@ export function ChatComposer({
   onPromptChange,
   onPromptKeyDown,
   onPromptPaste,
+  promptSuggestion = null,
   promptPlaceholder,
   compactPlaceholderName,
   promptDisabled = false,
@@ -312,27 +361,6 @@ export function ChatComposer({
   maxRows = 12,
   focusOnContainerClick = false,
 }: ChatComposerProps) {
-  const promptInputProps = {
-    disabled: promptDisabled && !preservePromptFocus,
-    'aria-disabled': promptDisabled || undefined,
-    onValueChange: (value: string) => {
-      if (!promptDisabled) onPromptChange(value);
-    },
-    onBeforeInput: (event: React.FormEvent<HTMLTextAreaElement>) => {
-      if (promptDisabled) event.preventDefault();
-    },
-    onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => {
-      if (promptDisabled) {
-        if (event.key !== 'Tab') event.preventDefault();
-        return;
-      }
-      onPromptKeyDown?.(event);
-    },
-    onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => {
-      if (promptDisabled) event.preventDefault();
-      else onPromptPaste?.(event);
-    },
-  };
   const { t, i18n } = useTranslation();
   const shortcutsAllowed = useWorkspaceFeature('shortcuts');
   const shortcutsEnabled = variant !== 'dialog' && shortcutsAllowed;
@@ -548,6 +576,85 @@ export function ChatComposer({
     [getMentionPromptRewrites, mentionRanges, pastedTextDrafts, promptValue]
   );
 
+  const visiblePromptSuggestion =
+    !promptDisabled &&
+    promptValue.length === 0 &&
+    promptSuggestion !== null &&
+    promptSuggestion.trim().length > 0
+      ? promptSuggestion
+      : null;
+  // Written only after the owner's controlled value carries the text, so the
+  // caret lands at the end of the accepted draft. A ref, not state: acceptance
+  // is a one-shot handoff, not a rendered mode.
+  const acceptedPromptSuggestionRef = useRef<string | null>(null);
+  const acceptPromptSuggestion = useCallback(() => {
+    if (visiblePromptSuggestion === null) return;
+    // Focus inside the press itself: the mobile Apply control is a real
+    // gesture, and iOS only raises the keyboard for focus it sees there.
+    const textarea =
+      promptRef && typeof promptRef === 'object' && 'current' in promptRef
+        ? promptRef.current
+        : null;
+    textarea?.focus();
+    acceptedPromptSuggestionRef.current = visiblePromptSuggestion;
+    onPromptChange(visiblePromptSuggestion);
+  }, [onPromptChange, promptRef, visiblePromptSuggestion]);
+  useEffect(() => {
+    const accepted = acceptedPromptSuggestionRef.current;
+    if (accepted === null) return;
+    // One commit is the whole handoff window: an owner that ignores the write
+    // must not leave a stale value that later edits happen to match.
+    acceptedPromptSuggestionRef.current = null;
+    if (promptValue !== accepted) return;
+    const textarea =
+      promptRef && typeof promptRef === 'object' && 'current' in promptRef
+        ? promptRef.current
+        : null;
+    if (!textarea) return;
+    const caret = textarea.value.length;
+    textarea.focus();
+    textarea.setSelectionRange(caret, caret);
+  }, [promptRef, promptValue]);
+  const promptInputProps = {
+    disabled: promptDisabled && !preservePromptFocus,
+    'aria-disabled': promptDisabled || undefined,
+    onValueChange: (value: string) => {
+      if (!promptDisabled) onPromptChange(value);
+    },
+    onBeforeInput: (event: React.FormEvent<HTMLTextAreaElement>) => {
+      if (promptDisabled) event.preventDefault();
+    },
+    onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (promptDisabled) {
+        if (event.key !== 'Tab') event.preventDefault();
+        return;
+      }
+      if (
+        event.key === 'Tab' &&
+        !isMobile &&
+        !event.shiftKey &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.defaultPrevented &&
+        visiblePromptSuggestion !== null &&
+        !isImeComposingKeyboardEvent(event)
+      ) {
+        // An empty composer cannot have an open mention/command menu (those
+        // require text), so this cannot take Tab from one. For the same reason
+        // it can never replace an existing draft, including whitespace.
+        event.preventDefault();
+        acceptPromptSuggestion();
+        return;
+      }
+      onPromptKeyDown?.(event);
+    },
+    onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => {
+      if (promptDisabled) event.preventDefault();
+      else onPromptPaste?.(event);
+    },
+  };
+
   const canHandleImageDrop = Boolean(onImageDrop) && !imageDropDisabled && !promptDisabled;
   const resetImageDragState = useCallback(() => {
     imageDragDepthRef.current = 0;
@@ -733,7 +840,11 @@ export function ChatComposer({
   // Only when the box is idle: desktop, has a focus binding, and nothing entered/attached
   // yet (so the chip never collides with text or thumbnails). focus-within hides it too.
   const showFocusHint =
-    focusHintSupported && Boolean(focusHintBinding) && !promptValue && !composerHasAttachments;
+    focusHintSupported &&
+    Boolean(focusHintBinding) &&
+    !promptValue &&
+    !composerHasAttachments &&
+    visiblePromptSuggestion === null;
   const imageDropClassName = isImageDropActive
     ? 'border-primary/50 bg-primary/[0.04] ring-2 ring-primary/25'
     : undefined;
@@ -1064,40 +1175,85 @@ export function ChatComposer({
                 </div>
               ) : null}
 
-              <CombinedMentionTextarea
-                enablePromptShortcuts={shortcutsEnabled}
-                menuSide="top"
-                id={promptId}
-                ref={promptRef}
-                mentionSource={mentionSource}
-                availableCommands={availableCommands}
-                commandsEnabled={commandsEnabled}
-                skillAgent={skillAgent}
-                currentSessionId={currentSessionId}
-                value={promptValue}
-                {...promptInputProps}
-                externalMentions={pastedTextMentions}
-                onExternalMentionsChange={handlePastedTextMentionsChange}
-                onMentionClick={handleMentionClick}
-                getMentionChip={getComposerMentionChip}
-                onMentionRangesChange={handleMentionRangesChange}
-                persistedMentions={persistedMentions}
-                draftKey={draftKey}
-                mentionActionsRef={mentionActionsRef}
-                onCopy={handlePromptCopy}
-                rows={effectivePromptRows}
-                enterKeyHint={promptEnterKeyHint}
-                placeholder={resolvedPromptPlaceholder}
-                // While the ⌘L focus hint is shown the box is empty, so the (long)
-                // placeholder would otherwise run under the top-right ⌘L chip. Reserve
-                // room for it so the placeholder wraps before the chip; the padding is
-                // dropped once the user types (showFocusHint → false → full width).
-                className={cn(boxTextareaClassName, showFocusHint && 'pr-16')}
-                fillHeight={isSheet}
-                mentionPanelPlacement={isSheet ? 'bottom' : undefined}
-                autoFocus={promptAutoFocus}
-                data-keyboard-nav="composer"
-              />
+              <div
+                {...stylex.props(
+                  promptSuggestionStyles.anchor,
+                  isSheet && promptSuggestionStyles.anchorSheet
+                )}
+              >
+                <CombinedMentionTextarea
+                  enablePromptShortcuts={shortcutsEnabled}
+                  menuSide="top"
+                  id={promptId}
+                  ref={promptRef}
+                  mentionSource={mentionSource}
+                  availableCommands={availableCommands}
+                  commandsEnabled={commandsEnabled}
+                  skillAgent={skillAgent}
+                  currentSessionId={currentSessionId}
+                  value={promptValue}
+                  {...promptInputProps}
+                  externalMentions={pastedTextMentions}
+                  onExternalMentionsChange={handlePastedTextMentionsChange}
+                  onMentionClick={handleMentionClick}
+                  getMentionChip={getComposerMentionChip}
+                  onMentionRangesChange={handleMentionRangesChange}
+                  persistedMentions={persistedMentions}
+                  draftKey={draftKey}
+                  mentionActionsRef={mentionActionsRef}
+                  onCopy={handlePromptCopy}
+                  rows={effectivePromptRows}
+                  enterKeyHint={promptEnterKeyHint}
+                  placeholder={
+                    visiblePromptSuggestion === null ? resolvedPromptPlaceholder : undefined
+                  }
+                  // While the ⌘L focus hint is shown the box is empty, so the (long)
+                  // placeholder would otherwise run under the top-right ⌘L chip. Reserve
+                  // room for it so the placeholder wraps before the chip; the padding is
+                  // dropped once the user types (showFocusHint → false → full width).
+                  className={cn(boxTextareaClassName, showFocusHint && 'pr-16')}
+                  fillHeight={isSheet}
+                  mentionPanelPlacement={isSheet ? 'bottom' : undefined}
+                  autoFocus={promptAutoFocus}
+                  data-keyboard-nav="composer"
+                />
+
+                {visiblePromptSuggestion !== null ? (
+                  <div
+                    {...stylex.props(
+                      promptSuggestionStyles.overlay,
+                      isLanding && promptSuggestionStyles.overlayLanding,
+                      isSheet && promptSuggestionStyles.overlaySheet
+                    )}
+                    data-prompt-suggestion=""
+                  >
+                    {isMobile ? (
+                      <span {...stylex.props(promptSuggestionStyles.apply)}>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="mini"
+                          shape="pill"
+                          onClick={acceptPromptSuggestion}
+                          aria-label={t(
+                            'chat.composer.promptSuggestion.applyAria',
+                            'Apply prompt suggestion'
+                          )}
+                        >
+                          {t('chat.composer.promptSuggestion.apply', 'Apply')}
+                        </Button>
+                      </span>
+                    ) : (
+                      // Literal "Tab": the shared binding formatter renders the
+                      // Mac tab glyph, which is not the word this hint teaches.
+                      <KbdPrimitive>Tab</KbdPrimitive>
+                    )}
+                    <span {...stylex.props(promptSuggestionStyles.text)}>
+                      {visiblePromptSuggestion}
+                    </span>
+                  </div>
+                ) : null}
+              </div>
 
               {showFocusHint ? (
                 <div

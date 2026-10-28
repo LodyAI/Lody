@@ -724,3 +724,40 @@ describe('AgentClient session startup', () => {
     });
   });
 });
+
+describe('AgentClient advisory prompt suggestions', () => {
+  it('delivers only negotiated native-session predictions under a stable Lody owner', async () => {
+    const delivered: unknown[] = [];
+    connectionMocks.initialize.mockResolvedValue({
+      agentCapabilities: { _meta: { lody: { promptSuggestions: { version: 1 } } } },
+    });
+    connectionMocks.newSession.mockResolvedValue({ sessionId: 'native-suggestion-session' });
+    const client = new AgentClient({
+      logger: createLogger(),
+      sessionId: 'lody-session' as SessionId,
+      terminalManager: {} as never,
+      onUpdateMessage: vi.fn(),
+      onRequestPermission: vi.fn(),
+      onPromptSuggestion: (event) => delivered.push(event),
+    });
+    const suggestion = {
+      sessionId: 'native-suggestion-session',
+      suggestionId: 'native-message',
+      result: { type: 'completed', text: 'Run tests' },
+    };
+    await client.extNotification?.('_lody/session/prompt_suggestion', suggestion);
+    expect(delivered).toEqual([]);
+    await client.startSession({} as never, '/tmp');
+    await client.extNotification?.('_lody/session/prompt_suggestion', {
+      ...suggestion,
+      sessionId: 'foreign',
+    });
+    await client.extNotification?.('_lody/session/prompt_suggestion', {
+      ...suggestion,
+      result: { type: 'completed', text: 42 },
+    });
+    expect(delivered).toEqual([]);
+    await client.extNotification?.('_lody/session/prompt_suggestion', suggestion);
+    expect(delivered).toEqual([suggestion]);
+  });
+});

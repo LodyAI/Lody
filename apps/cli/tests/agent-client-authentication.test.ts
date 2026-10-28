@@ -258,13 +258,13 @@ describe('AgentClient Kimi authentication and resume', () => {
     expect(connectionMocks.initialize).toHaveBeenCalledWith(
       expect.objectContaining({
         clientCapabilities: expect.objectContaining({
-          _meta: {
+          _meta: expect.objectContaining({
             'cognition.ai/subagentSupport': true,
-            lody: {
+            lody: expect.objectContaining({
               elicitation: { version: 1, answerNotes: true },
               subagentEvents: { version: 1 },
-            },
-          },
+            }),
+          }),
         }),
       })
     );

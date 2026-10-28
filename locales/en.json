@@ -732,6 +732,8 @@
   "chat.capabilities.binaryRequired": "Download required",
   "chat.capabilities.binaryVerifying": "Verifying",
   "chat.composer.focusHint": "Press {{shortcut}} to focus",
+  "chat.composer.promptSuggestion.apply": "Apply",
+  "chat.composer.promptSuggestion.applyAria": "Apply prompt suggestion",
   "chat.cliHint.daemonStarting": "The local daemon doesn't seem to have finished starting yet. If you run into trouble, click the button below to report a bug to us.",
   "chat.cliHint.discordLink": "Discord",
   "chat.cliHint.discordMessage": "Have questions? Join our Discord community for help.",

@@ -29,6 +29,7 @@ import {
 } from '@lody/shared/workspace-streams-content';
 import { makeCliE2eeCustody, type MachineKeyring } from './custody';
 import { makeCliE2eeRuntime } from './runtime';
+import { makeCliE2eeExecutionAuthorization } from './execution-authorization';
 import { openMachinePairingJournal, MachinePairingJournalError } from './pairing-journal';
 
 const Binding = z
@@ -596,7 +597,19 @@ async function openWorkspaceOwned(
             }
           : undefined,
       });
-      return { runtime, credential, custody, signingPublicKey: hex(device.publicKey.toBytes()) };
+      const executionAuthorization = yield* makeCliE2eeExecutionAuthorization({
+        workspaceId: options.workspaceId,
+        credential,
+        cloud: options.cloud,
+        runtime,
+      });
+      return {
+        runtime,
+        executionAuthorization,
+        credential,
+        custody,
+        signingPublicKey: hex(device.publicKey.toBytes()),
+      };
     })
   ).catch(async (error) => {
     await Effect.runPromise(Scope.close(scope, Exit.void));
@@ -1035,6 +1048,12 @@ async function openWorkspaceOwned(
             return yield* contentBinding.openAuthenticated(request);
           })
         )
+      ),
+    authorizeExecution: (workspaceId: string, requesterDevice: string) =>
+      Effect.suspend(() =>
+        closed
+          ? Effect.succeed({ _tag: 'Denied' as const, reason: 'closed' as const })
+          : opened.executionAuthorization.authorizeExecution(workspaceId, requesterDevice)
       ),
     assertPairingConfirmed: () => {
       if (!pairing || !pairingConfirmed)

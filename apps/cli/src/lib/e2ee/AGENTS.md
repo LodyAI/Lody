@@ -16,12 +16,13 @@
 - Batch Windows ACL checks. Retry SQLite BUSY asynchronously with a bound;
   never block busy_timeout during keyring work.
 
-- Resume first Windows ACL setup only in an empty custody directory; otherwise validate only.
+- Resume first Windows ACL setup only with empty custody; otherwise validate.
 - `runtime.ts` composes Feed/VerifiedLedger, installed keys and optional receiver.
-  Open/status are offline; cloud requests stay in cloud-cli-port.
+  Offline open/status; cloud I/O stays in cloud-cli-port.
   Report damaged history/pins distinctly; never reset trusted pins from remote hints.
+- Execution: `authorizeExecution`; authenticated read; RAM-only <15min from read start.
 - Journal originals before feed/pin; rebase core pin first after 64 records.
-  Retired cache cleanup cannot fail local open.
+  Retired cache cleanup cannot fail open.
 - No plaintext RPC, presence, attachments or schedules until encrypted channels exist.
 - `realtime-journal.ts`: schema 3/no migration; SQLite recovery before empty-v0 init.
   Retire readable current keys before intact archive; unreadable keys refuse reset.
@@ -45,7 +46,7 @@
   installed current key; temporary failure leaves the same pairing retryable.
 
 - Staging read denial/I/O failure cannot block independently verified mailbox reception.
-- Retain old-epoch sends; select confirmed keys per operation. Rotation hints never pause.
+- Retain old-epoch sends; select confirmed keys per operation; rotation hints never pause.
   [M3 selection](../../../../../.agents/notes/proposed/architecture/2026-10-27-e2ee-epoch-receive-barrier.md).
 - Prepared bindings cannot start content replicas. Activate only the native ledger/key
   receiver: verify current installed key, close temporary owner, THEN write `activation.json`

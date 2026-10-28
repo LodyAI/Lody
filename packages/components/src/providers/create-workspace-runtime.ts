@@ -155,6 +155,7 @@ import {
 } from './background-sync-coordinator';
 import { WorkspacePresenceTransport } from './workspace-presence-transport';
 import { WorkspaceMachineMonitorTransport } from './workspace-machine-monitor-transport';
+import { WorkspacePromptSuggestions } from './workspace-prompt-suggestions';
 import { WorkspaceLocalMachineMonitorTransport } from './workspace-local-machine-monitor-transport';
 import { TargetRoutedMachineMonitor } from './target-routed-machine-monitor';
 import { createResilientRemoteCursorStore } from './resilient-remote-cursor-store';
@@ -688,6 +689,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     workspaceId,
     onWarning: (message, context) => console.warn(message, context),
   });
+  const promptSuggestions = new WorkspacePromptSuggestions({
+    workspaceId,
+    resolvePlane: (machineId) => targetRouter.getPlaneForMachine(machineId),
+    onWarning: (message) => console.warn(message),
+  });
   const targetMachineMonitor = new TargetRoutedMachineMonitor(
     targetRouter,
     machineMonitorTransport
@@ -919,7 +925,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
   const cloudMetaSyncRoomId = `cloud-meta:${getLoroMetaStreamId(workspaceId)}`;
   const isCloudHealthRoom = (roomId: string): boolean => {
-    if (roomId.startsWith('presence:') || roomId.startsWith('machine-monitor:')) {
+    if (
+      roomId.startsWith('presence:') ||
+      roomId.startsWith('machine-monitor:') ||
+      roomId.startsWith('prompt-suggestions:')
+    ) {
       return true;
     }
     if (roomId === cloudMetaSyncRoomId) {
@@ -978,6 +988,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   notifyTargetRouteChange = () => {
     void repo.refreshTransportRoutes().catch(() => undefined);
     targetMachineMonitor.refreshRoutes();
+    promptSuggestions.refreshRoutes();
     notifyConnectionStateInputsChanged();
   };
 
@@ -2946,7 +2957,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
     if (stopPresence) {
       await presenceTransport.stop();
-      await machineMonitorTransport.stop();
+      await Promise.all([machineMonitorTransport.stop(), promptSuggestions.stop()]);
     }
     if (stopRpcClients) {
       for (const client of machineRpcClients.values()) {
@@ -3007,6 +3018,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       transportAttached = false;
     }
     localLoroTransport = null;
+    promptSuggestions.detachLocal();
     localMachineMonitorTransport?.stop();
     localMachineMonitorTransport = null;
     cloudTransportAttached = false;
@@ -3068,6 +3080,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       auth: streamsTokenProvider.createAuthCallback(),
       shardHostSuffix,
     });
+    promptSuggestions.start({
+      baseUrl: durableBaseUrl,
+      auth: streamsTokenProvider.createAuthCallback(),
+      shardHostSuffix,
+    });
     machineMonitorTransport.start({
       baseUrl: durableBaseUrl,
       auth: streamsTokenProvider.createAuthCallback(),
@@ -3109,6 +3126,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       connection: localConnection.connection,
     });
     targetMachineMonitor.setLocalTransport(localMachineMonitorTransport);
+    promptSuggestions.attachLocal(localConnection.connection);
     // Routing comes from resolveRoomTransports (wired to the router at repo
     // construction); per-room cloud bindings notify their own subscribers, so
     // the mux-era member-status side channel is gone by design.
@@ -3260,7 +3278,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       }
       if (shouldStartPresence) {
         await presenceTransport.stop();
-        await machineMonitorTransport.stop();
+        await Promise.all([machineMonitorTransport.stop(), promptSuggestions.stop()]);
       }
       throw error;
     }
@@ -3384,7 +3402,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       } catch (error) {
         cloudMetaTracker?.dispose();
         cloudMetaTracker = null;
-        await Promise.all([presenceTransport.stop(), machineMonitorTransport.stop()]);
+        await Promise.all([
+          presenceTransport.stop(),
+          machineMonitorTransport.stop(),
+          promptSuggestions.stop(),
+        ]);
         await repo.removeTransport('cloud', { close: true }).catch(() => undefined);
         throw error;
       }
@@ -3409,7 +3431,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     cloudMetaTracker?.dispose();
     cloudMetaTracker = null;
     cloudAttachDroppedSuspectCheckpoint = false;
-    await Promise.all([presenceTransport.stop(), machineMonitorTransport.stop()]);
+    await Promise.all([
+      presenceTransport.stop(),
+      machineMonitorTransport.stop(),
+      promptSuggestions.stop(),
+    ]);
     latestCloudPresenceStates = {};
     publishMergedPresence();
     if (transportAttached) {
@@ -3873,6 +3899,14 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     needsReconnect: () => machineMonitorTransport.needsReconnect(),
   });
 
+  const promptSuggestionSyncRoomId = `prompt-suggestions:${workspaceId}`;
+  const untrackPromptSuggestionSync = roomSyncRegistry.track({
+    roomId: promptSuggestionSyncRoomId,
+    getSyncState: () => promptSuggestions.getSyncState(),
+    subscribeSyncState: (listener) => promptSuggestions.subscribeSyncState(listener),
+    needsReconnect: () => promptSuggestions.needsReconnect(),
+  });
+
   if (cloudPlaneEnabled && !electronLocalDataPlane) {
     webAttachReconnectLoop = createLocalReconnectLoop({
       canRun: () =>
@@ -3918,7 +3952,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       // or stuck in a non-synced state.
       const presenceProblem = !electronLocalDataPlane && presenceTransport.needsReconnect();
       const machineMonitorProblem =
-        !electronLocalDataPlane && machineMonitorTransport.needsReconnect();
+        !electronLocalDataPlane &&
+        (machineMonitorTransport.needsReconnect() || promptSuggestions.needsReconnect());
       const restartPresenceForWake =
         !electronLocalDataPlane &&
         force &&
@@ -3928,11 +3963,13 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         !electronLocalDataPlane &&
         force &&
         (triggerReason === 'visibility-wake' || triggerReason === 'network-online') &&
-        machineMonitorTransport.shouldRestartOnExternalWake();
+        (machineMonitorTransport.shouldRestartOnExternalWake() ||
+          promptSuggestions.shouldRestartOnExternalWake());
       const durableProblemRooms = roomSyncRegistry.listNeedsReconnect(
         (roomId) =>
           roomId !== presenceSyncRoomId &&
           roomId !== machineMonitorSyncRoomId &&
+          roomId !== promptSuggestionSyncRoomId &&
           (!electronLocalDataPlane || isLocalHealthRoom(roomId))
       );
       const durableProblem = durableProblemRooms.length > 0;
@@ -4003,7 +4040,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
             machineMonitorSyncState: machineMonitorTransport.getSyncState(),
           }
         );
-        await Promise.all([presenceTransport.stop(), machineMonitorTransport.stop()]);
+        await Promise.all([
+          presenceTransport.stop(),
+          machineMonitorTransport.stop(),
+          promptSuggestions.stop(),
+        ]);
         // Re-check: teardownTransport() may have run while stop() awaited.
         if (!disposePromise && transportAttached && streamsTokenProvider) {
           startPresenceTransport();
@@ -4046,6 +4087,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           (roomId) =>
             roomId !== presenceSyncRoomId &&
             roomId !== machineMonitorSyncRoomId &&
+            roomId !== promptSuggestionSyncRoomId &&
             isCloudHealthRoom(roomId)
         );
         // Registry-invisible failures on dual-homed rooms; the member rejoin
@@ -4059,9 +4101,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
             presenceTransport.shouldRestartOnExternalWake());
         const restartMachineMonitor =
           machineMonitorTransport.needsReconnect() ||
+          promptSuggestions.needsReconnect() ||
           (force &&
             (triggerReason === 'visibility-wake' || triggerReason === 'network-online') &&
-            machineMonitorTransport.shouldRestartOnExternalWake());
+            (machineMonitorTransport.shouldRestartOnExternalWake() ||
+              promptSuggestions.shouldRestartOnExternalWake()));
 
         if (force || durableProblemRooms.length > 0 || cloudMemberProblemRooms.length > 0) {
           await repo.reconnect({ transportIds: ['cloud'], resetBackoff: true });
@@ -4103,7 +4147,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           cloudTransportAttached &&
           streamsTokenProvider
         ) {
-          await Promise.all([presenceTransport.stop(), machineMonitorTransport.stop()]);
+          await Promise.all([
+            presenceTransport.stop(),
+            machineMonitorTransport.stop(),
+            promptSuggestions.stop(),
+          ]);
           if (!disposePromise && cloudTransportAttached && streamsTokenProvider) {
             startPresenceTransport();
           }
@@ -5221,6 +5269,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       unsubscribeStartupAcpCapabilitiesPresence();
       unsubscribePresenceSyncState?.();
       untrackMachineMonitorSync();
+      untrackPromptSuggestionSync();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
@@ -5528,6 +5577,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     setLocalMachineId,
     setEagerSyncVisibleSessionIds,
     setAuthToken,
+    subscribePromptSuggestion: (machineId, sessionId, listener) =>
+      promptSuggestions.subscribeSession(machineId, sessionId, listener),
     subscribeMachineMonitor: (machineId, listener) =>
       targetMachineMonitor.subscribeMachine(machineId, listener),
     forceMachineMonitorSample: (machineId) => targetMachineMonitor.forceSample(machineId),
