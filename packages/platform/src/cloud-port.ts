@@ -53,6 +53,17 @@ export interface CloudSessionSharingPort {
  */
 /** Device-scoped cloud transport; local opens and custody stay with its host. */
 export interface CloudE2eePort {
+  /** Raw retained update messages, never a snapshot or an attribution verdict. */
+  readExecutionOriginPage?(
+    input: {
+      workspaceId: string;
+      credential: string;
+      docId: string;
+      before?: string;
+    },
+    signal: AbortSignal
+  ): Promise<{ messages: readonly Uint8Array[]; before: string; atStart: boolean }>;
+
   completeMachinePairing?(input: {
     workspaceId: string;
     credential: string;

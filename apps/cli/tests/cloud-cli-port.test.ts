@@ -1,8 +1,10 @@
+import { isCloudE2eeMemberRemoved, isCloudE2eeDeviceRevoked } from '../src/lib/cloud-e2ee-errors';
 import { Effect, Exit, Scope } from 'effect';
 import type { Logger } from '../src/utils/logger';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createCommandAttachmentTransfer,
+  createCloudE2eePort,
   createCloudSessionSharingPort,
   createCloudStreamsTokenPort,
 } from '../src/lib/cloud-cli-port';
@@ -533,3 +535,116 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
     vi.unstubAllEnvs();
   }
 });
+
+it('reads retained execution originals from the admitted encrypted stream with its device credential', async () => {
+  vi.stubEnv('LODY_HTTP_TRANSPORT', 'default');
+  const logger: Logger = {
+    debug: () => {},
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    trace: () => {},
+    success: () => {},
+    setLevel: () => {},
+    child: () => logger,
+    close: async () => {},
+  };
+  const message = Uint8Array.of(9, 8, 7);
+  const grants: unknown[] = [];
+  vi.stubGlobal('fetch', async (input: string, init: RequestInit) => {
+    const url = new URL(input);
+    if (url.hostname === 'execution-fixture.convex.cloud') {
+      const body = JSON.parse(String(init.body));
+      expect(body.path).toBe('e2eeContent:contentStreamsToken');
+      grants.push(body.args[0]);
+      return Response.json({
+        status: 'success',
+        value: {
+          token: 'content-token',
+          bucketId: 'encrypted-bucket',
+          gatewayBaseUrl: 'https://streams-fixture.example',
+          expiresIn: 300,
+          expiresAt: 2000000000000,
+        },
+      });
+    }
+    expect(url.pathname).toBe('/ds/encrypted-bucket/workspace%3As%3Asession');
+    expect(url.searchParams.get('direction')).toBe('backward');
+    expect(new Headers(init.headers).get('Authorization')).toBe('Bearer content-token');
+    return new Response(Uint8Array.from([1, 0, 3, ...message]), {
+      headers: {
+        'Content-Type': 'application/vnd.loro-streams.frames',
+        'Stream-Prev-Offset': '00000000000000000000',
+        'Stream-End-Offset': '00000000000000000003',
+        'Stream-At-Start': 'true',
+        'Stream-At-Retained-Start': 'true',
+      },
+    });
+  });
+  try {
+    const port = createCloudE2eePort({
+      authBaseUrl: 'https://execution-fixture.convex.cloud',
+      logger,
+    });
+    expect(
+      await port.readExecutionOriginPage!(
+        { workspaceId: 'workspace', credential: 'device-credential', docId: 'session-session' },
+        new AbortController().signal
+      )
+    ).toEqual({ messages: [message], before: '00000000000000000000', atStart: true });
+    expect(grants).toEqual([{ workspaceId: 'workspace', credential: 'device-credential' }]);
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
+it.each(['e2ee_member_removed', 'e2ee_device_revoked', 'temporary_network_failure'] as const)(
+  'brands only fixed credential endpoint confirmation (%s)',
+  async (code) => {
+    vi.stubEnv('LODY_HTTP_TRANSPORT', 'default');
+    const logger: Logger = {
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      trace: () => {},
+      success: () => {},
+      setLevel: () => {},
+      child: () => logger,
+      close: async () => {},
+    };
+    vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      expect(body.path).toBe('e2eeContent:contentStreamsToken');
+      expect(body.args[0]).toMatchObject({
+        workspaceId: 'workspace',
+        credential: 'synthetic-device-credential',
+      });
+      return Response.json({
+        status: 'error',
+        errorMessage: 'e2ee_member_removed',
+        errorData: { code },
+      });
+    });
+    try {
+      const port = createCloudE2eePort({
+        authBaseUrl: 'https://credential-fixture.convex.cloud',
+        logger,
+      });
+      const failure = await port.readExecutionOriginPage!(
+        {
+          workspaceId: 'workspace',
+          credential: 'synthetic-device-credential',
+          docId: 'session-session',
+        },
+        new AbortController().signal
+      ).catch((cause: unknown) => cause);
+      expect(isCloudE2eeMemberRemoved(failure)).toBe(code === 'e2ee_member_removed');
+      expect(isCloudE2eeDeviceRevoked(new Error('SDK wrapper', { cause: failure }))).toBe(
+        code === 'e2ee_device_revoked'
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  }
+);

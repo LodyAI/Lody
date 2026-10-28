@@ -8,7 +8,12 @@ export type ExecutionAuthorization =
   | { readonly _tag: 'Authorized' }
   | {
       readonly _tag: 'Denied';
-      readonly reason: 'invalid-request' | 'not-authorized' | 'unavailable' | 'closed';
+      readonly reason:
+        | 'invalid-request'
+        | 'not-authorized'
+        | 'e2ee_machine_not_owned'
+        | 'unavailable'
+        | 'closed';
     };
 const denied = (reason: Extract<ExecutionAuthorization, { _tag: 'Denied' }>['reason']) =>
   ({ _tag: 'Denied', reason }) as const;
@@ -24,6 +29,7 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
     workspaceId: string;
     credential: string;
     cloud: Pick<CloudE2eePort, 'getHistory'>;
+    onCredentialFailure?: (cause: unknown) => void;
     runtime: Pick<
       Effect.Success<ReturnType<typeof makeCliE2eeRuntime>>,
       'status' | 'ingest' | 'executionLedger'
@@ -43,12 +49,13 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
     const grants = new Map<string, Stamp>();
     let flight: Fiber.Fiber<Stamp | undefined> | undefined;
     let closed = false;
-    yield* Effect.addFinalizer(() =>
-      Effect.sync(() => {
-        closed = true;
-        grants.clear();
-      })
-    );
+    // Fence synchronously before asynchronous owner drain. Scope close still
+    // owns the actual raw reads and final resource release.
+    const invalidate = () => {
+      closed = true;
+      grants.clear();
+    };
+    yield* Effect.addFinalizer(() => Effect.sync(invalidate));
 
     const refresh = Effect.gen(function* () {
       const started = yield* stamp;
@@ -68,7 +75,10 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
                   ? { after: status.position }
                   : {}),
             }),
-          catch: () => 'unavailable' as const,
+          catch: (cause) => {
+            options.onCredentialFailure?.(cause);
+            return 'unavailable' as const;
+          },
         });
         // One authenticated endpoint for all pages, never a requester-supplied proof.
         checkpoint ??= { ...page.checkpoint };
@@ -103,6 +113,7 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
     // workspace Scope cancels the producer at close; late read replies cannot ingest.
     const refreshOnce = Effect.uninterruptibleMask((restore) =>
       Effect.gen(function* () {
+        if (closed) return undefined;
         if (!flight) flight = yield* Effect.forkIn(Effect.interruptible(refresh), scope);
         return yield* restore(Fiber.join(flight));
       })
@@ -121,6 +132,7 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         const requester = Bytes.signingPublicKey(Buffer.from(requesterDevice, 'hex'));
         if (Result.isFailure(requester)) return denied('invalid-request');
         const now = yield* stamp;
+        if (closed) return denied('closed');
         for (const [device, start] of grants) if (!fresh(start, now)) grants.delete(device);
         const start = grants.get(requesterDevice) ?? (yield* refreshOnce);
         if (closed) return denied('closed');
@@ -136,7 +148,20 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
           grants.delete(requesterDevice);
           return denied('not-authorized');
         }
+        const sender = state.devices.get(requesterDevice);
+        if (
+          !sender ||
+          !Buffer.from(sender.membershipId.toBytes()).equals(
+            Buffer.from(local.membershipId.toBytes())
+          )
+        ) {
+          grants.delete(requesterDevice);
+          return denied('e2ee_machine_not_owned');
+        }
         if (!fresh(start, yield* stamp)) return denied('unavailable');
+        // Revocation may arrive while a native check yields. Nothing may publish
+        // an old grant after the synchronous host fence, including cached reads.
+        if (closed) return denied('closed');
         // Bounded cache; eviction can only require an earlier authenticated reread.
         if (grants.size >= 1024) grants.clear();
         grants.set(requesterDevice, start);
@@ -146,6 +171,6 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         Cause.hasInterrupts(cause) ? Effect.interrupt : Effect.succeed(denied('unavailable'))
       )
     );
-    return { authorizeExecution };
+    return { authorizeExecution, invalidate };
   }
 );

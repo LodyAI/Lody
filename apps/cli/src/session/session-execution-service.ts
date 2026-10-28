@@ -1,3 +1,5 @@
+import type { EncryptedAgentExecution } from '@/lib/e2ee/agent-execution';
+import type { RealtimeStartPermit } from '@/lib/e2ee/realtime-journal';
 import { publishTurnCompletionLegacy } from './turn-completion-legacy';
 import { resolveProjectFileRoots } from './worktree/project-member-access';
 import { type AcpLauncher, resolveAcpLauncher } from '@/agent/acp-analytics';
@@ -431,6 +433,7 @@ type VisibleSessionTurnContext = {
     unhandledErrorContext?: VisibleSessionTurnUnhandledErrorContext;
   }) => Effect.Effect<void, unknown, never>;
   prompt: (promptBlocks: ContentBlock[]) => Effect.Effect<void, unknown, never>;
+  claimExecution: () => Effect.Effect<void, unknown, never>;
 };
 
 type VisibleSessionTurnAnalytics = {
@@ -512,6 +515,7 @@ export type PreparedSessionDispatchOptions = {
   dispatchSource: SessionDispatchSource;
   accessPromise: Promise<MachineAccessVerification>;
   requestPromise: Promise<PreparedSessionDispatchRequest>;
+  onExecutionDeferred?: () => void | Promise<void>;
   onAccessAllowed: () => void | Promise<void>;
   onAccessDenied: (
     reason: MachineAccessVerification & { outcome: 'denied' }
@@ -544,6 +548,8 @@ class SessionTurnHalted extends Data.TaggedError('SessionTurnHalted')<{
   sessionId: SessionId;
   reason: ChatFailedReason;
 }> {}
+
+class SessionTurnExecutionDeferred extends Data.TaggedError('SessionTurnExecutionDeferred')<{}> {}
 
 class SessionTurnClaimContended extends Data.TaggedError('SessionTurnClaimContended')<{
   sessionId: SessionId;
@@ -597,6 +603,9 @@ function truncateAnalyticsString(value: string, maxLength = 1_000): string {
 }
 
 export type SessionExecutionServiceDeps = {
+  /** Only encrypted workspace composition installs this shared execution gate. */
+  encryptedExecution?: EncryptedAgentExecution;
+  encryptedWorkspace?: boolean;
   logger: Logger;
   sessionManager: SessionManager;
   workspaceDocument: LoroDocumentManager;
@@ -2830,6 +2839,9 @@ export class SessionExecutionService {
             return undefined;
           })
       );
+      if (visibleOutcome === 'execution-deferred') {
+        await options.onExecutionDeferred?.();
+      }
       if (
         outcome === 'unknown' ||
         visibleOutcome === 'duplicate' ||
@@ -4286,6 +4298,7 @@ export class SessionExecutionService {
     }
     const self = this;
     let assistantEntryOpened = false;
+    let executionPermit: RealtimeStartPermit | undefined;
     let effectiveErrorContext: VisibleSessionTurnUnhandledErrorContext = {
       code: options.unhandledErrorCode,
       describe: options.describeUnhandledError,
@@ -4719,6 +4732,69 @@ export class SessionExecutionService {
               return undefined;
             });
 
+            const claimExecution = Effect.fnUntraced(function* (): Effect.fn.Return<void, unknown> {
+              const gate = self.deps.encryptedExecution;
+              if (!gate && !self.deps.encryptedWorkspace) return undefined;
+              yield* abortIfCancelled();
+              const result =
+                gate && userTurnId
+                  ? yield* gate.claim({
+                      workspaceId: self.deps.workspaceId,
+                      sessionId,
+                      userTurnId,
+                      requesterUserId: options.invocation?.requesterUserId,
+                      inputConfig: options.invocation?.inputConfig,
+                    })
+                  : { state: 'denied' as const };
+              if (result.state === 'pending-evidence') {
+                runtime.withdrawInboxExecution = true;
+                return yield* Effect.fail(new SessionTurnExecutionDeferred());
+              }
+              if (result.state === 'claimed') {
+                executionPermit = result.permit;
+                // Authorization may have yielded while Stop was requested.
+                yield* abortIfCancelled();
+                return undefined;
+              }
+              if (result.state === 'completed' && userTurnId) {
+                const backend = yield* self.tryPromise(() =>
+                  self.getSessionBackend(sessionDoc, sessionId)
+                );
+                const history = yield* self.tryPromise(() =>
+                  backend.readDispatchHistory([userTurnId])
+                );
+                if (
+                  history.some(
+                    (entry) =>
+                      entry.id === userTurnId &&
+                      ['handled', 'failed', 'canceled', 'delivery_unknown'].includes(
+                        entry.status ?? ''
+                      )
+                  )
+                ) {
+                  return yield* Effect.fail(
+                    new SessionTurnClaimContended({ sessionId, turnId: runtime.turnId })
+                  );
+                }
+              }
+              return yield* self.recordKnownChatFailureAndHaltEffect({
+                sessionId,
+                sessionDoc,
+                userTurnId,
+                reason: 'turn_pre_prompt_failed',
+                message:
+                  result.state === 'uncertain'
+                    ? 'Result unknown. This encrypted turn may already have started and will not be started again. Send a new turn to continue.'
+                    : result.state === 'completed'
+                      ? 'This encrypted turn already finished and will not be started again.'
+                      : result.state === 'expired'
+                        ? 'This encrypted turn expired before execution. Send a new turn to continue.'
+                        : result.state === 'denied' && result.reason === 'e2ee_machine_not_owned'
+                          ? 'e2ee_machine_not_owned: 加密工作区暂不支持使用其他成员的机器。'
+                          : 'This encrypted turn is not authorized for execution.',
+              });
+            });
+
             // Bound the whole turn against the initialization stall watchdog.
             // The watchdog only ever fires while the published presence status
             // is `initializing`, so a turn that reaches `running` races against
@@ -4733,9 +4809,19 @@ export class SessionExecutionService {
                 abortIfCancelled,
                 openAssistantEntry,
                 prompt,
+                claimExecution,
               }),
               self.awaitInitializationStall(sessionId, sessionDoc, runtime, presenceLease)
             );
+            if (executionPermit && self.deps.encryptedExecution) {
+              // Execution never repeats to repair a failed result write. The
+              // retained start remains uncertain and the actual turn can release.
+              yield* self.ignoreWithWarning(
+                sessionId,
+                'Encrypted execution result remains unknown',
+                self.deps.encryptedExecution.complete(executionPermit)
+              );
+            }
             return undefined;
           })
         )
@@ -4800,6 +4886,7 @@ export class SessionExecutionService {
     errorContext: VisibleSessionTurnUnhandledErrorContext;
   }): Promise<string> {
     const { sessionId, sessionDoc, runtime, error, errorContext } = options;
+    if (error instanceof SessionTurnExecutionDeferred) return 'execution-deferred';
     if (isSessionTurnClaimContended(error)) {
       return 'claim-contended';
     }
@@ -4935,8 +5022,10 @@ export class SessionExecutionService {
       try {
         if (inboxInput && !runtime.releaseFailure) {
           this.releaseTurnRuntime(sessionId, runtime.turnId);
-          await inbox!.wake();
-          this.onInboxReleased?.(sessionId);
+          if (outcome !== 'execution-deferred') {
+            await inbox!.wake();
+            this.onInboxReleased?.(sessionId);
+          }
         }
       } finally {
         const notify = async () => {
@@ -6209,7 +6298,8 @@ export class SessionExecutionService {
 
       // Inbox has already crossed its durable start fence before prompt submission.
       // A disconnected transport with no observed output cannot prove non-consumption.
-      // Ordinary turns retain their existing bounded stale-connection recovery.
+      // Encrypted turns also retain their start evidence instead of retrying an
+      // uncertain submission. Ordinary turns keep their bounded recovery.
       const promptWithStaleACPRecovery = (
         promptBlocks: ContentBlock[]
       ): Effect.Effect<void, unknown, Scope.Scope> =>
@@ -6219,6 +6309,8 @@ export class SessionExecutionService {
               const hasPromptEvents =
                 self.deps.hasPromptEventsForTurn?.(sessionId, runtime.turnId) ?? true;
               if (
+                self.deps.encryptedWorkspace ||
+                Boolean(self.deps.encryptedExecution) ||
                 dispatchOptions?.dispatchSource === 'inbox' ||
                 Boolean(dispatchOptions?.inboxBatch) ||
                 Boolean(ctx.runtime.inboxOwner?.batch) ||
@@ -6446,6 +6538,7 @@ export class SessionExecutionService {
       body: (ctx) =>
         Effect.gen(function* () {
           ctx.setUnhandledErrorContext(turnErrorContext);
+          yield* ctx.claimExecution();
           const memoryPressureResult = yield* self.tryPromise(() =>
             self.evictForTurnStart(sessionId)
           );
@@ -6807,9 +6900,11 @@ export class SessionExecutionService {
         abortIfCancelled,
         openAssistantEntry,
         prompt,
+        claimExecution,
       }) =>
         Effect.gen(function* () {
           setUnhandledErrorContext(turnErrorContext);
+          yield* claimExecution();
           const memoryPressureResult = yield* self.tryPromise(() =>
             self.evictForTurnStart(sessionId)
           );

@@ -1,4 +1,5 @@
-import { CloudE2eeMemberRemoved } from './cloud-e2ee-errors';
+import { StreamsClient } from '@loro-dev/streams-client';
+import { CloudE2eeMemberRemoved, CloudE2eeDeviceRevoked } from './cloud-e2ee-errors';
 import { Effect } from 'effect';
 import { SessionAttachmentTransfer } from './session-attachment-transfer';
 import { getCliPlatformKind } from './cli-platform';
@@ -11,6 +12,9 @@ import { e2eeHistoryPageSchema, e2eeMailboxReplySchemas } from './cloud-e2ee-rep
 import { ShareDeliveryEnvelopeSchema } from '@lody/shared/session-share-delivery';
 import {
   buildLoroStreamsTokenEndpoint,
+  getLoroStreamIdForDocId,
+  getLoroStreamsBaseUrl,
+  type WorkspaceId,
   PreviewControlVerificationSchema,
   createLoroStreamsTokenProviderLegacy,
   describeLoroStreamsTokenCause,
@@ -212,6 +216,8 @@ export function createCloudE2eePort(
       const rejected = z.object({ data: z.object({ code: z.string() }) }).safeParse(cause);
       if (rejected.success && rejected.data.data.code === 'e2ee_member_removed')
         throw new CloudE2eeMemberRemoved();
+      if (rejected.success && rejected.data.data.code === 'e2ee_device_revoked')
+        throw new CloudE2eeDeviceRevoked();
       throw cause;
     }
   };
@@ -230,6 +236,30 @@ export function createCloudE2eePort(
           },
         }
       : {}),
+    readExecutionOriginPage: async (input, signal) => {
+      const token = await getContentToken(
+        { workspaceId: input.workspaceId, credential: input.credential },
+        signal
+      );
+      const streamId = getLoroStreamIdForDocId(input.workspaceId as WorkspaceId, input.docId);
+      const streams = new StreamsClient({
+        url: `${getLoroStreamsBaseUrl(token.gatewayBaseUrl)}/ds/${encodeURIComponent(token.bucketId)}/${encodeURIComponent(streamId)}`,
+        fetch: fetchImpl,
+        auth: token.token,
+      });
+      const result = await streams.readBackwardMessages({
+        before: input.before,
+        pageBytes: 256 * 1024,
+        maxMessageBytes: 64 * 1024 * 1024,
+        signal,
+      });
+      if (!result.ok) throw result.result;
+      return {
+        messages: result.result.messages,
+        before: result.result.startOffset,
+        atStart: result.result.atRetainedStart,
+      };
+    },
     getHistory: async (input) =>
       e2eeHistoryPageSchema.parse(
         await client(AbortSignal.timeout(30_000)).action(api.e2eeWorkspaces.history, {
@@ -572,6 +602,7 @@ export function createCloudE2eeMachinePort(options: {
   ]);
   const e2ee = createCloudE2eePort({ authBaseUrl: options.authBaseUrl, logger: options.logger });
   const readEpochGroup = e2ee.readEpochGroup;
+  const readExecutionOriginPage = e2ee.readExecutionOriginPage;
   const completeMachinePairing = e2ee.completeMachinePairing;
   const bound = (value: { workspaceId: string; credential: string }) => {
     if (value.workspaceId !== options.workspaceId || value.credential !== options.credential)
@@ -583,6 +614,14 @@ export function createCloudE2eeMachinePort(options: {
     e2eeMachineScope: { workspaceId: options.workspaceId, genesisHash: options.genesisHash },
     e2ee: {
       ...e2ee,
+      ...(readExecutionOriginPage
+        ? {
+            readExecutionOriginPage: (input, signal) => {
+              bound(input);
+              return readExecutionOriginPage(input, signal);
+            },
+          }
+        : {}),
       getHistory: (input) => {
         bound(input);
         return e2ee.getHistory(input);

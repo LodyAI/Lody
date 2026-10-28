@@ -1,3 +1,4 @@
+import type { AuthorizeEncryptedExecution, EncryptedAgentExecution } from './e2ee/agent-execution';
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import type { CliE2eeWorkspaceLegacy } from './e2ee/workspace-legacy';
 import { LoroDocumentManager } from '@/lib/loro/doc';
@@ -40,6 +41,7 @@ interface LodyOptions {
   supportRegistryAgentTypes?: string[];
   workspaceId: WorkspaceId;
   contentMode?: string;
+  authorizeEncryptedExecution?: AuthorizeEncryptedExecution;
   genesisHash?: string;
   workspaceSlug?: string;
   token: string;
@@ -55,6 +57,8 @@ interface LodyOptions {
   ) => Promise<void>;
   onFatalAuthFailure?: (error: Error) => void;
   onStorageWriteFailure?: (error: Error) => void;
+  /** Drain this owner on confirmed member removal or device revocation.
+   * The workspace host alone owns receipt-verified member-data erasure. */
   onEncryptedMemberRemoved?: (owner: Lody) => Promise<void>;
   onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
   workspaceWatchCoordinator?: WorkspaceWatchCoordinatorApi;
@@ -73,7 +77,7 @@ export class Lody {
   private supportRegistryAgentTypes: string[];
   private cleanedUp = false;
   private encryptedWorkspace?: CliE2eeWorkspaceLegacy;
-  private memberRemoved = false;
+  private encryptedRevocation: 'e2ee_member_removed' | 'e2ee_device_revoked' | undefined;
   private startReceipt?: Promise<void>;
   private builtinAgentConfigRetryTimer: ReturnType<typeof setTimeout> | undefined;
   private pendingBuiltinAgentConfigRetryCliTypes = new Set<CliType>();
@@ -107,10 +111,11 @@ export class Lody {
         genesisHash: options.genesisHash,
         cloud: options.cloudPort.e2ee,
         onUnavailable: () => options.logger.debug('e2ee_background_unavailable'),
-        onRemoved: async () => {
+        onRemoved: async (reason) => {
           const owner = await removalOwner;
           if (!owner) return;
-          owner.memberRemoved = true;
+          owner.encryptedRevocation =
+            reason === 'device-revoked' ? 'e2ee_device_revoked' : 'e2ee_member_removed';
           await owner.startReceipt?.catch(() => undefined);
           if (options.onEncryptedMemberRemoved) await options.onEncryptedMemberRemoved(owner);
           else await owner.cleanup();
@@ -133,6 +138,28 @@ export class Lody {
       };
     }
     let manager: LoroDocumentManager | undefined;
+    let encryptedExecution: EncryptedAgentExecution | undefined;
+    if (e2ee) {
+      if (!options.genesisHash) throw new Error('e2ee_workspace_unavailable');
+      const { join } = await import('node:path');
+      const { Effect } = await import('effect');
+      const { makeEncryptedAgentExecution, lazyExecutionJournal } =
+        await import('./e2ee/agent-execution');
+      encryptedExecution = makeEncryptedAgentExecution({
+        genesis: options.genesisHash,
+        workspaceId: options.workspaceId,
+        targetMachineId: options.machineId,
+        journal: lazyExecutionJournal(join(e2ee.repositoryDirectory, 'execution.sqlite'), Date.now),
+        authorizeExecution: options.authorizeEncryptedExecution ?? e2ee.authorizeExecution,
+        isExecutionOpen: e2ee.isExecutionOpen,
+        resolveVerifiedOriginal: (intent) => {
+          const doc = manager?.sessions.get(intent.sessionId as SessionId)?.handle?.doc;
+          return doc && e2ee
+            ? e2ee.resolveVerifiedExecutionOriginal(intent, doc)
+            : Effect.succeed(undefined);
+        },
+      });
+    }
     // Commands the daemon executes may touch Sessions owned by other machines; their
     // Roost history lives with that owner, never in this machine's database.
     const ownerHistoryRouter =
@@ -177,7 +204,7 @@ export class Lody {
       await e2ee?.close();
       throw error;
     });
-    const lody = new Lody(options, manager);
+    const lody = new Lody(options, manager, encryptedExecution);
     lody.encryptedWorkspace = e2ee;
     resolveRemovalOwner(lody);
     return lody;
@@ -185,7 +212,8 @@ export class Lody {
 
   constructor(
     public readonly options: LodyOptions,
-    public readonly documentManager: LoroDocumentManager
+    public readonly documentManager: LoroDocumentManager,
+    encryptedExecution?: EncryptedAgentExecution
   ) {
     this.logger = options.logger;
 
@@ -211,6 +239,7 @@ export class Lody {
       handlerConfig: {
         token: this.token,
         encryptedWorkspace: options.contentMode === 'e2ee',
+        encryptedExecution: options.contentMode === 'e2ee' ? encryptedExecution : undefined,
         workspaceId: this.workspaceId,
         workspaceSlug: this.workspaceSlug,
         userId: this.userId,
@@ -236,7 +265,7 @@ export class Lody {
   }
 
   async start(): Promise<void> {
-    if (this.memberRemoved) throw new Error('e2ee_member_removed');
+    if (this.encryptedRevocation) throw new Error(this.encryptedRevocation);
     return (this.startReceipt = this.startRuntime());
   }
 

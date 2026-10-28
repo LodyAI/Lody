@@ -1,58 +1,61 @@
-# Machine E2EE custody
+# Machine E2EE
 
-`CLAUDE.md` is a symlink to this file. Parent CLI rules apply.
+`CLAUDE.md` aliases this; CLI rules apply.
 
-- Lazy machine-only custody; ordinary startup never probes keyring.
-- First creation probes OS keystore write/read, permanently choosing OS/file protection.
-  Reopen requires original selector/KEK; never re-probe or switch.
+- Lazy machine-only; ordinary startup never probes keyring.
+- Creation probes OS keystore write/read; fixes OS/file protection permanently.
+  Reopen: original selector/KEK; no re-probe/switch.
 - File protection: owner-only dirs/files, no symlinks. Windows: owner/DACL via official
   process Layer, never Unix mode bits.
-- Core node-custody owns blobs; no personal management, private exports, plaintext device files
+- Core node-custody owns blobs; no personal management, private exports/plaintext device files
   or silent keyring downgrade.
-- Disclose file protection before approval.
+- Disclose file protection pre-approval.
 
 - Keyring: 10s timeout, stdin secrets; confirm termination before fallback, retain failed owners.
-- Batch Windows ACL checks; bound async SQLite BUSY retries. Never block busy_timeout during keyring work.
+- Batch Windows ACL checks; bound async SQLite BUSY retries. No blocking busy_timeout in keyring work.
 
 - Resume first Windows ACL setup only with empty custody; otherwise validate.
 - `runtime.ts` composes Feed/VerifiedLedger, installed keys and optional receiver.
   Offline open/status; cloud I/O stays in cloud-cli-port.
-  Report damaged history/pins distinctly; never reset trusted pins from remote hints.
-- Execution: `authorizeExecution`; authenticated read; RAM-only <15min from read start.
+  Distinguish damaged history/pins; never reset trusted pins from remote hints.
+- Execution: `authorizeExecution`; same ledger membership as machine; authenticated read;
+  RAM-only <15min/read-start. Credential revoke: fence/clear grants before drain,
+  never network-retry.
 - Journal originals before feed/pin; rebase core pin first after 64 records.
-  Retired cache cleanup cannot fail open.
-- No plaintext RPC/attachments/schedules until encrypted. Presence uses shared minimal
-  plaintext allowlists on publish/receive, ordinary adaptor/90s TTL.
-- `realtime-journal.ts`: schema 3 only; no migration. Recover SQLite first;
-  Init only v0/no objects. Archive intact after retiring readable current
-  keys despite damage; unreadable keys refuse reset. No auto-replace/GC/archive replay/import.
-  Exact originals/first outcome; uncertain=unknown/no takeover; independent IDs.
-  Floors: genesis/workspace; before writes reject local >10min ahead of authenticated
-  current time, never frame time. No reference: scoped max; reset.
-  Reset: stop owners, archive, fresh ID; keep control/retired IDs/intent. Shared call
-  locks, exclusive reset; retain through failed main close. Bound permits/cleanup;
-  reply before send, exact retries; fence execution AND Meta/history. No authority.
+  Retired cache cleanup must fail closed.
+- No plaintext RPC/attachments/schedules before encryption. Presence: shared minimal
+  plaintext publish/receive allowlists, ordinary adaptor/90s TTL.
+- `realtime-journal.ts`: schema 3/no migration; SQLite recovery before empty-v0 init.
+  Retire readable current keys before intact archive; unreadable keys refuse reset.
+  No auto-replace/GC/archive replay/import. Exact originals/first outcome;
+  uncertain=unknown/no takeover; independent IDs. Floors: genesis/workspace.
+  Before writes reject local >10min ahead of authenticated now, never frame
+  time; no reference: scoped max/reset. Reset: stop owners, archive/new ID;
+  keep control/retired IDs/intent. Shared calls/exclusive reset; keep locks on
+  failed main close. Bound permits/cleanup; reply before send; exact retries.
+  `agent-execution.ts`: userTurnId claim for RPC/Meta/history; verified signer + host
+  authority. UI accounts are display-only. No capability: deny.
+  Missing origin: backfill/retry pending to original expiry. No snapshot-author
+  substitution or uncertain ACP retry.
   [Recovery](../../../README.md#local-encrypted-execution-log-recovery).
 - `prepareCliE2eeMachineLegacy` binds the retained credential hash to the exact
-  desktop-generated 16-byte pairing session using core's fixed v1 helper. Machine
-  possession additionally binds the strict UTF-8 machineId; activation compares it
-  with both the verified current device and the retained signed admission. Session
+  desktop 16-byte pairing session via core's fixed v1 helper. Machine
+  possession binds strict UTF-8 machineId; activation matches the verified current
+  device and retained signed admission. Session
   IDs stay outside possession and ledger records; old developer formats need recreation.
-  Local preparation/activation uses the OS-user socket; remote pairing uses the
-  signed offer and scoped service port. Fleet checks account/workspace/genesis first.
-  Activation refreshes the verified ledger and mailbox and acknowledges only an
-  installed current key; temporary failure leaves the same pairing retryable.
+  Local prepare/activate: OS-user socket; remote: signed offer/scoped port. Fleet checks account/workspace/genesis first.
+  Activation refreshes verified ledger/mailbox; ACK only an installed current key. Failure keeps pairing retryable.
 
 - Staging read denial/I/O failure cannot block independently verified mailbox reception.
 - Retain old-epoch sends; select confirmed keys per operation; rotation hints never pause.
   [M3 selection](../../../../../.agents/notes/proposed/architecture/2026-10-27-e2ee-epoch-receive-barrier.md).
 - Prepared bindings cannot start content replicas. Activate only the native ledger/key
   receiver: verify current installed key, close temporary owner, THEN write `activation.json`
-  before Fleet attaches rooms. The marker grants no authority; match genesis/device.
+  before Fleet attaches rooms. Marker grants no authority; match genesis/device.
   Activated workspaces reopen offline. Join identical per-workspace intents; Fleet shutdown
   drains activation before cloud-port close.
 
-- Never construct/register the Fleet PR poller for encrypted workspaces.
+- Never register Fleet PR pollers for encrypted workspaces.
 - Encrypted cloud ports omit hosted GitHub tokens. SessionManager uses host git/gh
   credentials; never send decrypted repository names through its credential broker.
 
@@ -78,7 +81,7 @@
   need consent; preserve signer/keys/credential. Preflight latest session before Fleet
   ownership changes; reject late sessions.
 - Publish ownership before replacement originals; publish material/current identity atomically.
-  Same-scope takeover atomically changes old creating=-1/new creating=1, retaining bytes.
+  Same-scope takeover: atomic old creating=-1/new creating=1, retain bytes.
   Match account/machine/workspace/genesis/member; superseded sessions cannot publish/retake.
   Reuse originals. Unpublished generations with retained credentials cannot replace missing
   devices; fresh explicit sessions may replace lost published identities with distinct
@@ -112,7 +115,6 @@
 - Reset: same-user socket; drain, exclusive sibling lease, archive whole dir;
   fresh approval/KEK. OS/unknown stays OS.
 
-Member removal: verify identity and persist its receipt before close releases custody.
-Stop/drain execution and sync; erase only account/genesis/device content under its
-identity lease/pairing mutex. Retry busy cleanup before open; preserve projects.
-Rejoin with fresh member/keys.
+Member removal: verify identity/persist receipt before custody release. Drain execution/sync;
+erase only account/genesis/device content under identity lease/pairing mutex. Retry busy
+cleanup before open; preserve projects. Rejoin with new member/keys.

@@ -1448,12 +1448,14 @@ describe('SessionDispatchWatcher', () => {
   // in history, so dispatch reaches the canUseMachine gate without the 5-min wait.
   const createAccessHarness = (opts: {
     canUseMachine: WatcherDeps['canUseMachine'];
+    encryptedWorkspace?: boolean;
     accessPolicy?: WatcherDeps['accessPolicy'];
     currentUserId?: WatcherDeps['currentUserId'];
     recordOwnerAccessSnapshot?: WatcherDeps['recordOwnerAccessSnapshot'];
     recordMemberAccessSnapshot?: WatcherDeps['recordMemberAccessSnapshot'];
     recordChatFailure?: WatcherDeps['recordChatFailure'];
     onFatalAuthFailure?: WatcherDeps['onFatalAuthFailure'];
+    dispatchPrepared?: SessionExecutionService['dispatchPreparedSessionTurn'];
   }) => {
     const startSession = vi.fn(async () => {});
     const continueSession = vi.fn(async () => {});
@@ -1499,12 +1501,14 @@ describe('SessionDispatchWatcher', () => {
     } as unknown as LoroDocumentManager;
 
     const watcher = createWatcher({
+      encryptedWorkspace: opts.encryptedWorkspace,
       logger: createSilentLogger(),
       machineId: 'machine-1',
       workspaceId: 'workspace-1' as WorkspaceId,
       ...(opts.currentUserId ? { currentUserId: opts.currentUserId } : {}),
       workspaceDocument,
       executionService: {
+        ...(opts.dispatchPrepared ? { dispatchPreparedSessionTurn: opts.dispatchPrepared } : {}),
         getExecutionSnapshot: vi.fn(() => ({
           hasActiveTurn: false,
           hasBlockingPendingCreate: false,
@@ -1543,6 +1547,85 @@ describe('SessionDispatchWatcher', () => {
   // turn), and the fiber's outcome routes back to dispatch or a visible failure.
   // The fiber's FIRST verify attempt is immediate (no backoff), so recover/deny
   // flows complete without waiting on timers.
+
+  it.each([
+    { encryptedWorkspace: false, reason: 'not_visible' as const },
+    { encryptedWorkspace: true, reason: 'not_visible' as const },
+    { encryptedWorkspace: false, reason: 'project_not_shared' as const },
+    { encryptedWorkspace: true, reason: 'project_not_shared' as const },
+  ])(
+    'routes encrypted=$encryptedWorkspace through its admission gate ($reason)',
+    async ({ encryptedWorkspace, reason }) => {
+      const forwarded: string[] = [];
+      const snapshots: string[] = [];
+      const h = createAccessHarness({
+        encryptedWorkspace,
+        currentUserId: 'machine-owner',
+        canUseMachine: async () => ({ outcome: 'denied', reason }),
+        accessPolicy: {
+          decide: () => Effect.succeed({ outcome: 'remote' as const }),
+        } as never,
+        recordMemberAccessSnapshot: async ({ requesterUserId }) => {
+          snapshots.push(requesterUserId);
+        },
+        dispatchPrepared: async (options) => {
+          const access = await options.accessPromise;
+          if (access.outcome === 'denied') {
+            await options.onAccessDenied(access);
+            return;
+          }
+          expect(access).toEqual({ outcome: 'allowed' });
+          await options.requestPromise;
+          forwarded.push(options.userTurnId);
+        },
+      });
+      try {
+        await runMaybeHandleSession(h.watcher, h.sessionId);
+        expect(forwarded).toEqual(encryptedWorkspace ? ['turn-x'] : []);
+        expect(h.getHistory()[0]?.status).toBe(encryptedWorkspace ? 'pending' : 'failed');
+        if (encryptedWorkspace) expect(snapshots).toEqual([]);
+      } finally {
+        h.watcher.stop();
+      }
+    }
+  );
+
+  it('retries missing execution evidence without retiring the pending turn, and cancels the retry on stop', async () => {
+    vi.useFakeTimers();
+    const dispatched = createDeferred();
+    let originalAvailable = false;
+    let starts = 0;
+    const h = createAccessHarness({
+      canUseMachine: async () => ({ outcome: 'allowed' }),
+      dispatchPrepared: async (options) => {
+        if (!originalAvailable) {
+          await options.onExecutionDeferred?.();
+          return;
+        }
+        starts += 1;
+        dispatched.resolve();
+      },
+    });
+    try {
+      await runMaybeHandleSession(h.watcher, h.sessionId);
+      expect(h.getHistory()[0]?.status).toBe('pending');
+      expect(starts).toBe(0);
+      originalAvailable = true;
+      await vi.advanceTimersByTimeAsync(1000);
+      await dispatched.promise;
+      expect(starts).toBe(1);
+      expect(h.getHistory()[0]?.status).toBe('pending');
+      originalAvailable = false;
+      await runMaybeHandleSession(h.watcher, h.sessionId);
+      h.watcher.stop();
+      originalAvailable = true;
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(starts).toBe(1);
+    } finally {
+      h.watcher.stop();
+      vi.useRealTimers();
+    }
+  });
 
   it('does not fail or retire a pending turn when access verification is indeterminate', async () => {
     const canUseMachine = vi.fn(async () => ({
