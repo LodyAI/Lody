@@ -214,3 +214,5 @@ processes; the `test/generate-*.py` scripts regenerate vectors (optional).
 
 Streams adapters and the Lab use the workspace catalog version. Node hosts can share
 [KEK custody](docs/surface.md#lodye2ee-coreadaptersnode-custody) while supplying their own OS wrapper.
+
+The [pre-freeze format review](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-format-freeze-review.md) records unresolved ledger format decisions and the current-only format inventory.
