@@ -35,6 +35,11 @@ export interface MachineRuntimeOptions {
 }
 
 export class MachineRuntime {
+  /** Trusted encrypted ingress only; actual side effects still enter the shared execution gate. */
+  async offerEncryptedRpcTurn(input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput) {
+    if (!this.options.handlerConfig.encryptedWorkspace) throw new Error('e2ee_rpc_unavailable');
+    return this.requireHandler().offerEncryptedRpcTurn(input);
+  }
   private handler: MessageHandler | null = null;
   private sessionManager: SessionManager | null = null;
   private readonly messageProcessor: MessageProcessor;

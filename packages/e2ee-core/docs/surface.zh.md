@@ -83,7 +83,7 @@
 `streamsLedgerLog`, `makeStreamsLedgerLog`, `StreamsLedgerLogOptions`,
 `LedgerSubmissionStream`, `streamsLedgerFeedSource`, `makeLedgerStreamReader`,
 `LedgerStreamReader`, `streamsDocumentBinding`, `StreamsDocumentBindingOptions`,
-`makeStreamsUpdateBinding`.
+`makeStreamsUpdateBinding`, `makeRealtimeContentBinding`.
 
 文档 binding 也提供 `openAuthenticated(input)`：与 SDK open 方法 相同的签名、上下文和 AEAD
 检查后返回 `{ plaintext, author }`。`author.device`、`author.actor` 和

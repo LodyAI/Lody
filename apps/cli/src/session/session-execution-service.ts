@@ -4754,6 +4754,11 @@ export class SessionExecutionService {
                 executionPermit = result.permit;
                 // Authorization may have yielded while Stop was requested.
                 yield* abortIfCancelled();
+                self.deps.logger.debug('[e2ee-rpc-timing]', {
+                  stage: 'handler-start',
+                  userTurnId,
+                  at: yield* Clock.currentTimeMillis,
+                });
                 return undefined;
               }
               if (result.state === 'completed' && userTurnId) {

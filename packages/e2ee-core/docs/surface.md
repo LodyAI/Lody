@@ -89,7 +89,7 @@ repository's tests and the Lab, with no compatibility promise.
 `streamsLedgerLog`, `makeStreamsLedgerLog`, `StreamsLedgerLogOptions`,
 `LedgerSubmissionStream`, `streamsLedgerFeedSource`, `makeLedgerStreamReader`,
 `LedgerStreamReader`, `streamsDocumentBinding`, `StreamsDocumentBindingOptions`,
-`makeStreamsUpdateBinding`.
+`makeStreamsUpdateBinding`, `makeRealtimeContentBinding`.
 
 The returned document binding also exposes `openAuthenticated(input)`: the same
 signature/context/AEAD checks as the SDK open method, returning `{ plaintext, author }`, where

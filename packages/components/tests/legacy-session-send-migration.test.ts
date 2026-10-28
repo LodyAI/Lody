@@ -125,6 +125,7 @@ function fixture() {
   const factory = new IDBFactory();
   return {
     runtime,
+    sessionDocs,
     snapshot: () => sessionDocs.get(SESSION)!.export({ mode: 'snapshot' }),
     factory,
     metas,
@@ -208,6 +209,67 @@ it.each(['rpc-lost', 'oversized'] as const)(
       }
     } finally {
       reopened.free();
+    }
+  }
+);
+
+it.each(['accepted', 'transport-failed', 'prepare-failed'] as const)(
+  'retains encrypted RPC originals and durable activation when acceleration is %s',
+  async (mode) => {
+    const f = fixture();
+    const input = entry('encrypted-human');
+    f.runtime.contentMode = 'e2ee';
+    f.runtime.requestSessionDispatchTurn = async () => {
+      throw new Error('plaintext RPC must not run');
+    };
+    const original = {
+      requestId: '01'.repeat(16),
+      targetMachineId: MACHINE,
+      frameHex: '02'.repeat(300),
+      requesterDevice: '03'.repeat(32),
+      expiresAt: 1234,
+    };
+    let sawDurableOriginal = false;
+    f.runtime.prepareEncryptedDispatch = async () => {
+      if (mode === 'prepare-failed') throw new Error('synthetic host failure');
+      return {
+        original,
+        send: async () => {
+          sawDurableOriginal =
+            f.sessionDocs.get(SESSION)?.getMap('rpcDispatchOriginals').get(input.id) ===
+            original.frameHex;
+          if (mode === 'transport-failed') throw new Error('synthetic transport failure');
+          return {
+            type: 'session/dispatch-turn_response',
+            sessionId: SESSION,
+            userTurnId: input.id,
+            accepted: true,
+            disposition: 'accepted',
+          };
+        },
+      };
+    };
+    await writeUserTurn(f.runtime, {
+      sessionId: SESSION,
+      entry: input,
+      delivery: { kind: 'history' },
+    });
+    await dispatchUserTurn(f.runtime, SESSION, input.id);
+    expect(f.metas.get(getSessionRoomId(SESSION))?.latestUserMsgId).toBe(input.id);
+    expect(f.sessionDocs.get(SESSION)?.getMap('rpcDispatchOriginals').get(input.id)).toBe(
+      mode === 'prepare-failed' ? undefined : original.frameHex
+    );
+    expect(sawDurableOriginal).toBe(mode !== 'prepare-failed');
+    const restored = new LoroDoc();
+    try {
+      const source = f.sessionDocs.get(SESSION);
+      if (!source) throw new Error('missing fixture doc');
+      restored.import(source.export({ mode: 'snapshot' }));
+      expect(restored.getMap('rpcDispatchOriginals').get(input.id)).toBe(
+        mode === 'prepare-failed' ? undefined : original.frameHex
+      );
+    } finally {
+      restored.free();
     }
   }
 );

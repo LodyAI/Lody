@@ -57,6 +57,8 @@ export function makeEncryptedAgentExecution(options: {
   authorizeExecution?: AuthorizeEncryptedExecution;
   isExecutionOpen?: () => boolean;
   resolveVerifiedOriginal: ResolveVerifiedExecutionOriginal;
+  /** Observation only, after the committed actual-start claim. */
+  onClaim?: (userTurnId: string) => void;
 }) {
   const claim = Effect.fnUntraced(function* (
     input: EncryptedExecutionIntent
@@ -130,6 +132,13 @@ export function makeEncryptedAgentExecution(options: {
       if (options.isExecutionOpen?.() === false) return { state: 'denied' as const };
       journal.receive(request);
       const result = journal.claim(request);
+      if (result.state === 'claimed') {
+        try {
+          options.onClaim?.(intent.userTurnId);
+        } catch {
+          /* Diagnostics never change execution. */
+        }
+      }
       return result.state === 'existing'
         ? {
             state:

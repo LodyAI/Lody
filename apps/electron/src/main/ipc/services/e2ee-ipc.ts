@@ -1448,6 +1448,39 @@ export class E2eeIpc extends IpcService {
     )
   }
   @IpcMethod()
+  async prepareDispatch(
+    workspaceId: string,
+    targetMachineId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
+  ) {
+    const id = sender()
+    return withDesktopE2eeAccount(
+      (owner) =>
+        owner.readers.get(workspaceId)?.has(id)
+          ? owner.host.prepareDispatch(workspaceId, targetMachineId, input)
+          : Effect.fail(new Error('e2ee_not_open')),
+      workspaceId,
+      false
+    )
+  }
+  @IpcMethod()
+  async acceptDispatchResponse(
+    workspaceId: string,
+    targetMachineId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput,
+    frameHex: string
+  ) {
+    const id = sender()
+    return withDesktopE2eeAccount(
+      (owner) =>
+        owner.readers.get(workspaceId)?.has(id)
+          ? owner.host.acceptDispatchResponse(workspaceId, targetMachineId, input, frameHex)
+          : Effect.fail(new Error('e2ee_not_open')),
+      workspaceId,
+      false
+    )
+  }
+  @IpcMethod()
   async resetLocalAgent(input: { workspaceId: string; resetId: string; confirm: true }) {
     const id = sender()
     if (

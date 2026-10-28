@@ -6778,6 +6778,32 @@ export class MessageHandler {
     }
   }
 
+  /** Native verified ingress. Never call this with an ordinary workspace RPC request. */
+  async offerEncryptedRpcTurn(
+    input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
+  ): Promise<import('@lody/shared/e2ee-rpc').E2eeDispatchAck> {
+    const inputConfig = normalizeSessionTurnInputConfig(input.inputConfig);
+    if (!this.executionService || !inputConfig) throw new Error('e2ee_rpc_input');
+    const sessionId = input.sessionId as SessionId;
+    const disposition = await this.sessionDispatchWatcher.offerRpcTurn({
+      sessionId,
+      userTurnId: input.userTurnId,
+      userId: input.userId,
+      timestamp: input.timestamp,
+      inputConfig,
+    });
+    return {
+      type: 'session/dispatch-turn_response',
+      sessionId,
+      userTurnId: input.userTurnId,
+      accepted:
+        disposition === 'accepted' ||
+        disposition === 'duplicate' ||
+        disposition === 'already-terminal',
+      disposition,
+    };
+  }
+
   private async dispatchLocalMachineRpc(
     request: LocalMachineRpcRequestValidated
   ): Promise<LocalMachineRpcResult> {

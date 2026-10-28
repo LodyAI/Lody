@@ -125,6 +125,23 @@ export function createDesktopE2eeContent(input: {
     needsUpdate: transition.needsUpdate,
     close: transition.close,
     e2ee: {
+      prepareDispatch: (
+        machineId: string,
+        args: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
+      ) => {
+        if (!input.runtime.prepareDispatch)
+          return Promise.reject(new Error('e2ee_rpc_unavailable'));
+        return input.runtime.prepareDispatch(input.workspaceId, machineId, args);
+      },
+      acceptDispatchResponse: (
+        machineId: string,
+        args: import('@lody/shared/e2ee-rpc').E2eeDispatchInput,
+        frame: string
+      ) => {
+        if (!input.runtime.acceptDispatchResponse)
+          return Promise.reject(new Error('e2ee_rpc_unavailable'));
+        return input.runtime.acceptDispatchResponse(input.workspaceId, machineId, args, frame);
+      },
       bucketId: () => bucketId,
       createTokenProvider: (signal: AbortSignal) => {
         const token = createLoroStreamsTokenProviderLegacy({

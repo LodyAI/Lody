@@ -410,6 +410,14 @@ export type WorkspaceRuntime = {
     },
     options?: { timeoutMs?: number }
   ) => Promise<SessionDispatchTurnResponse | null>;
+  /** Native original preparation plus an encrypted acceleration attempt; durable activation remains independent. */
+  prepareEncryptedDispatch?: (
+    machineId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
+  ) => Promise<{
+    original: import('@lody/shared/e2ee-rpc').E2eePreparedDispatch;
+    send: () => Promise<import('@lody/shared/e2ee-rpc').E2eeDispatchAck | null>;
+  }>;
   requestSessionPreviewCreate: (
     machineId: MachineId,
     sessionId: SessionId,

@@ -152,9 +152,16 @@ export class Lody {
         journal: lazyExecutionJournal(join(e2ee.repositoryDirectory, 'execution.sqlite'), Date.now),
         authorizeExecution: options.authorizeEncryptedExecution ?? e2ee.authorizeExecution,
         isExecutionOpen: e2ee.isExecutionOpen,
+        onClaim: (userTurnId) =>
+          options.logger.debug('[e2ee-rpc-timing]', {
+            stage: 'journal',
+            journal: 'agent-start',
+            userTurnId,
+            at: Date.now(),
+          }),
         resolveVerifiedOriginal: (intent) => {
           const doc = manager?.sessions.get(intent.sessionId as SessionId)?.handle?.doc;
-          return doc && e2ee
+          return e2ee && typeof e2ee.resolveVerifiedExecutionOriginal === 'function'
             ? e2ee.resolveVerifiedExecutionOriginal(intent, doc)
             : Effect.succeed(undefined);
         },
@@ -280,6 +287,11 @@ export class Lody {
       'startup.machine_runtime',
       { workspaceId: this.workspaceId },
       async () => await this.runtime.initialize()
+    );
+    await this.encryptedWorkspace?.startRpc(
+      this.machineId,
+      (input) => this.runtime.offerEncryptedRpcTurn(input),
+      (event) => this.logger.debug('[e2ee-rpc-timing]', event)
     );
     this.documentManager.ensureMachineFlockDocJoined(this.machineId, { reason: 'lody-start' });
   }
@@ -450,7 +462,11 @@ export class Lody {
     }
     this.pendingBuiltinAgentConfigRetryCliTypes.clear();
     this.builtinAgentConfigRetryAttempt = 0;
-    await this.runtime.cleanup();
+    try {
+      await this.encryptedWorkspace?.stopRpc();
+    } finally {
+      await this.runtime.cleanup();
+    }
   };
 
   async dispatchLocalControl(

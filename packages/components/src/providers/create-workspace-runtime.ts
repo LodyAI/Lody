@@ -228,6 +228,15 @@ export function resolveWorkspaceRuntimeCacheIdentity(
 export type WorkspaceE2eeTransport = {
   createTokenProvider(signal: AbortSignal): ReturnType<typeof createLoroStreamsTokenProviderLegacy>;
   bucketId(): string | null;
+  prepareDispatch?: (
+    machineId: string,
+    args: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
+  ) => Promise<import('@lody/shared/e2ee-rpc').E2eePreparedDispatch>;
+  acceptDispatchResponse?: (
+    machineId: string,
+    args: import('@lody/shared/e2ee-rpc').E2eeDispatchInput,
+    frame: string
+  ) => Promise<import('@lody/shared/e2ee-rpc').E2eeDispatchAck>;
 };
 type RuntimeDeps = {
   content: WorkspaceStreamsContent;
@@ -1847,6 +1856,46 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       MACHINE_RPC_TRANSPORT_READY_TIMEOUT_MS,
       `Streams RPC client not ready after ${MACHINE_RPC_TRANSPORT_READY_TIMEOUT_MS}ms`
     );
+
+  let encryptedDispatch:
+    | ReturnType<typeof import('./encrypted-dispatch-legacy').createEncryptedDispatchLegacy>
+    | undefined;
+  const prepareEncryptedDispatch =
+    protectedContent && deps.e2ee?.prepareDispatch && deps.e2ee.acceptDispatchResponse
+      ? async (machineId: string, input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput) => {
+          if (disposePromise) throw new Error('Runtime disposed');
+          if (!encryptedDispatch) {
+            const { createEncryptedDispatchLegacy } = await import('./encrypted-dispatch-legacy');
+            if (disposePromise) throw new Error('Runtime disposed');
+            const native = deps.e2ee;
+            if (!native?.prepareDispatch || !native.acceptDispatchResponse)
+              throw new Error('e2ee_rpc_unavailable');
+            encryptedDispatch ??= createEncryptedDispatchLegacy({
+              workspaceId,
+              prepare: native.prepareDispatch,
+              accept: native.acceptDispatchResponse,
+              client: async (signal) => {
+                const { provider, streamsBaseUrl } = await prepareStreamsAccess();
+                const bucketId = native.bucketId();
+                if (!bucketId || bucketId === LORO_STREAMS_BUCKET_ID)
+                  throw new Error('e2ee_content_configuration');
+                return createLoroStreamsJsonStreamClient({
+                  bucketId,
+                  baseUrl: streamsBaseUrl,
+                  getBaseUrl: () => getStreamsBaseUrlForProvider(provider),
+                  getToken: () => provider.getToken(),
+                  fetchImpl: (url, init) =>
+                    fetch(url, {
+                      ...init,
+                      signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal,
+                    }),
+                });
+              },
+            });
+          }
+          return encryptedDispatch.prepare(machineId, input);
+        }
+      : undefined;
 
   const getMachineRpcClient = async (
     machineId: MachineId
@@ -5238,6 +5287,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
     // Publish retirement before any cancellation callback or asynchronous close runs.
     disposePromise = Promise.resolve().then(async () => {
+      await encryptedDispatch?.close();
       sessionReaderAbort.abort();
       windowBootstrap?.close();
       sharedWindowDocuments.clear();
@@ -5489,6 +5539,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       requestSessionDispatchTurn,
       requestSessionSteer,
       contentMode: protectedContent ? 'e2ee' : 'plaintext',
+      ...(prepareEncryptedDispatch ? { prepareEncryptedDispatch } : {}),
       isMachineRpcUnreachable,
     },
     token: () => authToken,
@@ -5556,6 +5607,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     workspaceSlug: deps.workspaceSlug,
     workspaceId,
     contentMode: protectedContent ? 'e2ee' : 'plaintext',
+    ...(prepareEncryptedDispatch ? { prepareEncryptedDispatch } : {}),
     repo,
     accountId: deps.accountId ?? null,
     pendingSends,

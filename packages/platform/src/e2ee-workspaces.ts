@@ -221,6 +221,19 @@ export interface E2eeWorkspaceRuntime {
     input: E2eeContentSeal
   ): Promise<{ header: Uint8Array; sealed: Uint8Array }>;
   openContent(workspaceId: string, input: E2eeContentOpen): Promise<Uint8Array>;
+  /** Purpose-bound native preparation; persists the original before returning ciphertext. */
+  prepareDispatch?(
+    workspaceId: string,
+    targetMachineId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
+  ): Promise<import('@lody/shared/e2ee-rpc').E2eePreparedDispatch>;
+  /** Verify and retain a correlated target-signed delivery ACK, never an execution result. */
+  acceptDispatchResponse?(
+    workspaceId: string,
+    targetMachineId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput,
+    frameHex: string
+  ): Promise<import('@lody/shared/e2ee-rpc').E2eeDispatchAck>;
   /** Explicitly archive local originals and require fresh independently approved pairing. */
   resetIdentity?(input: {
     workspaceId?: string;
