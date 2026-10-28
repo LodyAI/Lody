@@ -111,6 +111,12 @@ const styles = stylex.create({
     display: 'grid',
     columnGap: '12px',
   },
+  compactTracks: { gridTemplateColumns: 'minmax(0, 1fr) auto' },
+  compactFrequency: { gridColumnEnd: 'span 2', gridRowStart: 2 },
+  compactNext: { gridColumnEnd: 'span 2', gridRowStart: 3 },
+  compactTarget: { gridColumnEnd: 'span 2', gridRowStart: 4 },
+  compactActions: { gridColumnStart: 2, gridRowStart: 1 },
+  compactRow: { rowGap: '2px' },
   cellName: { gridColumnStart: 1, gridRowStart: 1 },
   cellFrequency: {
     gridColumnEnd: {
@@ -515,6 +521,7 @@ function ScheduleListRow({
   runtime,
   context,
   widths,
+  compact,
   now,
   onOpen,
   onToggle,
@@ -529,6 +536,7 @@ function ScheduleListRow({
   selected?: boolean;
   context?: ScheduleRowContext;
   widths: ScheduleColumnWidths;
+  compact: boolean;
   now: number;
   onOpen: () => void;
   onToggle?: () => void;
@@ -560,8 +568,11 @@ function ScheduleListRow({
   const toggleLabel = row.enabled ? t('schedules.pause', 'Pause') : t('schedules.resume', 'Resume');
   const rowStyle = stylex.props(
     styles.listGrid,
-    styles.columnTracks(widths.name, widths.frequency, widths.next),
+    compact
+      ? styles.compactTracks
+      : styles.columnTracks(widths.name, widths.frequency, widths.next),
     styles.row,
+    compact && styles.compactRow,
     selected ? styles.rowSelected : styles.rowHover
   );
   const rowElement = (
@@ -577,17 +588,17 @@ function ScheduleListRow({
         <span {...stylex.props(styles.rowHitTarget)} aria-hidden="true" />
         <span {...stylex.props(styles.titleLine)}>
           <span {...stylex.props(styles.titleText)}>{row.title}</span>
-          <span {...stylex.props(styles.mobileOnly)}>
+          <span {...stylex.props(!compact && styles.mobileOnly)}>
             <StatusPill status={status} />
           </span>
         </span>
       </button>
 
-      <div {...stylex.props(cell.frequency, styles.frequency)}>
+      <div {...stylex.props(compact ? styles.compactFrequency : cell.frequency, styles.frequency)}>
         {describeTrigger(row.trigger, t, i18n.language, zone)}
       </div>
 
-      <div {...stylex.props(cell.next, styles.nextCell)}>
+      <div {...stylex.props(compact ? styles.compactNext : cell.next, styles.nextCell)}>
         {next != null ? (
           <Tooltip.Root>
             <Tooltip.Trigger
@@ -620,12 +631,14 @@ function ScheduleListRow({
           </Tooltip.Root>
         ) : null}
         {/* A pill that starts the cell pulls its text back onto the column line. */}
-        <span {...stylex.props(styles.desktopOnly, styles.firstPill)}>
-          <StatusPill status={status} />
-        </span>
+        {!compact ? (
+          <span {...stylex.props(styles.desktopOnly, styles.firstPill)}>
+            <StatusPill status={status} />
+          </span>
+        ) : null}
       </div>
 
-      <div {...stylex.props(cell.target, styles.target)}>
+      <div {...stylex.props(compact ? styles.compactTarget : cell.target, styles.target)}>
         <span {...stylex.props(styles.targetLine)}>
           <span {...stylex.props(styles.mutedText)}>{context?.agent ?? row.agentConfigId}</span>
           {offline ? (
@@ -653,7 +666,7 @@ function ScheduleListRow({
       </div>
 
       {/* 28px buttons centred on the 20px first line. */}
-      <div {...stylex.props(cell.actions, styles.actions)}>
+      <div {...stylex.props(compact ? styles.compactActions : cell.actions, styles.actions)}>
         {runtime?.lastDispatch && onOpenSession ? (
           <Tooltip.Root>
             <Tooltip.Trigger
@@ -925,9 +938,10 @@ export function ScheduleListView({
           <div {...stylex.props(styles.tableScroller)}>
             <div
               {...stylex.props(
-                styles.tableMinimum(
-                  `${widths.name + widths.frequency + widths.next + 200 + 92 + 48 + 32}px`
-                )
+                !hideHeader &&
+                  styles.tableMinimum(
+                    `${widths.name + widths.frequency + widths.next + 200 + 92 + 48 + 32}px`
+                  )
               )}
             >
               {error ? (
@@ -949,7 +963,7 @@ export function ScheduleListView({
                   ) : null}
                 </div>
               ) : null}
-              {ready && filtered.length > 0 ? (
+              {!hideHeader && ready && filtered.length > 0 ? (
                 <div
                   {...stylex.props(
                     styles.listGrid,
@@ -1033,6 +1047,7 @@ export function ScheduleListView({
                     runtime={matchingScheduleRuntime(row, runtimes)}
                     context={contextForRow?.(row)}
                     widths={widths}
+                    compact={hideHeader}
                     onOpen={() => onOpen(row.scheduleId)}
                     onToggle={onToggle ? () => onToggle(row) : undefined}
                     onRun={onRun ? () => onRun(row) : undefined}

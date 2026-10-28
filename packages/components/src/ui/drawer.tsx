@@ -8,23 +8,23 @@ import { isNativeAppShell, isNativeIOSAppShell } from '@/lib/native-platform';
 const DrawerViewportContext = React.createContext(false);
 
 function Drawer({ repositionInputs, ...props }: React.ComponentProps<typeof DrawerPrimitive.Root>) {
-  // Android-compatible shells can resize the layout viewport along with the
-  // keyboard. Vaul captures that already-shrunk drawer as its initial height
-  // and can restore it on hide (e.g. HarmonyOS / Zhuoyi). Side drawers instead
-  // keep their CSS height and track only the currently occluded bottom edge.
-  const followViewport =
+  // Vaul caches a focused drawer's initial height, which becomes stale after
+  // a fold/rotation or a keyboard-resized WebView. Keep side drawers CSS-sized.
+  // iOS surfaces already consume the native keyboard offset; other hosts need
+  // the currently occluded visual-viewport edge instead.
+  const manageSideDrawer =
     (props.direction === 'right' || props.direction === 'left') &&
     !props.snapPoints &&
     repositionInputs !== false &&
-    (isNativeAppShell() || repositionInputs === true) &&
-    !isNativeIOSAppShell();
+    (isNativeAppShell() || repositionInputs === true);
+  const followViewport = manageSideDrawer && !isNativeIOSAppShell();
 
   return (
     <DrawerViewportContext.Provider value={followViewport}>
       <DrawerPrimitive.Root
         data-slot="drawer"
         {...props}
-        repositionInputs={followViewport ? false : repositionInputs}
+        repositionInputs={manageSideDrawer ? false : repositionInputs}
       />
     </DrawerViewportContext.Provider>
   );

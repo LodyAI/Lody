@@ -118,7 +118,17 @@ import {
   zenLayoutModeAtom,
   zenRightPanelAtom,
 } from '@/atoms/layout-state';
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import { useNativeSideRail } from '../mobile/native-side-rail';
 import * as stylex from '@stylexjs/stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { useDocumentTitle } from '@/hooks/use-document-title';
@@ -914,6 +924,56 @@ const MobileProjectInfo = memo(function MobileProjectInfo({
     </span>
   );
 });
+
+function AdaptiveMobileSessionHeader({
+  inset,
+  title,
+  hasUnread,
+  onBack,
+  onTabs,
+  onMore,
+}: {
+  inset: string;
+  title: ReactNode;
+  hasUnread: boolean;
+  onBack: () => void;
+  onTabs: () => void;
+  onMore: () => void;
+}) {
+  const { t } = useTranslation();
+  const sideRailVisible = useNativeSideRail(
+    [
+      { id: 'back', label: t('common.back', 'Back'), symbol: 'chevron.left', onPress: onBack },
+      {
+        id: 'more',
+        label: t('sessions.moreActions', 'More actions'),
+        symbol: 'ellipsis',
+        onPress: onMore,
+      },
+    ],
+    2
+  );
+  return (
+    <BaseHeader
+      truncateTitle={false}
+      hideMenuButton
+      className="absolute inset-x-0 top-0 z-30 border-b-0 bg-background/55 backdrop-blur-xl"
+      style={{ height: inset, paddingTop: 'var(--safe-area-top, 0px)' }}
+      leading={sideRailVisible ? undefined : <MobileSessionHeaderBackButton onBack={onBack} />}
+      title={title}
+      actions={
+        <div {...stylex.props(detailStyles.mobileHeaderRight)}>
+          <MobileSessionTabButton hasUnread={hasUnread} onOpen={onTabs} />
+          {!sideRailVisible && (
+            <GlassIconButton label={t('sessions.moreActions', 'More actions')} onClick={onMore}>
+              <Ellipsis {...stylex.props(detailStyles.iconCurrent)} strokeWidth={1.75} />
+            </GlassIconButton>
+          )}
+        </div>
+      }
+    />
+  );
+}
 
 // Toggles the bottom terminal dock, which is hidden by default and only mounted
 // in the desktop app (Electron). Shown only when a terminal-capable local session
@@ -6303,37 +6363,18 @@ const SessionDetail = ({
           detailStyles.conversationTopInset(mobileHeaderInset)
         )}
       >
-        <BaseHeader
-          truncateTitle={false}
-          hideMenuButton
-          className="absolute inset-x-0 top-0 z-30 border-b-0 bg-background/55 backdrop-blur-xl"
-          style={{ height: mobileHeaderInset, paddingTop: 'var(--safe-area-top, 0px)' }}
-          leading={<MobileSessionHeaderBackButton onBack={handleMobileSessionBack} />}
+        <AdaptiveMobileSessionHeader
+          inset={mobileHeaderInset}
+          onBack={handleMobileSessionBack}
+          onTabs={() => setMobileTabSheetOpen(true)}
+          onMore={() => setMobileMenuSheetOpen(true)}
+          hasUnread={hasBackgroundUnread(mobileConversations)}
           title={
             <MobileProjectInfo
               session={activeSession}
               localProjectMeta={resolvedLocalProjectMeta}
               isSyncing={activeSessionDocIsSyncing}
             />
-          }
-          actions={
-            /* Extra -mr beyond the 4px disc/hit-target offset: the large
-               glass radius reads optically left of the hard right gutter
-               (user avatar + composer), so nudge ~8px total. */
-            <div {...stylex.props(detailStyles.mobileHeaderRight)}>
-              {/* Files, PR, and Browser entries live in the mobile tab sheet
-                  (mobileViewers), not the header. */}
-              <MobileSessionTabButton
-                hasUnread={hasBackgroundUnread(mobileConversations)}
-                onOpen={() => setMobileTabSheetOpen(true)}
-              />
-              <GlassIconButton
-                label={t('sessions.moreActions', 'More actions')}
-                onClick={() => setMobileMenuSheetOpen(true)}
-              >
-                <Ellipsis {...stylex.props(detailStyles.iconCurrent)} strokeWidth={1.75} />
-              </GlassIconButton>
-            </div>
           }
         />
         <MobileSessionTabSheet

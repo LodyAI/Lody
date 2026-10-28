@@ -56,6 +56,7 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
 
 ## Entry points, drafts, and layout
 
+- iOS divisions separate workspace panes; never save the temporary sidebar width. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-10-28-ios-vertical-division.md).
 - The window is `bg-sidebar`; pages use one inset `WorkspaceCard`. Keep the sidebar on the
   window, never as a floating surface. See [layout docs](../../../../.agents/docs/components-package.md).
 - Child-tab drafts send through the same accept unit as every other first message:

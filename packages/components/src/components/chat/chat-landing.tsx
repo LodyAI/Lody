@@ -6634,25 +6634,27 @@ function WorkspaceChatLanding({
              cleanup scripts. */
           settingsTabContent={
             mobileProjectContext.kind === 'local' ? (
-              <>
-                <MobileProjectEditSection
-                  seedSourceKey={`local:${mobileProjectContext.machineId}:${mobileProjectContext.projectId}`}
-                  seedName={mobileProjectContext.name}
-                />
-                <MobileLocalProjectSettings
-                  machineId={mobileProjectContext.machineId}
-                  projectId={mobileProjectContext.projectId}
-                  onRemoved={handleMobileProjectBack}
-                />
-              </>
+              <MobileLocalProjectSettings
+                machineId={mobileProjectContext.machineId}
+                projectId={mobileProjectContext.projectId}
+                onRemoved={handleMobileProjectBack}
+                intro={
+                  <MobileProjectEditSection
+                    seedSourceKey={`local:${mobileProjectContext.machineId}:${mobileProjectContext.projectId}`}
+                    seedName={mobileProjectContext.name}
+                  />
+                }
+              />
             ) : (
-              <>
-                <MobileProjectEditSection
-                  seedSourceKey={`github:${mobileProjectContext.fullName.toLowerCase()}`}
-                  seedName={mobileProjectContext.name}
-                />
-                <MobileGithubProjectSettings repoFullName={mobileProjectContext.fullName} />
-              </>
+              <MobileGithubProjectSettings
+                repoFullName={mobileProjectContext.fullName}
+                intro={
+                  <MobileProjectEditSection
+                    seedSourceKey={`github:${mobileProjectContext.fullName.toLowerCase()}`}
+                    seedName={mobileProjectContext.name}
+                  />
+                }
+              />
             )
           }
         />

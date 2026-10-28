@@ -35,11 +35,12 @@ before touching gestures.
 
 ## Home and chat lists
 
-- Dock icons must retain identity and size.
-- Inbox renders only on `showInboxTab`. Keep the chat/projects group
-  mounted so pull-to-refresh and scroll position survive tab round-trips.
-  `../chat/chat-landing.tsx` owns the default home tab; the workspace stack only
-  keeps `/chat` base context mounted under drawers.
+- iOS side rail: host-confirmed, suspended for dialogs, web fallback retained.
+- Fold panels retain list state.
+- Keep dock icons and their size.
+- Inbox requires `showInboxTab`. Keep chat/projects mounted for pull-to-refresh
+  and scroll position across tabs. `../chat/chat-landing.tsx` owns the default;
+  the workspace stack keeps `/chat` base context mounted under drawers.
 - The sticky home header is ONE chrome row (workspace | search |
   archive/settings): search fades out over `HEADER_SEARCH_EXIT_MS` before the
   connection/pull pill may mount, and the two never overlap. The filter chip
@@ -52,8 +53,7 @@ before touching gestures.
   archived multi-select. Preview state joins the `AnimatePresence` key,
   collapsing scrolls the toggle in from a LAYOUT effect, and its leading 16px
   slot stays EMPTY.
-- The list is deliberately NOT virtualized: the home screen owns the scroll
-  element, so never hand it to `VList`.
+- The home screen owns list scrolling; never virtualize it with `VList`.
 - `MobileChatListCard` renders the sidebar's opened-by tree
   (`lib/session-opened-by-tree.ts`, the same two unmerged fields and the shared
   `sidebarCollapsedOpenedBySessionsAtom`; `../AGENTS.md`) over EACH bucket. Its
@@ -90,7 +90,7 @@ before touching gestures.
 - `mobile-session-run-config.tsx` serves both composers using `agentSelection`
   (no SessionMeta) and model/mode/config props. Explicit permissions outrank
   legacy ACP modes; closing the sheet must not focus the composer.
-- Provider picker IDs use `run-config-option:`; built-in rows use `run-config-`.
+- Provider IDs use `run-config-option:`; built-in rows use `run-config-`.
 - The Role row renders whenever the caller passes `agentRoles` — both composers
   do (`../sessions/AGENTS.md`) — even with nothing to list, reading `None`. It
   sits above Agent as an inline picker ordered `None`, Roles by emoji + name,
