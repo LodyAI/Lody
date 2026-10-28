@@ -70,6 +70,8 @@ const SESSION_RECONCILE_CONCURRENCY = 4;
 type SessionUserResolverLike = Pick<SessionUserResolver, 'resolve' | 'clear'>;
 
 type SessionDispatchWatcherDeps = {
+  /** Encrypted turn execution is admitted only by its verified-device gate. */
+  encryptedWorkspace?: boolean;
   logger: Logger;
   machineId: MachineId;
   workspaceId: WorkspaceId;
@@ -1553,6 +1555,9 @@ export class SessionDispatchWatcher {
 
       const accessPromise = dispatchTurnPromise.then(async (turn) => {
         ensureActive();
+        // Account labels cannot authorize or reject encrypted execution. This
+        // only reaches the service's mandatory signer/ledger + journal gate.
+        if (this.deps.encryptedWorkspace) return { outcome: 'allowed' as const };
         const access = await traceAsync(
           this.deps.logger,
           'dispatch.verify_machine_access',
@@ -1577,8 +1582,9 @@ export class SessionDispatchWatcher {
       // outcome falls through to the pre-started backend verify DAG node, so the
       // dominant "owner sending to their own machine" case skips the blocking wait
       // while still using the prepared-turn execution path.
-      const localAccess =
-        this.deps.accessPolicy && this.deps.currentUserId
+      const localAccess = this.deps.encryptedWorkspace
+        ? ({ outcome: 'allow' } as const)
+        : this.deps.accessPolicy && this.deps.currentUserId
           ? await Effect.runPromise(
               this.deps.accessPolicy.decide({
                 workspaceId: this.deps.workspaceId,
@@ -1716,7 +1722,7 @@ export class SessionDispatchWatcher {
     const record = this.deps.recordOwnerAccessSnapshot;
     // The snapshot only ever represents "the current user owns this machine";
     // rechecks for foreign requesters must not touch it.
-    if (!record || requesterUserId !== this.deps.currentUserId) {
+    if (this.deps.encryptedWorkspace || !record || requesterUserId !== this.deps.currentUserId) {
       return;
     }
     void (async () => {
@@ -1750,7 +1756,12 @@ export class SessionDispatchWatcher {
     verdict: Promise<MachineAccessVerification>
   ): void {
     const record = this.deps.recordMemberAccessSnapshot;
-    if (!record || !this.deps.currentUserId || requesterUserId === this.deps.currentUserId) {
+    if (
+      this.deps.encryptedWorkspace ||
+      !record ||
+      !this.deps.currentUserId ||
+      requesterUserId === this.deps.currentUserId
+    ) {
       void verdict.catch(() => undefined);
       return;
     }

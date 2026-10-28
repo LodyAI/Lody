@@ -1448,6 +1448,7 @@ describe('SessionDispatchWatcher', () => {
   // in history, so dispatch reaches the canUseMachine gate without the 5-min wait.
   const createAccessHarness = (opts: {
     canUseMachine: WatcherDeps['canUseMachine'];
+    encryptedWorkspace?: boolean;
     accessPolicy?: WatcherDeps['accessPolicy'];
     currentUserId?: WatcherDeps['currentUserId'];
     recordOwnerAccessSnapshot?: WatcherDeps['recordOwnerAccessSnapshot'];
@@ -1500,6 +1501,7 @@ describe('SessionDispatchWatcher', () => {
     } as unknown as LoroDocumentManager;
 
     const watcher = createWatcher({
+      encryptedWorkspace: opts.encryptedWorkspace,
       logger: createSilentLogger(),
       machineId: 'machine-1',
       workspaceId: 'workspace-1' as WorkspaceId,
@@ -1545,6 +1547,39 @@ describe('SessionDispatchWatcher', () => {
   // turn), and the fiber's outcome routes back to dispatch or a visible failure.
   // The fiber's FIRST verify attempt is immediate (no backoff), so recover/deny
   // flows complete without waiting on timers.
+
+  it.each([false, true])(
+    'routes encrypted=%s display accounts through the appropriate admission gate',
+    async (encryptedWorkspace) => {
+      const forwarded: string[] = [];
+      const snapshots: string[] = [];
+      const h = createAccessHarness({
+        encryptedWorkspace,
+        currentUserId: 'machine-owner',
+        canUseMachine: async () => ({ outcome: 'denied', reason: 'requester_not_member' }),
+        accessPolicy: {
+          decide: () =>
+            Effect.succeed({ outcome: 'deny' as const, reason: 'requester_not_member' as const }),
+        } as never,
+        recordMemberAccessSnapshot: async ({ requesterUserId }) => {
+          snapshots.push(requesterUserId);
+        },
+        dispatchPrepared: async (options) => {
+          expect(await options.accessPromise).toEqual({ outcome: 'allowed' });
+          await options.requestPromise;
+          forwarded.push(options.userTurnId);
+        },
+      });
+      try {
+        await runMaybeHandleSession(h.watcher, h.sessionId);
+        expect(forwarded).toEqual(encryptedWorkspace ? ['turn-x'] : []);
+        expect(h.getHistory()[0]?.status).toBe(encryptedWorkspace ? 'pending' : 'failed');
+        if (encryptedWorkspace) expect(snapshots).toEqual([]);
+      } finally {
+        h.watcher.stop();
+      }
+    }
+  );
 
   it('retries missing execution evidence without retiring the pending turn, and cancels the retry on stop', async () => {
     vi.useFakeTimers();

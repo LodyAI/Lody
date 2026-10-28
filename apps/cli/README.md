@@ -34,11 +34,10 @@ rejects those new execution requests and permits retry without stopping local ed
 already running work or other workspace hosts. No RPC/agent dispatch is enabled by
 this interface alone.
 
-The execution integration still has a known identity gap: UI history stores account
-IDs while signed content exposes ledger crypto user IDs. A trusted machine-scoped
-account/member binding lookup is required before real UI account IDs can execute;
-the profile directory cannot supply that trust. The regression is retained as an
-expected failure, and this integration remains incomplete.
+Execution identity comes from the verified original update's device and ledger
+actor. UI account IDs are display metadata: they neither grant nor deny execution
+and are never compared with crypto user IDs. The host checks the signing device's
+current membership, role and revocation state immediately before a new claim.
 
 ## Local encrypted execution log recovery
 
@@ -67,7 +66,7 @@ CLI help. Encrypted agent starts, including Meta/history dispatch and RPC offers
 share a `userTurnId` execution claim in `execution.sqlite` under the active encrypted
 workspace's `repositoryDirectory`. Stop the daemon before reset. There is no desktop
 reset button. The execution gate resolves the turn's original signed update, checks its verified
-signer/user, then calls the same host's `authorizeExecution(workspaceId, requesterDevice)`
+signer, then calls the same host's `authorizeExecution(workspaceId, requesterDevice)`
 by default. `LodyOptions.authorizeEncryptedExecution` can override this capability
 with the same signature. Missing signer or authorization denies new starts;
 revoking a device cannot borrow another device's authority from the same user.

@@ -1419,7 +1419,7 @@ describe('host-only E2EE realtime journal', () => {
         resolveVerifiedOriginal: () =>
           Effect.succeed({
             requesterDevice: 'ab'.repeat(32),
-            requesterUserId: intent.requesterUserId,
+            requesterCryptoUserId: '1e'.repeat(32),
             expiresAt,
           }),
         authorizeExecution: () => Effect.succeed({ _tag: 'Authorized' }),
@@ -1434,7 +1434,7 @@ describe('host-only E2EE realtime journal', () => {
         resolveVerifiedOriginal: () =>
           Effect.succeed({
             requesterDevice: 'ab'.repeat(32),
-            requesterUserId: intent.requesterUserId,
+            requesterCryptoUserId: '1e'.repeat(32),
             expiresAt: 1000,
           }),
       });
@@ -1451,20 +1451,58 @@ describe('host-only E2EE realtime journal', () => {
       expect(journal.read(key)).toMatchObject({ state: 'received', expiresAt: 100 });
     });
 
-    it('binds the business intent to its exact user and session', async () => {
+    it('binds the business intent to its turn and session, independently of display account IDs', async () => {
       const execution = gate(() => journal);
       expect((await Effect.runPromise(execution.claim(intent))).state).toBe('claimed');
       for (const changed of [
         { ...intent, sessionId: 'other-session' },
-        { ...intent, requesterUserId: 'other-user' },
         { ...intent, workspaceId: 'other-workspace' },
       ]) {
         await expect(Effect.runPromise(execution.claim(changed))).rejects.toMatchObject({
           code: 'identity_conflict',
         });
       }
+      const before = journal.read(key);
+      expect(
+        await Effect.runPromise(
+          execution.claim({ ...intent, requesterUserId: 'another-display-account' })
+        )
+      ).toEqual({ state: 'uncertain' });
+      expect(journal.read(key)?.frame).toEqual(before?.frame);
       expect(journal.read(key)?.state).toBe('uncertain');
     });
+
+    it.each(['received', 'uncertain', 'completed'] as const)(
+      'preserves exact older %s evidence without binding display accounts',
+      async (state) => {
+        const frame = Buffer.from(
+          JSON.stringify([1, intent.sessionId, intent.userTurnId, 'earlier-display-account'])
+        );
+        const earlierRequest = { ...key, requester: 'ab'.repeat(32), expiresAt: 1000, frame };
+        journal.receive(earlierRequest);
+        if (state !== 'received') {
+          const result = journal.claim(earlierRequest);
+          if (result.state !== 'claimed') throw new Error('missing initial claim');
+          if (state === 'completed')
+            journal.finish(result.permit, Buffer.from('original settlement'));
+        }
+        const reopened = gate(() => new RealtimeJournal(filename, () => now));
+        expect(
+          await Effect.runPromise(
+            reopened.claim({ ...intent, requesterUserId: 'new-display-account' })
+          )
+        ).toMatchObject({ state: state === 'received' ? 'claimed' : state });
+        expect(Buffer.from(journal.read(key)?.frame ?? [])).toEqual(frame);
+        if (state === 'completed')
+          expect(journal.read(key)).toMatchObject({
+            state: 'completed',
+            outcome: Uint8Array.from(Buffer.from('original settlement')),
+          });
+        expect(
+          await Effect.runPromise(reopened.claim({ ...intent, requesterUserId: undefined }))
+        ).toEqual({ state: state === 'completed' ? 'completed' : 'uncertain' });
+      }
+    );
 
     it('cancels authorization without consuming execution evidence', async () => {
       let entered: () => void = () => {};
@@ -1479,7 +1517,7 @@ describe('host-only E2EE realtime journal', () => {
         resolveVerifiedOriginal: () =>
           Effect.succeed({
             requesterDevice: 'ab'.repeat(32),
-            requesterUserId: intent.requesterUserId,
+            requesterCryptoUserId: '1e'.repeat(32),
             expiresAt: 1000,
           }),
         authorizeExecution: () => Effect.sync(entered).pipe(Effect.andThen(Effect.never)),

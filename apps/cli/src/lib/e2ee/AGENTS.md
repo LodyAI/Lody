@@ -32,14 +32,14 @@
   time; no reference: scoped max/reset. Reset: stop owners, archive/new ID;
   keep control/retired IDs/intent. Shared calls/exclusive reset; keep locks on
   failed main close. Bound permits/cleanup; reply before send; exact retries.
-  `agent-execution.ts`: userTurnId claim for RPC/Meta/history; verified signer/user
-  plus device authority; default to host authorization. No capability: deny.
+  `agent-execution.ts`: userTurnId claim for RPC/Meta/history; verified signer + host
+  authority. UI accounts are display-only. No capability: deny.
   Missing origin: backfill/retry pending to original expiry. No snapshot-author
   substitution or uncertain ACP retry.
   [Recovery](../../../README.md#local-encrypted-execution-log-recovery).
 - `prepareCliE2eeMachineLegacy` binds the retained credential hash to the exact
   desktop-generated 16-byte pairing session using core's fixed v1 helper. Machine
-  Possession binds strict UTF-8 machineId; activation matches the verified current
+  possession binds strict UTF-8 machineId; activation matches the verified current
   device and retained signed admission. Session
   IDs stay outside possession and ledger records; old developer formats need recreation.
   Local preparation/activation: OS-user socket; remote pairing: signed offer/scoped port. Fleet checks account/workspace/genesis first.

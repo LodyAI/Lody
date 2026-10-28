@@ -23,7 +23,7 @@ Meta/history 持久派发和实时请求可能表达同一个用户 turn，却�
 ```text
 Meta/history -> dispatchPreparedSessionTurn --+
 RPC offer -> watcher -> prepared dispatch ----+-> start/continue plan
-                                                  验证原 turn 的 signer/user
+                                                  验证原 turn 的 signer
                                                   authorize(workspace, device)
                                                   journal claim(userTurnId)
                                                   创建/恢复 agent、提交 prompt
@@ -48,18 +48,21 @@ type AuthorizeEncryptedExecution = (
 新增 `openAuthenticated`，在验签与 AEAD 校验后返回历史设备和成员身份；SDK 使用的
 `open` 仍只返回明文字节。对 Loro update，宿主将原密文、AAD 和签名操作范围存入
 工作区本地 `execution-origins.sqlite`。执行前重新打开并验证原件，从 update 的依赖
-状态派生临时文档，再导入**实际签名字节**，匹配选中 turn 的创建操作、用户、时间戳、
+状态派生临时文档，再导入**实际签名字节**，匹配选中 turn 的创建操作、时间戳、
 输入配置和内容。同时匹配执行服务冻结的配置，并在异步验证后重新检查当前投影。
 仅操作编号不能证明内容：另一份有效签名帧可以重用 peer/counter 编码不同操作，不能
 直接从当前文档的相同编号状态推断签名覆盖的内容。
 
-当前 gate 将历史 crypto actor 直接与 `requesterUserId` 比较，仍有已知集成缺口：真实加密
-UI 写入账号 ID，与账本 crypto user ID 不同。用真实账号字段的原生生产回归已复现拒绝，
-暂保留为明确的预期失败。现有 D03 注册 action 只解析当前认证账号，公开协议尚无机器
-凭据可调用的成员账号绑定查询。任意请求者需要这个可信绑定；显示资料或请求方自报 ID
-不能代替它。此项尚未解决，PR 还不能集成。原件验证后，设备公钥仍交给当前权限检查。
+执行身份是已验证的签名设备及其账本 actor，后者以 `requesterCryptoUserId` 返回。
+原生 `host.authorizeExecution` 从当前已验证账本解析设备，检查成员、角色及撤销状态；
+原件验签和当前权限仍是两项检查。UI 的 `requesterUserId`/turn 账号 ID 只作显示，
+不与 crypto actor 比较、不选择权限，也不写进新执行 claim 的身份凭据。显示字段的修改
+不改变执行输入。旧凭据含账号字段时仍按 session/turn 匹配，保留原字节和启动围栏。
+机器不增加账号目录查询，也不推断账号到加密身份的映射。加密 watcher 不使用普通账号
+可见性/目录准入，也不读取或发布账号权限快照；仍必须通过执行服务的已验证设备 gate。
+普通工作区的准入不变。
 因此同一用户的其他设备仍有效，也不能使被撤销设备的待执行 turn 获得授权。
-缺少原件、签名者证据冲突、执行输入被修改或 signer 与用户不一致，都拒绝新启动。
+缺少原件、签名者证据冲突、执行输入被修改，都拒绝新启动。
 快照签名者不是其中每条历史 turn 的原作者。只有快照时，用当前工作区设备凭据向后
 读取 Streams 保留的 update，按已发布格式解析，重建逻辑房间 AAD，重新验签、检查 AEAD，
 保存原密文后解析 turn。命中本地来源凭据的正常路径不增加补取 I/O。
@@ -78,7 +81,7 @@ Effect fiber 管理。生产 `Lody.create` 默认调用同一宿主的 `authoriz
 省略覆盖回调会使用原生宿主授权，不会拒绝所有加密 turn。
 
 执行键为 `(genesis, workspaceId, targetMachineId, agent-start:<userTurnId>)`。
-不可变原件只编码意图版本、会话、turn 和请求用户。传输 request ID 及签名密文帧仍有各自
+不可变原件只编码意图版本、会话和 turn。传输 request ID 及签名密文帧仍有各自
 独立 journal 记录，不能代替业务执行身份。首次执行期限在重新授权和时钟回退后保留；
 缩短的替换期限拒绝执行。completed 不再启动，已有终态历史保持不变，陈旧 pending 历史
 显示拒绝原因。已 start 但没有确认结束的记录显示“结果未知”，不能接管。
@@ -120,11 +123,13 @@ completed/uncertain 日志、持久 create 被拒绝或过期、断连后不重�
 
 测试使用真实 SQLite、注入时间和显式同步信号，不断言吞吐量阈值，也不证明真实加密
 网络交付。真实签名账本、内容帧和 SQLite 测试还覆盖来源日志重开后的设备归属、同一
-用户设备撤销、用户不匹配、内容修改、验签拒绝及相同 peer/counter 的内容替换。
-临时移除设备与用户检查使回归 RED，恢复后 GREEN；精确内容替换测试也在改为向依赖
+用户设备撤销、显示账号独立、内容修改、验签拒绝及相同 peer/counter 的内容替换。
+临时移除设备检查使回归 RED，恢复后 GREEN；真实 UI 账号及显示账号不影响 journal 的回归
+在旧账号/crypto 比较下 RED，移除后 GREEN；精确内容替换测试也在改为向依赖
 快照导入实际签名字节前失败。生产构造回归使用真实 custody、签名账本与内容、SQLite、
 原生授权和实际 `Lody.create` 组合，不注入授权回调或 mock host；合成 cloud I/O 提供
 签名记录，ACP 测试边界记录 prompt 提交。缺少生产适配器时 RED，默认接通同一宿主后
-GREEN。新增 RED→GREEN 回归覆盖另一设备签署的真实验签快照、延后获得原件而不写
+GREEN。原生生产回归还覆盖有效显示账号不能使设备撤销前、成员降为 Guest 前或成员移除前
+签署的 update 获得当前执行权限。新增 RED→GREEN 回归覆盖另一设备签署的真实验签快照、延后获得原件而不写
 终态、原期限过期、真实 Streams HTTP 向后读取解析、有界 I/O 取消，以及 watcher 停止
 时取消重试。这些测试不代表生产交付。

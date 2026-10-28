@@ -13,6 +13,7 @@ import {
   Bytes,
   signGenesisRecord,
   prepareDeviceAdmission,
+  prepareJoinRequest,
   signLedgerRecord,
   prepareLedgerCommand,
   verifyLedger,
@@ -2814,7 +2815,7 @@ describe('SessionExecutionService', () => {
         resolveVerifiedOriginal: () =>
           Effect.succeed({
             requesterDevice: 'ab'.repeat(32),
-            requesterUserId: 'user-1',
+            requesterCryptoUserId: 'user-1',
             expiresAt: authorization === 'expired' ? 100 : 1000,
           }),
         authorizeExecution: () =>
@@ -2840,7 +2841,14 @@ describe('SessionExecutionService', () => {
   };
 
   const runProductionSignedTurn = async (
-    mode: 'account' | 'local' | 'snapshot' | 'delayed' | 'expired'
+    mode:
+      | 'account'
+      | 'snapshot'
+      | 'delayed'
+      | 'expired'
+      | 'revoked-device'
+      | 'guest'
+      | 'removed-member'
   ) => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-native-execution-'));
     vi.stubEnv('LODY_DATA_DIR', directory);
@@ -2851,7 +2859,9 @@ describe('SessionExecutionService', () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
     const sessionId = 'production-session' as SessionId;
     // The real encrypted UI writes runtime.accountId, not the ledger's crypto user ID.
-    const user = mode === 'account' ? accountId : '1e'.repeat(32);
+    const user = accountId;
+    const snapshotOnly = mode === 'snapshot' || mode === 'delayed' || mode === 'expired';
+    const deniedSigner = mode === 'revoked-device' || mode === 'guest' || mode === 'removed-member';
     const identity = cliE2eeIdentityDirectory(accountId, workspaceId);
     const noKeyring = async () => {
       throw new Error('synthetic missing keyring');
@@ -2931,6 +2941,48 @@ describe('SessionExecutionService', () => {
           view = Result.getOrThrow(
             extendLedger(view, [record], { length: 2, head: hashRecordBytes(record) })
           );
+          const records = [genesis.record, record];
+          const append = Effect.fnUntraced(function* (
+            command: Parameters<typeof prepareLedgerCommand>[2]
+          ) {
+            const next = yield* signLedgerRecord(
+              Result.getOrThrow(prepareLedgerCommand(view, owner.publicKey, command)),
+              owner
+            );
+            records.push(next);
+            view = Result.getOrThrow(
+              extendLedger(view, [next], { length: records.length, head: hashRecordBytes(next) })
+            );
+          });
+          let originalSigner:
+            | typeof owner
+            | Effect.Success<ReturnType<typeof ownerCustody.prepareDevice>> = owner;
+          const senderMemberId = Result.getOrThrow(Bytes.membershipId(new Uint8Array(16).fill(40)));
+          if (deniedSigner) {
+            const other = yield* ownerCustody.prepareDevice();
+            originalSigner = other;
+            if (mode === 'revoked-device') {
+              yield* append(
+                yield* prepareDeviceAdmission({
+                  genesis: genesis.genesis,
+                  membershipId,
+                  signer: other,
+                  encryptionPublicKey: other.enc,
+                  kind: 'personal',
+                })
+              );
+            } else {
+              const request = yield* prepareJoinRequest({
+                genesis: genesis.genesis,
+                requestId: Result.getOrThrow(Bytes.requestId(new Uint8Array(16).fill(50))),
+                userId: Result.getOrThrow(Bytes.userId(new Uint8Array(32).fill(60))),
+                encryptionPublicKey: other.enc,
+                expiresAt: null,
+                signer: other,
+              });
+              yield* append({ _tag: 'AdmitMember', membershipId: senderMemberId, request });
+            }
+          }
           yield* custody.prepareDeviceCredential(genesis.genesis, machine.publicKey);
           const frame = yield* prepareEpochEnvelope({
             context: {
@@ -2948,7 +3000,7 @@ describe('SessionExecutionService', () => {
             resource: 'doc:session-production-session',
             model: 'loro',
             writeEpoch: 'current',
-            signer: owner,
+            signer: originalSigner,
             ledger: () => Effect.succeed(view),
             readEpochKey: () => Effect.fromResult(Bytes.epochKey(new Uint8Array(32).fill(20))),
           });
@@ -3017,12 +3069,24 @@ describe('SessionExecutionService', () => {
             plaintext: source.export({ mode: 'snapshot' }),
             additionalData: () => snapshotAAD,
           });
+          if (mode === 'revoked-device')
+            yield* append({ _tag: 'RevokeDevice', target: originalSigner.publicKey });
+          if (mode === 'guest')
+            yield* append({ _tag: 'SetRole', membershipId: senderMemberId, role: 'guest' });
+          if (mode === 'removed-member')
+            yield* append({ _tag: 'DeclareCapabilities', capabilities: [1] });
+          if (mode === 'removed-member')
+            yield* append({ _tag: 'RemoveMember', membershipId: senderMemberId });
           return {
             genesis,
             snapshot,
             snapshotAAD,
             snapshotContext,
-            records: [genesis.record, record],
+            records,
+            checkpoint: {
+              length: records.length,
+              headHash: hex(hashRecordBytes(records.at(-1) ?? genesis.record).toBytes()),
+            },
             frame,
             sender: hex(owner.publicKey.toBytes()),
             machine: hex(machine.publicKey.toBytes()),
@@ -3062,12 +3126,9 @@ describe('SessionExecutionService', () => {
           return {
             startIndex: 0,
             recordsHex: fixture.records.map(hex),
-            position: 'p1:workspace-1:2:fixture',
+            position: `p1:workspace-1:${fixture.records.length}:fixture`,
             nextCursor: null,
-            checkpoint: {
-              length: 2,
-              headHash: hex(hashRecordBytes(fixture.records[1]).toBytes()),
-            },
+            checkpoint: fixture.checkpoint,
           };
         },
         mailboxCall: async (method: string, input: { slot?: unknown }) => {
@@ -3113,7 +3174,7 @@ describe('SessionExecutionService', () => {
       });
       if (protection.mode !== 'protected' || !sessionDoc.handle)
         throw new Error('missing signed session');
-      if (mode === 'account' || mode === 'local')
+      if (!snapshotOnly)
         await protection.config.provider.open({
           ...fixture.sealed,
           context: fixture.context,
@@ -3121,8 +3182,7 @@ describe('SessionExecutionService', () => {
         });
       // First connection/restart can reconstruct the state from a snapshot
       // without ever opening the author's signed creation update locally.
-      if (mode === 'account' || mode === 'local')
-        sessionDoc.handle.doc.import(source.export({ mode: 'update' }));
+      if (!snapshotOnly) sessionDoc.handle.doc.import(source.export({ mode: 'update' }));
       else {
         const snapshot = await protection.config.provider.open({
           ...fixture.snapshot,
@@ -3160,11 +3220,13 @@ describe('SessionExecutionService', () => {
       }
       const before = historyReads.length;
       const result = await dispatch();
-      expect(submitted).toEqual(['hi']);
-      expect(result.getHistory()[0]?.status).toBe('handled');
-      expect(result.failureMessages).toEqual([]);
+      expect(submitted).toEqual(deniedSigner ? [] : ['hi']);
+      expect(result.getHistory()[0]?.status).toBe(deniedSigner ? 'failed' : 'handled');
+      expect(result.failureMessages).toEqual(
+        deniedSigner ? [expect.stringContaining('not authorized')] : []
+      );
       expect(recoveredRooms).toEqual(
-        mode === 'account' || mode === 'local'
+        !snapshotOnly
           ? []
           : mode === 'delayed'
             ? ['session-production-session', 'session-production-session']
@@ -3186,11 +3248,9 @@ describe('SessionExecutionService', () => {
     }
   };
 
-  it('executes a signed durable turn through production Lody construction without injected authorization', () =>
-    runProductionSignedTurn('local'));
-  it.fails('accepts the real UI account ID after a trusted account-to-crypto-user binding is available', () =>
+  it('executes the real UI account ID through production Lody construction without injected authorization', () =>
     runProductionSignedTurn('account'));
-  it.each(['snapshot', 'delayed', 'expired'] as const)(
+  it.each(['snapshot', 'delayed', 'expired', 'revoked-device', 'guest', 'removed-member'] as const)(
     'executes a signed durable turn through production Lody construction (%s)',
     runProductionSignedTurn
   );
@@ -3207,7 +3267,7 @@ describe('SessionExecutionService', () => {
       resolveVerifiedOriginal: () =>
         Effect.succeed(
           originalAvailable
-            ? { requesterDevice: 'ab'.repeat(32), requesterUserId: 'user-1', expiresAt: 1000 }
+            ? { requesterDevice: 'ab'.repeat(32), requesterCryptoUserId: 'user-1', expiresAt: 1000 }
             : ({ state: 'pending-evidence', expiresAt: Date.now() + 1000 } as const)
         ),
       authorizeExecution: () => Effect.succeed({ _tag: 'Authorized' }),
@@ -3240,57 +3300,6 @@ describe('SessionExecutionService', () => {
       f.close();
     }
   });
-
-  it.each(['revoked-device', 'wrong-user', 'missing-signer'] as const)(
-    'refuses encrypted durable execution with %s evidence',
-    async (failure) => {
-      const f = encryptedExecutionFixture();
-      const submitted: string[] = [];
-      const authorizedDevices: string[] = [];
-      const activeDevice = 'ab'.repeat(32);
-      const revokedDevice = 'cd'.repeat(32);
-      const gate = makeEncryptedAgentExecution({
-        genesis: 'genesis',
-        workspaceId: 'workspace-1',
-        targetMachineId: 'machine-1',
-        journal: lazyExecutionJournal(f.filename, () => 100),
-        resolveVerifiedOriginal: () =>
-          Effect.succeed(
-            failure === 'missing-signer'
-              ? undefined
-              : {
-                  requesterDevice: failure === 'revoked-device' ? revokedDevice : activeDevice,
-                  requesterUserId: failure === 'wrong-user' ? 'other-user' : 'user-1',
-                  expiresAt: 1000,
-                }
-          ),
-        authorizeExecution: (_workspaceId, requesterDevice) =>
-          Effect.sync(() => {
-            authorizedDevices.push(requesterDevice);
-            return requesterDevice === activeDevice
-              ? { _tag: 'Authorized' as const }
-              : { _tag: 'Denied' as const, reason: 'not-authorized' };
-          }),
-      });
-      try {
-        const result = await runSilentPromptTurn({
-          sessionId: 'encrypted-session',
-          hasPromptEventsForTurn: true,
-          prepared: true,
-          encryptedExecution: gate,
-          onPrompt: async () => {
-            submitted.push('hi');
-          },
-        });
-        expect(submitted).toEqual([]);
-        expect(result.getHistory()[0]?.status).toBe('failed');
-        expect(result.failureMessages).toEqual([expect.stringContaining('not authorized')]);
-        expect(authorizedDevices).toEqual(failure === 'revoked-device' ? [revokedDevice] : []);
-      } finally {
-        f.close();
-      }
-    }
-  );
 
   it('shares the encrypted execution claim across RPC, durable dispatch and restart', async () => {
     const f = encryptedExecutionFixture();

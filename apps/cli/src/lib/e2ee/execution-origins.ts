@@ -75,7 +75,6 @@ const projection = (map: LoroMap) => {
   return {
     id: read('id'),
     role: read('role'),
-    userId: read('userId'),
     timestamp: read('timestamp'),
     inputConfig: read('inputConfig'),
     items: read('items'),
@@ -166,11 +165,7 @@ export class ExecutionOrigins {
     const selected = findTurn(doc, intent.userTurnId);
     if (!selected) return undefined;
     const current = projection(selected.map);
-    if (
-      current.userId !== intent.requesterUserId ||
-      !isDeepStrictEqual(current.inputConfig ?? {}, intent.inputConfig ?? {})
-    )
-      return undefined;
+    if (!isDeepStrictEqual(current.inputConfig ?? {}, intent.inputConfig ?? {})) return undefined;
     const resource = `doc:${getSessionRoomId(intent.sessionId as SessionId)}`;
     const readRows = () =>
       this.database((db) =>
@@ -232,7 +227,7 @@ export class ExecutionOrigins {
               return undefined;
             const verified = {
               requesterDevice: Buffer.from(opened.author.device.toBytes()).toString('hex'),
-              requesterUserId: Buffer.from(opened.author.actor.toBytes()).toString('hex'),
+              requesterCryptoUserId: Buffer.from(opened.author.actor.toBytes()).toString('hex'),
               expiresAt: timestamp + windowMs,
             };
             // Imported/forwarded operations cannot replace an earlier signer with

@@ -4737,13 +4737,13 @@ export class SessionExecutionService {
               if (!gate && !self.deps.encryptedWorkspace) return undefined;
               yield* abortIfCancelled();
               const result =
-                gate && userTurnId && options.invocation?.requesterUserId
+                gate && userTurnId
                   ? yield* gate.claim({
                       workspaceId: self.deps.workspaceId,
                       sessionId,
                       userTurnId,
-                      requesterUserId: options.invocation.requesterUserId,
-                      inputConfig: options.invocation.inputConfig,
+                      requesterUserId: options.invocation?.requesterUserId,
+                      inputConfig: options.invocation?.inputConfig,
                     })
                   : { state: 'denied' as const };
               if (result.state === 'pending-evidence') {

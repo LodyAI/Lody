@@ -9,11 +9,17 @@ import {
 
 const attempt = <A>(body: () => A) => Effect.try({ try: body, catch: (cause) => cause });
 
+const retainedIntentSchema = z.union([
+  z.tuple([z.literal(1), z.string(), z.string()]),
+  z.tuple([z.literal(1), z.string(), z.string(), z.string()]),
+]);
+
 const intentSchema = z.object({
   workspaceId: z.string().min(1),
   sessionId: z.string().min(1),
   userTurnId: z.string().min(1),
-  requesterUserId: z.string().min(1),
+  /** Display metadata only; execution identity comes from the verified signer. */
+  requesterUserId: z.string().optional(),
   inputConfig: z.unknown().optional(),
 });
 export type EncryptedExecutionIntent = z.infer<typeof intentSchema>;
@@ -27,7 +33,8 @@ export type AuthorizeEncryptedExecution = (
 ) => Effect.Effect<ExecutionAuthorization, unknown>;
 export type VerifiedExecutionOriginal = {
   requesterDevice: string;
-  requesterUserId: string;
+  /** Historical ledger actor, never the UI account ID. */
+  requesterCryptoUserId: string;
   expiresAt: number;
 };
 export type PendingExecutionOriginal = { state: 'pending-evidence'; expiresAt: number };
@@ -63,14 +70,19 @@ export function makeEncryptedAgentExecution(options: {
     };
     // Stable business evidence, separate from each transport's original frame.
     // No prompt, plaintext response, or transport request id belongs here.
-    const frame = Buffer.from(
-      JSON.stringify([1, intent.sessionId, intent.userTurnId, intent.requesterUserId])
-    );
+    const frame = Buffer.from(JSON.stringify([1, intent.sessionId, intent.userTurnId]));
     const journal = yield* attempt(options.journal);
     const read = () => {
       const retained = journal.read(key);
-      if (retained && !Buffer.from(retained.frame).equals(frame))
-        throw new RealtimeJournalError('identity_conflict');
+      if (retained) {
+        // Earlier intent evidence included a display account ID. Match only the
+        // business identity, preserving those exact bytes and every start fence.
+        const saved = retainedIntentSchema.parse(
+          JSON.parse(Buffer.from(retained.frame).toString('utf8'))
+        );
+        if (saved[1] !== intent.sessionId || saved[2] !== intent.userTurnId)
+          throw new RealtimeJournalError('identity_conflict');
+      }
       return retained;
     };
     let retained = yield* attempt(read);
@@ -87,7 +99,6 @@ export function makeEncryptedAgentExecution(options: {
     if (
       !verified ||
       !/^[0-9a-f]{64}$/.test(verified.requesterDevice) ||
-      verified.requesterUserId !== intent.requesterUserId ||
       !Number.isSafeInteger(verified.expiresAt) ||
       verified.expiresAt < 0
     )

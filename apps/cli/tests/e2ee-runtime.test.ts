@@ -379,12 +379,12 @@ describe('machine E2EE local runtime', () => {
     )
   );
 
-  it('binds signed history to the actual device and user across origin-store reopen', async () => {
+  it('binds signed history to its device and ledger actor, independently of display account IDs', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-turn-origins-'));
     const source = new LoroDoc();
     const replica = new LoroDoc();
     const user = '1e'.repeat(32);
-    const differentUser = '3c'.repeat(32);
+    const displayAccountId = 'another-display-account';
     const originalsFile = join(directory, 'origins.sqlite');
     const origins = new ExecutionOrigins(originalsFile);
     const resource = 'doc:session-session';
@@ -488,7 +488,7 @@ describe('machine E2EE local runtime', () => {
             });
           yield* addTurn('active', user, '1', ownerBinding);
           yield* addTurn('revoked', user, '2', otherBinding);
-          yield* addTurn('mismatch', differentUser, '1', ownerBinding);
+          yield* addTurn('mismatch', displayAccountId, '1', ownerBinding);
           yield* addTurn('edited', user, '1', ownerBinding);
           const revokedKey = hex(other.publicKey.toBytes());
           const revocation = yield* signLedgerRecord(
@@ -552,6 +552,9 @@ describe('machine E2EE local runtime', () => {
           } finally {
             forged.free();
           }
+          const relabeled = replica.getList('history').get(2) as LoroMap;
+          relabeled.set('userId', 'updated-display-account');
+          replica.commit();
           const checkedDevices: string[] = [];
           const gate = makeEncryptedAgentExecution({
             genesis: hex(signed.genesis.toBytes()),
@@ -584,8 +587,21 @@ describe('machine E2EE local runtime', () => {
           expect((yield* gate.claim(intent('active'))).state).toBe('claimed');
           expect((yield* gate.claim(intent('revoked'))).state).toBe('denied');
           expect(checkedDevices).toEqual([hex(owner.publicKey.toBytes()), revokedKey]);
-          expect((yield* gate.claim(intent('mismatch', differentUser))).state).toBe('denied');
-          expect(checkedDevices).toHaveLength(2);
+          expect(
+            yield* Effect.scoped(
+              origins.resolve(
+                intent('mismatch', displayAccountId),
+                replica,
+                ownerBinding.openAuthenticated
+              )
+            )
+          ).toMatchObject({ requesterCryptoUserId: user });
+          expect((yield* gate.claim(intent('mismatch', displayAccountId))).state).toBe('claimed');
+          expect(checkedDevices).toEqual([
+            hex(owner.publicKey.toBytes()),
+            revokedKey,
+            hex(owner.publicKey.toBytes()),
+          ]);
           const edited = replica.getList('history').get(3) as LoroMap;
           edited.set('inputConfig', { prompt: 'substituted' });
           replica.commit();
@@ -1109,7 +1125,7 @@ describe('machine E2EE local runtime', () => {
             )
           ).toEqual({
             requesterDevice: (await host.status()).devicePublicKey,
-            requesterUserId: '1e'.repeat(32),
+            requesterCryptoUserId: '1e'.repeat(32),
             expiresAt: 900100,
           });
         } finally {

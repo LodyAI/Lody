@@ -28,7 +28,7 @@ fallback is added.
 ```text
 Meta/history -> dispatchPreparedSessionTurn --+
 RPC offer -> watcher -> prepared dispatch ----+-> start/continue plan
-                                                  verify original turn signer/user
+                                                  verify original turn signer
                                                   authorize(workspace, device)
                                                   journal claim(userTurnId)
                                                   agent creation/restore/prompt
@@ -55,26 +55,30 @@ its SDK-facing `open` still returns plaintext alone. For Loro updates, the host
 retains original ciphertext/AAD and signed operation ranges in a workspace-local
 `execution-origins.sqlite`. At dispatch it reopens and verifies that original,
 forks the local document at the update's dependencies, imports the **exact signed
-update bytes**, and matches the selected turn's creation operation, user, timestamp,
+update bytes**, and matches the selected turn's creation operation, timestamp,
 input configuration and items. It also matches the frozen invocation configuration
 and checks the live projection again after asynchronous verification. An operation
 number alone is not proof: another valid frame can reuse its peer/counter with
 different operations, so inspecting the live document at matching counters is unsafe.
 
-The current gate compares the historical crypto actor with `requesterUserId`.
-This is a known integration gap: the real encrypted UI writes its account ID,
-which differs from the ledger crypto user ID. The native production fixture with
-that account field reproduces rejection and is retained as an explicit expected
-failure. The available D03 registration action resolves only the authenticated
-account; there is no machine-credential member-account binding query in this
-public contract. Supporting arbitrary requesters needs that trusted binding;
-directory labels or requester-supplied IDs cannot supply it. This remains
-unresolved and the PR is not ready for integration. After origin validation, the
-verified device key still goes to the current-authority gate.
+Execution identity is the verified signing device and its ledger actor, returned
+as `requesterCryptoUserId`. The native `host.authorizeExecution` resolves that
+device in the current verified ledger and checks its membership, role and
+revocation state. The original signature and current authority remain separate
+checks. UI `requesterUserId`/turn account IDs are display metadata and are never
+compared with the crypto actor, used to select authority, or bound into new
+execution claim evidence. Display-field edits do not change execution input.
+Older execution evidence containing an account field still matches by session and
+turn without rewriting its exact bytes or permitting another start. The machine
+adds no account directory query or inferred account-to-crypto mapping. Encrypted
+watcher dispatch bypasses ordinary account visibility/catalog admission and does
+not read or publish account-based authority snapshots; it still must pass the
+execution service's verified-device gate. Ordinary workspace admission is unchanged.
 Thus revoking one device denies its pending turns even while its user and another
-device stay active. Missing originals, conflicting signer attestations, modified
-execution input and user/signer mismatches refuse new starts. A snapshot signer
-never becomes the origin of every old turn inside that snapshot. A snapshot-only turn triggers a backward read of retained Streams updates using
+device stay active. Missing originals, conflicting signer attestations and modified execution input
+prevent a new start. A snapshot signer never becomes the origin of every old turn
+inside that snapshot. A snapshot-only turn triggers a backward read of retained
+Streams updates using
 this workspace's device credential. The host decodes released update framing,
 reconstructs exact logical-room AAD, reopens the original signature/AEAD and retains
 its ciphertext before resolving the turn. The snapshot signer never supplies the
@@ -101,7 +105,7 @@ authorization rather than denying every encrypted turn.
 
 The execution key is `(genesis, workspaceId, targetMachineId,
 agent-start:<userTurnId>)`. Its immutable bytes encode only the intent version,
-session, turn and requester user. Transport request IDs and signed/encrypted frames
+session and turn. Transport request IDs and signed/encrypted frames
 retain independent journal records; they must not become business execution IDs.
 The first received execution deadline survives reauthorization and clock rollback;
 a shorter replacement deadline is denied. An identical completed request does not
@@ -163,15 +167,17 @@ The existing journal and dispatch suites also remain part of local validation.
 These tests use real SQLite, injected time and explicit synchronization signals;
 they do not assert a throughput threshold or real encrypted network delivery.
 Real signed-ledger/content and SQLite tests additionally prove device attribution
-through origin-store reopen, same-user device revocation, user mismatch, payload
-changes, signature rejection and same-peer/counter payload substitution. The device
-and user admission regressions were RED under temporary removal of those checks;
-restoring them is GREEN. The exact-payload provenance test also failed before the
+through origin-store reopen, same-user device revocation, independent display accounts, payload
+changes, signature rejection and same-peer/counter payload substitution. The device admission regression was RED under temporary removal of that check;
+restoring it is GREEN. The real UI account and display-independent journal tests
+were RED under the former account/crypto comparison and are now GREEN. The exact-payload provenance test also failed before the
 signed update was imported into its dependency snapshot. A production-construction regression uses real custody, signed ledger/content,
 SQLite, native authorization and the actual `Lody.create` composition without an
 authorization callback or mock host. Synthetic cloud I/O supplies the signed
 records; the ACP harness records prompt submission. It was RED with the absent
-production adapter and GREEN after defaulting to the owned host. Additional RED → GREEN regressions cover native construction from a verified
+production adapter and GREEN after defaulting to the owned host. Native production regressions also reject updates signed before device revocation,
+member downgrade to Guest or member removal, despite an otherwise valid display
+account. Additional RED → GREEN regressions cover native construction from a verified
 snapshot signed by another device, delayed original availability without terminal
 writes, original expiry, the actual Streams HTTP backward parser, bounded aborted
 reads and watcher stop cancellation. These tests do not claim deployment acceptance.
