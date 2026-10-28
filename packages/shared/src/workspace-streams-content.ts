@@ -107,7 +107,7 @@ export function workspaceSupports(
   content: WorkspaceStreamsMode,
   feature: WorkspaceRestrictedFeature
 ): boolean {
-  return content.mode === 'plaintext' || feature === 'presence';
+  return content.mode === 'plaintext' || feature === 'presence' || feature === 'export';
 }
 
 /** Verified host facts only. This state never supplies ledger authority. */
