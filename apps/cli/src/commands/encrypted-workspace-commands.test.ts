@@ -27,6 +27,7 @@ vi.mock('@/lib/command-runtime', async (importOriginal) => ({
   resolveWorkspaceOrThrow: async () => seen.selected,
   listWorkspaceCandidates: async () => [plaintext, encrypted],
   listAliveRoomIds: async () => [],
+  listAliveSessionMetas: async () => [],
   listAliveDocMetas: async () => [],
   withWorkspaceManager: async (
     _auth: unknown,
@@ -70,24 +71,27 @@ beforeEach(() => {
 });
 
 describe('encrypted workspaces in one-shot data commands', () => {
-  it('export --all-workspace never decrypts an encrypted workspace to disk', async () => {
+  it('export --all-workspace includes the encrypted workspace on the local export path', async () => {
     const { exportCommand } = await import('./export');
     await exportCommand.parseAsync(['--all-workspace', '--offline', '/tmp/lody-export-test'], {
       from: 'user',
     });
-    expect(seen.exported).toEqual(['plain']);
+    expect(seen.exported).toEqual(['plain', 'protected']);
   });
 
-  it('export of an explicitly selected encrypted workspace is refused', async () => {
-    seen.selected = encrypted;
-    const { exportCommand } = await import('./export');
-    await expect(
-      exportCommand.parseAsync(['--workspace', 'protected', '--offline', '/tmp/lody-export-test'], {
-        from: 'user',
-      })
-    ).rejects.toThrow('Export is not available for end-to-end encrypted workspaces.');
-    expect(seen.exported).toEqual([]);
-  });
+  it.each([true, false])(
+    'exports an explicitly selected encrypted workspace (offline=%s)',
+    async (offline) => {
+      seen.selected = encrypted;
+      const { exportCommand } = await import('./export');
+      await exportCommand.parseAsync(
+        ['--workspace', 'protected', ...(offline ? ['--offline'] : []), '/tmp/lody-export-test'],
+        { from: 'user' }
+      );
+      expect(seen.exported).toEqual(['protected']);
+      expect(seen.flock).toEqual([]);
+    }
+  );
 
   it('sync includes schedule definitions and registry for ordinary and encrypted workspaces', async () => {
     const { syncCommand } = await import('./sync');

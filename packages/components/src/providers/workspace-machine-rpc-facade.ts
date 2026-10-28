@@ -21,6 +21,8 @@ import type {
 } from '@lody/loro-streams-rpc';
 import {
   McpToolListResultSchema,
+  McpAuthenticationResultSchema,
+  MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION,
   MACHINE_PROTOCOL_CAPABILITIES,
   MCP_TOOL_DISCOVERY_PROTOCOL_VERSION,
   machineSupportsProtocolCapability,
@@ -1567,7 +1569,11 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     }
   };
 
-  const requestLocalMcpTools = async (machineId: MachineId, server: WorkspaceMcpServerMeta) => {
+  const requestLocalMcpTools = async (
+    machineId: MachineId,
+    server: WorkspaceMcpServerMeta,
+    requesterUserId?: string
+  ) => {
     const protocolCapabilities = await deps.getMachineProtocolCapabilities(machineId);
     if (
       !machineSupportsProtocolCapability(
@@ -1583,14 +1589,51 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       machineId,
       workspaceId,
       method: 'mcp/list-tools',
-      params: { server },
+      params: {
+        server,
+        ...(requesterUserId &&
+        machineSupportsProtocolCapability(
+          { protocolCapabilities },
+          MACHINE_PROTOCOL_CAPABILITIES.mcpLocalAuthentication,
+          MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION
+        )
+          ? { requesterUserId }
+          : {}),
+      },
       timeoutMs: 35_000,
     });
     return McpToolListResultSchema.parse(result);
   };
 
+  const requestLocalMcpAuthentication = async (
+    machineId: MachineId,
+    params: Extract<LocalMachineRpcRequest, { method: 'mcp/authentication' }>['params']
+  ) => {
+    const protocolCapabilities = await deps.getMachineProtocolCapabilities(machineId);
+    if (
+      !machineSupportsProtocolCapability(
+        { protocolCapabilities },
+        MACHINE_PROTOCOL_CAPABILITIES.mcpLocalAuthentication,
+        MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION
+      ) ||
+      !(await canUseLocalMachineRpc(machineId))
+    ) {
+      throw new Error('MCP authentication requires a supported local daemon.');
+    }
+    return McpAuthenticationResultSchema.parse(
+      await sendLocalMachineRpcRequest({
+        machineId,
+        workspaceId,
+        method: 'mcp/authentication',
+        params,
+        timeoutMs: 35_000,
+      })
+    );
+  };
+
   return {
     requestLocalMcpTools,
+    requestLocalMcpAuthentication,
     requestSessionCancel,
     requestSessionSteer,
     requestSessionGoal,

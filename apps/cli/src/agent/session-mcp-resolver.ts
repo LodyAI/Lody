@@ -9,6 +9,9 @@ import {
   type SessionId,
   type WorkspaceFlockReadableFlock,
   type WorkspaceId,
+  type WorkspaceMcpServerMeta,
+  type ResolvedMcpServer,
+  normalizeMcpServerIdSelection,
 } from '@lody/shared';
 import { formatErrorMessage } from '@/utils/format-error';
 
@@ -30,6 +33,10 @@ export type LoadSessionMcpCatalogInput = {
   selectedIds: readonly McpServerId[];
   logger: { debug(message: string): void };
   env?: Readonly<Record<string, string | undefined>>;
+  prepare?: (
+    entry: WorkspaceMcpServerMeta,
+    resolved: ResolvedMcpServer
+  ) => Promise<ResolvedMcpServer>;
 };
 
 const CATALOG_SYNC_TIMEOUT_MS = 5_000;
@@ -70,8 +77,50 @@ export const loadSessionMcpCatalog = async (
     const handle = await input.repo.openFlockDoc(docId);
     const catalog = getWorkspaceMcpCatalog(readWorkspaceFlockRowsFromFlock(handle.flock));
     const env = input.env ?? process.env;
-    return (agentCapabilities) =>
-      resolveSessionMcpServers({ catalog, selectedIds, agentCapabilities, env });
+    if (!input.prepare)
+      return (agentCapabilities) =>
+        resolveSessionMcpServers({ catalog, selectedIds, agentCapabilities, env });
+    const prepared = new Map<string, ResolvedMcpServer>();
+    const failed = new Set<string>();
+    const ids = normalizeMcpServerIdSelection(selectedIds) ?? [];
+    for (const id of ids) {
+      const entry = catalog[id];
+      const resolved = resolveSessionMcpServers({
+        catalog,
+        selectedIds: [id],
+        agentCapabilities: { http: true },
+        env,
+      }).servers[0];
+      if (!entry || !resolved) continue;
+      try {
+        prepared.set(id, await input.prepare(entry, resolved));
+      } catch {
+        failed.add(id);
+      }
+    }
+    return (agentCapabilities) => {
+      const result: ResolveSessionMcpServersResult = { servers: [], problems: [] };
+      for (const id of ids) {
+        const selected = resolveSessionMcpServers({
+          catalog,
+          selectedIds: [id],
+          agentCapabilities,
+          env,
+        });
+        result.problems.push(...selected.problems);
+        const connection = prepared.get(id);
+        if (selected.servers.length && connection) result.servers.push(connection);
+        else if (selected.servers.length && failed.has(id))
+          result.problems.push({
+            kind: 'invalid_connection',
+            mcpServerId: id,
+            name: catalog[id]?.name ?? id,
+            reason:
+              'Local MCP authentication is unavailable. Configure it on this machine in Settings → MCP.',
+          });
+      }
+      return result;
+    };
   } catch (error) {
     const reason = formatErrorMessage(error);
     logger.debug(`[${sessionId}] Workspace MCP catalog read failed: ${reason}`);

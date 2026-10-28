@@ -228,3 +228,13 @@ it('hides remote machine controls and provider forms with the same explanation',
   );
   expect(container.querySelector('button')).toBeNull();
 });
+
+it.each(['en', 'zh_CN'])('enables local export controls in encrypted workspaces in %s', async (language) => {
+  await initI18n(language);
+  function ExportControl() {
+    const available = useWorkspaceFeature('export');
+    return <button disabled={!available}>Export</button>;
+  }
+  await act(async () => root.render(<Provider store={encryptedStore()}><ExportControl /></Provider>));
+  expect(container.querySelector('button')?.disabled).toBe(false);
+});

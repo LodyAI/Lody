@@ -10,6 +10,7 @@ import { isWorkspaceMcpServerMeta, type WorkspaceMcpServerMeta } from './workspa
 import { LocalFileResolutionSchema } from './local-file-preview';
 import { MachinePiExtensionsResponseSchema } from './pi-extensions';
 import { z } from 'zod';
+import { McpAuthenticationResultSchema, McpLocalAuthenticationSchema } from './mcp-authentication';
 import { SESSION_GOAL_ACTIONS } from './goal';
 import {
   CodeCollabV2ErrorSchema,
@@ -127,7 +128,22 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('mcp/list-tools'),
     params: z
-      .object({ server: z.custom<WorkspaceMcpServerMeta>(isWorkspaceMcpServerMeta) })
+      .object({
+        server: z.custom<WorkspaceMcpServerMeta>(isWorkspaceMcpServerMeta),
+        requesterUserId: z.string().min(1).optional(),
+      })
+      .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('mcp/authentication'),
+    params: z
+      .object({
+        server: z.custom<WorkspaceMcpServerMeta>(isWorkspaceMcpServerMeta),
+        requesterUserId: z.string().min(1),
+        action: z.enum(['status', 'configure', 'authorize', 'cancel', 'signout']),
+        authentication: McpLocalAuthenticationSchema.optional(),
+        attemptId: z.string().max(128).optional(),
+      })
       .strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
@@ -369,6 +385,7 @@ export const LocalMachineRpcResultSchema = z.union([
   MemoryProviderResponseSchema,
   IosSimulatorResponseSchema,
   McpToolListResultSchema,
+  McpAuthenticationResultSchema,
   SessionToolResultSchema,
   SessionActiveInvocationContextResultSchema,
   CodeCollabV2FileIndexSnapshotSchema,

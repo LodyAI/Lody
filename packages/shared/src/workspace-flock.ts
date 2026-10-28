@@ -12,6 +12,7 @@ import {
   type ProjectMcpDefault,
   type WorkspaceMcpServerMeta,
 } from './workspace-mcp';
+import { assertPublicMcpServer, publicMcpServer } from './mcp-authentication';
 
 export const WORKSPACE_FLOCK_DOC_STREAM_SEGMENT = 'wf';
 const WORKSPACE_FLOCK_DOC_NAME = 'workspace';
@@ -160,7 +161,7 @@ export const parseWorkspaceFlockRow = (
     if (!isWorkspaceMcpServerMeta(value) || value.id !== parsedKey.mcpServerId) {
       return undefined;
     }
-    return { key: parsedKey.key, value };
+    return { key: parsedKey.key, value: publicMcpServer(value) };
   }
   // Normalized rather than merely validated: an option key an older client
   // should never have written must not survive into a Session config just
@@ -229,7 +230,10 @@ const workspaceFlockRowsEqual = (
 export const writeWorkspaceMcpServerToFlock = (
   flock: WorkspaceFlockWritableFlock,
   entry: WorkspaceMcpServerMeta
-): boolean => writeWorkspaceFlockRow(flock, workspaceFlockKeys.mcpServer(entry.id), entry);
+): boolean => {
+  assertPublicMcpServer(entry);
+  return writeWorkspaceFlockRow(flock, workspaceFlockKeys.mcpServer(entry.id), entry);
+};
 
 export const deleteWorkspaceMcpServerFromFlock = (
   flock: WorkspaceFlockWritableFlock,
