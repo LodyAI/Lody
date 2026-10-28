@@ -1112,6 +1112,20 @@ test('mobile send retains its page through delayed presentation and later URL co
   );
   const composer = page.locator('[class~="@container/composer-box"]');
   await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
+  // Opening new chat now slides the page in. Measure sending from its settled
+  // position so the entrance is not mistaken for first-send layout movement.
+  await expect
+    .poll(() =>
+      composer.evaluate((element) => {
+        for (let parent: Element | null = element; parent; parent = parent.parentElement) {
+          if (parent.getAnimations().some((animation) => animation.playState === 'running')) {
+            return false;
+          }
+        }
+        return true;
+      })
+    )
+    .toBe(true);
   const before = await composer.boundingBox();
   await page.getByRole('button', { name: 'Send', exact: true }).click();
   // Let Vaul's first-frame shortcut expire before the real surface can mount.

@@ -135,6 +135,10 @@ shell. With `axis` locking, use-gesture reports `first` on the first intentional
 move, so the edge test reads the touch-down `initial` position. Web mounts no
 gesture, matching other edge-back surfaces.
 
+First-send browser geometry checks wait for the entrance animation to finish
+before measuring the composer, then retain exact geometry assertions throughout
+sending. The entrance motion and send handoff are separate interactions.
+
 Evidence is limited to jsdom tests driving touch events through use-gesture
 (entrance, Back exit, follow-and-commit, snap-back, composer/mid-screen/web
 exclusions, host removal) plus package typecheck. Native feel is unverified.
