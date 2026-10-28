@@ -373,6 +373,64 @@ export const ManyCreatedSessions: Story = {
   },
 };
 
+export const FailedAndMixedBatchResults: Story = {
+  args: operationStoryArgs,
+  render: () => (
+    <div className="w-[720px] max-w-[calc(100vw-2rem)] flex flex-col gap-6">
+      {[false, true].map((mixed) => (
+        <MessageRowView
+          key={String(mixed)}
+          sessionId={'storybook-opener' as SessionId}
+          message={{
+            id: `batch-failure-${mixed}`,
+            role: 'system',
+            timestamp: '2026-10-28T09:00:00.000Z',
+            read: true,
+            items: [
+              {
+                type: 'operation_completion',
+                operationId: `batch-failure-${mixed}`,
+                deliveryId: `batch-failure-${mixed}`,
+                operationKind: 'session_create_many',
+                completion: {
+                  type: 'result',
+                  value: {
+                    items: [
+                      ...(mixed
+                        ? [
+                            {
+                              status: 'succeeded' as const,
+                              label: 'Completed review',
+                              assistantTurnId: 'assistant-turn',
+                              target: {
+                                sessionId: 'storybook-success' as SessionId,
+                                userTurnId: 'turn',
+                              },
+                            },
+                          ]
+                        : []),
+                      {
+                        status: 'failed',
+                        label: 'Unavailable catalog',
+                        error: {
+                          code: 'INVALID_ITEM',
+                          message: 'Synthetic catalog failure',
+                          retryable: false,
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            ],
+          }}
+          onNavigateSession={() => {}}
+        />
+      ))}
+    </div>
+  ),
+};
+
 export const CompletedWorkBatch: Story = {
   args: operationStoryArgs,
   render: () => (

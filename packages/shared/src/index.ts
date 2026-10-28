@@ -56,6 +56,7 @@ export * from './schedule-time';
 export * from './schedule-recurrence';
 export * from './schedule-registry';
 export * from './schedule-schema';
+export * from './schedule-authorization';
 export * from './schedule-repository';
 export * from './cron-next-fire';
 export * from './scheduled-tasks-from-history';
@@ -516,3 +517,5 @@ export * from './project-path';
 export * from './session-pull-requests';
 
 export * from './prompt-suggestions';
+
+export * from './encrypted-attachment';

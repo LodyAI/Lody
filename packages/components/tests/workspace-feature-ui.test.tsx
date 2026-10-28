@@ -9,7 +9,8 @@ import {
   MachineDetailPane,
   MachineProvidersSection,
 } from '../src/components/settings/machine-detail-pane';
-import { SchedulesWorkspace } from '../src/components/schedules/schedules-workspace';
+import { LoroRepo } from 'loro-repo';
+import { ScheduleRepository, type WorkspaceId } from '@lody/shared';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { initI18n } from '../src/i18n';
@@ -22,6 +23,8 @@ import {
   saveScheduledMessage,
 } from '../src/components/schedules/scheduled-message-write';
 import type { WorkspaceRuntime } from '../src/atoms/runtime';
+import { createSessionSendResources } from '../src/lib/session-send-resources';
+import type { SessionAttachmentDraft } from '../src/lib/session-attachment-draft';
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import type { SessionMeta } from '@lody/shared';
 import { useWorkspaceFeature } from '../src/hooks/use-workspace-feature';
@@ -79,14 +82,106 @@ it('keeps ordinary unknown presence silent', async () => {
   expect(container.textContent).toBe('');
 });
 
-it('refuses schedule preparation and writes with the specific reason before resources are touched', async () => {
-  const runtime = { contentMode: 'e2ee' } as WorkspaceRuntime;
-  await expect(prepareScheduledMessage({ runtime } as never)).rejects.toThrow(
-    'Encrypted workspaces do not yet support scheduled messages.'
-  );
-  await expect(saveScheduledMessage({ runtime } as never)).rejects.toThrow(
-    'Encrypted workspaces do not yet support scheduled messages.'
-  );
+it('prepares and saves an encrypted scheduled message through the ordinary repository', async () => {
+  const repo = await LoroRepo.create({});
+  const workspaceId = 'workspace' as WorkspaceId;
+  const runtime = {
+    contentMode: 'e2ee',
+    workspaceId,
+    repo,
+    withScheduleStore: async (_id: string, write: () => Promise<unknown>) => write(),
+  } as WorkspaceRuntime;
+  try {
+    const message = await prepareScheduledMessage({
+      runtime,
+      sessionId: 'session' as never,
+      machineId: 'machine' as never,
+      actorId: 'owner',
+      inputBlocks: [{ type: 'text', text: 'hello' }],
+      attachments: [],
+      token: null,
+      localMachineId: null,
+      signal: new AbortController().signal,
+      onAttachments: () => {},
+    });
+    await saveScheduledMessage({
+      runtime,
+      actorId: 'owner',
+      scheduleId: 'reserved',
+      activationId: 'activation',
+      activityId: 'activity',
+      create: true,
+      now: 100,
+      draft: {
+        title: 'Hello',
+        prompt: 'hello',
+        message,
+        trigger: { kind: 'once', at: new Date(1000).toISOString() },
+        destination: { kind: 'existing_session', sessionId: 'session' },
+        machineId: 'machine',
+        agent: { agentConfigId: 'agent' },
+        misfirePolicy: { kind: 'run_once' },
+        overlapPolicy: 'queue_one',
+        retryPolicy: { dispatchMaxAttempts: 5, dispatchMaxAgeMs: 86_400_000 },
+      },
+    });
+    const repository = new ScheduleRepository(repo, workspaceId);
+    expect((await repository.read('reserved'))?.message).toEqual(message);
+    expect((await repository.list()).map((row) => row.scheduleId)).toEqual(['reserved']);
+  } finally {
+    await repo.destroy();
+  }
+});
+
+it('retains the encrypted scheduled attachment draft when its attachment grant is unavailable', async () => {
+  const resources = createSessionSendResources({
+    acquire: async () => {
+      throw new Error('Unexpected session acquisition');
+    },
+    releaseRef: () => {},
+  });
+  const runtime = {
+    contentMode: 'e2ee',
+    workspaceId: 'workspace',
+    sendResources: resources,
+  } as WorkspaceRuntime;
+  let retained: SessionAttachmentDraft[] = [];
+  try {
+    await expect(
+      prepareScheduledMessage({
+        runtime,
+        sessionId: 'session' as never,
+        machineId: 'machine' as never,
+        actorId: 'owner',
+        inputBlocks: [],
+        attachments: [
+          {
+            id: 'file',
+            kind: 'file',
+            source: new Blob(['private source']),
+            name: 'private.txt',
+            mimeType: 'text/plain',
+            lastModified: 0,
+          },
+        ],
+        token: 'synthetic-auth',
+        localMachineId: null,
+        signal: new AbortController().signal,
+        onAttachments: (attachments) => {
+          retained = attachments;
+        },
+      })
+    ).rejects.toThrow('e2ee_attachment_unavailable');
+    expect(retained[0]).toMatchObject({
+      id: 'file',
+      name: 'private.txt',
+      error: 'e2ee_attachment_unavailable',
+    });
+    expect(retained[0]?.source).toBeInstanceOf(Blob);
+    expect(retained[0]?.ready).toBeUndefined();
+  } finally {
+    await resources.dispose();
+  }
 });
 
 function encryptedStore() {
@@ -100,7 +195,7 @@ function encryptedStore() {
   return store;
 }
 
-it('shows the schedule restriction before readiness, machine or save errors', async () => {
+it('keeps the ordinary workspace readiness error for encrypted scheduled messages', async () => {
   function DraftStatus() {
     const state = useScheduledMessageDraft({ id: 'session' } as SessionMeta, null);
     return <button disabled={!!state.disabledReason}>{state.disabledReason}</button>;
@@ -113,7 +208,7 @@ it('shows the schedule restriction before readiness, machine or save errors', as
     )
   );
   expect(container.querySelector('button')?.disabled).toBe(true);
-  expect(container.textContent).toBe('Encrypted workspaces do not yet support scheduled messages.');
+  expect(container.textContent).toBe('Wait for the workspace to finish loading.');
 });
 
 it('keeps encrypted Code Collab available while its runtime is starting', async () => {
@@ -141,20 +236,6 @@ it('keeps encrypted Code Collab available while its runtime is starting', async 
   expect(container.textContent).not.toContain('Encrypted workspaces do not yet support');
 });
 
-it('blocks a schedule deep link before mounting its editor', async () => {
-  await act(async () =>
-    root.render(
-      <Provider store={encryptedStore()}>
-        <SchedulesWorkspace scheduleId="old-link" />
-      </Provider>
-    )
-  );
-  expect(container.querySelector('[role="status"]')?.textContent).toBe(
-    'Encrypted workspaces do not yet support scheduled messages.'
-  );
-  expect(container.querySelector('button')).toBeNull();
-});
-
 it('hides remote machine controls and provider forms with the same explanation', async () => {
   const store = encryptedStore();
   store.set(localProbeResultAtom, { ok: true, machineId: 'local' });
@@ -174,12 +255,21 @@ it('hides remote machine controls and provider forms with the same explanation',
   expect(container.querySelector('button')).toBeNull();
 });
 
-it.each(['en', 'zh_CN'])('enables local export controls in encrypted workspaces in %s', async (language) => {
-  await initI18n(language);
-  function ExportControl() {
-    const available = useWorkspaceFeature('export');
-    return <button disabled={!available}>Export</button>;
+it.each(['en', 'zh_CN'])(
+  'enables local export controls in encrypted workspaces in %s',
+  async (language) => {
+    await initI18n(language);
+    function ExportControl() {
+      const available = useWorkspaceFeature('export');
+      return <button disabled={!available}>Export</button>;
+    }
+    await act(async () =>
+      root.render(
+        <Provider store={encryptedStore()}>
+          <ExportControl />
+        </Provider>
+      )
+    );
+    expect(container.querySelector('button')?.disabled).toBe(false);
   }
-  await act(async () => root.render(<Provider store={encryptedStore()}><ExportControl /></Provider>));
-  expect(container.querySelector('button')?.disabled).toBe(false);
-});
+);

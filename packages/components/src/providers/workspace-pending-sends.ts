@@ -199,6 +199,7 @@ export function createWorkspacePendingSends(args: {
         signal,
         resources: runtime.sendResources,
         token: args.token,
+        attachmentToken: runtime.attachmentToken,
         localMachineId: args.localMachineId,
         update: publish,
         report: (id, progress) =>

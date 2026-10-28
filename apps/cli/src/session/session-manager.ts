@@ -123,6 +123,7 @@ import {
   readLocalProjectRootResolveSyncTimeoutMs,
 } from '@/lib/local-project-meta';
 import { loadSessionMcpCatalog } from '@/agent/session-mcp-resolver';
+import { waitForMcpCatalogBaseline } from '@/lib/workspace-mcp-store';
 import {
   claimLegacySpeculativeWorktree,
   completeLegacySpeculativeWorktreeSetup,
@@ -216,6 +217,8 @@ export interface ISession {
    * Returns null if the session has no host path mapping.
    */
   getHostWorkdir(): string | null;
+  /** Existing host path only; never creates a directory or prepares a runtime. */
+  peekHostWorkdir?(): string | null;
   getParentSessionId(): SessionId | undefined;
   applyExecutionPlaneLimits(limits: SessionSandboxLimits): Promise<void>;
   getMonitorRuntimeInfo(): Promise<SessionMonitorRuntimeInfo>;
@@ -782,11 +785,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       loadExternalMcpServers: () =>
         loadSessionMcpCatalog({
           repo: this.workspaceDocument.repo,
-          syncFlockDoc: (docId, { timeoutMs }) =>
-            this.workspaceDocument.syncFlockDocOrThrow(docId, {
-              timeoutMs,
-              reason: 'session-mcp-catalog-start',
-            }),
+          waitForCatalogBaseline: () =>
+            waitForMcpCatalogBaseline(this.workspaceDocument, this.workspaceId),
           workspaceId: this.workspaceId,
           sessionId,
           selectedIds: config.mcpServerIds,

@@ -3,8 +3,13 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildSessionTurnInputConfig } from '../../shared/src/session-input';
 import { Effect } from 'effect';
-import { decodeE2eeRpcResponseBody, encodeE2eeRpcResponseBody } from '../src/e2ee-wire';
+import {
+  decodeE2eeRpcResponseBody,
+  encodeE2eeRpcResponseBody,
+  encodeE2eeRpcRequestBody,
+} from '../src/e2ee-wire';
 import { e2eeRpcResource } from '../src/e2ee-resource';
+import { E2eeRpcOriginals, e2eeRpcDigest } from '../src/e2ee-native';
 import { encryptedRpcFixture } from './fixtures/e2ee-native-fixture';
 import { makeRealtimeContentBinding } from '@lody/e2ee-core/adapters/loro-streams';
 import { Bytes } from '@lody/e2ee-core/protocol';
@@ -22,6 +27,256 @@ afterEach(() => {
 });
 
 describe('trusted-host encrypted dispatch originals', () => {
+  it('rejects a valid old Guest-signed Pi query at the receiving host before retaining or executing it', async () => {
+    const f = encryptedRpcFixture({ guest: true });
+    fixtures.push(f);
+    const frame = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const binding = yield* makeRealtimeContentBinding({
+            genesis: f.ledger.context.genesis,
+            resource: e2eeRpcResource(f.machineId),
+            signer: f.ledger.owner.signer,
+            ledger: f.ledger.ledger,
+            readEpochKey: () =>
+              Effect.sync(() =>
+                Result.getOrThrow(Bytes.epochKey(copyEpochKeyBytes(f.ledger.secret)))
+              ),
+          });
+          return yield* binding.sealRequest(
+            encodeE2eeRpcRequestBody({
+              requestId: new Uint8Array(16).fill(42),
+              expiresAt: 60_000,
+              method: 'machine/pi-extensions',
+              params: new TextEncoder().encode(
+                JSON.stringify({ queryId: 'old-guest', params: {} })
+              ),
+            })
+          );
+        })
+      )
+    );
+    await expect(
+      Effect.runPromise(f.receiver.openFeature(f.machineId, Buffer.from(frame).toString('hex')))
+    ).rejects.toThrow();
+  });
+  it('retains read request/response originals without an execution journal', async () => {
+    const f = fixture();
+    const input = {
+      requestId: '11'.repeat(16),
+      request: {
+        workspaceId: f.workspaceId,
+        machineId: f.machineId,
+        method: 'machine/status' as const,
+        params: {},
+      },
+    };
+    const original = await Effect.runPromise(f.sender.prepareFeature(input));
+    expect(await Effect.runPromise(f.native('owner').prepareFeature(input))).toEqual(original);
+    const opened = await Effect.runPromise(f.receiver.openFeature(f.machineId, original.frameHex));
+    if (!opened) throw new Error('missing request');
+    await Effect.runPromise(f.receiver.retainFeatureRequest(f.machineId, opened));
+    await Effect.runPromise(f.receiver.retainFeatureRequest(f.machineId, opened));
+    await expect(
+      Effect.runPromise(
+        f.receiver.retainFeatureRequest(f.machineId, {
+          ...opened,
+          frame: Uint8Array.from([...opened.frame, 0]),
+        })
+      )
+    ).rejects.toThrow();
+    const result = { ok: false as const, error: 'PRIVATE_QUERY_CANARY' };
+    const response = await Effect.runPromise(
+      f.receiver.sealFeatureResult(f.machineId, opened, result)
+    );
+    expect(response[0]?.length).toBeLessThanOrEqual(1048576);
+    expect(Buffer.from(response[0] ?? []).includes(Buffer.from('PRIVATE_QUERY_CANARY'))).toBe(
+      false
+    );
+    expect(
+      await Effect.runPromise(
+        f.sender.acceptFeatureResponse(input, Buffer.from(response[0] ?? []).toString('hex'))
+      )
+    ).toEqual(result);
+    expect(
+      await Effect.runPromise(
+        f.native('phone').sealFeatureResult(f.machineId, opened, { ok: false, error: 'changed' })
+      )
+    ).toEqual(response);
+    for (const method of ['machine/restart', 'machine/memory'])
+      await expect(
+        Effect.runPromise(
+          f.sender.prepareFeature({ ...input, request: { ...input.request, method } } as never)
+        )
+      ).rejects.toThrow();
+  });
+
+  it('waits for every signed page, including across reopen, and returns an explicit error above 16 MiB', async () => {
+    const f = fixture();
+    const input = {
+      requestId: '12'.repeat(16),
+      request: {
+        workspaceId: f.workspaceId,
+        machineId: f.machineId,
+        method: 'machine/status' as const,
+        params: {},
+      },
+    };
+    const original = await Effect.runPromise(f.sender.prepareFeature(input));
+    const opened = await Effect.runPromise(f.receiver.openFeature(f.machineId, original.frameHex));
+    if (!opened) throw new Error('missing request');
+    const result = { ok: false as const, error: '合成'.repeat(300_000) };
+    const frames = await Effect.runPromise(
+      f.receiver.sealFeatureResult(f.machineId, opened, result)
+    );
+    expect(frames.length).toBeGreaterThan(1);
+    const accept = (index: number) =>
+      Effect.runPromise(
+        f.sender.acceptFeatureResponse(input, Buffer.from(frames[index] ?? []).toString('hex'))
+      );
+    expect(await accept(frames.length - 1)).toBeNull();
+    for (let index = 0; index < frames.length - 2; index++) expect(await accept(index)).toBeNull();
+    expect(await accept(frames.length - 2)).toEqual(result);
+    expect(
+      await Effect.runPromise(
+        f.native('owner').acceptFeatureResponse(input, Buffer.from(frames[0] ?? []).toString('hex'))
+      )
+    ).toEqual(result);
+    expect(
+      await Effect.runPromise(
+        f
+          .native('phone')
+          .sealFeatureResult(f.machineId, opened, { ok: false, error: 'replacement' })
+      )
+    ).toEqual(frames);
+    const large = { ...input, requestId: '13'.repeat(16) };
+    const prepared = await Effect.runPromise(f.sender.prepareFeature(large));
+    const request = await Effect.runPromise(f.receiver.openFeature(f.machineId, prepared.frameHex));
+    if (!request) throw new Error('missing request');
+    const rejected = await Effect.runPromise(
+      f.receiver.sealFeatureResult(f.machineId, request, {
+        ok: false,
+        error: 'x'.repeat(16 * 1024 * 1024),
+      })
+    );
+    expect(
+      await Effect.runPromise(
+        f.sender.acceptFeatureResponse(large, Buffer.from(rejected[0] ?? []).toString('hex'))
+      )
+    ).toMatchObject({
+      ok: false,
+      code: 'e2ee_query_too_large',
+      data: { truncated: true, maxBytes: 16 * 1024 * 1024 },
+    });
+  });
+
+  it('reuses every sealed feature response byte after an uncertain atomic outbox write', async () => {
+    const f = fixture();
+    const input = {
+      requestId: '14'.repeat(16),
+      request: {
+        workspaceId: f.workspaceId,
+        machineId: f.machineId,
+        method: 'machine/status' as const,
+        params: {},
+      },
+    };
+    const original = await Effect.runPromise(f.sender.prepareFeature(input));
+    const opened = await Effect.runPromise(f.receiver.openFeature(f.machineId, original.frameHex));
+    if (!opened) throw new Error('missing request');
+    const retain = E2eeRpcOriginals.prototype.retainResponsePages;
+    let sealed: Uint8Array[] = [];
+    const fault = vi
+      .spyOn(E2eeRpcOriginals.prototype, 'retainResponsePages')
+      .mockImplementationOnce(function (this: E2eeRpcOriginals, key, frames) {
+        sealed = frames.map((frame) => Uint8Array.from(frame));
+        retain.call(this, key, frames);
+        throw new Error('synthetic uncertain commit');
+      });
+    try {
+      await expect(
+        Effect.runPromise(
+          f.receiver.sealFeatureResult(f.machineId, opened, {
+            ok: false,
+            error: 'PRIVATE_OUTBOX'.repeat(30_000),
+          })
+        )
+      ).rejects.toThrow();
+    } finally {
+      fault.mockRestore();
+    }
+    expect(sealed.length).toBeGreaterThan(1);
+    expect(await Effect.runPromise(f.receiver.readFeatureResponse(opened))).toEqual(sealed);
+    expect(
+      await Effect.runPromise(
+        f
+          .native('phone')
+          .sealFeatureResult(f.machineId, opened, { ok: false, error: 'replacement' })
+      )
+    ).toEqual(sealed);
+    let completed;
+    for (const frame of sealed)
+      completed = await Effect.runPromise(
+        f.sender.acceptFeatureResponse(input, Buffer.from(frame).toString('hex'))
+      );
+    expect(completed).toEqual({ ok: false, error: 'PRIVATE_OUTBOX'.repeat(30_000) });
+  });
+
+  it.each(['before', 'after'] as const)(
+    'recovers outbox faults %s commit without exhausting later Guest reads',
+    async (phase) => {
+      const f = encryptedRpcFixture({ guest: true });
+      fixtures.push(f);
+      const retain = E2eeRpcOriginals.prototype.retainResponsePages;
+      for (let index = 0; index < 33; index++) {
+        const input = {
+          requestId: index.toString(16).padStart(32, '0'),
+          request: {
+            workspaceId: f.workspaceId,
+            machineId: f.machineId,
+            method: 'machine/status' as const,
+            params: {},
+          },
+        };
+        const prepared = await Effect.runPromise(f.sender.prepareFeature(input));
+        const opened = await Effect.runPromise(
+          f.receiver.openFeature(f.machineId, prepared.frameHex)
+        );
+        if (!opened) throw new Error('missing request');
+        const fault = vi
+          .spyOn(E2eeRpcOriginals.prototype, 'retainResponsePages')
+          .mockImplementation(function (this: E2eeRpcOriginals, key, frames) {
+            const current =
+              key ===
+              `feature-response:${Buffer.from(e2eeRpcDigest(opened.frame)).toString('hex')}`;
+            if (current && phase === 'before') throw new Error('synthetic uncommitted write');
+            retain.call(this, key, frames);
+            if (current) throw new Error('synthetic uncertain commit');
+          });
+        try {
+          await expect(
+            Effect.runPromise(
+              f.receiver.sealFeatureResult(f.machineId, opened, {
+                ok: false,
+                error: 'synthetic read outcome',
+              })
+            )
+          ).rejects.toThrow();
+        } finally {
+          fault.mockRestore();
+        }
+        if (index !== 32) continue;
+        const saved = await Effect.runPromise(f.receiver.readFeatureResponse(opened));
+        expect(saved).toHaveLength(1);
+        expect(
+          await Effect.runPromise(
+            f.sender.acceptFeatureResponse(input, Buffer.from(saved[0]!).toString('hex'))
+          )
+        ).toEqual({ ok: false, error: 'synthetic read outcome' });
+      }
+    }
+  );
+
   it('persists an original before returning it and reopens exact ID/ciphertext without re-signing', async () => {
     const f = fixture();
     const first = await Effect.runPromise(f.sender.prepareDispatch(f.machineId, f.input));
@@ -253,17 +508,18 @@ it('protects feature requests and chunked results with workspace signatures and 
     f.receiver.sealFeatureResult(f.machineId, opened!, result)
   );
   expect(frames.length).toBeGreaterThan(1);
-  const parts: Uint8Array[] = [];
-  for (const frame of frames) {
+  let outcome;
+  for (let index = 0; index < frames.length; index++) {
+    const frame = frames[index];
+    if (!frame) throw new Error('missing response');
+    expect(frame.length).toBeLessThanOrEqual(1048576);
     expect(Buffer.from(frame).includes(Buffer.from('SYNTHETIC_PRIVATE_FILE'))).toBe(false);
-    const part = await Effect.runPromise(
+    outcome = await Effect.runPromise(
       f.sender.acceptFeatureResponse(input, Buffer.from(frame).toString('hex'))
     );
-    expect(part.sequence).toBe(parts.length);
-    parts.push(part.bytes);
-    expect(part.final).toBe(parts.length === frames.length);
+    if (index < frames.length - 1) expect(outcome).toBeNull();
   }
-  expect(JSON.parse(Buffer.concat(parts).toString('utf8'))).toEqual(result);
+  expect(outcome).toEqual(result);
   await expect(
     Effect.runPromise(
       f.sender.prepareFeature({

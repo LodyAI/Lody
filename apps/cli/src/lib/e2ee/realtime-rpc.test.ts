@@ -17,8 +17,8 @@ const fixtures: ReturnType<typeof encryptedRpcFixture>[] = [];
 afterEach(() => {
   for (const value of fixtures.splice(0)) value.close();
 });
-function fixture() {
-  const f = encryptedRpcFixture();
+function fixture(options?: { guest?: boolean }) {
+  const f = encryptedRpcFixture(options);
   fixtures.push(f);
   let now = 1000;
   let permitted = true;
@@ -221,6 +221,7 @@ function memoryStreams() {
   const listeners = new Map<string, Set<(value: unknown) => Promise<void>>>();
   const appended = new Map<string, Deferred.Deferred<void>>();
   let failResponses = false;
+  const responseAttempts = new Map<string, number>();
   const writes: Array<{ stream: string; value: unknown }> = [];
   const signalFor = (id: string) => {
     let signal = appended.get(id);
@@ -236,7 +237,13 @@ function memoryStreams() {
     },
     appendJson: async (stream, value) => {
       writes.push({ stream, value });
-      if (stream.includes(':res:') && failResponses) throw new Error('synthetic ACK offline');
+      const responseId = (value as { id?: string }).id;
+      if (stream.includes(':res:') && responseId) {
+        const count = (responseAttempts.get(responseId) ?? 0) + 1;
+        responseAttempts.set(responseId, count);
+        Deferred.doneUnsafe(signalFor(`res:${responseId}:${count}`), Effect.void);
+        if (failResponses) throw new Error('synthetic ACK offline');
+      }
       const rows = values.get(stream) ?? [];
       rows.push(value);
       values.set(stream, rows);
@@ -269,6 +276,7 @@ function memoryStreams() {
     client,
     writes,
     waitAppend: (id: string) => Deferred.await(signalFor(id)),
+    waitResponse: (id: string, count: number) => Deferred.await(signalFor(`res:${id}:${count}`)),
     failResponses: (value: boolean) => {
       failResponses = value;
     },
@@ -356,7 +364,7 @@ effectIt.effect(
       const original = yield* f.sender.prepareFeature(input);
       const saved: string[] = [];
       let authorized = true;
-      const receive = makeEncryptedFeatureReceiver({
+      const receiveOptions = {
         workspaceId: f.workspaceId,
         genesis: Buffer.from(f.ledger.context.genesis.toBytes()).toString('hex'),
         machineId: f.machineId,
@@ -368,35 +376,63 @@ effectIt.effect(
               ? { _tag: 'Authorized' as const }
               : { _tag: 'Denied' as const, reason: 'revoked' }
           ),
+        authorizeRead: () => Effect.die('writer test entered read lane'),
         isOpen: () => true,
         client: streams.client,
-        handle: async (request) => {
+        handle: async (
+          request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest
+        ) => {
           if (
             request.method !== 'code-collab/save-text' ||
             request.params.text.encoding !== 'plain'
           )
             throw new Error('unexpected request');
           saved.push(request.params.text.text);
-          return { ok: false, error: 'synthetic saved outcome' };
+          return { ok: false as const, error: 'synthetic saved outcome' };
         },
-      });
+      };
+      const envelope = { id: original.requestId, frame: original.frameHex };
       streams.failResponses(true);
-      yield* Effect.result(receive({ id: original.requestId, frame: original.frameHex }));
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const receive = yield* makeEncryptedFeatureReceiver(receiveOptions);
+          yield* receive(envelope);
+          yield* streams.waitResponse(original.requestId, 1);
+        })
+      );
       expect(saved).toEqual(['SYNTHETIC_ENCRYPTED_SAVE']);
       const first = streams.writes.filter((write) => write.stream.includes(':res:'));
       streams.failResponses(false);
-      yield* receive({ id: original.requestId, frame: original.frameHex });
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const receive = yield* makeEncryptedFeatureReceiver(receiveOptions);
+          yield* receive(envelope);
+          yield* streams.waitResponse(original.requestId, 2);
+        })
+      );
       expect(saved).toEqual(['SYNTHETIC_ENCRYPTED_SAVE']);
       const replies = streams.writes.filter((write) => write.stream.includes(':res:'));
       expect(replies.slice(first.length)).toEqual(first);
-      const envelope = replies.at(-1)?.value as { frame: string };
-      const part = yield* f.sender.acceptFeatureResponse(input, envelope.frame);
-      expect(JSON.parse(new TextDecoder().decode(part.bytes))).toEqual({
+      const reply = replies.at(-1)?.value as { frame: string };
+      expect(yield* f.sender.acceptFeatureResponse(input, reply.frame)).toEqual({
         ok: false,
         error: 'synthetic saved outcome',
       });
       authorized = false;
-      yield* receive({ id: original.requestId, frame: original.frameHex });
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const checked = yield* Deferred.make<void>();
+          const receive = yield* makeEncryptedFeatureReceiver({
+            ...receiveOptions,
+            authorize: () =>
+              Deferred.succeed(checked, undefined).pipe(
+                Effect.as({ _tag: 'Denied' as const, reason: 'revoked' })
+              ),
+          });
+          yield* receive(envelope);
+          yield* Deferred.await(checked);
+        })
+      );
       expect(streams.writes.filter((write) => write.stream.includes(':res:'))).toEqual(replies);
       expect(JSON.stringify(streams.writes)).not.toContain('SYNTHETIC_ENCRYPTED_SAVE');
     })
@@ -412,22 +448,6 @@ it('connects the renderer feature facade to the CLI listener with large encrypte
   const streams = memoryStreams();
   const text = 'SYNTHETIC_PRIVATE_TEXT'.repeat(60_000);
   const paths = new Map<string, string>();
-  const receive = makeEncryptedFeatureReceiver({
-    workspaceId: f.workspaceId,
-    genesis: Buffer.from(f.ledger.context.genesis.toBytes()).toString('hex'),
-    machineId: f.machineId,
-    native: f.nativeReceiver,
-    journal: () => f.receipts,
-    authorize: () => Effect.succeed({ _tag: 'Authorized' as const }),
-    isOpen: () => true,
-    client: streams.client,
-    handle: async (request) => {
-      if (request.method !== 'code-collab/save-text' || request.params.text.encoding !== 'plain')
-        throw new Error('unexpected method');
-      paths.set(request.params.path, request.params.text.text);
-      return { ok: false, error: request.params.text.text };
-    },
-  });
   const renderer = createEncryptedDispatchLegacy({
     workspaceId: f.workspaceId,
     prepare: (machine, input) => Effect.runPromise(f.sender.prepareDispatch(machine, input)),
@@ -442,6 +462,26 @@ it('connects the renderer feature facade to the CLI listener with large encrypte
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
+          const receive = yield* makeEncryptedFeatureReceiver({
+            workspaceId: f.workspaceId,
+            genesis: Buffer.from(f.ledger.context.genesis.toBytes()).toString('hex'),
+            machineId: f.machineId,
+            native: f.nativeReceiver,
+            journal: () => f.receipts,
+            authorize: () => Effect.succeed({ _tag: 'Authorized' as const }),
+            authorizeRead: () => Effect.die('writer test entered read lane'),
+            isOpen: () => true,
+            client: streams.client,
+            handle: async (request) => {
+              if (
+                request.method !== 'code-collab/save-text' ||
+                request.params.text.encoding !== 'plain'
+              )
+                throw new Error('unexpected method');
+              paths.set(request.params.path, request.params.text.text);
+              return { ok: false, error: request.params.text.text };
+            },
+          });
           yield* makeEncryptedRpcListener({
             workspaceId: f.workspaceId,
             machineId: f.machineId,
@@ -471,6 +511,134 @@ it('connects the renderer feature facade to the CLI listener with large encrypte
     );
     expect(streams.activeReads()).toBe(0);
   } finally {
+    await renderer.close();
+    vi.useRealTimers();
+  }
+});
+
+it('shares the feature codec with the ordinary read adapter for a Guest, with complete large results and no execution journal', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(1000);
+  const { makeEncryptedFeatureReceiver } = await import('./feature-rpc');
+  const { createEncryptedDispatchLegacy } =
+    await import('../../../../../packages/components/src/providers/encrypted-dispatch-legacy');
+  const { LoroStreamsMachineRpcClient, LoroStreamsMachineRpcServer } =
+    await import('@lody/loro-streams-rpc');
+  const f = fixture({ guest: true });
+  const streams = memoryStreams();
+  const outcome = {
+    status: 'ok' as const,
+    path: 'synthetic.txt',
+    digest: `sha256:${'a'.repeat(64)}`,
+    text: {
+      encoding: 'plain' as const,
+      text: 'PRIVATE_READ_CANARY'.repeat(70000),
+      rawBytes: 19 * 70000,
+    },
+  };
+  const server = new LoroStreamsMachineRpcServer({
+    workspaceId: f.workspaceId as never,
+    machineId: f.machineId as never,
+    logger: { warn: () => {} },
+    now: () => 0,
+    getMachineStatus: async () => {
+      throw new Error('unused');
+    },
+    refreshMachineAcpCapabilities: async () => {
+      throw new Error('must not launch');
+    },
+    resolveCodeCollabOwnerSessionId: async () => f.input.sessionId,
+    openCodeCollabText: async () => outcome,
+  });
+  const renderer = createEncryptedDispatchLegacy({
+    workspaceId: f.workspaceId,
+    prepare: (machine, input) => Effect.runPromise(f.sender.prepareDispatch(machine, input)),
+    accept: (machine, input, frame) =>
+      Effect.runPromise(f.sender.acceptResponse(machine, input, frame)),
+    prepareFeature: (input) => Effect.runPromise(f.sender.prepareFeature(input)),
+    acceptFeature: (input, frame) =>
+      Effect.runPromise(f.sender.acceptFeatureResponse(input, frame)),
+    client: async () => streams.client,
+  });
+  const client = new LoroStreamsMachineRpcClient({
+    workspaceId: f.workspaceId,
+    machineId: f.machineId,
+    encryptedQuery: (method, params, timeoutMs) =>
+      renderer.query(f.machineId, method, params, timeoutMs),
+  });
+  try {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const receive = yield* makeEncryptedFeatureReceiver({
+            workspaceId: f.workspaceId,
+            machineId: f.machineId,
+            genesis: Buffer.from(f.ledger.context.genesis.toBytes()).toString('hex'),
+            native: f.nativeReceiver,
+            journal: () => {
+              throw new Error('read entered execution journal');
+            },
+            authorize: () => Effect.succeed({ _tag: 'Denied' as const, reason: 'Guest' }),
+            authorizeRead: () => Effect.succeed({ _tag: 'Authorized' as const }),
+            isOpen: () => true,
+            client: streams.client,
+            handle: (request, context) => server.readFeatureQuery(request, context),
+          });
+          yield* makeEncryptedRpcListener({
+            workspaceId: f.workspaceId,
+            machineId: f.machineId,
+            client: streams.client,
+            receive: (envelope) => receive(envelope).pipe(Effect.asVoid),
+          });
+          expect(
+            yield* Effect.promise(() =>
+              renderer.requestFeature({
+                workspaceId: f.workspaceId,
+                machineId: f.machineId,
+                method: 'code-collab/open-text',
+                params: { sessionId: f.input.sessionId, path: 'synthetic.txt' },
+              })
+            )
+          ).toEqual({ ok: true, result: outcome });
+          expect(
+            yield* Effect.promise(() =>
+              client.requestCodeCollabOpenText({
+                sessionId: f.input.sessionId,
+                path: 'synthetic.txt',
+                timeoutMs: 60000,
+              })
+            )
+          ).toEqual(outcome);
+          const before = streams.writes.length;
+          yield* Effect.promise(async () => {
+            await expect(
+              renderer.requestFeature({
+                workspaceId: f.workspaceId,
+                machineId: f.machineId,
+                method: 'code-collab/publish-index',
+                params: { sessionId: f.input.sessionId },
+              } as never)
+            ).rejects.toThrow();
+          });
+          expect(streams.writes.length).toBe(before);
+          expect(
+            yield* Effect.promise(() =>
+              client.requestCodeCollabOpenText({
+                sessionId: f.input.sessionId,
+                path: 'synthetic.txt',
+                timeoutMs: 60000,
+              })
+            )
+          ).toEqual(outcome);
+          expect(JSON.stringify(streams.writes)).not.toContain('PRIVATE_READ_CANARY');
+          yield* Effect.promise(() => renderer.close());
+        })
+      )
+    );
+    expect(streams.activeReads()).toBe(0);
+  } finally {
+    client.stop();
+    server.stop();
     await renderer.close();
     vi.useRealTimers();
   }

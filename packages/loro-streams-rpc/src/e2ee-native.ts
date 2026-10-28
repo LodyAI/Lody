@@ -14,6 +14,7 @@ import {
 import { E2eeRpcOriginals } from './e2ee-node-store';
 import { makeE2eeFeatureRpcNative } from './e2ee-feature-native';
 import { e2eeRpcResource, e2eeRpcResponseStream } from './e2ee-resource';
+import { isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
 import type {
   E2eeDispatchInput,
   E2eePreparedDispatch,
@@ -122,9 +123,33 @@ export function makeE2eeRpcNative(options: {
       opened.plaintext.fill(0);
     }
   });
+  const requireDispatchWriter = Effect.fnUntraced(function* () {
+    const state = (yield* options.ledger()).inspectState();
+    const device = state.devices.get(options.requesterDevice);
+    const member = device && state.members.get(hex(device.membershipId.toBytes()));
+    if (!device || device.kind === 'recovery' || !member || member.role === 'guest')
+      return yield* Effect.fail(new Error('e2ee_rpc_denied'));
+    return yield* Effect.void;
+  });
+  const authorizeRequest = Effect.fnUntraced(function* (
+    input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput
+  ) {
+    if (!isE2eeReadQuery(input.request.method, input.request.params))
+      return yield* requireDispatchWriter();
+    const state = (yield* options.ledger()).inspectState();
+    const device = state.devices.get(options.requesterDevice);
+    if (
+      !device ||
+      device.kind === 'recovery' ||
+      !state.members.has(hex(device.membershipId.toBytes()))
+    )
+      return yield* Effect.fail(new Error('e2ee_rpc_denied'));
+    return yield* Effect.void;
+  });
   const prepareDispatch = (machineId: string, input: E2eeDispatchInput) =>
     Effect.scoped(
       Effect.gen(function* () {
+        yield* requireDispatchWriter();
         const args = yield* attempt(() => normalizeInput(input));
         const signer = yield* targetSigner(machineId);
         let saved = yield* attempt(() => options.originals.read('sent', key(args)));
@@ -215,7 +240,7 @@ export function makeE2eeRpcNative(options: {
         }
       })
     );
-  const features = makeE2eeFeatureRpcNative({ ...options, targetSigner });
+  const features = makeE2eeFeatureRpcNative({ ...options, targetSigner, authorizeRequest });
   return {
     ...features,
     /** Terminal native store cleanup; failed owners remain available for another close attempt. */

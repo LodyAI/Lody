@@ -214,7 +214,8 @@ export interface E2eeWorkspaceRuntime {
   contentStreamsToken(
     workspaceId: string,
     rejectedToken?: string,
-    requestSnapshotFor?: string
+    requestSnapshotFor?: string,
+    rpcOnly?: true
   ): Promise<import('@lody/cloud-api').E2eeContentToken>;
   seal(
     workspaceId: string,
@@ -230,7 +231,7 @@ export interface E2eeWorkspaceRuntime {
     workspaceId: string,
     input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput,
     frame: string
-  ): Promise<import('@lody/shared/e2ee-rpc').E2eeFeatureResponsePart>;
+  ): Promise<import('@lody/shared/local-machine-rpc').LocalMachineRpcResponse | null>;
   prepareDispatch?(
     workspaceId: string,
     targetMachineId: string,

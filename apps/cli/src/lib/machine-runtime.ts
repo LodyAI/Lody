@@ -1,3 +1,5 @@
+import { isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
+import type { EncryptedFeatureContext } from './e2ee/feature-rpc';
 import {
   type LocalSessionControlRequestValidated,
   type LocalSessionControlResponse,
@@ -41,7 +43,8 @@ export class MachineRuntime {
   }
   /** Verified encrypted feature ingress reuses same-member machine authority. */
   async handleEncryptedFeatureRpc(
-    request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest
+    request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest,
+    context?: EncryptedFeatureContext
   ) {
     const config = this.options.handlerConfig;
     if (
@@ -52,6 +55,10 @@ export class MachineRuntime {
       throw new Error('e2ee_feature_scope');
     if ('requestedByUserId' in request.params && request.params.requestedByUserId !== config.userId)
       throw new Error('e2ee_feature_requester');
+    if (isE2eeReadQuery(request.method, request.params)) {
+      if (!context) throw new Error('e2ee_rpc_unavailable');
+      return this.requireHandler().readEncryptedMachineRequest(request, context);
+    }
     return this.dispatchLocalMachineRpc(request);
   }
   private handler: MessageHandler | null = null;

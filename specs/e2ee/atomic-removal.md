@@ -1,6 +1,6 @@
 # Member removal and staged epoch publication
 
-Status: draft
+Status: approved · [approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md)
 Translation: current
 
 [中文](atomic-removal.zh.md)
@@ -98,8 +98,7 @@ force a malicious publisher to make usable ciphertext or preserve it forever.
 
 ## Approval and evidence
 
-The design direction above is supplied by the user; this revised Spec remains
-**draft for approval**. It does not enable production, select vault/native custody,
+The user approved this revised Spec on 2026-10-28. It does not enable production, select vault/native custody,
 strict B, account recovery or an MLS replacement. See [producer and replay](../../packages/e2ee-core/src/internal/ledger/ADMISSION.md),
 [staging port](../../packages/e2ee-core/src/internal/keys/staging.ts),
 [rotation workflow](../../packages/e2ee-core/src/internal/keys/publisher.ts) and

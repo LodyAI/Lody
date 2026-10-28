@@ -72,7 +72,7 @@ export type HistoryAction =
   | { kind: 'upsert-turn'; turn: SessionEntry; beforeTurnId?: string; beforeLastUser?: boolean }
   | { kind: 'remove-turn'; turnId: string }
   | { kind: 'agent-warning'; turn: SessionEntry; message: string }
-  | { kind: 'file-backfilled'; fileId: string; relayFileId: string };
+  | { kind: 'file-backfilled'; fileId: string; relayFileId: string; encryption?: import('../encrypted-attachment').EncryptedAttachment };
 
 /** Which actions can be committed by reading exactly one body. */
 export function historyActionTarget(action: HistoryAction): string | undefined {
@@ -322,6 +322,7 @@ export function applyHistoryAction(
         for (const item of entry.items ?? []) {
           if (item.type === 'file' && item.fileId === action.fileId && item.transport === 'local') {
             item.fileId = action.relayFileId;
+            if (action.encryption) item.encryption = action.encryption;
             item.transport = 'r2';
             delete item.machineId;
             matched = true;

@@ -11,6 +11,7 @@ import {
   scheduleDefinitionFingerprint,
   scheduleRegistryKeys,
   ScheduleRuntimeRowSchema,
+  type ScheduleAuthorizationRequest,
   type SessionId,
   type SessionMeta,
   type WorkspaceId,
@@ -63,6 +64,7 @@ export async function createScheduleWorkspace(args: {
   workspace: WorkspaceSummary;
   auth: AuthContext;
   localOnly: boolean;
+  authorize?: (request: ScheduleAuthorizationRequest) => Promise<boolean>;
   slots: AgentExecutionSlots;
   logger: Logger;
   hasSessionWork: (sessionId: SessionId) => boolean;
@@ -150,6 +152,8 @@ export async function createScheduleWorkspace(args: {
     now: getServerNow,
     disabled: () => disabled || disposed,
     ready: isReady,
+    encrypted: workspace.contentMode === 'e2ee',
+    authorize: args.authorize,
     list: () => repository.list(),
     read: async (id) => {
       if (!args.localOnly)
@@ -209,6 +213,12 @@ export async function createScheduleWorkspace(args: {
         scheduleId: run.scheduleId,
         turnId: prepared.userTurn.id,
         title: notificationLabel(run.definition.title) ?? '',
+        ...(workspace.contentMode === 'e2ee'
+          ? {
+              definitionFingerprint: run.definitionFingerprint,
+              ...(run.manual ? { manualRunKey: run.runKey } : {}),
+            }
+          : {}),
       };
       prepared.source = {
         id: run.sourceEntryId,

@@ -1,4 +1,9 @@
-import { readProjectDefaultMcpIds, syncMcpCatalog } from '@/lib/workspace-mcp-store';
+import {
+  readProjectDefaultMcpIds,
+  syncMcpCatalog,
+  waitForMcpDefaultCatalog,
+} from '@/lib/workspace-mcp-store';
+import { getDaemonWorkspace } from '@/lib/session-command-environment';
 import { normalizeMcpServerIdSelection, resolveSessionConversationConfig } from '@lody/shared';
 import {
   getMachineRoomId,
@@ -3426,7 +3431,16 @@ export async function resolveEffectiveSessionCreateDispatchConfig(args: {
     dispatchConfig.mcpServerIds !== undefined
       ? [...dispatchConfig.mcpServerIds]
       : await (async () => {
-          if (!args.localOnly) await syncMcpCatalog(args.manager, args.workspaceId);
+          if (!args.localOnly) {
+            if (
+              getDaemonWorkspace()?.manager === args.manager ||
+              args.manager.hasWorkspaceCatalogReader?.()
+            ) {
+              await waitForMcpDefaultCatalog(args.manager, args.workspaceId);
+            } else {
+              await syncMcpCatalog(args.manager, args.workspaceId);
+            }
+          }
           return readProjectDefaultMcpIds(
             args.manager.repo,
             args.workspaceId,
@@ -3736,7 +3750,10 @@ export async function prepareSessionInput(
         ? {
             relay: createCommandAttachmentTransfer(
               auth.token,
-              Boolean(getSessionCommandEnvironment())
+              Boolean(getSessionCommandEnvironment()),
+              manager.isEncryptedWorkspace()
+                ? { token: () => manager.getEncryptedAttachmentToken() }
+                : undefined
             ),
           }
         : {}),
@@ -4101,7 +4118,10 @@ export async function sendSessionChatResult(
         ? {
             relay: createCommandAttachmentTransfer(
               auth.token,
-              Boolean(getSessionCommandEnvironment())
+              Boolean(getSessionCommandEnvironment()),
+              manager.isEncryptedWorkspace()
+                ? { token: () => manager.getEncryptedAttachmentToken() }
+                : undefined
             ),
           }
         : {}),

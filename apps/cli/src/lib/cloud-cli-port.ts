@@ -196,6 +196,10 @@ export function createCloudE2eePort(
     });
   const tokenSchema = z.object({
     token: z.string().min(1),
+    attachmentToken: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
     bucketId: z.string().min(1),
     gatewayBaseUrl: z.string().url(),
     expiresIn: z.number().int().positive().max(900),
@@ -555,11 +559,12 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
 /** One-shot command composition; local builds never construct a cloud transfer. */
 export function createCommandAttachmentTransfer(
   token: string,
-  localWorkspace = false
+  localWorkspace = false,
+  encrypted?: { token(): Promise<string> }
 ): SessionAttachmentTransfer | undefined {
   if (localWorkspace || getCliPlatformKind() === 'local') return undefined;
   if (!LODY_SERVER_URL?.trim()) throw new Error('cloud_attachment_upload_unavailable');
-  return new SessionAttachmentTransfer(token, LODY_SERVER_URL);
+  return new SessionAttachmentTransfer(token, LODY_SERVER_URL, encrypted);
 }
 
 /** A cloud machine authenticated only to one admitted encrypted workspace. No account APIs. */
@@ -570,10 +575,13 @@ export function createCloudE2eeMachinePort(options: {
   machineId: string;
   credential: string;
   authBaseUrl: string;
+  serverBaseUrl: string;
   logger: Logger;
   client?: Pick<ConvexClient, 'onUpdate' | 'query' | 'close'>;
 }): CloudPort {
   if (getCliPlatformKind() !== 'cloud') throw new Error('e2ee_unavailable');
+  const serverBaseUrl = options.serverBaseUrl.trim();
+  if (!serverBaseUrl) throw new Error('cloud_attachment_upload_unavailable');
   const base = createLocalCloudPort({ identity: { userId: options.accountId }, workspaces: [] });
   const client = options.client ?? new ConvexClient(options.authBaseUrl, { logger: false });
   const access = {
@@ -612,6 +620,7 @@ export function createCloudE2eeMachinePort(options: {
     ...base,
     kind: 'cloud',
     e2eeMachineScope: { workspaceId: options.workspaceId, genesisHash: options.genesisHash },
+    attachmentUpload: { serverBaseUrl },
     e2ee: {
       ...e2ee,
       ...(readExecutionOriginPage

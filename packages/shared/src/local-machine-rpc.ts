@@ -1,4 +1,5 @@
 import { SessionFileRootIdSchema } from './project-path';
+import { FileDownloadRequestSchema, FileDownloadResponseSchema } from './file-download';
 import { ProjectLocalMemberProbeSchema } from './workspace-project';
 import { MemoryProviderRequestSchema, MemoryProviderResponseSchema } from './memory-provider';
 import {
@@ -34,6 +35,9 @@ import {
 } from './code-collab';
 import { FilePreviewV3RequestSchema, FilePreviewV3ResponseSchema } from './file-preview';
 import {
+  MachineStatusResponseSchema,
+  MachinePingResponseSchema,
+  MachineAcpBinaryStatusResponseSchema,
   SessionCancelResponseSchema,
   SessionDispatchTurnResponseSchema,
   SessionEditAndResendResponseSchema,
@@ -113,6 +117,27 @@ export const SessionToolResultSchema = z
   .strict();
 
 export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('machine/status'),
+    params: z.object({}).strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('machine/ping'),
+    params: z.object({ requestId: z.string().trim().min(1) }).strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('machine/acp-binary-status'),
+    params: z.object({ agentType: z.string().trim().min(1) }).strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/live-status'),
+    params: z.object({ sessionId: z.string().trim().min(1) }).strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('file/download-chunk'),
+    params: FileDownloadRequestSchema,
+  }).strict(),
+
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('project/probe-local-member'),
     params: z.object({ localProjectId: z.string().trim().min(1) }).strict(),
@@ -380,7 +405,38 @@ export const ProjectProbeLocalMemberResultSchema = ProjectLocalMemberProbeSchema
 
 export type ProjectProbeLocalMemberResult = z.infer<typeof ProjectProbeLocalMemberResultSchema>;
 
+const SessionLiveStateSchema = z.enum(['idle', 'initializing', 'running', 'waiting', 'unknown']);
+
+export const SessionLiveStatusResponseSchema = z.discriminatedUnion('success', [
+  z
+    .object({
+      type: z.literal('session/live-status_response'),
+      machineId: z.string().trim().min(1),
+      sessionId: z.string().trim().min(1),
+      success: z.literal(true),
+      state: SessionLiveStateSchema,
+      observedAtMs: z.number().finite().nonnegative(),
+      reason: z.string().trim().min(1).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('session/live-status_response'),
+      machineId: z.string().trim().min(1),
+      sessionId: z.string().trim().min(1),
+      success: z.literal(false),
+      state: z.literal('unknown'),
+      error: z.string().trim().min(1),
+    })
+    .strict(),
+]);
+
 export const LocalMachineRpcResultSchema = z.union([
+  MachineStatusResponseSchema,
+  MachinePingResponseSchema,
+  MachineAcpBinaryStatusResponseSchema,
+  SessionLiveStatusResponseSchema,
+  FileDownloadResponseSchema,
   ProjectProbeLocalMemberResultSchema,
   MemoryProviderResponseSchema,
   IosSimulatorResponseSchema,
@@ -429,6 +485,11 @@ export const LocalMachineRpcResponseSchema = z.union([
     .object({
       ok: z.literal(false),
       error: z.string().trim().min(1),
+      code: z
+        .string()
+        .regex(/^[A-Za-z0-9_-]{1,64}$/)
+        .optional(),
+      data: z.unknown().optional(),
     })
     .strict(),
 ]);

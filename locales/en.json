@@ -4513,6 +4513,7 @@
   "billing.subscribeConsentTerms": "Terms of Service",
   "orchestration.operationCompleted": "Operation completed",
   "orchestration.operationFailed": "Operation failed",
+  "orchestration.operationPartialResult": "{{succeeded}} succeeded · {{failed}} failed · {{cancelled}} cancelled",
   "orchestration.operationCancelled": "Operation cancelled",
   "sessions.turnConfig.tooltipEmpty": "No run configuration recorded for this turn",
   "sessions.turnConfig.tooltip": "View turn configuration",

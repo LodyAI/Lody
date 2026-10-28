@@ -626,6 +626,7 @@ export const uploadSessionFile = async (
   args: UploadSessionFileArgs
 ): Promise<SessionFilePayload> => {
   requireWorkspaceFeature(args.content, 'attachments');
+  if (args.content.mode === 'protected') throw new Error('e2ee_attachment_requires_preparation');
   // Defensive re-check; the composer validates (and translates) before upload.
   const validationError = validateSessionFile(args.file);
   if (validationError === 'empty') {

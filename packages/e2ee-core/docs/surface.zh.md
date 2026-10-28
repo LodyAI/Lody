@@ -58,6 +58,8 @@
 | 报告         | `installationBody`, `installationSigningBytes`, `encodeInstallationReport`, `decodeInstallationReport`, `authenticateInstallationReport`, `checkInstallationContext`, `checkLocalPublication`, `envelopeRouting`, `mailboxDigest`, `slotId`, `MailboxSlot`, `InstallationSource`, `InstallationContext`                                                                                                                                                                                                                                      |
 | 恢复         | `generateRecoveryPackage`, `importRecoveryIdentity`, `parseRecoveryFile`, `wipeRecoveryPackage`, `verifiedPasskeyPrf`, `disposePrf`, `ownVaultCiphertext`, `vaultCiphertextDigest`, `sameVaultCiphertext`, `RecoveryVaultError`, `RecoveryIdentity`, `RecoveryPrivatePackage`, `VerifiedPasskeyPrf`, `VaultCiphertext`                                                                                                                                                                                                                       |
 
+| Machine sharing | `verifyMachineSharingGeneration`, `VerifiedMachineSharingGeneration`, `MachineSharingAdmission`, `updateMachineSharingState`, `encodeMachineSharingPolicy`, `decodeMachineSharingPolicy`, `machineSharingContentScope`, `machineSharingDigest`, `sealMachineSharingPolicy`, `openMachineSharingPolicy`, `verifyMachineSharingHistoryStep`, `readMachineSharingHistoryStep`, `authorizeMachineExecution`, `MachineSharingBinding`, `MachineSharingState`, `MachineSharingChange`, `MachineSharingPolicy`, `MachineSharingHead`, `MachineSharingHistoryStep`, `VerifiedMachineSharingPolicy`, `MachineExecutionDecision` |
+
 ## `@lody/e2ee-core/host` — 后端合同
 
 | 分组                | 导出                                                                                                                                                                                                                                                                                                     |
@@ -68,6 +70,8 @@
 | 文档准入            | `admitDocument`, `admitStreamsUpdateBatch`, `admitStreamsUpdateBatchEffect`, `admitStreamsSnapshot`, `admitStreamsSnapshotEffect`, `authenticateStreamsSnapshotEffect`, `StreamsRecordBoundary`, `StreamsRecordBoundaryPort`                                                                             |
 | 端口类型            | `KeyMailbox`, `KeyMailboxStatus`, `EpochStagingStore`                                                                                                                                                                                                                                                    |
 | 恢复 vault 线上合同 | `RecoveryVaultCiphertextDto`, `RecoveryVaultPutRequest`, `RecoveryVaultReadRequest`, `RecoveryVaultIndexReadRequest`, `RecoveryVaultIndexCasRequest`, `RecoveryVaultIndexCasReply`, `RecoveryVaultDeleteRequest`, `encodeRecoveryVaultCiphertext`, `decodeRecoveryVaultCiphertext`, `RecoveryVaultStore` |
+
+| Machine sharing admission | `admitMachineSharingFrame` |
 
 ## `@lody/e2ee-core/adapters/node-sqlite`
 

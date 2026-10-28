@@ -133,6 +133,39 @@ function makeWorkspaceWatchCoordinator(): {
   };
 }
 
+it('reads encrypted file content without starting watchers or publishing an index', async () => {
+  await withWorkspace(async (workspaceRoot) => {
+    await writeFile(path.join(workspaceRoot, 'readonly.txt'), 'synthetic original');
+    const publish = collectPublishedSharedStates();
+    const watch = makeWorkspaceWatchCoordinator();
+    const service = new CodeCollabV2Service({
+      readOnly: true,
+      resolveWorkspace: makeResolver(workspaceRoot),
+      workspaceWatchCoordinator: watch.coordinator,
+      ...publish,
+    });
+    try {
+      const first = await service.openText({ sessionId: SESSION_ID, path: 'readonly.txt' });
+      expect(first.status).toBe('ok');
+      expect(
+        await service.refreshText({
+          sessionId: SESSION_ID,
+          path: 'readonly.txt',
+          digest: first.digest,
+        })
+      ).toMatchObject({ status: 'up_to_date' });
+      expect(activeWorkspaceWatchCount(service)).toBe(0);
+      expect(publish.published).toEqual([]);
+      expect(publish.signals).toEqual([]);
+      expect(await readFile(path.join(workspaceRoot, 'readonly.txt'), 'utf8')).toBe(
+        'synthetic original'
+      );
+    } finally {
+      await service.dispose();
+    }
+  });
+});
+
 describe('CodeCollabV2Service text RPC boundary', () => {
   it('uses the configured refresh deadline, cancels publication and lets a queued refresh publish newer files', async () => {
     await withWorkspace(async (workspaceRoot) => {

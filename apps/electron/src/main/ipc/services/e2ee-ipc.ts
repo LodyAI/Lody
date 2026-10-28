@@ -1386,7 +1386,8 @@ export class E2eeIpc extends IpcService {
   async contentStreamsToken(
     workspaceId: string,
     rejectedToken?: string,
-    requestSnapshotFor?: string
+    requestSnapshotFor?: string,
+    rpcOnly?: true
   ) {
     const id = sender()
     const access = await withDesktopE2eeAccount(
@@ -1410,7 +1411,8 @@ export class E2eeIpc extends IpcService {
         workspaceId,
         credential: access.credential,
         ...(rejectedToken ? { rejectedToken } : {}),
-        ...(requestSnapshotFor ? { requestSnapshotFor } : {})
+        ...(requestSnapshotFor ? { requestSnapshotFor } : {}),
+        ...(rpcOnly ? { rpcOnly } : {})
       })
     ).catch((error) => {
       if (error instanceof E2eeMemberRemovedError) return this.removeLocalWorkspace(access)

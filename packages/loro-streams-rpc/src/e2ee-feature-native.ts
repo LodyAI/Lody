@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { Clock, Effect, type Scope } from 'effect';
+import { Clock, Effect, Semaphore, type Scope } from 'effect';
 import { z } from 'zod';
 import type { makeRealtimeContentBinding } from '@lody/e2ee-core/adapters/loro-streams';
 import {
   E2eeFeatureInputSchema,
   isE2eeFeatureMethod,
+  isE2eeReadQuery,
   type E2eeFeatureInput,
 } from '@lody/shared/e2ee-rpc';
 import {
@@ -20,6 +21,13 @@ import {
   E2EE_RPC_MAX_FRAME_BYTES,
 } from './e2ee-wire';
 import { e2eeRpcResource } from './e2ee-resource';
+import {
+  E2EE_FEATURE_CHUNK_BYTES as chunkBytes,
+  E2EE_FEATURE_MAX_REQUEST_BYTES,
+  E2EE_FEATURE_MAX_RESULT_BYTES,
+  encodeFeatureResponsePage,
+  decodeFeatureResponsePage,
+} from './e2ee-feature-parts';
 import type { E2eeRpcOriginals } from './e2ee-node-store';
 
 type OpenedFeature = {
@@ -43,14 +51,14 @@ const digest = (frame: Uint8Array) => Uint8Array.from(createHash('sha256').updat
 const key = (input: E2eeFeatureInput) => `feature:${input.requestId}`;
 const canonical = (input: unknown) =>
   E2eeFeatureInputSchema.parse(JSON.parse(JSON.stringify(input)));
-const chunkBytes = 256 * 1024;
-export const E2EE_FEATURE_MAX_RESULT_BYTES = 32 * 1024 * 1024;
+export { E2EE_FEATURE_MAX_RESULT_BYTES } from './e2ee-feature-parts';
 
 /** Existing RPC wire/key domain, with a fixed product-method allowlist. No arbitrary signing. */
 export function makeE2eeFeatureRpcNative(options: {
   workspaceId: string;
   requesterDevice: string;
   originals: E2eeRpcOriginals;
+  authorizeRequest: (input: E2eeFeatureInput) => Effect.Effect<void, unknown>;
   targetSigner: (machineId: string) => Effect.Effect<string, unknown>;
   binding: (resource: string) => Effect.Effect<Binding, unknown, Scope.Scope>;
 }) {
@@ -91,7 +99,7 @@ export function makeE2eeFeatureRpcNative(options: {
       try {
         if (body.method === 'session/dispatch-turn') return null;
         if (
-          !isE2eeFeatureMethod(body.method) ||
+          (!isE2eeFeatureMethod(body.method) && !isE2eeReadQuery(body.method, undefined)) ||
           body.params.length < 9 ||
           body.params.length > chunkBytes + 8
         )
@@ -139,14 +147,15 @@ export function makeE2eeFeatureRpcNative(options: {
         (part.requestId !== first.requestId ||
           part.method !== first.method ||
           part.requesterDevice !== first.requesterDevice ||
-          part.expiresAt !== first.expiresAt)
+          part.expiresAt !== first.expiresAt ||
+          part.epoch !== first.epoch)
       )
         return yield* Effect.fail(new Error('e2ee_feature_part_binding'));
       parts.push(part);
       length += part.bytes.length;
     }
     const first = parts[0];
-    if (!first || length > E2EE_FEATURE_MAX_RESULT_BYTES)
+    if (!first || length > E2EE_FEATURE_MAX_REQUEST_BYTES)
       return yield* Effect.fail(new Error('e2ee_feature_size'));
     const bytes = new Uint8Array(length);
     let offset = 0;
@@ -197,7 +206,10 @@ export function makeE2eeFeatureRpcNative(options: {
     part.bytes.fill(0);
     const now = yield* Clock.currentTimeMillis;
     for (const [id, saved] of incoming) if (saved.expiresAt <= now) discard(id);
-    if (part.expiresAt <= now || part.expiresAt > now + 900_000)
+    if (
+      part.expiresAt <= now ||
+      part.expiresAt > now + (isE2eeReadQuery(part.method, undefined) ? 60_000 : 900_000)
+    )
       return yield* Effect.fail(new Error('e2ee_feature_expiry'));
     if (part.count === 1) return yield* openFrames(machineId, [frameHex]);
     const id = JSON.stringify([machineId, part.requesterDevice, part.requestId]);
@@ -215,7 +227,7 @@ export function makeE2eeFeatureRpcNative(options: {
     )
       return yield* Effect.fail(new Error('e2ee_feature_part_conflict'));
     if (!previous) {
-      if (incomingSize + part.frame.length > E2EE_FEATURE_MAX_RESULT_BYTES)
+      if (incomingSize + part.frame.length > E2EE_FEATURE_MAX_REQUEST_BYTES)
         return yield* Effect.fail(new Error('e2ee_feature_busy'));
       saved.frames.set(part.index, frameHex);
       saved.size += part.frame.length;
@@ -228,6 +240,7 @@ export function makeE2eeFeatureRpcNative(options: {
   });
   const prepareFeature = Effect.fnUntraced(function* (input: E2eeFeatureInput) {
     const args = yield* attempt(() => canonical(input));
+    yield* options.authorizeRequest(args);
     if (args.request.workspaceId !== options.workspaceId)
       return yield* Effect.fail(new Error('e2ee_feature_scope'));
     const machineId = args.request.machineId;
@@ -238,7 +251,7 @@ export function makeE2eeFeatureRpcNative(options: {
       const bytes = yield* attempt(() => new TextEncoder().encode(JSON.stringify(args)));
       const frames: Uint8Array[] = [];
       try {
-        if (bytes.length > E2EE_FEATURE_MAX_RESULT_BYTES)
+        if (bytes.length > E2EE_FEATURE_MAX_REQUEST_BYTES)
           return yield* Effect.fail(new Error('e2ee_feature_size'));
         const count = Math.ceil(bytes.length / chunkBytes);
         const binding = yield* options.binding(e2eeRpcResource(machineId));
@@ -252,7 +265,9 @@ export function makeE2eeFeatureRpcNative(options: {
           const body = yield* attempt(() =>
             encodeE2eeRpcRequestBody({
               requestId: Uint8Array.from(Buffer.from(args.requestId, 'hex')),
-              expiresAt: now + 900_000,
+              expiresAt:
+                now +
+                (isE2eeReadQuery(args.request.method, args.request.params) ? 60_000 : 900_000),
               method: args.request.method,
               params,
             })
@@ -285,6 +300,7 @@ export function makeE2eeFeatureRpcNative(options: {
       !isDeepStrictEqual(checked.input, args)
     )
       return yield* Effect.fail(new Error('e2ee_rpc_intent_conflict'));
+    yield* options.authorizeRequest(args);
     return {
       requestId: args.requestId,
       targetMachineId: machineId,
@@ -295,45 +311,173 @@ export function makeE2eeFeatureRpcNative(options: {
     };
   });
   type Opened = NonNullable<Effect.Success<ReturnType<typeof openFeature>>>;
-  const sealFeatureResult = Effect.fnUntraced(function* (
-    machineId: string,
+  const resultKey = (request: Opened) => `feature-response:${hex(digest(request.frame))}`;
+  const verifyPage = Effect.fnUntraced(function* (
     request: Opened,
-    result: LocalMachineRpcResponse
+    frame: Uint8Array,
+    signer: string
   ) {
-    const bytes = yield* attempt(() =>
-      new TextEncoder().encode(JSON.stringify(LocalMachineRpcResponseSchema.parse(result)))
-    );
+    const binding = yield* options.binding(e2eeRpcResource(request.input.request.machineId));
+    const opened = yield* binding.openResponse(frame, signer, request.epoch);
     try {
-      if (bytes.length > E2EE_FEATURE_MAX_RESULT_BYTES)
-        return yield* Effect.fail(new Error('e2ee_feature_result_too_large'));
-      const binding = yield* options.binding(e2eeRpcResource(machineId));
-      const frames: Uint8Array[] = [];
-      for (let offset = 0; offset < bytes.length; offset += chunkBytes) {
-        const body = yield* attempt(() =>
-          encodeE2eeRpcResponseBody({
-            requestId: Uint8Array.from(Buffer.from(request.requestId, 'hex')),
-            requestDigest: digest(request.frame),
-            sequence: frames.length,
-            kind: offset + chunkBytes >= bytes.length ? 'success' : 'progress',
-            payload: bytes.subarray(offset, offset + chunkBytes),
-          })
-        );
-        try {
-          frames.push(yield* binding.sealResponse(body, request.epoch));
-        } finally {
-          body.fill(0);
-        }
+      const response = yield* attempt(() => decodeE2eeRpcResponseBody(opened.plaintext));
+      try {
+        if (
+          hex(response.requestId) !== request.requestId ||
+          hex(response.requestDigest) !== hex(digest(request.frame))
+        )
+          return yield* Effect.fail(new Error('e2ee_rpc_response_binding'));
+        const page = yield* attempt(() => decodeFeatureResponsePage(response));
+        return { sequence: response.sequence, page } as const;
+      } finally {
+        response.payload.fill(0);
       }
-      return frames;
     } finally {
-      bytes.fill(0);
+      opened.plaintext.fill(0);
     }
   });
+  const completeResponse = Effect.fnUntraced(function* (
+    request: Opened,
+    storageKey: string,
+    signer: string,
+    requireComplete = false
+  ) {
+    const first = yield* attempt(() => options.originals.readResponse(storageKey, 0));
+    if (!first) return null;
+    const head = yield* verifyPage(request, first, signer);
+    if (head.sequence !== 0) return yield* Effect.fail(new Error('e2ee_feature_page'));
+    const chunks = [head.page.bytes];
+    const frames = [first];
+    try {
+      for (let sequence = 1; sequence < head.page.totalPages; sequence++) {
+        const frame = yield* attempt(() => options.originals.readResponse(storageKey, sequence));
+        if (!frame) {
+          if (requireComplete)
+            return yield* Effect.fail(new Error('e2ee_feature_response_missing'));
+          return null;
+        }
+        const next = yield* verifyPage(request, frame, signer);
+        chunks.push(next.page.bytes);
+        if (
+          next.sequence !== sequence ||
+          next.page.totalPages !== head.page.totalPages ||
+          next.page.totalBytes !== head.page.totalBytes
+        )
+          return yield* Effect.fail(new Error('e2ee_feature_page'));
+        frames.push(frame);
+      }
+      const bytes = new Uint8Array(head.page.totalBytes);
+      try {
+        let offset = 0;
+        for (const chunk of chunks) {
+          bytes.set(chunk, offset);
+          offset += chunk.length;
+        }
+        if (offset !== bytes.length) return yield* Effect.fail(new Error('e2ee_feature_page'));
+        const outcome = yield* attempt(() =>
+          LocalMachineRpcResponseSchema.parse(
+            JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
+          )
+        );
+        return { frames, outcome };
+      } finally {
+        bytes.fill(0);
+      }
+    } finally {
+      for (const chunk of chunks) chunk.fill(0);
+    }
+  });
+  const pending = new Map<string, Uint8Array[]>();
+  const sealing = Semaphore.makeUnsafe(1);
+  const sealFeatureResult = (machineId: string, request: Opened, result: LocalMachineRpcResponse) =>
+    sealing.withPermits(1)(
+      Effect.uninterruptible(
+        Effect.scoped(
+          Effect.gen(function* () {
+            if ((yield* options.targetSigner(machineId)) !== options.requesterDevice)
+              return yield* Effect.fail(new Error('e2ee_rpc_target_changed'));
+            const responseId = resultKey(request);
+            const saved = yield* completeResponse(
+              request,
+              responseId,
+              options.requesterDevice,
+              true
+            );
+            if (saved) {
+              pending.delete(responseId);
+              return saved.frames;
+            }
+            let frames = pending.get(responseId);
+            if (!frames) {
+              if (pending.size >= 32) {
+                // Retry retained ciphertext only. Abandoned callers must not leave
+                // recoverable outbox faults consuming every later request slot.
+                for (const [id, retained] of pending) {
+                  const persisted = yield* attempt(() =>
+                    options.originals.retainResponsePages(id, retained)
+                  ).pipe(
+                    Effect.as(true),
+                    Effect.catch(() => Effect.succeed(false))
+                  );
+                  if (persisted) {
+                    pending.delete(id);
+                    break;
+                  }
+                }
+              }
+              if (pending.size >= 32) return yield* Effect.fail(new Error('e2ee_feature_busy'));
+              let outcome = yield* attempt(() => LocalMachineRpcResponseSchema.parse(result));
+              let bytes = yield* attempt(() => new TextEncoder().encode(JSON.stringify(outcome)));
+              if (bytes.length > E2EE_FEATURE_MAX_RESULT_BYTES) {
+                const totalBytes = bytes.length;
+                bytes.fill(0);
+                outcome = {
+                  ok: false,
+                  error: 'Query exceeds 16 MiB. Request a smaller page or range.',
+                  code: 'e2ee_query_too_large',
+                  data: { truncated: true, totalBytes, maxBytes: E2EE_FEATURE_MAX_RESULT_BYTES },
+                };
+                bytes = new TextEncoder().encode(JSON.stringify(outcome));
+              }
+              frames = [];
+              const binding = yield* options.binding(e2eeRpcResource(machineId));
+              try {
+                const count = Math.ceil(bytes.length / chunkBytes);
+                for (let sequence = 0; sequence < count; sequence++) {
+                  const payload = encodeFeatureResponsePage(bytes, sequence);
+                  const body = encodeE2eeRpcResponseBody({
+                    requestId: Uint8Array.from(Buffer.from(request.requestId, 'hex')),
+                    requestDigest: digest(request.frame),
+                    sequence,
+                    kind: sequence === count - 1 ? 'success' : 'progress',
+                    payload,
+                  });
+                  try {
+                    frames.push(yield* binding.sealResponse(body, request.epoch));
+                  } finally {
+                    body.fill(0);
+                    payload.fill(0);
+                  }
+                }
+              } finally {
+                bytes.fill(0);
+              }
+              pending.set(responseId, frames);
+            }
+            const originals = frames;
+            yield* attempt(() => options.originals.retainResponsePages(responseId, originals));
+            pending.delete(responseId);
+            return originals;
+          })
+        )
+      )
+    );
   const acceptFeatureResponse = Effect.fnUntraced(function* (
     input: E2eeFeatureInput,
     frameHex: string
   ) {
     const args = yield* attempt(() => canonical(input));
+    yield* options.authorizeRequest(args);
     const saved = yield* attempt(() => options.originals.read('sent', key(args)));
     if (
       !saved ||
@@ -343,7 +487,6 @@ export function makeE2eeFeatureRpcNative(options: {
       return yield* Effect.fail(new Error('e2ee_rpc_original_missing'));
     const original = yield* openFrames(saved.target, unpackFrames(saved.frame));
     if (
-      !original ||
       original.requesterDevice !== options.requesterDevice ||
       !isDeepStrictEqual(original.input, args)
     )
@@ -351,37 +494,54 @@ export function makeE2eeFeatureRpcNative(options: {
     const frame = yield* attempt(() =>
       Uint8Array.from(Buffer.from(frameSchema.parse(frameHex), 'hex'))
     );
-    const binding = yield* options.binding(e2eeRpcResource(saved.target));
-    const opened = yield* binding.openResponse(frame, saved.signer, original.epoch);
-    try {
-      const response = yield* attempt(() => decodeE2eeRpcResponseBody(opened.plaintext));
-      try {
-        if (
-          hex(response.requestId) !== args.requestId ||
-          hex(response.requestDigest) !== hex(digest(saved.frame)) ||
-          response.sequence >= E2EE_FEATURE_MAX_RESULT_BYTES / chunkBytes ||
-          response.kind === 'error' ||
-          response.payload.length > chunkBytes
-        )
-          return yield* Effect.fail(new Error('e2ee_rpc_response_binding'));
-        yield* attempt(() => options.originals.retainResponse(key(args), response.sequence, frame));
-        return {
-          sequence: response.sequence,
-          final: response.kind === 'success',
-          bytes: Uint8Array.from(response.payload),
-        };
-      } finally {
-        response.payload.fill(0);
-      }
-    } finally {
-      opened.plaintext.fill(0);
-    }
+    const checked = yield* verifyPage(original, frame, saved.signer);
+    checked.page.bytes.fill(0);
+    yield* attempt(() => options.originals.retainResponse(key(args), checked.sequence, frame));
+    const complete = yield* completeResponse(original, key(args), saved.signer);
+    return complete?.outcome ?? null;
   });
   return {
+    verifyFeatureRequest: (request: Opened) =>
+      Effect.scoped(
+        openFrames(request.input.request.machineId, unpackFrames(request.frame)).pipe(Effect.asVoid)
+      ),
     clearFeatureParts: () => {
       incoming.clear();
       incomingSize = 0;
     },
+    retainFeatureRequest: (machineId: string, request: Opened) =>
+      attempt(() =>
+        options.originals.retain(
+          'received',
+          JSON.stringify(['feature', request.requesterDevice, request.requestId]),
+          { target: machineId, signer: request.requesterDevice, frame: request.frame }
+        )
+      ),
+    readFeatureResponse: (request: Opened) =>
+      sealing.withPermits(1)(
+        Effect.uninterruptible(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const responseId = resultKey(request);
+              const complete = yield* completeResponse(
+                request,
+                responseId,
+                options.requesterDevice,
+                true
+              );
+              if (complete) {
+                pending.delete(responseId);
+                return complete.frames;
+              }
+              const retained = pending.get(responseId);
+              if (!retained) return [];
+              yield* attempt(() => options.originals.retainResponsePages(responseId, retained));
+              pending.delete(responseId);
+              return retained;
+            })
+          )
+        )
+      ),
     prepareFeature: (input: E2eeFeatureInput) => Effect.scoped(prepareFeature(input)),
     openFeature: (machineId: string, frameHex: string) =>
       Effect.scoped(openFeature(machineId, frameHex)),

@@ -6,11 +6,7 @@ import { inspectContentFrame } from '../../internal/foundation/content-format';
 import { parseContentFrame } from '../../internal/foundation/content-format';
 import { verifyParsedContentSignature } from '../../internal/foundation/signature';
 import type { DeviceSigner } from '../../internal/foundation/signing';
-import {
-  contentPermissions,
-  requireLedgerContinuation,
-  type LedgerView,
-} from '../../internal/ledger';
+import { requireLedgerContinuation, type LedgerView } from '../../internal/ledger';
 import {
   openRpcRequestContent,
   openRpcResponseContent,
@@ -20,7 +16,8 @@ import {
 
 /** Scoped opaque RPC crypto for trusted hosts. The caller supplies an independently
  * bound resource and enforces machine ownership, body limits, expiry, freshness,
- * correlation and the execution journal. Never expose this as arbitrary-sign IPC.
+ * correlation and method authorization. This binding admits current non-recovery readers;
+ * only execution methods require write authority and an execution journal. Never expose this as arbitrary-sign IPC.
  * Each key read transfers ownership; all keys and temporary plaintext are released.
  * The containing Scope drains admitted crypto before custody may close. */
 export const makeRealtimeContentBinding = Effect.fnUntraced(function* (input: {
@@ -63,9 +60,16 @@ export const makeRealtimeContentBinding = Effect.fnUntraced(function* (input: {
   });
   const permitted = (view: LedgerView, signer: Bytes.SigningPublicKey) =>
     Effect.gen(function* () {
-      const permission = yield* Effect.fromResult(contentPermissions(view, signer));
-      if (!permission.mayWriteDocument) yield* fail();
+      const state = view.inspectState();
+      const device = state.devices.get(hex(signer.toBytes()));
+      if (
+        !device ||
+        device.kind === 'recovery' ||
+        !state.members.has(hex(device.membershipId.toBytes()))
+      )
+        yield* fail();
     });
+
   const withKey = <A, E, R>(epoch: number, work: (key: Bytes.EpochKey) => Effect.Effect<A, E, R>) =>
     Effect.acquireUseRelease(input.readEpochKey(epoch), work, (key) =>
       Effect.sync(() => disposeEpochKey(key))

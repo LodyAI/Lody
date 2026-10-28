@@ -1,3 +1,8 @@
+import {
+  readEncryptedAttachment,
+  encryptedAttachmentPath,
+  type EncryptedAttachment,
+} from '@lody/shared';
 import type { EncryptedAgentExecution } from './e2ee/agent-execution';
 import { isScheduledMessageFile } from './schedules/scheduled-message-files';
 import {
@@ -244,7 +249,7 @@ import {
   getSessionFileBlobPath,
   listPendingLocalSessionFiles,
   markSessionFileBlobBackfilled,
-  readSessionFileBlobBackfillMarker,
+  readSessionFileBlobBackfillReceipt,
   removeSessionFileBlob,
   sessionFileBlobExists,
   writeSessionFileBlobBackfillMarker,
@@ -293,7 +298,7 @@ import {
   type ImageGenerationEndEvent,
 } from 'src/agent/agent-client';
 import type { RateLimit, SessionUsageUpdate } from 'acp-extension-core';
-import { getWorktreeManager } from '@/session/worktree/worktree-manager';
+import { getWorktreeManager, WorktreeManager } from '@/session/worktree/worktree-manager';
 import { WorktreeGarbageCollector, type WorktreeOwnerState } from '@/session/worktree/worktree-gc';
 import { createWorktreeScriptHistoryRecorder } from '@/session/worktree/worktree-script-history';
 import { runWorktreeCleanup } from '@/session/worktree/worktree-setup-runner';
@@ -752,6 +757,7 @@ export class MessageHandler {
   }
   private hasShownHappyCodingMessage = false;
   private readonly cloudPort: CloudPort;
+  private readonly encryptedAttachments: boolean;
   private notificationService: CloudNotificationsPort | null;
   private usageTrackingService: CloudUsagePort | null;
   private readonly turnTokenUsage = new TurnTokenUsageLedger();
@@ -802,6 +808,23 @@ export class MessageHandler {
   private localProjectControlService: LocalProjectControlService;
   private localWorkspaceCatalog: LocalWorkspaceCatalogService;
   private machineRpcServer: LoroStreamsMachineRpcServer | null = null;
+  private encryptedQueryServer: LoroStreamsMachineRpcServer | null = null;
+
+  async readEncryptedQuery(
+    input: import('@lody/shared/e2ee-rpc').E2eeQueryInput,
+    expiresAt: number,
+    signal: AbortSignal
+  ) {
+    if (!this.encryptedQueryServer) throw new Error('e2ee_rpc_unavailable');
+    return this.encryptedQueryServer.readQuery(input, expiresAt, signal);
+  }
+  async readEncryptedMachineRequest(
+    request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest,
+    context: { requestId: string; expiresAt: number; signal: AbortSignal }
+  ) {
+    if (!this.encryptedQueryServer) throw new Error('e2ee_rpc_unavailable');
+    return this.encryptedQueryServer.readFeatureQuery(request, context);
+  }
   private machineRpcTokenProvider: LoroStreamsTokenProviderLegacy | null = null;
   private machineRpcGatewayBaseUrl: string | null = null;
   private machineRpcServerStartPromise: Promise<void> | null = null;
@@ -822,6 +845,8 @@ export class MessageHandler {
   // File Preview v3. Separate from Code Collab on purpose: previewing a file must
   // not start a workspace watcher or publish a file index.
   private filePreviewService: FilePreviewService;
+  private encryptedFileReader?: FilePreviewService;
+  private encryptedCodeCollabReader?: CodeCollabV2Service;
 
   /**
    * Get a logger with session context. Caches loggers per session for efficiency.
@@ -1708,7 +1733,10 @@ export class MessageHandler {
   private attachmentTransfer(): SessionAttachmentTransfer {
     return new SessionAttachmentTransfer(
       this.token,
-      this.cloudPort.attachmentUpload?.serverBaseUrl
+      this.cloudPort.attachmentUpload?.serverBaseUrl,
+      this.encryptedAttachments
+        ? { token: () => this.workspaceDocument.getEncryptedAttachmentToken() }
+        : undefined
     );
   }
 
@@ -1850,10 +1878,12 @@ export class MessageHandler {
     sessionId: SessionId;
     imageId: string;
     expectedMimeType: string;
+    encryption?: EncryptedAttachment;
   }): Promise<DownloadedSessionImagePromptBlock> {
     return await downloadSessionImageForPrompt({
       ...args,
       serverBaseUrl: this.resolveServerBaseUrl(),
+      attachmentToken: () => this.workspaceDocument.getEncryptedAttachmentToken(),
       token: this.token,
       logger: this.logger,
     });
@@ -2117,8 +2147,48 @@ export class MessageHandler {
     sessionId: SessionId;
     fileId: string;
     expectedSha256?: string;
+    encryption?: EncryptedAttachment;
     destPath: string;
   }): Promise<{ ok: true } | { ok: false; reason: 'not_found' | 'error'; message: string }> {
+    if (args.encryption) {
+      const tempPath = `${args.destPath}.${uuidV4()}.part`;
+      let handle: fs.promises.FileHandle | undefined;
+      try {
+        const token = await this.workspaceDocument.getEncryptedAttachmentToken();
+        const chunks = readEncryptedAttachment({
+          ...args,
+          encryption: args.encryption,
+          fetchPart: (fileId) =>
+            fetch(
+              buildSessionFileApiUrl(
+                this.resolveServerBaseUrl(),
+                encryptedAttachmentPath(
+                  getSessionFileDownloadApiPath(args.workspaceId, args.sessionId, fileId)
+                )
+              ),
+              {
+                headers: { Authorization: `Bearer ${token}` },
+              }
+            ),
+        });
+        const hash = crypto.createHash('sha256');
+        handle = await fs.promises.open(tempPath, 'wx', 0o600);
+        for await (const bytes of chunks) {
+          hash.update(bytes);
+          await handle.writeFile(bytes);
+        }
+        await handle.close();
+        handle = undefined;
+        if (args.expectedSha256 && hash.digest('hex') !== args.expectedSha256)
+          throw new Error('Downloaded encrypted file failed sha256 verification');
+        await fs.promises.rename(tempPath, args.destPath);
+        return { ok: true };
+      } catch (error) {
+        await handle?.close().catch(() => {});
+        await fs.promises.unlink(tempPath).catch(() => {});
+        return { ok: false, reason: 'error', message: formatErrorMessage(error) };
+      }
+    }
     const serverBaseUrl = this.resolveServerBaseUrl();
     const fileUrl = buildSessionFileApiUrl(
       serverBaseUrl,
@@ -2297,6 +2367,7 @@ export class MessageHandler {
             sessionId: storageSessionId,
             fileId: block.fileId,
             expectedSha256: block.sha256,
+            encryption: block.encryption,
             destPath,
           });
           if (!result.ok) {
@@ -2392,6 +2463,7 @@ export class MessageHandler {
           sessionId: block.storageSessionId ?? args.sessionId,
           imageId: block.imageId,
           expectedMimeType: block.mimeType,
+          encryption: block.encryption,
         });
         return { inputBlock: block, downloaded };
       })
@@ -2826,6 +2898,7 @@ export class MessageHandler {
     config: MessageHandlerConfig
   ) {
     this.sessionManager = sessionManager;
+    this.encryptedAttachments = config.encryptedWorkspace === true;
     // Create a child logger with workspace context for file logging
     this.logger = logger.child({
       workspaceName: config.workspaceSlug || config.workspaceId,
@@ -2932,13 +3005,14 @@ export class MessageHandler {
         );
       },
     });
+    const canDownloadLargeFiles = async () => {
+      const entitlement = await this.cloudPort.billing?.getWorkspaceEntitlement(this.workspaceId);
+      return Boolean(
+        entitlement && !entitlement.checkoutPending && entitlement.effectivePlanTier !== 'free'
+      );
+    };
     this.filePreviewService = new FilePreviewService({
-      canDownloadLargeFiles: async () => {
-        const entitlement = await this.cloudPort.billing?.getWorkspaceEntitlement(this.workspaceId);
-        return Boolean(
-          entitlement && !entitlement.checkoutPending && entitlement.effectivePlanTier !== 'free'
-        );
-      },
+      canDownloadLargeFiles,
       onDiagnostic: (event) => this.logger.debug(`[file-preview] ${JSON.stringify(event)}`),
       resolveLocalWorkspace: this.resolveLocalFilePreviewWorkspace,
       resolveWorkspace: async (sessionId, rootId) => {
@@ -2953,6 +3027,20 @@ export class MessageHandler {
           : { ok: false, code: resolved.code, message: resolved.message };
       },
     });
+    if (config.encryptedWorkspace) {
+      this.encryptedCodeCollabReader = new CodeCollabV2Service({
+        readOnly: true,
+        resolveWorkspace: this.resolveEncryptedCodeCollabV2Workspace,
+      });
+      this.encryptedFileReader = new FilePreviewService({
+        allowGitDiscovery: false,
+        canDownloadLargeFiles,
+        resolveWorkspace: (sessionId, rootId) =>
+          this.resolveEncryptedCodeCollabV2Workspace(sessionId, { rootId }),
+        resolveLocalWorkspace: (sessionId, rootId) =>
+          this.resolveEncryptedCodeCollabV2Workspace(sessionId, { rootId }),
+      });
+    }
     this.sessionManager.setRequestPermissionHandler((sessionId, requestId, request, agentClient) =>
       this.handleAgentPermissionRequest(
         sessionId,
@@ -3226,27 +3314,33 @@ export class MessageHandler {
       },
     });
     const streamsTokens = config.encryptedWorkspace ? null : this.cloudPort.streamsTokens;
-    if (streamsTokens) {
+    if (streamsTokens || config.encryptedWorkspace) {
       const cliHttpFetch = getCliHttpFetch({ logger: this.logger });
       const rpcConnectTimeoutMs = readTimeoutEnv('LODY_LORO_RPC_CONNECT_TIMEOUT_MS', 30_000);
       this.logger.debug(
         `[rpc-server:${this.machineId}] using Loro Streams RPC connect timeout ${rpcConnectTimeoutMs}ms`
       );
-      const streamsTokenProvider = streamsTokens.createTokenProviderLegacy({
+      const streamsTokenProvider = streamsTokens?.createTokenProviderLegacy({
         workspaceId: this.workspaceId,
       });
-      this.machineRpcTokenProvider = streamsTokenProvider;
-      const jsonStreamClient = createLoroStreamsJsonStreamClient({
-        bucketId: LORO_STREAMS_BUCKET_ID,
-        getToken: async () => await streamsTokenProvider.getToken(),
-        getBaseUrl: () =>
-          streamsTokenProvider.getGatewayBaseUrl() ?? this.machineRpcGatewayBaseUrl ?? undefined,
-        fetchImpl: cliHttpFetch,
-        timeout: {
-          connectTimeoutMs: rpcConnectTimeoutMs,
-        },
-      });
-      this.machineRpcServer = new LoroStreamsMachineRpcServer({
+      this.machineRpcTokenProvider = streamsTokenProvider ?? null;
+      const jsonStreamClient = streamsTokenProvider
+        ? createLoroStreamsJsonStreamClient({
+            bucketId: LORO_STREAMS_BUCKET_ID,
+            getToken: async () => await streamsTokenProvider.getToken(),
+            getBaseUrl: () =>
+              streamsTokenProvider.getGatewayBaseUrl() ??
+              this.machineRpcGatewayBaseUrl ??
+              undefined,
+            fetchImpl: cliHttpFetch,
+            timeout: {
+              connectTimeoutMs: rpcConnectTimeoutMs,
+            },
+          })
+        : undefined;
+      const fileReader = this.encryptedFileReader ?? this.filePreviewService;
+      const codeReader = this.encryptedCodeCollabReader ?? this.codeCollabV2Service;
+      const queryServer = new LoroStreamsMachineRpcServer({
         logger: this.logger,
         workspaceId: this.workspaceId,
         machineId: this.machineId,
@@ -3423,21 +3517,7 @@ export class MessageHandler {
             error: result.error,
           };
         },
-        getSessionLiveStatus: async ({ sessionId }) => {
-          const liveStatus = resolveSessionLiveStatus({
-            presence: this.sessionActivePresence.getStatus(sessionId),
-            execution: this.executionService.getExecutionSnapshot(sessionId),
-            hasPendingDispatch: this.sessionDispatchWatcher.hasPendingDispatch(sessionId),
-          });
-          return {
-            type: 'session/live-status_response' as const,
-            machineId: this.machineId,
-            sessionId,
-            success: true,
-            ...liveStatus,
-            observedAtMs: getServerNow(),
-          };
-        },
+        getSessionLiveStatus: async ({ sessionId }) => this.readSessionLiveStatus(sessionId),
         steerSession: async (args) => await this.steerSessionWithAccessCheck(args),
         controlSessionGoal: async (args) => await this.controlSessionGoalWithAccessCheck(args),
         terminateSession: async ({ sessionId }) => await this.terminateAcpSession(sessionId),
@@ -3478,13 +3558,13 @@ export class MessageHandler {
         waitForSessionHistoryChanges: async (args) => await this.waitForSessionHistoryChanges(args),
         writeSessionHistory: async ({ sessionId, operation, payload }) =>
           await this.writeSessionHistoryForRpc(sessionId, operation, payload),
-        resolveCodeCollabOwnerSessionId: this.resolveCodeCollabV2OwnerSessionId,
-        previewFile: async (request) => await this.filePreviewService.previewFile(request),
-        downloadFileChunk: async (request) =>
-          await this.filePreviewService.downloadFileChunk(request),
-        openCodeCollabText: async (request) => await this.codeCollabV2Service.openText(request),
-        refreshCodeCollabText: async (request) =>
-          await this.codeCollabV2Service.refreshText(request),
+        resolveCodeCollabOwnerSessionId: config.encryptedWorkspace
+          ? this.resolveEncryptedCodeCollabOwnerSessionId
+          : this.resolveCodeCollabV2OwnerSessionId,
+        previewFile: async (request) => await fileReader.previewFile(request),
+        downloadFileChunk: async (request) => await fileReader.downloadFileChunk(request),
+        openCodeCollabText: async (request) => await codeReader.openText(request),
+        refreshCodeCollabText: async (request) => await codeReader.refreshText(request),
         saveCodeCollabText: async (request) => await this.codeCollabV2Service.saveText(request),
         openCodeCollabCurrentDiff: async (request) =>
           await this.codeCollabV2Service.openCurrentDiff(request),
@@ -3494,10 +3574,8 @@ export class MessageHandler {
           await this.codeCollabV2Service.openTurnDiff(request),
         initCodeCollabDirectory: async (request) =>
           await this.codeCollabV2Service.initDirectory(request),
-        getCodeCollabLspDefinition: async (request) =>
-          await this.codeCollabV2Service.lspDefinition(request),
-        getCodeCollabLspReferences: async (request) =>
-          await this.codeCollabV2Service.lspReferences(request),
+        getCodeCollabLspDefinition: async (request) => await codeReader.lspDefinition(request),
+        getCodeCollabLspReferences: async (request) => await codeReader.lspReferences(request),
         controlIosSimulator: async ({ proof, responseKey, ...request }) =>
           this.iosSimulatorService.control(request, true, () =>
             this.previewService.authorizeRemoteControl(
@@ -3568,6 +3646,8 @@ export class MessageHandler {
           await this.dispatchLocalProjectControlViaRpc(request),
         onFatalAuthFailure: (error) => this.onFatalAuthFailure?.(error),
       });
+      if (config.encryptedWorkspace) this.encryptedQueryServer = queryServer;
+      else this.machineRpcServer = queryServer;
     } else {
       this.logger.debug('Streams RPC disabled: cloud Streams port unavailable');
     }
@@ -6490,12 +6570,92 @@ export class MessageHandler {
     };
   }
 
-  private readonly resolveCodeCollabV2Workspace: CodeCollabV2WorkspaceResolver = async (
+  /** Observe existing paths only. Ordinary Session getters may mkdir, and the
+   * live local-project resolver may create/subscribe a Flock or repair links. */
+  private async resolveEncryptedFileWorkspaceRoot(
+    sessionId: SessionId
+  ): Promise<CodeCollabWorkspaceRootResolution> {
+    const meta = await this.resolveCodeCollabOwnerSessionMeta(sessionId);
+    if (!meta)
+      return { ok: false, error: 'session_not_found', message: 'Session metadata is unavailable.' };
+    const ownerSessionId = meta.parentSessionId ?? sessionId;
+    const owner =
+      ownerSessionId === sessionId
+        ? meta
+        : await this.resolveCodeCollabOwnerSessionMeta(ownerSessionId);
+    if (
+      !owner ||
+      meta.isArchived ||
+      owner.isArchived ||
+      owner.parentSessionId ||
+      meta.machineId !== this.machineId ||
+      owner.machineId !== this.machineId
+    )
+      return {
+        ok: false,
+        error: 'permission_denied',
+        message: 'Session file ownership is invalid.',
+      };
+
+    let workspaceRoot = this.sessionManager.getSession(ownerSessionId)?.peekHostWorkdir?.() ?? null;
+    if (!workspaceRoot) {
+      const project = owner.project;
+      if (owner.projectRun) {
+        workspaceRoot = path.join(
+          projectGroupDirectory(owner.projectRun),
+          'worktrees',
+          ownerSessionId
+        );
+      } else if (project?.kind === 'local') {
+        const root = this.workspaceDocument.peekLocalProjectRootPath(
+          this.machineId,
+          project.localProjectId
+        );
+        if (root)
+          workspaceRoot =
+            owner.isWorktree || project.useWorktree
+              ? new WorktreeManager({
+                  repoId: deriveRepoIdFromLocalProjectPath(root),
+                  logger: this.logger,
+                }).getWorktreeHostPath(ownerSessionId)
+              : root;
+      } else {
+        const repo = resolveProjectGitHubRepo(project) ?? owner.repoFullName?.trim();
+        if (repo)
+          workspaceRoot = new WorktreeManager({
+            repoId: deriveRepoIdFromGitHubRepo(repo),
+            logger: this.logger,
+          }).getWorktreeHostPath(ownerSessionId);
+        else if (!project && !owner.isWorktree)
+          workspaceRoot = getDefaultSessionWorkdir(ownerSessionId);
+      }
+    }
+    if (!workspaceRoot || !fs.statSync(workspaceRoot, { throwIfNoEntry: false })?.isDirectory())
+      return {
+        ok: false,
+        error: 'workspace_unavailable',
+        message: 'Session file workspace is unavailable.',
+      };
+    return { ok: true, ownerSessionId, workspaceRoot, source: 'encrypted-existing-files' };
+  }
+
+  private readonly resolveEncryptedCodeCollabV2Workspace: CodeCollabV2WorkspaceResolver = (
     sessionId,
-    options?: CodeCollabV2WorkspaceResolveOptions
-  ) => {
+    options
+  ) => this.resolveCodeCollabWorkspaceWithPolicy(sessionId, options, true);
+  private readonly resolveCodeCollabV2Workspace: CodeCollabV2WorkspaceResolver = (
+    sessionId,
+    options
+  ) => this.resolveCodeCollabWorkspaceWithPolicy(sessionId, options, false);
+  private readonly resolveCodeCollabWorkspaceWithPolicy = async (
+    sessionId: SessionId,
+    options: CodeCollabV2WorkspaceResolveOptions | undefined,
+    readOnly: boolean
+  ): ReturnType<CodeCollabV2WorkspaceResolver> => {
     try {
-      const resolved = await this.resolveCodeCollabWorkspaceRoot(sessionId);
+      const resolved = await (readOnly
+        ? this.resolveEncryptedFileWorkspaceRoot(sessionId)
+        : this.resolveCodeCollabWorkspaceRoot(sessionId));
       if (resolved.ok) {
         const ownerSessionId = resolved.ownerSessionId ?? sessionId;
         const ownerMeta = await this.resolveCodeCollabOwnerSessionMeta(ownerSessionId);
@@ -6516,8 +6676,12 @@ export class MessageHandler {
           resolved.workspaceRoot,
           ownerMeta?.projectRun,
           this.machineId,
-          (id) => this.sessionManager.resolveLocalProjectRootPath(id),
-          (id) => this.logger.debug(`Project group file root unavailable: ${id}`)
+          (id) =>
+            readOnly
+              ? Promise.resolve(this.workspaceDocument.peekLocalProjectRootPath(this.machineId, id))
+              : this.sessionManager.resolveLocalProjectRootPath(id),
+          (id) => this.logger.debug(`Project group file root unavailable: ${id}`),
+          !readOnly
         );
         const rootId = options?.rootId ?? 'main';
         const selected = fileRoots.find((root) => root.id === rootId);
@@ -6619,6 +6783,14 @@ export class MessageHandler {
       return { ok: true, ownerSessionId, workspaceRoot: null };
     }
     return resolved;
+  };
+
+  private readonly resolveEncryptedCodeCollabOwnerSessionId = async (
+    sessionId: SessionId
+  ): Promise<SessionId> => {
+    const resolved = await this.resolveEncryptedCodeCollabV2Workspace(sessionId);
+    if (resolved.ok) return resolved.ownerSessionId;
+    throw new CodeCollabV2ServiceError(resolved.code, resolved.message);
   };
 
   private readonly resolveCodeCollabV2OwnerSessionId = async (
@@ -6796,6 +6968,24 @@ export class MessageHandler {
     };
   }
 
+  private readSessionLiveStatus(
+    sessionId: SessionId
+  ): import('@lody/loro-streams-rpc').LoroSessionLiveStatusRpcResponse {
+    const liveStatus = resolveSessionLiveStatus({
+      presence: this.sessionActivePresence.getStatus(sessionId),
+      execution: this.executionService.getExecutionSnapshot(sessionId),
+      hasPendingDispatch: this.sessionDispatchWatcher.hasPendingDispatch(sessionId),
+    });
+    return {
+      type: 'session/live-status_response' as const,
+      machineId: this.machineId,
+      sessionId,
+      success: true,
+      ...liveStatus,
+      observedAtMs: getServerNow(),
+    };
+  }
+
   private async dispatchLocalMachineRpc(
     request: LocalMachineRpcRequestValidated
   ): Promise<LocalMachineRpcResult> {
@@ -6814,6 +7004,32 @@ export class MessageHandler {
     };
 
     switch (request.method) {
+      case 'machine/status':
+        return this.executionService.getMachineStatus({
+          type: 'machine/status',
+          machineId: this.machineId,
+          workspaceId: this.workspaceId,
+        });
+      case 'machine/ping':
+        return this.executionService.pingMachine({
+          type: 'machine/ping',
+          machineId: this.machineId,
+          workspaceId: this.workspaceId,
+          ...request.params,
+        });
+      case 'machine/acp-binary-status':
+        return this.executionService.getMachineAcpBinaryStatus({
+          type: 'machine/acp-binary-status',
+          machineId: this.machineId,
+          workspaceId: this.workspaceId,
+          ...request.params,
+        });
+      case 'session/live-status':
+        return this.readSessionLiveStatus(request.params.sessionId as SessionId);
+      case 'file/download-chunk':
+        await assertOwner(request.params.sessionId as SessionId);
+        return this.filePreviewService.downloadFileChunk(request.params);
+
       case 'project/probe-local-member': {
         if (
           request.machineId !== this.machineId ||
@@ -8383,7 +8599,11 @@ export class MessageHandler {
     // flip→mark window (R5.3): the flip rewrites the fileId, so after it the
     // local block is gone and a naive re-run would throw "not yet persisted"
     // forever, stranding the blob and its quota.
-    const markerRelayFileId = await readSessionFileBlobBackfillMarker(blobArgs);
+    const receipt = await readSessionFileBlobBackfillReceipt(blobArgs).catch((error) => {
+      if (this.encryptedAttachments) throw error;
+      return null;
+    });
+    const markerRelayFileId = receipt?.relayFileId;
 
     if (!target) {
       if (markerRelayFileId) {
@@ -8413,6 +8633,9 @@ export class MessageHandler {
     // Reuse a prior upload recorded by the marker (crash before flip) instead of
     // re-uploading; otherwise upload now and record the relay key before flipping.
     let relayFileId = markerRelayFileId;
+    let encryption = receipt?.encryption;
+    if (relayFileId && this.encryptedAttachments && !encryption)
+      throw new Error('e2ee_attachment_receipt_unprotected');
     if (!relayFileId) {
       const uploaded = await this.uploadValidatedSessionFile({
         workspaceId: this.workspaceId,
@@ -8432,7 +8655,8 @@ export class MessageHandler {
       // sees a plain pending blob — never the "flip committed" R5.3 window.
       this.throwIfBackfillSuperseded(generation);
       relayFileId = uploaded.fileId;
-      await writeSessionFileBlobBackfillMarker({ ...blobArgs, relayFileId });
+      encryption = uploaded.encryption;
+      await writeSessionFileBlobBackfillMarker({ ...blobArgs, relayFileId, encryption });
     }
 
     // Last gate before the point of no return. Past the flip we always
@@ -8445,6 +8669,7 @@ export class MessageHandler {
       kind: 'file-backfilled',
       fileId,
       relayFileId,
+      ...(encryption ? { encryption } : {}),
     });
     await markSessionFileBlobBackfilled(blobArgs);
     this.logger.info(`[${sessionId}] Backfilled local file ${fileId} -> relay ${relayFileId}`);
@@ -10301,7 +10526,9 @@ export class MessageHandler {
     this.sessionFileBackfillStopped = true;
     this.cancelPendingPermissionRequests();
     this.machineRpcServer?.stop();
+    this.encryptedQueryServer?.stop();
     this.sessionDispatchWatcher.stop();
+    this.encryptedCodeCollabReader?.dispose();
     this.codeCollabV2Service.dispose();
     for (const handle of this.sessionLifecycleWatchHandles) handle.unsubscribe();
     this.sessionLifecycleWatchHandles = [];

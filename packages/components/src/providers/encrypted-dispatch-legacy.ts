@@ -5,12 +5,12 @@ import type {
   E2eePreparedDispatch,
 } from '@lody/shared/e2ee-rpc';
 import {
-  LocalMachineRpcResponseSchema,
   type LocalMachineRpcRequest,
   type LocalMachineRpcResponse,
 } from '@lody/shared/local-machine-rpc';
-import type { E2eeFeatureInput, E2eeFeatureResponsePart } from '@lody/shared/e2ee-rpc';
+import type { E2eeFeatureInput } from '@lody/shared/e2ee-rpc';
 import type { LoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
+import { callEncryptedReadFeature } from '@lody/loro-streams-rpc';
 import { makeEncryptedStreamsChannel } from '@lody/loro-streams-rpc/e2ee-streams';
 
 type Call =
@@ -18,8 +18,6 @@ type Call =
   | {
       kind: 'feature';
       input: E2eeFeatureInput;
-      parts: Map<number, Uint8Array>;
-      last?: number;
     };
 type Reply = E2eeDispatchAck | LocalMachineRpcResponse;
 type Channel = {
@@ -37,7 +35,11 @@ export function createEncryptedDispatchLegacy(options: {
   prepare: (machineId: string, input: E2eeDispatchInput) => Promise<E2eePreparedDispatch>;
   accept: (machineId: string, input: E2eeDispatchInput, frame: string) => Promise<E2eeDispatchAck>;
   prepareFeature?: (input: E2eeFeatureInput) => Promise<E2eePreparedDispatch>;
-  acceptFeature?: (input: E2eeFeatureInput, frame: string) => Promise<E2eeFeatureResponsePart>;
+  acceptFeature?: (
+    input: E2eeFeatureInput,
+    frame: string
+  ) => Promise<LocalMachineRpcResponse | null>;
+  closeClient?: () => Promise<void>;
   client: (signal: AbortSignal) => Promise<LoroStreamsJsonStreamClient>;
 }) {
   const scope = Scope.makeUnsafe();
@@ -65,28 +67,7 @@ export function createEncryptedDispatchLegacy(options: {
                 if (call.kind === 'dispatch')
                   return options.accept(original.targetMachineId, call.input, frame);
                 if (!options.acceptFeature) throw new Error('e2ee_rpc_unavailable');
-                const part = await options.acceptFeature(call.input, frame);
-                call.parts.set(part.sequence, part.bytes);
-                if (part.final) call.last = part.sequence;
-                if (call.last === undefined) return undefined;
-                const parts: Uint8Array[] = [];
-                let length = 0;
-                for (let index = 0; index <= call.last; index++) {
-                  const bytes = call.parts.get(index);
-                  if (!bytes) return undefined;
-                  length += bytes.length;
-                  parts.push(bytes);
-                }
-                if (length > 32 * 1024 * 1024) throw new Error('e2ee_feature_result_too_large');
-                const bytes = new Uint8Array(length);
-                let offset = 0;
-                for (const chunk of parts) {
-                  bytes.set(chunk, offset);
-                  offset += chunk.length;
-                }
-                return LocalMachineRpcResponseSchema.parse(
-                  JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
-                );
+                return (await options.acceptFeature(call.input, frame)) ?? undefined;
               },
               traceInput: (call) => (call.kind === 'dispatch' ? call.input.userTurnId : undefined),
               trace: (event) => console.debug('[e2ee-rpc-timing]', event),
@@ -104,6 +85,27 @@ export function createEncryptedDispatchLegacy(options: {
         )
       );
     });
+  const requestFeature = async (
+    request: LocalMachineRpcRequest
+  ): Promise<LocalMachineRpcResponse> => {
+    if (closed || !options.prepareFeature || !options.acceptFeature)
+      throw new Error('e2ee_rpc_unavailable');
+    const input = { requestId: crypto.randomUUID().replaceAll('-', ''), request };
+    const original = await options.prepareFeature(input);
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const client = yield* channel(original);
+        return yield* client.send(
+          original,
+          { kind: 'feature', input },
+          request.timeoutMs ?? 30_000
+        );
+      })
+    );
+    return result && 'ok' in result
+      ? result
+      : { ok: false, error: 'Encrypted machine request timed out.' };
+  };
   return {
     prepare: async (machineId: string, input: E2eeDispatchInput) => {
       if (closed) throw new Error('e2ee_rpc_closed');
@@ -133,29 +135,21 @@ export function createEncryptedDispatchLegacy(options: {
           ),
       };
     },
-    requestFeature: async (request: LocalMachineRpcRequest): Promise<LocalMachineRpcResponse> => {
-      if (closed || !options.prepareFeature || !options.acceptFeature)
-        throw new Error('e2ee_rpc_unavailable');
-      const input = { requestId: crypto.randomUUID().replaceAll('-', ''), request };
-      const original = await options.prepareFeature(input);
-      const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          const client = yield* channel(original);
-          return yield* client.send(
-            original,
-            { kind: 'feature', input, parts: new Map() },
-            request.timeoutMs ?? 30_000
-          );
-        })
-      );
-      return result && 'ok' in result
-        ? result
-        : { ok: false, error: 'Encrypted machine request timed out.' };
-    },
-    close: () => {
+    requestFeature,
+    query: (machineId: string, method: string, params: unknown, timeoutMs: number) =>
+      callEncryptedReadFeature({
+        workspaceId: options.workspaceId,
+        machineId,
+        method,
+        params,
+        timeoutMs,
+        request: requestFeature,
+      }),
+    close: async () => {
       closed = true;
       controller.abort();
-      return Effect.runPromise(Scope.close(scope, Exit.void));
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      await options.closeClient?.();
     },
   };
 }

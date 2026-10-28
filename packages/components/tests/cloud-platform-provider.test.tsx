@@ -207,20 +207,13 @@ describe('CloudPlatformProvider', () => {
     fixture.usePreload = true;
     window.ipc = ipcBridge;
     refetch('Encrypted');
-    const dispatchInput = {
-      sessionId: 'session-a',
-      userTurnId: 'turn-a',
-      userId: 'user-a',
-      timestamp: new Date(1000).toISOString(),
-      inputConfig: { prompt: 'synthetic input' },
-    };
     const input = {
       requestId: '55'.repeat(16),
       request: {
         workspaceId: 'workspace-a',
         machineId: 'machine-a',
-        method: 'code-collab/open-text' as const,
-        params: { sessionId: dispatchInput.sessionId, path: 'private.ts' },
+        method: 'machine/status' as const,
+        params: {},
       },
     };
     const original = {
@@ -230,7 +223,11 @@ describe('CloudPlatformProvider', () => {
       frameHex: '33'.repeat(143),
       expiresAt: 901000,
     };
-    const ack = { sequence: 0, final: true, bytes: new Uint8Array([7]) };
+    const ack = {
+      ok: false as const,
+      code: 'e2ee_query_failed',
+      error: 'synthetic complete outcome',
+    };
     const retained: unknown[][] = [];
     fixture.invoke = async (channel, ...args) => {
       // The mock is below the real preload allowlist, at ipcRenderer.invoke.
@@ -244,6 +241,16 @@ describe('CloudPlatformProvider', () => {
         expect(retained).toEqual([['workspace-a', input]]);
         expect(args).toEqual(['workspace-a', input, '44'.repeat(143)]);
         return ack;
+      }
+      if (channel === 'e2ee.contentStreamsToken') {
+        expect(args).toEqual(['workspace-a', undefined, undefined, true]);
+        return {
+          token: 'synthetic-rpc-only',
+          bucketId: 'synthetic-encrypted-content',
+          gatewayBaseUrl: 'https://streams.example.test',
+          expiresIn: 900,
+          expiresAt: Date.now() + 900000,
+        };
       }
       throw new Error(`unexpected IPC invocation: ${channel}`);
     };
@@ -259,6 +266,12 @@ describe('CloudPlatformProvider', () => {
     try {
       expect(await access.e2ee.prepareFeatureRpc!(input)).toEqual(original);
       expect(await access.e2ee.acceptFeatureRpcResponse!(input, '44'.repeat(143))).toEqual(ack);
+      const rpcToken = access.e2ee.createRpcTokenProvider(new AbortController().signal);
+      try {
+        expect(await rpcToken.getToken()).toBe('synthetic-rpc-only');
+      } finally {
+        await rpcToken.close();
+      }
     } finally {
       await access.close();
     }
