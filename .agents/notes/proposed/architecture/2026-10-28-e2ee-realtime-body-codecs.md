@@ -35,7 +35,7 @@ exact opaque bytes for the authorized method codec. No JSON normalization occurs
 
 The candidate limit treats 1 MiB as the **whole sealed RPC frame**, reserving the
 existing 143-byte overhead. This is stricter than the draft's 1 MiB plaintext
-table and needs reconciliation in PR-25S. Presence keeps that draft's 64 KiB body
+table and needs reconciliation in the public wire draft. Presence keeps that draft's 64 KiB body
 limit and positive TTL at most 60 seconds. Both encode and decode reject invalid
 sizes, versions, integers, kinds and text. Advertised lengths are checked against
 the remaining bounded view before copying, and returned bytes own their storage,
@@ -46,45 +46,24 @@ the candidate signed bytes and rejects ambiguity before method dispatch. Changin
 the core's generic content maximum would incorrectly restrict document content.
 This module instead applies only the candidate realtime profile bounds.
 
-## Remaining M5 work and independent delivery
+## Integration boundary and public evidence
 
 ```text
-method DTO bytes -> body codec -> existing purpose-8/9 sealing
-                -> retained original -> encrypted Streams (iroh later)
-                -> verified authority -> shared actual-start claim
-Meta/history -------------------------> same business intent and claim
+method DTO bytes -> body codec [this change] -> existing purpose-8/9 sealing
+                -> authenticated integration [separate work]
 ```
 
-- PR-25: these codecs finish only the body subset. Existing crypto vectors cover
-  purpose/scope/signer isolation; target authority is still integration work.
-- PR-25S can independently correct/review the draft. Remove obsolete old machine
-  admissions without machineId and rotationRequired send/execution pauses; current
-  records require machineId, and rotationRequired is advisory. Update the earlier
-  code audit and preserve the durable fallback. The current latency target is at
-  most one second slower than ordinary dispatch, not the plan's earlier 200 ms.
-- PR-26a must connect the existing journal to the actual agent-start boundary and
-  the durable Meta/history path using the same userTurnId/business intent. It
-  must also enforce machine-initiated authenticated ledger freshness, memory only,
-  at most 15 minutes from read start; no restart restoration or requester clock.
-  Reception-only deduplication or a delivery ACK is insufficient.
-- PR-26b adopts merged prerequisites from main: retained sender originals,
-  encrypted Streams control/dispatch and durable fallback, including outcome
-  lookup without replaying uncertain work. PR-27 then adds read/file/history
-  methods with their own read permissions; PR-28 presence can proceed in parallel.
-- PR-26c follows as acceleration: workspace-device Ed25519 identity reuse inside
-  trusted native hosts, domain-separation review and connection fallback that
-  does not delay usable Streams. No renderer private export or arbitrary signing.
+The public [wire draft](https://github.com/LodyAI/Lody/pull/1894) already describes
+retained originals, machine-bound responses, freshness, one actual-start claim
+shared with Meta/history, and the distinction between a dispatch ACK and business
+completion. These codecs implement none of those authority or execution gates.
+The public [journal decision](2026-10-26-e2ee-realtime-journal.md) likewise requires
+integration at actual execution rather than reception-only deduplication.
 
-Each implementation branches from main rather than a deep PR stack. Host
-execution/freshness, presence and native feasibility work can proceed separately
-while the draft is corrected. Private service changes and adoption remain separate
-from public implementation; no backend or gitlink is changed here.
-
-Before adoption, owner review must resolve exact bytes and the limit interpretation.
-The draft's 1..128 printable-ASCII machineId also conflicts with the ledger's
-1..256 strict UTF-8 bytes. Recommend a canonical lossless ASCII resource encoding
-over the exact UTF-8 bytes; this module deliberately provides no scope helper.
-No format is downgraded, migrated or written by this PR.
+Before product adoption, the exact wire revision and limit interpretation need
+owner review. Resource encoding is deliberately absent: the public draft's
+1..128 printable-ASCII machineId conflicts with the current public ledger's
+1..256 strict UTF-8 bytes. No format is downgraded, migrated or written here.
 
 ## Evidence and limits
 
