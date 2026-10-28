@@ -194,6 +194,7 @@ test('note opening requires a nonempty abstract in the authored language', async
   const f = await fixture(t);
   const note = '.agents/notes/proposed/process/2026-09-06-example.md';
   const header = '# Example\nStatus: proposed\nTranslation: pending\n\n';
+  f.write('README.md', `[decision](${note})\n`);
   f.write(note, header + '## Problem\nA problem.\n');
   assert.ok((await documentStatus(f.root)).errors.some((e) => e.includes('Abstract')));
   f.write(note, header + '## Abstract\n\n## Problem\nA problem.\n');
@@ -445,6 +446,7 @@ test('a pending note counterpart warns without failing the check', async (t) => 
   const f = await fixture(t);
   const note = '.agents/notes/proposed/process/2026-09-06-example.md';
   f.write(note, '# Note\n\nStatus: proposed\nTranslation: pending\n\n## Abstract\n\nBody.\n');
+  f.write('README.md', `[decision](${note})\n`);
   const pending = await documentStatus(f.root);
   assert.ok(
     pending.warnings.some((w) => w.includes(`${note}: ${note.replace(/\.md$/, '.zh.md')}`))
@@ -505,6 +507,51 @@ test('note hygiene gates apply to notes the task changed and queue stale referen
   const fixed = await documentStatus(f.root);
   assert.ok(!fixed.errors.some((e) => e.includes(note)));
   assert.deepEqual(fixed.staleReferences, []);
+});
+
+test('a new note must be linked from a current-state owner document', async (t) => {
+  const f = await fixture(t);
+  const note = '.agents/notes/implemented/bug-fix/2026-09-08-provider-quirk.md';
+  const body = '# Quirk\n\nStatus: implemented\nTranslation: current\n\n## Abstract\n\nBody.\n';
+  const unlinked = (report) => report.errors.some((e) => e.startsWith(`${note}: a new note needs`));
+  f.write(note, body);
+  f.write(note.replace(/\.md$/, '.zh.md'), body.replace('Abstract', '摘要'));
+  f.write(
+    '.agents/notes/implemented/bug-fix/2026-09-09-sibling.md',
+    `[quirk](2026-09-08-provider-quirk.md)\n`
+  );
+  const fresh = await documentStatus(f.root);
+  assert.ok(unlinked(fresh), 'a link from another note does not make it discoverable');
+  assert.equal(fresh.errors.filter((e) => e.includes('a new note needs')).length, 2);
+  assert.ok(fresh.unlinkedNotes.includes(note));
+  f.write(
+    'apps/README.md',
+    '[Why the quirk exists](../.agents/notes/implemented/bug-fix/2026-09-08-provider-quirk.zh.md)\n'
+  );
+  const linked = await documentStatus(f.root);
+  assert.ok(!unlinked(linked), 'a link to either language satisfies the pair');
+  assert.ok(!linked.unlinkedNotes.includes(note));
+  rmSync(path.join(f.root, 'apps/README.md'));
+  f.write(
+    '.agents/notes/AGENTS.md',
+    '[Rationale](implemented/bug-fix/2026-09-08-provider-quirk.md)\n'
+  );
+  assert.ok(!unlinked(await documentStatus(f.root)), 'the note rules file is an owner, not a note');
+  rmSync(path.join(f.root, '.agents/notes/AGENTS.md'));
+  await f.commit();
+  const existing = await documentStatus(f.root);
+  assert.ok(!unlinked(existing), 'existing notes are queued, not failed');
+  assert.ok(existing.unlinkedNotes.includes(note));
+  const moved = note.replace('/implemented/', '/proposed/');
+  mkdirSync(path.join(f.root, path.dirname(moved)), { recursive: true });
+  await f.git('mv', note, moved);
+  await f.git('mv', note.replace(/\.md$/, '.zh.md'), moved.replace(/\.md$/, '.zh.md'));
+  for (const file of [moved, moved.replace(/\.md$/, '.zh.md')])
+    f.write(file, readFileSync(path.join(f.root, file), 'utf8').replace('implemented', 'proposed'));
+  assert.ok(
+    !(await documentStatus(f.root)).errors.some((e) => e.includes('a new note needs')),
+    'a lifecycle move is not a new note'
+  );
 });
 
 test('a fully superseded note must already be archived', async (t) => {

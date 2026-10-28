@@ -6,9 +6,12 @@ Map: [README.md](README.md#repository).
 ## Context and documentation
 
 - Read the applicable ancestor/scoped `AGENTS.md` files and task-relevant Specs,
-  active notes, `.agents/docs/`, and module READMEs. Follow the required topic
-  links below when their trigger applies, including changes outside the owner's
-  directory. Archives are history, not current authority.
+  `.agents/docs/`, and module READMEs, then the notes they link for the rationale.
+  Search notes directly before reversing a recorded decision. Follow the required
+  topic links below when their trigger applies, including changes outside the
+  owner's directory. Archives are history, not current authority.
+- A note you rely on that is stale, unlinked, or in the wrong lifecycle is fixed in
+  the same PR ([maintenance on read](.agents/notes/AGENTS.md#maintenance-on-read)).
 - Specs express intent, docs explain implementation, notes record decisions.
   Distinguish bugs, stale docs, and unimplemented intent using code and evidence;
   never change a Spec to justify a bug.

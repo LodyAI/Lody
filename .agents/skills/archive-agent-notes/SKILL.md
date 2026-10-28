@@ -57,7 +57,10 @@ Apply these outcomes per lifecycle:
 - **Rejected, delete:** the idea is obsolete, superseded or no longer plausible.
 
 Classify analogous notes under one principle, use judgement for close cases, and
-report genuinely borderline ones.
+report genuinely borderline ones. A note kept active must end the change linked
+from its current-state owner (README, `.agents/docs/` page, `AGENTS.md` or Spec)
+with one sentence of what is true now; `pnpm run docs status` lists active notes
+that lack one (`unlinkedNotes`) and is the discovery list for a topic audit.
 
 ## Calibrated examples
 

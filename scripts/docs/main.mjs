@@ -220,16 +220,29 @@ function agentsBudgets(root) {
   return budgets;
 }
 
-/** Files this task introduced or changed: the working tree against `base` (default HEAD) plus untracked files. */
+/**
+ * Files this task changed or added: the working tree against `base` (default HEAD) plus
+ * untracked files. A rename counts as changed, not added, so a lifecycle move is not a new note.
+ */
 async function changedFiles(root, base) {
   const changed = new Set();
+  const added = new Set();
   const list = (bytes) => bytes.toString().split('\0').filter(Boolean);
-  for (const file of list(await git(root, ['diff', '--name-only', '-z', base ?? 'HEAD', '--'])))
+  const diff = ['diff', '--name-only', '-z', '--find-renames'];
+  for (const file of list(await git(root, [...diff, base ?? 'HEAD', '--']))) changed.add(file);
+  for (const file of list(await git(root, [...diff, '--diff-filter=A', base ?? 'HEAD', '--'])))
+    added.add(file);
+  for (const file of list(await git(root, ['ls-files', '--others', '--exclude-standard', '-z']))) {
     changed.add(file);
-  for (const file of list(await git(root, ['ls-files', '--others', '--exclude-standard', '-z'])))
-    changed.add(file);
-  return changed;
+    added.add(file);
+  }
+  return { changed, added };
 }
+
+/** Dated note records; rule files such as `.agents/notes/AGENTS.md` are owners, not notes. */
+const noteRecord = /^\.agents\/notes\/(?:proposed|implemented|rejected|archived)\//;
+/** One key per note pair, so a link to either language counts for both. */
+const noteKey = (file) => file.replace(/\.zh\.md$/, '.md');
 
 function noteLinkTargets(value) {
   const links = [...value.matchAll(/\]\(<?([^\s)>]+)>?\)/g)].map((match) => match[1]);
@@ -355,7 +368,9 @@ export async function documentStatus(root, { base } = {}) {
   const errors = [];
   const warnings = [];
   const staleReferences = [];
-  const changed = await changedFiles(root, base);
+  const unlinkedNotes = new Set();
+  const markdown = await checkRepositoryMarkdown(root);
+  const { changed, added } = await changedFiles(root, base);
   for (const file of ['specs', '.agents/notes'].flatMap((p) => walk(root, p))) {
     if (
       !file.endsWith('.md') ||
@@ -406,6 +421,20 @@ export async function documentStatus(root, { base } = {}) {
         );
         if (missing.length) staleReferences.push({ file, missing });
       }
+      if (
+        ['proposed', 'implemented'].includes(lifecycle) &&
+        !markdown.ownerLinkedNotes.has(noteKey(file))
+      ) {
+        const key = noteKey(file);
+        const counterpartAdded = added.has(key) || added.has(key.replace(/\.md$/, '.zh.md'));
+        if (counterpartAdded && !unlinkedNotes.has(key))
+          errors.push(
+            `${key}: a new note needs an inbound link from its current-state owner (a README, ` +
+              '.agents/docs page, AGENTS.md or Spec) so readers of that code find it ' +
+              '(.agents/notes/AGENTS.md#linking)'
+          );
+        unlinkedNotes.add(key);
+      }
       if (changed.has(file)) {
         const heading = proposalHeadings.exec(text)?.[0];
         if (lifecycle === 'implemented' && heading)
@@ -445,16 +474,19 @@ export async function documentStatus(root, { base } = {}) {
     }
     documents.push({ file, status, translation, missingTranslation });
   }
-  const markdown = await checkRepositoryMarkdown(root);
   errors.push(...markdown.errors);
   warnings.push(...markdown.warnings);
-  return { documents, staleReferences, errors, warnings };
+  return { documents, staleReferences, unlinkedNotes: [...unlinkedNotes], errors, warnings };
 }
 
-/** Check tracked and untracked non-ignored Markdown, including hubs and archives. */
+/**
+ * Check tracked and untracked non-ignored Markdown, including hubs and archives, and collect
+ * the notes that a non-note document links to.
+ */
 async function checkRepositoryMarkdown(root) {
   const errors = [];
   const warnings = [];
+  const ownerLinkedNotes = new Set();
   const files = [
     ...new Set(
       (await git(root, ['ls-files', '--cached', '--others', '--exclude-standard', '-z']))
@@ -522,9 +554,13 @@ async function checkRepositoryMarkdown(root) {
         !existsSync(destination)
       )
         errors.push(`${file}: broken local link ${target}`);
+      else if (!noteRecord.test(file)) {
+        const linked = path.relative(root, destination).split(path.sep).join('/');
+        if (linked.startsWith('.agents/notes/')) ownerLinkedNotes.add(noteKey(linked));
+      }
     }
   }
-  return { errors, warnings };
+  return { errors, warnings, ownerLinkedNotes };
 }
 
 /** Explicit confirmation requires committed, recoverable content and never edits a Spec. */

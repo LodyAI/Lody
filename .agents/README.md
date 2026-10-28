@@ -25,6 +25,7 @@ content in the wrong place. Route it rather than delete it:
 | One directory's file-by-file responsibilities        | That directory's `README.md`      | It changes whenever the directory does                                    |
 | An explanation crossing modules                      | [`.agents/docs/`](docs/AGENTS.md) | It answers a reader, not a directory                                      |
 | Consequential intent/guarantees needing human review | [`specs/`](../specs/AGENTS.md)    | Keep only the decision and essential guarantees; prefer an existing owner |
+| What a past decision means for the code today        | Owning README or `.agents/docs/`  | One sentence of current state, linking the note that explains it          |
 | Why a choice was made, what was rejected             | [Notes](notes/AGENTS.md)          | It is dated history, not current authority                                |
 
 Explanations live under `.agents/` rather than a root `docs/`: `site-docs/` already
@@ -94,10 +95,12 @@ pnpm run docs check
 
 Status is derived from existing files: draft/outdated Specs, proposed notes,
 pending/stale translations, active notes citing repository paths that no longer
-exist (`staleReferences`), and topics needing SHA review. Do not maintain a
+exist (`staleReferences`), active notes no README, `.agents/docs/` page,
+`AGENTS.md` or Spec links (`unlinkedNotes`), and topics needing SHA review. Do not maintain a
 separate global INDEX or TODO. Both commands are read-only. Check reports invalid
 metadata, repository Markdown links (including archives), `AGENTS.md` files over
-their word ceiling, `Supersedes` targets that are not archived, and stale or
+their word ceiling, `Supersedes` targets that are not archived, new notes without
+a current-state owner link, and stale or
 broken registered topics. Note hygiene gates (proposal-era headings in an
 implemented note, run-log phrases) apply only to notes the task changed, against
 `--base` in CI and `HEAD` locally; earlier records are not reopened. Warnings,
@@ -155,8 +158,11 @@ Translation cannot approve a Spec, and the tool does not assess translation accu
 2. Run the [supersession check](notes/AGENTS.md#supersession) before writing a
    note: update the owning note, archive fully superseded ones, cross-link partial
    replacements. Update current conclusions in Specs, `.agents/docs/`, or owning
-   READMEs so the next agent need not reconstruct history. When the diff moves or
-   renames something an implemented note cites, update that fact in the note.
+   READMEs so the next agent need not reconstruct history. Link every new note from
+   that current-state owner; the check rejects a new note only other notes link.
+   When the diff moves or renames something an implemented note cites, update that
+   fact in the note, and apply [maintenance on read](notes/AGENTS.md#maintenance-on-read)
+   to any note the task relied on.
 3. Check existing invariants when identifying risk. Explain violations; propose
    evidence-backed changes to the nearest `AGENTS.md` when a rule is missing.
    Humans confirm important intent. Do not add a parallel risk inventory.
