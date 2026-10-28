@@ -3013,10 +3013,6 @@ function WorkspaceChatLanding({
   }, [openAddProjectDialog]);
 
   const requestProjectEditor = useSetAtom(projectEditorRequestAtom);
-  const handleCreateProject = useCallback(
-    () => requestProjectEditor({ kind: 'create' }),
-    [requestProjectEditor]
-  );
 
   const handleLocalProjectAdded = useCallback(
     (info: { machineId: MachineId; localProjectId: LocalProjectId }) => {
@@ -3764,6 +3760,19 @@ function WorkspaceChatLanding({
     },
     [handleSelectedLocalProjectChange, selectProjectGroup]
   );
+  // The project just created is what the user meant to work in.
+  const handleCreateProject = useCallback(
+    () =>
+      requestProjectEditor({
+        kind: 'create',
+        onCreated: (projectId) => handleDesktopProjectChange({ kind: 'group', projectId }),
+      }),
+    [handleDesktopProjectChange, requestProjectEditor]
+  );
+  const handleEditProjectGroup = useCallback(
+    (projectId: string) => requestProjectEditor({ kind: 'edit', projectId }),
+    [requestProjectEditor]
+  );
   const desktopProjectGroupOptions = useMemo<UnifiedProjectGroupOption[]>(
     () =>
       workspaceProjects.flatMap((project) => {
@@ -4079,6 +4088,7 @@ function WorkspaceChatLanding({
           onConnectGitRepo={handleConnectGitRepo}
           onAddLocalProject={handleAddLocalProject}
           onCreateProject={handleCreateProject}
+          onEditProjectGroup={handleEditProjectGroup}
           onShareLocalProjectWithTeam={
             showProjectSharing ? handleShareLocalProjectWithTeam : undefined
           }

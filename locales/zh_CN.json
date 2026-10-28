@@ -5708,6 +5708,7 @@
   "settings.projectGroups.wizard.details.remove": "移除 {{name}}",
   "settings.projectGroups.wizard.details.instructions": "给 Agent 的说明（可选）",
   "chat.projectPicker.createProject": "创建项目",
+  "chat.projectPicker.editGroup": "编辑 {{name}}",
   "settings.projectGroups.wizard.sources.bothSelected": "{{names}} 同时选中了本地文件夹和 GitHub 仓库。项目只保留一份，优先使用 GitHub 仓库。",
   "settings.projectGroups.wizard.sources.bothSelected_other": "{{names}} 同时选中了本地文件夹和 GitHub 仓库。项目只保留一份，优先使用 GitHub 仓库。",
   "settings.projectGroups.wizard.previous": "上次选择",

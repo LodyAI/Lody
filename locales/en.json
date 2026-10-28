@@ -5716,6 +5716,7 @@
   "settings.projectGroups.wizard.details.remove": "Remove {{name}}",
   "settings.projectGroups.wizard.details.instructions": "Instructions for the agent (optional)",
   "chat.projectPicker.createProject": "Create project",
+  "chat.projectPicker.editGroup": "Edit {{name}}",
   "settings.projectGroups.wizard.sources.bothSelected": "{{names}} is selected both as a folder and as a GitHub repository. The project keeps one copy and uses the GitHub repository.",
   "settings.projectGroups.wizard.sources.bothSelected_one": "{{names}} is selected both as a folder and as a GitHub repository. The project keeps one copy and uses the GitHub repository.",
   "settings.projectGroups.wizard.sources.bothSelected_other": "{{names}} are selected both as folders and as GitHub repositories. The project keeps one copy of each and uses the GitHub repositories.",
