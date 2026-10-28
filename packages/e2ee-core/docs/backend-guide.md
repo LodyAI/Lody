@@ -202,9 +202,10 @@ Explicit new owner intent CASes that removed head to n+1 with its digest as pare
 from reactivating a removed resource. Atomic same-member machine replacement keeps
 the policy active and does not run removal cleanup. Retain the removal cutoff and
 minimal request receipts even after reactivation; cleanup deletes only ciphertext
-at/below that cutoff, never newer commits. Purged version/request reads return a
-removed barrier; an exact commit retry of a purged request returns removed and
-must never restore its original frame.
+at/below that cutoff, never newer commits. Purged version reads may return null;
+readHead retains the removed high water. Purged request reads retain their removal
+barrier; an exact commit retry returns removed and must never restore its original
+frame.
 
 A server tombstone is a storage/CAS barrier, not a signed policy or verified client
 pin. Missing originals leave a history gap that the core currently rejects; A3 must

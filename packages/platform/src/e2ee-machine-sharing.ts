@@ -8,7 +8,7 @@ export interface E2eeMachineSharingTransport {
   readHead(
     input: E2eeMachineSharingRequests['readHead']
   ): Promise<E2eeMachineSharingReplies['readHead']>;
-  /** Read an immutable original, or a removal barrier after cleanup. A barrier never verifies a history gap. */
+  /** Read an immutable original; purged ciphertext may return null while readHead retains the removal high water. */
   readVersion(
     input: E2eeMachineSharingRequests['readVersion']
   ): Promise<E2eeMachineSharingReplies['readVersion']>;

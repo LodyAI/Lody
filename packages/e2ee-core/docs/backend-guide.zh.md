@@ -109,8 +109,9 @@ Loro / Durable Streams 直接提供这些能力：`@lody/e2ee-core/adapters/loro
 新的明确所有者意图以 removed head 做 CAS，提交 n+1 并以前摘要为父项，0/null 则
 提交 1/null。CAS 比较 status，避免旧 pending active 请求复活共享。同成员原子替换
 机器保持策略 active，不进入移除清理。即使重新启用也保留移除 cutoff 和最小请求收据；
-后台清理只删除 cutoff 及以下版本的密文，不碰更新的提交。已清理的版本／请求读取返回
-removed 屏障，旧提交精确重试返回 removed，不能恢复旧原文。
+后台清理只删除 cutoff 及以下版本的密文，不碰更新的提交。已清理的版本读取可返回 null，
+readHead 仍保留 removed 高水位；请求读取保留 removed 屏障，旧提交精确重试返回
+removed，不能恢复旧原文。
 
 服务端 tombstone 是存储／CAS 屏障，不是签名策略或已验证客户端 pin。原文缺失形成的
 历史缺口当前 core 仍会拒绝；A3 须提供明确审核的缺口恢复，才能声称清理后可执行，不能

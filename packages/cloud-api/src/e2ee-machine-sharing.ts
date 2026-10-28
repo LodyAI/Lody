@@ -26,7 +26,7 @@ export type E2eeMachineSharingVersion = E2eeMachineSharingScope &
     requestId: string;
     frameHex: string;
   };
-/** An original version, a barrier for a purged original, or absence. A purged request/version must not
+/** An original version, a removal barrier, or a missing/purged original (null). A purged request/version must not
  * become a fresh request or resurrect its ciphertext, including after a later reactivation. */
 export type E2eeMachineSharingReadResult =
   | E2eeMachineSharingVersion
@@ -63,6 +63,7 @@ export type E2eeMachineSharingRequests = {
 /** A commit acknowledgement is storage evidence only. Clients independently verify every returned head/frame. */
 export type E2eeMachineSharingReplies = {
   readHead: E2eeMachineSharingHeadState | null;
+  /** Missing or purged ciphertext may return null; readHead still preserves the removed high water. */
   readVersion: E2eeMachineSharingReadResult;
   readRequest: E2eeMachineSharingReadResult;
   latestForMember: E2eeMachineSharingLatestForMember;

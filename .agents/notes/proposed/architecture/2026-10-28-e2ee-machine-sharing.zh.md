@@ -34,7 +34,7 @@ platform 传输接口与 cloud-api 复用唯一 DTO。后端从设备凭据确�
 
 客户端从首版或自己可信、绑定资源的持久 pin 开始，逐版验证，拒绝跳号、分叉和回退。服务端 head 本身不构成密码学授权或新鲜度。新机器或包含已撤销签名者的缺口可用 `verifyMachineSharingHistoryStep` 验证历史成员身份与摘要链，仅返回临时 head；最后的最新策略通过当前所有者个人设备检查后才推进持久接受 pin，不能仅凭历史步骤执行或接受新 pin。`openMachineSharingPolicy` 产生只有模块可创建的验证证据，`authorizeMachineExecution` 拒绝复制／伪造证据，并用当前真实账本复查。只有机器所属成员的个人设备可改策略，工作区 Owner/Admin 无跨成员修改权。Guest/recovery 不能通过“全团队”获得执行权；同成员替换机器密钥可保留策略，新成员实例不继承。签发个人设备撤销后旧策略失效，须由所有者另一有效个人设备签发下一版。
 
-真正移除机器保留带 scope 的 removed head，保存最后已提交版本／摘要，从未写过则为 0/null。重新启用须有新的明确所有者意图，CAS 比较完整 status／scope／版本／摘要，提交 n+1，不能重放旧 pending 请求。同成员原子替换维持 active。后台清理保存 cutoff，不能删除更新的提交；保留最小请求意图收据，避免清理后精确重试恢复密文或复用 requestId。独立账号 query `latestForMember` 只向当前工作区账号成员返回密文与未验证的路由／head，不替代设备认证的最新读取或任何写操作。
+真正移除机器保留带 scope 的 removed head，保存最后已提交版本／摘要，从未写过则为 0/null。重新启用须有新的明确所有者意图，CAS 比较完整 status／scope／版本／摘要，提交 n+1，不能重放旧 pending 请求。同成员原子替换维持 active。版本清理后读取可返回 null，readHead 仍保留 removed 高水位。后台清理保存 cutoff，不能删除更新的提交；保留最小请求意图收据，避免清理后精确重试恢复密文或复用 requestId。独立账号 query `latestForMember` 只向当前工作区账号成员返回密文与未验证的路由／head，不替代设备认证的最新读取或任何写操作。
 
 清空原文后，新客户端或落后客户端无法使用当前 core 证明完整策略链。存储 tombstone 可供写者做 CAS 基点，不是已验证执行 pin。缺口恢复须由 A3 明确约定；没有恢复时保持 pending，不能静默接受 tombstone 或跳过历史。这是物理清理尚未解决的可用性限制，不改变签名格式。
 
