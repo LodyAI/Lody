@@ -7,6 +7,8 @@ export type E2eeContentTokenRequest = E2eeDeviceAccess & {
   requestSnapshotFor?: string;
 };
 export type E2eeContentToken = {
+  /** Short-lived attachment-only grant; device credentials remain in the host. */
+  attachmentToken?: string;
   token: string;
   bucketId: string;
   gatewayBaseUrl: string;

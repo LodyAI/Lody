@@ -69,3 +69,7 @@ MessageHandler's assistant output/backfill. Transport never appends history.
 Create and chat write the same complete input blocks to user content and frozen
 execution input. MCP acceptance persists references in `operation_inputs` with
 fixed Session/Turn IDs; daemon recovery consumes these instead of source paths.
+
+## Encrypted workspace attachments
+
+The transfer selects the encrypted-file route only for an admitted encrypted workspace and obtains a short-lived attachment grant from its host-owned device credential. Paired machine ports receive the relay URL explicitly from cloud startup, without restoring an account CLI token. Files and images upload bounded opaque parts; the protected conversation stores the secret manifest. Downloads authenticate parts before materialization, and local backfill retains that manifest with its crash-recovery receipt. The [file-key decision](../notes/proposed/architecture/2026-10-28-encrypted-attachments.md) explains rotation, retention and failure trade-offs. Ordinary transfer paths remain unchanged.

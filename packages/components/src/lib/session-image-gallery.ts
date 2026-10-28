@@ -10,6 +10,7 @@ type SessionImageLike =
     >;
 
 export type SessionImageGalleryEntry = {
+  encryption?: import('@lody/shared').EncryptedAttachment;
   key: string;
   sessionId: SessionId;
   messageId: string;
@@ -45,6 +46,7 @@ export const createSessionImageGalleryEntry = ({
   messageId,
   galleryGroupId,
   imageId: image.imageId,
+  encryption: image.encryption,
   mimeType: image.mimeType,
   fileName: image.fileName,
   sizeBytes: image.sizeBytes,

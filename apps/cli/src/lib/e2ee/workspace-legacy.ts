@@ -1085,6 +1085,15 @@ async function openWorkspaceOwned(
   // Startup is one of the three refresh triggers; no network request is awaited by open.
   void refreshInBackground();
   return {
+    attachmentToken: async () => {
+      if (closed) throw new Error('e2ee_closed');
+      const result = await options.cloud.getContentToken({
+        workspaceId: options.workspaceId,
+        credential: opened.credential,
+      });
+      if (closed || !result.attachmentToken) throw new Error('e2ee_attachment_unavailable');
+      return result.attachmentToken;
+    },
     repositoryDirectory: repositoryDirectory(
       directory,
       binding.genesisHash,

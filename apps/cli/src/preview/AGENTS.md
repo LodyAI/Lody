@@ -2,7 +2,7 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-Managed preview tunnels and the local proxy. [apps/cli/AGENTS.md](../../AGENTS.md) applies.
+[apps/cli/AGENTS.md](../../AGENTS.md) applies.
 
 - Quick Tunnel replacement is in progress; target contract:
   [Quick Tunnel preview](../../../../specs/quick-tunnel-preview.md).
