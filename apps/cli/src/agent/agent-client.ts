@@ -1544,12 +1544,6 @@ export class AgentClient implements acp.Client {
       provider: this.options.agentConfig?.agentType ?? 'unknown',
     });
     if (!event) {
-      // TEMP prompt-suggestion-debug
-      if (logicalMethod === 'lody/session/prompt_suggestion') {
-        this.logger.debug('[prompt-suggestion-debug] invalid-event', {
-          sessionId: this.options.sessionId,
-        });
-      }
       this.logger.debug(`[${this.options.sessionId}] Ignoring extension message ${logicalMethod}`);
       return;
     }
@@ -1597,19 +1591,6 @@ export class AgentClient implements acp.Client {
         return;
       }
       case 'promptSuggestion':
-        // TEMP prompt-suggestion-debug
-        this.logger.debug('[prompt-suggestion-debug] acp-received', {
-          sessionId: this.options.sessionId,
-          acpSessionId: this.acpSessionId,
-          eventSessionId: event.update.sessionId,
-          negotiated: this.lodyExtensionCapabilities.promptSuggestions?.version === 1,
-          sessionMatches:
-            this.acpSessionId !== null && event.update.sessionId === this.acpSessionId,
-          hasConsumer: !!this.options.onPromptSuggestion,
-          result: event.update.result.type,
-          textLength:
-            event.update.result.type === 'completed' ? (event.update.result.text?.length ?? 0) : 0,
-        });
         if (
           this.lodyExtensionCapabilities.promptSuggestions?.version === 1 &&
           this.acpSessionId !== null &&
@@ -2059,12 +2040,6 @@ export class AgentClient implements acp.Client {
       | null
       | undefined;
     this.lodyExtensionCapabilities = parseLodyExtensionCapabilities(extensionMeta);
-    // TEMP prompt-suggestion-debug
-    this.logger.debug('[prompt-suggestion-debug] negotiated', {
-      sessionId: this.options.sessionId,
-      provider: this.options.agentConfig?.agentType,
-      version: this.lodyExtensionCapabilities.promptSuggestions?.version ?? null,
-    });
     this.supportsForkAtTurn = this.lodyExtensionCapabilities.forkAtTurn?.version === 1;
     this.acknowledgedSteerCapability = parseAcknowledgedSteerCapability(extensionMeta);
     const hasCloseMethod = typeof connection.closeSession === 'function';

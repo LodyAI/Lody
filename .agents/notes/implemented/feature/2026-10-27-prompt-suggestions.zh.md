@@ -48,7 +48,7 @@ Claude 协商后开启 SDK `promptSuggestions`，但尊重 provider 选项的显
   没有历史／读取／重试 API，也不保证每轮必有事件；SDK 抑制生成不等于失败。
 - 根 pnpm 工作区已有 `acp-extension-core: workspace:*` override，本地消费者使用本次
   源码。Core 0.3.0 已发布，两个 adapter 均精确依赖 `acp-extension-core@0.3.0`，
-  npm 生成的 lockfile 包含对应注册表校验值。根 lockfile 因 workspace 覆盖不变。全部 8 个 submodule 已对齐拉取时的上游 main，包含 Core 0.3.0 发布提交；随后 Codex 额外锁定临时诊断提交 `7e4af7e`，托管运行时版本锁定不变。
+  npm 生成的 lockfile 包含对应注册表校验值。根 lockfile 因 workspace 覆盖不变。全部 8 个 submodule 已对齐拉取时的上游 main，包含 Core 0.3.0 发布提交；Codex 调试结束后恢复 main 提交 `304d594`，托管运行时版本锁定不变。
 - 建议使用独立 `prompt-suggestions` ephemeral 通道，不进入 presence 心跳和持久化历史。发布端最多保留 256 个会话条目、24 小时，文本上限 16,384 字符，身份字段有长度限制。这是传输保留时间，不是 turn 新鲜度规则。
 - CLI 仅接受已协商且属于当前 ACP 会话的通知，再映射到稳定 Lody 会话及机器。现有物理写入器向本地连接合并发送最新快照。可选云桥接沿用既有授权并排除加密工作区；纯本地组合不启动云传输。
 - Renderer 分离本地与云端 store，按目标机器选择来源，未知路由不显示建议。hook 防止 workspace/runtime/session/machine 切换串数据。输入、清空和接受都不消费共享建议；空结果或失败清除可见提示。参见 [composer 交互契约](2026-10-27-prompt-suggestion-composer-ui.zh.md)。
@@ -64,8 +64,6 @@ Core build/typecheck 与全部 10 项测试通过。adapter 测试覆盖未协�
 Core 0.3.0 在干净的独立 adapter 克隆中使用 `npm ci` 验证：Codex 类型检查、构建和 11 项定向测试通过；Claude 构建、check 和 699 项定向测试通过（10 项跳过）。真实模型生成和抑制行为仍未验证。
 
 合并 main 后，Lody 的 46 项 CLI、21 项共享边界及 80 项 renderer/composer 测试通过；扩展后的 6 项建议测试也通过，覆盖 sheet 接受和禁用时保留焦点。此前共享包全量 1,688 项测试通过。合并 main 前 shared、CLI、components 类型检查通过；合并后 components 类型检查因已安装的 Streams 依赖缺少 main 的 `onSnapshotRecovery` 补丁阻塞，相关 E2EE 消费代码与 main 一致。根格式化和文档检查通过。根 `pnpm check` 在 Devin adapter 准备阶段因该 checkout 缺少依赖阻塞，不能视为全仓检查通过。根 lint 也遇到其他 checkout 范围缺少 Node/React/Vite 类型定义。Storybook 浏览器检查覆盖桌面 Tab、移动端应用、输入隐藏与清空恢复，控制台无错误；数据为合成组件输入，并非真实模型或完整应用会话。
-
-临时诊断统一使用 `prompt-suggestion-debug` 标记，覆盖原生接收、adapter 转发、ACP 协商及接收、发布尝试、前端订阅和来源路由；只记录标识、状态与文本长度，不记录正文。用户调试后删除所有同标记代码。Codex stderr 进入 daemon 日志，前端记录在 Console。相关 52 项测试与 adapter 构建通过。
 
 ## Codex 运行时可用性纠正
 
