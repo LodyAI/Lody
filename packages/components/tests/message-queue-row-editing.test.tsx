@@ -158,6 +158,8 @@ describe('queued message editing commits', () => {
     ]);
     expect(scheduledRows[0]!.textContent).toContain('Not sent');
     expect(scheduledRows[1]!.textContent).toContain('Pending');
+    expect(scheduledRows[0]!.className).not.toContain('border-t');
+    expect(scheduledRows[1]!.className).toContain('border-t');
     for (const row of scheduledRows) {
       expect(row.querySelector('[aria-label="Drag to reorder"]')).toBeNull();
     }

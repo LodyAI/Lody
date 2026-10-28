@@ -88,6 +88,7 @@ const styles = stylex.create({
     paddingInline: { default: space[4], '@media (max-width: 600px)': space[2] },
     fontSize: text.footnoteSize,
   },
+  onlyScheduledHeader: { minHeight: 36, paddingBlock: 2 },
   title: { fontWeight: 500 },
   count: { marginInlineStart: space[1.5] },
   status: {
@@ -105,11 +106,7 @@ const styles = stylex.create({
     alignItems: 'center',
     gap: space[1.5],
     paddingInline: space[2],
-    paddingTop: space[2],
-    paddingBottom: space[1],
-    borderTopWidth: 1,
-    borderTopStyle: 'solid',
-    borderTopColor: colors.separator,
+    paddingBlock: { default: space[1], '@media (pointer: coarse), (max-width: 600px)': 2 },
     fontSize: text.captionSize,
     color: colors.secondaryLabel,
   },
@@ -245,6 +242,7 @@ export function MessageQueueDisplay({
   };
 
   const fadeMask = buildScrollEdgeFadeMask(overflow, FADE_PX);
+  const scheduledSectionProps = stylex.props(styles.scheduledSection);
 
   // A sheet tucked onto the surface below it (the info bar, or the composer when
   // there is no bar): rounded top, square open bottom, and the composer's own
@@ -263,7 +261,11 @@ export function MessageQueueDisplay({
         )}
       >
         <Collapsible.Trigger
-          {...stylex.props(styles.header, roomy && styles.roomyHeader)}
+          {...stylex.props(
+            styles.header,
+            roomy && styles.roomyHeader,
+            onlyScheduled && styles.onlyScheduledHeader
+          )}
           data-message-queue-toggle=""
           onPointerDown={(event) => {
             if (event.button === 0) event.currentTarget.focus();
@@ -355,13 +357,21 @@ export function MessageQueueDisplay({
                 />
               ))}
               {!onlyScheduled && dedicatedScheduled.length > 0 ? (
-                <div {...stylex.props(styles.scheduledSection)}>
+                <div
+                  {...scheduledSectionProps}
+                  className={cn(scheduledSectionProps.className, 'border-t border-border/30')}
+                >
                   <Clock size={12} aria-hidden="true" />
                   {t('sessions.messageQueue.scheduledTitle', 'Scheduled')}
                 </div>
               ) : null}
-              {dedicatedScheduled.map((item) => (
-                <ScheduledQueueRow key={item.scheduleId} item={item} onOpen={onOpenScheduled} />
+              {dedicatedScheduled.map((item, index) => (
+                <ScheduledQueueRow
+                  key={item.scheduleId}
+                  item={item}
+                  onOpen={onOpenScheduled}
+                  divided={index > 0}
+                />
               ))}
             </DndContext>
           </div>

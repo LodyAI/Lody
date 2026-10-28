@@ -1,6 +1,7 @@
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import { Clock } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { formatUpcoming } from '../../schedules/schedule-format';
 import { queueSurface } from './surface';
 
@@ -19,18 +20,22 @@ export type ScheduledQueueItem = {
 export function ScheduledQueueRow({
   item,
   onOpen,
+  divided = true,
 }: {
   item: ScheduledQueueItem;
   onOpen?: (item: ScheduledQueueItem) => void;
+  divided?: boolean;
 }) {
   const { t, i18n } = useTranslation();
+  const rowProps = stylex.props(queueSurface.scheduledRow);
   return (
     <button
       type="button"
       onClick={() => onOpen?.(item)}
       disabled={!onOpen}
       title={item.title}
-      {...stylex.props(queueSurface.scheduledRow)}
+      {...rowProps}
+      className={cn(rowProps.className, divided && 'border-t border-border/30')}
     >
       <Clock size={12} aria-hidden="true" {...stylex.props(queueSurface.scheduledIcon)} />
       <span {...stylex.props(queueSurface.scheduledTime)}>
