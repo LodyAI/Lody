@@ -10,7 +10,8 @@ Translation: current
 加密远程执行需要明确字节，并让实时和持久派发共用一个持久启动边界。本修订对齐已
 合入的用途专用加密原语、账本机器绑定和 schema-3 journal 恢复，候选正文字节钉在
 已合入 PR-25。保留加密 history/Meta 最终回退，区分持久请求过期与仅内存执行新鲜度。
-完整 Spec 仍为 draft；RPC 完整帧上限与机器资源规范编码已于 2026-10-28 获 owner
+完整 Spec revision `e4351fda` 已批准，见
+[PR #1894 批准记录](https://github.com/LodyAI/Lody/pull/1894)；RPC 完整帧上限与机器资源规范编码已于 2026-10-28 获 owner
 批准。MVP 采用加密 Streams RPC 加持久回退，iroh 延后为加速层；产品执行和延迟
 验收仍未证实。Owner 还选择现有 90 秒通道的最小明文 presence，发布前白名单过滤
 仍待接线。
@@ -89,10 +90,11 @@ PR-25 **已合入**（merge `c7b3c71512e2bdf26b14817fc8ff56cbd730f509`），源�
 
 ## 验证边界
 
-[PR #1894](https://github.com/LodyAI/Lody/pull/1894) 保持 draft；四份 Spec 均为 draft，
-双语 Note 均 proposed/current。文档检查只验证元数据／链接，不代表最终 Spec 批准
-或运行时行为。两个格式点批准不改变 Spec 状态：最终批准仍待独立 PR-25／wire
-一致性审查及之后 owner 明确批准。已对照指定 PR-25 codec 和独立生成的向量，
+[PR #1894](https://github.com/LodyAI/Lody/pull/1894) 记录：owner 授权总调度
+（会话 `b12f1597`）于 2026-10-28 审核后批准 revision
+`e4351fda5f0455b121b7e80db8ebc79752dee862`。四份 Spec 均为 approved；运行时接线
+尚未实现，双语 Note 保持 proposed/current。文档检查只验证元数据／链接，不代表
+运行时行为。Spec 批准不代表产品验收通过。已对照指定 PR-25 codec 和独立生成的向量，
 不复制候选实现，也不加新测试套件。认证传输／新鲜度、发送 outbox、查询授权、实际执行和持久回退、真实
 网关、原生／平台和延迟验收仍待接线。本 revision 的检查记录在 PR 描述；旧检查／评审
 结果不作为此次 revision 的证据。

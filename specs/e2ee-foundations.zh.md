@@ -1,7 +1,11 @@
 # E2EE 基础模块边界
 
-Status: draft
+Status: approved
 Translation: current
+
+Approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
+Approval: 2026-10-28，owner 授权总调度（会话 `b12f1597`）审核后批准；
+[批准记录](https://github.com/LodyAI/Lody/pull/1894)。
 
 [English](e2ee-foundations.md)
 
@@ -40,7 +44,7 @@ RPC → 加密 history/Meta 持久派发最终回退**。Streams RPC 失效时�
 中。普通工作区保持原行为；RPC 和持久内容不回退明文，MVP presence 是下文单独
 批准的最小明文元数据通道。
 
-**本具体字节修订仍为 draft。** 下文两点已获 **owner 于 2026-10-28 批准**：RPC 的
+**本具体字节修订已批准，记录见上。** 下文两点已获 **owner 于 2026-10-28 批准**：RPC 的
 1 MiB 包含 content v0 的 143 字节开销；RPC 资源使用账本 machineId 字节的规范
 无填充 base64url。RPC 正文布局对齐已合入 PR-25（merge
 `c7b3c71512e2bdf26b14817fc8ff56cbd730f509`），源码钉在
@@ -247,9 +251,9 @@ journal 错误只阻断依赖它的工作；保留证据和原 cause，I/O 恢�
 与[通道契约](loro-ephemeral-presence-channel.zh.md)。其通用 schema 仍允许自由文本
 status.detail；加密工作区发布白名单是接线要求，不是本次文档已经实现的行为。
 这些子集不证明资源编码、认证传输／新鲜度、发送 outbox、实际执行及持久回退接线、
-结果查询授权、iroh 托管、安装平台或延迟验收。两个格式点已于 2026-10-28 获 owner
-批准；完整 Spec 保持 draft，等待独立 PR-25／wire 一致性审查及之后 owner 对最终
-revision 的明确批准。文档检查或这两项格式决定都不批准完整 Spec，也不开启产品通道。
+结果查询授权、iroh 托管、安装平台或延迟验收。完整 Spec revision `e4351fda` 已于
+2026-10-28 经 owner 授权总调度审核后批准，记录见上。Spec 批准不代表开启产品通道
+或运行时验收通过。
 
 ## 格式兼容性
 
@@ -313,8 +317,8 @@ Owner 批准在冻结前扩展现有机器 AdmitDevice（tag4），不新增操�
 安装报告须晚于持久保存、实际回读／解封和独立 commitment 校验。失败不得
 宣称已报告安装。原生工作结束和临时清理须晚于取消请求、早于取消／Scope
 完成。禁止明文降级或生产装配。原生适配器选择、恢复文件／包装／并发仍单独验收。
-发布者窗口改用先暂存后提交；vault 与真实平台保管仍单独验收。本 Spec 修订保持 draft；边界方向已定和合成
-测试通过，不代表整份修订获批或原生存钥通过验收。
+发布者窗口改用先暂存后提交；vault 与真实平台保管仍单独验收。本 Spec 修订已批准，记录见上；边界批准和合成
+测试通过，不代表原生存钥通过验收。
 
 [Host 契约与验证边界](../packages/e2ee-core/docs/workflows.md#installedepochkeys-and-installedepochhistory)。
 
@@ -334,7 +338,7 @@ SDK provider 头仅为 [4]，不再在 provider 头里编码 offset，无旧格�
 
 通用 ASCII offset 使用 u16 长度界；已发布 SDK 的 4096B sealing-overhead
 限制使适配器上限更小。真实 Loro/Flock 消费者用快照和后续增量 bootstrap。
-以上方向已确定，修订稿仍为 draft，待用户审批，不代表产品启用。发布者密钥
+本修订已批准，记录见上，不代表产品启用。发布者密钥
 可用性改用[先暂存后提交](e2ee/publisher-key-recoverability.zh.md)，不再保留旧 A/B 提案。
 
 ## 本地 SQLite 持久化

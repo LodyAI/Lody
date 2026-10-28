@@ -8,11 +8,12 @@ Translation: current
 ## Abstract
 
 Encrypted remote execution needs unambiguous bytes and one durable start boundary
-across realtime and persistent delivery. This revision aligns the public draft
+across realtime and persistent delivery. This revision aligns the public Spec
 with merged purpose-specific crypto, signed machine binding and schema-3 journal
 recovery, while pinning RPC body bytes to merged PR-25. It keeps encrypted
 history/Meta dispatch as the final fallback and separates persistent request
-expiry from memory-only execution freshness. The full Spec remains draft;
+expiry from memory-only execution freshness. The full Spec revision `e4351fda` is approved as recorded in
+[PR #1894](https://github.com/LodyAI/Lody/pull/1894);
 the owner approved whole-frame RPC sizing and canonical machine resource encoding
 on 2026-10-28. The MVP uses encrypted Streams RPC plus durable fallback, with
 iroh deferred to a later accelerator. The owner selected minimal plaintext presence
@@ -113,11 +114,12 @@ primitive/codec availability or ordinary-workspace presence behavior.
 
 ## Verification boundary
 
-[PR #1894](https://github.com/LodyAI/Lody/pull/1894) remains draft; all four Spec
-files remain draft and both Note languages remain proposed/current. Document checks
-validate metadata/links, not final Spec approval or runtime behavior. The two
-format approvals do not change Spec status: final approval awaits independent
-PR-25/wire consistency review and subsequent explicit owner approval. The bytes
+[PR #1894](https://github.com/LodyAI/Lody/pull/1894) records approval of revision
+`e4351fda5f0455b121b7e80db8ebc79752dee862` on 2026-10-28 by the owner-authorized
+coordinator (session `b12f1597`). All four Spec files are approved. Both Note
+languages remain proposed/current because runtime integration is not implemented.
+Document checks validate metadata/links, not runtime behavior. Spec approval is
+not product acceptance. The bytes
 were compared with the pinned PR-25 codec and independently
 generated vectors; no copied candidate implementation or new test suite is added.
 Authenticated transports/freshness, sender outbox, query authorization, actual

@@ -1,9 +1,13 @@
 # Lody Security Whitepaper
 
-Status: draft
+Status: approved
 Translation: current
 
-This public draft preserves the pinned proposed architecture. References to independent implementations describe the prototype source, not completion in this repository. Current public implementation and unresolved protocol decisions are tracked in the [migration guide](../../.agents/docs/e2ee-migration.md). No production E2EE entrypoint is enabled.
+Approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
+Approval: 2026-10-28, reviewed and approved by the owner-authorized coordinator
+(session `b12f1597`); [approval record](https://github.com/LodyAI/Lody/pull/1894).
+
+This public Spec preserves the pinned proposed architecture. References to independent implementations describe the prototype source, not completion in this repository. Current public implementation and unresolved protocol decisions are tracked in the [migration guide](../../.agents/docs/e2ee-migration.md). No production E2EE entrypoint is enabled.
 
 End-to-End Encryption, Device Trust, and Organization Collaboration
 
@@ -205,8 +209,8 @@ with no measurement claimed here. The owner approved whole-frame 1 MiB RPC sizin
 (including 143 bytes) and canonical unpadded-base64url machine resources on
 2026-10-28. The later iroh identity still reuses the ledger device key; the reported
 domain-separation review found no signing-protocol confusion. Native key lifetime
-and product acceptance remain separate work. The full revision stays draft pending
-independent PR-25/wire consistency review and final explicit owner approval.
+and product acceptance remain separate work. The full Spec revision `e4351fda` was approved on
+2026-10-28 through the owner-authorized coordinator review recorded above.
 
 **Presence option A — owner approved (2026-10-28):** encrypted workspaces use the
 existing plaintext presence channel with its 90-second TTL. Publish only actual

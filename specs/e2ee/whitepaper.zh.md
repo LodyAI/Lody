@@ -1,9 +1,13 @@
 # Lody 安全白皮书
 
-Status: draft
+Status: approved
 Translation: current
 
-本公开草案保留固定来源的设计意图。文中的独立包实现指来源原型，不表示本公共仓已完成；实际迁移与未定协议见[迁移指南](../../.agents/docs/e2ee-migration.zh.md)。生产 E2EE 入口未开放。
+Approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
+Approval: 2026-10-28，owner 授权总调度（会话 `b12f1597`）审核后批准；
+[批准记录](https://github.com/LodyAI/Lody/pull/1894)。
+
+本公开 Spec 保留固定来源的设计意图。文中的独立包实现指来源原型，不表示本公共仓已完成；实际迁移与未定协议见[迁移指南](../../.agents/docs/e2ee-migration.zh.md)。生产 E2EE 入口未开放。
 
 端到端加密、设备信任与团队协作
 
@@ -195,7 +199,8 @@ journal 持久工作区过期下限不是该授权。执行证据不自动回收
 ≤1 秒，本次不声称测量通过。RPC 完整帧 1 MiB 包含 143 字节开销、机器资源规范
 无填充 base64url 两点已获 owner 批准（2026-10-28）。后续 iroh 仍复用账本设备钥；
 所报告的域隔离审查未发现签名协议混淆。原生密钥生命周期和产品验收仍须单独完成。
-完整 revision 保持 draft，等待独立 PR-25／wire 一致性审查及最终 owner 明确批准。
+完整 Spec revision `e4351fda` 已于 2026-10-28 经 owner 授权总调度审核后批准，
+记录见上。
 
 **Presence 方案 A——owner 已批准（2026-10-28）：** 加密工作区沿用现有明文 presence
 通道和 90 秒 TTL，只发布真实 machineId／instanceId／sessionId／userId、固定 kind／

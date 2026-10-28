@@ -1,7 +1,11 @@
 # E2EE foundation boundary
 
-Status: draft
+Status: approved
 Translation: current
+
+Approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
+Approval: 2026-10-28, reviewed and approved by the owner-authorized coordinator
+(session `b12f1597`); [approval record](https://github.com/LodyAI/Lody/pull/1894).
 
 [中文](e2ee-foundations.zh.md)
 
@@ -34,7 +38,7 @@ validates XChaCha20-Poly1305 tags using caller-supplied context/header and bindi
 New encryption requires a secure random 24-byte nonce. Tag validity alone does
 not establish author identity or authority. It does not expose a signer, private-key export, platform storage,
 transport or production feature switch. Platform custody and full content opening
-remain separate work. This draft is not product or all-platform acceptance.
+remain separate work. Spec approval is not product or all-platform acceptance.
 
 The separate HPKE epoch primitive preserves Base X25519/HKDF-SHA-256/ChaCha20-Poly1305,
 info `lody-e2ee/hpke-epoch/v1\0` and canonical four-field ledger AAD. It seals only
@@ -54,7 +58,7 @@ Iroh is a later acceleration layer, outside the MVP. Ordinary workspaces keep
 their existing behavior. RPC and durable content never fall back to plaintext;
 MVP presence is the separately approved minimal plaintext metadata channel below.
 
-**This concrete byte revision remains draft.** The owner approved both format
+**This concrete byte revision is approved as recorded above.** The owner approved both format
 choices below on **2026-10-28**: the 1 MiB RPC limit includes content v0's
 143-byte overhead, and
 RPC resources use canonical unpadded base64url of the ledger machineId bytes.
@@ -332,10 +336,9 @@ an integration requirement, not behavior established by this documentation.
 Resource encoding, authenticated transport/freshness, sender outbox, actual
 execution and durable fallback wiring, result-query authorization, iroh custody,
 installed-platform and latency acceptance are not established by those subsets.
-The two format choices are owner-approved as of 2026-10-28; the complete Spec
-remains draft pending independent PR-25/wire consistency review and subsequent
-explicit owner approval of the final revision. Neither document checks nor those
-format decisions approve the whole Spec or enable product channels.
+The complete Spec revision `e4351fda` was approved on 2026-10-28 through the
+owner-authorized coordinator review recorded above. Spec approval does not enable
+product channels or establish runtime acceptance.
 
 ## Format compatibility
 
@@ -402,8 +405,8 @@ independent commitment verification. Failure must never claim reported installat
 Native settlement and temporary cleanup precede cancellation/Scope completion.
 No plaintext fallback or production composition is allowed. Native adapter choice,
 recovery file/wrapping/concurrency and native custody remain separate decisions; publisher availability uses
-[stage-before-CAS](e2ee/publisher-key-recoverability.md). This Spec revision stays draft; accepted boundary direction
-and executed synthetic tests do not approve this entire revision or native custody.
+[stage-before-CAS](e2ee/publisher-key-recoverability.md). This Spec revision is approved as recorded above; boundary approval
+and executed synthetic tests do not establish native custody acceptance.
 
 [Host contract and validation boundary](../packages/e2ee-core/docs/workflows.md#installedepochkeys-and-installedepochhistory).
 
@@ -431,8 +434,8 @@ by clients. Native boundary lookup is a host capability, not snapshot authority.
 
 Generic ASCII offsets use the u16 length bound; the released SDK's 4096-byte
 sealing-overhead limit imposes a smaller adapter bound. A snapshot plus subsequent
-updates bootstraps through actual Loro/Flock consumers. These design decisions do
-not mark this revised draft approved or enable product encryption.
+updates bootstraps through actual Loro/Flock consumers. This revision
+is approved as recorded above; approval does not enable product encryption.
 
 ## Local SQLite persistence
 
