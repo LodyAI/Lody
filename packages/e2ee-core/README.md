@@ -46,7 +46,10 @@ host before enabling a channel. Retain the returned original frame for retries;
 running a seal again creates a new encryption. No product transport is enabled.
 
 The protocol entry also provides an owner-signed complete machine-sharing codec,
-resource binding, version verification and pure execution gate. The backend
+resource binding, version verification and pure execution gate.
+`readMachineSharingHistoryStep` returns authenticated historical full state for
+fresh owner intent, including after its personal signer is revoked; it grants no
+execution authority. The backend
 entry admits opaque owner frames; platform/cloud-api define the matching CAS
 DTOs. These are inert primitives, with no network, UI or execution integration.
 The [sharing proposal](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md)

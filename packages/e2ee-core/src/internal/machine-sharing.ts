@@ -8,6 +8,7 @@ import { encodeContentContext, type ContentScope } from './foundation/content-fo
 import type { DeviceSigner } from './foundation/signing';
 import { decodeMachineId, encodeMachineId } from './ledger/machine-id';
 import { contentPermissions, requireLedgerContinuation, type LedgerView } from './ledger';
+import { historicalDeviceKind } from './ledger/replay';
 import { admitDocument, openDocument, sealDocument, type DocumentKey } from './content';
 
 /** Independent trusted resource identity. Membership is an instance, never an account/display ID. */
@@ -39,6 +40,14 @@ export interface MachineSharingPolicy extends MachineSharingBinding, MachineShar
 export interface MachineSharingHead {
   readonly revision: number;
   readonly digest: string;
+}
+/** Authenticated historical data for preparing fresh owner intent, never an execution credential.
+ * Signature, AEAD, resource, personal-device admission and version continuity are checked; publication time,
+ * then-current permission and latest-head freshness are not proved. Revoked personal devices may be read. */
+export interface MachineSharingHistoryStep {
+  readonly _tag: 'MachineSharingHistoryStep';
+  readonly head: MachineSharingHead;
+  readonly policy: MachineSharingPolicy;
 }
 const verified: unique symbol = Symbol('VerifiedMachineSharingPolicy');
 /** Module-created evidence of exact frame, binding, signer and version verification. Not a freshness grant. */
@@ -398,7 +407,26 @@ function readPolicyFrame(input: OpenPolicyInput) {
           ))
     )
       return yield* fail('policy-version-conflict');
-    return { policy, head };
+    return { policy, head, signer: opened.author.device };
+  });
+}
+/** Read exact historical full state without constructing VerifiedMachineSharingPolicy or advancing a pin.
+ * Accepts a formerly admitted personal device of the bound owner membership, including a revoked signer;
+ * machine/recovery signatures fail. Uses the same trusted-head/parent checks and plaintext cleanup as open.
+ * The caller may preserve projects while preparing explicit fresh owner intent at n+1, with a new requestId
+ * and current active personal signer through sealMachineSharingPolicy. This result alone never authorizes
+ * automatic re-signing, execution, freshness, or skipped/missing history. */
+export function readMachineSharingHistoryStep(
+  input: OpenPolicyInput
+): Result.Result<MachineSharingHistoryStep, ContentError> {
+  return Result.gen(function* () {
+    const { policy, head, signer } = yield* readPolicyFrame(input);
+    const kind = yield* mapped(
+      historicalDeviceKind(input.ledger, signer),
+      'policy-signer-ineligible'
+    );
+    if (kind !== 'personal') return yield* fail('policy-signer-ineligible');
+    return Object.freeze({ _tag: 'MachineSharingHistoryStep' as const, policy, head });
   });
 }
 /** Authenticate one consecutive historical frame to bridge a retained pin through revoked signers.

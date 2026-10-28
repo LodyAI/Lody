@@ -14,7 +14,9 @@
 后端需要实现什么，并不负责部署服务器。
 
 protocol 入口还提供机器所有者签名的完整共享策略 codec、资源绑定、版本验证与纯执行
-判断；host 入口验证不解密的所有者帧，platform/cloud-api 定义对应 CAS DTO。这些原语
+判断。`readMachineSharingHistoryStep` 可在原 personal 签名者撤销后读取历史完整状态，
+供新所有者意图保留项目设置，不授予执行权。host 入口验证不解密的所有者帧，
+platform/cloud-api 定义对应 CAS DTO。这些原语
 尚未接入网络、UI 或执行路径；[共享策略提案](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.zh.md)
 说明待批准 Spec 增量与后续宿主职责。
 
