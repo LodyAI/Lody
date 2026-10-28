@@ -1042,40 +1042,66 @@ test('mobile project choices mix sources by recency and render their icons', asy
   );
 });
 
-test('mobile GitHub projects show owner avatars after loading with a GitHub fallback meanwhile', async ({
-  page,
-}) => {
-  let release!: () => void;
-  const ready = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await page.route('https://avatars.githubusercontent.com/**', async (route) => {
-    await ready;
-    await route.fulfill({
-      contentType: 'image/svg+xml',
-      headers: { 'Access-Control-Allow-Origin': '*' },
-      body: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#318080"/></svg>',
+for (const theme of ['light', 'dark']) {
+  test(`mobile GitHub project avatars remain centered while loading and after loading in ${theme}`, async ({
+    page,
+  }) => {
+    let release!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      release = resolve;
     });
+    await page.route('https://avatars.githubusercontent.com/**', async (route) => {
+      await ready;
+      await route.fulfill({
+        contentType: 'image/svg+xml',
+        headers: { 'Access-Control-Allow-Origin': '*' },
+        body: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#318080"/></svg>',
+      });
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(
+      `/iframe.html?id=mobile-mobilenewchatsheet--inline-page-review-story&viewMode=story&globals=theme:${theme}`
+    );
+    const project = page.getByRole('button', { name: 'Project', exact: true });
+    const expectCentered = async (row: typeof project, name: string, icon: string) => {
+      await expect
+        .poll(() =>
+          row.evaluate(
+            (element, { name: labelName, icon: iconSelector }) => {
+              const image = element.querySelector(iconSelector);
+              const label = Array.from(element.querySelectorAll('span')).find(
+                (span) => span.childElementCount === 0 && span.textContent === labelName
+              );
+              if (!image || !label) return Number.POSITIVE_INFINITY;
+              const imageBox = image.getBoundingClientRect();
+              const labelBox = label.getBoundingClientRect();
+              return Math.abs(
+                imageBox.top + imageBox.height / 2 - labelBox.top - labelBox.height / 2
+              );
+            },
+            { name, icon }
+          )
+        )
+        .toBeLessThanOrEqual(0.5);
+    };
+    await expect(project.locator('svg.lucide-github')).toBeVisible();
+    await expectCentered(project, 'loro-dev/loro', 'svg.lucide-github');
+    release();
+    await expect(project.locator('img')).toBeVisible();
+    await expect(project.locator('img')).toHaveCSS('opacity', '1');
+    await expect(project.locator('svg.lucide-github')).toHaveCount(0);
+    await expectCentered(project, 'loro-dev/loro', 'img');
+    await project.click();
+    const repo = page.getByRole('option').filter({ hasText: 'loro-dev/loro' });
+    await expect(repo.locator('img')).toHaveAttribute(
+      'src',
+      /^(blob:|https:\/\/avatars\.githubusercontent\.com\/loro-dev\?size=80)/
+    );
+    await expect(repo.locator('img')).toHaveCSS('opacity', '1');
+    await expect(repo.locator('svg.lucide-github')).toHaveCount(0);
+    await expectCentered(repo, 'loro-dev/loro', 'img');
   });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(
-    '/iframe.html?id=mobile-mobilenewchatsheet--inline-page-review-story&viewMode=story'
-  );
-  const project = page.getByRole('button', { name: 'Project', exact: true });
-  await expect(project.locator('svg.lucide-github')).toBeVisible();
-  release();
-  await expect(project.locator('img')).toBeVisible();
-  await expect(project.locator('img')).toHaveCSS('opacity', '1');
-  await expect(project.locator('svg.lucide-github')).toHaveCount(0);
-  await project.click();
-  const repo = page.getByRole('option').filter({ hasText: 'loro-dev/loro' });
-  await expect(repo.locator('img')).toHaveAttribute(
-    'src',
-    /^(blob:|https:\/\/avatars\.githubusercontent\.com\/loro-dev\?size=80)/
-  );
-  await expect(repo.locator('img')).toHaveCSS('opacity', '1');
-  await expect(repo.locator('svg.lucide-github')).toHaveCount(0);
-});
+}
 
 test('mobile send retains its page through delayed presentation and later URL corrections', async ({
   page,

@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { toast } from '@/lib/toast';
 
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
@@ -34,6 +35,18 @@ import { contextPill } from './context-pill-class';
 import { Menu, MenuSearchInput } from '@/ui/menu';
 import { Tooltip } from '@lody/ui/tooltip';
 
+const ownerAvatarStyles = stylex.create({
+  frame: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: space[4],
+    height: space[4],
+    flexShrink: 0,
+  },
+});
+
 export function GitHubOwnerAvatarIcon({ repoFullName }: { repoFullName: string }) {
   const ownerHandle = (repoFullName.split('/')[0] ?? '').trim();
   const [loadedOwner, setLoadedOwner] = useState<string | null>(null);
@@ -44,7 +57,7 @@ export function GitHubOwnerAvatarIcon({ repoFullName }: { repoFullName: string }
   }
 
   return (
-    <span className="relative inline-flex h-4 w-4 shrink-0">
+    <span {...stylex.props(ownerAvatarStyles.frame)}>
       {loadedOwner !== ownerHandle && <Github className="h-4 w-4 opacity-70" />}
       <CachedAvatarImg
         key={ownerHandle}

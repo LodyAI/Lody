@@ -43,6 +43,14 @@ That work adapted [#491](https://github.com/LodyAI/Lody/pull/491) by
   priority from creation time. Search filters without re-ranking the list;
   no-project/add/connect actions keep their fixed positions.
 
+## GitHub owner icon alignment
+
+The shared owner-avatar frame uses block flex layout, avoiding an inline baseline
+line box in the mobile project trigger. Before the correction, Chromium and WebKit
+both measured the loaded avatar center 2.5px above the project label in either
+theme; afterward the centers coincide. The existing browser coverage checks the
+loading fallback, loaded avatar and expanded option against the text center.
+
 ## First-send ownership
 
 The landing keeps its controlled draft and attachments until session admission
