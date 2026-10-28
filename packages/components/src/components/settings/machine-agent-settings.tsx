@@ -550,6 +550,7 @@ export function MachineAgentSettings({
       const projects = projectsByMachineId.get(entry.machineId) ?? [];
       projects.push({
         key,
+        localProjectId: entry.project.id,
         name: entry.project.name,
         rootPath: entry.project.rootPath,
         sharedWithTeam: accessByProjectKey.get(key)?.sharedWithTeam ?? false,

@@ -45,7 +45,10 @@ const fixture = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('jotai', () => ({ useAtomValue: () => false }));
+vi.mock('jotai', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('jotai')>()),
+  useAtomValue: () => false,
+}));
 vi.mock('@/atoms', () => ({ userAtom: 'user' }));
 vi.mock('@/atoms/runtime', () => ({ activeWorkspaceRuntimeAtom: 'runtime' }));
 vi.mock('@/atoms/local-probe', () => ({ localAgentEnabledAtom: 'local-agent' }));
@@ -81,6 +84,8 @@ vi.mock('@/lib/cloud-http-port', () => ({ installCloudHttpPort: () => () => {} }
 
 import { ipcBridge } from '../../../apps/electron/src/preload/ipc-bridge';
 import { createDesktopE2eeContent } from '@/providers/desktop-e2ee-content';
+import { initI18n } from '@/i18n';
+import { MachineSharingController } from '@/components/settings/e2ee/machine-sharing-settings';
 import { CloudPlatformProvider } from '@/providers/cloud-platform-provider';
 import { createCloudE2eeWorkspaces } from '@/providers/cloud-e2ee-workspaces';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
@@ -207,7 +212,14 @@ describe('CloudPlatformProvider', () => {
     fixture.usePreload = true;
     window.ipc = ipcBridge;
     refetch('Encrypted');
-    const view = { generation: '55'.repeat(32), machineId: 'machine-a', ownerMembershipId: '11'.repeat(16), head: { revision: 2, digest: '22'.repeat(32) }, sharedWithTeam: true, projects: ['project-a'] };
+    const view = {
+      generation: '55'.repeat(32),
+      machineId: 'machine-a',
+      ownerMembershipId: '11'.repeat(16),
+      head: { revision: 2, digest: '22'.repeat(32) },
+      sharedWithTeam: true,
+      projects: ['project-a'],
+    };
     const rid = '33'.repeat(16);
     const change = { kind: 'project', localProjectId: 'project-a', sharedWithTeam: true } as const;
     let pending = true;
@@ -227,8 +239,256 @@ describe('CloudPlatformProvider', () => {
     await render();
     const runtime = seen.at(-1)!.e2eeWorkspaces!.runtime!;
     expect(await runtime.readMachineSharing!('workspace-a', 'machine-a')).toEqual(view);
-    expect(await runtime.updateMachineSharing!('workspace-a', 'machine-a', view.generation, rid, change)).toEqual({ status: 'pending', requestId: rid });
-    expect(await runtime.updateMachineSharing!('workspace-a', 'machine-a', view.generation, rid, change)).toEqual({ status: 'saved', requestId: rid });
+    expect(
+      await runtime.updateMachineSharing!('workspace-a', 'machine-a', view.generation, rid, change)
+    ).toEqual({ status: 'pending', requestId: rid });
+    expect(
+      await runtime.updateMachineSharing!('workspace-a', 'machine-a', view.generation, rid, change)
+    ).toEqual({ status: 'saved', requestId: rid });
+  });
+
+  const policyView = (): import('@lody/platform').E2eeMachineSharingView => ({
+    machineId: 'machine-a',
+    ownerMembershipId: '11'.repeat(16),
+    generation: '22'.repeat(32),
+    head: { revision: 1, digest: '33'.repeat(32) },
+    sharedWithTeam: false,
+    projects: [],
+    signer: '44'.repeat(32),
+    canManage: true,
+    needsResign: false,
+  });
+  function SharingSurface({
+    machineId = 'machine-a',
+    other = () => {},
+  }: {
+    machineId?: string;
+    other?: () => void;
+  }) {
+    return createElement(
+      'div',
+      null,
+      createElement('button', { onClick: other }, 'Other setting'),
+      createElement(MachineSharingController, {
+        key: machineId,
+        accountId: 'user-a',
+        workspaceId: 'workspace-a',
+        machineId,
+        runtime: usePlatform().e2eeWorkspaces?.runtime,
+        projects: [{ id: 'project-a', name: 'Lody', rootPath: '~/Projects/Lody' }],
+      })
+    );
+  }
+  const sharingButton = (label: string) => {
+    const button = [...container.querySelectorAll<HTMLElement>('button')].find(
+      (item) => item.textContent === label || item.getAttribute('aria-label') === label
+    );
+    if (!button) throw new Error(`missing sharing button: ${label}`);
+    return button;
+  };
+  const clickSharing = (label: string) =>
+    act(async () => {
+      sharingButton(label).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+  const renderSharing = async (props: Parameters<typeof SharingSurface>[0] = {}) => {
+    fixture.electron = true;
+    fixture.usePreload = true;
+    window.ipc = ipcBridge;
+    refetch('Encrypted');
+    await initI18n('en');
+    await act(async () =>
+      root.render(createElement(CloudPlatformProvider, null, createElement(SharingSurface, props)))
+    );
+  };
+
+  it.each(['pending', 'lost-reply'] as const)(
+    'recovers a %s sharing change after remount through real provider and preload with the same request identity',
+    async (mode) => {
+      let view = policyView();
+      const writes: unknown[][] = [];
+      fixture.invoke = async (channel, ...args) => {
+        if (channel === 'e2ee.readMachineSharing') return view;
+        if (channel !== 'e2ee.updateMachineSharing') throw new Error(channel);
+        writes.push(args);
+        const change = args[4] as import('@lody/platform').E2eeMachineSharingChange;
+        expect(args.slice(0, 3)).toEqual(['workspace-a', 'machine-a', view.generation]);
+        expect(args[3]).toMatch(/^[0-9a-f]{32}$/);
+        if (writes.length === 1) {
+          view = { ...view, pendingRequest: { requestId: String(args[3]), change } };
+          if (mode === 'lost-reply') throw new Error('synthetic lost reply');
+          return { status: 'pending', requestId: args[3] };
+        }
+        view = {
+          ...view,
+          sharedWithTeam: true,
+          projects: ['project-a'],
+          head: { revision: 2, digest: '55'.repeat(32) },
+          pendingRequest: undefined,
+        };
+        return { status: 'saved', requestId: args[3] };
+      };
+      await renderSharing();
+      await clickSharing('Share Lody with the team');
+      expect(container.textContent).toContain('Retry change');
+      await act(async () => root.render(null));
+      await renderSharing();
+      expect(container.textContent).toContain('result is not confirmed');
+      await clickSharing('Retry change');
+      expect(writes).toHaveLength(2);
+      expect(writes[1]).toEqual(writes[0]);
+      expect(container.textContent).toContain('v2');
+      expect(
+        container
+          .querySelector('[aria-label="Share with the whole team"]')
+          ?.getAttribute('aria-checked')
+      ).toBe('true');
+    }
+  );
+
+  it('refreshes a terminal conflict and submits a fresh explicit intent while retaining the requested switch', async () => {
+    let view = policyView();
+    const writes: unknown[][] = [];
+    fixture.invoke = async (channel, ...args) => {
+      if (channel === 'e2ee.readMachineSharing') return view;
+      writes.push(args);
+      if (writes.length === 1) {
+        view = { ...view, head: { revision: 8, digest: '88'.repeat(32) } };
+        return { status: 'conflict', head: null, requestId: args[3] };
+      }
+      view = { ...view, sharedWithTeam: true, head: { revision: 9, digest: '99'.repeat(32) } };
+      return { status: 'saved', requestId: args[3] };
+    };
+    await renderSharing();
+    await clickSharing('Share with the whole team');
+    expect(container.textContent).toContain('Another policy was saved');
+    await clickSharing('Retry change');
+    expect(writes[1]?.[3]).not.toBe(writes[0]?.[3]);
+    expect(writes[1]?.[4]).toEqual(writes[0]?.[4]);
+    expect(container.textContent).toContain('v9');
+  });
+
+  it('re-signs a revoked issuer policy without dropping undisplayed project choices', async () => {
+    let view = {
+      ...policyView(),
+      needsResign: true,
+      sharedWithTeam: true,
+      projects: ['project-a', 'retained-project'],
+    };
+    fixture.invoke = async (channel, ...args) => {
+      if (channel === 'e2ee.readMachineSharing') return view;
+      expect(args.slice(0, 3)).toEqual(['workspace-a', 'machine-a', view.generation]);
+      expect(args[4]).toEqual({ kind: 'machine', sharedWithTeam: true });
+      view = {
+        ...view,
+        needsResign: false,
+        head: { revision: 2, digest: '55'.repeat(32) },
+        signer: '66'.repeat(32),
+      };
+      return { status: 'saved', requestId: args[3] };
+    };
+    await renderSharing();
+    expect(container.textContent).toContain('Re-sign required');
+    await clickSharing('Re-sign with this device');
+    expect(container.textContent).toContain('v2');
+    expect(container.textContent).toContain('666666666666');
+    expect(container.textContent).toContain('retained-project');
+    expect(
+      container
+        .querySelector('[aria-label="Share Lody with the team"]')
+        ?.getAttribute('aria-checked')
+    ).toBe('true');
+  });
+
+  it.each(['en', 'zh_CN'] as const)(
+    'shows native non-owner refusal as read-only friendly text (%s)',
+    async (language) => {
+      fixture.invoke = async (channel) => {
+        if (channel !== 'e2ee.readMachineSharing')
+          throw new Error('read-only UI attempted a write');
+        return { ...policyView(), canManage: false, deniedReason: 'e2ee_machine_not_shared' };
+      };
+      await renderSharing();
+      await act(async () => {
+        await initI18n(language);
+      });
+      expect(container.querySelectorAll('[role=switch]')).toHaveLength(0);
+      expect(container.textContent).toContain(language === 'en' ? 'Read only' : '只读');
+      expect(container.textContent).toContain(language === 'en' ? 'Ask its owner' : '联系所有者');
+      expect(container.textContent).not.toContain('e2ee_machine_not_');
+    }
+  );
+
+  it('keeps unrelated settings usable while a write is unresolved and reports a safe ownership refusal', async () => {
+    let reject!: (error: Error) => void;
+    const waiting = new Promise((_, fail) => {
+      reject = fail;
+    });
+    let other = 0;
+    fixture.invoke = async (channel) =>
+      channel === 'e2ee.readMachineSharing' ? policyView() : waiting;
+    await renderSharing({
+      other: () => {
+        other++;
+      },
+    });
+    await clickSharing('Share with the whole team');
+    await clickSharing('Other setting');
+    expect(other).toBe(1);
+    await act(async () => {
+      reject(new Error('e2ee_machine_not_owned'));
+    });
+    expect(container.textContent).toContain('Only a current personal device');
+    expect(container.textContent).not.toContain('e2ee_machine_not_owned');
+  });
+
+  it('discards a pending old-generation intent when the machine rejoins', async () => {
+    let view = policyView();
+    const writes: unknown[][] = [];
+    fixture.invoke = async (channel, ...args) => {
+      if (channel === 'e2ee.readMachineSharing') return view;
+      writes.push(args);
+      view = {
+        ...view,
+        pendingRequest: {
+          requestId: String(args[3]),
+          change: args[4] as import('@lody/platform').E2eeMachineSharingChange,
+        },
+      };
+      return { status: 'pending', requestId: args[3] };
+    };
+    await renderSharing();
+    await clickSharing('Share with the whole team');
+    view = { ...policyView(), generation: '77'.repeat(32) };
+    await clickSharing('Refresh policy');
+    expect(container.textContent).toContain('machine has rejoined');
+    expect(container.textContent).not.toContain('Retry change');
+    expect(writes).toHaveLength(1);
+    await clickSharing('Share with the whole team');
+    expect(writes[1]?.[2]).toBe(view.generation);
+    expect(writes[1]?.[3]).not.toBe(writes[0]?.[3]);
+  });
+
+  it('fences a delayed read when the selected machine changes', async () => {
+    let finish!: (value: unknown) => void;
+    const first = new Promise((resolve) => {
+      finish = resolve;
+    });
+    fixture.invoke = async (_channel, ...args) =>
+      args[1] === 'machine-a'
+        ? first
+        : {
+            ...policyView(),
+            machineId: 'machine-b',
+            head: { revision: 7, digest: '77'.repeat(32) },
+          };
+    await renderSharing();
+    await renderSharing({ machineId: 'machine-b' });
+    expect(container.textContent).toContain('v7');
+    await act(async () => {
+      finish({ ...policyView(), head: { revision: 99, digest: '99'.repeat(32) } });
+    });
+    expect(container.textContent).toContain('v7');
+    expect(container.textContent).not.toContain('v99');
   });
 
   it('routes encrypted feature preparation and response verification through the production provider, IPC proxy and preload', async () => {

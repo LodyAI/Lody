@@ -350,6 +350,16 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
             state: null,
           };
         if (management) {
+          const active = openMachineSharingPolicy(input);
+          if (Result.isSuccess(active)) {
+            const body = active.success.inspect();
+            if (
+              body.requestId !== version.requestId ||
+              body.previousDigest !== version.previousDigest
+            )
+              return yield* fail('sharing_invalid');
+            return { head: active.success.head, policy: active.success, state: body };
+          }
           const historical = yield* Effect.fromResult(readMachineSharingHistoryStep(input));
           if (
             historical.policy.requestId !== version.requestId ||
@@ -442,7 +452,7 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
       if (revision === head.revision) {
         if (!sameHead(read.head, head)) return yield* fail('sharing_conflict');
         yield* guard();
-        if (!management) yield* remember(binding, head, raw);
+        if (read.policy) yield* remember(binding, head, raw);
       }
     }
     if ((!policy && !management) || !fullState || !sharingFresh(started, yield* sharingStamp))
@@ -484,17 +494,64 @@ export const makeMachineSharingHost = Effect.fn('MachineSharingHost.make')(funct
             ),
           };
         });
-        const checked = yield* Effect.result(latest(binding, remote, machineGeneration, force));
+        const checked = yield* Effect.result(
+          latest(binding, remote, machineGeneration, force, true)
+        );
         if (Result.isFailure(checked) && !unfinished) return yield* Effect.fail(checked.failure);
         const policy = Result.isSuccess(checked) ? checked.success.policy : null;
         const saved = yield* pin(binding);
+        const body = Result.isSuccess(checked) ? checked.success.state : null;
+        const current = yield* target(machineId);
+        if (!matches(binding, current.binding)) return yield* fail('sharing_conflict');
+        const selfDevice = current.ledger.inspectState().devices.get(self);
+        const permissions = contentPermissions(current.ledger, options.signer.publicKey);
+        const canManage =
+          selfDevice?.kind === 'personal' &&
+          hex(selfDevice.membershipId.toBytes()) === binding.ownerMembershipId &&
+          Result.isSuccess(permissions) &&
+          permissions.success.mayWriteDocument;
+        const decision = authorizeMachineExecution({
+          ledger: current.ledger,
+          policy,
+          signer: options.signer.publicKey,
+          machineGeneration: current.machineGeneration,
+          target: {
+            ...binding,
+            device: Result.getOrThrow(Bytes.signingPublicKey(unhex(current.device))),
+          },
+        });
         return {
           machineId,
           ownerMembershipId: binding.ownerMembershipId,
           generation: binding.generation,
-          head: policy?.head ?? null,
-          sharedWithTeam: policy?.inspect().sharedWithTeam ?? false,
-          projects: policy?.inspect().projects ?? [],
+          head:
+            Result.isSuccess(checked) && body
+              ? {
+                  revision: checked.success.head!.revision,
+                  digest: checked.success.head!.digest as string,
+                }
+              : null,
+          sharedWithTeam: body?.sharedWithTeam ?? false,
+          projects: body?.projects ?? [],
+          canManage,
+          signer: body?.signer ?? null,
+          needsResign:
+            !!body &&
+            (!policy ||
+              (() => {
+                const signer = current.ledger.inspectState().devices.get(body.signer);
+                const permission = contentPermissions(
+                  current.ledger,
+                  Result.getOrThrow(Bytes.signingPublicKey(unhex(body.signer)))
+                );
+                return (
+                  signer?.kind !== 'personal' ||
+                  hex(signer.membershipId.toBytes()) !== binding.ownerMembershipId ||
+                  Result.isFailure(permission) ||
+                  !permission.success.mayWriteDocument
+                );
+              })()),
+          ...(!decision.allowed ? { deniedReason: 'e2ee_machine_not_shared' as const } : {}),
           removed: saved?.head?.status === 'removed',
           ...(unfinished ? { pendingRequest: unfinished } : {}),
           ...(Result.isFailure(checked) ? { unavailable: true as const } : {}),

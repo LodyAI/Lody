@@ -51,6 +51,13 @@ export interface E2eeMachineSharingView {
   sharedWithTeam: boolean;
   projects: readonly string[];
   removed?: boolean;
+  /** Current host personal-device authority, derived from the verified ledger. */
+  canManage: boolean;
+  /** Policy's actual signing device, including a historically admitted revoked device. */
+  signer: string | null;
+  /** Historical state is display/re-sign input only; it grants no cross-member execution. */
+  needsResign: boolean;
+  deniedReason?: 'e2ee_machine_not_shared' | 'e2ee_machine_not_owned';
   /** Discover an interrupted local intent so a new window can reconcile the same request. */
   pendingRequest?: { requestId: string; change: E2eeMachineSharingChange };
   /** Pending intent is retained, but no latest policy was verified by this read. */
