@@ -1,7 +1,9 @@
 # Lody Security Whitepaper
 
-Status: draft
+Status: approved
 Translation: current
+
+Approved revision: 2026-10-28 recovery format alignment; [approval record](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md).
 
 Previously approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
 Approval: 2026-10-28, reviewed and approved by the owner-authorized coordinator

@@ -1,7 +1,9 @@
 # Lody 安全白皮书
 
-Status: draft
+Status: approved
 Translation: current
+
+Approved revision: 2026-10-28 恢复格式对齐；[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md)。
 
 Previously approved revision: [`e4351fda5f0455b121b7e80db8ebc79752dee862`](https://github.com/LodyAI/Lody/commit/e4351fda5f0455b121b7e80db8ebc79752dee862)
 Approval: 2026-10-28，owner 授权总调度（会话 `b12f1597`）审核后批准；
