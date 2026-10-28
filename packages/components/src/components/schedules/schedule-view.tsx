@@ -228,6 +228,22 @@ const styles = stylex.create({
     borderTopColor: 'hsl(var(--border) / 1)',
     paddingTop: 'calc(var(--spacing) * 4)',
   },
+  // In the open-schedule modal the footer stays on screen while the body scrolls.
+  footerSticky: {
+    position: 'sticky',
+    bottom: 0,
+    zIndex: 1,
+    marginBottom: 'calc(var(--spacing) * -5)',
+    paddingBottom: 'calc(var(--spacing) * 4)',
+    backgroundColor: 'hsl(var(--background))',
+  },
+  footerButtons: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    alignSelf: { default: 'flex-end', [WIDE]: 'auto' },
+  },
   footerNote: { minWidth: 0, flex: '1', paddingInline: 'calc(var(--spacing) * 3)' },
   footerMessage: { margin: 0, fontSize: '0.85em', color: 'hsl(var(--destructive) / 1)' },
   footerIssues: {
@@ -257,7 +273,6 @@ const styles = stylex.create({
 export {
   ScheduleListView,
   matchingScheduleRuntime,
-  type ScheduleColumnWidths,
   type ScheduleRowContext,
 } from './schedule-list';
 
@@ -308,6 +323,8 @@ export function ScheduleForm({
   autoFocus,
   revealIssues = false,
   now = getServerNow(),
+  stickyFooter = false,
+  onCancel,
   onSave,
 }: {
   initial: ScheduleFormValue;
@@ -332,6 +349,10 @@ export function ScheduleForm({
   revealIssues?: boolean;
   /** Injected so previews and tests are deterministic. */
   now?: number;
+  /** Keep Save on screen at the bottom of a scrolling modal body. */
+  stickyFooter?: boolean;
+  /** Shows Cancel beside Save. */
+  onCancel?: () => void;
   onSave: (value: ScheduleFormValue) => void;
 }) {
   const { t, i18n } = useTranslation();
@@ -524,7 +545,7 @@ export function ScheduleForm({
           )}
         </div>
 
-        <div {...stylex.props(styles.footer)}>
+        <div {...stylex.props(styles.footer, stickyFooter && styles.footerSticky)}>
           <div id={noteId} aria-live="polite" {...stylex.props(styles.footerNote)}>
             {error ? (
               <p {...stylex.props(styles.footerMessage)} role="alert">
@@ -541,16 +562,23 @@ export function ScheduleForm({
               </p>
             ) : null}
           </div>
-          <Button
-            type="submit"
-            variant="primary"
-            size="small"
-            {...stylex.props(styles.saveButton)}
-            disabled={saving || formIssues.length > 0}
-            aria-describedby={noteId}
-          >
-            {saving ? t('schedules.saving', 'Saving…') : t('schedules.save', 'Save schedule')}
-          </Button>
+          <div {...stylex.props(styles.footerButtons)}>
+            {onCancel ? (
+              <Button type="button" variant="ghost" size="small" onClick={onCancel}>
+                {t('schedules.cancel', 'Cancel')}
+              </Button>
+            ) : null}
+            <Button
+              type="submit"
+              variant="primary"
+              size="small"
+              {...stylex.props(styles.saveButton)}
+              disabled={saving || formIssues.length > 0}
+              aria-describedby={noteId}
+            >
+              {saving ? t('schedules.saving', 'Saving…') : t('schedules.save', 'Save schedule')}
+            </Button>
+          </div>
         </div>
       </form>
     </Tooltip.Provider>

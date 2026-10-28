@@ -408,7 +408,9 @@ export function ScheduleProposalNotice({
         await runtime.withScheduleStore(
           scheduleId,
           () =>
-            new ScheduleRepository(runtime.repo, runtime.workspaceId).save({
+            new ScheduleRepository(runtime.repo, runtime.workspaceId, {
+              protectedContent: runtime.contentMode === 'e2ee',
+            }).save({
               scheduleId,
               activationId: uuid(),
               activityId: `proposal-${meta.proposalId}`,

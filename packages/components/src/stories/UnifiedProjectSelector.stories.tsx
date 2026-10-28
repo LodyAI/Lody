@@ -218,3 +218,28 @@ export const ShareConfirmation: Story = {
     await userEvent.click(within(canvasElement).getByRole('button', { name: /Share project/ }));
   },
 };
+
+const projectGroupArgs = {
+  value: { kind: 'group', projectId: 'lody-group' },
+  projectGroups: [
+    { projectId: 'lody-group', name: 'lody-group', memberCount: 2, lastUsedAt: 10 },
+    { projectId: 'shop', name: 'shop', memberCount: 3, lastUsedAt: 1 },
+  ],
+  onEditProjectGroup: fn(),
+} satisfies Partial<Story['args']>;
+
+/** A project group row offers Edit beside its check on hover. */
+export const ProjectGroupSelected: Story = {
+  args: projectGroupArgs,
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'lody-group' }));
+  },
+};
+
+export const ProjectGroupSelectedDark: Story = {
+  args: projectGroupArgs,
+  globals: { theme: 'dark' },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'lody-group' }));
+  },
+};

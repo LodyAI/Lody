@@ -1,6 +1,6 @@
 # 移除成员与暂存换代发布
 
-Status: draft
+Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md)
 Translation: current
 
 [English](atomic-removal.md)
@@ -59,7 +59,7 @@ core 仅定义暂存、读回、按条件删除 port；DTO 归 cloud-api；Conve
 
 ## 审批与证据
 
-以上方向来自用户明确要求；修订后的 Spec 仍为 **draft，待审批**，不代表生产
+用户于 2026-10-28 批准了本修订，不代表生产
 启用，也未决定 vault、原生保管、严格 B、账号恢复或 MLS 替换。
 参见[准入](../../packages/e2ee-core/src/internal/ledger/ADMISSION.md)、
 [暂存 port](../../packages/e2ee-core/src/internal/keys/staging.ts)、

@@ -42,7 +42,10 @@ import {
   sqliteReceiveJournal,
   sqliteRepairJournal,
 } from '@lody/e2ee-core/adapters/node-sqlite';
-import { makeStreamsUpdateBinding } from '@lody/e2ee-core/adapters/loro-streams';
+import {
+  makeStreamsUpdateBinding,
+  makeRealtimeContentBinding,
+} from '@lody/e2ee-core/adapters/loro-streams';
 
 /** Safe local failures. Raw errors and decrypted material never cross this boundary. */
 export class CliE2eeRuntimeError extends Data.TaggedError('CliE2eeRuntimeError')<{
@@ -553,6 +556,14 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
         writeEpoch,
         signer: options.device,
         ledger: () => verified.current(),
+        readEpochKey: (epoch) => history.read(epoch),
+      }),
+    realtimeBinding: (resource: string) =>
+      makeRealtimeContentBinding({
+        genesis,
+        resource,
+        signer: options.device,
+        ledger: () => guard().pipe(Effect.andThen(verified.current())),
         readEpochKey: (epoch) => history.read(epoch),
       }),
     /** Coalescing belongs to the caller's single background refresh owner. */

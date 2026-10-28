@@ -3,13 +3,16 @@
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 Repo-wide guidelines live in the root `AGENTS.md`.
 
-Workspace/machine-level JSON RPC over Loro Streams. File responsibilities, the
-Web/CLI Code Collab seam, and the reasons behind the watchdog, shard selection,
-and the `file/preview` namespace are in
-[the Loro Streams Machine RPC map](../../.agents/docs/rpc-loro-streams-rpc.md).
+Machine RPC contracts: [transport map](../../.agents/docs/rpc-loro-streams-rpc.md).
 
 ## Invariants
 
+- Encrypted machine RPC uses one feature DTO/chunk codec and native complete-response assembler.
+  The closed pure-read list uses fresh read authority, never execution journals; other admitted
+  Code Collab/preview actions require write authority and execution claims. Keep same-member
+  machine binding, exact originals and explicit size errors; never fall back to ordinary RPC.
+- Encrypted dispatch retains exact frames across retry/fallback. Receipt ACK never
+  completes the shared execution claim. [Ownership/close](README.md#encrypted-dispatch).
 - Request stream ids are workspace/machine scoped:
   `getLoroMachineRpcRequestStreamId(workspaceId, machineId)` returns
   `<workspaceId>:rpc:req:<machineId>`.

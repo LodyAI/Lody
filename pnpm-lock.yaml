@@ -575,6 +575,9 @@ importers:
       '@lody/cloud-api':
         specifier: workspace:*
         version: link:../../packages/cloud-api
+      '@lody/loro-streams-rpc':
+        specifier: workspace:*
+        version: link:../../packages/loro-streams-rpc
       '@lody/platform':
         specifier: workspace:*
         version: link:../../packages/platform
@@ -1701,12 +1704,18 @@ importers:
 
   packages/loro-streams-rpc:
     dependencies:
+      '@lody/e2ee-core':
+        specifier: workspace:*
+        version: link:../e2ee-core
       '@lody/shared':
         specifier: workspace:*
         version: link:../shared
       '@loro-dev/streams-client':
         specifier: 'catalog:'
         version: 0.12.1(effect@4.0.2)
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.2
       zod:
         specifier: 4.3.6
         version: 4.3.6

@@ -1386,7 +1386,8 @@ export class E2eeIpc extends IpcService {
   async contentStreamsToken(
     workspaceId: string,
     rejectedToken?: string,
-    requestSnapshotFor?: string
+    requestSnapshotFor?: string,
+    rpcOnly?: true
   ) {
     const id = sender()
     const access = await withDesktopE2eeAccount(
@@ -1410,7 +1411,8 @@ export class E2eeIpc extends IpcService {
         workspaceId,
         credential: access.credential,
         ...(rejectedToken ? { rejectedToken } : {}),
-        ...(requestSnapshotFor ? { requestSnapshotFor } : {})
+        ...(requestSnapshotFor ? { requestSnapshotFor } : {}),
+        ...(rpcOnly ? { rpcOnly } : {})
       })
     ).catch((error) => {
       if (error instanceof E2eeMemberRemovedError) return this.removeLocalWorkspace(access)
@@ -1442,6 +1444,70 @@ export class E2eeIpc extends IpcService {
       (owner) =>
         owner.readers.get(workspaceId)?.has(id)
           ? owner.host.openContent(workspaceId, input)
+          : Effect.fail(new Error('e2ee_not_open')),
+      workspaceId,
+      false
+    )
+  }
+  @IpcMethod()
+  async prepareFeatureRpc(
+    workspaceId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput
+  ) {
+    const id = sender()
+    return withDesktopE2eeAccount(
+      (owner) =>
+        owner.readers.get(workspaceId)?.has(id)
+          ? owner.host.prepareFeatureRpc(workspaceId, input)
+          : Effect.fail(new Error('e2ee_not_open')),
+      workspaceId,
+      false
+    )
+  }
+  @IpcMethod()
+  async acceptFeatureRpcResponse(
+    workspaceId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput,
+    frame: string
+  ) {
+    const id = sender()
+    return withDesktopE2eeAccount(
+      (owner) =>
+        owner.readers.get(workspaceId)?.has(id)
+          ? owner.host.acceptFeatureRpcResponse(workspaceId, input, frame)
+          : Effect.fail(new Error('e2ee_not_open')),
+      workspaceId,
+      false
+    )
+  }
+  @IpcMethod()
+  async prepareDispatch(
+    workspaceId: string,
+    targetMachineId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
+  ) {
+    const id = sender()
+    return withDesktopE2eeAccount(
+      (owner) =>
+        owner.readers.get(workspaceId)?.has(id)
+          ? owner.host.prepareDispatch(workspaceId, targetMachineId, input)
+          : Effect.fail(new Error('e2ee_not_open')),
+      workspaceId,
+      false
+    )
+  }
+  @IpcMethod()
+  async acceptDispatchResponse(
+    workspaceId: string,
+    targetMachineId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput,
+    frameHex: string
+  ) {
+    const id = sender()
+    return withDesktopE2eeAccount(
+      (owner) =>
+        owner.readers.get(workspaceId)?.has(id)
+          ? owner.host.acceptDispatchResponse(workspaceId, targetMachineId, input, frameHex)
           : Effect.fail(new Error('e2ee_not_open')),
       workspaceId,
       false

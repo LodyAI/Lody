@@ -108,8 +108,8 @@
 
 - Same-context `creating=-1` means `prepare-superseded`; other errors stay errors. Main
   archives only the matching all-null unsigned attempt before fresh consent. Keep CLI originals.
-- Never cache an unimplemented content mode; `export` refuses and `sync` skips schedules
-  for encrypted workspaces
+- Never cache an unimplemented content mode. `export` decrypts locally; `export` and
+  `sync` include encrypted Schedule documents and Registry
   ([note](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-cli-review-fixes.md)).
 
 - Reset: same-user socket; drain, exclusive sibling lease, archive whole dir;

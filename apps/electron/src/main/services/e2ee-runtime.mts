@@ -63,7 +63,12 @@ import {
   sqliteLedgerPinStore
 } from '@lody/e2ee-core/adapters/node-sqlite'
 import type { E2eeWorkspaceRuntime, E2eeContentSeal, E2eeContentOpen } from '@lody/platform'
-import { makeStreamsUpdateBinding } from '@lody/e2ee-core/adapters/loro-streams'
+import {
+  makeStreamsUpdateBinding,
+  makeRealtimeContentBinding
+} from '@lody/e2ee-core/adapters/loro-streams'
+import { makeE2eeRpcNative, E2eeRpcOriginals } from '@lody/loro-streams-rpc/e2ee-native'
+import type { E2eeDispatchInput } from '@lody/shared/e2ee-rpc'
 import { encryptedWorkspaceRoom } from '@lody/shared/workspace-streams-content'
 type E2eeWorkspaceHistoryPage = Parameters<E2eeWorkspaceRuntime['ingestLedgerRecords']>[1]
 import type { E2eeRuntimeLedgerView, E2eeRuntimeStatus } from '@lody/platform'
@@ -216,6 +221,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           input: E2eeContentSeal
         ) => Effect.Effect<{ header: Uint8Array; sealed: Uint8Array }, unknown>
         openContent: (input: E2eeContentOpen) => Effect.Effect<Uint8Array, unknown>
+        rpc: ReturnType<typeof makeE2eeRpcNative>
         ingest: (page: E2eeWorkspaceHistoryPage) => Effect.Effect<E2eeRuntimeStatus, unknown>
       }
     >()
@@ -846,6 +852,21 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           return yield* result
         }, Effect.uninterruptible)
         const history = Context.get(historyContext, InstalledEpochHistory)
+        const rpc = makeE2eeRpcNative({
+          workspaceId,
+          requesterDevice: hex(device.publicKey.toBytes()),
+          originals: new E2eeRpcOriginals(join(directory, 'rpc-originals.sqlite')),
+          ledger: () => verified.current(),
+          binding: (resource) =>
+            makeRealtimeContentBinding({
+              genesis,
+              resource,
+              signer: device,
+              ledger: () => verified.current(),
+              readEpochKey: (epoch) => history.read(epoch)
+            })
+        })
+        yield* Effect.addFinalizer(() => rpc.close().pipe(Effect.orDie))
         const bindings = new Map<
           string,
           Effect.Success<ReturnType<typeof makeStreamsUpdateBinding>>
@@ -1239,6 +1260,7 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
           observe,
           seal,
           openContent,
+          rpc,
           keyRound,
           stop,
           isClosing: () => closing,
@@ -1481,6 +1503,38 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.seal(input))),
       openContent: (workspaceId: string, input: E2eeContentOpen) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.openContent(input))),
+      prepareFeatureRpc: (
+        workspaceId: string,
+        input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput
+      ) =>
+        run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.rpc.prepareFeature(input))),
+      acceptFeatureRpcResponse: (
+        workspaceId: string,
+        input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput,
+        frame: string
+      ) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.rpc.acceptFeatureResponse(input, frame)
+          )
+        ),
+      prepareDispatch: (workspaceId: string, targetMachineId: string, input: E2eeDispatchInput) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.rpc.prepareDispatch(targetMachineId, input)
+          )
+        ),
+      acceptDispatchResponse: (
+        workspaceId: string,
+        targetMachineId: string,
+        input: E2eeDispatchInput,
+        frameHex: string
+      ) =>
+        run(
+          Effect.flatMap(openWorkspace(workspaceId), (entry) =>
+            entry.rpc.acceptResponse(targetMachineId, input, frameHex)
+          )
+        ),
       ledgerView: (workspaceId: string) =>
         run(Effect.flatMap(openWorkspace(workspaceId), (entry) => entry.ledgerView())),
       ingestLedgerRecords: (workspaceId: string, page: E2eeWorkspaceHistoryPage) =>

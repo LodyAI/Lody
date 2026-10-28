@@ -27,8 +27,9 @@ maintenance commands here.
 ## Generated artifacts
 
 - `docs/main.mjs` (exposed through `pnpm run docs <command>`) provides document queues and scoped content-hash
-  review. Errors fail `check`; warnings, such as an `AGENTS.md` above the 7000-byte
-  target but under the 8192-byte gate, never do. Status, check, and diff are read-only; only explicit `confirm` writes a
+  review. Errors fail `check`; warnings, such as an `AGENTS.md` above 90% of its word
+  ceiling in `docs/agents-budgets.json` or a run-log phrase in a changed note, never do.
+  Owner-link and note-hygiene errors apply only to notes added or changed against the base. Status, check, and diff are read-only; only explicit `confirm` writes a
   topic record. Confirmation requires recoverable committed inputs and evidence,
   never changes Spec approval, and never auto-refreshes a stale baseline.
   Await Git subprocesses throughout the command chain and retain Buffer output.

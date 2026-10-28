@@ -1,4 +1,6 @@
+import { isWorkspaceCodeCollabFlockDocId } from './code-collab-rooms';
 import { parseMachineFlockDocId } from './machine-flock';
+import { getScheduleRegistryFlockDocId } from './schedule-registry';
 import { getWorkspaceFlockDocId } from './workspace-flock';
 import type { WorkspaceId } from './ids';
 import type { SnapshotCodec, SnapshotUploadOptions } from '@loro-dev/streams-crdt';
@@ -66,7 +68,9 @@ export function encryptedWorkspaceRoom(
     const machine = parseMachineFlockDocId(room.flockDocId);
     if (
       (machine && machine.workspaceId === workspaceId) ||
-      room.flockDocId === getWorkspaceFlockDocId(workspaceId as WorkspaceId)
+      room.flockDocId === getWorkspaceFlockDocId(workspaceId as WorkspaceId) ||
+      room.flockDocId === getScheduleRegistryFlockDocId(workspaceId as WorkspaceId) ||
+      isWorkspaceCodeCollabFlockDocId(workspaceId, room.flockDocId)
     )
       return { resource: `flock:${room.flockDocId}`, model: 'flock' };
   }
@@ -89,7 +93,7 @@ export function encryptedWorkspaceResolver(
   };
 }
 
-/** Content-bearing side channels remain unavailable; minimal plaintext presence is allowed. */
+/** Shared feature verdicts: schedules use protected CRDT; minimal presence stays plaintext. */
 export type WorkspaceRestrictedFeature =
   | 'schedules'
   | 'preview-comments'
@@ -107,7 +111,20 @@ export function workspaceSupports(
   content: WorkspaceStreamsMode,
   feature: WorkspaceRestrictedFeature
 ): boolean {
-  return content.mode === 'plaintext' || feature === 'presence';
+  if (
+    feature === 'preview-comments' ||
+    feature === 'code-collab-index' ||
+    feature === 'remote-preview' ||
+    feature === 'sharing'
+  )
+    return true;
+  return (
+    content.mode === 'plaintext' ||
+    feature === 'presence' ||
+    feature === 'export' ||
+    feature === 'attachments' ||
+    feature === 'schedules'
+  );
 }
 
 /** Verified host facts only. This state never supplies ledger authority. */

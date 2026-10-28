@@ -1,6 +1,7 @@
 import {
   scheduleDefinitionFingerprint,
   type ScheduleDocument,
+  type ScheduleAuthorizationRequest,
   type ScheduleRegistryRow,
   type ScheduleRuntimeRow,
 } from '@lody/shared';
@@ -25,6 +26,8 @@ export type ScheduleEnginePorts<Prepared> = {
   now: () => number;
   disabled: () => boolean;
   ready: () => boolean;
+  encrypted?: boolean;
+  authorize?: (request: ScheduleAuthorizationRequest) => Promise<boolean>;
   list: () => Promise<ScheduleRegistryRow[]>;
   read: (scheduleId: string) => Promise<ScheduleDocument | null>;
   validateTarget: (run: ScheduleRun<Prepared>) => Promise<void>;
@@ -213,6 +216,7 @@ export class ScheduleEngine<Prepared> {
       }
       if (run.manual && !run.message) p.slots.restore(run.agentConfigId, run.runKey);
       try {
+        await this.authorize(run);
         let current = p.store.transition(run.runKey, [run.state], {
           state: 'claimed',
           attempts: run.attempts + 1,
@@ -263,6 +267,7 @@ export class ScheduleEngine<Prepared> {
           this.skip(p.store.get(run.runKey)!, 'ACTIVATION_REVOKED');
           continue;
         }
+        await this.authorize(run);
         await p.dispatch(current.prepared!);
         p.store.transition(run.runKey, ['session_prepared'], {
           state: 'dispatched',
@@ -313,6 +318,19 @@ export class ScheduleEngine<Prepared> {
     }
     for (const row of await p.list())
       if (this.owned(row) && row.scheduledMessage) await this.project(row, {});
+  }
+
+  private async authorize(run: ScheduleRun<Prepared>): Promise<void> {
+    if (!this.ports.encrypted) return;
+    if (
+      !this.ports.authorize ||
+      !(await this.ports.authorize({
+        scheduleId: run.scheduleId,
+        definitionFingerprint: run.definitionFingerprint,
+        ...(run.manual ? { manualRunKey: run.runKey } : {}),
+      }))
+    )
+      throw new ScheduleConfigurationError('E2EE_SCHEDULE_NOT_AUTHORIZED');
   }
 
   private skip(run: ScheduleRun<Prepared>, code: string): void {

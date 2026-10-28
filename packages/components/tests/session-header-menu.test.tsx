@@ -386,7 +386,9 @@ describe('SessionHeaderMenu', () => {
     await act(async () => menuItem('Cursor').click());
     expect(onSelect).toHaveBeenCalledWith(cursorLauncher);
   });
-  it('disables encrypted export, sharing and remote controls even with callbacks supplied', async () => {
+  it('allows encrypted sharing, local export and preview while keeping unsupported operations restricted', async () => {
+    let exported = false;
+    let shareOpened = false;
     const store = createStore();
     store.set(workspaceContentModeAtom, {
       accountId: 'user',
@@ -399,7 +401,7 @@ describe('SessionHeaderMenu', () => {
         <Provider store={store}>
           <ForkMenuHarness
             onOpenPublicShare={() => {
-              throw new Error('must not open sharing');
+              shareOpened = true;
             }}
             onShareWithTeam={() => {
               throw new Error('must not share with team');
@@ -414,26 +416,35 @@ describe('SessionHeaderMenu', () => {
               projectName: null,
             }}
             onShareAsImage={() => {
-              throw new Error('must not export');
+              exported = true;
             }}
           />
         </Provider>
       )
     );
     await openMenu();
-    for (const reason of [
-      'Encrypted workspaces do not yet support exports.',
-      'Encrypted workspaces do not yet support sharing.',
-      'Encrypted workspaces do not yet support remote preview.',
-      'Encrypted workspaces do not yet support remote machine operations.',
-    ]) {
+    for (const reason of ['Encrypted workspaces do not yet support remote machine operations.']) {
       const item = menuItem(reason);
       expect(item.getAttribute('aria-disabled')).toBe('true');
       await act(async () => item.click());
     }
-    expect(document.body.textContent).not.toContain('Fork session');
-    expect(document.body.textContent).not.toContain('Share with team');
+    expect(document.body.textContent).not.toContain(
+      'Encrypted workspaces do not yet support remote preview.'
+    );
+    expect(document.body.textContent).not.toContain(
+      'Encrypted workspaces do not yet support sharing.'
+    );
+    await act(async () => menuItem('Share').click());
+    expect(shareOpened).toBe(true);
+    await openMenu();
     expect(container?.querySelector('[data-testid="copy-result"]')?.textContent).toBe('not copied');
     expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe('none');
+    await act(async () => menuItem('Fork session').click());
+    await act(async () => menuItem('Copy context as Markdown').click());
+    expect(container?.querySelector('[data-testid="copy-result"]')?.textContent).toBe('copied');
+    expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe('none');
+    await openMenu();
+    await act(async () => menuItem('Share as image').click());
+    expect(exported).toBe(true);
   });
 });

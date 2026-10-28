@@ -231,8 +231,16 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
               revokeDevice: (workspaceId, signingPublicKey) =>
                 native.revokeDevice(workspaceId, signingPublicKey),
               refresh: (workspaceId, options) => native.refresh(workspaceId, options),
-              contentStreamsToken: (workspaceId, rejectedToken) =>
-                native.contentStreamsToken(workspaceId, rejectedToken),
+              contentStreamsToken: (workspaceId, rejectedToken, requestSnapshotFor, rpcOnly) =>
+                native.contentStreamsToken(workspaceId, rejectedToken, requestSnapshotFor, rpcOnly),
+              prepareFeatureRpc: (workspaceId, input) =>
+                native.prepareFeatureRpc(workspaceId, input),
+              acceptFeatureRpcResponse: (workspaceId, input, frame) =>
+                native.acceptFeatureRpcResponse(workspaceId, input, frame),
+              prepareDispatch: (workspaceId, machineId, input) =>
+                native.prepareDispatch(workspaceId, machineId, input),
+              acceptDispatchResponse: (workspaceId, machineId, input, frame) =>
+                native.acceptDispatchResponse(workspaceId, machineId, input, frame),
               seal: (workspaceId, input) => native.seal(workspaceId, input),
               openContent: (workspaceId, input) => native.openContent(workspaceId, input),
               account: (options) => native.account(options),

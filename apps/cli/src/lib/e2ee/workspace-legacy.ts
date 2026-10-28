@@ -1,4 +1,18 @@
+import { authorizeEncryptedSchedule } from './schedule-execution-authorization';
+import {
+  getScheduleRoomId,
+  getScheduleIdFromRoomId,
+  type ScheduleAuthorizationRequest,
+} from '@lody/shared';
 import { makeExecutionOriginRecovery } from './execution-origin-recovery';
+import { makeEncryptedFeatureReceiver, type EncryptedFeatureHandler } from './feature-rpc';
+import { makeEncryptedRpcReceiver } from './realtime-rpc';
+import { lazyExecutionJournal } from './agent-execution';
+import { makeE2eeRpcNative, E2eeRpcOriginals } from '@lody/loro-streams-rpc/e2ee-native';
+import { createLoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
+import { makeEncryptedRpcListener, type E2eeRpcTiming } from '@lody/loro-streams-rpc/e2ee-streams';
+import type { E2eeDispatchInput, E2eeDispatchAck } from '@lody/shared/e2ee-rpc';
+import { isDeepStrictEqual } from 'node:util';
 import { ExecutionOrigins } from './execution-origins';
 import type { EncryptedExecutionIntent } from './agent-execution';
 import type { LoroDoc } from 'loro-crdt';
@@ -14,7 +28,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { constants, existsSync } from 'node:fs';
 import { link, mkdir, open, readFile, rename, unlink, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { Effect, Exit, Scope, Result } from 'effect';
+import { Effect, Exit, Scope, Result, Fiber, Schedule } from 'effect';
 import { z } from 'zod';
 import type { PayloadProtectionProvider } from '@loro-dev/streams-crdt';
 import type { CloudE2eePort, CloudStreamsTokenPort } from '@lody/platform';
@@ -673,6 +687,29 @@ async function openWorkspaceOwned(
       'execution-origins.sqlite'
     )
   );
+  const rpc = makeE2eeRpcNative({
+    workspaceId: options.workspaceId,
+    requesterDevice: opened.signingPublicKey,
+    originals: new E2eeRpcOriginals(
+      join(
+        repositoryDirectory(directory, binding.genesisHash, opened.signingPublicKey),
+        'rpc-originals.sqlite'
+      )
+    ),
+    ledger: () => opened.runtime.executionLedger(),
+    binding: (resource) => opened.runtime.realtimeBinding(resource),
+  });
+  const rpcJournal = lazyExecutionJournal(
+    join(
+      repositoryDirectory(directory, binding.genesisHash, opened.signingPublicKey),
+      'rpc-receipts.sqlite'
+    ),
+    Date.now
+  );
+  await run(Effect.addFinalizer(() => rpc.close().pipe(Effect.orDie)));
+  let rpcFiber: Fiber.Fiber<never, unknown> | undefined;
+  const stopRpc = () =>
+    rpcFiber ? run(Fiber.interrupt(rpcFiber)).then(() => undefined) : Promise.resolve();
   const readExecutionOriginPage = options.cloud.readExecutionOriginPage?.bind(options.cloud);
   const originRecovery = readExecutionOriginPage
     ? makeExecutionOriginRecovery(
@@ -730,7 +767,8 @@ async function openWorkspaceOwned(
             if (
               descriptor.model === 'loro' &&
               descriptor.resource.startsWith('doc:') &&
-              isSessionDocRoomId(descriptor.resource.slice(4)) &&
+              (isSessionDocRoomId(descriptor.resource.slice(4)) ||
+                getScheduleIdFromRoomId(descriptor.resource.slice(4))) &&
               originalFrame.context.kind === 'update_batch'
             ) {
               try {
@@ -760,42 +798,44 @@ async function openWorkspaceOwned(
       };
     }),
   };
+  const createTokenProvider = (rpcOnly?: true) =>
+    Effect.gen(function* () {
+      if (closed) throw new Error('e2ee_closed');
+      if (!options.cloud.createContentTokenProvider) throw new Error('e2ee_content_unavailable');
+      const provider = yield* options.cloud.createContentTokenProvider({
+        workspaceId: options.workspaceId,
+        credential: opened.credential,
+        ...(rpcOnly ? { rpcOnly } : {}),
+      });
+      bucket = provider.getBucketId;
+      const observe =
+        (auth: LoroStreamsTokenAuth): LoroStreamsTokenAuth =>
+        (context) =>
+          auth(context).pipe(
+            Effect.tapCause((cause) =>
+              Effect.sync(() => {
+                for (const reason of cause.reasons) {
+                  if (reason._tag === 'Fail') credentialFailureHandler(reason.error);
+                  if (reason._tag === 'Die') credentialFailureHandler(reason.defect);
+                }
+              })
+            )
+          );
+      const observed = {
+        ...provider,
+        getToken: observe(provider.getToken),
+        createAuthCallback: () => observe(provider.createAuthCallback()),
+      };
+      tokensInUse.add(observed);
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          tokensInUse.delete(observed);
+        })
+      );
+      return observed;
+    });
   const tokens: CloudStreamsTokenPort = {
-    createTokenProvider: () =>
-      Effect.gen(function* () {
-        if (closed) throw new Error('e2ee_closed');
-        if (!options.cloud.createContentTokenProvider) throw new Error('e2ee_content_unavailable');
-        const provider = yield* options.cloud.createContentTokenProvider({
-          workspaceId: options.workspaceId,
-          credential: opened.credential,
-        });
-        bucket = provider.getBucketId;
-        const observe =
-          (auth: LoroStreamsTokenAuth): LoroStreamsTokenAuth =>
-          (context) =>
-            auth(context).pipe(
-              Effect.tapCause((cause) =>
-                Effect.sync(() => {
-                  for (const reason of cause.reasons) {
-                    if (reason._tag === 'Fail') credentialFailureHandler(reason.error);
-                    if (reason._tag === 'Die') credentialFailureHandler(reason.defect);
-                  }
-                })
-              )
-            );
-        const observed = {
-          ...provider,
-          getToken: observe(provider.getToken),
-          createAuthCallback: () => observe(provider.createAuthCallback()),
-        };
-        tokensInUse.add(observed);
-        yield* Effect.addFinalizer(() =>
-          Effect.sync(() => {
-            tokensInUse.delete(observed);
-          })
-        );
-        return observed;
-      }),
+    createTokenProvider: () => createTokenProvider(),
     // E2EE never attaches the old Machine RPC or presence token consumers.
     createTokenProviderLegacy: () => {
       throw new Error('e2ee_plaintext_channel_disabled');
@@ -1027,6 +1067,7 @@ async function openWorkspaceOwned(
     opened.executionAuthorization.invalidate();
     clearLedgerRetry();
     return (closeReceipt ??= (async () => {
+      await stopRpc();
       await epochTransition.close();
       await refresh;
       await Promise.allSettled([...snapshotFlights]);
@@ -1051,31 +1092,189 @@ async function openWorkspaceOwned(
   };
   // Startup is one of the three refresh triggers; no network request is awaited by open.
   void refreshInBackground();
+  const authorizeScheduleExecution = (request: ScheduleAuthorizationRequest, doc: LoroDoc) =>
+    Effect.scoped(
+      authorizeEncryptedSchedule({
+        workspaceId: options.workspaceId,
+        request,
+        doc,
+        origins: executionOrigins,
+        open: (input) =>
+          Effect.gen(function* () {
+            const native = yield* opened.runtime.binding(
+              `doc:${getScheduleRoomId(request.scheduleId)}`,
+              'loro',
+              'current'
+            );
+            return yield* native.openAuthenticated(input);
+          }),
+        recover: originRecovery?.recover,
+        authorizeExecution: opened.executionAuthorization.authorizeExecution,
+        isExecutionOpen: () => !closed,
+      })
+    );
   return {
+    attachmentToken: async () => {
+      if (closed) throw new Error('e2ee_closed');
+      const result = await options.cloud.getContentToken({
+        workspaceId: options.workspaceId,
+        credential: opened.credential,
+      });
+      if (closed || !result.attachmentToken) throw new Error('e2ee_attachment_unavailable');
+      return result.attachmentToken;
+    },
     repositoryDirectory: repositoryDirectory(
       directory,
       binding.genesisHash,
       opened.signingPublicKey
     ),
-    resolveVerifiedExecutionOriginal: (intent: EncryptedExecutionIntent, doc: LoroDoc) =>
+    authorizeScheduleExecution,
+    authorizeScheduleExecutionLegacy: (request: ScheduleAuthorizationRequest, doc: LoroDoc) =>
+      run(authorizeScheduleExecution(request, doc)),
+    resolveVerifiedExecutionOriginal: (intent: EncryptedExecutionIntent, doc?: LoroDoc) =>
       Effect.scoped(
-        executionOrigins.resolve(
-          intent,
-          doc,
-          (request) =>
-            Effect.gen(function* () {
-              if (closed || intent.workspaceId !== options.workspaceId)
-                return yield* Effect.fail(new Error('e2ee_execution_origin_unavailable'));
-              const contentBinding = yield* opened.runtime.binding(
-                `doc:${getSessionRoomId(intent.sessionId as SessionId)}`,
-                'loro',
-                'current'
-              );
-              return yield* contentBinding.openAuthenticated(request);
-            }),
-          originRecovery?.recover
-        )
+        Effect.gen(function* () {
+          if (closed || intent.workspaceId !== options.workspaceId) return undefined;
+          const fromDoc = doc?.getMap('rpcDispatchOriginals').get(intent.userTurnId);
+          // This original cache is an accelerator, never the actual-start journal.
+          // Its local I/O fault cannot block the independently signed durable origin.
+          const cached = yield* rpc
+            .readIncoming(intent)
+            .pipe(Effect.catch(() => Effect.succeed(undefined)));
+          const rpcOriginal =
+            typeof fromDoc === 'string' ? fromDoc : cached ? hex(cached.frame) : undefined;
+          if (rpcOriginal !== undefined) {
+            if (cached && hex(cached.frame) !== rpcOriginal) return undefined;
+            const view = yield* opened.runtime.executionLedger();
+            const state = view.inspectState();
+            const machineId = state.devices.get(opened.signingPublicKey)?.machineId;
+            if (!machineId) return undefined;
+            const verified = yield* rpc.openDispatch(machineId, rpcOriginal);
+            if (
+              verified.args.sessionId !== intent.sessionId ||
+              verified.args.userTurnId !== intent.userTurnId ||
+              !isDeepStrictEqual(verified.args.inputConfig ?? {}, intent.inputConfig ?? {})
+            )
+              return undefined;
+            const device = state.devices.get(verified.requesterDevice);
+            const member = device && state.members.get(hex(device.membershipId.toBytes()));
+            if (!member) return undefined;
+            return {
+              requesterDevice: verified.requesterDevice,
+              requesterCryptoUserId: hex(member.userId.toBytes()),
+              expiresAt: verified.expiresAt,
+            };
+          }
+          if (!doc) return undefined;
+          return yield* executionOrigins.resolve(
+            intent,
+            doc,
+            (request) =>
+              Effect.gen(function* () {
+                if (closed || intent.workspaceId !== options.workspaceId)
+                  return yield* Effect.fail(new Error('e2ee_execution_origin_unavailable'));
+                const contentBinding = yield* opened.runtime.binding(
+                  `doc:${getSessionRoomId(intent.sessionId as SessionId)}`,
+                  'loro',
+                  'current'
+                );
+                return yield* contentBinding.openAuthenticated(request);
+              }),
+            originRecovery?.recover
+          );
+        })
       ),
+    startRpc: (
+      machineId: string,
+      offer: (input: E2eeDispatchInput) => Promise<E2eeDispatchAck>,
+      trace?: (event: E2eeRpcTiming) => void,
+      handleFeature?: EncryptedFeatureHandler
+    ) =>
+      run(
+        Effect.gen(function* () {
+          if (rpcFiber || closed) return;
+          rpcFiber = yield* Effect.forkIn(
+            Effect.scoped(
+              Effect.gen(function* () {
+                const provider = yield* createTokenProvider(true);
+                yield* provider.getToken();
+                const bucketId = provider.getBucketId();
+                if (!bucketId || bucketId === 'lody' || !provider.getGatewayBaseUrl())
+                  return yield* Effect.fail(new Error('e2ee_content_configuration'));
+                const controller = new AbortController();
+                yield* Effect.addFinalizer(() => Effect.sync(() => controller.abort()));
+                const client = createLoroStreamsJsonStreamClient({
+                  bucketId,
+                  getBaseUrl: provider.getGatewayBaseUrl,
+                  getToken: () => Effect.runPromise(provider.getToken()),
+                  fetchImpl: (url, init) =>
+                    fetch(url, {
+                      ...init,
+                      signal: init?.signal
+                        ? AbortSignal.any([controller.signal, init.signal])
+                        : controller.signal,
+                    }),
+                });
+                const receive = makeEncryptedRpcReceiver({
+                  workspaceId: options.workspaceId,
+                  genesis: binding.genesisHash,
+                  machineId,
+                  native: rpc,
+                  journal: rpcJournal,
+                  authorize: opened.executionAuthorization.authorizeExecution,
+                  isOpen: () => !closed,
+                  offer,
+                  client,
+                  trace,
+                });
+                const receiveFeature = handleFeature
+                  ? yield* makeEncryptedFeatureReceiver({
+                      workspaceId: options.workspaceId,
+                      genesis: binding.genesisHash,
+                      machineId,
+                      native: rpc,
+                      journal: rpcJournal,
+                      authorize: opened.executionAuthorization.authorizeExecution,
+                      authorizeRead: opened.executionAuthorization.authorizeRead,
+                      isOpen: () => !closed,
+                      handle: handleFeature,
+                      client,
+                    })
+                  : undefined;
+                let failureReported = false;
+                yield* makeEncryptedRpcListener({
+                  workspaceId: options.workspaceId,
+                  machineId,
+                  client,
+                  trace,
+                  receive: (envelope) =>
+                    Effect.gen(function* () {
+                      if (receiveFeature && (yield* receiveFeature(envelope))) return;
+                      yield* receive(envelope);
+                    }).pipe(
+                      Effect.tap(() =>
+                        Effect.sync(() => {
+                          failureReported = false;
+                        })
+                      )
+                    ),
+                  onFailure: () => {
+                    if (!failureReported) {
+                      failureReported = true;
+                      console.debug(
+                        '[e2ee] encrypted RPC request unavailable; durable dispatch remains active'
+                      );
+                    }
+                  },
+                });
+                return yield* Effect.never;
+              })
+            ).pipe(Effect.retry(Schedule.spaced('1 second'))),
+            scope
+          );
+        })
+      ),
+    stopRpc,
     isExecutionOpen: () => !closed,
     authorizeExecution: (workspaceId: string, requesterDevice: string) =>
       Effect.suspend(() =>

@@ -42,6 +42,7 @@ import {
   SessionStatus,
   SessionContextWindowUsage,
   type ProjectRef,
+  getWorkspaceFlockDocId,
   SessionPlanEntry,
   type SessionExternalHistoryCursorDocState,
   ACP_CAPABILITY_CACHE_VERSION,
@@ -126,6 +127,7 @@ import type { RateLimit } from 'acp-extension-core';
 import type { RemoteCursorStore } from '@loro-dev/streams-crdt';
 import {
   createCliSqliteRepoStore,
+  hasPersistedFlockRemoteState,
   createDocumentRemoteCursorStore,
   type DocumentCursorScope,
 } from './sqlite-repo-store';
@@ -353,7 +355,7 @@ export interface LoroDocumentManagerOptions {
   remoteStreamsAttached?: boolean;
   encryptedWorkspace?: Pick<
     CliE2eeWorkspaceLegacy,
-    'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory'
+    'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory' | 'attachmentToken'
   >;
   streamsTokens?: CloudStreamsTokenPort | null;
   cloudBilling?: CloudBillingPort | null;
@@ -404,7 +406,7 @@ export class LoroDocumentManager {
   private remoteTransportOpQueue: Promise<unknown> = Promise.resolve();
   private readonly encryptedWorkspace?: Pick<
     CliE2eeWorkspaceLegacy,
-    'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory'
+    'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory' | 'attachmentToken'
   >;
   private readonly streamsTokens: CloudStreamsTokenPort | null;
   public readonly cloudBilling: CloudBillingPort | null;
@@ -417,12 +419,33 @@ export class LoroDocumentManager {
     return this.encryptedWorkspace !== undefined;
   }
 
+  async getEncryptedAttachmentToken(): Promise<string> {
+    if (!this.encryptedWorkspace?.attachmentToken) throw new Error('e2ee_attachment_unavailable');
+    return this.encryptedWorkspace.attachmentToken();
+  }
+
   async holdCatalogFlockDoc(flockDocId: string): Promise<void> {
     await this.catalogSync?.hold(flockDocId);
   }
 
   async catalogBaselineReady(flockDocId: string | undefined, timeoutMs: number): Promise<boolean> {
     return this.catalogSync ? this.catalogSync.ready(flockDocId, timeoutMs) : true;
+  }
+
+  /** Projects the existing reader owner, including daemon calls outside Session ALS. */
+  hasWorkspaceCatalogReader(): boolean {
+    return this.catalogSync !== undefined;
+  }
+
+  /** Past remote receipt, not current connectivity or a fresh authorization verdict. */
+  hasPersistedWorkspaceCatalog(): boolean {
+    return (
+      this.sqliteRepoStore !== null &&
+      hasPersistedFlockRemoteState(
+        this.sqliteRepoStore.dbPath,
+        getWorkspaceFlockDocId(this.workspaceId)
+      )
+    );
   }
 
   static async create(
@@ -440,7 +463,7 @@ export class LoroDocumentManager {
       documentCursorScope?: DocumentCursorScope;
       encryptedWorkspace?: Pick<
         CliE2eeWorkspaceLegacy,
-        'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory'
+        'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory' | 'attachmentToken'
       >;
       streamsTokens?: CloudStreamsTokenPort | null;
       cloudBilling?: CloudBillingPort | null;
@@ -1206,6 +1229,14 @@ export class LoroDocumentManager {
         { cause: error }
       );
     }
+  }
+
+  /** Observation of the machine catalog already owned by the runtime. */
+  peekLocalProjectRootPath(
+    machineId: MachineId,
+    localProjectId: import('@lody/shared').LocalProjectId
+  ): string | null {
+    return this.machineFlockSync.peekLocalProjectRootPath(machineId, localProjectId);
   }
 
   async syncMachineFlockDoc(

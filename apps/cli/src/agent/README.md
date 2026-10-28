@@ -130,11 +130,20 @@ the MCP child with `session/close` or Agent teardown.
 
 ### Workspace MCP resolution is two phases
 
-`loadExternalMcpServers` (catalog sync + document read) runs BEFORE `initialize` so its
-remote round trip overlaps spawn and the handshake, and the selector it resolves to applies
-the agent's advertised `http` capability at `newSession`. Awaiting the load between
-`initialize` and `newSession` would put a remote sync — up to its 5s budget — on the
-critical path of every session establishment while the agent process sits idle.
+`loadExternalMcpServers` runs BEFORE `initialize`, and the selector it resolves to applies
+the agent's advertised `http` capability at `newSession`. Loading reuses the daemon's
+live workspace catalog: only its first baseline may wait, for up to one second,
+overlapping spawn and the handshake. If that wait expires but every frozen selected
+ID exists locally, startup uses those rows and emits a `configWarning` that the
+configuration has not been confirmed with the remote. Local authentication is prepared
+only after checking all selected rows. A missing selected row preserves the original
+typed cold error; startup rechecks once at provider-session establishment. If still
+missing and unconfirmed, initialization rejects before `newSession`/load/resume/fork.
+This avoids freezing an incomplete tool selection while allowing offline startup from
+persisted configuration. The same reader continues recovering independently, and a
+later load after its baseline uses ordinary reads without the cold warning. Existing
+startup owners retain process and relay cleanup. Other configuration diagnostics
+remain best effort. Empty selections skip the catalog entirely.
 
 ### Steer delivery classification
 

@@ -1,3 +1,4 @@
+import { protectedAttachmentBlob, protectedAttachmentChunks } from './encrypted-session-attachment';
 import { SESSION_FILE_PREVIEW_FETCH_BYTES, type SessionId, type WorkspaceId } from '@lody/shared';
 import { buildSessionFileDownloadUrl, buildSessionFilePreviewUrl } from './session-file-upload';
 import { isNativeAppShell } from './native-platform';
@@ -8,6 +9,8 @@ type FileFetchArgs = {
   sessionId: SessionId;
   fileId: string;
   token: string;
+  encryption?: import('@lody/shared').EncryptedAttachment;
+  attachmentToken?: () => Promise<string>;
 };
 
 /**
@@ -27,13 +30,15 @@ const downloadSessionFileInBrowser = async (
   args: FileFetchArgs & { fileName: string }
 ): Promise<void> => {
   const { workspaceId, sessionId, fileId, token, fileName } = args;
-  const response = await fetch(buildSessionFileDownloadUrl(workspaceId, sessionId, fileId), {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!response.ok) {
-    throw new Error(`Failed to download file (${response.status})`);
+  let blob: Blob;
+  if (args.encryption) blob = await protectedAttachmentBlob({ ...args, encryption: args.encryption });
+  else {
+    const response = await fetch(buildSessionFileDownloadUrl(workspaceId, sessionId, fileId), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) throw new Error(`Failed to download file (${response.status})`);
+    blob = await response.blob();
   }
-  const blob = await response.blob();
   const objectUrl = URL.createObjectURL(blob);
   try {
     const anchor = document.createElement('a');
@@ -114,6 +119,17 @@ export const fetchSessionFilePreview = async (
 ): Promise<SessionFilePreviewResult> => {
   const { workspaceId, sessionId, fileId, token, sizeBytes, signal } = args;
   const maxBytes = SESSION_FILE_PREVIEW_FETCH_BYTES;
+  if (args.encryption) {
+    const parts: Uint8Array[] = []; let fetchedBytes = 0;
+    for await (const bytes of protectedAttachmentChunks({ ...args, encryption: args.encryption })) {
+      const take = bytes.slice(0, maxBytes - fetchedBytes);
+      parts.push(take); fetchedBytes += take.length;
+      if (fetchedBytes >= maxBytes) break;
+    }
+    const bytes = new Uint8Array(fetchedBytes); let offset = 0;
+    for (const part of parts) { bytes.set(part, offset); offset += part.length; }
+    return { text: new TextDecoder().decode(bytes), fetchedBytes, truncated: args.sizeBytes > fetchedBytes };
+  }
   const response = await fetch(buildSessionFilePreviewUrl(workspaceId, sessionId, fileId), {
     headers: {
       Authorization: `Bearer ${token}`,

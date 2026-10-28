@@ -38,6 +38,11 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import { LoroDoc } from 'loro-crdt';
+import {
+  encryptedWorkspaceResolver,
+  encryptedWorkspaceRoom,
+} from '@lody/shared/workspace-streams-content';
+import { getScheduleRoomId, getScheduleRegistryFlockDocId } from '@lody/shared';
 import type { PayloadProtectionProvider, RemoteCursorStore } from '@loro-dev/streams-crdt';
 import { LoroRepo, type StorageSavePayload } from 'loro-repo';
 import { IndexedDBStorageAdaptor } from 'loro-repo/storage/indexeddb';
@@ -909,11 +914,23 @@ type CryptoFault = 'signature' | 'tag' | 'missing-key';
  * content contract. Missing production signing/history ports remain blockers.
  */
 function cryptoTestProtection(
-  options: { scope?: Partial<ContentScope>; fault?: CryptoFault; snapshotOnly?: boolean } = {}
+  options: {
+    scope?: Partial<ContentScope>;
+    fault?: CryptoFault;
+    snapshotOnly?: boolean;
+    model?: 'loro' | 'flock';
+  } = {}
 ): PayloadProtectionProvider {
   const scopeFor = (snapshot: boolean): ContentScope => ({
     ...syntheticScope,
-    purpose: snapshot ? 'doc-snapshot' : 'doc-update',
+    purpose:
+      options.model === 'flock'
+        ? snapshot
+          ? 'flock-snapshot'
+          : 'flock-update'
+        : snapshot
+          ? 'doc-snapshot'
+          : 'doc-update',
     ...options.scope,
   });
   const unwrap = <A>(
@@ -1013,6 +1030,79 @@ const cryptoContent = (provider?: PayloadProtectionProvider): WorkspaceStreamsCo
   });
 
 describe('P10 public crypto and published SDK preparation', () => {
+  it.each(['doc', 'flock'] as const)(
+    'syncs the schedule %s through the production encrypted selector, signed snapshots and durable storage',
+    async (kind) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const server = createByteServer();
+      const writer = await openTab(`schedule-w-${++sequence}` as WorkspaceId);
+      const readerName = `schedule-r-${sequence}` as WorkspaceId;
+      const reader = await openTab(readerName);
+      reader.workspaceId = writer.workspaceId;
+      const id =
+        kind === 'doc'
+          ? getScheduleRoomId('message')
+          : getScheduleRegistryFlockDocId(writer.workspaceId);
+      const content = protectedContent({
+        resolve: encryptedWorkspaceResolver(writer.workspaceId, (room) => {
+          const descriptor = encryptedWorkspaceRoom(writer.workspaceId, room);
+          return cryptoTestProtection({
+            scope: { resource: descriptor.resource },
+            model: descriptor.model,
+          });
+        }),
+        snapshotUpload: { canUpload: () => true, debounceMs: 10, minBytesSinceRemoteSnapshot: 0 },
+      });
+      const transport = transportFor(writer, content);
+      if (kind === 'doc') {
+        const doc = (await writer.repo.openPersistedDoc(id)).doc;
+        const sub = transport.joinDocRoom(id, doc);
+        await settle(sub.firstSyncedWithRemote);
+        doc.getMap('schedule').set('prompt', 'Private scheduled message');
+        doc.commit();
+        await settle(sub.waitUntilSynced());
+        await vi.advanceTimersByTimeAsync(10);
+        await server.snapshotReady;
+        const remote = (await reader.repo.openPersistedDoc(id)).doc;
+        expect((await transportFor(reader, content).syncDoc(id, remote)).ok).toBe(true);
+        expect(remote.toJSON()).toEqual(doc.toJSON());
+      } else {
+        const flock = (await writer.repo.openFlockDoc(id)).flock;
+        const sub = transport.joinFlockDocRoom(id, flock);
+        await settle(sub.firstSyncedWithRemote);
+        flock.put(['schedule', 'message'], { title: 'Private scheduled message', enabled: true });
+        await settle(sub.waitUntilSynced());
+        await vi.advanceTimersByTimeAsync(10);
+        await server.snapshotReady;
+        const remote = (await reader.repo.openFlockDoc(id)).flock;
+        expect((await transportFor(reader, content).syncFlockDoc(id, remote)).ok).toBe(true);
+        expect(remote.get(['schedule', 'message'])).toEqual(flock.get(['schedule', 'message']));
+      }
+      const path =
+        kind === 'doc'
+          ? new URL(docUrl(writer.workspaceId, id)).pathname
+          : `/ds/${LORO_STREAMS_BUCKET_ID}/${encodeURIComponent(id)}`;
+      const room = server.room(path);
+      expect(room.batches.length).toBeGreaterThan(0);
+      expect(room.snapshot).toBeDefined();
+      for (const bytes of [...room.batches, room.snapshot!.body])
+        expect(Buffer.from(bytes).includes(Buffer.from('Private scheduled message'))).toBe(false);
+      await reader.repo.flush();
+      await reader.repo.destroy();
+      openTabs.delete(reader);
+      const restored = await openTab(readerName);
+      if (kind === 'doc')
+        expect(
+          (await restored.repo.openPersistedDoc(id)).doc.getMap('schedule').get('prompt')
+        ).toBe('Private scheduled message');
+      else
+        expect((await restored.repo.openFlockDoc(id)).flock.get(['schedule', 'message'])).toEqual({
+          title: 'Private scheduled message',
+          enabled: true,
+        });
+    }
+  );
+
   it('round-trips whole v0 update batches through the renderer repo and durable storage', async () => {
     const server = createByteServer();
     const writer = await openTab(`v0-writer-${++sequence}` as WorkspaceId);

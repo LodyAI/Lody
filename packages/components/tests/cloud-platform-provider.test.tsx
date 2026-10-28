@@ -18,6 +18,10 @@ const fixture = vi.hoisted(() => ({
   session: {} as Record<string, unknown>,
   organization: {} as Record<string, unknown>,
   electron: false,
+  usePreload: false,
+  invoke: async (_channel: string, ..._args: unknown[]): Promise<unknown> => {
+    throw new Error('unexpected IPC invocation');
+  },
   native: undefined as
     | {
         e2ee: E2eeWorkspaceRuntime & {
@@ -46,7 +50,20 @@ vi.mock('@/atoms', () => ({ userAtom: 'user' }));
 vi.mock('@/atoms/runtime', () => ({ activeWorkspaceRuntimeAtom: 'runtime' }));
 vi.mock('@/atoms/local-probe', () => ({ localAgentEnabledAtom: 'local-agent' }));
 vi.mock('@/lib/electron', () => ({ isElectronRenderer: () => fixture.electron }));
-vi.mock('@/lib/electron-ipc-client', () => ({ getIpcServices: () => fixture.native }));
+vi.mock('@/lib/electron-ipc-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/electron-ipc-client')>();
+  return {
+    ...actual,
+    getIpcServices: () => (fixture.usePreload ? actual.getIpcServices() : fixture.native),
+  };
+});
+// Match preload's app-local Electron dependency; keep the real bridge and policy.
+vi.mock('../../../apps/electron/node_modules/electron', () => ({
+  ipcRenderer: {
+    on: () => {},
+    invoke: (channel: string, ...args: unknown[]) => fixture.invoke(channel, ...args),
+  },
+}));
 vi.mock('@/hooks/useStableSession', () => ({ useStableSession: () => fixture.session }));
 vi.mock('@/hooks/useOrganization', () => ({ useOrganization: () => fixture.organization }));
 vi.mock('@/providers/convex-provider', () => ({ useAuthSignOut: () => async () => {} }));
@@ -62,6 +79,8 @@ vi.mock('@/providers/cloud-github-token-port', () => ({ cloudGitHubTokenPort: {}
 vi.mock('@/lib/github-token-port', () => ({ installGitHubTokenPort: () => () => {} }));
 vi.mock('@/lib/cloud-http-port', () => ({ installCloudHttpPort: () => () => {} }));
 
+import { ipcBridge } from '../../../apps/electron/src/preload/ipc-bridge';
+import { createDesktopE2eeContent } from '@/providers/desktop-e2ee-content';
 import { CloudPlatformProvider } from '@/providers/cloud-platform-provider';
 import { createCloudE2eeWorkspaces } from '@/providers/cloud-e2ee-workspaces';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
@@ -99,6 +118,11 @@ describe('CloudPlatformProvider', () => {
   beforeEach(() => {
     seen.length = 0;
     fixture.electron = false;
+    fixture.usePreload = false;
+    fixture.invoke = async () => {
+      throw new Error('unexpected IPC invocation');
+    };
+    delete window.ipc;
     fixture.native = undefined;
     fixture.cloudClient.query = async () => {
       throw new Error('unexpected query');
@@ -114,6 +138,143 @@ describe('CloudPlatformProvider', () => {
     act(() => root.unmount());
     container.remove();
     localStorage.clear();
+    delete window.ipc;
+  });
+
+  it('routes encrypted dispatch and ACK verification through the production provider, IPC proxy and preload', async () => {
+    fixture.electron = true;
+    fixture.usePreload = true;
+    window.ipc = ipcBridge;
+    refetch('Encrypted');
+    const input = {
+      sessionId: 'session-a',
+      userTurnId: 'turn-a',
+      userId: 'user-a',
+      timestamp: new Date(1000).toISOString(),
+      inputConfig: { prompt: 'synthetic input' },
+    };
+    const original = {
+      targetMachineId: 'machine-a',
+      requesterDevice: '11'.repeat(32),
+      requestId: '22'.repeat(16),
+      frameHex: '33'.repeat(143),
+      expiresAt: 901000,
+    };
+    const ack = {
+      type: 'session/dispatch-turn_response',
+      sessionId: input.sessionId,
+      userTurnId: input.userTurnId,
+      accepted: true,
+      disposition: 'accepted',
+    };
+    const retained: unknown[][] = [];
+    fixture.invoke = async (channel, ...args) => {
+      // The mock is below the real preload allowlist, at ipcRenderer.invoke.
+      // Returning a value requires the exact production route and arguments.
+      if (channel === 'e2ee.prepareDispatch') {
+        expect(args).toEqual(['workspace-a', 'machine-a', input]);
+        retained.push(args);
+        return original;
+      }
+      if (channel === 'e2ee.acceptDispatchResponse') {
+        expect(retained).toEqual([['workspace-a', 'machine-a', input]]);
+        expect(args).toEqual(['workspace-a', 'machine-a', input, '44'.repeat(143)]);
+        return ack;
+      }
+      throw new Error(`unexpected IPC invocation: ${channel}`);
+    };
+    await render();
+    const runtime = seen.at(-1)!.e2eeWorkspaces!.runtime!;
+    const access = createDesktopE2eeContent({
+      runtime,
+      workspaceId: 'workspace-a',
+      genesisHash: 'aa'.repeat(32),
+      epoch: 0,
+      authToken: () => 'synthetic-account-token',
+    });
+    try {
+      expect(await access.e2ee.prepareDispatch!('machine-a', input)).toEqual(original);
+      expect(
+        await access.e2ee.acceptDispatchResponse!('machine-a', input, '44'.repeat(143))
+      ).toEqual(ack);
+    } finally {
+      await access.close();
+    }
+  });
+
+  it('routes encrypted feature preparation and response verification through the production provider, IPC proxy and preload', async () => {
+    fixture.electron = true;
+    fixture.usePreload = true;
+    window.ipc = ipcBridge;
+    refetch('Encrypted');
+    const input = {
+      requestId: '55'.repeat(16),
+      request: {
+        workspaceId: 'workspace-a',
+        machineId: 'machine-a',
+        method: 'machine/status' as const,
+        params: {},
+      },
+    };
+    const original = {
+      targetMachineId: 'machine-a',
+      requesterDevice: '11'.repeat(32),
+      requestId: '22'.repeat(16),
+      frameHex: '33'.repeat(143),
+      expiresAt: 901000,
+    };
+    const ack = {
+      ok: false as const,
+      code: 'e2ee_query_failed',
+      error: 'synthetic complete outcome',
+    };
+    const retained: unknown[][] = [];
+    fixture.invoke = async (channel, ...args) => {
+      // The mock is below the real preload allowlist, at ipcRenderer.invoke.
+      // Returning a value requires the exact production route and arguments.
+      if (channel === 'e2ee.prepareFeatureRpc') {
+        expect(args).toEqual(['workspace-a', input]);
+        retained.push(args);
+        return original;
+      }
+      if (channel === 'e2ee.acceptFeatureRpcResponse') {
+        expect(retained).toEqual([['workspace-a', input]]);
+        expect(args).toEqual(['workspace-a', input, '44'.repeat(143)]);
+        return ack;
+      }
+      if (channel === 'e2ee.contentStreamsToken') {
+        expect(args).toEqual(['workspace-a', undefined, undefined, true]);
+        return {
+          token: 'synthetic-rpc-only',
+          bucketId: 'synthetic-encrypted-content',
+          gatewayBaseUrl: 'https://streams.example.test',
+          expiresIn: 900,
+          expiresAt: Date.now() + 900000,
+        };
+      }
+      throw new Error(`unexpected IPC invocation: ${channel}`);
+    };
+    await render();
+    const runtime = seen.at(-1)!.e2eeWorkspaces!.runtime!;
+    const access = createDesktopE2eeContent({
+      runtime,
+      workspaceId: 'workspace-a',
+      genesisHash: 'aa'.repeat(32),
+      epoch: 0,
+      authToken: () => 'synthetic-account-token',
+    });
+    try {
+      expect(await access.e2ee.prepareFeatureRpc!(input)).toEqual(original);
+      expect(await access.e2ee.acceptFeatureRpcResponse!(input, '44'.repeat(143))).toEqual(ack);
+      const rpcToken = access.e2ee.createRpcTokenProvider(new AbortController().signal);
+      try {
+        expect(await rpcToken.getToken()).toBe('synthetic-rpc-only');
+      } finally {
+        await rpcToken.close();
+      }
+    } finally {
+      await access.close();
+    }
   });
 
   it('keeps ordinary access unauthenticated while E2EE opens with an expired snapshot and retained bearer after network retries fail', async () => {

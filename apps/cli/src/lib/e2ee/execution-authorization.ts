@@ -118,10 +118,11 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         return yield* restore(Fiber.join(flight));
       })
     );
-    const authorizeExecution = Effect.fn('CliE2eeExecutionAuthorization.authorizeExecution')(
+    const authorize = Effect.fn('CliE2eeExecutionAuthorization.authorize')(
       function* (
         workspaceId: string,
-        requesterDevice: string
+        requesterDevice: string,
+        access: 'read' | 'execute'
       ): Effect.fn.Return<ExecutionAuthorization, unknown> {
         if (closed) return denied('closed');
         if (
@@ -144,7 +145,12 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         if (!local || !state.members.has(Buffer.from(local.membershipId.toBytes()).toString('hex')))
           return denied('not-authorized');
         const permissions = yield* Effect.fromResult(contentPermissions(view, requester.success));
-        if (!permissions.mayWriteDocument) {
+        const reader = state.devices.get(requesterDevice);
+        const mayRead =
+          reader &&
+          reader.kind !== 'recovery' &&
+          state.members.has(Buffer.from(reader.membershipId.toBytes()).toString('hex'));
+        if (access === 'read' ? !mayRead : !permissions.mayWriteDocument) {
           grants.delete(requesterDevice);
           return denied('not-authorized');
         }
@@ -171,6 +177,12 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         Cause.hasInterrupts(cause) ? Effect.interrupt : Effect.succeed(denied('unavailable'))
       )
     );
-    return { authorizeExecution, invalidate };
+    return {
+      authorizeExecution: (workspaceId: string, requesterDevice: string) =>
+        authorize(workspaceId, requesterDevice, 'execute'),
+      authorizeRead: (workspaceId: string, requesterDevice: string) =>
+        authorize(workspaceId, requesterDevice, 'read'),
+      invalidate,
+    };
   }
 );

@@ -74,3 +74,17 @@ pending applications, approve/reject, revoke an invitation and reconcile key
 installation. Email automatic admission and link approval remain distinct.
 Callers must retain the original request on a lost response; membership and key
 readiness are separate. Credentials and private keys never cross this port.
+
+## Encrypted machine sharing
+
+`E2eeMachineSharingTransport` is an unconnected host transport interface using the
+canonical `@lody/cloud-api` DTOs. It supplies no provider or renderer capability.
+The host retains exact original frames, reconciles uncertain writes, verifies
+consecutive policy versions and owns execution freshness before using the core
+pure authorization decision. Every scope includes the ledger-qualified machine binding generation. Removal
+closes the old resource; readmission starts at revision one in a new resource,
+while atomic replacement preserves generation. Storage tombstones cannot replace
+verified history pins. The separate
+`E2eeMachineSharingDisplayReader.latestForMember` port accepts account membership
+only and returns ciphertext/untrusted metadata, with no execution freshness.
+See the [pending sharing contract](../../specs/e2ee-foundations.md#machine-sharing-policy-pending-approval-increment).

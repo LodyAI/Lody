@@ -1,0 +1,53 @@
+# 所有者签名的加密机器共享
+
+Status: proposed
+Translation: current
+PR: [#2014](https://github.com/LodyAI/Lody/pull/2014)
+
+[English](2026-10-28-e2ee-machine-sharing.md)
+
+## 摘要
+
+机器归属只能证明谁控制机器，不能授权其他成员执行。拟议 MVP 通过机器所有者有效个人设备签名的完整加密策略，保留私有默认值与机器／项目开关。账本验证的绑定代次区分移除重入与原子密钥替换：移除后使用新资源，从第 1 版开始，清理旧历史既不阻碍恢复，也不复活旧授权。服务端 CAS 在同代内定序，A1 提供原语、代次证据、授权和 DTO，存储／宿主／UI 另行接入。短本地缓存无法给持续隐瞒最新 head 的服务端下的未知撤回提供时限；owner 于 2026-10-28 已确认接受信任服务端不持续隐藏新 head 的前提。
+
+## 决定与替代方案
+
+共享策略独立于成员账本，避免项目开关变成永久成员记录。完整策略让开启项目和机器原子生效，关闭机器时保留项目记录。CRDT 布尔值／快照签名不能证明每项设置来自机器所有者；账号共享会让服务端决定权限，默认团队可用会取消私有默认值，均不符合选定边界。
+
+[机器身份决定](2026-10-27-e2ee-machine-ledger-binding.zh.md) 继续负责账本绑定及原子替换。本提案不新增账本记录、capability 或快照／retained-state 格式，不另立重复 note；原共享 UI 关闭状态及实时／journal 职责不变。
+
+## 代次与移除
+
+`generation` 为当前连续原子替换链首次机器 AdmitDevice（`replaces=null`）签名公钥的小写 hex32。已验证账本永久禁止密钥复用；后续原子替换指定精确的旧有效密钥，因此保留根。撤销／移除后重新准入使用新的初始密钥，即使成员和 machineId 相同也有新代次；代次不是服务端计数、时间戳或客户端自选字符串。
+
+`verifyMachineSharingGeneration` 接收从首次准入到当前设备的完整准入／替换链，每项为 `{record,length}`，length 是该原文在账本的一起始位置。它在真实账本中验证原文摘要的精确位置、严格递增顺序、机器／成员身份及 replaces 连续关系，返回绑定当前设备与视图的模块私有证据。所有策略操作和执行判断都需要该证据并复查当前绑定，链最多 4096 项。压缩快照／retained 视图不能猜测缺失的账本检查点，须用保留相关检查点的真实视图（通常完整重放）在当前终点核验，再供同位置压缩视图或后续视图使用。证明不可用只影响该机器共享／执行，不阻止文档读取与无关工作。
+
+所有 DTO scope、签名正文、资源、本地日志、缓存及策略 pin 都包含代次。移除将旧代次标成永久 removed，并保留清理 cutoff／高水位，不能再提交使其 active。新代次不继承旧 pin 或授权，从 1/null 父项和私有默认值开始，恢复共享需要新的明确所有者意图。原子替换仍在同代并保留策略。这替代了清理后续写 n+1 的旧方案：仅比较 status 只能挡部分旧写入，不能让新客户端验证已删前缀，也无法单独阻止旧策略证据跨重入生效。
+
+## 格式与职责
+
+规范有界 CBOR 为 current-only v2：
+
+```text
+[format=2, purpose=1, workspaceIdUtf8, genesis32, machineIdUtf8,
+ ownerMembership16, revision, previousFrameDigest32OrNull, sharedWithTeam,
+ sortedProjectIdUtf8s, signer32, issuedAt, requestId16, generation32]
+```
+
+身份字符串使用严格 UTF-8，1..256 字节，不规范化、不去 BOM。项目按字节排序、去重，最多 4096 项；展开正文最多 256 KiB。公钥保留严格 Ed25519 检查。issuedAt 为非负安全 Unix 毫秒整数，只供描述；版本为正安全整数，仅首版父摘要为空。公开 DTO hex 为小写。
+
+复用既有 content-v0 document-update 密码学，固定资源 `machine-access:<unpadded-base64url(machineIdUtf8)>:<ownerMembershipIdHex>:<generationHex>`、docEpoch 零和签名／AAD 绑定 `lody-e2ee/machine-sharing/v2\0`。完整原始密文帧用 SHA-256 摘要，不能哈希解码状态；帧上限仍为 262287 字节。未知结果保留原文重试，不重新加密或自动重放。没有 v1 策略读取、回退或静默转换。
+
+后端使用凭据身份、账本验证的当前代次与 `admitMachineSharingFrame`；在同一原子 mutation 中复查当前 personal／成员／机器资格与代次，比较完整 scope／status／版本／摘要，去重请求意图并插入原文与 head。旧代 pending 请求即使版本／摘要数值相同也冲突；已提交精确重试返回原收据或清理后的 removed，同 requestId 改变意图要失败。最小请求意图收据和移除 cutoff 保留；清理绑定旧代次，不能删除新代提交。版本清理后可返回 null，readHead 保留旧 removed 高水位，不能把它当可信 pin。账号 `latestForMember` 仅向当前工作区成员返回密文／未验证元数据，不续期执行新鲜度。
+
+`readMachineSharingHistoryStep` 允许在原 personal 签发者撤销后读取同代、历史入账的所有者个人设备签名的完整正文，不产生执行凭证，也不证明发布时刻或当时权限。只有新的明确所有者意图可在同代保留该状态，由当前有效 personal 设备签发 n+1；machine/recovery 签名不能作为恢复输入。`openMachineSharingPolicy` 和 `authorizeMachineExecution` 继续要求当前有效所有者个人设备授权，Guest/recovery 不执行，全团队包括未来合格成员。活跃代次内缺失历史不能跳过。
+
+## 接入与信任限制
+
+A2 负责私有存储、设备准入、代次 CAS、收据与清理；A3 负责代次证据核验、原文／pin、实际项目解析、经认证账本／head 读取与共用 actual-start 门禁；A4 负责既有开关 UI 与已验证可见性。代理执行保留双方权限交集，缺少签名主体证据的入口继续关闭。撤回阻止新开始和后续需授权动作，不强杀已运行命令。
+
+已观察到的撤回立即使授权失效。严格小于 15 分钟的内存缓存只约束本机经认证读取的年龄，网络 I/O 前计时并与账本／请求期限取交集；它无法约束持续隐瞒最新控制状态的服务端下的未知撤回。签名／链能发现已知回滚与分叉，不能证明全局最新 head；owner 于 2026-10-28 已确认接受信任服务端不持续隐藏新 head 的前提，这里不新增密码学新鲜度证明。重启或时钟不确定后须重新验证，失败仅影响依赖授权的动作，保留离线内容与无关工作。
+
+## 验证
+
+[行为测试](../../../../packages/e2ee-core/test/machine-sharing.test.ts) 使用确定性合成身份／nonce 和显式签名屏障，覆盖同成员移除重入、旧预备写入与缓存执行证据、无旧策略正文的新代首版引导、私有默认值、新意图重开共享、原子替换连续性、账本位置／证明替换、压缩视图核验及撤销 personal 后保留完整项目重签。既有账本／密码学向量不变；不据此声称已部署 CAS、真实机器新鲜度或双成员产品验收。
