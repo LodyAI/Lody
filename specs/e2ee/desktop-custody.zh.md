@@ -1,6 +1,6 @@
 # 桌面 E2EE 密钥保管
 
-Status: draft
+Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md)
 Translation: current
 
 [English](desktop-custody.md)
@@ -17,7 +17,7 @@ safeStorage 不可用时拒绝；Linux basic_text、未知或不可用钥匙串�
 
 ## 验收范围
 
-所属测试使用真实原生密码学、文件、OS 子进程重开，以及合成认证 safeStorage 边界，验证后端拒绝、篡改／AAD 拒绝、磁盘无生成秘密及实际关闭等待。这不是已访问系统钥匙串的证明；产品启用前须在支持的桌面系统上用打包 Electron 验证真实 safeStorage。
+所属测试使用真实原生密码学、文件、OS 子进程重开，以及合成认证 safeStorage 边界，验证后端拒绝、篡改／AAD 拒绝、磁盘无生成秘密及实际关闭等待。这不是已访问系统钥匙串的证明；产品启用前须将打包 Electron 在 macOS 和 Windows 真实系统钥匙串上的验证列入真机验收，并在每个支持的桌面系统上验证真实 safeStorage。
 
 ## 已确认的成员移除
 
