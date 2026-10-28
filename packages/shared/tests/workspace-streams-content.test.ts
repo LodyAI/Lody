@@ -1,11 +1,13 @@
 import { LoroDoc } from 'loro-crdt';
 import { describe, expect, it, vi } from 'vitest';
 import { getMachineFlockDocId } from '../src/machine-flock';
+import { getScheduleRegistryFlockDocId, getScheduleRoomId } from '../src/schedule-registry';
 import { getWorkspaceFlockDocId } from '../src/workspace-flock';
 import type { MachineId, WorkspaceId } from '../src/ids';
 import {
   encryptedWorkspaceRoom,
   createWorkspaceEpochTransitionLegacy,
+  workspaceSupports,
 } from '../src/workspace-streams-content';
 
 describe('encrypted workspace room domains', () => {
@@ -22,6 +24,7 @@ describe('encrypted workspace room domains', () => {
     for (const flockDocId of [
       getMachineFlockDocId(workspace, 'local' as MachineId),
       getWorkspaceFlockDocId(workspace),
+      getScheduleRegistryFlockDocId(workspace),
       `${workspace}:fi:session`,
       `${workspace}:fis:session`,
     ])
@@ -30,10 +33,19 @@ describe('encrypted workspace room domains', () => {
         model: 'flock',
       });
   });
+  it('enables encrypted schedules and keeps schedule documents in the Loro domain', () => {
+    expect(workspaceSupports({ mode: 'protected' }, 'schedules')).toBe(true);
+    const docId = getScheduleRoomId('reserved-message');
+    expect(encryptedWorkspaceRoom(workspace, { kind: 'doc', docId })).toEqual({
+      resource: `doc:${docId}`,
+      model: 'loro',
+    });
+  });
   it('rejects other workspaces and all unimplemented Flock domains', () => {
     for (const flockDocId of [
       getMachineFlockDocId('other' as WorkspaceId, 'local' as MachineId),
       getWorkspaceFlockDocId('other' as WorkspaceId),
+      getScheduleRegistryFlockDocId('other' as WorkspaceId),
       'wf',
       'mf:local',
       `${workspace}:schedule:registry`,

@@ -2985,13 +2985,29 @@ const OperationCompletionView = ({
 }) => {
   const { t } = useTranslation();
   if (!hasVisibleOperationContent(completion)) return null;
-  const failedCompletion = completion.completion.type === 'error';
-  const cancelledCompletion = completion.completion.type === 'cancelled';
-  const StatusIcon = failedCompletion ? AlertCircle : cancelledCompletion ? Circle : CheckCircle2;
+  const targetCards = getOperationCompletionItems(completion);
+  // Progress suppresses duplicate cards, but the summary still counts every result.
+  const results =
+    completion.completion.type === 'result'
+      ? completion.completion.value.items
+      : completion.completion.type === 'cancelled'
+        ? (completion.completion.partial?.items ?? [])
+        : [];
+  const failed = results.filter((item) => item.status === 'failed').length;
+  const cancelled = results.filter((item) => item.status === 'cancelled').length;
+  const succeeded = results.filter((item) => item.status === 'succeeded').length;
+  const failedCompletion =
+    completion.completion.type === 'error' ||
+    (completion.completion.type === 'result' && failed > 0 && failed === results.length);
+  const cancelledCompletion =
+    completion.completion.type === 'cancelled' ||
+    (completion.completion.type === 'result' && cancelled > 0 && cancelled === results.length);
+  const partialCompletion = !failedCompletion && !cancelledCompletion && failed + cancelled > 0;
+  const StatusIcon =
+    failedCompletion || failed > 0 ? AlertCircle : cancelledCompletion ? Circle : CheckCircle2;
   const createsSessions =
     completion.operationKind === 'session_create' ||
     completion.operationKind === 'session_create_many';
-  const targetCards = getOperationCompletionItems(completion);
   const cards = targetCards.flatMap((item) =>
     item.target
       ? [
@@ -3027,8 +3043,9 @@ const OperationCompletionView = ({
       : []
   );
   // The status card carries only what the cards cannot: a whole-Operation
-  // failure or cancellation, or targetless problems.
-  const showStatusCard = failedCompletion || cancelledCompletion || untargetedProblems.length > 0;
+  // failure, cancellation or mixed outcomes, or targetless problems.
+  const showStatusCard =
+    failedCompletion || cancelledCompletion || partialCompletion || untargetedProblems.length > 0;
 
   return (
     <div className="flex flex-col gap-2" data-operation-completion={completion.operationKind}>
@@ -3063,7 +3080,7 @@ const OperationCompletionView = ({
           <StatusIcon
             className={cn(
               'mt-0.5 h-4 w-4 shrink-0',
-              failedCompletion ? 'text-destructive' : 'text-muted-foreground'
+              failedCompletion || failed > 0 ? 'text-destructive' : 'text-muted-foreground'
             )}
             aria-hidden="true"
           />
@@ -3074,7 +3091,10 @@ const OperationCompletionView = ({
                   ? 'orchestration.operationFailed'
                   : cancelledCompletion
                     ? 'orchestration.operationCancelled'
-                    : 'orchestration.operationCompleted'
+                    : partialCompletion
+                      ? 'orchestration.operationPartialResult'
+                      : 'orchestration.operationCompleted',
+                { succeeded, failed, cancelled }
               )}
             </div>
             {completion.completion.type === 'error' ? (

@@ -12,8 +12,7 @@ workspace could be handled as plaintext or leak its owner. The local catalog now
 never caches a workspace whose content mode this client does not implement, so an
 offline daemon restart cannot open it as plaintext. The initial export restriction
 has reached its owner-approved milestone: [local export](../../../../apps/cli/README.md#local-export)
-now reads the protected replica and writes decrypted files on this device. Export and
-sync still skip unsupported encrypted schedule rooms. One-shot commands close an opened encrypted workspace when manager creation
+now reads the protected replica and writes decrypted files on this device. Schedule documents and their Registry also use the protected CRDT transport. One-shot commands close an opened encrypted workspace when manager creation
 fails, and the CLI E2EE cloud port validates history and mailbox replies with Zod
 instead of trusting or casting them. Two related findings that depend on the pending
 machine-pairing change are handed to that line rather than patched here.
@@ -27,11 +26,11 @@ machine-pairing change are handed to that line rather than patched here.
   rejects it with `workspace_mode_unsupported`.
 - **Export is device-local.** The original refusal prevented an unverified path from
   being enabled prematurely. The current exporter uses the protected workspace manager
-  and skips unsupported schedule rooms; it may write decrypted content to the user-selected
+  and may write decrypted content to the user-selected
   local directory. Desktop copy/image export also remains local.
-- **Sync keeps the protected replica and skips schedules.** Encrypted workspaces still
-  sync meta, session and machine docs; the schedule registry and schedule rooms, which
-  have no encrypted channel, are skipped rather than reported as failures.
+- **Sync keeps the protected replica.** Encrypted workspaces sync metadata, session,
+  machine and Schedule documents plus the Schedule Registry, using the same encryption,
+  signatures and snapshots as the other protected CRDT rooms.
 - **Creation failure owns cleanup.** As in `Lody.create`, one-shot manager creation
   failure closes the opened custody/history/refresh owner. The original error is kept;
   a cleanup failure is logged, not substituted.

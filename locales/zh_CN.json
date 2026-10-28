@@ -4510,6 +4510,7 @@
   "billing.subscribeConsentTerms": "用户协议",
   "orchestration.operationCompleted": "操作已完成",
   "orchestration.operationFailed": "操作失败",
+  "orchestration.operationPartialResult": "成功 {{succeeded}} 项 · 失败 {{failed}} 项 · 已取消 {{cancelled}} 项",
   "orchestration.operationCancelled": "操作已取消",
   "sessions.turnConfig.tooltipEmpty": "此轮没有记录运行配置",
   "sessions.turnConfig.tooltip": "查看运行配置",

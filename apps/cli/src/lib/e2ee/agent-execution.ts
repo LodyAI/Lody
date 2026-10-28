@@ -1,3 +1,4 @@
+import type { ScheduleAuthorizationRequest } from '@lody/shared';
 import { existsSync } from 'node:fs';
 import { Clock, Effect } from 'effect';
 import { z } from 'zod';
@@ -38,6 +39,7 @@ export type VerifiedExecutionOriginal = {
   /** Historical ledger actor, never the UI account ID. */
   requesterCryptoUserId: string;
   expiresAt: number;
+  schedule?: ScheduleAuthorizationRequest;
 };
 export type PendingExecutionOriginal = { state: 'pending-evidence'; expiresAt: number };
 export type ResolveVerifiedExecutionOriginal = (
@@ -57,6 +59,10 @@ export function makeEncryptedAgentExecution(options: {
   targetMachineId: string;
   journal: () => RealtimeJournal;
   authorizeExecution?: AuthorizeEncryptedExecution;
+  authorizeSchedule?: (
+    request: ScheduleAuthorizationRequest,
+    localProjectId?: string
+  ) => Effect.Effect<ExecutionAuthorization, unknown>;
   isExecutionOpen?: () => boolean;
   resolveVerifiedOriginal: ResolveVerifiedExecutionOriginal;
   /** Observation only, after the committed actual-start claim. */
@@ -112,7 +118,7 @@ export function makeEncryptedAgentExecution(options: {
       return { state: 'denied' };
     const authorizeExecution = options.authorizeExecution;
     if (!authorizeExecution) return { state: 'denied' };
-    const authorization = yield* authorizeExecution(
+    let authorization = yield* authorizeExecution(
       intent.workspaceId,
       verified.requesterDevice,
       intent.localProjectId
@@ -121,6 +127,38 @@ export function makeEncryptedAgentExecution(options: {
       return authorization.reason === 'e2ee_machine_not_shared'
         ? { state: 'denied', reason: 'e2ee_machine_not_shared' }
         : { state: 'denied' };
+    let scheduleCurrent: (() => boolean) | undefined;
+    if (verified.schedule) {
+      if (!options.authorizeSchedule) return { state: 'denied' };
+      const schedule = yield* options.authorizeSchedule(verified.schedule, intent.localProjectId);
+      if (schedule._tag !== 'Authorized')
+        return {
+          state:
+            schedule.reason === 'e2ee_schedule_evidence_pending'
+              ? (yield* Clock.currentTimeMillis) < verified.expiresAt
+                ? 'pending-evidence'
+                : 'expired'
+              : 'denied',
+          ...(schedule.reason === 'e2ee_machine_not_shared'
+            ? { reason: 'e2ee_machine_not_shared' as const }
+            : {}),
+        };
+      scheduleCurrent = schedule.isCurrent;
+      // Schedule signer refreshes may advance the ledger snapshot. Recheck the
+      // turn signer without dropping the independent Schedule source fences.
+      authorization = yield* authorizeExecution(
+        intent.workspaceId,
+        verified.requesterDevice,
+        intent.localProjectId
+      );
+      if (authorization._tag !== 'Authorized')
+        return {
+          state: 'denied',
+          ...(authorization.reason === 'e2ee_machine_not_shared'
+            ? { reason: 'e2ee_machine_not_shared' as const }
+            : {}),
+        };
+    }
     // Authorization can yield. Re-read before receive so concurrent channels
     // reuse the first expiry instead of replacing or extending its evidence.
     retained = yield* attempt(read);
@@ -133,9 +171,14 @@ export function makeEncryptedAgentExecution(options: {
       expiresAt: verified.expiresAt,
       frame,
     };
+    const executionCurrent = authorization.isCurrent;
     return yield* attempt(() => {
       // No await between the terminal lifecycle fence and the durable start.
-      if (options.isExecutionOpen?.() === false || authorization.isCurrent?.() === false)
+      if (
+        options.isExecutionOpen?.() === false ||
+        executionCurrent?.() === false ||
+        scheduleCurrent?.() === false
+      )
         return { state: 'denied' as const };
       journal.receive(request);
       const result = journal.claim(request);

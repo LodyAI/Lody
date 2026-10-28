@@ -13,7 +13,7 @@ entries disappeared without explanation, waited forever or surfaced internal cod
 The UI now uses the existing capability verdict with one localized reason per feature.
 Unsupported actions are disabled or replaced by an explanation before editing or
 transfer; operation guards remain and refused attachments retain the draft. This
-availability fix does not implement encrypted RPC, presence, attachments, schedules,
+availability fix does not implement encrypted RPC, presence, attachments,
 sharing, exports or Code Collab indexes.
 
 ## Decision and boundaries
@@ -23,12 +23,11 @@ sharing, exports or Code Collab indexes.
   guard error. Display checks the admitted workspace mode; operations check their own
   runtime/content even if callbacks or deep links bypass the UI.
 - Composer menus show disabled actions with visible explanations on desktop and touch.
-  Ordinary disabled schedule actions retain their hover tooltip; the encrypted-workspace
-  explanation stays visible even when a machine-level disabled reason also exists.
+  Disabled schedule actions retain their ordinary machine/readiness reasons; encrypted
+  schedules use the protected CRDT path without an unsupported-workspace notice.
   Conversation menus explain exports, sharing, remote preview and RPC. Remote machine
-  detail/provider controls and schedule deep links show a notice before mounting the
-  unsupported editor. Remote goal, edit-and-resend and native steering affordances
-  respect RPC availability; durable send and cancel keep their existing paths.
+  detail/provider controls show a notice before mounting the unsupported editor.
+  Remote goal, edit-and-resend and native steering affordances respect RPC availability; durable send and cancel keep their existing paths.
 - Presence uses the existing status slot below browser-offline and machine-removed,
   with neutral copy instead of claiming the machine is offline. Code Collab terminates
   its disabled-index loading state with an unavailable reason. Confirmed same-machine
@@ -43,7 +42,7 @@ sharing, exports or Code Collab indexes.
 
 Deterministic tests exercise rendered disabled menus, English/Chinese upload refusals
 before network transfer, English/Chinese presence copy,
-schedule reasons/deep links, remote form suppression, Code Collab unavailability and
+ordinary schedule readiness, remote form suppression, Code Collab unavailability and
 local preview, real persistent draft hooks and prepared local files crossing real
 Loro history writes. With the implementation withdrawn to main, nine selected
 regressions fail on their intended assertions and exit normally; restoring it passes.

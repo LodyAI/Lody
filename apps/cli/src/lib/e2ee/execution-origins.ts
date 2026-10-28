@@ -1,4 +1,15 @@
-import { getSessionRoomId, type SessionId } from '@lody/shared';
+import {
+  getSessionRoomId,
+  getScheduleRoomId,
+  ScheduleAuthorizationRequestSchema,
+  readScheduleAuthorization,
+  captureScheduleAuthorization,
+  scheduleChangedSince,
+  scheduleDocumentFromMirrorState,
+  scheduleDefinitionFingerprint,
+  type ScheduleAuthorizationRequest,
+  type SessionId,
+} from '@lody/shared';
 import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -78,6 +89,7 @@ const projection = (map: LoroMap) => {
     timestamp: read('timestamp'),
     inputConfig: read('inputConfig'),
     items: read('items'),
+    scheduleRun: read('scheduleRun'),
   };
 };
 
@@ -147,6 +159,103 @@ export class ExecutionOrigins {
     return target !== undefined && decoded.some(({ meta }) => contains(meta, target));
   }
 
+  /** A declaration is useful only through its exact signed update. Snapshot
+   * authors and later machine-generated turns never supply Schedule authority. */
+  resolveSchedule = Effect.fnUntraced(function* (
+    this: ExecutionOrigins,
+    request: ScheduleAuthorizationRequest,
+    doc: LoroDoc,
+    open: (input: PayloadProtectionOpenInput) => Effect.Effect<Opened, unknown, Scope.Scope>,
+    recover?: (
+      docId: string,
+      id: OpId,
+      open: (input: PayloadProtectionOpenInput) => Effect.Effect<Opened, unknown, Scope.Scope>
+    ) => Effect.Effect<void, unknown, Scope.Scope>
+  ): Effect.fn.Return<string[] | { state: 'pending-evidence' } | undefined, unknown, Scope.Scope> {
+    const fingerprint = (source: LoroDoc) => {
+      const raw = source.toJSON() as {
+        definition?: unknown;
+        prompt?: unknown;
+        message?: { payload?: unknown };
+      };
+      if (typeof raw.prompt !== 'string') return undefined;
+      const document = scheduleDocumentFromMirrorState(
+        { ...raw, prompt: raw.prompt, timeline: [] },
+        request.scheduleId
+      );
+      return document ? scheduleDefinitionFingerprint(document) : undefined;
+    };
+    const unchanged = captureScheduleAuthorization(doc, request.manualRunKey);
+    if (fingerprint(doc) !== request.definitionFingerprint) return undefined;
+    const docId = getScheduleRoomId(request.scheduleId);
+    const resource = `doc:${docId}`;
+    const signers: string[] = [];
+    for (const manualRunKey of request.manualRunKey
+      ? [undefined, request.manualRunKey]
+      : [undefined]) {
+      const selected = readScheduleAuthorization(doc, manualRunKey);
+      if (
+        !selected ||
+        !isDeepStrictEqual(selected.value, {
+          definitionFingerprint: request.definitionFingerprint,
+          kind: manualRunKey ? 'manual' : 'definition',
+          ...(manualRunKey ? { manualRunKey } : {}),
+        })
+      )
+        return undefined;
+      const read = () =>
+        this.database((db) =>
+          db
+            .prepare(`SELECT DISTINCT f.sealed, f.aad FROM spans s JOIN frames f ON s.digest=f.digest
+        WHERE s.resource=? AND f.resource=? AND s.peer=? AND s.start<=? AND s.end>?`)
+            .all(resource, resource, selected.id.peer, selected.id.counter, selected.id.counter)
+            .map((row) => frameSchema.parse(row))
+        );
+      let rows = yield* attempt(read);
+      if (!rows.length && recover) {
+        yield* recover(docId, selected.id, open);
+        rows = yield* attempt(read);
+      }
+      if (!rows.length) return { state: 'pending-evidence' };
+      let signer: string | undefined;
+      for (const row of rows) {
+        const opened = yield* open({
+          context,
+          header: Uint8Array.of(3),
+          sealed: row.sealed,
+          additionalData: row.aad,
+        });
+        try {
+          const decoded = updates(opened.plaintext);
+          for (const { meta } of decoded) {
+            if (!contains(meta, selected.id)) continue;
+            const historical = yield* attempt(() => doc.forkAt(meta.startFrontiers));
+            try {
+              yield* attempt(() => historical.importBatch(decoded.map((update) => update.bytes)));
+              const declaration = readScheduleAuthorization(historical, manualRunKey);
+              if (
+                !isDeepStrictEqual(declaration, selected) ||
+                fingerprint(historical) !== request.definitionFingerprint ||
+                scheduleChangedSince(doc, historical)
+              )
+                return undefined;
+              const verified = Buffer.from(opened.author.device.toBytes()).toString('hex');
+              if (signer && signer !== verified) return undefined;
+              signer = verified;
+            } finally {
+              historical.free();
+            }
+          }
+        } finally {
+          opened.plaintext.fill(0);
+        }
+      }
+      if (!signer) return undefined;
+      signers.push(signer);
+    }
+    return unchanged() && fingerprint(doc) === request.definitionFingerprint ? signers : undefined;
+  });
+
   resolve = Effect.fnUntraced(function* (
     this: ExecutionOrigins,
     intent: EncryptedExecutionIntent,
@@ -166,6 +275,13 @@ export class ExecutionOrigins {
     if (!selected) return undefined;
     const current = projection(selected.map);
     if (!isDeepStrictEqual(current.inputConfig ?? {}, intent.inputConfig ?? {})) return undefined;
+    const schedule =
+      current.scheduleRun === undefined
+        ? undefined
+        : ScheduleAuthorizationRequestSchema.extend({
+            turnId: z.literal(intent.userTurnId),
+          }).safeParse(current.scheduleRun);
+    if (schedule && !schedule.success) return undefined;
     const resource = `doc:${getSessionRoomId(intent.sessionId as SessionId)}`;
     const readRows = () =>
       this.database((db) =>
@@ -229,6 +345,7 @@ export class ExecutionOrigins {
               requesterDevice: Buffer.from(opened.author.device.toBytes()).toString('hex'),
               requesterCryptoUserId: Buffer.from(opened.author.actor.toBytes()).toString('hex'),
               expiresAt: timestamp + windowMs,
+              ...(schedule?.success ? { schedule: schedule.data } : {}),
             };
             // Imported/forwarded operations cannot replace an earlier signer with
             // another device's authorization. Conflicting provenance is unknown.

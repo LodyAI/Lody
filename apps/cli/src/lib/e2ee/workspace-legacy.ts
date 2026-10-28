@@ -1,4 +1,10 @@
 import { makeLazyMachineSharingHost, sharingRemoteFromTransport } from '@lody/e2ee-machine-sharing';
+import { authorizeEncryptedSchedule } from './schedule-execution-authorization';
+import {
+  getScheduleRoomId,
+  getScheduleIdFromRoomId,
+  type ScheduleAuthorizationRequest,
+} from '@lody/shared';
 import { makeExecutionOriginRecovery } from './execution-origin-recovery';
 import { makeEncryptedFeatureReceiver, type EncryptedFeatureHandler } from './feature-rpc';
 import { makeEncryptedRpcReceiver } from './realtime-rpc';
@@ -805,7 +811,8 @@ async function openWorkspaceOwned(
             if (
               descriptor.model === 'loro' &&
               descriptor.resource.startsWith('doc:') &&
-              isSessionDocRoomId(descriptor.resource.slice(4)) &&
+              (isSessionDocRoomId(descriptor.resource.slice(4)) ||
+                getScheduleIdFromRoomId(descriptor.resource.slice(4))) &&
               originalFrame.context.kind === 'update_batch'
             ) {
               try {
@@ -1131,6 +1138,32 @@ async function openWorkspaceOwned(
   };
   // Startup is one of the three refresh triggers; no network request is awaited by open.
   void refreshInBackground();
+  const authorizeScheduleExecution = (
+    request: ScheduleAuthorizationRequest,
+    doc: LoroDoc,
+    executionTarget?: { localProjectId?: string }
+  ) =>
+    Effect.scoped(
+      authorizeEncryptedSchedule({
+        workspaceId: options.workspaceId,
+        request,
+        doc,
+        executionTarget,
+        origins: executionOrigins,
+        open: (input) =>
+          Effect.gen(function* () {
+            const native = yield* opened.runtime.binding(
+              `doc:${getScheduleRoomId(request.scheduleId)}`,
+              'loro',
+              'current'
+            );
+            return yield* native.openAuthenticated(input);
+          }),
+        recover: originRecovery?.recover,
+        authorizeExecution: opened.executionAuthorization.authorizeExecution,
+        isExecutionOpen: () => !closed,
+      })
+    );
   return {
     attachmentToken: async () => {
       if (closed) throw new Error('e2ee_closed');
@@ -1146,6 +1179,9 @@ async function openWorkspaceOwned(
       binding.genesisHash,
       opened.signingPublicKey
     ),
+    authorizeScheduleExecution,
+    authorizeScheduleExecutionLegacy: (request: ScheduleAuthorizationRequest, doc: LoroDoc) =>
+      run(authorizeScheduleExecution(request, doc)),
     resolveVerifiedExecutionOriginal: (intent: EncryptedExecutionIntent, doc?: LoroDoc) =>
       Effect.scoped(
         Effect.gen(function* () {

@@ -997,6 +997,7 @@ export class LodyFleet {
               },
               localOnly: this.localPlatform,
               slots: executionSlots,
+              authorize: (request) => startedLody.authorizeScheduleExecution(request),
               logger: workspaceLogger,
               hasSessionWork: (sessionId) => startedLody.hasAutomationSessionWork(sessionId),
             });

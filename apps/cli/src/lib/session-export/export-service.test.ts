@@ -1,3 +1,5 @@
+import { LoroRepo } from 'loro-repo';
+import { ScheduleRepository, type WorkspaceId } from '@lody/shared';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -9,7 +11,7 @@ vi.mock('./workspace-usage', () => ({
   fetchWorkspaceUsageBundle: async () => ({ summary: {}, timelines: [] }),
 }));
 
-it('writes decrypted session history locally without touching unsupported encrypted schedule rooms', async () => {
+it('writes decrypted sessions and encrypted Schedule definitions to the local export', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'lody-encrypted-export-'));
   const outputDir = path.join(root, 'export');
   const session = { id: 'synthetic', title: 'Private export', createdAt: '2026-01-01T00:00:00Z' };
@@ -21,15 +23,31 @@ it('writes decrypted session history locally without touching unsupported encryp
       items: [{ type: 'text', text: 'SYNTHETIC_DECRYPTED_EXPORT' }],
     },
   ];
-  const manager = {
-    repo: {
-      metaFlock: { exportJson: () => ({}) },
-      getMeta: () => ({ scan: async () => [{ key: ['m', 'session-synthetic'] }] }),
-      getDocMeta: async () => ({ meta: session }),
-      openFlockDoc: async () => {
-        throw new Error('encrypted schedule room must stay closed');
-      },
+  const repo = await LoroRepo.create({});
+  await repo.upsertDocMeta('session-synthetic', session);
+  const repository = new ScheduleRepository(repo, 'protected' as WorkspaceId, {
+    protectedContent: true,
+  });
+  await repository.save({
+    scheduleId: 'synthetic-schedule',
+    actorId: 'owner',
+    now: 0,
+    activationId: 'active',
+    activityId: 'create',
+    create: true,
+    draft: {
+      title: 'Private schedule',
+      prompt: 'SYNTHETIC_SCHEDULE_EXPORT',
+      machineId: 'machine',
+      trigger: { kind: 'once', at: '1970-01-01T00:01:00.000Z' },
+      misfirePolicy: { kind: 'run_once' },
+      overlapPolicy: 'queue_one',
+      agent: { agentConfigId: 'agent' },
+      retryPolicy: { dispatchMaxAttempts: 5, dispatchMaxAgeMs: 86400000 },
     },
+  });
+  const manager = {
+    repo,
     getSessionHistorySnapshot: async () => history,
   } as unknown as LoroDocumentManager;
   try {
@@ -45,14 +63,18 @@ it('writes decrypted session history locally without touching unsupported encryp
       outputDir,
       downloadImages: false,
     });
-    expect(result.manifest).toMatchObject({ sessionCount: 1, scheduleCount: 0 });
+    expect(result.manifest).toMatchObject({ sessionCount: 1, scheduleCount: 1 });
     expect(
       await readFile(path.join(outputDir, 'sessions/synthetic/transcript.md'), 'utf8')
     ).toContain('SYNTHETIC_DECRYPTED_EXPORT');
     expect(
       JSON.parse(await readFile(path.join(outputDir, 'schedules/index.json'), 'utf8'))
-    ).toEqual([]);
+    ).toEqual([{ scheduleId: 'synthetic-schedule', title: 'Private schedule' }]);
+    expect(
+      await readFile(path.join(outputDir, 'schedules/synthetic-schedule/schedule.md'), 'utf8')
+    ).toContain('SYNTHETIC_SCHEDULE_EXPORT');
   } finally {
+    await repo.destroy();
     await rm(root, { recursive: true, force: true });
   }
 });
