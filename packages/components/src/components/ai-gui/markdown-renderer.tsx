@@ -278,7 +278,7 @@ const markdownStyles = stylex.create({
     fontFamily: 'var(--font-mono)',
     fontSize: 'var(--markdown-code-font-size)',
     lineHeight: 'var(--markdown-code-line-height)',
-    color: conversation.reading,
+    color: 'inherit',
   },
 });
 
