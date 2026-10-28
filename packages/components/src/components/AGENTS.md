@@ -37,8 +37,10 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
   worktree, PR icon or mobile time with one 14px mark. +/- totals: hover card only.
   Mobile: [mobile/AGENTS.md](mobile/AGENTS.md). Folded groups: only
   `SidebarGroupActivityMark`, no counts ([why](../../../../.agents/notes/implemented/feature/2026-09-26-sidebar-folded-group-status.md)).
-- Never hide a Session through nesting: missing, cross-section, cross-group, cycling,
-  or deeper-than-one-level openers render top-level. `MAX_VISIBLE_SESSIONS` /
+- Never hide a Session through nesting: missing, cross-section, cycling, or
+  deeper-than-one-level openers render top-level. In Workspace mode,
+  `placeWorkspaceSessionsWithOpeners` first moves a Session whose opener renders in
+  another group into that group; Pinned and Updated keep natural membership. `MAX_VISIBLE_SESSIONS` /
   `SHOW_FULL_BUCKET_THRESHOLD` count top-level rows. Every list passes `rootRank` for
   latest-activity sorting; rank an opener by its freshest opened Session.
 - Collapse state uses `sidebarCollapsedOpenedBySessionsAtom`, default expanded. Keep

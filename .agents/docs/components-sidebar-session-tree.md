@@ -41,9 +41,25 @@ live outside it.
 Nesting is resolved inside a single rendered list, which is what keeps section
 boundaries intact: a pinned opener and an unpinned opened Session are in different
 arrays, so both stay top-level. The tree never hides a Session — a missing,
-cross-section, cross-group, cycling, or deeper-than-one-level opener degrades to a
-top-level row — and the preview cap counts top-level rows so a bucket's visible size
-does not depend on how deeply it happens to nest.
+cross-section, cycling, or deeper-than-one-level opener degrades to a top-level
+row — and the preview cap counts top-level rows so a bucket's visible size does not
+depend on how deeply it happens to nest.
+
+Workspace mode groups rows by work context, so an opened Session often lives in
+another group than its opener: a Role dispatched from a Local Project to another
+Machine becomes a plain chat or a GitHub-repository Session. Before the groups build
+their trees, `placeWorkspaceSessionsWithOpeners` (`sessions/session-list-rows.ts`)
+moves each such row into the group of its topmost rendered ancestor, so the fan-out
+stays legible. The row leaves its own group, keeping every Session in exactly one
+place for keyboard navigation and counts; it travels with its opener when that group
+is folded. Only rendered groups take part, so an opener in a hidden project, the
+Pinned section or the archive leaves the row where it was. A Local Project Session
+joining a task group becomes a task row, and a local group's hover card names the
+moved row's own Machine rather than the project's. Two alternatives were rejected:
+making the remote Session a `parentSessionId` child, which would break the child
+contract of one shared machine and workspace, and showing the row in both groups,
+which would duplicate navigation targets. Updated mode is one list and already nests
+across contexts; mobile lists still nest per bucket.
 
 Every list here is sorted by latest activity, so each surface passes `rootRank` and an
 opener is ranked by its freshest opened Session. Without that, nesting would bury a
