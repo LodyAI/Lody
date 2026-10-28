@@ -401,24 +401,23 @@ export function useSessionShareManagement(
     if (!consent) return;
     const current = currentPublication.current;
     const unchangedSources =
-      current.entry?.canManage === consent.entry?.canManage &&
-      current.entry?.canRevoke === consent.entry?.canRevoke &&
       selectedSetKey(current.entry?.selectedSourceIds ?? []) ===
         selectedSetKey(consent.entry?.selectedSourceIds ?? []) &&
       sourceMapKey(current.entry?.sourceIds ?? []) === sourceMapKey(consent.entry?.sourceIds ?? []);
-    // Admission can itself create/update the management row. Accept only our exact
-    // acknowledged record and its old or just-prepared source mapping, never another revision.
+    // Admission can itself create/update the management row. A fresh share has
+    // no published source mapping, even when it replaces a revoked share. Derived
+    // permissions are not scope identity; the server authorizes each mutation.
+    const previousPublication = value?.expected ? consent.entry : null;
     const ownAdmission =
       value?.deployment &&
-      current.entry?.canManage &&
-      current.entry.canRevoke === (consent.entry?.canRevoke ?? true) &&
+      current.entry != null &&
       shareRecordVersion(current.entry) === shareRecordVersion(value.deployment) &&
       [
-        selectedSetKey(consent.entry?.selectedSourceIds ?? []),
+        selectedSetKey(previousPublication?.selectedSourceIds ?? []),
         selectedSetKey(consent.selectedIds),
       ].includes(selectedSetKey(current.entry.selectedSourceIds)) &&
       [
-        sourceMapKey(consent.entry?.sourceIds ?? []),
+        sourceMapKey(previousPublication?.sourceIds ?? []),
         sourceMapKey(value.prepared.sourceIds),
       ].includes(sourceMapKey(current.entry.sourceIds));
     if (

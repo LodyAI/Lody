@@ -419,6 +419,107 @@ describe('static publication client lifecycle', () => {
     }
   );
 
+  it.each(['empty draft', 'prepared draft', 'wrong record', 'wrong version', 'foreign mapping'])(
+    'replaces a revoked encrypted share only with its own acknowledged %s',
+    async (scenario) => {
+      store.set(activeWorkspaceRuntimeAtom, {
+        workspaceId: 'workspace',
+        contentMode: 'e2ee',
+      } as never);
+      cloud.state = {
+        ...entry,
+        status: 'revoked',
+        revision: 2,
+        canManage: false,
+        canRevoke: false,
+      };
+      let entered!: () => void, release!: () => void;
+      const started = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const admitted = {
+        ...entry,
+        shareId: 'replacement-share',
+        status: 'draft' as const,
+        revision: 0,
+        title: '',
+        createdAt: 2,
+        updatedAt: 2,
+        deploymentId: 'replacement-deployment',
+      };
+      cloud.mutation.mockImplementation(async (name: string) => {
+        if (name === 'sessionSharing:beginDeployment') {
+          entered();
+          await held;
+          return admitted;
+        }
+        return { ...admitted, status: 'active', revision: 1 };
+      });
+      await render();
+      expect(control.canCapture).toBe(true);
+      await act(async () => control.onPublish());
+      expect(control.plaintextConfirmation).toBe(true);
+      let publishing!: Promise<void>;
+      await act(async () => {
+        publishing = control.onConfirmPlaintextPublish();
+        await started;
+      });
+      // Convex getManagement follows the new draft created by this very beginDeployment.
+      const prepared: PreparedSharePackage = await cloud.capture.mock.results[0]!.value;
+      cloud.state = {
+        ...admitted,
+        sourceIds: [],
+        selectedSourceIds: [],
+        canManage: true,
+        canRevoke: true,
+      };
+      if (scenario === 'prepared draft')
+        cloud.state = {
+          ...cloud.state,
+          sourceIds: prepared.sourceIds,
+          selectedSourceIds: ['root'],
+        };
+      if (scenario === 'wrong record') cloud.state = { ...cloud.state, shareId: 'foreign-share' };
+      if (scenario === 'wrong version') cloud.state = { ...cloud.state, revision: 1 };
+      if (scenario === 'foreign mapping')
+        cloud.state = {
+          ...cloud.state,
+          sourceIds: [{ sourceId: 'foreign', conversationId: 'foreign' }],
+          selectedSourceIds: ['foreign'],
+        };
+      await render();
+      expect(control.canCapture).toBe(true);
+      await act(async () => {
+        release();
+        await publishing;
+      });
+      if (['wrong record', 'wrong version', 'foreign mapping'].includes(scenario)) {
+        expect(control.result).toBeNull();
+        expect(control.hasPending).toBe(false);
+        expect(cloud.upload).not.toHaveBeenCalled();
+        expect(cloud.mutation.mock.calls.map(([name]) => name)).toEqual([
+          'sessionSharing:beginDeployment',
+        ]);
+        return;
+      }
+      expect(control.error).toBeNull();
+      expect(control.result).not.toBeNull();
+      expect(cloud.mutation.mock.calls.map(([name]) => name)).toEqual([
+        'sessionSharing:beginDeployment',
+        'sessionSharing:publishDeployment',
+      ]);
+      expect(cloud.mutation.mock.calls[0]?.[1]).toMatchObject({
+        shareId: undefined,
+        expectedRevision: undefined,
+      });
+      expect(control.result?.url).toContain('/s/replacement-share');
+      expect(control.hasPending).toBe(false);
+    }
+  );
+
   it('does not commit after the share changes during upload', async () => {
     store.set(activeWorkspaceRuntimeAtom, {
       workspaceId: 'workspace',
