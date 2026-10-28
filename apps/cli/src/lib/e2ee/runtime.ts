@@ -433,14 +433,6 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
   );
   return {
     status: () => serial.withPermit(status()),
-    /** Current verified authority only; execution freshness must come from an authenticated read. */
-    executionLedger: () =>
-      serial.withPermit(
-        Effect.gen(function* () {
-          yield* guard();
-          return yield* verified.current();
-        })
-      ),
     pairingEvidence: () =>
       serial.withPermit(
         Effect.gen(function* () {

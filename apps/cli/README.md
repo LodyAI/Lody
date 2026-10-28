@@ -14,26 +14,6 @@ Install the CLI package:
 npm install -g lody@next
 ```
 
-## Encrypted remote execution authorization
-
-The encrypted workspace host exposes
-`authorizeExecution(workspaceId, requesterDevice): Effect<ExecutionAuthorization>`.
-The requester is the lowercase hex signing public key from an independently verified
-request. The result is `Authorized`, or `Denied` with `invalid-request`,
-`not-authorized`, `unavailable`, or `closed`. Use it immediately before a new execution;
-request integrity, target binding and the durable journal claim remain separate checks.
-
-The machine reads the ledger with its own device credential and verifies every page
-through the existing runtime. Grants are isolated by workspace host and requesting
-device, kept only in memory for less than 15 minutes from read start, and checked
-against currently known membership on every call. Owner/Admin/Member personal or
-machine devices qualify; Guest, recovery, removed and revoked devices do not.
-Restart requires another authenticated read. A connection or forwarded proof cannot
-renew a grant. Concurrent misses share a refresh, bounded to 30 seconds; failure
-rejects those new execution requests and permits retry without stopping local editing,
-already running work or other workspace hosts. No RPC/agent dispatch is enabled by
-this interface alone.
-
 ## Local encrypted execution log recovery
 
 Stop the journal's execution owners, then run:
