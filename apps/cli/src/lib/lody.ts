@@ -1,3 +1,4 @@
+import type { AuthorizeEncryptedExecution, EncryptedAgentExecution } from './e2ee/agent-execution';
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import type { CliE2eeWorkspaceLegacy } from './e2ee/workspace-legacy';
 import { LoroDocumentManager } from '@/lib/loro/doc';
@@ -40,6 +41,7 @@ interface LodyOptions {
   supportRegistryAgentTypes?: string[];
   workspaceId: WorkspaceId;
   contentMode?: string;
+  authorizeEncryptedExecution?: AuthorizeEncryptedExecution;
   genesisHash?: string;
   workspaceSlug?: string;
   token: string;
@@ -132,6 +134,22 @@ export class Lody {
         },
       };
     }
+    let encryptedExecution: EncryptedAgentExecution | undefined;
+    if (e2ee) {
+      if (!options.genesisHash) throw new Error('e2ee_workspace_unavailable');
+      const { join } = await import('node:path');
+      const { Effect } = await import('effect');
+      const { makeEncryptedAgentExecution, lazyExecutionJournal } =
+        await import('./e2ee/agent-execution');
+      encryptedExecution = makeEncryptedAgentExecution({
+        genesis: options.genesisHash,
+        workspaceId: options.workspaceId,
+        targetMachineId: options.machineId,
+        journal: lazyExecutionJournal(join(e2ee.repositoryDirectory, 'execution.sqlite'), Date.now),
+        authorizeExecution:
+          options.authorizeEncryptedExecution ?? (() => Effect.succeed({ state: 'denied' })),
+      });
+    }
     let manager: LoroDocumentManager | undefined;
     // Commands the daemon executes may touch Sessions owned by other machines; their
     // Roost history lives with that owner, never in this machine's database.
@@ -177,7 +195,7 @@ export class Lody {
       await e2ee?.close();
       throw error;
     });
-    const lody = new Lody(options, manager);
+    const lody = new Lody(options, manager, encryptedExecution);
     lody.encryptedWorkspace = e2ee;
     resolveRemovalOwner(lody);
     return lody;
@@ -185,7 +203,8 @@ export class Lody {
 
   constructor(
     public readonly options: LodyOptions,
-    public readonly documentManager: LoroDocumentManager
+    public readonly documentManager: LoroDocumentManager,
+    encryptedExecution?: EncryptedAgentExecution
   ) {
     this.logger = options.logger;
 
@@ -211,6 +230,7 @@ export class Lody {
       handlerConfig: {
         token: this.token,
         encryptedWorkspace: options.contentMode === 'e2ee',
+        encryptedExecution: options.contentMode === 'e2ee' ? encryptedExecution : undefined,
         workspaceId: this.workspaceId,
         workspaceSlug: this.workspaceSlug,
         userId: this.userId,

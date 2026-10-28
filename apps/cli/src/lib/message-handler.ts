@@ -1,3 +1,4 @@
+import type { EncryptedAgentExecution } from './e2ee/agent-execution';
 import { isScheduledMessageFile } from './schedules/scheduled-message-files';
 import {
   getWorkspaceFlockDocId,
@@ -603,6 +604,7 @@ function formatLiveActivityUpdatedAt(value: number, nowMs: number): string {
 
 export interface MessageHandlerConfig {
   encryptedWorkspace?: boolean;
+  encryptedExecution?: EncryptedAgentExecution;
   token: string;
   workspaceId: WorkspaceId;
   workspaceSlug?: string;
@@ -2970,6 +2972,8 @@ export class MessageHandler {
       prAssociation: this.cloudPort.prAssociation,
     });
     this.executionService = new SessionExecutionService({
+      encryptedExecution: config.encryptedWorkspace ? config.encryptedExecution : undefined,
+      encryptedWorkspace: config.encryptedWorkspace,
       logger: this.logger,
       sessionManager: this.sessionManager,
       workspaceDocument: this.workspaceDocument,

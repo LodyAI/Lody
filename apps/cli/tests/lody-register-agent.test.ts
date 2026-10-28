@@ -1,3 +1,7 @@
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Effect } from 'effect';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ACP_CAPABILITY_CACHE_VERSION } from '@lody/shared';
 import { getAcpCapabilitySourceVersion } from '../src/agent/setting';
@@ -503,6 +507,7 @@ describe('Lody workspace cloud-port composition', () => {
   it.each([undefined, 'plaintext', 'e2ee'] as const)(
     'uses host Git credentials only in encrypted workspaces (mode=%s)',
     async (contentMode) => {
+      const directory = mkdtempSync(join(tmpdir(), 'lody-execution-composition-'));
       const hostedTokenManager = {
         getCredentialPolicy: async () => ({ personalEnabled: true }),
       };
@@ -517,7 +522,7 @@ describe('Lody workspace cloud-port composition', () => {
         .spyOn(encryptedWorkspace, 'openCliE2eeWorkspaceLegacy')
         .mockImplementation(async () => {
           if (contentMode !== 'e2ee') throw new Error('ordinary workspace opened E2EE custody');
-          return { close: async () => {} } as never;
+          return { close: async () => {}, repositoryDirectory: directory } as never;
         });
       const documents = vi
         .spyOn(LoroDocumentManager, 'create')
@@ -543,6 +548,25 @@ describe('Lody workspace cloud-port composition', () => {
           },
         });
         const runtime = mocks.runtimeOptions.at(-1) as MachineRuntimeOptions;
+        expect(readdirSync(directory)).toEqual([]);
+        const gate = runtime.handlerConfig.encryptedExecution;
+        if (contentMode === 'e2ee') {
+          if (!gate) throw new Error('Missing encrypted execution gate');
+          expect(
+            await Effect.runPromise(
+              gate.claim({
+                workspaceId: 'synthetic-workspace',
+                sessionId: 'session',
+                userTurnId: 'turn',
+                requesterUserId: 'user-1',
+              })
+            )
+          ).toEqual({ state: 'denied' });
+        } else {
+          expect(gate).toBeUndefined();
+          expect(readdirSync(directory)).toEqual([]);
+        }
+
         // Invoke Lody's production factory and the real SessionManager policy
         // method: a null broker means agent git/gh uses the host credentials.
         const sessions = runtime.sessionManagerFactory();
@@ -557,6 +581,7 @@ describe('Lody workspace cloud-port composition', () => {
           contentMode === 'e2ee' ? null : cloudPort.githubTokens
         );
       } finally {
+        rmSync(directory, { recursive: true, force: true });
         native.mockRestore();
         documents.mockRestore();
       }

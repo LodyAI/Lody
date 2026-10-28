@@ -1,3 +1,5 @@
+import { Effect, Fiber } from 'effect';
+import { makeEncryptedAgentExecution, lazyExecutionJournal } from './agent-execution';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
@@ -1394,5 +1396,121 @@ describe('host-only E2EE realtime journal', () => {
         record: { state: 'uncertain' },
       });
     }
+  });
+  describe('shared agent execution admission', () => {
+    const intent = {
+      workspaceId: 'synthetic-workspace',
+      sessionId: 'session',
+      userTurnId: 'user-turn',
+      requesterUserId: 'user',
+    };
+    const key = {
+      genesis: 'synthetic-genesis',
+      workspaceId: 'synthetic-workspace',
+      targetMachineId: 'synthetic-machine',
+      requestId: 'agent-start:user-turn',
+    };
+    const gate = (
+      open: () => RealtimeJournal,
+      authorizeExecution = () =>
+        Effect.succeed({ state: 'authorized' as const, requesterDevice: 'device', expiresAt: 1000 })
+    ) =>
+      makeEncryptedAgentExecution({
+        genesis: key.genesis,
+        workspaceId: key.workspaceId,
+        targetMachineId: key.targetMachineId,
+        journal: open,
+        authorizeExecution,
+      });
+
+    it('preserves the first execution deadline through reauthorization and a backwards clock', async () => {
+      const first = gate(
+        () => journal,
+        () => Effect.succeed({ state: 'authorized', requesterDevice: 'device', expiresAt: 100 })
+      );
+      expect(await Effect.runPromise(first.claim(intent))).toMatchObject({ state: 'expired' });
+      now = 1;
+      const retry = gate(() => new RealtimeJournal(filename, () => now));
+      expect(await Effect.runPromise(retry.claim(intent))).toMatchObject({ state: 'expired' });
+      expect(journal.read(key)).toMatchObject({ state: 'received', expiresAt: 100 });
+    });
+
+    it('binds the business intent to its exact user and session', async () => {
+      const execution = gate(() => journal);
+      expect((await Effect.runPromise(execution.claim(intent))).state).toBe('claimed');
+      for (const changed of [
+        { ...intent, sessionId: 'other-session' },
+        { ...intent, requesterUserId: 'other-user' },
+        { ...intent, workspaceId: 'other-workspace' },
+      ]) {
+        await expect(Effect.runPromise(execution.claim(changed))).rejects.toMatchObject({
+          code: 'identity_conflict',
+        });
+      }
+      expect(journal.read(key)?.state).toBe('uncertain');
+    });
+
+    it('cancels authorization without consuming execution evidence', async () => {
+      let entered: () => void = () => {};
+      const ready = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const blocked = makeEncryptedAgentExecution({
+        genesis: key.genesis,
+        workspaceId: key.workspaceId,
+        targetMachineId: key.targetMachineId,
+        journal: () => journal,
+        authorizeExecution: () => Effect.sync(entered).pipe(Effect.andThen(Effect.never)),
+      });
+      const fiber = Effect.runFork(blocked.claim(intent));
+      await ready;
+      await Effect.runPromise(Fiber.interrupt(fiber));
+      expect(journal.read(key)).toBeNull();
+      expect((await Effect.runPromise(gate(() => journal).claim(intent))).state).toBe('claimed');
+    });
+
+    it('retains userTurnId fences across explicit journal reset', async () => {
+      const execution = gate(() => journal);
+      expect((await Effect.runPromise(execution.claim(intent))).state).toBe('claimed');
+      journal.reset();
+      const successor = gate(() => new RealtimeJournal(filename, () => now));
+      await expect(Effect.runPromise(successor.claim(intent))).rejects.toMatchObject({
+        code: 'archived_request',
+      });
+      expect(
+        (await Effect.runPromise(successor.claim({ ...intent, userTurnId: 'new-user-turn' }))).state
+      ).toBe('claimed');
+    });
+
+    it('never provisions over a missing used execution log', async () => {
+      const execution = gate(lazyExecutionJournal(filename, () => now));
+      await Effect.runPromise(execution.claim(intent));
+      rmSync(filename);
+      const restarted = gate(lazyExecutionJournal(filename, () => now));
+      await expect(Effect.runPromise(restarted.claim(intent))).rejects.toMatchObject({
+        code: 'storage',
+      });
+      expect(readdirSync(directory)).not.toContain('journal.sqlite');
+      expect(readdirSync(directory)).toContain('journal.sqlite.control.sqlite');
+    });
+
+    it('retries only completion storage after a result write fails', async () => {
+      const execution = gate(() => journal);
+      const claim = await Effect.runPromise(execution.claim(intent));
+      if (claim.state !== 'claimed') throw new Error('Missing execution claim');
+      const finish = vi.spyOn(journal, 'finish').mockImplementationOnce(() => {
+        throw new RealtimeJournalError('storage');
+      });
+      await expect(Effect.runPromise(execution.complete(claim.permit))).rejects.toMatchObject({
+        code: 'storage',
+      });
+      expect((await Effect.runPromise(execution.claim(intent))).state).toBe('uncertain');
+      await Effect.runPromise(execution.complete(claim.permit));
+      expect(journal.read(key)).toMatchObject({
+        state: 'completed',
+        outcome: Uint8Array.from(Buffer.from('{"state":"settled"}')),
+      });
+      finish.mockRestore();
+    });
   });
 });

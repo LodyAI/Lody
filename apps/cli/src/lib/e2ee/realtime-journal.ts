@@ -113,9 +113,9 @@ const responseTable = `CREATE TABLE realtime_responses (
 ) WITHOUT ROWID`;
 
 /**
- * Host-only persistence leaf; intentionally unconnected to RPC and agent execution.
- * A started row is never made runnable again, including after crash/reopen. This
- * cannot replace fencing the dispatch watcher and its durable Meta fallback.
+ * Host-only persistence leaf shared by transport receipts and the userTurnId
+ * execution gate. A started row is never made runnable again, including after
+ * crash/reopen. Callers establish authority independently before claiming.
  */
 export class RealtimeJournal {
   private readonly permits = new WeakMap<

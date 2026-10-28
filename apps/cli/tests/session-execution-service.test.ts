@@ -1,3 +1,5 @@
+import { makeEncryptedAgentExecution, lazyExecutionJournal } from '../src/lib/e2ee/agent-execution';
+import { RealtimeJournal } from '../src/lib/e2ee/realtime-journal';
 import { AcpStartupProcessError } from '../src/agent/acp-startup-monitor';
 import * as quotaRunner from '../src/agent/acp-runner';
 import { ProviderQuotaRefreshCache } from '../src/session/provider-quota-refresh-cache';
@@ -2578,6 +2580,7 @@ describe('SessionExecutionService', () => {
   // left the user with an unanswered message and no error anywhere.
   const runSilentPromptTurn = async (options: {
     sessionId: string;
+    workspaceId?: WorkspaceId;
     inputAuthor?: SessionHistoryInput['author'];
     earlierInputAuthor?: SessionHistoryInput['author'];
     attempts?: number;
@@ -2589,6 +2592,10 @@ describe('SessionExecutionService', () => {
     onTurnOutcome?: (fact: TurnOutcomeFact) => Promise<void>;
     onTurnClaimed?: () => Promise<boolean>;
     onTurnStarted?: () => Promise<boolean>;
+    encryptedExecution?: ReturnType<typeof makeEncryptedAgentExecution>;
+    prepared?: boolean;
+    create?: boolean;
+    onPrompt?: () => Promise<void>;
   }) => {
     let history: Array<Record<string, unknown>> = [
       ...(options.earlierInputAuthor
@@ -2613,6 +2620,7 @@ describe('SessionExecutionService', () => {
       isCreated: vi.fn(() => true),
       cancel: vi.fn(async () => {}),
       prompt: vi.fn(async () => {
+        await options.onPrompt?.();
         if (options.promptFailure) throw options.promptFailure;
         return { stopReason: 'end_turn' };
       }),
@@ -2639,11 +2647,13 @@ describe('SessionExecutionService', () => {
         status = next;
       }),
       setLastMessageAt: vi.fn(async () => {}),
+      waitUntilSynced: async () => {},
       getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
         history = updater(history);
       }),
     });
+    const failureMessages: string[] = [];
     const notificationFacts: TurnOutcomeFact[] = [];
     const onTurnOutcome = vi.fn(async (fact: TurnOutcomeFact) => {
       await options.onTurnOutcome?.(fact);
@@ -2652,6 +2662,11 @@ describe('SessionExecutionService', () => {
     const finalizationOwners: boolean[] = [];
     const upsertDocMeta = vi.fn(async () => {});
     const deps = createBaseDeps({
+      workspaceId: options.workspaceId ?? 'workspace-1',
+      encryptedExecution: options.encryptedExecution,
+      recordChatFailure: vi.fn(async (_doc, _reason, message) => {
+        if (message) failureMessages.push(message);
+      }),
       beginConversationTurn: vi.fn(
         (_sessionId: SessionId, parentTurnId?: string) => `assistant:${parentTurnId ?? 'unbound'}`
       ),
@@ -2700,26 +2715,47 @@ describe('SessionExecutionService', () => {
 
     const service = new SessionExecutionService(deps);
     for (let attempt = 0; attempt < (options.attempts ?? 1); attempt += 1) {
-      await service.continueSession(
-        {
-          type: 'session/chat',
-          sessionId: options.sessionId as SessionId,
-          machineId: 'machine-1',
-          workspaceId: 'workspace-1' as WorkspaceId,
-          project: undefined,
-          acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
-          userTurnId: 'turn-user-1',
-          userId: 'user-1',
-          userName: 'User',
-          userEmail: 'user@example.com',
-        },
-        {
+      const message = {
+        type: 'session/chat' as const,
+        sessionId: options.sessionId as SessionId,
+        machineId: 'machine-1',
+        workspaceId: options.workspaceId ?? 'workspace-1',
+        project: undefined,
+        acpSessionConfig: { prompt: 'hi', cliType: 'builtin' as const, agentType: 'codex' },
+        userTurnId: 'turn-user-1',
+        userId: 'user-1',
+        userName: 'User',
+        userEmail: 'user@example.com',
+      };
+      if (options.prepared) {
+        await service.dispatchPreparedSessionTurn({
+          sessionId: message.sessionId,
+          sessionDoc,
+          userTurnId: message.userTurnId,
+          invocation: {
+            sourceTurnId: message.userTurnId,
+            requesterUserId: message.userId,
+            inputConfig: message.acpSessionConfig,
+          },
+          dispatchSource: options.dispatchSource ?? 'crdt',
+          accessPromise: Promise.resolve({ outcome: 'allowed' }),
+          requestPromise: Promise.resolve(
+            options.create
+              ? { mode: 'create', request: { ...message, type: 'session/create' } }
+              : { mode: 'continue', request: message }
+          ),
+          onAccessAllowed: async () => {},
+          onAccessDenied: async () => {},
+          onAccessIndeterminate: async () => {},
+        });
+      } else {
+        await service.continueSession(message, {
           notificationAudience: options.notificationAudience ?? { kind: 'user' },
           ...(options.dispatchSource ? { dispatchSource: options.dispatchSource } : {}),
           ...(options.onTurnClaimed ? { onTurnClaimed: options.onTurnClaimed } : {}),
           ...(options.onTurnStarted ? { onTurnStarted: options.onTurnStarted } : {}),
-        }
-      );
+        });
+      }
     }
 
     await service.drainInboxExecutions();
@@ -2727,6 +2763,7 @@ describe('SessionExecutionService', () => {
       deps,
       sessionDoc,
       notificationFacts,
+      failureMessages,
       upsertDocMeta,
       agentClient,
       getHistory: () => history,
@@ -2735,6 +2772,224 @@ describe('SessionExecutionService', () => {
       service,
     });
   };
+
+  const encryptedExecutionFixture = () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'encrypted-execution-'));
+    const filename = path.join(directory, 'execution.sqlite');
+    const gate = (
+      authorization: 'authorized' | 'denied' | 'expired' = 'authorized',
+      file = filename,
+      workspaceId = 'workspace-1'
+    ) =>
+      makeEncryptedAgentExecution({
+        genesis: 'genesis',
+        workspaceId,
+        targetMachineId: 'machine-1',
+        journal: lazyExecutionJournal(file, () => 100),
+        authorizeExecution: () =>
+          Effect.succeed(
+            authorization === 'denied'
+              ? { state: 'denied' }
+              : {
+                  state: 'authorized',
+                  requesterDevice: 'device',
+                  expiresAt: authorization === 'expired' ? 100 : 1000,
+                }
+          ),
+      });
+    const intent = {
+      workspaceId: 'workspace-1',
+      sessionId: 'encrypted-session',
+      userTurnId: 'turn-user-1',
+      requesterUserId: 'user-1',
+    };
+    return {
+      directory,
+      filename,
+      gate,
+      intent,
+      close: () => fs.rmSync(directory, { recursive: true, force: true }),
+    };
+  };
+
+  it('shares the encrypted execution claim across RPC, durable dispatch and restart', async () => {
+    const f = encryptedExecutionFixture();
+    const started = createDeferred<void>();
+    const finished = createDeferred<void>();
+    const submissions: string[] = [];
+    const onPrompt = async () => {
+      submissions.push('hi');
+      started.resolve();
+      await finished.promise;
+    };
+    const first = runSilentPromptTurn({
+      sessionId: 'encrypted-session',
+      hasPromptEventsForTurn: true,
+      attempts: 2,
+      dispatchSource: 'rpc',
+      encryptedExecution: f.gate(),
+      onPrompt,
+    });
+    try {
+      await started.promise;
+      const duplicate = await runSilentPromptTurn({
+        sessionId: 'encrypted-session',
+        hasPromptEventsForTurn: true,
+        prepared: true,
+        encryptedExecution: f.gate(),
+        onPrompt,
+      });
+      expect(submissions).toEqual(['hi']);
+      expect(duplicate.failureMessages).toEqual([expect.stringContaining('Result unknown')]);
+      finished.resolve();
+      const completed = await first;
+      expect(completed.getHistory()[0]?.status).toBe('handled');
+      expect(completed.failureMessages).toEqual([]);
+      const restart = await runSilentPromptTurn({
+        sessionId: 'encrypted-session',
+        hasPromptEventsForTurn: true,
+        prepared: true,
+        encryptedExecution: f.gate(),
+        onPrompt,
+      });
+      expect(submissions).toEqual(['hi']);
+      expect(restart.failureMessages).toEqual([expect.stringContaining('already finished')]);
+      expect(
+        new RealtimeJournal(f.filename, () => 100).read({
+          genesis: 'genesis',
+          workspaceId: 'workspace-1',
+          targetMachineId: 'machine-1',
+          requestId: 'agent-start:turn-user-1',
+        })?.state
+      ).toBe('completed');
+    } finally {
+      finished.resolve();
+      await first;
+      f.close();
+    }
+  });
+
+  it('leaves a claimed encrypted turn uncertain after restart without replaying it', async () => {
+    const f = encryptedExecutionFixture();
+    const submissions: string[] = [];
+    try {
+      expect((await Effect.runPromise(f.gate().claim(f.intent))).state).toBe('claimed');
+      const recovered = await runSilentPromptTurn({
+        sessionId: 'encrypted-session',
+        hasPromptEventsForTurn: true,
+        prepared: true,
+        encryptedExecution: f.gate(),
+        onPrompt: async () => {
+          submissions.push('hi');
+        },
+      });
+      expect(submissions).toEqual([]);
+      expect(recovered.failureMessages).toEqual([expect.stringContaining('Result unknown')]);
+      expect(recovered.getHistory()[0]?.status).toBe('failed');
+    } finally {
+      f.close();
+    }
+  });
+
+  it.each(['denied', 'expired'] as const)(
+    'does not start a %s encrypted turn from durable history',
+    async (authorization) => {
+      const f = encryptedExecutionFixture();
+      const submissions: string[] = [];
+      try {
+        const result = await runSilentPromptTurn({
+          sessionId: 'encrypted-session',
+          hasPromptEventsForTurn: true,
+          prepared: true,
+          create: true,
+          encryptedExecution: f.gate(authorization),
+          onPrompt: async () => {
+            submissions.push('hi');
+          },
+        });
+        expect(submissions).toEqual([]);
+        expect(result.failureMessages).toEqual([
+          expect.stringContaining(authorization === 'denied' ? 'not authorized' : 'expired'),
+        ]);
+        expect(result.getHistory()[0]?.status).toBe('failed');
+        expect(
+          result.service.getExecutionSnapshot('encrypted-session' as SessionId).hasActiveTurn
+        ).toBe(false);
+      } finally {
+        f.close();
+      }
+    }
+  );
+
+  it('does not retry an encrypted prompt whose submission disconnected before output', async () => {
+    const f = encryptedExecutionFixture();
+    const submissions: string[] = [];
+    try {
+      const result = await runSilentPromptTurn({
+        sessionId: 'encrypted-session',
+        hasPromptEventsForTurn: false,
+        prepared: true,
+        encryptedExecution: f.gate(),
+        promptFailure: new Error('ACP connection closed'),
+        onPrompt: async () => {
+          submissions.push('hi');
+        },
+      });
+      expect(submissions).toEqual(['hi']);
+      expect((await Effect.runPromise(f.gate().claim(f.intent))).state).toBe('uncertain');
+      expect(
+        result.service.getExecutionSnapshot('encrypted-session' as SessionId).hasActiveTurn
+      ).toBe(false);
+    } finally {
+      f.close();
+    }
+  });
+
+  it('contains a broken encrypted journal while ordinary and healthy dispatch continue', async () => {
+    const f = encryptedExecutionFixture();
+    const submissions: string[] = [];
+    fs.writeFileSync(f.filename, 'damaged execution evidence');
+    try {
+      const broken = await runSilentPromptTurn({
+        sessionId: 'encrypted-session',
+        hasPromptEventsForTurn: true,
+        prepared: true,
+        encryptedExecution: f.gate(),
+        onPrompt: async () => {
+          submissions.push('broken');
+        },
+      });
+      const ordinary = await runSilentPromptTurn({
+        sessionId: 'ordinary-session',
+        hasPromptEventsForTurn: true,
+        prepared: true,
+        onPrompt: async () => {
+          submissions.push('ordinary');
+        },
+      });
+      const healthy = await runSilentPromptTurn({
+        sessionId: 'healthy-session',
+        workspaceId: 'workspace-2',
+        hasPromptEventsForTurn: true,
+        prepared: true,
+        encryptedExecution: f.gate(
+          'authorized',
+          path.join(f.directory, 'healthy.sqlite'),
+          'workspace-2'
+        ),
+        onPrompt: async () => {
+          submissions.push('healthy');
+        },
+      });
+      expect(submissions).toEqual(['ordinary', 'healthy']);
+      expect(ordinary.getHistory()[0]?.status).toBe('handled');
+      expect(healthy.getHistory()[0]?.status).toBe('handled');
+      expect(broken.getHistory()[0]?.status).toBe('failed');
+      expect(fs.readFileSync(f.filename, 'utf8')).toBe('damaged execution evidence');
+    } finally {
+      f.close();
+    }
+  });
 
   it.each([
     { output: true, outcome: { kind: 'succeeded' } },

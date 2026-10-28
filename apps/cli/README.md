@@ -37,8 +37,14 @@ readable request keys before archival; unreadable current request keys refuse re
 and preserve the original for repair. No legacy data is imported.
 
 This maintenance command is available by its explicit name and hidden from general
-CLI help. The journal has no product dispatch caller yet, so there is no default
-product path or desktop reset button. See the
+CLI help. Encrypted agent starts, including Meta/history dispatch and RPC offers,
+share a `userTurnId` execution claim in `execution.sqlite` under the active encrypted
+workspace's `repositoryDirectory`. Stop the daemon before reset. There is no desktop
+reset button. The execution gate requires an injected verified authorization resolver;
+missing authorization denies new starts. Ordinary workspaces do not open this log.
+Transport frames keep their own original request/response receipts; execution evidence
+contains intent identities and a settlement marker, never prompt or response plaintext.
+See the
 [recovery decision](../../.agents/notes/proposed/bug-fix/2026-10-27-e2ee-realtime-journal-recovery.md).
 
 ## Development type checking
