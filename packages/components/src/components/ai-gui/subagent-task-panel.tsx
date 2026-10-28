@@ -151,16 +151,15 @@ function TaskRows({
 /** A tab's label, with a spinner while any of its tasks is still live. */
 function GroupTab({ group, tasks }: { group: TaskGroup; tasks: readonly SubagentTask[] }) {
   const { t } = useTranslation();
-  const running = tasks.filter(isRunning).length;
+  const running = tasks.some(isRunning);
   const label =
     group === 'subagents'
       ? t('sessions.subagentTasks.subagentsTab', 'Subagents')
       : t('sessions.subagentTasks.tasksTab', 'Tasks');
   return (
     <Tabs.Tab value={group} data-subagent-task-tab={group}>
-      {running > 0 ? <Spinner size="small" /> : null}
+      {running ? <Spinner size="small" /> : null}
       <span>{label}</span>
-      <span {...stylex.props(styles.tabCount)}>{running > 0 ? running : tasks.length}</span>
     </Tabs.Tab>
   );
 }

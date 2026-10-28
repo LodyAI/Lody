@@ -7,7 +7,7 @@ Translation: current
 
 ## Abstract
 
-A turn's task panel listed agent runs and background shell commands in one list, so a reader could not tell which rows were agents. When a turn has both kinds, the panel now splits them into a Subagents tab, selected first, and a Tasks tab. Each tab shows a spinner and its running count while anything on it is live. A turn with only one kind keeps the single list. The split is inferred in the renderer from provider task types, because the published `taskKind` does not distinguish an agent from a command.
+A turn's task panel listed agent runs and background shell commands in one list, so a reader could not tell which rows were agents. When a turn has both kinds, the panel now splits them into a Subagents tab, selected first, and a Tasks tab. Each tab shows a spinner while anything on it is live; tabs carry no counts, which the header summary already gives. A turn with only one kind keeps the single list. The split is inferred in the renderer from provider task types, because the published `taskKind` does not distinguish an agent from a command.
 
 ## Classification
 
@@ -37,7 +37,7 @@ command with its parent would leave the Tasks tab incomplete.
 ## Evidence and limits
 
 `tests/subagent-task-panel.test.tsx` covers single-kind lists, a backgrounded
-agent classified as a subagent, the default tab, running marks and counts, and
+agent classified as a subagent, the default tab, per-tab running marks, and
 a chosen tab persisting while tasks change. The component typecheck passes. The
 `SubagentsAndCommands` story shows the mixed state. The type list follows the
 current Claude Agent SDK task types; a new non-agent type will appear under

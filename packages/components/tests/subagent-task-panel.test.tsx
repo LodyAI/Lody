@@ -271,13 +271,13 @@ describe('SubagentTaskPanel', () => {
     expect(shownIds()).toEqual(['shell', 'monitor']);
 
     // A backgrounded agent is still a subagent; Subagents is chosen first, and
-    // each tab says whether anything on it is still running.
+    // each tab marks whether anything on it is still running.
     render([shell, agent, doneAgent, monitor]);
     expect(shownIds()).toEqual(['agent', 'done-agent']);
     expect(container.textContent).toContain('Waiting on 1 task');
-    expect(tab('subagents')?.textContent).toBe('Subagents1');
+    expect(tab('subagents')?.textContent).toBe('Subagents');
     expect(tab('subagents')?.querySelector('[data-slot="spinner"]')).not.toBeNull();
-    expect(tab('tasks')?.textContent).toBe('Tasks2');
+    expect(tab('tasks')?.textContent).toBe('Tasks');
     expect(tab('tasks')?.querySelector('[data-slot="spinner"]')).toBeNull();
 
     await act(async () => tab('tasks')?.click());
@@ -286,7 +286,7 @@ describe('SubagentTaskPanel', () => {
     // The chosen tab survives the tasks changing under it.
     render([shell, agent, doneAgent, monitor, wakeup]);
     expect(shownIds()).toEqual(['shell', 'monitor', 'wakeup']);
-    expect(tab('tasks')?.textContent).toBe('Tasks1');
+    expect(tab('tasks')?.textContent).toBe('Tasks');
     expect(tab('tasks')?.querySelector('[data-slot="spinner"]')).not.toBeNull();
   });
 

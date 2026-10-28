@@ -291,8 +291,8 @@ working. While any task is pending or running, the finished turn keeps this
 panel after its answer; once every task is terminal, the panel returns to the
 folded work details. When a turn has both agent runs and other tasks (shell
 commands, MCP tasks, monitors, scheduled wakeups), the rows split into a Subagents
-tab, selected first, and a Tasks tab; each tab shows a spinner and its running
-count while live. `groupOf` infers the split from task types because `taskKind`
+tab, selected first, and a Tasks tab; each tab shows a spinner while live and
+carries no count. `groupOf` infers the split from task types because `taskKind`
 marks backgrounding, not agent versus command
 ([decision](../../../../../.agents/notes/implemented/feature/2026-10-28-subagent-task-tabs.md)).
 A row opens the panel's ONE dialog by task id (not a snapshot), so a
