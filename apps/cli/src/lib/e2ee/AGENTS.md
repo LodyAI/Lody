@@ -3,10 +3,10 @@
 `CLAUDE.md` is a symlink to this file. Parent CLI rules apply.
 
 - Lazy machine-only; ordinary startup never probes keyring.
-- First creation write/read-probes the OS keystore and permanently selects OS or
+- First creation probes OS keystore write/read and permanently selects OS or
   file protection. Reopen requires the original selector/KEK; never probe or switch.
-- File protection requires owner-only directories/files, no symlinks; Windows uses actual
-  owner/DACL checks through the official process Layer, not Unix mode bits.
+- File protection: owner-only dirs/files, no symlinks. Windows needs real
+  owner/DACL checks via official process Layer, not Unix modes.
 - Core node-custody owns blobs. No personal management/private exports, plaintext
   device files or silent keyring downgrade.
 - Display file protection before pairing approval.
@@ -23,16 +23,16 @@
 - Journal originals before feed/pin; rebase core pin first after 64 records.
   Retired cache cleanup cannot fail local open.
 - No plaintext RPC, presence, attachments or schedules until encrypted channels exist.
-- `realtime-journal.ts`: schema 3 only/no migration. Recover SQLite first;
-  init only v0/no objects. Retire readable current keys before intact archive;
-  unreadable keys refuse reset. No auto-replace/GC/archive replay/import.
-  Exact originals/first outcome; uncertain=unknown/no takeover; independent IDs.
-  Floors: genesis/workspace; before writes reject local >10min ahead of authenticated
-  current time, never frame time. No reference: scoped max; reset.
-  Reset: stop owners, archive, fresh ID; keep control/retired IDs/intent. Shared call
-  locks, exclusive reset; retain through failed main close. Bound permits/cleanup;
-  reply before send, exact retries. `agent-execution.ts`: one userTurnId claim
-  across RPC/Meta/history; require authority; no uncertain ACP retry.
+- `realtime-journal.ts`: schema 3/no migration; SQLite recovery before empty-v0 init.
+  Retire readable current keys before intact archive; unreadable keys refuse reset.
+  No auto-replace/GC/archive replay/import. Exact originals/first outcome;
+  uncertain=unknown/no takeover; independent IDs. Floors: genesis/workspace.
+  Before writes reject local >10min ahead of authenticated now, never frame
+  time; no reference: scoped max/reset. Reset: stop owners, archive/new ID;
+  keep control/retired IDs/intent. Shared calls/exclusive reset; keep locks on
+  failed main close. Bound permits/cleanup; reply before send; exact retries.
+  `agent-execution.ts`: userTurnId claim for RPC/Meta/history; verified signer/user
+  plus device authority; snapshots/author fields are no origin. No uncertain ACP retry.
   [Recovery](../../../README.md#local-encrypted-execution-log-recovery).
 - `prepareCliE2eeMachineLegacy` binds the retained credential hash to the exact
   desktop-generated 16-byte pairing session using core's fixed v1 helper. Machine

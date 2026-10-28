@@ -1410,24 +1410,23 @@ describe('host-only E2EE realtime journal', () => {
       targetMachineId: 'synthetic-machine',
       requestId: 'agent-start:user-turn',
     };
-    const gate = (
-      open: () => RealtimeJournal,
-      authorizeExecution = () =>
-        Effect.succeed({ state: 'authorized' as const, requesterDevice: 'device', expiresAt: 1000 })
-    ) =>
+    const gate = (open: () => RealtimeJournal, expiresAt = 1000) =>
       makeEncryptedAgentExecution({
         genesis: key.genesis,
         workspaceId: key.workspaceId,
         targetMachineId: key.targetMachineId,
         journal: open,
-        authorizeExecution,
+        resolveVerifiedOriginal: () =>
+          Effect.succeed({
+            requesterDevice: 'ab'.repeat(32),
+            requesterUserId: intent.requesterUserId,
+            expiresAt,
+          }),
+        authorizeExecution: () => Effect.succeed({ _tag: 'Authorized' }),
       });
 
     it('preserves the first execution deadline through reauthorization and a backwards clock', async () => {
-      const first = gate(
-        () => journal,
-        () => Effect.succeed({ state: 'authorized', requesterDevice: 'device', expiresAt: 100 })
-      );
+      const first = gate(() => journal, 100);
       expect(await Effect.runPromise(first.claim(intent))).toMatchObject({ state: 'expired' });
       now = 1;
       const retry = gate(() => new RealtimeJournal(filename, () => now));
@@ -1460,6 +1459,12 @@ describe('host-only E2EE realtime journal', () => {
         workspaceId: key.workspaceId,
         targetMachineId: key.targetMachineId,
         journal: () => journal,
+        resolveVerifiedOriginal: () =>
+          Effect.succeed({
+            requesterDevice: 'ab'.repeat(32),
+            requesterUserId: intent.requesterUserId,
+            expiresAt: 1000,
+          }),
         authorizeExecution: () => Effect.sync(entered).pipe(Effect.andThen(Effect.never)),
       });
       const fiber = Effect.runFork(blocked.claim(intent));

@@ -85,6 +85,12 @@
 `LedgerStreamReader`, `streamsDocumentBinding`, `StreamsDocumentBindingOptions`,
 `makeStreamsUpdateBinding`.
 
+文档 binding 也提供 `openAuthenticated(input)`：与 SDK open 方法 相同的签名、上下文和 AEAD
+检查后返回 `{ plaintext, author }`。`author.device`、`author.actor` 和
+`author.memberInstance` 来自已验证的历史账本身份；调用方拥有并清理明文。这只证明
+历史归属，不授予当前权限或执行新鲜度；快照签名者也不是其中每条 turn 的原作者。
+SDK 的 SDK open 方法 仍只返回明文字节。
+
 ## `@lody/e2ee-core/cloudflare`
 
 `ed25519WasmActive`。在 Cloudflare Worker 中导入一次该入口即可：workerd 禁止在运行时从字节编译 WebAssembly，因此改由打包器编译包内的严格 Ed25519 模块。不导入时，core 仍会用纯 JS 正确验证，只是更慢。`@lody/e2ee-core/protocol` 也导出 `ed25519WasmActive`（同一个状态），供无法打包本入口的宿主（如 Convex）上报当前是否使用 WebAssembly；首次调用时可能会实例化内嵌模块，与第一次验签的行为相同（失败则回退到纯 JS）；它不会替换或关闭任何验证后端。

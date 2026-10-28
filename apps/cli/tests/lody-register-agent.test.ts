@@ -526,7 +526,7 @@ describe('Lody workspace cloud-port composition', () => {
         });
       const documents = vi
         .spyOn(LoroDocumentManager, 'create')
-        .mockResolvedValue({} as LoroDocumentManager);
+        .mockResolvedValue({ sessions: new Map() } as LoroDocumentManager);
       try {
         const { Lody } = await import('../src/lib/lody');
         const lody = await Lody.create({

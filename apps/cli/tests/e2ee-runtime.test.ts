@@ -1,3 +1,6 @@
+import { makeStreamsUpdateBinding } from '@lody/e2ee-core/adapters/loro-streams';
+import { ExecutionOrigins } from '../src/lib/e2ee/execution-origins';
+import { makeEncryptedAgentExecution, lazyExecutionJournal } from '../src/lib/e2ee/agent-execution';
 import {
   createCliSqliteRepoStore,
   type CliSqliteRepoStore,
@@ -21,7 +24,7 @@ import {
   Scope as TokenScope,
   Exit as TokenExit,
 } from 'effect';
-import { LoroDoc } from 'loro-crdt';
+import { LoroDoc, LoroMap } from 'loro-crdt';
 import {
   StreamsCrdt,
   createLoroDocAdapter,
@@ -316,6 +319,242 @@ const page = (records: Uint8Array[], start = 0, end = records.length) => ({
 });
 
 describe('machine E2EE local runtime', () => {
+  it('binds signed history to the actual device and user across origin-store reopen', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'cli-e2ee-turn-origins-'));
+    const source = new LoroDoc();
+    const replica = new LoroDoc();
+    const user = '1e'.repeat(32);
+    const differentUser = '3c'.repeat(32);
+    const originalsFile = join(directory, 'origins.sqlite');
+    const origins = new ExecutionOrigins(originalsFile);
+    const resource = 'doc:session-session';
+    const wrapUpdate = (update: Uint8Array) => {
+      const batch = new Uint8Array(update.length + 4);
+      new DataView(batch.buffer).setUint32(0, update.length, false);
+      batch.set(update, 4);
+      return batch;
+    };
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const custody = yield* makeNodeE2eeCustody({
+            directory: join(directory, 'custody'),
+            wrapper,
+          });
+          const prepared = yield* custody.prepareDevice();
+          const membershipId = Result.getOrThrow(Bytes.membershipId(new Uint8Array(16).fill(10)));
+          const signed = yield* signGenesisRecord({
+            signer: prepared,
+            encryptionPublicKey: prepared.enc,
+            initialKey: Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(20))),
+            userId: Result.getOrThrow(Bytes.userId(new Uint8Array(32).fill(30))),
+            membershipId,
+          });
+          const owner = yield* custody.retainDevice(signed.genesis, prepared);
+          const other = yield* custody.prepareDevice();
+          let view = Result.getOrThrow(
+            verifyLedger({
+              anchor: signed.genesis,
+              records: [signed.record],
+              checkpoint: { length: 1, head: hashRecordBytes(signed.record) },
+            })
+          );
+          const admitted = yield* prepareDeviceAdmission({
+            genesis: signed.genesis,
+            membershipId,
+            signer: other,
+            encryptionPublicKey: other.enc,
+            kind: 'personal',
+          });
+          const addition = yield* signLedgerRecord(
+            Result.getOrThrow(prepareLedgerCommand(view, owner.publicKey, admitted)),
+            owner
+          );
+          view = Result.getOrThrow(
+            extendLedger(view, [addition], { length: 2, head: hashRecordBytes(addition) })
+          );
+          const forSigner = (signer: typeof owner | typeof other) =>
+            makeStreamsUpdateBinding({
+              genesis: signed.genesis,
+              resource,
+              model: 'loro',
+              writeEpoch: 'current',
+              signer,
+              ledger: () => Effect.succeed(view),
+              readEpochKey: () => Effect.fromResult(Bytes.epochKey(new Uint8Array(32).fill(20))),
+            });
+          const ownerBinding = yield* forSigner(owner);
+          const otherBinding = yield* forSigner(other);
+          const addTurn = (
+            id: string,
+            userId: string,
+            peer: string,
+            binding: typeof ownerBinding
+          ) =>
+            Effect.gen(function* () {
+              source.setPeerId(peer as `${number}`);
+              const from = source.version();
+              const row = source
+                .getList('history')
+                .insertContainer(source.getList('history').length, new LoroMap());
+              row.set('id', id);
+              row.set('role', 'user');
+              row.set('userId', userId);
+              row.set('timestamp', '1970-01-01T00:00:00.100Z');
+              row.set('inputConfig', { prompt: id });
+              row.set('items', [{ type: 'text', text: id }]);
+              source.commit();
+              const update = source.export({ mode: 'update', from });
+              const context = {
+                protocol: 'loro-streams-crdt-payload-protection',
+                version: 2,
+                kind: 'update_batch',
+              } as const;
+              const sealed = yield* binding.seal({
+                context,
+                plaintext: wrapUpdate(update),
+                additionalData: (header) => Uint8Array.from([...header, 9]),
+              });
+              const request = {
+                ...sealed,
+                context,
+                additionalData: Uint8Array.from([...sealed.header, 9]),
+              };
+              const opened = yield* ownerBinding.openAuthenticated(request);
+              origins.retain(resource, request, opened.plaintext);
+              opened.plaintext.fill(0);
+              replica.import(update);
+              return { row, request };
+            });
+          yield* addTurn('active', user, '1', ownerBinding);
+          yield* addTurn('revoked', user, '2', otherBinding);
+          yield* addTurn('mismatch', differentUser, '1', ownerBinding);
+          yield* addTurn('edited', user, '1', ownerBinding);
+          const revokedKey = hex(other.publicKey.toBytes());
+          const revocation = yield* signLedgerRecord(
+            Result.getOrThrow(
+              prepareLedgerCommand(view, owner.publicKey, {
+                _tag: 'RevokeDevice',
+                target: other.publicKey,
+              })
+            ),
+            owner
+          );
+          view = Result.getOrThrow(
+            extendLedger(view, [revocation], { length: 3, head: hashRecordBytes(revocation) })
+          );
+          expect(view.inspectState().members.has(hex(membershipId.toBytes()))).toBe(true);
+          const forged = new LoroDoc();
+          try {
+            forged.setPeerId('2');
+            const row = forged.getList('history').insertContainer(0, new LoroMap());
+            row.set('id', 'different-turn');
+            row.set('role', 'user');
+            row.set('userId', user);
+            row.set('timestamp', '1970-01-01T00:00:00.100Z');
+            row.set('inputConfig', { prompt: 'different-turn' });
+            row.set('items', [{ type: 'text', text: 'different-turn' }]);
+            forged.commit();
+            const context = {
+              protocol: 'loro-streams-crdt-payload-protection',
+              version: 2,
+              kind: 'update_batch',
+            } as const;
+            const frame = yield* ownerBinding.seal({
+              context,
+              plaintext: wrapUpdate(forged.export({ mode: 'update' })),
+              additionalData: (header) => Uint8Array.from([...header, 9]),
+            });
+            const request = {
+              ...frame,
+              context,
+              additionalData: Uint8Array.from([...frame.header, 9]),
+            };
+            const verified = yield* ownerBinding.openAuthenticated(request);
+            const substituted = new ExecutionOrigins(join(directory, 'substituted.sqlite'));
+            substituted.retain(resource, request, verified.plaintext);
+            verified.plaintext.fill(0);
+            expect(
+              yield* Effect.scoped(
+                substituted.resolve(
+                  {
+                    workspaceId: 'workspace',
+                    sessionId: 'session',
+                    userTurnId: 'revoked',
+                    requesterUserId: user,
+                    inputConfig: { prompt: 'revoked' },
+                  },
+                  replica,
+                  ownerBinding.openAuthenticated
+                )
+              )
+            ).toBeUndefined();
+          } finally {
+            forged.free();
+          }
+          const checkedDevices: string[] = [];
+          const gate = makeEncryptedAgentExecution({
+            genesis: hex(signed.genesis.toBytes()),
+            workspaceId: 'workspace',
+            targetMachineId: 'machine',
+            journal: lazyExecutionJournal(join(directory, 'execution.sqlite'), () => 100),
+            resolveVerifiedOriginal: (intent) =>
+              Effect.scoped(
+                new ExecutionOrigins(originalsFile).resolve(
+                  intent,
+                  replica,
+                  ownerBinding.openAuthenticated
+                )
+              ),
+            authorizeExecution: (_workspaceId, device) =>
+              Effect.sync(() => {
+                checkedDevices.push(device);
+                return view.inspectState().devices.has(device)
+                  ? { _tag: 'Authorized' as const }
+                  : { _tag: 'Denied' as const, reason: 'not-authorized' };
+              }),
+          });
+          const intent = (userTurnId: string, requesterUserId = user) => ({
+            workspaceId: 'workspace',
+            sessionId: 'session',
+            userTurnId,
+            requesterUserId,
+            inputConfig: { prompt: userTurnId },
+          });
+          expect((yield* gate.claim(intent('active'))).state).toBe('claimed');
+          expect((yield* gate.claim(intent('revoked'))).state).toBe('denied');
+          expect(checkedDevices).toEqual([hex(owner.publicKey.toBytes()), revokedKey]);
+          expect((yield* gate.claim(intent('mismatch', differentUser))).state).toBe('denied');
+          expect(checkedDevices).toHaveLength(2);
+          const edited = replica.getList('history').get(3) as LoroMap;
+          edited.set('inputConfig', { prompt: 'substituted' });
+          replica.commit();
+          expect(
+            (yield* gate.claim({ ...intent('edited'), inputConfig: { prompt: 'substituted' } }))
+              .state
+          ).toBe('denied');
+          const noOriginal = new ExecutionOrigins(join(directory, 'missing-origins.sqlite'));
+          expect(
+            yield* Effect.scoped(
+              noOriginal.resolve(intent('active'), replica, ownerBinding.openAuthenticated)
+            )
+          ).toBeUndefined();
+          const corrupt = { ...(yield* addTurn('bad-signature', user, '1', ownerBinding)).request };
+          corrupt.sealed = Uint8Array.from(corrupt.sealed);
+          corrupt.sealed[corrupt.sealed.length - 1] ^= 1;
+          expect(
+            Result.isFailure(yield* Effect.result(ownerBinding.openAuthenticated(corrupt)))
+          ).toBe(true);
+        })
+      );
+      expect((await readFile(originalsFile)).includes(Buffer.from('bad-signature'))).toBe(false);
+    } finally {
+      source.free();
+      replica.free();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it.each(['signature', 'conflict', 'defect'] as const)(
     'bounds background ledger recovery after %s rejection, preserves the verified view and supports explicit retry',
     async (failure) => {
@@ -772,6 +1011,49 @@ describe('machine E2EE local runtime', () => {
           ).toEqual(input.plaintext);
           expect((await host.status()).epochPhase).toBe('ready');
           return;
+        }
+        const turnDoc = new LoroDoc();
+        try {
+          const turn = turnDoc.getList('history').insertContainer(0, new LoroMap());
+          turn.set('id', 'original');
+          turn.set('role', 'user');
+          turn.set('userId', '1e'.repeat(32));
+          turn.set('timestamp', '1970-01-01T00:00:00.100Z');
+          turn.set('inputConfig', { prompt: 'original' });
+          turn.set('items', [{ type: 'text', text: 'original' }]);
+          turnDoc.commit();
+          const update = turnDoc.export({ mode: 'update' });
+          const plaintext = new Uint8Array(update.length + 4);
+          new DataView(plaintext.buffer).setUint32(0, update.length, false);
+          plaintext.set(update, 4);
+          const turnProtection = host.content.resolve({ kind: 'doc', docId: 'session-origin' });
+          if (turnProtection.mode !== 'protected') throw new Error('missing turn protection');
+          const original = await turnProtection.config.provider.seal({ ...input, plaintext });
+          await turnProtection.config.provider.open({
+            ...original,
+            context: input.context,
+            additionalData: new Uint8Array([...original.header, 9]),
+          });
+          expect(
+            await Effect.runPromise(
+              host.resolveVerifiedExecutionOriginal(
+                {
+                  workspaceId: 'workspace',
+                  sessionId: 'origin',
+                  userTurnId: 'original',
+                  requesterUserId: '1e'.repeat(32),
+                  inputConfig: { prompt: 'original' },
+                },
+                turnDoc
+              )
+            )
+          ).toEqual({
+            requesterDevice: (await host.status()).devicePublicKey,
+            requesterUserId: '1e'.repeat(32),
+            expiresAt: 900100,
+          });
+        } finally {
+          turnDoc.free();
         }
         const sealed = await protection.config.provider.seal(input);
         expect(Buffer.from(sealed.sealed).includes(input.plaintext)).toBe(false);

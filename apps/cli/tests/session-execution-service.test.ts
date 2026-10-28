@@ -2786,15 +2786,17 @@ describe('SessionExecutionService', () => {
         workspaceId,
         targetMachineId: 'machine-1',
         journal: lazyExecutionJournal(file, () => 100),
+        resolveVerifiedOriginal: () =>
+          Effect.succeed({
+            requesterDevice: 'ab'.repeat(32),
+            requesterUserId: 'user-1',
+            expiresAt: authorization === 'expired' ? 100 : 1000,
+          }),
         authorizeExecution: () =>
           Effect.succeed(
             authorization === 'denied'
-              ? { state: 'denied' }
-              : {
-                  state: 'authorized',
-                  requesterDevice: 'device',
-                  expiresAt: authorization === 'expired' ? 100 : 1000,
-                }
+              ? { _tag: 'Denied', reason: 'not-authorized' }
+              : { _tag: 'Authorized' }
           ),
       });
     const intent = {
@@ -2811,6 +2813,57 @@ describe('SessionExecutionService', () => {
       close: () => fs.rmSync(directory, { recursive: true, force: true }),
     };
   };
+
+  it.each(['revoked-device', 'wrong-user', 'missing-signer'] as const)(
+    'refuses encrypted durable execution with %s evidence',
+    async (failure) => {
+      const f = encryptedExecutionFixture();
+      const submitted: string[] = [];
+      const authorizedDevices: string[] = [];
+      const activeDevice = 'ab'.repeat(32);
+      const revokedDevice = 'cd'.repeat(32);
+      const gate = makeEncryptedAgentExecution({
+        genesis: 'genesis',
+        workspaceId: 'workspace-1',
+        targetMachineId: 'machine-1',
+        journal: lazyExecutionJournal(f.filename, () => 100),
+        resolveVerifiedOriginal: () =>
+          Effect.succeed(
+            failure === 'missing-signer'
+              ? undefined
+              : {
+                  requesterDevice: failure === 'revoked-device' ? revokedDevice : activeDevice,
+                  requesterUserId: failure === 'wrong-user' ? 'other-user' : 'user-1',
+                  expiresAt: 1000,
+                }
+          ),
+        authorizeExecution: (_workspaceId, requesterDevice) =>
+          Effect.sync(() => {
+            authorizedDevices.push(requesterDevice);
+            return requesterDevice === activeDevice
+              ? { _tag: 'Authorized' as const }
+              : { _tag: 'Denied' as const, reason: 'not-authorized' };
+          }),
+      });
+      try {
+        const result = await runSilentPromptTurn({
+          sessionId: 'encrypted-session',
+          hasPromptEventsForTurn: true,
+          prepared: true,
+          encryptedExecution: gate,
+          onPrompt: async () => {
+            submitted.push('hi');
+          },
+        });
+        expect(submitted).toEqual([]);
+        expect(result.getHistory()[0]?.status).toBe('failed');
+        expect(result.failureMessages).toEqual([expect.stringContaining('not authorized')]);
+        expect(authorizedDevices).toEqual(failure === 'revoked-device' ? [revokedDevice] : []);
+      } finally {
+        f.close();
+      }
+    }
+  );
 
   it('shares the encrypted execution claim across RPC, durable dispatch and restart', async () => {
     const f = encryptedExecutionFixture();

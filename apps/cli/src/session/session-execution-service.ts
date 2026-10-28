@@ -4737,6 +4737,7 @@ export class SessionExecutionService {
                       sessionId,
                       userTurnId,
                       requesterUserId: options.invocation.requesterUserId,
+                      inputConfig: options.invocation.inputConfig,
                     })
                   : { state: 'denied' as const };
               if (result.state === 'claimed') {

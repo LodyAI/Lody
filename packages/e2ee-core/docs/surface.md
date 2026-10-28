@@ -91,6 +91,14 @@ repository's tests and the Lab, with no compatibility promise.
 `LedgerStreamReader`, `streamsDocumentBinding`, `StreamsDocumentBindingOptions`,
 `makeStreamsUpdateBinding`.
 
+The returned document binding also exposes `openAuthenticated(input)`: the same
+signature/context/AEAD checks as the SDK open method, returning `{ plaintext, author }`, where
+`author.device`, `author.actor` and `author.memberInstance` come from the verified
+historical ledger identity. The caller owns and clears plaintext. This result
+establishes historical attribution only, never current permission or execution
+freshness; a snapshot signer does not identify the origin of every embedded turn.
+The SDK-facing the SDK open method continues to return only plaintext.
+
 ## `@lody/e2ee-core/cloudflare`
 
 `ed25519WasmActive`. Import this entry once in a Cloudflare Worker: workerd forbids compiling WebAssembly from bytes at runtime, so the bundler compiles the packaged strict Ed25519 module instead. Without it core still verifies correctly in pure JS, only slower. `@lody/e2ee-core/protocol` exports the same `ed25519WasmActive` so hosts that cannot bundle this entry (such as Convex) can report whether WebAssembly is in use; it may instantiate the embedded module on first use, exactly as the first verification would (falling back to pure JS on failure), and never replaces or disables a verification backend.

@@ -14,21 +14,25 @@ const intentSchema = z.object({
   sessionId: z.string().min(1),
   userTurnId: z.string().min(1),
   requesterUserId: z.string().min(1),
+  inputConfig: z.unknown().optional(),
 });
 export type EncryptedExecutionIntent = z.infer<typeof intentSchema>;
-const authorizationSchema = z.discriminatedUnion('state', [
-  z.object({
-    state: z.literal('authorized'),
-    requesterDevice: z.string().min(1),
-    expiresAt: z.number().int().nonnegative().safe(),
-  }),
-  z.object({ state: z.literal('denied') }),
-]);
-/** Resolve the verified original device/window for this exact intent. Neither
- * history authors nor the journal establish authority. Retry cannot extend it. */
+/** The shape is structurally compatible with the workspace host freshness gate. */
+export type ExecutionAuthorization =
+  | { readonly _tag: 'Authorized' }
+  | { readonly _tag: 'Denied'; readonly reason: string };
 export type AuthorizeEncryptedExecution = (
+  workspaceId: string,
+  requesterDevice: string
+) => Effect.Effect<ExecutionAuthorization, unknown>;
+export type VerifiedExecutionOriginal = {
+  requesterDevice: string;
+  requesterUserId: string;
+  expiresAt: number;
+};
+export type ResolveVerifiedExecutionOriginal = (
   intent: EncryptedExecutionIntent
-) => Effect.Effect<z.infer<typeof authorizationSchema>, unknown>;
+) => Effect.Effect<VerifiedExecutionOriginal | undefined, unknown>;
 
 export type EncryptedExecutionClaim =
   | { state: 'claimed'; permit: RealtimeStartPermit }
@@ -42,6 +46,7 @@ export function makeEncryptedAgentExecution(options: {
   targetMachineId: string;
   journal: () => RealtimeJournal;
   authorizeExecution: AuthorizeEncryptedExecution;
+  resolveVerifiedOriginal: ResolveVerifiedExecutionOriginal;
 }) {
   const claim = Effect.fnUntraced(function* (
     input: EncryptedExecutionIntent
@@ -69,9 +74,20 @@ export function makeEncryptedAgentExecution(options: {
     };
     let retained = yield* attempt(read);
     if (retained && retained.state !== 'received') return { state: retained.state };
-    const authorization = yield* options.authorizeExecution(intent);
-    const verified = yield* attempt(() => authorizationSchema.parse(authorization));
-    if (verified.state === 'denied') return verified;
+    const verified = yield* options.resolveVerifiedOriginal(intent);
+    if (
+      !verified ||
+      !/^[0-9a-f]{64}$/.test(verified.requesterDevice) ||
+      verified.requesterUserId !== intent.requesterUserId ||
+      !Number.isSafeInteger(verified.expiresAt) ||
+      verified.expiresAt < 0
+    )
+      return { state: 'denied' };
+    const authorization = yield* options.authorizeExecution(
+      intent.workspaceId,
+      verified.requesterDevice
+    );
+    if (authorization._tag !== 'Authorized') return { state: 'denied' };
     // Authorization can yield. Re-read before receive so concurrent channels
     // reuse the first expiry instead of replacing or extending its evidence.
     retained = yield* attempt(read);

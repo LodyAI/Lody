@@ -27,33 +27,55 @@ fallback is added.
 ```text
 Meta/history -> dispatchPreparedSessionTurn --+
 RPC offer -> watcher -> prepared dispatch ----+-> start/continue plan
-                                                  authorize exact intent
+                                                  verify original turn signer/user
+                                                  authorize(workspace, device)
                                                   journal claim(userTurnId)
                                                   agent creation/restore/prompt
                                                   retain settlement
 ```
 
-`AuthorizeEncryptedExecution(intent)` returns
-`Effect<Authorized | Denied, unknown>`, with no environment requirement:
+`LodyOptions.authorizeEncryptedExecution` now has the same call/result shape as
+`host.authorizeExecution` in [#1991](https://github.com/LodyAI/Lody/pull/1991):
 
 ```ts
-type Intent = {
-  workspaceId: string;
-  sessionId: string;
-  userTurnId: string;
-  requesterUserId: string;
-};
-type Authorized = { state: 'authorized'; requesterDevice: string; expiresAt: number };
-type Denied = { state: 'denied' };
+type AuthorizeEncryptedExecution = (
+  workspaceId: string,
+  requesterDevice: string // verified signing public key, lowercase hex
+) => Effect.Effect<
+  { readonly _tag: 'Authorized' } | { readonly _tag: 'Denied'; readonly reason: string },
+  unknown
+>;
 ```
 
-The resolver must independently bind the exact intent to its verified original
-requester device and original execution deadline, and check current authorization
-immediately before returning. History authors and journal rows confer no authority.
-Errors remain errors; cancellation belongs to the caller's Effect fiber. The public
-composition seam is `LodyOptions.authorizeEncryptedExecution`. This change supplies
-no production authorization implementation: absent injection returns denied. Wiring
-a verified device/freshness implementation remains necessary for encrypted starts.
+The production turn origin resolver is supplied by the encrypted workspace host,
+not by history author fields. The Streams binding exposes `openAuthenticated`,
+returning historical device/member identity only after signature and AEAD checks;
+its SDK-facing `open` still returns plaintext alone. For Loro updates, the host
+retains original ciphertext/AAD and signed operation ranges in a workspace-local
+`execution-origins.sqlite`. At dispatch it reopens and verifies that original,
+forks the local document at the update's dependencies, imports the **exact signed
+update bytes**, and matches the selected turn's creation operation, user, timestamp,
+input configuration and items. It also matches the frozen invocation configuration
+and checks the live projection again after asynchronous verification. An operation
+number alone is not proof: another valid frame can reuse its peer/counter with
+different operations, so inspecting the live document at matching counters is unsafe.
+
+The verified historical actor must equal `requesterUserId` (the ledger's canonical
+hex user identity); this code does not guess account-to-crypto-user mappings from
+profiles. The verified device key goes to the injected current-authority gate.
+Thus revoking one device denies its pending turns even while its user and another
+device stay active. Missing originals, conflicting signer attestations, modified
+execution input and user/signer mismatches refuse new starts. A snapshot signer
+never becomes the origin of every old turn inside that snapshot. A snapshot-only
+turn has no executable origin until its original signed update is available.
+
+For durable history, the original window ends 15 minutes after the authenticated
+turn timestamp. Reopening proofs and refreshing the authorization cache do not
+change it; the host's 15-minute ledger-read cache is independent. A fresh realtime
+entry must supply equally verified origin/intent evidence through the same execution
+boundary. Errors remain errors; cancellation belongs to the caller's Effect fiber.
+The new host resolver is wired here; production freshness implementation injection
+remains separate. Missing `authorizeEncryptedExecution` still denies new starts.
 
 The execution key is `(genesis, workspaceId, targetMachineId,
 agent-start:<userTurnId>)`. Its immutable bytes encode only the intent version,
@@ -78,7 +100,9 @@ unknown" and is never taken over.
   non-consumption. The ordinary recovery behavior remains covered by its suite.
 - Failure/recovery: journal open/claim failure refuses only this workspace's turn;
   it does not block content startup, unrelated workspaces or ordinary dispatch.
-  Each SQLite operation retains the existing zero busy timeout. Missing main files
+  Origin receipt writes never block content sync on failure; a bounded diagnostic
+  reports the episode, while missing/unreadable receipts refuse affected starts.
+  Both stores use zero SQLite busy timeout. Missing main files
   with retained control evidence are errors, never silently provisioned replacements.
   Explicit reset retains retired execution keys; a new user turn has a new key.
 - Completion: after the turn body settles, a small fixed settlement marker is
@@ -86,6 +110,12 @@ unknown" and is never taken over.
   finish write logs through the owning turn's observed warning boundary and leaves
   the start uncertain; it never reruns the business action or blocks independent
   release. Existing journal exact-outcome retries remain available.
+
+Origin receipts contain ciphertext and public operation ranges, never decrypted
+prompts. They are authentication evidence, not another execution claim or authority
+cache; the realtime journal remains the only durable execution gate. Each lookup
+closes its SQLite handle; decrypted buffers and temporary Loro documents are released
+before the turn can proceed. No proof pruning or snapshot-author substitution occurs.
 
 The new gate composes native Effects in the existing turn fiber and adapts only
 the synchronous SQLite leaf. It does not launch nested runtimes or introduce an
@@ -109,5 +139,10 @@ The existing journal and dispatch suites also remain part of local validation.
 
 These tests use real SQLite, injected time and explicit synchronization signals;
 they do not assert a throughput threshold or real encrypted network delivery.
-Authorization provenance and freshness are independently supplied and are not proven
-by the journal or these injected-authorizer tests.
+Real signed-ledger/content and SQLite tests additionally prove device attribution
+through origin-store reopen, same-user device revocation, user mismatch, payload
+changes, signature rejection and same-peer/counter payload substitution. The device
+and user admission regressions were RED under temporary removal of those checks;
+restoring them is GREEN. The exact-payload provenance test also failed before the
+signed update was imported into its dependency snapshot. Freshness remains the
+separate injected host capability; these tests do not claim deployment acceptance.

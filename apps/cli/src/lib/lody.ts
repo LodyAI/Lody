@@ -134,6 +134,7 @@ export class Lody {
         },
       };
     }
+    let manager: LoroDocumentManager | undefined;
     let encryptedExecution: EncryptedAgentExecution | undefined;
     if (e2ee) {
       if (!options.genesisHash) throw new Error('e2ee_workspace_unavailable');
@@ -147,10 +148,16 @@ export class Lody {
         targetMachineId: options.machineId,
         journal: lazyExecutionJournal(join(e2ee.repositoryDirectory, 'execution.sqlite'), Date.now),
         authorizeExecution:
-          options.authorizeEncryptedExecution ?? (() => Effect.succeed({ state: 'denied' })),
+          options.authorizeEncryptedExecution ??
+          (() => Effect.succeed({ _tag: 'Denied', reason: 'unavailable' })),
+        resolveVerifiedOriginal: (intent) => {
+          const doc = manager?.sessions.get(intent.sessionId as SessionId)?.handle?.doc;
+          return doc && e2ee
+            ? e2ee.resolveVerifiedExecutionOriginal(intent, doc)
+            : Effect.succeed(undefined);
+        },
       });
     }
-    let manager: LoroDocumentManager | undefined;
     // Commands the daemon executes may touch Sessions owned by other machines; their
     // Roost history lives with that owner, never in this machine's database.
     const ownerHistoryRouter =

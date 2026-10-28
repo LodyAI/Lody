@@ -1,5 +1,13 @@
+import { ExecutionOrigins } from './execution-origins';
+import type { EncryptedExecutionIntent } from './agent-execution';
+import type { LoroDoc } from 'loro-crdt';
 import { isCloudE2eeMemberRemoved } from '../cloud-e2ee-errors';
-import type { LoroStreamsTokenAuth } from '@lody/shared';
+import {
+  getSessionRoomId,
+  isSessionDocRoomId,
+  type SessionId,
+  type LoroStreamsTokenAuth,
+} from '@lody/shared';
 import { leaseE2eeIdentity } from '@lody/shared/node/e2ee-identity';
 import { createHash, randomBytes } from 'node:crypto';
 import { constants, existsSync } from 'node:fs';
@@ -642,6 +650,13 @@ async function openWorkspaceOwned(
       }
     );
   };
+  let originWriteFailed = false;
+  const executionOrigins = new ExecutionOrigins(
+    join(
+      repositoryDirectory(directory, binding.genesisHash, opened.signingPublicKey),
+      'execution-origins.sqlite'
+    )
+  );
   const content: WorkspaceStreamsContent = {
     mode: 'protected',
     namespace: encryptedWorkspaceNamespace(binding.genesisHash),
@@ -674,7 +689,32 @@ async function openWorkspaceOwned(
         return {
           maxSealOverheadBytes: 4096,
           seal: async (input) => run((await getForEpoch()).seal(input)),
-          open: async (input) => run((await getForEpoch()).open(input)),
+          open: async (input) => {
+            const originalFrame = {
+              ...input,
+              context: { ...input.context },
+              sealed: Uint8Array.from(input.sealed),
+              header: Uint8Array.from(input.header),
+              additionalData: Uint8Array.from(input.additionalData),
+            };
+            const result = await run((await getForEpoch()).openAuthenticated(originalFrame));
+            if (
+              descriptor.model === 'loro' &&
+              descriptor.resource.startsWith('doc:') &&
+              isSessionDocRoomId(descriptor.resource.slice(4)) &&
+              originalFrame.context.kind === 'update_batch'
+            ) {
+              try {
+                executionOrigins.retain(descriptor.resource, originalFrame, result.plaintext);
+                originWriteFailed = false;
+              } catch {
+                if (!originWriteFailed)
+                  console.warn('[e2ee] execution origin unavailable; affected turns cannot start');
+                originWriteFailed = true;
+              }
+            }
+            return result.plaintext;
+          },
         } satisfies PayloadProtectionProvider;
       });
       return {
@@ -981,6 +1021,21 @@ async function openWorkspaceOwned(
       binding.genesisHash,
       opened.signingPublicKey
     ),
+    resolveVerifiedExecutionOriginal: (intent: EncryptedExecutionIntent, doc: LoroDoc) =>
+      Effect.scoped(
+        executionOrigins.resolve(intent, doc, (request) =>
+          Effect.gen(function* () {
+            if (closed || intent.workspaceId !== options.workspaceId)
+              return yield* Effect.fail(new Error('e2ee_execution_origin_unavailable'));
+            const contentBinding = yield* opened.runtime.binding(
+              `doc:${getSessionRoomId(intent.sessionId as SessionId)}`,
+              'loro',
+              'current'
+            );
+            return yield* contentBinding.openAuthenticated(request);
+          })
+        )
+      ),
     assertPairingConfirmed: () => {
       if (!pairing || !pairingConfirmed)
         throw new Error('e2ee_pairing_unconfirmed', { cause: pairingFailure });

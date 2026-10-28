@@ -537,7 +537,7 @@ export const makeCliE2eeRuntime = Effect.fn('CliE2eeRuntime.open')(function* (op
           return yield* status();
         })
       ),
-    binding: (resource: string, model: 'loro' | 'flock', writeEpoch: number) =>
+    binding: (resource: string, model: 'loro' | 'flock', writeEpoch: number | 'current') =>
       makeStreamsUpdateBinding({
         genesis,
         resource,
