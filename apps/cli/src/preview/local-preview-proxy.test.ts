@@ -697,6 +697,104 @@ describe('LocalPreviewProxyManager', () => {
     wsServer.close();
   });
 
+  it('reuses local cookie names when a session reopens the same target', async () => {
+    const { server, target } = await listenHtmlServer();
+    servers.push(server);
+    server.prependListener('request', (_request, response) => {
+      response.setHeader('set-cookie', 'session=app-value; Path=/; Max-Age=3600');
+    });
+    const manager = new LocalPreviewProxyManager({ logger: createLogger() });
+    managers.push(manager);
+    const sessionId = 'reopened-preview' as SessionId;
+    const first = await manager.acquire({ sessionId, target });
+    const firstPage = await fetch(first.viewerUrl);
+    const firstCookies = firstPage.headers.getSetCookie().map((value) => value.split(';')[0] ?? '');
+    await firstPage.text();
+    await manager.release(sessionId, first.endpointId);
+    const second = await manager.acquire({ sessionId, target });
+    expect(second.endpointId).not.toBe(first.endpointId);
+    const oldTokenRequest = await fetch(new URL('/asset', second.viewerUrl), {
+      headers: { cookie: firstCookies.join('; ') },
+    });
+    expect(oldTokenRequest.status).toBe(403);
+    await oldTokenRequest.text();
+    const secondPage = await fetch(second.viewerUrl);
+    const secondCookies = secondPage.headers
+      .getSetCookie()
+      .map((value) => value.split(';')[0] ?? '');
+    await secondPage.text();
+    expect(secondCookies.map((pair) => pair.split('=')[0])).toEqual(
+      firstCookies.map((pair) => pair.split('=')[0])
+    );
+    expect(secondCookies[1]).not.toEqual(firstCookies[1]);
+    const forwarded: Array<string | undefined> = [];
+    server.prependListener('request', (request) => forwarded.push(request.headers.cookie));
+    const response = await fetch(new URL('/asset', second.viewerUrl), {
+      headers: { cookie: `${firstCookies[0]}; ${secondCookies[1]}` },
+    });
+    expect(response.status).toBe(200);
+    await response.text();
+    expect(forwarded).toEqual(['session=app-value']);
+    const other = await listenHtmlServer();
+    servers.push(other.server);
+    other.server.prependListener('request', (_request, otherResponse) => {
+      otherResponse.setHeader('set-cookie', 'session=other; Path=/');
+    });
+    const otherEndpoint = await manager.acquire({ sessionId, target: other.target });
+    const otherPage = await fetch(otherEndpoint.viewerUrl);
+    expect(otherPage.headers.getSetCookie()[0]?.split('=')[0]).not.toEqual(
+      firstCookies[0]?.split('=')[0]
+    );
+    await otherPage.text();
+  });
+
+  it('accepts a large browser cookie jar while forwarding only the current application cookies', async () => {
+    const { server, target } = await listenHtmlServer();
+    servers.push(server);
+    const received: Array<string | undefined> = [];
+    server.prependListener('request', (request, response) => {
+      received.push(request.headers.cookie);
+      response.setHeader('set-cookie', 'session=active; Path=/');
+    });
+    const wsServer = new WebSocketServer({ noServer: true });
+    server.on('upgrade', (request, socket, head) => {
+      received.push(request.headers.cookie);
+      wsServer.handleUpgrade(request, socket, head, (client) => client.close());
+    });
+    const manager = new LocalPreviewProxyManager({ logger: createLogger() });
+    managers.push(manager);
+    const endpoint = await manager.acquire({ sessionId: 'large-cookie-jar' as SessionId, target });
+    const page = await fetch(endpoint.viewerUrl);
+    const cookies = page.headers.getSetCookie().map((value) => value.split(';')[0] ?? '');
+    await page.text();
+    const staleCookies = Array.from(
+      { length: 180 },
+      (_, index) => `lody_app_old${index}_session=${'x'.repeat(3500)}`
+    ).join('; ');
+    const response = await fetch(new URL('/asset', endpoint.viewerUrl), {
+      headers: { cookie: `${staleCookies}; ${cookies.join('; ')}` },
+    });
+    expect(response.status).toBe(200);
+    await response.text();
+    const socketUrl = new URL('/ws', endpoint.viewerUrl);
+    socketUrl.protocol = 'ws:';
+    const socket = new WebSocket(socketUrl, {
+      headers: { cookie: `${staleCookies}; ${cookies.join('; ')}` },
+    });
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', resolve);
+      socket.once('error', reject);
+    });
+    socket.terminate();
+    expect(received).toEqual([undefined, 'session=active', 'session=active']);
+    wsServer.close();
+    const tooLarge = await fetch(endpoint.viewerUrl, {
+      headers: { cookie: `oversized=${'x'.repeat(1024 * 1024)}` },
+    });
+    expect(tooLarge.status).toBe(431);
+    await tooLarge.text();
+  });
+
   it('rejects redirects that leave the bound target origin', async () => {
     const { server, target } = await listenHtmlServer();
     servers.push(server);

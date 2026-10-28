@@ -10,7 +10,7 @@ Translation: current
 本地预览签发 SameSite=Lax 凭证 Cookie，Chromium 在跨站框架中会拒绝保存它。
 首层资源仍可能凭带 token 的 Referer 通过鉴权，但嵌套导入丢失凭证后会返回 403。
 代理现在对本地和远程预览都使用 Secure、HttpOnly、SameSite=None、Partitioned
-Cookie，并为每个本地端点使用独立名称，避免并行 Session 覆盖彼此的凭证。
+Cookie，并为每个本地 Session 和目标使用独立名称，避免并行 Session 覆盖彼此的凭证。
 合成页面的 Chromium HTTP 和 file 宿主验证通过；报告中的另一个 502 和其他
 控制台警告仍未验证。
 
@@ -18,10 +18,11 @@ Cookie，并为每个本地端点使用独立名称，避免并行 Session 覆�
 
 Cookie 作用域不区分端口。所有临时本地监听器原本使用相同主机、路径和名称，
 所以即便浏览器接受 Cookie，也会让后开的 Session 覆盖前一个的 token。
-本地名称现在包含端点 ID；远程查看器绑定不同主机名，因此远程名称保持不变。
+本地名称由 Session 和目标 origin 确定，端点重建时保持稳定，凭证值重新生成；
+远程查看器绑定不同主机名，因此远程名称保持不变。
 每次 HTTP 请求和 WebSocket 升级仍检查当前活动端点的精确 token。
 仅有 Origin 或不含 token 的 Referer 仍不足以授权，凭证 Cookie 不会转发到目标。
-[应用 Cookie](2026-10-28-preview-app-cookies.zh.md) 使用独立的端点名称。
+[应用 Cookie](2026-10-28-preview-app-cookies.zh.md) 在本地使用按 Session 和目标隔离的名称。
 
 真实 Chrome 合成验证在 `localhost` 顶层页面中嵌入 `127.0.0.1`。
 SameSite=Lax 配置没有保存 Cookie，入口和嵌套模块请求均不携带它。

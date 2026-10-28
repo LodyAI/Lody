@@ -57,10 +57,11 @@ Managed preview tunnels and the local proxy. [apps/cli/AGENTS.md](../../AGENTS.m
 - Endpoint capabilities are checked on every HTTP request and WS upgrade. There
   is no global unlock: a matching Origin/tokenless Referer never grants access.
   Local and remote tokens differ; cookies are Secure, HttpOnly, SameSite=None and
-  Partitioned. Local cookie names are endpoint-specific. Application cookies use
-  endpoint-specific names; only the current endpoint’s application cookies reach
-  the target, never capability cookies. Preserve separate Set-Cookie headers and
-  rewrite their security attributes. A remote viewer origin must
+  Partitioned. Local cookie names are scoped to Session and target origin, stable
+  across endpoint replacement. Only the current scope’s application cookies reach
+  the target, never capability cookies. Bound local request headers while accepting
+  a large shared cookie jar. Preserve separate Set-Cookie headers and rewrite their
+  security attributes. A remote viewer origin must
   be explicitly bound, never inferred from Host or forwarded headers.
 - A WS upgrade is acknowledged only after the upstream selects its subprotocol.
   Preserve text/binary frames and close shape; use socket backpressure, not an

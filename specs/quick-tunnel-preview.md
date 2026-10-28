@@ -114,8 +114,9 @@ different origin still replaces the old content.
 Quick Tunnels have temporary addresses, no SLA, a 200-in-flight-request limit,
 and no SSE support. Errors are explicit. Fixed-version, integrity-checked
 cloudflared is product-managed, never an unknown PATH binary or system service.
-Application cookies are forwarded for HTTP and WebSocket requests after endpoint
-isolation. The proxy removes Domain, preserves Path and expiry, and forces Secure,
+Application cookies are forwarded for HTTP and WebSocket requests after isolation
+by Session and target origin locally and by endpoint remotely. Local names survive
+endpoint replacement; capability values remain freshly generated. The proxy removes Domain, preserves Path and expiry, and forces Secure,
 SameSite=None and Partitioned. Capability cookies never reach the application.
 This relaxes application SameSite protections: the endpoint token and preserved
 foreign Origin do not replace application CSRF defenses. Applications that rely

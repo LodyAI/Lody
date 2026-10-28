@@ -85,7 +85,9 @@ Quick Tunnel 地址临时、无 SLA、上限为 200 个在途请求，且不支�
 呈现。cloudflared 使用产品管理的固定版本并校验完整性，不调用未知 PATH 二进制或
 安装系统服务。不包含 iOS 模拟器。
 
-应用 Cookie 在端点隔离后随 HTTP 和 WebSocket 请求转发。代理移除 Domain，
+应用 Cookie 在本地按 Session 和目标 origin 隔离、远程按端点隔离后，随 HTTP
+和 WebSocket 请求转发。本地名称在端点重建后保持稳定，凭证值仍重新生成。
+代理移除 Domain，
 保留 Path 和过期属性，并强制 Secure、SameSite=None 和 Partitioned；端点凭证
 Cookie 不会到达应用。这会放宽应用的 SameSite 防护：端点 token 和保留外来
 Origin 不能替代应用的 CSRF 防护，仅依赖 SameSite 的应用需要额外检查。

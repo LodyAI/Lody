@@ -1,6 +1,6 @@
 import http, { type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from 'http';
 import { Buffer } from 'buffer';
-import { randomBytes, randomUUID } from 'crypto';
+import { createHash, randomBytes, randomUUID } from 'crypto';
 import type { Socket } from 'net';
 import type { Duplex } from 'stream';
 import {
@@ -39,6 +39,7 @@ type LocalPreviewProxyRecord = {
   transport: ReturnType<typeof createPreviewTargetTransport>;
   endpoint: SessionPreviewEndpoint;
   token: string;
+  cookieScope: string;
   active: boolean;
   remote: boolean;
   visualAnnotation: boolean;
@@ -70,16 +71,19 @@ type AcquireLocalPreviewEndpointOptions = {
 
 const LOCAL_PREVIEW_TOKEN_QUERY_PARAM = PREVIEW_ACCESS_TOKEN_QUERY_PARAM;
 const LOCAL_PREVIEW_TOKEN_COOKIE = PREVIEW_ACCESS_TOKEN_COOKIE;
+// All local preview ports share a browser cookie jar. Accept a bounded jar
+// larger than Node's default 16 KiB before filtering it for this endpoint.
+const LOCAL_PREVIEW_MAX_HEADER_BYTES = 1024 * 1024;
 
 // Cookies ignore ports: each loopback listener needs its own name so opening
 // another Session cannot replace the credential for an existing module graph.
 const tokenCookieName = (record: LocalPreviewProxyRecord): string =>
   record.remote
     ? LOCAL_PREVIEW_TOKEN_COOKIE
-    : `${LOCAL_PREVIEW_TOKEN_COOKIE}_${record.endpoint.endpointId}`;
+    : `${LOCAL_PREVIEW_TOKEN_COOKIE}_${record.cookieScope}`;
 
 const appCookiePrefix = (record: LocalPreviewProxyRecord): string =>
-  `lody_app_${record.endpoint.endpointId}_`;
+  `lody_app_${record.cookieScope}_`;
 
 const toUrlHost = (host: string): string => (host.includes(':') ? `[${host}]` : host);
 
@@ -278,9 +282,19 @@ export class LocalPreviewProxyManager {
     const endpointId = randomUUID();
     const token = randomBytes(32).toString('base64url');
     const localOrigin = buildLocalOrigin(options.target);
+    // Session and target origin are stable across endpoint replacement. Include
+    // both to keep concurrent Sessions and distinct applications separate.
+    const cookieScope = options.remote
+      ? endpointId
+      : createHash('sha256')
+          .update(JSON.stringify([options.sessionId, localOrigin.origin]))
+          .digest('hex')
+          .slice(0, 32);
     const transport = createPreviewTargetTransport(options.target, options.connectionAddress);
     const resourceLimits = resolveResourceLimits(options.resourceLimits);
-    const server = http.createServer();
+    const server = http.createServer(
+      options.remote ? {} : { maxHeaderSize: LOCAL_PREVIEW_MAX_HEADER_BYTES }
+    );
     const webSocketServer = new WebSocketServer({
       noServer: true,
       maxPayload: resourceLimits.maxRequestBodyBytes,
@@ -360,6 +374,7 @@ export class LocalPreviewProxyManager {
       transport,
       endpoint,
       token,
+      cookieScope,
       active: true,
       remote: options.remote ?? false,
       visualAnnotation: options.visualAnnotation ?? true,

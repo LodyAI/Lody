@@ -11,8 +11,8 @@ Local previews issued SameSite=Lax capability cookies, which Chromium rejected
 inside cross-site frames. First-level resources could authenticate with a
 token-bearing Referer, while nested imports lost the token and returned 403.
 The proxy now issues Secure, HttpOnly, SameSite=None, Partitioned cookies for
-local viewing as well as remote viewing, and gives each local endpoint a distinct
-cookie name so concurrent Sessions cannot overwrite one another. Synthetic
+local viewing as well as remote viewing, and gives each local Session and target
+a distinct cookie name so concurrent Sessions cannot overwrite one another. Synthetic
 Chromium HTTP and file-host checks pass; the reported page's separate 502 and
 unrelated console warnings remain unverified.
 
@@ -20,11 +20,12 @@ unrelated console warnings remain unverified.
 
 Cookie scope ignores ports. All ephemeral local listeners used the same host,
 path and name, so even a context accepting the cookie could replace one Session's
-token with another's. Local names now include the endpoint ID; remote names stay
-unchanged because remote viewers have distinct bound hostnames. Authorization
+token with another's. Local names derive from the Session and target origin and remain stable across
+endpoint replacement; remote names stay unchanged because remote viewers have
+distinct bound hostnames. A replacement generates a fresh capability value. Authorization
 still checks the exact active endpoint's token on every HTTP request and WebSocket
 upgrade. Bare Origin and tokenless Referer remain insufficient, and capability cookies are never forwarded to the target.
-[Application cookies](2026-10-28-preview-app-cookies.md) use separate endpoint-scoped names.
+[Application cookies](2026-10-28-preview-app-cookies.md) use separate Session-and-target-scoped names locally.
 
 A real Chrome fixture embedded `127.0.0.1` under a `localhost` top-level page.
 With SameSite=Lax, no cookie was stored or sent on the entry or nested module.
