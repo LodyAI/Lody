@@ -27,19 +27,26 @@ vi.mock('../src/components/sessions/session-conversation-page', () => ({
 }));
 
 // Keep the regression probe at the exact production seam that originally
-// escaped: TourApp's reused composer asking for visibility data. The rest of
+// escaped: TourApp's reused composer reading visibility data and prompt suggestions. The rest of
 // the heavy product chrome is irrelevant to this provider-wiring assertion.
 vi.mock('../src/components/sessions/session-chat-input-area', async () => {
-  const [{ createElement, forwardRef }, { useCloudQuery }, { cloudOperations }, fixtures] =
-    await Promise.all([
-      import('react'),
-      import('@lody/platform/react'),
-      import('../src/lib/cloud-api-operations'),
-      import('../src/components/onboarding/tour/tour-fixtures'),
-    ]);
+  const [
+    { createElement, forwardRef },
+    { useCloudQuery },
+    { cloudOperations },
+    fixtures,
+    { useSessionPromptSuggestion },
+  ] = await Promise.all([
+    import('react'),
+    import('@lody/platform/react'),
+    import('../src/lib/cloud-api-operations'),
+    import('../src/components/onboarding/tour/tour-fixtures'),
+    import('../src/hooks/use-session-prompt-suggestion'),
+  ]);
 
   return {
     SessionChatInputArea: forwardRef(function TourComposerCloudProbe() {
+      const suggestion = useSessionPromptSuggestion(fixtures.TOUR_SESSION_ID);
       const machines = useCloudQuery(cloudOperations.machines.listVisibleMachines, {
         workspaceId: fixtures.TOUR_WORKSPACE_ID,
       });
@@ -50,7 +57,7 @@ vi.mock('../src/components/sessions/session-chat-input-area', async () => {
       return createElement(
         'div',
         { 'data-testid': 'tour-composer-cloud-probe' },
-        `${machines?.[0]?.machineId ?? 'missing'}:${localProjects?.[0]?.localProjectId ?? 'missing'}`
+        `${machines?.[0]?.machineId ?? 'missing'}:${localProjects?.[0]?.localProjectId ?? 'missing'}:${suggestion ?? 'no hint'}`
       );
     }),
   };
@@ -97,7 +104,7 @@ describe('TourApp cloud isolation wiring', () => {
     container.remove();
   });
 
-  it('keeps composer visibility reads off the authenticated outer cloud adapter', async () => {
+  it('keeps composer visibility and prompt suggestion reads inside the tour', async () => {
     const useOuterCloudQuery = vi.fn(() => {
       throw new Error('Tour query escaped to the authenticated app cloud adapter');
     });
@@ -127,7 +134,7 @@ describe('TourApp cloud isolation wiring', () => {
     });
 
     expect(container.querySelector('[data-testid="tour-composer-cloud-probe"]')?.textContent).toBe(
-      `${TOUR_MACHINE_ID}:${TOUR_LOCAL_PROJECT_ID}`
+      `${TOUR_MACHINE_ID}:${TOUR_LOCAL_PROJECT_ID}:no hint`
     );
     expect(useOuterCloudQuery).not.toHaveBeenCalled();
   });
