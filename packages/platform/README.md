@@ -81,4 +81,8 @@ readiness are separate. Credentials and private keys never cross this port.
 canonical `@lody/cloud-api` DTOs. It supplies no provider or renderer capability.
 The host retains exact original frames, reconciles uncertain writes, verifies
 consecutive policy versions and owns execution freshness before using the core
-pure authorization decision. See the [pending sharing contract](../../specs/e2ee-foundations.md#machine-sharing-policy-pending-approval-increment).
+pure authorization decision. Storage tombstones fence old pending CAS requests;
+they cannot replace verified history pins. The separate
+`E2eeMachineSharingDisplayReader.latestForMember` port accepts account membership
+only and returns ciphertext/untrusted metadata, with no execution freshness.
+See the [pending sharing contract](../../specs/e2ee-foundations.md#machine-sharing-policy-pending-approval-increment).

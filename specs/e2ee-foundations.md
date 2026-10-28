@@ -242,10 +242,18 @@ signing device and descriptive issuedAt. Its fixed business domain and resource
 isolate it from ordinary document writes. It uses existing content-v0 encryption
 and signatures, with docEpoch zero; ledger records and format do not change.
 Server head CAS orders immutable complete versions, beginning at revision one
-with no parent. Revocation is another version, never deletion. Retain exact
+with no parent. Sharing withdrawal is another signed version, never deletion. Retain exact
 originals across unknown outcomes; a confirmed conflict requires a new explicit
 owner intent rather than automatic rebase. Local verified high-water pins reject
 rollback, equal-version forks and gaps; exact original replay is idempotent.
+
+Actual machine removal retains a scoped storage tombstone with the last revision
+and digest while ciphertext is cleaned. Re-entry in the same membership continues
+at n+1 under a status-aware CAS and fresh owner intent; atomic machine replacement
+keeps its active policy. A storage tombstone is not a verified policy pin. Missing
+history after cleanup still needs an explicit recovery boundary before execution.
+A separate account-authenticated display query may return ciphertext and untrusted
+head metadata to current workspace members, without granting execution freshness.
 
 Before each new start and later action requiring authority, the machine checks
 current ledger eligibility, its exact active machine binding, and the verified

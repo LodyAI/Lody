@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
+import type { CloudApi } from '@lody/cloud-api';
 import type { WorkspaceId } from '@lody/shared';
 import {
   CLOUD_PLATFORM_CAPABILITIES,
@@ -15,10 +16,39 @@ import {
   LOCAL_PLATFORM_CAPABILITIES,
   PLATFORM_CAPABILITIES,
   type PlatformSessionState,
+  type E2eeMachineSharingRequests,
+  type E2eeMachineSharingReplies,
+  type E2eeMachineSharingHeadState,
+  type E2eeMachineSharingRemovedHead,
+  type E2eeMachineSharingDisplayReader,
   DEFAULT_RUNTIME_ARTIFACTS_BASE_URL,
   resolveRuntimeArtifactsBaseUrl,
   resolvePlatformKind,
 } from '../src/index';
+
+it('keeps machine sharing tombstones and account display outside execution credentials', () => {
+  expectTypeOf<
+    E2eeMachineSharingRequests['commit']['expectedHead']
+  >().toEqualTypeOf<E2eeMachineSharingHeadState | null>();
+  expectTypeOf<E2eeMachineSharingRequests['commit']>().toMatchTypeOf<{ credential: string }>();
+  expectTypeOf<
+    E2eeMachineSharingReplies['readHead']
+  >().toEqualTypeOf<E2eeMachineSharingHeadState | null>();
+  expectTypeOf<
+    Extract<E2eeMachineSharingReplies['readRequest'], { status: 'removed' }>
+  >().toEqualTypeOf<E2eeMachineSharingRemovedHead>();
+  expectTypeOf<Extract<keyof E2eeMachineSharingRemovedHead, 'frameHex'>>().toEqualTypeOf<never>();
+  expectTypeOf<
+    Extract<keyof E2eeMachineSharingRequests['latestForMember'], 'credential' | 'cliToken'>
+  >().toEqualTypeOf<never>();
+  expectTypeOf<Parameters<E2eeMachineSharingDisplayReader['latestForMember']>[0]>().toEqualTypeOf<
+    E2eeMachineSharingRequests['latestForMember']
+  >();
+  expectTypeOf<
+    CloudApi['e2eeMachineSharing']['latestForMember']['_type']
+  >().toEqualTypeOf<'query'>();
+  expectTypeOf<CloudApi['e2eeMachineSharing']['readHead']['_type']>().toEqualTypeOf<'action'>();
+});
 
 describe('resolvePlatformKind', () => {
   it('defaults to local when unset or blank', () => {

@@ -175,22 +175,40 @@ rejected frames and revocation during a request.
 ## Machine sharing policy storage (unconnected contract)
 
 The optional `cloud-api` machine-sharing DTOs address one workspace/genesis,
-machine and owner membership instance. Authenticate device credentials and
-current ledger eligibility for every operation. Reads may serve current eligible
-workspace devices; commits require the machine owner's active personal device.
-Use `admitMachineSharingFrame` from the host entry before storing an opaque
-frame. It verifies the exact machine resource and fixed business signature/AAD
-domain without decrypting. This is required sharing admission, separate from
-the optional mailbox signature tier above.
+machine and owner membership instance. Control operations require device credentials
+and current ledger eligibility. Commits require the machine owner's active personal
+device and `admitMachineSharingFrame` before storing an opaque original. This verifies
+the exact resource and fixed business signature/AAD domain without decryption; it is
+required sharing admission, separate from the optional mailbox signature tier above.
 
-Atomically insert immutable originals and CAS head. First revision is 1 with a
-null parent/head; subsequent revisions increment by one and reference the exact
-previous frame digest. Digest complete raw ciphertext bytes with SHA-256, with a
-maximum frame of 262287 bytes. Keep requestId and the complete original intent:
-exact retries return their original receipt even after newer commits; changed
-intent under the same requestId fails. Confirmed conflicts must not auto-rebase.
-Keep original versions available to verify consecutive history. Withdrawal is a
-new complete policy, never deletion. Deletion cleanup belongs to the workspace
-owner. Returned head/metadata are untrusted until client verification, and the
-server must deliver latest heads for bounded execution freshness. No server or
-transport is enabled here; see the [pending Spec increment](../../../specs/e2ee-foundations.md#machine-sharing-policy-pending-approval-increment).
+`latestForMember` is a separate account-authenticated query for current workspace
+members. It returns only ciphertext and untrusted routing/head metadata. It never
+returns permission conclusions, accepts device credentials, or renews execution
+freshness. Machines retain their own credential-authenticated `readHead` path.
+
+Atomically insert immutable originals and CAS the full head identity: scope, status,
+revision and digest. First signed revision is 1/null parent; subsequent revisions
+increment by one and reference the complete original frame's SHA-256 digest. The
+maximum frame is 262287 bytes. Retain lightweight request intent digests for exact
+retry checks. Exact retries return the original receipt while retained, or a removed
+barrier after purge; changed intent under the same requestId fails. Confirmed
+conflicts must not auto-rebase.
+
+Sharing withdrawal is a new signed complete policy. Actual machine removal first
+marks its head removed, retaining its last committed revision/digest even when
+ciphertext is purged. A never-written resource uses removed revision 0/digest null.
+Explicit new owner intent CASes that removed head to n+1 with its digest as parent
+(0/null to 1/null). Comparing status prevents old pending active-head requests
+from reactivating a removed resource. Atomic same-member machine replacement keeps
+the policy active and does not run removal cleanup. Retain the removal cutoff and
+minimal request receipts even after reactivation; cleanup deletes only ciphertext
+at/below that cutoff, never newer commits. Purged version/request reads return a
+removed barrier; an exact commit retry of a purged request returns removed and
+must never restore its original frame.
+
+A server tombstone is a storage/CAS barrier, not a signed policy or verified client
+pin. Missing originals leave a history gap that the core currently rejects; A3 must
+provide explicit reviewed gap recovery before claiming execution after such cleanup.
+Never silently seed a verified pin from the server tombstone. Latest-head delivery
+still supports only bounded freshness. No server or transport is enabled here; see
+the [pending Spec increment](../../../specs/e2ee-foundations.md#machine-sharing-policy-pending-approval-increment).
