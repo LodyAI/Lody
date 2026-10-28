@@ -47,3 +47,12 @@ retesting crossed from a wide chat with the keyboard open back to a phone layout
 the same chat and composer remained visible after the keyboard dismissed.
 Typechecking and linting passed. Mobile-to-mobile transitions, physical devices and
 floating-keyboard acceptance remain distinct from JSDOM geometry checks.
+
+The October 28 ordinary-iPhone review found an incomplete owner transition: the
+PR, browser, file-list and simulator portals had relied on Vaul resizing and had
+no replacement native inset. A real PR comment input stayed below a 300-point
+keyboard in a 390-by-852 viewport. Those panels now explicitly enable
+`DrawerContent.nativeKeyboardInset`; conversation composers retain their own lift.
+A WebKit regression fails before this correction and passes after it, preserving
+the same input, unsent draft and focus across repeated keyboard appearance and
+dismissal. Independent Android overlay/resize and browser resize checks also pass.

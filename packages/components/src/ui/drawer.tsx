@@ -92,6 +92,7 @@ DrawerOverlay.displayName = 'DrawerOverlay';
 
 function DrawerContent({
   skipOpenAnimation = false,
+  nativeKeyboardInset = false,
   className,
   children,
   style,
@@ -99,6 +100,8 @@ function DrawerContent({
 }: React.ComponentProps<typeof DrawerPrimitive.Content> & {
   /** Suppress entrance for an in-place handoff; preserve drag/exit transitions. */
   skipOpenAnimation?: boolean;
+  /** Native side-panel portals whose children do not already own keyboard lift. */
+  nativeKeyboardInset?: boolean;
 }) {
   const viewportBottom = useDrawerViewportBottom();
   const [popupContainer, setPopupContainer] = React.useState<HTMLDivElement | null>(null);
@@ -106,6 +109,9 @@ function DrawerContent({
     '--lody-drawer-width': '256px',
     ...style,
     ...(skipOpenAnimation ? { animationName: 'none' } : {}),
+    ...(nativeKeyboardInset && isNativeIOSAppShell()
+      ? { bottom: 'var(--native-keyboard-height, 0px)' }
+      : {}),
     ...(viewportBottom === undefined ? {} : { bottom: viewportBottom }),
   } as React.CSSProperties;
 

@@ -6673,6 +6673,7 @@ const SessionDetail = ({
           onOpenChange={setMobileFilesBrowserOpen}
         >
           <DrawerContent
+            nativeKeyboardInset
             className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
             data-sidebar-swipe-open-disabled
           >
@@ -6728,8 +6729,8 @@ const SessionDetail = ({
            `data-vaul-no-drag`), so PR diffs scroll horizontally without dragging
            the drawer toward dismissal. The zone clears the fixed header so the
            back button stays tappable. See mobile-workspace-stack.tsx. */}
-        {/* Native keyboard handling is owned by ui/drawer.tsx: live viewport
-           inset on non-iOS side drawers, Vaul repositioning on iOS. Mobile web
+        {/* Keyboard handling is owned by ui/drawer.tsx: a native keyboard
+           inset on iOS and the live viewport inset on other shells. Mobile web
            uses browser resizing; see mobile-workspace-stack.tsx. */}
         <Drawer
           direction="right"
@@ -6740,6 +6741,7 @@ const SessionDetail = ({
           }}
         >
           <DrawerContent
+            nativeKeyboardInset
             className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
             data-sidebar-swipe-open-disabled
           >
@@ -6780,8 +6782,8 @@ const SessionDetail = ({
            conversation (invisible until the session drawer closes and flashes
            a few frames). Managed preview iframes survive remount via
            `managed-preview-frame-cache.ts`. */}
-        {/* Native keyboard handling is owned by ui/drawer.tsx: live viewport
-           inset on non-iOS side drawers, Vaul repositioning on iOS. Mobile web
+        {/* Keyboard handling is owned by ui/drawer.tsx: a native keyboard
+           inset on iOS and the live viewport inset on other shells. Mobile web
            uses browser resizing; see mobile-workspace-stack.tsx. */}
         <Drawer
           direction="right"
@@ -6792,6 +6794,7 @@ const SessionDetail = ({
           }}
         >
           <DrawerContent
+            nativeKeyboardInset
             className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
             data-sidebar-swipe-open-disabled
           >
@@ -6850,6 +6853,7 @@ const SessionDetail = ({
           }}
         >
           <DrawerContent
+            nativeKeyboardInset
             className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
             data-sidebar-swipe-open-disabled
           >

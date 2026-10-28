@@ -28,3 +28,8 @@ the side tabs switched between chat and schedules, the chat menu opened, and its
 rail disappeared while the sheet was open. The docked keyboard left the composer
 visible. The host has an older-SDK fallback; real devices, Split View, dynamic
 island expansion, VoiceOver and all sheet/menu variants still need acceptance.
+
+The October 28 review corrected menu suspension to observe Base UI's `data-open`
+state as well as legacy `data-state` surfaces. The regression uses the real Menu
+component: opening it clears native actions and rejects events from the old owner;
+closing it restores registration and waits for fresh native visibility confirmation.

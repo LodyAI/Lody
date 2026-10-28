@@ -49,8 +49,8 @@ Read parent rules and linked context.
 
 ## [Conversation surface](../../../../../.agents/docs/sessions-surface.md)
 
-- Mobile drawers lift composer/questions by the native keyboard offset; wide
-  sessions inherit workspace padding and must not lift twice.
+- Mobile chat composers/questions own keyboard lift; other side panels use
+  `nativeKeyboardInset`. Wide sessions inherit root padding once.
 - Message-list crash fallback preserves the composer and copies the shared report
   with the original error and React component stacks.
 - Read receipts require per-surface `isVisible`, never mere mounting.

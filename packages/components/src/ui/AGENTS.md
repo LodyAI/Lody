@@ -6,7 +6,8 @@ feature directory.
 
 ## Drawers
 
-- Native iOS side drawers stay CSS-sized; surfaces own keyboard offsets.
+- Native iOS side drawers stay CSS-sized. Non-chat panels opt into
+  `nativeKeyboardInset`; chat composers own their lift.
 - `DrawerContent` keeps popup/modal hosts state-backed, no-drag, inside the
   modal and outside scrollers. Body portals inherit pointer lock and pass clicks through.
 

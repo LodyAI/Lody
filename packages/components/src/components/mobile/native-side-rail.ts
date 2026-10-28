@@ -27,7 +27,7 @@ let lastMessage = '';
 function hasBlockingDialog(): boolean {
   return Array.from(
     document.querySelectorAll(
-      '[aria-modal="true"]:not([data-state="closed"]), [role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [role="menu"][data-state="open"]'
+      '[aria-modal="true"]:not([data-state="closed"]), [role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [role="menu"][data-state="open"], [role="menu"][data-open]'
     )
   ).some((dialog) => !dialog.hasAttribute('data-lody-session-drawer'));
 }
@@ -84,7 +84,7 @@ export function useNativeSideRail(actions: SideRailAction[], priority: number): 
         subtree: true,
         childList: true,
         attributes: true,
-        attributeFilter: ['aria-modal', 'data-state', 'role'],
+        attributeFilter: ['aria-modal', 'data-state', 'data-open', 'role'],
       });
     }
     registrations.set(id, { priority, actions: actionsRef.current, setVisible });

@@ -189,8 +189,11 @@ returns to zero on keyboard hide; a WebView that already resizes needs no extra
 inset. Monaco's existing automatic layout follows the resized container.
 
 Native iOS side drawers without snap points also disable Vaul's input repositioning:
-the session composer already consumes the native keyboard offset. Their CSS insets
-follow folds and rotation without restoring a height captured on another display.
+the session composer already consumes the native keyboard offset. Other full-screen
+PR, browser, file-list and simulator panels explicitly use `DrawerContent`'s
+`nativeKeyboardInset` so their controls stay above a docked keyboard on ordinary
+iPhones too. Their CSS insets follow folds and rotation without restoring a height
+captured on another display.
 Bottom sheets retain their separate `useKeyboardAwareSheet()` contract.
 See the [resize decision](../notes/implemented/bug-fix/2026-10-27-ios-drawer-resize.md).
 

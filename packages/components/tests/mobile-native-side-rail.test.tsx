@@ -2,6 +2,7 @@
 import { act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it } from 'vitest';
+import { Menu } from '@lody/ui/menu';
 import { useNativeSideRail } from '../src/components/mobile/native-side-rail';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -103,4 +104,47 @@ it('hands controls to the active surface and restores them when a dialog opens',
     modal.remove();
     await Promise.resolve();
   });
+});
+
+it('suspends native controls while a real menu is open and ignores old rail actions', async () => {
+  const surface = (menuOpen: boolean) => (
+    <>
+      <Surface name="chat" priority={2} />
+      <Menu.Root open={menuOpen}>
+        <Menu.Trigger>More controls</Menu.Trigger>
+        <Menu.Content>
+          <Menu.Item>Menu action</Menu.Item>
+        </Menu.Content>
+      </Menu.Root>
+    </>
+  );
+  act(() => root.render(surface(false)));
+  const owner = messages.at(-1)!.owner;
+  event({ owner, visible: true });
+  expect(node.textContent).toContain('chat:0:rail');
+
+  await act(async () => {
+    root.render(surface(true));
+    await Promise.resolve();
+  });
+  expect(document.querySelector('[role="menu"]')?.textContent).toContain('Menu action');
+  expect(messages.at(-1)).toEqual({ owner: '', items: [] });
+  expect(node.textContent).toContain('chat:0:fallback');
+  event({ owner, action: 'open' });
+  event({ owner, visible: true });
+  expect(node.textContent).toContain('chat:0:fallback');
+
+  await act(async () => {
+    root.render(surface(false));
+    await Promise.resolve();
+  });
+  expect(document.querySelector('[role="menu"]')).toBeNull();
+  expect(messages.at(-1)).toEqual({
+    owner,
+    items: [{ id: 'open', label: 'Open', symbol: 'folder', selected: false }],
+  });
+  expect(node.textContent).toContain('chat:0:fallback');
+  event({ owner, visible: true });
+  event({ owner, action: 'open' });
+  expect(node.textContent).toContain('chat:1:rail');
 });
