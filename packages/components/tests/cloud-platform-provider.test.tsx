@@ -202,28 +202,45 @@ describe('CloudPlatformProvider', () => {
     }
   });
 
-  it('routes read queries through the mounted cloud provider, real IPC proxy and preload', async () => {
+  it('routes encrypted feature preparation and response verification through the production provider, IPC proxy and preload', async () => {
     fixture.electron = true;
     fixture.usePreload = true;
     window.ipc = ipcBridge;
     refetch('Encrypted');
-    const input = { queryId: 'query-a', method: 'machine/status' as const, params: {} };
+    const input = {
+      requestId: '55'.repeat(16),
+      request: {
+        workspaceId: 'workspace-a',
+        machineId: 'machine-a',
+        method: 'machine/status' as const,
+        params: {},
+      },
+    };
     const original = {
-      requestId: '22'.repeat(16),
       targetMachineId: 'machine-a',
       requesterDevice: '11'.repeat(32),
+      requestId: '22'.repeat(16),
       frameHex: '33'.repeat(143),
-      expiresAt: 100000,
+      expiresAt: 901000,
     };
-    const result = { result: { type: 'machine/status', synthetic: true } };
+    const ack = {
+      ok: false as const,
+      code: 'e2ee_query_failed',
+      error: 'synthetic complete outcome',
+    };
+    const retained: unknown[][] = [];
     fixture.invoke = async (channel, ...args) => {
-      if (channel === 'e2ee.prepareQuery') {
-        expect(args).toEqual(['workspace-a', 'machine-a', input]);
+      // The mock is below the real preload allowlist, at ipcRenderer.invoke.
+      // Returning a value requires the exact production route and arguments.
+      if (channel === 'e2ee.prepareFeatureRpc') {
+        expect(args).toEqual(['workspace-a', input]);
+        retained.push(args);
         return original;
       }
-      if (channel === 'e2ee.acceptQueryResponse') {
-        expect(args).toEqual(['workspace-a', 'machine-a', input, '44'.repeat(143)]);
-        return result;
+      if (channel === 'e2ee.acceptFeatureRpcResponse') {
+        expect(retained).toEqual([['workspace-a', input]]);
+        expect(args).toEqual(['workspace-a', input, '44'.repeat(143)]);
+        return ack;
       }
       if (channel === 'e2ee.contentStreamsToken') {
         expect(args).toEqual(['workspace-a', undefined, undefined, true]);
@@ -238,18 +255,17 @@ describe('CloudPlatformProvider', () => {
       throw new Error(`unexpected IPC invocation: ${channel}`);
     };
     await render();
+    const runtime = seen.at(-1)!.e2eeWorkspaces!.runtime!;
     const access = createDesktopE2eeContent({
-      runtime: seen.at(-1)!.e2eeWorkspaces!.runtime!,
+      runtime,
       workspaceId: 'workspace-a',
       genesisHash: 'aa'.repeat(32),
       epoch: 0,
       authToken: () => 'synthetic-account-token',
     });
     try {
-      expect(await access.e2ee.prepareQuery('machine-a', input)).toEqual(original);
-      expect(await access.e2ee.acceptQueryResponse('machine-a', input, '44'.repeat(143))).toEqual(
-        result
-      );
+      expect(await access.e2ee.prepareFeatureRpc!(input)).toEqual(original);
+      expect(await access.e2ee.acceptFeatureRpcResponse!(input, '44'.repeat(143))).toEqual(ack);
       const rpcToken = access.e2ee.createRpcTokenProvider(new AbortController().signal);
       try {
         expect(await rpcToken.getToken()).toBe('synthetic-rpc-only');

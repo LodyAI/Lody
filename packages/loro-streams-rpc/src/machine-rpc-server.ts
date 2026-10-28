@@ -83,6 +83,12 @@ import type {
 } from '@lody/shared';
 import { LoroStreamsTokenAuthError } from '@lody/shared';
 import {
+  LocalMachineRpcRequestSchema,
+  LocalMachineRpcResponseSchema,
+  type LocalMachineRpcRequest,
+  type LocalMachineRpcResponse,
+} from '@lody/shared/local-machine-rpc';
+import {
   CodeCollabV2ErrorCodeSchema,
   normalizeSessionTurnInputConfig,
   CodeCollabV2InitDirectoryRequestSchema,
@@ -103,6 +109,7 @@ import {
   CodeCollabV2LspRpcParamsSchema,
   decryptCodeCollabV2RpcPayload,
   encryptCodeCollabV2RpcPayload,
+  isOwnerScopedEncryptedRpcMethod,
   type LoroJsonStreamState,
   type LoroStreamsJsonStreamClient,
   LoroStreamsGatewayError,
@@ -971,6 +978,62 @@ export class LoroStreamsMachineRpcServer {
     } finally {
       this.historyRequests.delete(request.id);
     }
+  }
+
+  /** The shared feature channel carries one LocalMachineRpc DTO. Keep the
+   * ordinary RPC's inner owner envelope inside this compatibility boundary. */
+  async readFeatureQuery(
+    raw: LocalMachineRpcRequest,
+    context: { requestId: string; expiresAt: number; signal: AbortSignal }
+  ): Promise<LocalMachineRpcResponse> {
+    const input = LocalMachineRpcRequestSchema.parse(raw);
+    if (
+      input.workspaceId !== this.deps.workspaceId ||
+      input.machineId !== this.deps.machineId ||
+      !isE2eeReadQuery(input.method, input.params)
+    )
+      throw new Error('e2ee_query_method');
+    let owner: string | undefined;
+    let params: unknown = input.params;
+    if (isOwnerScopedEncryptedRpcMethod(input.method)) {
+      if (!('sessionId' in input.params) || typeof input.params.sessionId !== 'string')
+        throw new Error('e2ee_query_owner');
+      owner =
+        input.ownerSessionId ??
+        (await this.deps.resolveCodeCollabOwnerSessionId?.(input.params.sessionId as SessionId));
+      if (!owner) throw new Error('e2ee_query_owner');
+      params = await encryptCodeCollabV2RpcPayload(owner, params);
+    }
+    const outcome = await this.readQuery(
+      { queryId: context.requestId, method: input.method, params },
+      context.expiresAt,
+      context.signal
+    );
+    if (outcome.error)
+      return LocalMachineRpcResponseSchema.parse({
+        ok: false,
+        error: outcome.error.message,
+        code: outcome.error.code,
+        ...(outcome.error.data === undefined
+          ? {}
+          : {
+              data: owner
+                ? await decryptCodeCollabV2RpcPayload(
+                    CodeCollabV2RpcContentEnvelopeSchema.parse(outcome.error.data),
+                    owner
+                  )
+                : outcome.error.data,
+            }),
+      });
+    return LocalMachineRpcResponseSchema.parse({
+      ok: true,
+      result: owner
+        ? await decryptCodeCollabV2RpcPayload(
+            CodeCollabV2RpcContentEnvelopeSchema.parse(outcome.result),
+            owner
+          )
+        : outcome.result,
+    });
   }
 
   /** Authenticated native read entry; it cannot start the ordinary network listener. */

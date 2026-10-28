@@ -1,5 +1,6 @@
 import { makeExecutionOriginRecovery } from './execution-origin-recovery';
-import { makeEncryptedRpcReceiver, makeEncryptedQueryReceiver } from './realtime-rpc';
+import { makeEncryptedFeatureReceiver, type EncryptedFeatureHandler } from './feature-rpc';
+import { makeEncryptedRpcReceiver } from './realtime-rpc';
 import { lazyExecutionJournal } from './agent-execution';
 import { makeE2eeRpcNative, E2eeRpcOriginals } from '@lody/loro-streams-rpc/e2ee-native';
 import { createLoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
@@ -1147,11 +1148,7 @@ async function openWorkspaceOwned(
       machineId: string,
       offer: (input: E2eeDispatchInput) => Promise<E2eeDispatchAck>,
       trace?: (event: E2eeRpcTiming) => void,
-      query?: (
-        input: import('@lody/shared/e2ee-rpc').E2eeQueryInput,
-        expiresAt: number,
-        signal: AbortSignal
-      ) => Promise<import('@lody/shared/e2ee-rpc').E2eeQueryResult>
+      handleFeature?: EncryptedFeatureHandler
     ) =>
       run(
         Effect.gen(function* () {
@@ -1190,15 +1187,18 @@ async function openWorkspaceOwned(
                   client,
                   trace,
                 });
-                const receiveQuery = query
-                  ? yield* makeEncryptedQueryReceiver({
+                const receiveFeature = handleFeature
+                  ? yield* makeEncryptedFeatureReceiver({
                       workspaceId: options.workspaceId,
+                      genesis: binding.genesisHash,
                       machineId,
                       native: rpc,
-                      authorize: opened.executionAuthorization.authorizeRead,
+                      journal: rpcJournal,
+                      authorize: opened.executionAuthorization.authorizeExecution,
+                      authorizeRead: opened.executionAuthorization.authorizeRead,
                       isOpen: () => !closed,
+                      handle: handleFeature,
                       client,
-                      query,
                     })
                   : undefined;
                 let failureReported = false;
@@ -1208,14 +1208,10 @@ async function openWorkspaceOwned(
                   client,
                   trace,
                   receive: (envelope) =>
-                    receive(envelope).pipe(
-                      Effect.catch((cause) =>
-                        cause instanceof Error &&
-                        cause.message === 'e2ee_rpc_method' &&
-                        receiveQuery
-                          ? receiveQuery(envelope)
-                          : Effect.fail(cause)
-                      ),
+                    Effect.gen(function* () {
+                      if (receiveFeature && (yield* receiveFeature(envelope))) return;
+                      yield* receive(envelope);
+                    }).pipe(
                       Effect.tap(() =>
                         Effect.sync(() => {
                           failureReported = false;

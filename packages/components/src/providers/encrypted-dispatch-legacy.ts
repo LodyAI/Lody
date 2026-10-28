@@ -1,20 +1,32 @@
 import { Effect, Exit, Fiber, Scope } from 'effect';
-import { isE2eeReadQuery, type E2eeReadQueryMethod } from '@lody/shared/e2ee-rpc';
 import type {
   E2eeDispatchInput,
   E2eeDispatchAck,
   E2eePreparedDispatch,
-  E2eeQueryInput,
-  E2eeQueryResult,
 } from '@lody/shared/e2ee-rpc';
+import {
+  type LocalMachineRpcRequest,
+  type LocalMachineRpcResponse,
+} from '@lody/shared/local-machine-rpc';
+import type { E2eeFeatureInput } from '@lody/shared/e2ee-rpc';
 import type { LoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
-import { makeEncryptedStreamsRpc } from '@lody/loro-streams-rpc/e2ee-streams';
+import { callEncryptedReadFeature } from '@lody/loro-streams-rpc';
+import { makeEncryptedStreamsChannel } from '@lody/loro-streams-rpc/e2ee-streams';
 
-type Input =
+type Call =
   | { kind: 'dispatch'; input: E2eeDispatchInput }
-  | { kind: 'query'; input: E2eeQueryInput };
-type Output = E2eeDispatchAck | E2eeQueryResult;
-type Channel = Effect.Success<ReturnType<typeof makeEncryptedStreamsRpc<Input, Output>>>;
+  | {
+      kind: 'feature';
+      input: E2eeFeatureInput;
+    };
+type Reply = E2eeDispatchAck | LocalMachineRpcResponse;
+type Channel = {
+  send: (
+    prepared: E2eePreparedDispatch,
+    call: Call,
+    timeoutMs?: number
+  ) => Effect.Effect<Reply | null, unknown>;
+};
 
 /** Promise boundary for the existing renderer runtime. The native kernel owns
  * its shared reader and pending calls; close cancels transport before token disposal. */
@@ -22,12 +34,11 @@ export function createEncryptedDispatchLegacy(options: {
   workspaceId: string;
   prepare: (machineId: string, input: E2eeDispatchInput) => Promise<E2eePreparedDispatch>;
   accept: (machineId: string, input: E2eeDispatchInput, frame: string) => Promise<E2eeDispatchAck>;
-  prepareQuery?: (machineId: string, input: E2eeQueryInput) => Promise<E2eePreparedDispatch>;
-  acceptQueryResponse?: (
-    machineId: string,
-    input: E2eeQueryInput,
+  prepareFeature?: (input: E2eeFeatureInput) => Promise<E2eePreparedDispatch>;
+  acceptFeature?: (
+    input: E2eeFeatureInput,
     frame: string
-  ) => Promise<E2eeQueryResult | null>;
+  ) => Promise<LocalMachineRpcResponse | null>;
   closeClient?: () => Promise<void>;
   client: (signal: AbortSignal) => Promise<LoroStreamsJsonStreamClient>;
 }) {
@@ -48,14 +59,17 @@ export function createEncryptedDispatchLegacy(options: {
               try: () => options.client(controller.signal),
               catch: () => new Error('e2ee_rpc_transport'),
             });
-            return yield* makeEncryptedStreamsRpc<Input, Output>({
+            return yield* makeEncryptedStreamsChannel<Call, Reply>({
               workspaceId: options.workspaceId,
               requesterDevice: prepared.requesterDevice,
               client,
-              acceptResponse: (original, input, frame) =>
-                input.kind === 'dispatch'
-                  ? options.accept(original.targetMachineId, input.input, frame)
-                  : options.acceptQueryResponse!(original.targetMachineId, input.input, frame),
+              acceptResponse: async (original, call, frame) => {
+                if (call.kind === 'dispatch')
+                  return options.accept(original.targetMachineId, call.input, frame);
+                if (!options.acceptFeature) throw new Error('e2ee_rpc_unavailable');
+                return (await options.acceptFeature(call.input, frame)) ?? undefined;
+              },
+              traceInput: (call) => (call.kind === 'dispatch' ? call.input.userTurnId : undefined),
               trace: (event) => console.debug('[e2ee-rpc-timing]', event),
             }).pipe(Scope.provide(scope));
           }),
@@ -71,6 +85,27 @@ export function createEncryptedDispatchLegacy(options: {
         )
       );
     });
+  const requestFeature = async (
+    request: LocalMachineRpcRequest
+  ): Promise<LocalMachineRpcResponse> => {
+    if (closed || !options.prepareFeature || !options.acceptFeature)
+      throw new Error('e2ee_rpc_unavailable');
+    const input = { requestId: crypto.randomUUID().replaceAll('-', ''), request };
+    const original = await options.prepareFeature(input);
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const client = yield* channel(original);
+        return yield* client.send(
+          original,
+          { kind: 'feature', input },
+          request.timeoutMs ?? 30_000
+        );
+      })
+    );
+    return result && 'ok' in result
+      ? result
+      : { ok: false, error: 'Encrypted machine request timed out.' };
+  };
   return {
     prepare: async (machineId: string, input: E2eeDispatchInput) => {
       if (closed) throw new Error('e2ee_rpc_closed');
@@ -94,43 +129,22 @@ export function createEncryptedDispatchLegacy(options: {
           Effect.runPromise(
             Effect.gen(function* () {
               const client = yield* channel(original);
-              const reply = yield* client.send(original, { kind: 'dispatch', input });
-              return reply && 'type' in reply ? reply : null;
+              const result = yield* client.send(original, { kind: 'dispatch', input });
+              return result && 'type' in result ? result : null;
             })
           ),
       };
     },
-    query: async (
-      machineId: string,
-      method: string,
-      params: unknown,
-      timeoutMs: number
-    ): Promise<E2eeQueryResult | null> => {
-      if (
-        closed ||
-        !options.prepareQuery ||
-        !options.acceptQueryResponse ||
-        !isE2eeReadQuery(method, params)
-      )
-        throw new Error('e2ee_rpc_unavailable');
-      const input: E2eeQueryInput = {
-        queryId: crypto.randomUUID(),
-        method: method as E2eeReadQueryMethod,
+    requestFeature,
+    query: (machineId: string, method: string, params: unknown, timeoutMs: number) =>
+      callEncryptedReadFeature({
+        workspaceId: options.workspaceId,
+        machineId,
+        method,
         params,
-      };
-      const original = await options.prepareQuery(machineId, input);
-      const reply = await Effect.runPromise(
-        Effect.gen(function* () {
-          const client = yield* channel(original);
-          return yield* client.send(
-            original,
-            { kind: 'query', input },
-            Math.min(timeoutMs, 60_000)
-          );
-        })
-      );
-      return reply && !('type' in reply) ? reply : null;
-    },
+        timeoutMs,
+        request: requestFeature,
+      }),
     close: async () => {
       closed = true;
       controller.abort();

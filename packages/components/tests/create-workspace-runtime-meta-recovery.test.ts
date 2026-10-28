@@ -2439,6 +2439,68 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
 
     await runtime.dispose();
   });
+  it('opens the encrypted file index and preview comments through the production runtime repo', async () => {
+    vi.useRealTimers();
+    const { indexedDB, IDBKeyRange } = await import('fake-indexeddb');
+    vi.stubGlobal('indexedDB', indexedDB);
+    vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+    const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
+    const { IndexedDBStorageAdaptor } = await vi.importActual<
+      typeof import('loro-repo/storage/indexeddb')
+    >('loro-repo/storage/indexeddb');
+    const repo = await RealRepo.create({
+      storageAdapter: new IndexedDBStorageAdaptor({ dbName: 'encrypted-file-surfaces' }),
+      metaDebounceCommitMs: 0,
+    });
+    mocks.repoOverride = repo;
+    const { writeCodeCollabFileIndexToFlock } = await import('@lody/shared');
+    const flockId = 'workspace-1:fi:synthetic';
+    const handle = await repo.openFlockDoc(flockId);
+    writeCodeCollabFileIndexToFlock(handle.flock, { 'private.ts': { kind: 'text' } }, 1000);
+    const runtime = await createWorkspaceRuntime({
+      content: {
+        mode: 'protected',
+        namespace: 'synthetic',
+        resolve: () => {
+          throw new Error('offline');
+        },
+        snapshotUpload: { canUpload: () => false },
+      },
+      e2ee: {
+        bucketId: () => 'encrypted',
+        createTokenProvider: () => {
+          throw new Error('offline');
+        },
+      },
+      accountId: 'synthetic-account',
+      e2eeLocalIdentity: {
+        accountId: 'synthetic-account',
+        workspaceId: 'workspace-1',
+        genesisHash: '11'.repeat(32),
+        signingPublicKey: '22'.repeat(32),
+      },
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceSlug: 'workspace',
+      apiBaseUrl: 'https://api.example.test',
+    });
+    try {
+      const lease = await runtime.codeCollabFileIndexCache.acquire(flockId);
+      expect(lease.resource.getSnapshot()).toMatchObject({
+        status: 'ready',
+        snapshot: { fileIndex: { 'private.ts': { kind: 'text' } } },
+      });
+      await lease.release();
+      const comments = await runtime.acquirePreviewVisualCommentStore('synthetic' as SessionId);
+      comments.setState((draft) => {
+        draft.meta.sessionId = 'synthetic';
+      });
+      expect(comments.getState().meta.sessionId).toBe('synthetic');
+      runtime.releasePreviewVisualCommentStoreRef('synthetic' as SessionId);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it('opens protected content offline, then enables only minimal presence on authentication', async () => {
     const provider = () =>
       createLoroStreamsTokenProviderLegacy({

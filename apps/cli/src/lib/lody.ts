@@ -292,7 +292,7 @@ export class Lody {
       this.machineId,
       (input) => this.runtime.offerEncryptedRpcTurn(input),
       (event) => this.logger.debug('[e2ee-rpc-timing]', event),
-      (input, expiresAt, signal) => this.runtime.readEncryptedQuery(input, expiresAt, signal)
+      (request, context) => this.runtime.handleEncryptedFeatureRpc(request, context)
     );
     this.documentManager.ensureMachineFlockDocJoined(this.machineId, { reason: 'lody-start' });
   }

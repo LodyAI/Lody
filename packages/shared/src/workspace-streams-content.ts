@@ -1,3 +1,4 @@
+import { isWorkspaceCodeCollabFlockDocId } from './code-collab-rooms';
 import { parseMachineFlockDocId } from './machine-flock';
 import { getWorkspaceFlockDocId } from './workspace-flock';
 import type { WorkspaceId } from './ids';
@@ -66,7 +67,8 @@ export function encryptedWorkspaceRoom(
     const machine = parseMachineFlockDocId(room.flockDocId);
     if (
       (machine && machine.workspaceId === workspaceId) ||
-      room.flockDocId === getWorkspaceFlockDocId(workspaceId as WorkspaceId)
+      room.flockDocId === getWorkspaceFlockDocId(workspaceId as WorkspaceId) ||
+      isWorkspaceCodeCollabFlockDocId(workspaceId, room.flockDocId)
     )
       return { resource: `flock:${room.flockDocId}`, model: 'flock' };
   }
@@ -107,7 +109,13 @@ export function workspaceSupports(
   content: WorkspaceStreamsMode,
   feature: WorkspaceRestrictedFeature
 ): boolean {
-  return content.mode === 'plaintext' || feature === 'presence';
+  if (
+    feature === 'preview-comments' ||
+    feature === 'code-collab-index' ||
+    feature === 'remote-preview'
+  )
+    return true;
+  return content.mode === 'plaintext' || feature === 'presence' || feature === 'export';
 }
 
 /** Verified host facts only. This state never supplies ledger authority. */

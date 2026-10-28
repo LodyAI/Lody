@@ -1,4 +1,4 @@
-import { requireWorkspaceFeature, WorkspaceFeatureUnavailableError } from '@/lib/workspace-feature';
+import { requireWorkspaceFeature } from '@/lib/workspace-feature';
 import {
   requirePlaintextWorkspaceStreamsContent,
   type WorkspaceStreamsContent,
@@ -227,19 +227,17 @@ export function resolveWorkspaceRuntimeCacheIdentity(
 
 export type WorkspaceE2eeTransport = {
   createTokenProvider(signal: AbortSignal): ReturnType<typeof createLoroStreamsTokenProviderLegacy>;
-  createRpcTokenProvider?(
+  createRpcTokenProvider(
     signal: AbortSignal
   ): ReturnType<typeof createLoroStreamsTokenProviderLegacy>;
   bucketId(): string | null;
-  prepareQuery?: (
-    machineId: string,
-    input: import('@lody/shared/e2ee-rpc').E2eeQueryInput
+  prepareFeatureRpc?: (
+    input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput
   ) => Promise<import('@lody/shared/e2ee-rpc').E2eePreparedDispatch>;
-  acceptQueryResponse?: (
-    machineId: string,
-    input: import('@lody/shared/e2ee-rpc').E2eeQueryInput,
+  acceptFeatureRpcResponse?: (
+    input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput,
     frame: string
-  ) => Promise<import('@lody/shared/e2ee-rpc').E2eeQueryResult | null>;
+  ) => Promise<import('@lody/shared/local-machine-rpc').LocalMachineRpcResponse | null>;
   prepareDispatch?: (
     machineId: string,
     args: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
@@ -1872,6 +1870,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   let encryptedDispatch:
     | ReturnType<typeof import('./encrypted-dispatch-legacy').createEncryptedDispatchLegacy>
     | undefined;
+  let encryptedRpcToken:
+    | ReturnType<NonNullable<typeof deps.e2ee>['createRpcTokenProvider']>
+    | undefined;
   const ensureEncryptedRpc = async () => {
     if (disposePromise) throw new Error('Runtime disposed');
     if (!encryptedDispatch) {
@@ -1880,21 +1881,20 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       const native = deps.e2ee;
       if (!native?.prepareDispatch || !native.acceptDispatchResponse)
         throw new Error('e2ee_rpc_unavailable');
-      let rpcProvider: ReturnType<typeof createLoroStreamsTokenProviderLegacy> | undefined;
       encryptedDispatch ??= createEncryptedDispatchLegacy({
-        closeClient: async () => {
-          await rpcProvider?.close();
-        },
         workspaceId,
         prepare: native.prepareDispatch,
-        prepareQuery: native.prepareQuery,
-        acceptQueryResponse: native.acceptQueryResponse,
         accept: native.acceptDispatchResponse,
+        prepareFeature: native.prepareFeatureRpc,
+        acceptFeature: native.acceptFeatureRpcResponse,
+        closeClient: async () => {
+          await encryptedRpcToken?.close();
+          encryptedRpcToken = undefined;
+        },
         client: async (signal) => {
           if (!native.createRpcTokenProvider) throw new Error('e2ee_rpc_unavailable');
-          rpcProvider ??= native.createRpcTokenProvider(signal);
-          await rpcProvider.getToken();
-          const provider = rpcProvider;
+          const provider = (encryptedRpcToken ??= native.createRpcTokenProvider(signal));
+          await provider.getToken();
           const streamsBaseUrl = getStreamsBaseUrlForProvider(provider);
           const bucketId = native.bucketId();
           if (!bucketId || bucketId === LORO_STREAMS_BUCKET_ID)
@@ -1926,8 +1926,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   ): Promise<LoroStreamsMachineRpcClient> => {
     if (protectedContent) {
       if (
-        !deps.e2ee?.prepareQuery ||
-        !deps.e2ee.acceptQueryResponse ||
+        !deps.e2ee?.prepareFeatureRpc ||
+        !deps.e2ee.acceptFeatureRpcResponse ||
         !deps.e2ee.createRpcTokenProvider
       )
         throw new Error('e2ee_rpc_unavailable');
@@ -2025,6 +2025,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestLocalProjectControl,
     requestMachineBugReport,
     requestLocalMcpTools,
+    requestLocalMcpAuthentication,
     requestMemoryProvider,
     requestMachinePiExtensions,
   } = createWorkspaceMachineRpcFacade({
@@ -2036,6 +2037,13 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     workspaceId,
     targetRouter,
     getMachineRpcClient,
+    ...(protectedContent
+      ? {
+          requestEncryptedFeature: async (
+            request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest
+          ) => (await ensureEncryptedRpc()).requestFeature(request),
+        }
+      : {}),
   });
 
   /**
@@ -4904,10 +4912,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const createPreviewVisualCommentStore = async (
     sessionId: SessionId
   ): Promise<PreviewVisualCommentDocStore> => {
-    requireWorkspaceFeature(
-      { mode: protectedContent ? 'protected' : 'plaintext' },
-      'preview-comments'
-    );
     const roomId = getPreviewCommentRoomId(sessionId);
     const persistedDoc = await repo.openPersistedDoc(roomId);
 
@@ -5551,14 +5555,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   }, RECONNECT_BACKSTOP_INTERVAL_MS);
 
   window.repo = repo;
-  const codeCollabFileIndexCache = protectedContent
-    ? {
-        acquire: async () => {
-          throw new WorkspaceFeatureUnavailableError('code-collab-index');
-        },
-        dispose: async () => {},
-      }
-    : createCodeCollabFileIndexCache(repo);
+  const codeCollabFileIndexCache = createCodeCollabFileIndexCache(repo);
   const sendResources = createSessionSendResources({
     acquire: sessionStoreCache.acquire,
     releaseRef: sessionStoreCache.releaseRef,
@@ -5769,6 +5766,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestLocalProjectControl,
     requestMachineBugReport,
     requestLocalMcpTools,
+    requestLocalMcpAuthentication,
     requestMemoryProvider,
     requestMachinePiExtensions,
     dispose,

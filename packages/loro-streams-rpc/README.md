@@ -38,7 +38,7 @@ request does not stop the workspace. Originals and execution evidence are not
 automatically collected. See the [implementation decision and validation limits](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-streams-dispatch.md).
 
 The pure codecs in `src/e2ee-wire.ts` also define nested error and presence
-bodies. Encrypted read queries use the host integration below; the reserved encrypted presence codec remains unused.
+bodies; those codecs do not enable additional RPC methods or presence transport.
 
 ## Request deadlines
 
@@ -80,26 +80,13 @@ pnpm test:integration
 The integration command starts a local server through `loro dev --db-path ...` and
 then runs the transport tests against it.
 
-## Encrypted read queries
+## Encrypted file and preview features
 
-Encrypted workspaces route existing machine reads through the same purpose-8/9 channel.
-The closed allowlist in `@lody/shared/e2ee-rpc` admits ten state/file/text/LSP method names.
-LSP keeps its existing unsupported result. Pi extension discovery, memory list, project Git
-queries, history and diff reads stay disabled: their handlers can install/run commands,
-initialize storage or flush writes. File reads observe existing paths and already-open
-project catalogs, without directory creation, link repair, watchers or sync-on-miss.
-Markdown worktree discovery returns an explicit unsupported error; direct file paths remain readable.
-Hosts authenticate current readers and the target machine's ledger membership, and target
-responses must carry that machine device's signature. Reads never claim an execution journal.
-
-JSON outcomes are paged into at most 32 signed frames carrying 512 KiB of result bytes each;
-every sealed frame stays below 1 MiB. Missing pages remain incomplete, including when the
-terminal page arrives first. An outcome above 16 MiB returns an explicit truncated/too-large
-error and requires a smaller application page or range. The complete ciphertext outcome is
-saved before publication, and retries reuse those exact frames.
-
-RPC token providers are separate from document providers. `rpcOnly: true` grants read,
-create and append only under `<workspace>:e2ee-rpc:`, including for Guests; it grants no
-document/snapshot writes. This requires the matching optional-cloud backend change.
-Ordinary workspaces retain their existing transport and codecs. See the
-[read-query decision](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-read-queries.md).
+Encrypted workspaces route Code Collab, restricted file preview and preview controls
+through the existing signed workspace RPC domain. The native host retains request
+and response originals and validates all result pages before returning a complete DTO;
+the renderer shares dispatch's response owner. Audited machine/file reads use that same
+codec with read authority and no execution journal. See the
+[read boundary](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-read-queries.md). The format,
+room boundaries and acceptance limits are recorded in the
+[availability decision](../../.agents/notes/implemented/feature/2026-10-28-e2ee-file-preview-availability.md).

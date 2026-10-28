@@ -5,6 +5,7 @@ import * as tar from 'tar';
 import * as managedRuntime from '../src/agent/managed-agent-runtime';
 import * as processFacade from '@lody/shared/node/process';
 import {
+  callEncryptedReadFeature,
   decryptCodeCollabV2RpcPayload,
   encryptCodeCollabV2RpcPayload,
 } from '@lody/loro-streams-rpc';
@@ -203,7 +204,12 @@ describe('MessageHandler file preview workspace lifecycle', () => {
             ? await encryptCodeCollabV2RpcPayload(sessionId, params)
             : params,
       } as E2eeQueryInput;
-      const admitted = await Effect.runPromise(f.sender.prepareQuery(f.machineId, input)).then(
+      const admitted = await Effect.runPromise(
+        f.sender.prepareFeature({
+          requestId: 'aa'.repeat(16),
+          request: { workspaceId, machineId, method, params },
+        } as never)
+      ).then(
         () => true,
         () => false
       );
@@ -385,32 +391,35 @@ describe('MessageHandler file preview workspace lifecycle', () => {
         const before = diskSnapshot();
         const wrapped = method.startsWith('file/') || method.startsWith('code-collab/');
         const input = {
-          queryId: 'guest-read',
-          method,
-          params: wrapped ? await encryptCodeCollabV2RpcPayload(sessionId, payload) : payload,
-        } as E2eeQueryInput;
-        const prepared = await Effect.runPromise(f.sender.prepareQuery(f.machineId, input));
+          requestId: 'bb'.repeat(16),
+          request: {
+            workspaceId,
+            machineId,
+            method,
+            ...(wrapped ? { ownerSessionId: sessionId } : {}),
+            params: payload,
+          },
+        } as import('@lody/shared/e2ee-rpc').E2eeFeatureInput;
+        const prepared = await Effect.runPromise(f.sender.prepareFeature(input));
         const opened = await Effect.runPromise(
-          f.receiver.openQuery(f.machineId, prepared.frameHex)
+          f.receiver.openFeature(f.machineId, prepared.frameHex)
         );
-        const outcome = await handler.readEncryptedQuery(
-          opened.input,
-          Number.MAX_SAFE_INTEGER,
-          new AbortController().signal
-        );
+        if (!opened) throw new Error('missing request');
+        const outcome = await handler.readEncryptedMachineRequest(opened.input.request, {
+          requestId: opened.requestId,
+          expiresAt: Number.MAX_SAFE_INTEGER,
+          signal: new AbortController().signal,
+        });
         const frames = await Effect.runPromise(
-          f.receiver.queryResponse(f.machineId, opened, outcome)
+          f.receiver.sealFeatureResult(f.machineId, opened, outcome)
         );
         let accepted;
         for (const frame of frames)
           accepted = await Effect.runPromise(
-            f.sender.acceptQueryResponse(f.machineId, input, Buffer.from(frame).toString('hex'))
+            f.sender.acceptFeatureResponse(input, Buffer.from(frame).toString('hex'))
           );
-        expect(accepted).toHaveProperty('result');
-        const result = accepted && 'result' in accepted ? accepted.result : undefined;
-        expect(
-          wrapped ? await decryptCodeCollabV2RpcPayload(result as never, sessionId) : result
-        ).toMatchObject(expected);
+        expect(accepted?.ok).toBe(true);
+        expect(accepted?.ok ? accepted.result : undefined).toMatchObject(expected);
         expect({ disk: diskSnapshot(), processEvents }).toEqual({
           disk: before,
           processEvents: [],
@@ -553,6 +562,53 @@ describe('MessageHandler file preview workspace lifecycle', () => {
       processRun.mockRestore();
     }
   });
+
+  it.each(['file/preview', 'code-collab/open-text'] as const)(
+    'adapts both %s callers to the same plain feature DTO',
+    async (method) => {
+      await encryptedHandler();
+      writeArtifact();
+      const params = {
+        ...(method === 'file/preview' ? { v: 3 } : {}),
+        sessionId,
+        path: 'artifact.txt',
+      };
+      const direct = {
+        workspaceId,
+        machineId,
+        ownerSessionId: sessionId,
+        method,
+        params,
+      } as import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest;
+      const context = {
+        requestId: 'shared-read',
+        expiresAt: Number.MAX_SAFE_INTEGER,
+        signal: new AbortController().signal,
+      };
+      const baseline = diskSnapshot();
+      const response = await handler.readEncryptedMachineRequest(direct, context);
+      expect(response.ok).toBe(true);
+      const result = await callEncryptedReadFeature({
+        workspaceId,
+        machineId,
+        method,
+        params: await encryptCodeCollabV2RpcPayload(sessionId, params),
+        timeoutMs: 30_000,
+        request: async (sharedRequest) => {
+          expect({ ...sharedRequest, timeoutMs: undefined }).toEqual({
+            ...direct,
+            timeoutMs: undefined,
+          });
+          return handler.readEncryptedMachineRequest(sharedRequest, context);
+        },
+      });
+      expect(result).toHaveProperty('result');
+      expect(await decryptCodeCollabV2RpcPayload(result.result as never, sessionId)).toEqual(
+        response.ok ? response.result : undefined
+      );
+      expect(diskSnapshot()).toEqual(baseline);
+    }
+  );
 
   it('rejects cross-machine, cross-workspace and session-scoped project probes before filesystem access', async () => {
     for (const scope of [

@@ -223,6 +223,15 @@ export interface E2eeWorkspaceRuntime {
   ): Promise<{ header: Uint8Array; sealed: Uint8Array }>;
   openContent(workspaceId: string, input: E2eeContentOpen): Promise<Uint8Array>;
   /** Purpose-bound native preparation; persists the original before returning ciphertext. */
+  prepareFeatureRpc?(
+    workspaceId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput
+  ): Promise<import('@lody/shared/e2ee-rpc').E2eePreparedDispatch>;
+  acceptFeatureRpcResponse?(
+    workspaceId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput,
+    frame: string
+  ): Promise<import('@lody/shared/local-machine-rpc').LocalMachineRpcResponse | null>;
   prepareDispatch?(
     workspaceId: string,
     targetMachineId: string,
@@ -235,19 +244,6 @@ export interface E2eeWorkspaceRuntime {
     input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput,
     frameHex: string
   ): Promise<import('@lody/shared/e2ee-rpc').E2eeDispatchAck>;
-  /** Prepare an allowlisted read with native request identity, target binding and retained ciphertext. */
-  prepareQuery?(
-    workspaceId: string,
-    targetMachineId: string,
-    input: import('@lody/shared/e2ee-rpc').E2eeQueryInput
-  ): Promise<import('@lody/shared/e2ee-rpc').E2eePreparedDispatch>;
-  /** Retain target-signed response pages; null means an incomplete result, never success. */
-  acceptQueryResponse?(
-    workspaceId: string,
-    targetMachineId: string,
-    input: import('@lody/shared/e2ee-rpc').E2eeQueryInput,
-    frameHex: string
-  ): Promise<import('@lody/shared/e2ee-rpc').E2eeQueryResult | null>;
   /** Explicitly archive local originals and require fresh independently approved pairing. */
   resetIdentity?(input: {
     workspaceId?: string;

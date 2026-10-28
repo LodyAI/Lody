@@ -142,6 +142,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   public acpSessionId: ACPSessionId | null = null;
   private acpCapabilities: AcpCapabilitiesResult | null = null;
   private acpCapabilitySourceVersion: string | null = null;
+  private releaseExternalMcpServers?: () => Promise<void>;
   public terminalManager: TerminalManager;
 
   constructor(
@@ -375,7 +376,12 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       throw new Error(`Session ${this.sessionId} sandbox cleanup is unresolved`, { cause: error });
     }
 
-    await this.credentials.release();
+    for (const outcome of await Promise.allSettled([
+      this.credentials.release(),
+      this.cleanupExternalMcpServers(),
+    ])) {
+      if (outcome.status === 'rejected') failures.push(outcome.reason);
+    }
     this.activeProcess = null;
     this.agentProcess = null;
     this.agentClient = null;
@@ -549,6 +555,9 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   }
 
   async createAgent(callbacks: CreateAgentConfig): Promise<string> {
+    this.releaseExternalMcpServers = callbacks.releaseExternalMcpServers;
+    const releaseMcp = callbacks.releaseExternalMcpServers;
+    let established = false;
     this.acpCapabilitySourceVersion = callbacks.capabilitySourceVersion ?? null;
     const loginShellEnv = await getLoginShellEnvLegacy();
     callbacks.abortSignal?.throwIfAborted();
@@ -662,7 +671,11 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         this.logger.debug(
           `[${this.sessionId}] ACP agent process exited with code ${code} signal ${signal}`
         );
-        this.agentProcess = null;
+        if (this.agentProcess === agentProcessHandle) this.agentProcess = null;
+        if (established)
+          void this.cleanupExternalMcpServers(releaseMcp).catch(() => {
+            this.logger.error(`[${this.sessionId}] MCP connection cleanup failed.`);
+          });
         void agentProcessHandle
           .inspectExit(code, signal)
           .then((violation) => {
@@ -825,7 +838,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         }
       );
     try {
-      return await runCodexRefreshStartupWithRetry({
+      const result = await runCodexRefreshStartupWithRetry({
         attempt: () => startAttempt(false),
         retryAttempt: callbacks.revalidateManagedCodexProfile
           ? () => startAttempt(true)
@@ -837,10 +850,27 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
             `[${this.sessionId}] Retrying Codex session startup after refresh contention`
           ),
       });
+      established = true;
+      if (!this.agentProcess) await this.cleanupExternalMcpServers(releaseMcp);
+      return result;
     } catch (error) {
       await cleanupFailedAttempt();
+      await this.cleanupExternalMcpServers(releaseMcp);
       throw error;
     }
+  }
+
+  private async cleanupExternalMcpServers(release = this.releaseExternalMcpServers): Promise<void> {
+    await release?.();
+    if (this.releaseExternalMcpServers === release) this.releaseExternalMcpServers = undefined;
+  }
+
+  async validateMcpRequester(userId: string): Promise<void> {
+    if (!this.config.mcpServerIds?.length || userId === this.config.requesterUserId) return;
+    await this.terminate(true);
+    throw new Error(
+      'The MCP user changed. Start a new turn to use this user’s local authorization.'
+    );
   }
 
   getAcpCapabilities(): AcpCapabilitiesResult | null {

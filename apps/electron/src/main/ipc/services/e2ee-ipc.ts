@@ -1412,7 +1412,7 @@ export class E2eeIpc extends IpcService {
         credential: access.credential,
         ...(rejectedToken ? { rejectedToken } : {}),
         ...(requestSnapshotFor ? { requestSnapshotFor } : {}),
-        ...(rpcOnly === true ? { rpcOnly: true } : {})
+        ...(rpcOnly ? { rpcOnly } : {})
       })
     ).catch((error) => {
       if (error instanceof E2eeMemberRemovedError) return this.removeLocalWorkspace(access)
@@ -1450,33 +1450,31 @@ export class E2eeIpc extends IpcService {
     )
   }
   @IpcMethod()
-  async prepareQuery(
+  async prepareFeatureRpc(
     workspaceId: string,
-    targetMachineId: string,
-    input: import('@lody/shared/e2ee-rpc').E2eeQueryInput
+    input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput
   ) {
     const id = sender()
     return withDesktopE2eeAccount(
       (owner) =>
         owner.readers.get(workspaceId)?.has(id)
-          ? owner.host.prepareQuery(workspaceId, targetMachineId, input)
+          ? owner.host.prepareFeatureRpc(workspaceId, input)
           : Effect.fail(new Error('e2ee_not_open')),
       workspaceId,
       false
     )
   }
   @IpcMethod()
-  async acceptQueryResponse(
+  async acceptFeatureRpcResponse(
     workspaceId: string,
-    targetMachineId: string,
-    input: import('@lody/shared/e2ee-rpc').E2eeQueryInput,
-    frameHex: string
+    input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput,
+    frame: string
   ) {
     const id = sender()
     return withDesktopE2eeAccount(
       (owner) =>
         owner.readers.get(workspaceId)?.has(id)
-          ? owner.host.acceptQueryResponse(workspaceId, targetMachineId, input, frameHex)
+          ? owner.host.acceptFeatureRpcResponse(workspaceId, input, frame)
           : Effect.fail(new Error('e2ee_not_open')),
       workspaceId,
       false

@@ -1,3 +1,4 @@
+import { SessionLiveStatusResponseSchema as LoroSessionLiveStatusRpcResponseSchema } from '@lody/shared/local-machine-rpc';
 import { isE2eeReadQuery, type E2eeQueryResult } from '@lody/shared/e2ee-rpc';
 import {
   SessionFileRootIdSchema,
@@ -811,31 +812,7 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroLocalProjectControlRpcRequestSchema,
 ]);
 
-const SessionLiveStateSchema = z.enum(['idle', 'initializing', 'running', 'waiting', 'unknown']);
-
-export const LoroSessionLiveStatusRpcResponseSchema = z.discriminatedUnion('success', [
-  z
-    .object({
-      type: z.literal('session/live-status_response'),
-      machineId: z.string().trim().min(1),
-      sessionId: z.string().trim().min(1),
-      success: z.literal(true),
-      state: SessionLiveStateSchema,
-      observedAtMs: z.number().finite().nonnegative(),
-      reason: z.string().trim().min(1).optional(),
-    })
-    .strict(),
-  z
-    .object({
-      type: z.literal('session/live-status_response'),
-      machineId: z.string().trim().min(1),
-      sessionId: z.string().trim().min(1),
-      success: z.literal(false),
-      state: z.literal('unknown'),
-      error: z.string().trim().min(1),
-    })
-    .strict(),
-]);
+export { SessionLiveStatusResponseSchema as LoroSessionLiveStatusRpcResponseSchema } from '@lody/shared/local-machine-rpc';
 
 export const LoroLocalProjectGitStateRpcResponseSchema = z.discriminatedUnion('success', [
   z

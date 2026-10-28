@@ -71,7 +71,7 @@ XChaCha20-Poly1305 protected blobs. It never joins the renderer IPC registry or
 starts from application bootstrap. The explicit E2EE IPC methods create
 or reopen an account-bound local pending request and workspace runtime; they expose public state and room-bound content seal/open; device access credentials stay in main, with no arbitrary signing or content-key export. It rejects local composition
 before authentication/native access and checks the main-process account session.
-The encrypted adapter enables only Meta, Loro session documents and the owning workspace/machine Flocks; unsupported rooms and plaintext side channels stay closed.
+The encrypted adapter enables Meta, Loro documents and the owning workspace/machine/Code Collab index and signal Flocks; unsupported rooms and plaintext side channels stay closed.
 `e2ee-custody-electron.ts` is the readiness-gated native composition factory.
 Reject unavailable native encryption and Linux `basic_text`/unknown backends;
 never reuse auth cookie plaintext overrides or fall back to plaintext files.

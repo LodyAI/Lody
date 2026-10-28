@@ -11,6 +11,8 @@ export type E2eePreparedDispatch = {
   requestId: string;
   targetMachineId: string;
   frameHex: string;
+  /** Feature requests only: ordered, individually signed chunks of one original. */
+  frames?: string[];
   requesterDevice: string;
   expiresAt: number;
 };
@@ -22,6 +24,27 @@ export type E2eeDispatchAck = {
   accepted: boolean;
   disposition: 'accepted' | 'duplicate' | 'already-terminal' | 'not-owned' | 'error';
 };
+
+import { z } from 'zod';
+import { LocalMachineRpcRequestSchema, type LocalMachineRpcRequest } from './local-machine-rpc';
+
+/** Network access stays restricted to the existing file and preview product surfaces. */
+export const isE2eeFeatureMethod = (method: string): boolean =>
+  method.startsWith('code-collab/') ||
+  method === 'file/preview' ||
+  method === 'session/preview-create' ||
+  method === 'session/preview-revoke' ||
+  method === 'session/preview-status';
+export const E2eeFeatureInputSchema = z
+  .object({
+    requestId: z.string().regex(/^[0-9a-f]{32}$/),
+    request: LocalMachineRpcRequestSchema.refine(
+      (request) =>
+        isE2eeFeatureMethod(request.method) || isE2eeReadQuery(request.method, request.params)
+    ),
+  })
+  .strict();
+export type E2eeFeatureInput = { requestId: string; request: LocalMachineRpcRequest };
 
 /** Closed set of reads with no machine writes, process/worker starts or lazy storage setup. */
 export const E2EE_READ_QUERY_METHODS = [
@@ -37,7 +60,7 @@ export const E2EE_READ_QUERY_METHODS = [
   'code-collab/lsp-references',
 ] as const;
 export type E2eeReadQueryMethod = (typeof E2EE_READ_QUERY_METHODS)[number];
-/** Params use the existing method codec, including owner-session envelopes. */
+/** In-process ordinary-method adapter intent, never an encrypted wire payload. */
 export type E2eeQueryInput = { queryId: string; method: E2eeReadQueryMethod; params: unknown };
 /** Encrypted method outcome; raw host exceptions never cross this boundary. */
 export type E2eeQueryResult =
