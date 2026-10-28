@@ -47,7 +47,9 @@ export const MemoryProviderResponseSchema = z
   .strict();
 export type MemoryProviderResponse = z.infer<typeof MemoryProviderResponseSchema>;
 
-/** UI metadata only. Commands and environment mapping belong to the daemon adapter. */
+/** External identity inventories. Built-in memory derives identity from the current Role,
+ * so it has no machine-scoped association or machine/memory inventory.
+ * Commands and environment mapping belong to the daemon adapter. */
 export const MEMORY_PROVIDERS = [
   {
     id: 'nowledge-mem',

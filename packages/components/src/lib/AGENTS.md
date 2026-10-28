@@ -34,7 +34,7 @@ Background: [components](../../../../.agents/docs/components-package.md),
   still signed in; reloads one window) and `startHardReset` (full wipe/sign-out,
   host-native first, own confirmation). Defer deletes to next boot; clear synchronous
   storage BEFORE the flag. Record a clear's result; never re-run it unasked.
-- Cache clearing uses a localStorage DELETE list, never a keep-allowlist. Include
+- Cache clearing uses a localStorage DELETE list. Preserve personal-memory DBs. Include
   connection caches (Streams JWT/gateway, cursor-bypass, workspace-info) and new
   `lody:*` cache keys; retain auth tokens and preferences.
 - Reports copy the `lib/session-render-trace.ts` tail; writers append one compact line,

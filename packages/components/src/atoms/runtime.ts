@@ -1,3 +1,4 @@
+import type { PersonalMemoryHandle } from '@lody/memory/repo';
 import type {
   MemoryProviderRequest,
   MemoryProviderResponse,
@@ -186,6 +187,7 @@ export type ScheduleDocStore = {
 };
 
 export type WorkspaceRuntime = {
+  openPersonalMemory?: (roleId: string, machineId: MachineId) => Promise<PersonalMemoryHandle>;
   /**
    * The workspace slug used for caching the (slug, id) mapping.
    */

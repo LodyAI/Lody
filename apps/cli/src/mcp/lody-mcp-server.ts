@@ -1,3 +1,4 @@
+import { registerMemoryTools } from './memory-tools';
 import { resolveSessionPullRequests } from '@lody/shared';
 import { turnNotificationAudience } from '@/lib/notifications/turn-notification-audience';
 import { registerAgentRoleTools } from './agent-role-tools';
@@ -3904,6 +3905,18 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     },
     handlers
   );
+
+  registerMemoryTools(registerSessionTool, async () => {
+    const workspace = getDaemonWorkspace();
+    if (!workspace) throw new Error('memory_unavailable');
+    const source = await resolveInvokingTurnSource();
+    return {
+      sessionId: getSessionContext().sessionId,
+      turnId: source.id,
+      open: () =>
+        workspace.manager.openAgentMemory(source.userId, source.inputConfig, workspace.machineId),
+    };
+  });
 
   registerAgentRoleTools(
     registerSessionTool,

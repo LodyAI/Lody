@@ -112,3 +112,43 @@ auto-select an identity. The Role page has no machine tabs or machine filtering.
 Assigned memories show “Linked:” followed by the accessible bound Roles’ emoji avatars.
 Desktop hover/focus reveals the Role name; mobile tapping opens a name popover.
 Assignments match any of a Role's machine targets by machine, provider and memory ID, and update with the Role catalog.
+
+## Proposed built-in personal memory
+
+The machine-scoped association/environment behavior above continues to describe
+external providers such as Nowledge. The proposed built-in provider uses
+`@lody/memory`: within a workspace, one trusted user and stable Role resolve to one logical memory,
+independent of machine, model and Role name. A copied Role gets an independent
+memory. Only personal mode is supported initially; shared Role ownership is not an
+implicit fallback or conversion of personal data.
+
+Loro is the sole authority. A memory uses root `meta` and `documents` Maps; `meta`
+holds format version and identity. Relative Markdown paths are document Map keys,
+with mergeable Map/Text containers for metadata, body and source records.
+Same-path concurrent creation addresses one document without a separate uniqueness
+index. Paths are identities: rename migrates visible content and sources to another
+path, not the old CRDT identity. A visible destination is not implicitly overwritten.
+`MEMORY.md` is the short entry; wiki links resolve within this memory. Descriptions
+improve navigation and ranking without excluding body-only matches.
+Deletion removes the parent key; reads/updates never reactivate missing paths.
+Explicit creation may reuse a deleted path and its retained history. No extra
+business tombstones are maintained.
+
+Hosts authorize the current execution and pass a bound Doc; model inputs cannot
+choose another principal, Role or memory. Existing renderer/CLI authorship and local
+durability remain host responsibilities. In-memory commit is not a save receipt.
+Production sync remains unavailable until the personal resource authorization and
+existing E2EE adapters protect the complete data boundary. No plaintext fallback
+or independent encryption scheme is permitted. Nowledge data is neither migrated
+nor altered by adding this provider.
+
+The [package document service](../packages/memory/README.md), including CRUD,
+paged reading, search, provenance and startup-context assembly, is implemented;
+local Agent prompt injection, MCP tools, Role-editor management and separate
+SQLite/IndexedDB persistence are wired. The local data plane replicates Renderer
+edits to CLI without proxy authoring. Production cross-device sync remains disabled.
+Unlinking/Role deletion revokes later Agent access without destroying stored content;
+previously disclosed conversation context is not erased. Local management requires
+a daemon advertising `builtinMemory: 1`. Ordinary cache clearing retains personal
+memory; explicit full reset may delete the local replica. This proposed ownership
+and storage contract remains draft, not human-approved by test results.

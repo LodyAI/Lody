@@ -1,3 +1,4 @@
+import { isBuiltinMemoryBinding } from '@lody/memory';
 import {
   AGENT_ROLE_VERSION,
   ACP_CONFIG_OPTION_OFF_VALUE,
@@ -202,10 +203,11 @@ export const suggestAgentRoleTarget = (input: {
     sameAgent.find((candidate) => candidate.name === sourceConfig.name) ?? sameAgent[0];
   const memory = source.memory;
   const memoryLinked =
-    memory !== undefined &&
-    input.memories.some(
-      (entry) => entry.providerId === memory.providerId && entry.memoryId === memory.memoryId
-    );
+    isBuiltinMemoryBinding(memory) ||
+    (memory !== undefined &&
+      input.memories.some(
+        (entry) => entry.providerId === memory.providerId && entry.memoryId === memory.memoryId
+      ));
   return {
     ...empty,
     ...(config

@@ -1,3 +1,4 @@
+import { PERSONAL_MEMORY_DATABASE_PREFIX } from '@lody/memory';
 /**
  * "Clear cache" support shared by web, mobile (Capacitor), and desktop (Electron).
  *
@@ -262,6 +263,7 @@ export async function clearAllLodyLocalCache(extraNames: string[] = []): Promise
       [...names].filter(
         (name) =>
           !name.startsWith(PROMPT_SHORTCUT_DATA_PREFIX) &&
+          !name.startsWith(PERSONAL_MEMORY_DATABASE_PREFIX) &&
           name !== SESSION_INPUT_DATABASE &&
           name !== CLIENT_LOG_DATABASE
       )
@@ -699,7 +701,9 @@ export async function maybeClearLodyCacheOnBoot(extraNames: string[] = []): Prom
     extraNames.filter(
       (name) =>
         mode === 'hard' ||
-        (!name.startsWith(PROMPT_SHORTCUT_DATA_PREFIX) && name !== SESSION_INPUT_DATABASE)
+        (!name.startsWith(PROMPT_SHORTCUT_DATA_PREFIX) &&
+          !name.startsWith(PERSONAL_MEMORY_DATABASE_PREFIX) &&
+          name !== SESSION_INPUT_DATABASE)
     )
   );
   if (failed.length > 0) recordLateClearFailures(failed.length);

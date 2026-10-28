@@ -311,6 +311,9 @@ importers:
       '@lody/loro-streams-rpc':
         specifier: workspace:*
         version: link:../../packages/loro-streams-rpc
+      '@lody/memory':
+        specifier: workspace:*
+        version: link:../../packages/memory
       '@lody/platform':
         specifier: workspace:*
         version: link:../../packages/platform
@@ -1145,6 +1148,9 @@ importers:
       '@lody/loro-streams-rpc':
         specifier: workspace:*
         version: link:../loro-streams-rpc
+      '@lody/memory':
+        specifier: workspace:*
+        version: link:../memory
       '@lody/platform':
         specifier: workspace:*
         version: link:../platform
@@ -1716,6 +1722,31 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^3.2.4
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@24.10.12)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)
+
+  packages/memory:
+    dependencies:
+      loro-crdt:
+        specifier: 'catalog:'
+        version: 1.17.0
+      loro-repo:
+        specifier: 'catalog:'
+        version: 0.25.0(@loro-dev/flock-wasm@0.4.4)(@loro-dev/flock@4.4.4)(@loro-dev/streams-crdt@0.19.2(@loro-dev/flock-wasm@0.4.4)(effect@4.0.2)(loro-crdt@1.17.0))(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)(effect@4.0.2)(loro-crdt@1.17.0)
+      zod:
+        specifier: 4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.10.12
+      oxfmt:
+        specifier: ^0.65.0
+        version: 0.65.0
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 3.2.4
         version: 3.2.4(@types/debug@4.1.12)(@types/node@24.10.12)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)
 
   packages/platform:

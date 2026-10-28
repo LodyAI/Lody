@@ -1,3 +1,5 @@
+import { BUILTIN_MEMORY_BINDING, isBuiltinMemoryBinding } from '@lody/memory';
+import { BuiltinMemoryEditor } from './builtin-memory-editor';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
@@ -939,21 +941,56 @@ export function MemoryEditor({
 }
 
 export function RoleMemoryPicker({
+  roleId,
   machineId,
   value,
   onChange,
 }: {
+  roleId?: string;
   machineId: MachineId;
   value?: MemoryBinding;
   onChange: (value?: MemoryBinding) => void;
 }) {
   const { t } = useTranslation();
+  const [editingMemory, setEditingMemory] = useState(false);
   const { entries } = useMemoryAssociations(machineId);
   const { machines } = useVisibleMachineMetas();
   const supported = machineSupportsMemoryProviders(machines.get(machineId));
+  const builtinSupported = (machines.get(machineId)?.protocolCapabilities?.builtinMemory ?? 0) >= 1;
   return (
     <div {...stylex.props(styles.stack)}>
-      <span {...stylex.props(catalog.meta)}>{t('settings.memory.rolePromptHint')}</span>
+      <div {...stylex.props(styles.row)}>
+        <Button
+          type="button"
+          variant={isBuiltinMemoryBinding(value) ? 'primary' : 'ghost'}
+          disabled={!builtinSupported}
+          onClick={() => onChange(BUILTIN_MEMORY_BINDING)}
+        >
+          {t('settings.memory.builtin.title')}
+        </Button>
+        {roleId && (
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={!builtinSupported}
+            onClick={() => setEditingMemory(true)}
+          >
+            {t('settings.memory.builtin.manage')}
+          </Button>
+        )}
+      </div>
+      <span {...stylex.props(catalog.meta)}>{t('settings.memory.builtin.localOnly')}</span>
+      {editingMemory && roleId && (
+        <BuiltinMemoryEditor
+          key={`${roleId}:${machineId}`}
+          roleId={roleId}
+          machineId={machineId}
+          onClose={() => setEditingMemory(false)}
+        />
+      )}
+      {!isBuiltinMemoryBinding(value) && (
+        <span {...stylex.props(catalog.meta)}>{t('settings.memory.rolePromptHint')}</span>
+      )}
       {value ? (
         <div {...stylex.props(styles.unlinkRow)}>
           <Button type="button" size="small" variant="ghost" onClick={() => onChange(undefined)}>
@@ -961,21 +998,19 @@ export function RoleMemoryPicker({
           </Button>
         </div>
       ) : null}
-      {!entries.length ? (
-        <p {...stylex.props(catalog.meta)}>{t('settings.memory.emptyRole')}</p>
-      ) : (
-        MEMORY_PROVIDERS.map((provider) => (
-          <RoleProviderMemories
-            key={provider.id}
-            machineId={machineId}
-            provider={provider}
-            entries={entries.filter((entry) => entry.providerId === provider.id)}
-            supported={supported}
-            value={value}
-            onChange={onChange}
-          />
-        ))
-      )}
+      {!entries.length
+        ? null
+        : MEMORY_PROVIDERS.map((provider) => (
+            <RoleProviderMemories
+              key={provider.id}
+              machineId={machineId}
+              provider={provider}
+              entries={entries.filter((entry) => entry.providerId === provider.id)}
+              supported={supported}
+              value={value}
+              onChange={onChange}
+            />
+          ))}
     </div>
   );
 }

@@ -120,7 +120,8 @@
     "ws": "^8.18.3",
     "yauzl": "^3.4.0",
     "zod": "catalog:",
-    "zstd-stream": "^1.1.0"
+    "zstd-stream": "^1.1.0",
+    "@lody/memory": "workspace:*"
   },
   "files": [
     "dist",

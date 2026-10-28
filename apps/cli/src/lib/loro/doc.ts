@@ -1,3 +1,16 @@
+import { createCliPersonalMemoryRuntime } from './personal-memory';
+import {
+  authorizePersonalMemoryRole,
+  PERSONAL_MEMORY_ROOM_PREFIX,
+  personalMemoryRoleFromRoom,
+} from '@lody/memory';
+import {
+  getAgentRoleTarget,
+  getWorkspaceFlockDocId,
+  listWorkspaceAgentRoles,
+  readWorkspaceFlockRowsFromFlock,
+  type SessionTurnInputConfig,
+} from '@lody/shared';
 import type { CliE2eeWorkspaceLegacy } from '../e2ee/workspace-legacy';
 import { projectRunMetaPatch } from '@/session/project-run-state';
 import type { LodyRateLimitsCapability } from 'acp-extension-core';
@@ -183,11 +196,15 @@ const createLocalLoroDataPlaneServer = (
   repo: LoroRepo,
   workspaceId: WorkspaceId,
   presenceRuntime: CliPresenceRuntimeLegacy,
-  machineMonitorRuntime: CliMachineMonitorRuntime
+  machineMonitorRuntime: CliMachineMonitorRuntime,
+  resolvePersonalMemory: (docId: string) => Promise<LoroDoc>
 ): LocalLoroDataPlaneServerLegacy =>
   new LocalLoroDataPlaneServerLegacy({
     workspaceId,
-    resolveDoc: async (docId) => (await repo.openPersistedDoc(docId)).doc,
+    resolveDoc: async (docId) =>
+      docId.startsWith(PERSONAL_MEMORY_ROOM_PREFIX)
+        ? resolvePersonalMemory(docId)
+        : (await repo.openPersistedDoc(docId)).doc,
     resolveFlockDoc: async (flockDocId) => (await repo.openFlockDoc(flockDocId)).flock,
     // The meta room is the repo's internal metaFlock (`repo.getMeta()`).
     // Renderer `upsertDocMeta` writes must land here so the CLI's doc-metadata
@@ -362,6 +379,7 @@ export type LoroRepoPersistReason =
 
 export class LoroDocumentManager {
   public readonly repo: LoroRepo;
+  private readonly personalMemory: ReturnType<typeof createCliPersonalMemoryRuntime>;
   sessions: Map<SessionId, SessionDocument> = new Map();
   machine: MachineDocument | null = null;
   private readonly workspaceId: WorkspaceId;
@@ -496,7 +514,16 @@ export class LoroDocumentManager {
         createdRepo,
         workspaceId,
         presenceRuntime,
-        machineMonitorRuntime
+        machineMonitorRuntime,
+        async (docId) => {
+          if (!manager) throw new Error('memory_unavailable');
+          const handle = await manager.personalMemory.open(
+            personalMemoryRoleFromRoom(docId, userId)
+          );
+          // This repository never evicts; the server borrows its cached Doc until shutdown.
+          await handle.release();
+          return handle.doc;
+        }
       );
       const metaSub = await traceAsync(
         logger,
@@ -612,6 +639,7 @@ export class LoroDocumentManager {
 
   constructor(options: LoroDocumentManagerOptions) {
     this.repo = options.repo;
+    this.personalMemory = createCliPersonalMemoryRuntime(options.userId, options.workspaceId);
     this.workspaceId = options.workspaceId;
     this.userId = options.userId;
     this.logger = options.logger;
@@ -675,6 +703,26 @@ export class LoroDocumentManager {
         void this.encryptedWorkspace?.refresh();
       }
     );
+  }
+
+  async openAgentMemory(
+    requesterUserId: string,
+    inputConfig: SessionTurnInputConfig,
+    machineId: MachineId
+  ) {
+    // Read the live local catalog: accepted configuration stays frozen, but unlink/delete revokes access.
+    const handle = await this.repo.openFlockDoc(getWorkspaceFlockDocId(this.workspaceId));
+    const role = listWorkspaceAgentRoles(readWorkspaceFlockRowsFromFlock(handle.flock)).find(
+      (entry) => entry.id === inputConfig.agentRoleId
+    );
+    const roleId = authorizePersonalMemoryRole({
+      ownerId: this.userId,
+      requesterUserId,
+      roleId: inputConfig.agentRoleId,
+      binding: inputConfig.memory,
+      liveBinding: role ? getAgentRoleTarget(role, machineId)?.runConfig.memory : undefined,
+    });
+    return this.personalMemory.open(roleId);
   }
 
   private setTransportStatus(status: TransportConnectionStatus): void {
@@ -1931,8 +1979,16 @@ export class LoroDocumentManager {
     this.machineExistenceWatcher = null;
     this.remoteStreamsStatusUnsubscribe?.();
     this.remoteStreamsStatusUnsubscribe = null;
-    await this.destroyRepo({ fast: options.fast });
+    const closed = await Promise.allSettled([
+      this.personalMemory.close(),
+      this.destroyRepo({ fast: options.fast }),
+    ]);
+    const closeErrors = closed
+      .filter((result) => result.status === 'rejected')
+      .map((result) => result.reason);
     await this.encryptedWorkspace?.close();
+    if (closeErrors.length)
+      throw new AggregateError(closeErrors, 'Workspace stores failed to close');
     if (presenceCleanupFailure) throw presenceCleanupFailure;
   }
 

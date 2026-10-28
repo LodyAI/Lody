@@ -1,3 +1,5 @@
+import { PERSONAL_MEMORY_DATABASE_PREFIX } from '@lody/memory';
+import { createPersonalMemoryRuntime } from './personal-memory-runtime';
 import {
   requirePlaintextWorkspaceStreamsContent,
   type WorkspaceStreamsContent,
@@ -532,6 +534,14 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     protectedContent ? 'cloud' : deps.syncMode ?? (isElectronLocalDataPlaneEnabled() ? 'dual' : 'cloud');
   // Historical name: true whenever a local plane exists (dual OR local).
   const electronLocalDataPlane = syncMode !== 'cloud';
+  const personalMemory =
+    deps.accountId && electronLocalDataPlane
+      ? createPersonalMemoryRuntime(
+          deps.accountId,
+          deps.workspaceId,
+          `${PERSONAL_MEMORY_DATABASE_PREFIX}${cacheIdentity.repoDbName}:${encodeURIComponent(deps.accountId)}`
+        )
+      : null;
   // False only on the local-only platform: no Streams member, no token
   // provider, no cloud presence/RPC — zero cloud I/O by construction.
   const cloudPlaneEnabled = syncMode !== 'local';
@@ -5166,6 +5176,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       await pendingSends.dispose();
       // Cancel and join send I/O while its cache, transport and repo still exist.
       await sendResources.dispose();
+      let memoryCloseError: unknown;
+      try {
+        await personalMemory?.close();
+      } catch (error) {
+        memoryCloseError = error;
+      }
       cancelDelayedBackgroundSyncStart?.();
       cancelDelayedBackgroundSyncStart = null;
       cancelDelayedStartupAcpCapabilitiesRefresh?.();
@@ -5287,6 +5303,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         }
       }
 
+      if (memoryCloseError) throw memoryCloseError;
       if (destroyError) {
         throw destroyError;
       }
@@ -5467,6 +5484,17 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     contentMode: protectedContent ? 'e2ee' : 'plaintext',
     repo,
     accountId: deps.accountId ?? null,
+    openPersonalMemory: async (roleId, machineId) => {
+      if (
+        disposePromise ||
+        !personalMemory ||
+        targetRouter.getPlaneForMachine(machineId) !== 'local'
+      )
+        throw new Error('memory_local_only');
+      if (((await getMachineProtocolCapabilities(machineId))?.builtinMemory ?? 0) < 1)
+        throw new Error('memory_unsupported');
+      return personalMemory.open(roleId);
+    },
     pendingSends,
     isMachineRpcUnreachable,
     codeCollabFileIndexCache,

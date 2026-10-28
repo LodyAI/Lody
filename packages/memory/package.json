@@ -1,0 +1,29 @@
+{
+  "name": "@lody/memory",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Personal Role memory contracts and Loro document foundations.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./loro": "./src/loro.ts",
+    "./repo": "./src/repo.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --testTimeout=30000",
+    "format": "oxfmt src test",
+    "format:check": "oxfmt --check src test"
+  },
+  "dependencies": {
+    "loro-crdt": "catalog:",
+    "zod": "4.3.6",
+    "loro-repo": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "3.2.4",
+    "oxfmt": "^0.65.0"
+  }
+}
