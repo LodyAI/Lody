@@ -2,6 +2,7 @@
 
 Status: proposed
 Translation: current
+PR: [#2014](https://github.com/LodyAI/Lody/pull/2014)
 
 [中文](2026-10-28-e2ee-machine-sharing.zh.md)
 
