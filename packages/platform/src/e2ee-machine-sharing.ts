@@ -1,0 +1,29 @@
+import type { E2eeMachineSharingRequests, E2eeMachineSharingReplies } from '@lody/cloud-api';
+
+/** Host transport contract only; no provider, IPC, storage or network is constructed here.
+ * Hosts retain original intent/frame across unknown results and verify returned evidence with e2ee-core.
+ * Credentials stay inside trusted host composition; this is not a renderer management capability. */
+export interface E2eeMachineSharingTransport {
+  /** Authenticated latest-head read; freshness starts before I/O, never from server timestamps. */
+  readHead(
+    input: E2eeMachineSharingRequests['readHead']
+  ): Promise<E2eeMachineSharingReplies['readHead']>;
+  /** Read an immutable original to verify each consecutive revision. */
+  readVersion(
+    input: E2eeMachineSharingRequests['readVersion']
+  ): Promise<E2eeMachineSharingReplies['readVersion']>;
+  /** Reconcile an unknown commit by its original requestId before any retry. */
+  readRequest(
+    input: E2eeMachineSharingRequests['readRequest']
+  ): Promise<E2eeMachineSharingReplies['readRequest']>;
+  /** Publish exact bytes under head CAS; conflicts require explicit new owner intent. */
+  commit(input: E2eeMachineSharingRequests['commit']): Promise<E2eeMachineSharingReplies['commit']>;
+}
+
+export type {
+  E2eeMachineSharingScope,
+  E2eeMachineSharingHead,
+  E2eeMachineSharingVersion,
+  E2eeMachineSharingRequests,
+  E2eeMachineSharingReplies,
+} from '@lody/cloud-api';

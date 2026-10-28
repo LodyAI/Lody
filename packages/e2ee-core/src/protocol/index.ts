@@ -79,6 +79,26 @@ export {
   openRpcResponseContent,
 } from '../internal/content/realtime';
 
+// Machine sharing
+export {
+  updateMachineSharingState,
+  encodeMachineSharingPolicy,
+  decodeMachineSharingPolicy,
+  machineSharingContentScope,
+  machineSharingDigest,
+  sealMachineSharingPolicy,
+  openMachineSharingPolicy,
+  verifyMachineSharingHistoryStep,
+  authorizeMachineExecution,
+  type MachineSharingBinding,
+  type MachineSharingState,
+  type MachineSharingChange,
+  type MachineSharingPolicy,
+  type MachineSharingHead,
+  type VerifiedMachineSharingPolicy,
+  type MachineExecutionDecision,
+} from '../internal/machine-sharing';
+
 // Documents
 export {
   sealDocument,

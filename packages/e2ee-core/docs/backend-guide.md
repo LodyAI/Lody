@@ -171,3 +171,26 @@ adapters (`E2eeWorkflows` plus your ports) and drive receive, distribute,
 repair and publish. The core test suites in `test/keys/` show the
 fault cases worth reproducing: lost acknowledgements, retries after restart,
 rejected frames and revocation during a request.
+
+## Machine sharing policy storage (unconnected contract)
+
+The optional `cloud-api` machine-sharing DTOs address one workspace/genesis,
+machine and owner membership instance. Authenticate device credentials and
+current ledger eligibility for every operation. Reads may serve current eligible
+workspace devices; commits require the machine owner's active personal device.
+Use `admitMachineSharingFrame` from the host entry before storing an opaque
+frame. It verifies the exact machine resource and fixed business signature/AAD
+domain without decrypting. This is required sharing admission, separate from
+the optional mailbox signature tier above.
+
+Atomically insert immutable originals and CAS head. First revision is 1 with a
+null parent/head; subsequent revisions increment by one and reference the exact
+previous frame digest. Digest complete raw ciphertext bytes with SHA-256, with a
+maximum frame of 262287 bytes. Keep requestId and the complete original intent:
+exact retries return their original receipt even after newer commits; changed
+intent under the same requestId fails. Confirmed conflicts must not auto-rebase.
+Keep original versions available to verify consecutive history. Withdrawal is a
+new complete policy, never deletion. Deletion cleanup belongs to the workspace
+owner. Returned head/metadata are untrusted until client verification, and the
+server must deliver latest heads for bounded execution freshness. No server or
+transport is enabled here; see the [pending Spec increment](../../../specs/e2ee-foundations.md#machine-sharing-policy-pending-approval-increment).

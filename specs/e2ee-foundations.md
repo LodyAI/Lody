@@ -222,6 +222,49 @@ path; do not add legacy decoding, migration, metadata guesses or re-signing of
 history. Production has no encrypted workspaces requiring that compatibility.
 This does not authorize erasing uncertain operations or execution evidence.
 
+### Machine sharing policy (pending approval increment)
+
+**Increment status: draft; not covered by the approved revision above.** The
+existing approved machine identity and execution contracts remain in force.
+
+Encrypted-workspace members need to use another member's machine only when its
+owner explicitly shares it. Each machine/member instance has one independent,
+complete encrypted policy: machine sharing plus the set of shared localProjectIds.
+New machines and absent project records are private. Enabling a project also
+turns on machine sharing in the same policy; turning the machine off retains the
+project records. Only that machine owner's currently active personal device may
+sign changes. Workspace Owner/Admin status grants no override. Team sharing
+includes future qualified members; Guest and recovery devices never execute.
+
+The policy binds workspace ID, pinned genesis, exact machineId, owner membership
+instance, revision, previous original-frame digest, request ID, complete state,
+signing device and descriptive issuedAt. Its fixed business domain and resource
+isolate it from ordinary document writes. It uses existing content-v0 encryption
+and signatures, with docEpoch zero; ledger records and format do not change.
+Server head CAS orders immutable complete versions, beginning at revision one
+with no parent. Revocation is another version, never deletion. Retain exact
+originals across unknown outcomes; a confirmed conflict requires a new explicit
+owner intent rather than automatic rebase. Local verified high-water pins reject
+rollback, equal-version forks and gaps; exact original replay is idempotent.
+
+Before each new start and later action requiring authority, the machine checks
+current ledger eligibility, its exact active machine binding, and the verified
+policy for cross-member access. Local-project execution also requires its actual
+localProjectId to be shared. A revoked policy signer invalidates the old policy;
+another currently valid personal device of the same owner must re-sign the next
+version. A removed/rejoined member gets a new instance and private default;
+same-member machine-key replacement may retain the policy. Withdrawal does not
+kill a running task, but blocks new starts and subsequent authorized actions.
+
+Known withdrawal takes effect immediately. Unknown changes use a strictly less
+than 15-minute memory cache measured from before authenticated latest reads;
+intersect ledger/policy validity and request deadlines. Restart or uncertain clock
+elapsed time requires online revalidation. The server must deliver latest control
+heads: signatures and local pins cannot expose a never-observed withheld version.
+No per-member grants, UI, transport, cache or execution integration is enabled by
+these primitives. See the [proposed sharing decision](../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md)
+for format and responsibility boundaries.
+
 ### Permission freshness and the separate durable expiry clock
 
 A verified ledger proves continuity, not a fresh latest read. Tokens, timestamps,

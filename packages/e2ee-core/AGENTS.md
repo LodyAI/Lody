@@ -76,6 +76,11 @@ whitepaper, Specs, decisions and this package's docs. Contract:
   opaque payload authentication grants no membership, freshness or execution
   authority. Keep application body codecs, target binding and send/rotation gates
   in the authorized integration; never expand `sealDocument` for these purposes.
+- Machine-sharing policies remain independent of ledger records. Execution requires
+  the current machine owner's active personal-device policy signature; historical
+  chain verification grants no execution authority. Hosts own latest-head freshness,
+  resource-bound durable pins and actual local-project resolution. See the
+  [sharing proposal](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).
 - Key rounds attempt receive and distribution independently; report each outcome
   and retain the failed phase's retry cursor. Unknown senders request ledger refresh.
 - Durable workflows persist exact originals before any network step, retry

@@ -13,6 +13,11 @@
 适配器；其他运行时需要实现自己的存储和平台适配器。后端端口与 `/host` 规定其他
 后端需要实现什么，并不负责部署服务器。
 
+protocol 入口还提供机器所有者签名的完整共享策略 codec、资源绑定、版本验证与纯执行
+判断；host 入口验证不解密的所有者帧，platform/cloud-api 定义对应 CAS DTO。这些原语
+尚未接入网络、UI 或执行路径；[共享策略提案](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.zh.md)
+说明待批准 Spec 增量与后续宿主职责。
+
 ## 从这里开始
 
 | 你想要… | 阅读 |
