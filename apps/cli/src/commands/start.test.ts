@@ -3,6 +3,10 @@ import { CliType, SUPPORTED_CLI_TYPES } from '@lody/shared';
 import { resolveCliTypesSelection } from './start-options';
 import { createStartShutdownController } from './start-shutdown';
 import type { Logger } from '@/utils/logger';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { hasBuiltinAgentCredentials } from './builtin-agent-credentials';
 
 function createTestLogger(): Logger {
   let logger: Logger;
@@ -40,6 +44,28 @@ afterEach(() => {
 });
 
 describe('start command cli type selection', () => {
+  it('defaults Kimi and Grok only when their credential files exist', () => {
+    const home = mkdtempSync(join(tmpdir(), 'lody-agent-auth-'));
+    try {
+      const availability = () => ({
+        kimi: hasBuiltinAgentCredentials('kimi', home, {}) && 'configured',
+        grok: hasBuiltinAgentCredentials('grok', home, {}) && 'configured',
+        claude: false as const,
+        codex: false as const,
+      });
+      expect(resolveCliTypesSelection({ availability: availability() }).configuredCliTypes).toEqual([]);
+      mkdirSync(join(home, '.kimi-code', 'credentials'), { recursive: true });
+      writeFileSync(join(home, '.kimi-code', 'credentials', 'kimi-code.json'), '{}');
+      expect(resolveCliTypesSelection({ availability: availability() }).configuredCliTypes).toEqual(['kimi']);
+      mkdirSync(join(home, '.grok'), { recursive: true });
+      writeFileSync(join(home, '.grok', 'auth.json'), '{}');
+      expect(resolveCliTypesSelection({ availability: availability() }).configuredCliTypes).toEqual(['kimi', 'grok']);
+      expect(hasBuiltinAgentCredentials('kimi', home, { KIMI_CODE_HOME: join(home, 'other') })).toBe(false);
+      expect(hasBuiltinAgentCredentials('grok', home, { GROK_HOME: join(home, 'other') })).toBe(false);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
   it('defaults to all supported CLI types when none are requested', () => {
     const result = resolveCliTypesSelection({
       requestedCliTypes: undefined,
