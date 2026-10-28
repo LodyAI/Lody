@@ -29,7 +29,7 @@ For resources with no parameters, omit the argument or pass `{}`. Arbitrary reso
 names and extra parameters are rejected. For exact context, return and read parameter
 schemas, read `skill://lody-automations/references/context.schema.json`.
 
-Reads return data; JavaScript defines the condition. Unknown/incomplete observations
+Reads return data; the condition uses CodeMode’s supported JavaScript subset. Unknown/incomplete observations
 must not be treated as success. Payloads must be JSON; return concise results rather
 than all observations. Each check permits up to 32 reads and each observation is
 bounded to 128 KiB; the result is bounded to 64 KiB. Five consecutive check errors

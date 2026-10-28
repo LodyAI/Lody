@@ -1,14 +1,22 @@
 import { createHash } from 'node:crypto';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { McpServer } from '@modelcontextprotocol/server';
-import { getQuickJS } from 'quickjs-emscripten';
+import { Effect } from 'effect';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { automationCommandSchema } from '@lody/shared/automations';
-import { evaluateAutomationProgram } from '../../automations/programs/quickjs';
+import { evaluateAutomationProgram as evaluate } from '../../automations/programs/codemode';
 import { registerAutomationTools } from '../automation-tools';
 import { skillEntrySchema } from './catalog';
 import { LODY_SKILL_INSTRUCTIONS, registerLodySkills } from './server';
+
+const evaluateAutomationProgram = (
+  program: string,
+  context: import('@lody/shared/automations').AutomationProgramContext,
+  read: (
+    input: import('@lody/shared/automations').AutomationReadRequest
+  ) => Promise<import('@lody/shared/automations').AutomationReadResponse>
+) => Effect.runPromise(evaluate(program, context, (input) => Effect.tryPromise(() => read(input))));
 
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => {
@@ -106,10 +114,10 @@ describe('Lody Skills MCP server contract', () => {
       state: 'waiting',
     });
     const program = z.string().parse(registrations[0]);
-    const module = await getQuickJS();
+
     const context = { sessionId: 'session', workspaceId: 'workspace', now: 100 };
     for (const value of ['unknown', 'no', 'yes']) {
-      const result = await evaluateAutomationProgram(module, program, context, async (input) => {
+      const result = await evaluateAutomationProgram(program, context, async (input) => {
         expect(input).toEqual({ resource: 'session.group', parameters: {} });
         return { observedAt: 100, value: { value, reason: 'synthetic' } };
       });
@@ -124,10 +132,10 @@ describe('Lody Skills MCP server contract', () => {
   it('runs the served CI example against unavailable, passing and failing source observations', async () => {
     const { client } = await fixture();
     const program = await readText(client, 'skill://lody-automations/examples/wait-for-ci.js');
-    const module = await getQuickJS();
+
     const context = { sessionId: 'session', workspaceId: 'workspace', now: 100 };
     const failed = { runId: 123, status: 'completed', conclusion: 'failure' };
-    const observations = [
+    const observations: import('@lody/shared/automations').AutomationReadResponse['value'][] = [
       { status: 'unknown', reason: 'no_linked_pull_request' },
       { status: 'observed', pullRequests: [{ runs: [{ ...failed, conclusion: 'success' }] }] },
       { status: 'observed', pullRequests: [{ runs: [failed] }] },
@@ -135,7 +143,7 @@ describe('Lody Skills MCP server contract', () => {
     const results = [];
     for (const value of observations)
       results.push(
-        await evaluateAutomationProgram(module, program, context, async () => ({
+        await evaluateAutomationProgram(program, context, async () => ({
           observedAt: 100,
           value,
         }))

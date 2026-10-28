@@ -261,10 +261,11 @@ export const shouldRecoverStaleACPConnectionPrompt = (args: {
 /** Structured provider evidence only; neither generic 429 nor billing failure authorizes recovery. */
 export function classifyCapacityFailure(
   error: unknown
-): 'rate_limited' | 'quota_exhausted' | undefined {
+): 'rate_limited' | 'quota_exhausted' | 'provider_overloaded' | undefined {
   const parsed = parseACPError(error);
   if (!parsed) return undefined;
   const codex = getStringField(parsed.data, 'codexErrorInfo');
+  if (codex === 'serverOverloaded') return 'provider_overloaded';
   if (codex === 'usageLimitExceeded' || codex === 'usage_limit_exceeded') return 'quota_exhausted';
   if (getStringField(parsed.data, 'errorKind') === 'rate_limit') return 'rate_limited';
   return undefined;

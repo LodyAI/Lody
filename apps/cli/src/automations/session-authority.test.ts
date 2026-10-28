@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Effect } from 'effect';
-import { evaluateAutomationProgram, loadAutomationPrograms } from './programs/quickjs';
+import { evaluateAutomationProgram as evaluate } from './programs/codemode';
 import { readAutomationContext } from './context/reads-legacy';
 import { observePullRequests } from './sources/pull-requests';
 import { observeWorkflows } from './sources/workflows';
@@ -124,6 +124,14 @@ function groupFixture() {
     },
   };
 }
+const evaluateAutomationProgram = (
+  program: string,
+  context: import('@lody/shared/automations').AutomationProgramContext,
+  read: (
+    input: import('@lody/shared/automations').AutomationReadRequest
+  ) => Promise<import('@lody/shared/automations').AutomationReadResponse>
+) => Effect.runPromise(evaluate(program, context, (input) => Effect.tryPromise(() => read(input))));
+
 const allowed = async () => ({ value: 'yes' as const, reason: 'current' });
 
 describe('Automation Session authority', () => {
@@ -146,7 +154,7 @@ describe('Automation Session authority', () => {
       }`;
       const wait = ledger.registerWait({ program, intervalMs: 1000 }, f.rootId, 'user', 1000);
       ledger.updateWait(wait.id, 'waiting', { state: 'checking' }, 1000);
-      const module = await Effect.runPromise(loadAutomationPrograms);
+
       const read = (input: import('@lody/shared/automations').AutomationReadRequest) =>
         readAutomationContext({
           ledger,
@@ -158,7 +166,6 @@ describe('Automation Session authority', () => {
         });
       expect(
         await evaluateAutomationProgram(
-          module,
           program,
           { sessionId: f.rootId, workspaceId: 'workspace', now: 1000 },
           read
@@ -208,7 +215,6 @@ describe('Automation Session authority', () => {
         1000
       );
       const result = await evaluateAutomationProgram(
-        module,
         program,
         { sessionId: f.rootId, workspaceId: 'workspace', now: 1000 },
         read

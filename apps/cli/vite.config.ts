@@ -36,15 +36,12 @@ const explicitlyExternal = new Set([
   // cannot be inlined. Kept external and staged into the Electron app like the
   // other external runtime deps (apps/electron/scripts/cli-native-deps.mjs).
   'tinypool',
-  // Emscripten locates its WASM beside the package loader.
-  'quickjs-emscripten',
 ]);
 
 // Packaging builds these process entry graphs sequentially so the CLI and ACP
 // adapters do not retain all transformed sources and maps in one Node heap.
 // Other modes (including build:watch) preserve the existing combined graph.
 const runtimeEntries = {
-  'automation-program-worker': path.resolve(__dirname, 'src/automations/programs/worker.ts'),
   index: path.resolve(__dirname, 'src/index.ts'),
   'cloudflared-worker': path.resolve(__dirname, 'src/preview/cloudflared-worker.ts'),
   'baguette-worker': path.resolve(__dirname, 'src/ios-simulator/baguette-worker.ts'),

@@ -30,7 +30,7 @@ import { createSessionBackend } from '@/session/session-backend';
 import { AutomationLedger, automationIdentity } from './storage/ledger';
 import { Automations, AutomationHost } from './runtime/engine';
 import { evaluateCapacity } from './runtime/capacity';
-import { runAutomationProgramWorker } from './programs/worker-client';
+import { evaluateAutomationProgram } from './programs/codemode';
 import { AutomationSessionActionsLegacy } from './actions/session-actions-legacy';
 import { retainsAutomationGrant, matchesPreparedOrigin } from './actions/authorization';
 import { observeCapacity } from './sources/capacity';
@@ -217,7 +217,7 @@ export async function createAutomationWorkspaceLegacy(options: {
     Effect.tryPromise(() => sessionContext(wait.sessionId)).pipe(
       Effect.uninterruptible,
       Effect.flatMap((context) =>
-        runAutomationProgramWorker(wait.program, context, (input) =>
+        evaluateAutomationProgram(wait.program, context, (input) =>
           Effect.tryPromise(() =>
             readAutomationContext({
               ledger,
@@ -403,7 +403,7 @@ export async function createAutomationWorkspaceLegacy(options: {
               if (command.expiresAt !== undefined && command.expiresAt <= now)
                 throw new Error('AUTOMATION_ALREADY_EXPIRED');
               await runtime.runPromise(
-                runAutomationProgramWorker(
+                evaluateAutomationProgram(
                   command.program,
                   context,
                   () => Effect.fail(new Error('AUTOMATION_VALIDATION_HAS_NO_READS')),

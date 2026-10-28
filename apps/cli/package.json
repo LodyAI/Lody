@@ -64,6 +64,7 @@
     "@modelcontextprotocol/node": "2.0.0",
     "@modelcontextprotocol/sdk": "1.29.0",
     "@modelcontextprotocol/server": "2.0.0",
+    "@opencode/codemode": "2.2.0",
     "@types/better-sqlite3": "catalog:",
     "@types/cross-spawn": "^6.0.6",
     "@types/diff": "^7.0.0",
@@ -74,6 +75,7 @@
     "@types/ws": "^8.18.1",
     "@types/yauzl": "^3.4.0",
     "@vitest/coverage-v8": "5.0.2",
+    "acorn": "8.15.0",
     "acp-extension-claude": "workspace:*",
     "acp-extension-codex": "workspace:*",
     "acp-extension-core": "workspace:*",
@@ -137,7 +139,6 @@
     "better-sqlite3": "catalog:",
     "loro-crdt": "1.17.0",
     "tinypool": "^1.0.0",
-    "typescript": "^5.9.3",
-    "quickjs-emscripten": "0.31.0"
+    "typescript": "^5.9.3"
   }
 }

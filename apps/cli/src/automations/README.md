@@ -1,6 +1,6 @@
 # Lody Automations
 
-A Session registers a JavaScript condition. The local Host rechecks it after the
+A Session registers a condition in CodeMode’s supported JavaScript subset. The local Host rechecks it after the
 Agent exits and across daemon restarts. `false` keeps waiting;
 `{ resumeText, payload? }` completes the wait and queues one continuation in the
 registering Session. Workspace identifies the daemon/storage owner; it does not
@@ -12,7 +12,7 @@ replace the Session as the continuation target.
 | Agent guidance      | [MCP skill](../mcp/skills/lody-automations/SKILL.md)                                                                                                | Progressive workflow, data references, runnable example and generated API schemas             |
 | Persistence         | [ledger](storage/ledger.ts)                                                                                                                         | Waits, results, fixed continuation identities, source observations and native unfinished work |
 | Scheduling          | [runtime](runtime/engine.ts)                                                                                                                        | Reevaluation, expiry, submission fencing, reconciliation and cancellation                     |
-| JavaScript          | [programs](programs/quickjs.ts)                                                                                                                     | Disposable QuickJS worker and scoped read bridge                                              |
+| JavaScript          | [programs](programs/codemode.ts)                                                                                                                     | CodeMode interpreter and scoped read capability                                              |
 | Product policy      | [Session policies](policies/session.ts)                                                                                                             | Fixed merge/archive, quota/recovery and idle/compact behavior                                 |
 | Resource effects    | [Session adapter](actions/session-actions-legacy.ts)                                                                                                | Existing queue, permissions, native continuation and compaction                               |
 | Composition         | [workspace](workspace-legacy.ts)                                                                                                                    | Fleet lifetime, local control and existing source owners                                      |
@@ -52,7 +52,9 @@ Managed sessions supply `LODY_SESSION_ID` and `LODY_WORKSPACE_ID`. Outside a Ses
 pass `--session SESSION_ID --workspace WORKSPACE_ID`. MCP `lody_automation` accepts
 `{command: {type: "register", program: "async ({ctx}) => ..."}}` and binds the
 current Session automatically. Its caller cannot redirect the result to another
-Session. CLI and MCP share the same local control endpoint.
+Session. CLI and MCP share the same local control endpoint. The developer-gated
+Electron Session UI uses that endpoint for local-machine waits and settings;
+remote machines and Web do not have an Automation control bridge yet.
 
 Optional `reason`, `intervalMs` (default 30 seconds, minimum 1 second) and
 `expiresAt` (absolute epoch milliseconds) describe the wait. CLI exposes
@@ -64,8 +66,8 @@ registrations in the same Session deduplicate; a terminal wait may be registered
 
 Each evaluation receives `{ctx}` with `sessionId`, `workspaceId`, `now` and
 `read(resource, parameters?)`. Reads return `{value, observedAt}`; the Host checks
-Session ownership and active registration for every call. JavaScript combines these
-observations into arbitrary predicates. Resources describe available data, not a
+Session ownership and active registration for every call. CodeMode combines these
+observations into predicates using its supported JavaScript subset. Resources describe available data, not a
 catalog of business conditions.
 
 | Resource              | Observation                                                                         |
@@ -85,9 +87,9 @@ owners. Await every read. See [CI](examples/wait-for-ci.js) and
 [event composition](examples/wait-for-event.js); an event example requires an
 installed source that publishes that fact.
 
-Each check has a 30-second deadline, bounded interpreter memory/instructions,
-32 reads, four concurrent read calls and a 128-KiB bound per observation.
-Cancellation joins worker and in-flight owner reads. Five consecutive check errors
+Each check has a 30-second deadline, at most 32 reads, four concurrent read calls
+and a 128-KiB bound per observation. Cancellation interrupts the interpreter and
+joins in-flight owner reads. Five consecutive check errors
 end the wait as `failed`; successful checks reset the error count. `show` retains
 the error, check count, next check time and continuation state. Host restart retries
 interrupted checks. Checks are read-only and may repeat.

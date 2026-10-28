@@ -284,6 +284,17 @@ export const inboxFeatureEnabledAtom = atom(
   (get) => get(developerModeEnabledAtom) && get(inboxBetaEnabledAtom)
 );
 
+export const sessionContinuationBetaEnabledAtom = atomWithStorage<boolean>(
+  'lody-session-continuation-beta-enabled',
+  false,
+  undefined,
+  { getOnInit: true }
+);
+
+export const sessionContinuationFeatureEnabledAtom = atom(
+  (get) => get(developerModeEnabledAtom) && get(sessionContinuationBetaEnabledAtom)
+);
+
 /** Enables creation only. Existing encrypted workspaces retain their immutable mode. */
 export const e2eeWorkspaceCreationEnabledAtom = atomWithStorage<boolean>(
   'lody-e2ee-workspace-creation-enabled',

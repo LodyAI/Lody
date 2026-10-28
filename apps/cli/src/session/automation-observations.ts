@@ -52,7 +52,7 @@ export type SessionAutomationObservation = {
   binding?: ProviderBinding;
   modelId?: string;
   outcome: 'completed' | 'failed' | 'cancelled' | 'unknown';
-  capacityFailure?: 'rate_limited' | 'quota_exhausted';
+  capacityFailure?: 'rate_limited' | 'quota_exhausted' | 'provider_overloaded';
   inputConfig: SessionTurnInputConfig;
   released: boolean;
   finalized: boolean;

@@ -40,14 +40,7 @@ const CLI_RUNTIME_PACKAGE_CHAIN = [
   { name: '@lydell/node-pty', from: 'cli' },
   // tinypool drives the diff line-count worker pool; it stays external because it
   // resolves its own entry/worker.js relative to its package dir. Pure JS, no deps.
-  { name: 'tinypool', from: 'cli' },
-  { name: 'quickjs-emscripten', from: 'cli' },
-  { name: 'quickjs-emscripten-core', from: 'quickjs-emscripten' },
-  { name: '@jitl/quickjs-ffi-types', from: 'quickjs-emscripten-core' },
-  ...['debug-asyncify', 'debug-sync', 'release-asyncify', 'release-sync'].map((variant) => ({
-    name: `@jitl/quickjs-wasmfile-${variant}`,
-    from: 'quickjs-emscripten'
-  }))
+  { name: 'tinypool', from: 'cli' }
 ]
 
 // Top-level package dirs that are never needed at runtime (C++ sources, the

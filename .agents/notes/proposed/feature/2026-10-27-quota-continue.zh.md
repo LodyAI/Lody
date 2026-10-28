@@ -5,6 +5,9 @@ Translation: current
 
 [English](2026-10-27-quota-continue.md)
 
+> 已取代：composer 快捷方式于 2026-10-27 移除，因为 `recoverCapacity` 现在拥有
+> 额度继续。见[退休笔记](../../implemented/feature/2026-10-27-retire-quota-continue-shortcut.md)。
+
 ## 摘要
 
 Claude 的会话额度耗尽后，对话可能需要等待五小时额度重置。输入框上方提供一个需要点击的快捷操作，在服务端重置时间之后发送一次字面消息 `continue`。该操作复用完整定时消息，保留当前草稿。它要求对应额度已经耗尽且具有明确的未来重置时间，仅有自然语言时钟提示不足以创建此操作。

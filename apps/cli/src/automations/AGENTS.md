@@ -14,13 +14,13 @@
   event-to-action mapping internal; registration binds the same Session once.
 - Commit a matched result and its continuation identity together. Retry interrupted
   checks, reconcile accepted effects, and never use tool side effects as durable steps.
-- QuickJS exposes only scoped `ctx` reads. Credentials and network auth stay with
-  resource owners. Scope close joins worker and owner reads; no ambient shell or env.
+- CodeMode exposes only scoped `ctx` reads. Credentials and network auth stay with
+  resource owners. Scope close joins interpreter and owner reads; no ambient shell or env.
 - Capture source evidence on the Host, freeze it with the receipt, and recheck at
   admission. Active continuations retain source demand; results cannot forge provenance.
 - Session actions use normal admission/queue/Stop/permission owners. Idle maintenance
   expires on new input. Settled groups include unfinished automation and native work.
-- Native Effect owns the loop and worker. `workspace-legacy.ts`,
+- Native Effect owns the loop and interpreter. `workspace-legacy.ts`,
   `actions/session-actions-legacy.ts`, and `sources/sessions-legacy.ts` are explicit
   bridges to unfinished Fleet/Repo/Session Promise APIs. Join raw adapter work;
   remove each bridge when its owner migrates, rather than add a parallel runtime.

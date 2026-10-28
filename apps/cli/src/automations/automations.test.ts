@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { Deferred, Effect, Layer, Fiber } from 'effect';
+import { Clock, Deferred, Effect, Layer, Fiber } from 'effect';
 import type {
   AutomationEvent,
   AutomationRuleDraft,
@@ -17,7 +17,7 @@ import type {
 import { AutomationLedger } from './storage/ledger';
 import { evaluateCapacity } from './runtime/capacity';
 import { Automations, AutomationHost } from './runtime/engine';
-import { loadAutomationPrograms, evaluateAutomationProgram } from './programs/quickjs';
+import { evaluateAutomationProgram as evaluate } from './programs/codemode';
 import { observePullRequests } from './sources/pull-requests';
 import type { SessionMeta } from '@lody/shared';
 
@@ -25,6 +25,14 @@ function required<A>(value: A | undefined): A {
   if (value === undefined) throw new Error('Missing fixture value');
   return value;
 }
+
+const evaluateAutomationProgram = (
+  program: string,
+  context: import('@lody/shared/automations').AutomationProgramContext,
+  read: (
+    input: import('@lody/shared/automations').AutomationReadRequest
+  ) => Promise<import('@lody/shared/automations').AutomationReadResponse>
+) => Effect.runPromise(evaluate(program, context, (input) => Effect.tryPromise(() => read(input))));
 
 const roots: string[] = [];
 const stores: AutomationLedger[] = [];
@@ -219,8 +227,8 @@ describe('JavaScript conditions', () => {
     expect(ledger.registerWait({ program, intervalMs: 1000 }, 'session', 'user', 101).id).toBe(
       wait.id
     );
-    const module = await Effect.runPromise(loadAutomationPrograms);
-    const missing = await evaluateAutomationProgram(module, program, context, async () => ({
+
+    const missing = await evaluateAutomationProgram(program, context, async () => ({
       value: { status: 'waiting' },
       observedAt: 100,
     }));
@@ -231,7 +239,7 @@ describe('JavaScript conditions', () => {
     const recovered = open();
     const next = required(recovered.dueWaits(1100)[0]);
     recovered.updateWait(next.id, 'waiting', { state: 'checking' }, 1100);
-    const result = await evaluateAutomationProgram(module, program, context, async () => ({
+    const result = await evaluateAutomationProgram(program, context, async () => ({
       value: { status: 'ready' },
       observedAt: 1100,
     }));
@@ -247,26 +255,99 @@ describe('JavaScript conditions', () => {
     expect(recovered.rule(next.id)?.enabled).toBe(false);
   });
   it('exposes only explicit tools, bounds CPU and rejects malformed results', async () => {
-    const module = await Effect.runPromise(loadAutomationPrograms);
     const invoke = (program: string) =>
-      evaluateAutomationProgram(module, program, context, async () => {
+      evaluateAutomationProgram(program, context, async () => {
         throw new Error('No tools needed');
       });
     expect(
       await invoke(`() => {
       if (typeof process !== 'undefined' || typeof require !== 'undefined' || typeof fetch !== 'undefined') throw new Error('host leaked');
-      const host = ({}).constructor.constructor('return this')();
-      if (typeof host.process !== 'undefined') throw new Error('prototype escape');
       return false;
     }`)
     ).toBe(false);
+    await expect(invoke(`() => ({}).constructor.constructor('return this')()`)).rejects.toThrow();
     expect(await invoke('async () => false; // A normal function file\n')).toBe(false);
-    await expect(invoke('() => { while (true) {} }')).rejects.toThrow();
+    const expire = (program: string) =>
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const clock = yield* Clock.Clock;
+          const immediateClock: Clock.Clock = {
+            monotonicTimeNanosUnsafe: () => clock.monotonicTimeNanosUnsafe(),
+            monotonicTimeNanos: clock.monotonicTimeNanos,
+            currentTimeMillisUnsafe: () => clock.currentTimeMillisUnsafe(),
+            currentTimeMillis: clock.currentTimeMillis,
+            currentTimeNanosUnsafe: () => clock.currentTimeNanosUnsafe(),
+            currentTimeNanos: clock.currentTimeNanos,
+            sleep: () => Effect.void,
+          };
+          return yield* evaluate(program, context, () => Effect.fail('unexpected read')).pipe(
+            Effect.provideService(Clock.Clock, immediateClock)
+          );
+        })
+      );
+    await expect(expire('() => { while (true) {} }')).rejects.toThrow('timed out');
     await expect(invoke('async () => true')).rejects.toThrow();
     await expect(invoke('async () => ({resumeText: ""})')).rejects.toThrow();
-    await expect(invoke('async () => new Promise(() => {})')).rejects.toThrow(
-      'AUTOMATION_PROGRAM_DID_NOT_COMPLETE'
+    await expect(expire('async () => new Promise(() => {})')).rejects.toThrow('timed out');
+  });
+  it('bounds condition reads and validates returned observations', async () => {
+    const read = () => Effect.succeed({ value: null, observedAt: 100 });
+    await expect(
+      Effect.runPromise(
+        evaluate(
+          `async ({ctx}) => { for (let i = 0; i < 33; i++) await ctx.read('events'); return false; }`,
+          context,
+          read
+        )
+      )
+    ).rejects.toThrow();
+    await expect(
+      Effect.runPromise(
+        evaluate(`async ({ctx}) => { await ctx.read('events'); return false; }`, context, () =>
+          Effect.succeed({ value: 'x'.repeat(128 * 1024), observedAt: 100 })
+        )
+      )
+    ).rejects.toThrow();
+  });
+  it('interrupts and joins an in-flight scoped read on cancellation', async () => {
+    const entered = Deferred.makeUnsafe<void>();
+    let closed = false;
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fiber = yield* evaluate(
+            `async ({ctx}) => { await ctx.read('events'); return false; }`,
+            context,
+            () =>
+              Deferred.succeed(entered, undefined).pipe(
+                Effect.andThen(Effect.never),
+                Effect.ensuring(
+                  Effect.sync(() => {
+                    closed = true;
+                  })
+                )
+              )
+          ).pipe(Effect.forkChild);
+          yield* Deferred.await(entered);
+          yield* Fiber.interrupt(fiber);
+          expect(closed).toBe(true);
+        })
+      )
     );
+  });
+  it('validates a registration without executing its condition or reads', async () => {
+    const result = await Effect.runPromise(
+      evaluate(
+        `async ({ctx}) => { await ctx.read('events'); return false; }`,
+        context,
+        () => Effect.fail(new Error('unexpected read')),
+        true
+      )
+    );
+    expect(result).toBe(false);
+    await expect(
+      Effect.runPromise(evaluate('this is invalid', context, () => Effect.never, true))
+    ).rejects.toThrow();
   });
   it('does not accept a late result after cancellation or expiry', () => {
     const { ledger } = fixture();
@@ -417,6 +498,13 @@ describe('Recovery evidence and activity inspection', () => {
     expect(ledger.deliveries()).toEqual([]);
   });
   it('requires structured quota evidence and a confirmed tool boundary', () => {
+    expect(
+      classifyCapacityFailure({
+        code: -32603,
+        message: 'model unavailable',
+        data: { codexErrorInfo: 'serverOverloaded' },
+      })
+    ).toBe('provider_overloaded');
     expect(
       classifyCapacityFailure({ code: -32603, message: '429 quota billing limit reached' })
     ).toBeUndefined();

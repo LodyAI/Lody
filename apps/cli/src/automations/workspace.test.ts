@@ -11,38 +11,6 @@ import {
   type AutomationWorkspaceHandle,
 } from './workspace-legacy';
 
-// Control tests use the real interpreter in-process; built artifacts verify worker ownership separately.
-vi.mock('./programs/worker-client', async () => {
-  const { Effect } = await import('effect');
-  const { evaluateAutomationProgram, loadAutomationPrograms } = await import('./programs/quickjs');
-  return {
-    runAutomationProgramWorker: (
-      program: string,
-      context: import('@lody/shared/automations').AutomationProgramContext,
-      read: (
-        input: import('@lody/shared/automations').AutomationReadRequest
-      ) => import('effect').Effect.Effect<
-        import('@lody/shared/automations').AutomationReadResponse,
-        unknown
-      >,
-      validateOnly: boolean
-    ) =>
-      loadAutomationPrograms.pipe(
-        Effect.flatMap((module) =>
-          Effect.tryPromise(() =>
-            evaluateAutomationProgram(
-              module,
-              program,
-              context,
-              (input) => Effect.runPromise(read(input)),
-              validateOnly
-            )
-          )
-        )
-      ),
-  };
-});
-
 const roots: string[] = [];
 const owners: AutomationWorkspaceHandle[] = [];
 afterEach(async () => {

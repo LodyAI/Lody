@@ -1,4 +1,8 @@
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
+import { useLocalSessionContinuation } from './use-local-session-continuation';
+import { SessionContinuationNote } from './session-continuation-note';
+import { SessionContinuationTweaks } from './session-continuation-tweaks';
+import { useStableNow } from '@/hooks/use-stable-now';
 import type { DocumentSelection } from '@/lib/document-selection';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
 import { RepoSyncError, RepoTransportError } from 'loro-repo';
@@ -1331,6 +1335,7 @@ export function SessionHeaderMenu({
   onDelete,
   compact = false,
   openInIde,
+  continuationTweaks,
   t,
 }: {
   session: SessionMeta;
@@ -1361,6 +1366,7 @@ export function SessionHeaderMenu({
   onRestore?: () => void | Promise<void>;
   onDelete?: () => void | Promise<void>;
   compact?: boolean;
+  continuationTweaks?: React.ReactNode;
   /** Electron path launchers; always listed in `⋯` so CSS-hidden pills stay reachable. */
   openInIde?: {
     options: PathLauncherOption[];
@@ -1703,6 +1709,15 @@ export function SessionHeaderMenu({
           </Menu.Item>
 
           {openedByRelationRows}
+
+          {continuationTweaks && (
+            <Menu.Submenu>
+              <Menu.SubmenuTrigger>
+                {t('sessions.continuation.tweaks.title', '自动化设置')}
+              </Menu.SubmenuTrigger>
+              <Menu.Content className="w-[290px] p-3">{continuationTweaks}</Menu.Content>
+            </Menu.Submenu>
+          )}
 
           {openInIdeMenu}
 
@@ -2551,6 +2566,13 @@ export const SessionChatInterface = memo(
     const liveSessionPresence = useAtomValue(sessionLivePresenceAtomFamily(session.id));
     const liveSessionStatus = liveSessionPresence?.status ?? null;
     const isLocalSession = !!localMachineId && session.machineId === localMachineId;
+    const continuation = useLocalSessionContinuation(
+      isLocalSession && workspaceId && session.machineId
+        ? { workspaceId, machineId: session.machineId, sessionId: session.id }
+        : null,
+      isVisible
+    );
+    const continuationNow = useStableNow(10_000).getTime();
     // Session-scoped UI state below stores the session it belongs to and is read
     // only for that session: this instance can outlive a switch (the desktop
     // toolbar is not keyed), and a late async write must not reach the next one.
@@ -6729,6 +6751,38 @@ export const SessionChatInterface = memo(
           publicShareWorkspaceId ? () => setPublicShareSessionId(session.id) : undefined
         }
         session={session}
+        continuationTweaks={
+          continuation.value && !continuation.error ? (
+            <SessionContinuationTweaks
+              value={continuation.value}
+              onChange={continuation.setTweak}
+              disabled={continuation.busy}
+              capabilities={{
+                recoverCapacity: {
+                  supported:
+                    continuation.value.recoverCapacity ||
+                    Boolean(
+                      session.agentConfigId &&
+                      sessionAgentConfig &&
+                      sessionMachine?.acpCapabilities?.[session.agentConfigId]?.rateLimits
+                        ?.query === true &&
+                      canShowSubscriptionRateLimits({
+                        cliType: session.cliType,
+                        agentType: session.agentType,
+                        config: sessionAgentConfig,
+                        capability:
+                          sessionMachine?.acpCapabilities?.[session.agentConfigId]?.rateLimits,
+                      })
+                    ),
+                  reason: t(
+                    'sessions.continuation.quotaUnavailable',
+                    'Quota recovery support could not be confirmed for this provider.'
+                  ),
+                },
+              }}
+            />
+          ) : undefined
+        }
         localProjectMeta={resolvedLocalProjectMeta}
         workspacePath={sessionWorkspacePath}
         machineName={sessionMachine?.name}
@@ -6993,7 +7047,32 @@ export const SessionChatInterface = memo(
                                 leadingContent={openedByConversationStart}
                                 emptyState={chatStreamEmptyState}
                                 trailingContent={
-                                  unsentFirstMessage ? undefined : pendingMessages.trailingContent
+                                  unsentFirstMessage ? undefined : (
+                                    <>
+                                      {pendingMessages.trailingContent}
+                                      {continuation.views.map((view) => (
+                                        <SessionContinuationNote
+                                          key={view.id}
+                                          view={
+                                            continuation.error
+                                              ? { ...view, block: 'unavailable' }
+                                              : view
+                                          }
+                                          now={continuationNow}
+                                          compact={isMobile}
+                                          onCancel={continuation.cancel}
+                                        />
+                                      ))}
+                                      {continuation.error && (
+                                        <span>
+                                          {t(
+                                            'sessions.continuation.connectionError',
+                                            'Unable to reach the local automation service.'
+                                          )}
+                                        </span>
+                                      )}
+                                    </>
+                                  )
                                 }
                                 localUserMessages={pendingMessages.localUserMessages}
                                 agentActivityLabel={agentActivityLabel}
