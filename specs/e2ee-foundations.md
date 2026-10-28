@@ -47,18 +47,19 @@ mandatory caller responsibilities; HPKE validity does not establish sender ident
 ## Realtime RPC and presence (M5 review draft)
 
 Remote execution needs the same authority and execution evidence whichever route
-wins. Use **iroh first → encrypted Streams RPC → encrypted history/Meta durable
-dispatch** as the final fallback. Keep that durable path available when both
-realtime paths fail; it must reach the same actual-start claim, not a second
-execution path. Ordinary workspaces keep their existing behavior. No encrypted
-route may fall back to plaintext.
+wins. For the MVP, use **encrypted Streams RPC → encrypted history/Meta durable
+dispatch** as the final fallback. Keep that durable path available when Streams
+RPC fails; it must reach the same actual-start claim, not a second execution path.
+Iroh is a later acceleration layer, outside the MVP. Ordinary workspaces keep
+their existing behavior. No encrypted route may fall back to plaintext.
 
-**This concrete byte revision remains draft.** Two format choices below await
-owner approval: the 1 MiB RPC limit includes content v0's 143-byte overhead, and
+**This concrete byte revision remains draft.** The owner approved both format
+choices below on **2026-10-28**: the 1 MiB RPC limit includes content v0's
+143-byte overhead, and
 RPC resources use canonical unpadded base64url of the ledger machineId bytes.
 The body layout follows the unmerged PR-25 candidate at
 `daee5751fde6698e50960ca6a5627191c887e297`; that code is evidence of candidate
-bytes, not approval or a shipped realtime capability.
+bytes, not final Spec approval or a shipped realtime capability.
 
 ### Shared content frame and resource bytes
 
@@ -71,7 +72,7 @@ response, presence and document leaves never substitute for each other.
 Transport metadata supplies no authority; the host separately checks the fixed
 genesis-to-workspace binding and independently trusted target/signer.
 
-**Resource choice awaiting approval:** requests and responses use
+**Resource choice — owner approved (2026-10-28):** requests and responses use
 `rpc:<encodedMachineId>`, where encodedMachineId is RFC 4648 section 5 base64url
 of the exact ledger machineId's strict UTF-8 bytes, **without `=` padding**. The
 ledger permits 1..256 bytes, preserves a leading BOM, rejects lone surrogates and
@@ -106,7 +107,7 @@ own their storage, including for offset Buffer inputs.
 | 9 response | `version:u8=0, requestId:16, requestDigest:32, kind:u8, sequence:u32, payload:bytes32`     | Each complete sealed frame ≤1,048,576 bytes                                 |
 | 7 presence | `version:u8=0, incarnation:16, sequence:u32, issuedAt:u64, expiresAt:u64, payload:bytes32` | Plaintext body ≤65,536 bytes; TTL ≤60,000 ms                                |
 
-**RPC limit choice awaiting approval:** body size is at most **1,048,433 bytes**
+**RPC limit choice — owner approved (2026-10-28):** body size is at most **1,048,433 bytes**
 (`1,048,576 - 143`), not 1 MiB plus content overhead. Request body size is
 `31 + methodBytes + paramsBytes`; response body size is `58 + payloadBytes`.
 Presence body size is `41 + payloadBytes`; its separate 64 KiB body limit gives
@@ -188,7 +189,7 @@ forwarded proofs and received frames do not grant execution freshness. Before a
 new start **and each later action**, check current member/device roles and existing
 machine ownership/sharing rules; Guest and recovery devices cannot execute.
 Read queries need read permissions. Known revocation, an incompatible epoch or
-conflicting evidence stops affected sends/execution across all three routes.
+conflicting evidence stops affected sends/execution across all delivery routes.
 **`rotationRequired` is an administrator advisory only:** keep prompting for key
 rotation, but the flag alone blocks neither new sealing, sending nor execution.
 Current verified authorization and usable epoch keys remain necessary.
@@ -217,22 +218,15 @@ while retaining retired request IDs; it neither renews original deadlines nor
 restores freshness or replay authority. Follow the public
 [journal recovery decision](../.agents/notes/proposed/bug-fix/2026-10-27-e2ee-realtime-journal-recovery.md).
 
-### Routes, iroh identity and latency acceptance
+### MVP routes and latency acceptance
 
-Iroh reuses the workspace device's Ed25519 identity: EndpointId equals its signing
-public key. Only the trusted host supplies the private key, with no renderer
-export or arbitrary-sign IPC. A connected peer still passes shared-frame,
-verified-binding, current-permission, freshness and execution-journal checks.
-Concrete TLS/discovery domain separation, native SDK/key lifetime and platform
-acceptance remain gates before enabling identity reuse.
-
-A slow/unavailable iroh connection must not hold up usable encrypted Streams RPC.
-If both are unusable, retain **encrypted history/Meta durable dispatch as the final
-fallback**. Retries across realtime routes reuse the original ID and exact signed
-ciphertext. Durable dispatch retains the same business identity (`userTurnId`
-where applicable) and original request correlation; all routes pass the same
-actual-start claim and current authorization. A durable arrival does not refresh
-the original deadline or start a second operation.
+The MVP uses encrypted Streams RPC as its realtime path. If it is unusable, retain
+**encrypted history/Meta durable dispatch as the final fallback**. Retry the
+original ID and exact signed ciphertext. Durable dispatch retains the same
+business identity (`userTurnId` where applicable) and original request correlation;
+both routes pass the same actual-start claim and current authorization. A durable
+arrival does not refresh the original deadline or start a second operation.
+MVP delivery and acceptance must not depend on an iroh connection or SDK.
 
 The acceptance target is **send-to-actual-execution-start ≤1 second**, measured
 from sender acceptance of the send to the machine's actual-start boundary, not
@@ -240,6 +234,19 @@ to a receipt ACK or business completion. Measure ordinary/encrypted paths and
 transport/fallback selection separately under stated conditions. Offline durable
 catch-up has no one-second delivery guarantee; a passed deadline still forbids
 a new start. No latency result is claimed by this documentation revision.
+
+### Later acceleration: iroh (outside the MVP)
+
+The owner deferred iroh from the MVP on **2026-10-28**. The identity decision is
+retained for that later layer: iroh reuses the workspace device's Ed25519
+identity, so EndpointId equals its signing public key. Only the trusted host supplies the private key, with no renderer
+export or arbitrary-sign IPC. A connected peer still passes shared-frame,
+verified-binding, current-permission, freshness and execution-journal checks.
+The 2026-10-28 owner decision records that the domain-separation review found no
+confusion between the signing protocols. That finding is not native SDK/key
+lifetime or installed-platform acceptance. A later iroh accelerator must preserve
+the same original ID/ciphertext, authorization and actual-start claim, and must
+not delay usable encrypted Streams RPC or its durable fallback.
 
 ### Durable identities, actual start and retained outcomes
 
@@ -286,8 +293,10 @@ and its [vectors](https://github.com/LodyAI/Lody/blob/daee5751fde6698e50960ca6a5
 Resource encoding, authenticated transport/freshness, sender outbox, actual
 execution and durable fallback wiring, result-query authorization, iroh custody,
 installed-platform and latency acceptance are not established by those subsets.
-Owner approval must identify this exact revision; neither document checks nor
-candidate code approval approves the whole Spec or enables product channels.
+The two format choices are owner-approved as of 2026-10-28; the complete Spec
+remains draft pending independent PR-25/wire consistency review and subsequent
+explicit owner approval of the final revision. Neither document checks nor those
+format decisions approve the whole Spec or enable product channels.
 
 ## Format compatibility
 

@@ -13,16 +13,19 @@ with merged purpose-specific crypto, signed machine binding and schema-3 journal
 recovery, while pinning candidate body bytes to unmerged PR-25. It keeps encrypted
 history/Meta dispatch as the final fallback and separates persistent request
 expiry from memory-only execution freshness. The full Spec remains draft;
-whole-frame RPC sizing and canonical machine resource encoding await owner approval,
-and product transport, execution and latency acceptance remain unverified.
+the owner approved whole-frame RPC sizing and canonical machine resource encoding
+on 2026-10-28. The MVP uses encrypted Streams RPC plus durable fallback, with
+iroh deferred to a later accelerator; product execution and latency remain unverified.
 
 ## Decisions and alternatives
 
 The [owning draft](../../../../specs/e2ee-foundations.md#realtime-rpc-and-presence-m5-review-draft)
 contains the single byte profile. Retain content v0 purposes 7/8/9 and exact original
-ciphertext across realtime retries. Use iroh first, encrypted Streams RPC next,
-and encrypted history/Meta durable dispatch as the final fallback, all converging
-on one actual-start claim. A dispatch ACK is receipt/progress, not agent completion.
+ciphertext across realtime retries. The 2026-10-28 owner decision selects encrypted
+Streams RPC with encrypted history/Meta durable dispatch as the final fallback
+for the MVP, both converging on one actual-start claim. Iroh is outside the MVP
+and may be added later as an accelerator. A dispatch ACK is receipt/progress,
+not agent completion.
 Preserve userTurnId and existing steer/fork evidence; never automatically restart
 uncertain work. Execution/request/response evidence has no automatic collection;
 capacity exhaustion refuses new work rather than evicting deduplication evidence.
@@ -43,7 +46,7 @@ expiry floor cannot grant that freshness; its authenticated-time skew checks and
 evidence-preserving explicit reset retain their own contract. Neither reset nor
 refresh renews request expiry or permits uncertain takeover.
 
-Two byte choices require owner approval of a specific revision:
+The owner approved these two byte choices on **2026-10-28**:
 
 1. Follow PR-25: the whole RPC content frame fits in 1,048,576 bytes including
    143 bytes overhead; the body is at most 1,048,433 bytes. This replaces the old
@@ -55,9 +58,11 @@ Two byte choices require owner approval of a specific revision:
    lossy normalization could merge distinct identities. PR-25 does not implement
    this resource codec.
 
-Iroh's EndpointId remains the workspace device signing public key, supplied only
-inside trusted hosts. Concrete signing-domain/key-lifetime and platform audits
-remain open. The send-to-actual-start acceptance target is ≤1 second, not ACK or
+For the later, non-MVP iroh layer, EndpointId remains the workspace device signing
+public key, supplied only inside trusted hosts. The 2026-10-28 owner decision
+records that the domain-separation review found no signing-protocol confusion;
+this is not native key-lifetime or installed-platform acceptance. The
+send-to-actual-start acceptance target is ≤1 second, not ACK or
 business completion; no measurement is claimed and offline durable catch-up has
 no one-second delivery guarantee.
 
@@ -93,8 +98,10 @@ This revision supersedes only the stale M5 contract audit, not those owning reco
 
 [PR #1894](https://github.com/LodyAI/Lody/pull/1894) remains draft; all four Spec
 files remain draft and both Note languages remain proposed/current. Document checks
-validate metadata/links, not human approval, native domain separation or runtime
-behavior. The bytes were compared with the pinned PR-25 codec and independently
+validate metadata/links, not final Spec approval or runtime behavior. The two
+format approvals do not change Spec status: final approval awaits independent
+PR-25/wire consistency review and subsequent explicit owner approval. The bytes
+were compared with the pinned PR-25 codec and independently
 generated vectors; no copied candidate implementation or new test suite is added.
 Authenticated transports/freshness, sender outbox, query authorization, actual
 execution and persistent fallback, real gateways, native/platform and latency

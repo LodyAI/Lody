@@ -189,8 +189,9 @@ Execution requests include starting an Agent turn, saving a remote file and term
 Org execution permissions obey the same worst-case 15-minute revocation bound. Caches cannot outlive the original freshness proof, and forwarding, receipt, or restart does not start a new timer. Known revocation invalidates them immediately; failure to refresh by expiry blocks new execution. This bound depends on the server honestly supplying current control state: a local timer cannot prevent a malicious server from continually concealing revocation. Cancelling an already started command is a separate process; revocation does not automatically undo its effects.
 
 The [M5 realtime review draft](../e2ee-foundations.md#realtime-rpc-and-presence-m5-review-draft)
-sets the concrete candidate bytes and the route order: iroh first, encrypted
-Streams RPC, then encrypted history/Meta durable dispatch as the final fallback.
+sets the concrete bytes and MVP route order: encrypted Streams RPC, then encrypted
+history/Meta durable dispatch as the final fallback. The 2026-10-28 owner decision
+defers iroh to a later, non-MVP acceleration layer.
 All routes share current authorization and one durable actual-start claim;
 realtime retries retain the exact original ciphertext and ID. The merged ledger
 binds machineId in admission and possession; old developer ledgers are recreated
@@ -200,10 +201,12 @@ execution freshness is memory-only, at most 15 minutes from before its own
 authenticated latest read, and requires online revalidation after restart; the
 journal's persistent workspace expiry floor is not that grant. Execution evidence
 is not automatically collected. The send-to-actual-start target is ≤1 second,
-with no measurement claimed here. The full revision stays draft: whole-frame
-1 MiB RPC sizing (including 143 bytes) and canonical unpadded-base64url machine
-resources await owner approval; native iroh/domain and product acceptance remain
-separate work.
+with no measurement claimed here. The owner approved whole-frame 1 MiB RPC sizing
+(including 143 bytes) and canonical unpadded-base64url machine resources on
+2026-10-28. The later iroh identity still reuses the ledger device key; the reported
+domain-separation review found no signing-protocol confusion. Native key lifetime
+and product acceptance remain separate work. The full revision stays draft pending
+independent PR-25/wire consistency review and final explicit owner approval.
 
 ## 8. Security Properties and Trade-offs
 

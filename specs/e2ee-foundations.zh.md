@@ -34,15 +34,15 @@ info `lody-e2ee/hpke-epoch/v1\0` 与账本规范四字段 AAD。只把 32 字节
 
 ## 实时 RPC 与 presence（M5 评审草案）
 
-远程执行无论从哪条路径到达，都必须使用相同权限和执行证据。采用 **iroh 优先 → 加密
-Streams RPC → 加密 history/Meta 持久派发最终回退**。两条实时路径失效时必须保留持久
-路径，并进入同一个实际启动 claim，不能形成第二条执行入口。普通工作区保持原行为；
-加密路径不能回退到明文。
+远程执行无论从哪条路径到达，都必须使用相同权限和执行证据。MVP 采用**加密 Streams
+RPC → 加密 history/Meta 持久派发最终回退**。Streams RPC 失效时必须保留持久路径，
+并进入同一个实际启动 claim，不能形成第二条执行入口。Iroh 为后续加速层，不在 MVP
+中。普通工作区保持原行为；加密路径不能回退到明文。
 
-**本具体字节修订仍为 draft。** 下文两点待 owner 批准：RPC 的 1 MiB 包含 content v0
-的 143 字节开销；RPC 资源使用账本 machineId 字节的规范无填充 base64url。正文布局
+**本具体字节修订仍为 draft。** 下文两点已获 **owner 于 2026-10-28 批准**：RPC 的
+1 MiB 包含 content v0 的 143 字节开销；RPC 资源使用账本 machineId 字节的规范无填充 base64url。正文布局
 对齐未合入 PR-25 的 `daee5751fde6698e50960ca6a5627191c887e297`；候选代码只是
-具体字节证据，不代表批准或已上线实时能力。
+具体字节证据，不代表完整 Spec 批准或已上线实时能力。
 
 ### 共用内容帧与资源字节
 
@@ -53,7 +53,7 @@ Streams RPC → 加密 history/Meta 持久派发最终回退**。两条实时路
 请求、响应、presence 和文档派生叶不能互换。传输元数据不产生权限；宿主另行核对固定
 的 genesis／工作区对应关系和独立可信的目标／签名者。
 
-**待批准的资源选择：** 请求与响应使用 `rpc:<encodedMachineId>`，其中
+**资源选择——owner 已批准（2026-10-28）：** 请求与响应使用 `rpc:<encodedMachineId>`，其中
 encodedMachineId 是账本 machineId 的精确严格 UTF-8 字节按 RFC 4648 第 5 节编码
 的 base64url，**不带 `=` 填充**。账本允许 1..256 字节，保留开头 BOM，拒绝孤立代理
 项和非法 UTF-8，不做 Unicode 归一化。编码原字节，不 trim、不折叠大小写、不 URL
@@ -82,7 +82,7 @@ Presence 使用 `presence:<roomId>`；roomId 限 1..128 字节的 `0x21..0x7e`�
 | 9 响应     | `version:u8=0, requestId:16, requestDigest:32, kind:u8, sequence:u32, payload:bytes32`     | 每个完整封装帧 ≤1,048,576 字节                                   |
 | 7 presence | `version:u8=0, incarnation:16, sequence:u32, issuedAt:u64, expiresAt:u64, payload:bytes32` | 明文正文 ≤65,536 字节；TTL ≤60,000 ms                            |
 
-**待批准的 RPC 上限选择：** 正文最多 **1,048,433 字节**（`1,048,576 - 143`），
+**RPC 上限选择——owner 已批准（2026-10-28）：** 正文最多 **1,048,433 字节**（`1,048,576 - 143`），
 不是 1 MiB 另加内容帧开销。请求正文大小是 `31 + methodBytes + paramsBytes`；响应
 正文是 `58 + payloadBytes`。Presence 正文为 `41 + payloadBytes`，独立的 64 KiB
 正文上限对应完整内容帧最多 65,679 字节。传输外层封装不计入上述内容帧上限；通用
@@ -141,7 +141,7 @@ credential-binding/v1 继续将配对交互绑定到 session，不是 machineId 
 已验证账本证明连续性，不证明刚读取了最新状态。token、时间戳、转发证明和收到帧
 不授予执行新鲜度。新开始**及每个后续动作**前检查当前成员／设备角色和既有机器
 所有权／共享规则；Guest／恢复设备不能执行。只读查询需要读取权限。已知撤销、不兼容
-的 epoch 或证据冲突停止三条路径中受影响的发送／执行。**`rotationRequired` 只提示
+的 epoch 或证据冲突停止各条派发路径中受影响的发送／执行。**`rotationRequired` 只提示
 管理员换钥：该标志本身不阻断新封装、发送或执行。** 当前已验证授权和可用 epoch 钥
 仍然必需。
 
@@ -161,21 +161,25 @@ claim 拒绝本机或已保存下限超前超过 600,000 ms 的情形；接受�
 原期限，不恢复新鲜度，也不授予重放权限。遵循公开
 [journal 恢复决定](../.agents/notes/proposed/bug-fix/2026-10-27-e2ee-realtime-journal-recovery.zh.md)。
 
-### 路由、iroh 身份与延迟验收
+### MVP 路由与延迟验收
 
-Iroh 复用工作区设备 Ed25519 身份：EndpointId 等于其签名公钥。只有可信宿主交付
-私钥，不导出给 renderer，不开放任意签名 IPC。连接对端仍须通过共用帧、已验证绑定、
-当前权限、新鲜度和执行 journal 检查。启用复用前仍须完成具体 TLS／discovery 域隔离、
-原生 SDK／密钥生命周期和平台验收。
-
-慢或不可用的 iroh 不能拖住可用的加密 Streams RPC。两者都不可用时必须保留**加密
-history/Meta 持久派发最终回退**。实时重试保留原 ID 和完整原签名密文；持久派发保留
-同一业务身份（适用时为 userTurnId）与原请求关联。三路都经过同一实际启动 claim 和
-当前授权。持久到达不刷新原期限，也不产生第二次操作。
+MVP 实时主路径为加密 Streams RPC；不可用时必须保留**加密 history/Meta 持久派发
+最终回退**。重试保留原 ID 和完整原签名密文；持久派发保留同一业务身份（适用时为
+userTurnId）与原请求关联。两路都经过同一实际启动 claim 和当前授权。持久到达不
+刷新原期限，也不产生第二次操作。MVP 交付和验收不依赖 iroh 连接或 SDK。
 
 验收目标为**发送到实际执行开始 ≤1 秒**：从发送方接受 send 到机器实际启动边界，
 不是到交付 ACK，也不是业务完成。按明确条件分别测普通／加密路径、通道和回退选择。
 离线持久补同步不保证一秒交付；期限已过仍禁止新启动。本次文档修订不声称测量通过。
+
+### 后续加速层：iroh（非 MVP）
+
+Owner 于 **2026-10-28** 将 iroh 延后至 MVP 之后。保留其身份决定：复用工作区设备
+Ed25519 身份，EndpointId 等于其签名公钥。只有可信宿主交付私钥，不导出给 renderer，不开放任意签名 IPC。连接对端仍须通过共用帧、已验证绑定、
+当前权限、新鲜度和执行 journal 检查。2026-10-28 的 owner 决定记录域隔离审查未
+发现签名协议混淆；这不等于原生 SDK／密钥生命周期或安装平台验收通过。后续 iroh
+加速层须保留相同原 ID／密文、授权和实际启动 claim，不能拖住可用的加密 Streams
+RPC 或持久回退。
 
 ### 持久身份、实际启动与结果保留
 
@@ -210,8 +214,9 @@ journal 错误只阻断依赖它的工作；保留证据和原 cause，I/O 恢�
 [PR-25 源码](https://github.com/LodyAI/Lody/blob/daee5751fde6698e50960ca6a5627191c887e297/packages/loro-streams-rpc/src/e2ee-wire.ts)
 和[向量](https://github.com/LodyAI/Lody/blob/daee5751fde6698e50960ca6a5627191c887e297/packages/loro-streams-rpc/tests/fixtures/e2ee-wire-v0.json)。
 这些子集不证明资源编码、认证传输／新鲜度、发送 outbox、实际执行及持久回退接线、
-结果查询授权、iroh 托管、安装平台或延迟验收。owner 批准须指明本具体 revision；
-文档检查或候选代码批准都不批准完整 Spec，也不开启产品通道。
+结果查询授权、iroh 托管、安装平台或延迟验收。两个格式点已于 2026-10-28 获 owner
+批准；完整 Spec 保持 draft，等待独立 PR-25／wire 一致性审查及之后 owner 对最终
+revision 的明确批准。文档检查或这两项格式决定都不批准完整 Spec，也不开启产品通道。
 
 ## 格式兼容性
 

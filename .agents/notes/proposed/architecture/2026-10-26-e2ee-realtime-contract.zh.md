@@ -10,14 +10,16 @@ Translation: current
 加密远程执行需要明确字节，并让实时和持久派发共用一个持久启动边界。本修订对齐已
 合入的用途专用加密原语、账本机器绑定和 schema-3 journal 恢复，候选正文字节钉在
 未合入 PR-25。保留加密 history/Meta 最终回退，区分持久请求过期与仅内存执行新鲜度。
-完整 Spec 仍为 draft；RPC 完整帧上限与机器资源规范编码待 owner 批准，产品传输、
-执行和延迟验收仍未证实。
+完整 Spec 仍为 draft；RPC 完整帧上限与机器资源规范编码已于 2026-10-28 获 owner
+批准。MVP 采用加密 Streams RPC 加持久回退，iroh 延后为加速层；产品执行和延迟
+验收仍未证实。
 
 ## 决定与替代方案
 
 [所属草案](../../../../specs/e2ee-foundations.zh.md#实时-rpc-与-presencem5-评审草案)
-保存唯一字节 profile。保留 content v0 用途 7/8/9，实时重试原密文。iroh 优先，其次
-加密 Streams RPC，最后加密 history/Meta 持久派发；三路汇入同一个实际启动 claim。
+保存唯一字节 profile。保留 content v0 用途 7/8/9，实时重试原密文。2026-10-28
+的 owner 决定选择 MVP 加密 Streams RPC 主路径与加密 history/Meta 持久派发最终
+回退，两路汇入同一个实际启动 claim。Iroh 不在 MVP 中，可在后续作为加速层。
 派发 ACK 是接收／progress，不是 agent 完成。保留 userTurnId 和既有 steer／fork
 证据，不自动重启不确定操作。执行／请求／响应证据不自动回收；容量耗尽拒绝新工作，
 不驱逐去重证据。
@@ -33,7 +35,7 @@ tag4 和机器 possession 绑定严格 UTF-8 machineId；credential-binding/v1 �
 检查及保留证据的显式 reset 有独立契约。reset／刷新均不续请求期限，也不允许接管
 不确定操作。
 
-两个字节点需要 owner 批准具体 revision：
+两个字节点已获 **owner 批准（2026-10-28）**：
 
 1. 对齐 PR-25：完整 RPC 内容帧最多 1,048,576 字节，包含 143 字节开销，正文最多
    1,048,433 字节。取代此前仅明文 1 MiB 的解释；presence 仍为 65,536 字节正文。
@@ -42,8 +44,9 @@ tag4 和机器 possession 绑定严格 UTF-8 machineId；credential-binding/v1 �
    完整资源最多 346。拒绝非 ASCII 或超过 128 字节的原 ID 会排除合法账本机器；有损
    归一化可能合并不同身份。PR-25 未实现此资源 codec。
 
-Iroh EndpointId 仍为工作区设备签名公钥，仅在可信宿主交付私钥。具体签名域／密钥
-生命周期和平台审计仍未完成。发送到实际启动目标为 ≤1 秒，不是 ACK 或业务完成；
+后续非 MVP 的 iroh 层保留工作区设备签名公钥作为 EndpointId，仅在可信宿主交付
+私钥。2026-10-28 的 owner 决定记录域隔离审查未发现签名协议混淆；这不等于原生
+密钥生命周期或安装平台验收通过。发送到实际启动目标为 ≤1 秒，不是 ACK 或业务完成；
 不声称已测得，离线持久补同步不保证一秒交付。
 
 ## 源码审计与接线边界
@@ -76,8 +79,9 @@ PR-25 **尚未合入**，钉在
 ## 验证边界
 
 [PR #1894](https://github.com/LodyAI/Lody/pull/1894) 保持 draft；四份 Spec 均为 draft，
-双语 Note 均 proposed/current。文档检查只验证元数据／链接，不代表人工批准、原生
-域隔离或运行时行为。已对照指定 PR-25 codec 和独立生成的向量，不复制候选实现，也
-不加新测试套件。认证传输／新鲜度、发送 outbox、查询授权、实际执行和持久回退、真实
+双语 Note 均 proposed/current。文档检查只验证元数据／链接，不代表最终 Spec 批准
+或运行时行为。两个格式点批准不改变 Spec 状态：最终批准仍待独立 PR-25／wire
+一致性审查及之后 owner 明确批准。已对照指定 PR-25 codec 和独立生成的向量，
+不复制候选实现，也不加新测试套件。认证传输／新鲜度、发送 outbox、查询授权、实际执行和持久回退、真实
 网关、原生／平台和延迟验收仍待接线。本 revision 的检查记录在 PR 描述；旧检查／评审
 结果不作为此次 revision 的证据。
