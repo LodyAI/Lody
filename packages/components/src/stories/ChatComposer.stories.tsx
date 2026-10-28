@@ -1,6 +1,12 @@
+import { QueuedScheduledMessagePreview } from './queued-scheduled-message-preview';
+import { SessionInfoBar } from '../components/sessions/session-info-bar';
+import {
+  ScheduledMessageInfoChip,
+  ScheduledMessageTimeDialog,
+} from '../components/schedules/scheduled-message-time';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useRef, useState } from 'react';
-import { ArrowUp, Bot, Github } from 'lucide-react';
+import { Clock, ArrowUp, Bot, Github } from 'lucide-react';
 
 import {
   ChatComposer,
@@ -527,4 +533,100 @@ export const LandingWithPastedText: Story = {
       </div>
     </div>
   ),
+};
+
+function ScheduledSendPreview({
+  pickerInitiallyOpen = false,
+  infoInitiallyOpen = false,
+}: {
+  pickerInitiallyOpen?: boolean;
+  infoInitiallyOpen?: boolean;
+}) {
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const [text, setText] = useState(
+    'Review these files tomorrow morning and summarize the remaining issues.'
+  );
+  const [at, setAt] = useState<string | null>('2026-10-28T01:00:00.000Z');
+  const [picker, setPicker] = useState(pickerInitiallyOpen);
+  return (
+    <div className="min-h-screen bg-background p-4 flex items-center justify-center">
+      <div className="w-full max-w-2xl">
+        <SessionInfoBar
+          status={null}
+          machine={{
+            machineId: 'story-machine' as never,
+            name: 'MacBook Pro',
+            onlineStatus: 'online',
+          }}
+          scheduledMessage={
+            at ? (
+              <ScheduledMessageInfoChip
+                at={at}
+                timeZone="Asia/Shanghai"
+                defaultOpen={infoInitiallyOpen}
+                onEdit={() => setPicker(true)}
+              />
+            ) : null
+          }
+        />
+        <ChatComposer
+          variant="session"
+          promptRef={promptRef}
+          tone="light"
+          promptValue={text}
+          onPromptChange={setText}
+          onAttachmentAddClick={() => {}}
+          onScheduleSend={() => setPicker(true)}
+          primaryAction={
+            <Button icon aria-label="Schedule send">
+              <Clock size={16} />
+            </Button>
+          }
+          autoResize
+        />
+      </div>
+      {picker ? (
+        <ScheduledMessageTimeDialog
+          finalFocus={promptRef}
+          onRemoveTime={
+            at
+              ? () => {
+                  setAt(null);
+                  setPicker(false);
+                }
+              : undefined
+          }
+          at={at}
+          timeZone="Asia/Shanghai"
+          now={Date.parse('2026-10-27T08:00:00Z')}
+          onClose={() => setPicker(false)}
+          onApply={(value) => {
+            setAt(value);
+            setPicker(false);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+export const ScheduledSend: Story = { render: () => <ScheduledSendPreview /> };
+export const ScheduledSendTimePicker: Story = {
+  render: () => <ScheduledSendPreview pickerInitiallyOpen />,
+};
+export const ScheduledSendDark: Story = {
+  globals: { theme: 'dark' },
+  render: () => <ScheduledSendPreview />,
+};
+
+export const ScheduledSendInfo: Story = {
+  render: () => <ScheduledSendPreview infoInitiallyOpen />,
+};
+
+export const QueuedScheduledMessage: Story = { render: () => <QueuedScheduledMessagePreview /> };
+
+export const QueuedTimeLeading: Story = {
+  render: () => <QueuedScheduledMessagePreview variant="start" />,
+};
+export const QueuedTimeAiry: Story = {
+  render: () => <QueuedScheduledMessagePreview variant="airy" />,
 };

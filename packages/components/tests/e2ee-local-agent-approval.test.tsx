@@ -16,7 +16,10 @@ describe('local encrypted agent approval', () => {
   let session: string;
   let hasCredential: boolean;
   let protection: 'file' | 'os-keystore' = 'file';
-  let runtime: Pick<E2eeWorkspaceRuntime, 'prepareLocalAgent' | 'admitLocalAgent' | 'status'>;
+  let runtime: Pick<
+    E2eeWorkspaceRuntime,
+    'prepareLocalAgent' | 'admitLocalAgent' | 'status' | 'resetLocalAgent' | 'resetIdentity'
+  >;
   beforeEach(() => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     container = document.createElement('div');
@@ -58,6 +61,100 @@ describe('local encrypted agent approval', () => {
     if (!button) throw new Error(`missing button ${label}`);
     await act(async () => button.click());
   };
+  it('offers explicit machine reset after corrupt preparation, then requires new approval', async () => {
+    const prepareOriginal = runtime.prepareLocalAgent;
+    let broken = true;
+    runtime.prepareLocalAgent = async (...args) => {
+      if (broken)
+        throw new Error(
+          "Error invoking remote method 'e2ee:prepareLocalAgent': Error: e2ee_machine_corrupt"
+        );
+      if (!prepareOriginal) throw new Error('missing fixture preparation');
+      return prepareOriginal(...args);
+    };
+    runtime.resetLocalAgent = async (input) => {
+      expect(input.workspaceId).toBe('workspace');
+      expect(input.confirm).toBe(true);
+      expect(input.resetId).toBeTruthy();
+      broken = false;
+      session = 'replacement-session';
+    };
+    await render();
+    await click('e2ee.localAgent.enable');
+    await click('e2ee.identity.resetMachine');
+    expect(broken).toBe(true);
+    await click('e2ee.identity.confirm');
+    expect(broken).toBe(false);
+    expect(admitted).toBe(false);
+    await click('e2ee.localAgent.enable');
+    expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain(
+      'e2ee.localAgent.confirm'
+    );
+    expect(admitted).toBe(false);
+    await click('e2ee.localAgent.allow');
+    expect(admitted).toBe(true);
+  });
+
+  it('a desktop status failure offers the desktop identity reset, not machine reset', async () => {
+    let desktopReset = false;
+    runtime.status = async () => {
+      throw new Error("Error invoking remote method 'e2ee:status': Error: e2ee_corrupt");
+    };
+    runtime.resetIdentity = async () => {
+      desktopReset = true;
+      return { archive: '/synthetic/archive' };
+    };
+    runtime.resetLocalAgent = async () => {
+      throw new Error('wrong recovery scope');
+    };
+    await render();
+    expect(container.textContent).toContain('e2ee.identity.resetWorkspace');
+    expect(container.textContent).not.toContain('e2ee.identity.resetMachine');
+    await click('e2ee.identity.resetWorkspace');
+    await click('e2ee.identity.confirm');
+    expect(desktopReset).toBe(true);
+    expect(admitted).toBe(false);
+  });
+
+  it.each([
+    ['local-history-recovery-required', 'historyTitle'],
+    ['trusted-pin-unavailable', 'pinTitle'],
+    ['restart-required', 'restartTitle'],
+  ])('maps native %s to its permitted recovery', async (code, title) => {
+    let archived = false;
+    runtime.status = async () => {
+      throw new Error(`Error invoking remote method 'e2ee:status': Error: e2ee_${code}`);
+    };
+    runtime.resetIdentity = async () => {
+      archived = true;
+      return { archive: '/synthetic/archive' };
+    };
+    await render();
+    expect(container.textContent).toContain(`e2ee.identity.${title}`);
+    expect(archived).toBe(false);
+    if (code === 'restart-required') {
+      expect(container.textContent).toContain('e2ee.identity.restartHelp');
+      expect(container.textContent).not.toContain('e2ee.identity.resetWorkspace');
+      expect(container.textContent).not.toContain('e2ee.identity.resetAccount');
+    } else {
+      await click('e2ee.identity.resetWorkspace');
+      expect(archived).toBe(false);
+      await click('e2ee.identity.confirm');
+      expect(archived).toBe(true);
+    }
+    expect(admitted).toBe(false);
+  });
+
+  it('permission repair offers retry without an identity reset', async () => {
+    runtime.prepareLocalAgent = async () => {
+      throw new Error('e2ee_machine_permissions');
+    };
+    await render();
+    await click('e2ee.localAgent.enable');
+    expect(container.textContent).toContain('e2ee.identity.permissionsHelp');
+    expect(container.textContent).not.toContain('e2ee.identity.resetMachine');
+  });
+
   it('does nothing on the ordinary workspace path', async () => {
     await render(false);
     expect(container.textContent).toBe('');
@@ -190,11 +287,93 @@ describe('local encrypted agent approval', () => {
     expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
     expect(admitted).toBe(false);
   });
-  it('reuses an already admitted machine without a second approval dialog', async () => {
+  it('requires explicit consent for a new session even when the machine was admitted by another frontend', async () => {
     admitted = true;
     await render();
+    let activationRequested = false;
+    runtime.admitLocalAgent = async () => {
+      activationRequested = true;
+      return { admitted: true, ready: true };
+    };
     await click('e2ee.localAgent.enable');
+    expect(activationRequested).toBe(false);
+    expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+    await click('e2ee.localAgent.allow');
+    expect(activationRequested).toBe(true);
     expect(container.textContent).toBe('');
-    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+  });
+});
+
+describe('remote encrypted machine approval', () => {
+  it('shows the exact summary and file protection before separate approval, then preserves pending installation', async () => {
+    const { E2eeRemoteMachinePairing } =
+      await import('../src/components/pages/e2ee-remote-machine-pairing');
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const pairingSessionId = '11'.repeat(16),
+      summary = Array(8).fill('12345678').join(' ');
+    let state: 'claimed' | 'admitted' = 'claimed';
+    const material = {
+      ok: true as const,
+      type: 'prepare' as const,
+      machineId: 'synthetic-machine',
+      pairingSessionId,
+      signingPublicKey: '22'.repeat(32),
+      encryptionPublicKey: '33'.repeat(32),
+      possessionSignature: '44'.repeat(64),
+      credentialHash: '55'.repeat(32),
+      bindingSignature: '66'.repeat(64),
+      protection: 'file' as const,
+    };
+    const view = () => ({
+      pairingSessionId,
+      summary,
+      material,
+      status: state,
+      expiresAt: 2_000_000,
+      location: { country: 'CN', city: 'Shanghai' },
+    });
+    const runtime = {
+      beginRemoteMachinePairing: async () => ({
+        ...view(),
+        command: 'lody machine pair --offer synthetic-command',
+      }),
+      inspectRemoteMachinePairing: async () => view(),
+      approveRemoteMachinePairing: async (_workspace: string, session: string, shown: string) => {
+        if (session !== pairingSessionId || shown !== summary) throw new Error('evidence changed');
+        state = 'admitted';
+        return { admitted: true, ready: false };
+      },
+      cancelRemoteMachinePairing: async () => ({ ...view(), status: 'cancelled' as const }),
+    };
+    const click = async (key: string) => {
+      const button = Array.from(container.querySelectorAll('button')).find(
+        (item) => item.textContent === key
+      );
+      if (!button) throw new Error(`missing ${key}`);
+      await act(async () => button.click());
+    };
+    try {
+      await act(async () =>
+        root.render(<E2eeRemoteMachinePairing workspaceId="workspace" runtime={runtime} />)
+      );
+      await click('e2ee.remoteMachine.create');
+      expect(container.querySelector('textarea')?.value).toContain('synthetic-command');
+      expect(container.textContent).not.toContain(summary);
+      await click('e2ee.remoteMachine.check');
+      expect(state).toBe('claimed');
+      expect(container.textContent).toContain(summary);
+      expect(container.textContent).toContain('e2ee.localAgent.fileProtection');
+      await click('e2ee.remoteMachine.allow');
+      expect(state).toBe('admitted');
+      expect(container.textContent).toContain('e2ee.remoteMachine.status.admitted');
+      expect(container.textContent).toContain('e2ee.remoteMachine.resume');
+      expect(container.textContent).not.toContain('e2ee.remoteMachine.status.ready');
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
   });
 });

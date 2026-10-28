@@ -125,6 +125,7 @@ export interface SessionFileHistoryProvider {
 
 export interface SessionFileProvider
   extends Omit<FileWorkspaceProvider, 'openFile'>, SessionFileHistoryProvider {
+  downloadFile?(path: string, signal?: AbortSignal): Promise<Uint8Array | null>;
   openFile(pathOrFileId: string, mode?: SessionFileProviderMode): Promise<FileWorkspaceOpenResult>;
 }
 

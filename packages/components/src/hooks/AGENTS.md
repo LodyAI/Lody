@@ -57,9 +57,9 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
   auth state and platform credential storage. A rotated token or successful
   verification fences late responses from an older login. Native login holds
   `nativeSignInInProgressAtom` from the first sign-in request through successful page
-  replacement, and root session invalidation must respect that fence. Never treat a
-  transport failure (timeout, 5xx, `Client disconnected`) as terminal; those stay
-  retryable and must not sign out a recoverable user.
+  replacement, and root session invalidation must respect that fence. A transport
+  failure (timeout, 5xx, `Client disconnected`) or userless in-flight refetch is never
+  terminal and must not sign out a recoverable user.
 - `use-session-doc.ts` publishes the initial mirror snapshot immediately, then coalesces
   history-only mirror bursts to the latest snapshot once per animation frame through
   `lib/latest-frame-subscription.ts`. Control state (`session`, message queue, fork,

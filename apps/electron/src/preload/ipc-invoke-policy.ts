@@ -25,19 +25,47 @@ export function isIpcInvokeChannel(channel: string): boolean {
   if (group === 'e2ee')
     return new Set([
       'account',
+      'createMemberInvitation',
+      'pendingMemberJoin',
+      'prepareMemberJoin',
+      'memberJoinRequests',
+      'approveMemberJoin',
+      'rejectMemberJoin',
+      'revokeMemberInvitation',
+      'claimMemberJoin',
+      'personalPairingOffer',
+      'pendingPersonalJoin',
+      'preparePersonalJoin',
+      'inspectPersonalJoin',
+      'approvePersonalJoin',
+      'claimPersonalJoin',
+      'cancelPersonalJoin',
+
       'prepareLocalAgent',
       'admitLocalAgent',
+      'beginRemoteMachinePairing',
+      'inspectRemoteMachinePairing',
+      'approveRemoteMachinePairing',
+      'cancelRemoteMachinePairing',
       'seal',
       'openContent',
       'contentStreamsToken',
+      'removeMember',
+      'setMemberRole',
       'refresh',
       'prepareCreation',
       'recordCreated',
       'open',
       'close',
       'status',
+      'readIdentity',
+      'resetIdentity',
+      'resetLocalAgent',
       'ingestLedgerRecords',
-      'ledgerView'
+      'ledgerView',
+      'managementState',
+      'updateKeys',
+      'revokeDevice'
     ]).has(match![2]!)
   return group !== undefined && INVOKE_SERVICE_GROUP_VALUES.has(group)
 }

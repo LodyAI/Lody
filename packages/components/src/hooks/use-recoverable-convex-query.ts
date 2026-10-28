@@ -192,6 +192,15 @@ export function useRecoverableConvexQuery<Query extends FunctionReference<'query
   query: Query,
   ...args: ConvexReact.OptionalRestArgsOrSkip<Query>
 ): Query['_returnType'] | undefined {
+  const result = useOptionalRecoverableConvexQuery(query, ...args);
+  if (result.error) throw result.error;
+  return result.data;
+}
+
+export function useOptionalRecoverableConvexQuery<Query extends FunctionReference<'query'>>(
+  query: Query,
+  ...args: ConvexReact.OptionalRestArgsOrSkip<Query>
+): { data: Query['_returnType'] | undefined; error: Error | null } {
   const { authSessionId, confirmedUnauthenticated, isAuthenticated, requestAuthRecovery } =
     useAuthenticatedConvex();
   const client = ConvexReact.useConvex();
@@ -234,11 +243,15 @@ export function useRecoverableConvexQuery<Query extends FunctionReference<'query
   }, [authSessionId, queryKey, queryName, result, skip]);
 
   if (result instanceof Error) {
-    if (!authError) throw result;
+    if (!authError) return { data: undefined, error: result };
     const snapshot = snapshotRef.current;
-    return source.canRetainSnapshot() && matchesSnapshot(snapshot, authSessionId, queryKey)
-      ? (snapshot.value as Query['_returnType'])
-      : undefined;
+    return {
+      data:
+        source.canRetainSnapshot() && matchesSnapshot(snapshot, authSessionId, queryKey)
+          ? (snapshot.value as Query['_returnType'])
+          : undefined,
+      error: null,
+    };
   }
 
   // Retain the last committed value whenever the subscription is transiently
@@ -253,11 +266,11 @@ export function useRecoverableConvexQuery<Query extends FunctionReference<'query
   if (skip && !callerSkipped && !confirmedUnauthenticated) {
     const snapshot = snapshotRef.current;
     if (source.canRetainSnapshot() && matchesSnapshot(snapshot, authSessionId, queryKey)) {
-      return snapshot.value as Query['_returnType'];
+      return { data: snapshot.value as Query['_returnType'], error: null };
     }
   }
 
-  return result;
+  return { data: result, error: null };
 }
 
 /** Public queries must run before authentication, so they cannot use the

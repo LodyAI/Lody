@@ -15,6 +15,9 @@ import {
   DEFAULT_SCHEDULE_DESTINATION,
   ScheduleActivitySchema,
   ScheduleDefinitionSchema,
+  ScheduleTriggerSchema,
+  ScheduledMessageSchema,
+  scheduledMessagePrompt,
   ScheduleTombstoneSchema,
   type ScheduleDefinition,
   type ScheduleDocument,
@@ -30,7 +33,11 @@ export type ScheduleDraft = Pick<
   | 'agent'
   | 'project'
   | 'retryPolicy'
-> & { prompt: string; destination?: ScheduleDefinition['destination'] };
+> & {
+  prompt: string;
+  message?: ScheduleDocument['message'];
+  destination?: ScheduleDefinition['destination'];
+};
 
 export type ScheduleRepositoryPort = {
   openPersistedDoc: (id: string) => Promise<{ doc: unknown }>;
@@ -57,15 +64,37 @@ export type ScheduleRepositoryPort = {
  * objects before parsing drops it; every Mirror read of a Schedule goes here.
  */
 export function scheduleDocumentFromMirrorState(
-  state: { definition?: unknown; prompt: string; timeline: ScheduleDocument['timeline'] },
+  state: {
+    definition?: unknown;
+    prompt: string;
+    message?: { payload?: unknown };
+    timeline: ScheduleDocument['timeline'];
+  },
   scheduleId: string
 ): ScheduleDocument | null {
   const parsed = ScheduleDefinitionSchema.safeParse(withoutContainerIds(state.definition));
   if (!parsed.success || parsed.data.scheduleId !== scheduleId) return null;
+  const message =
+    state.message?.payload === undefined
+      ? undefined
+      : ScheduledMessageSchema.safeParse(withoutContainerIds(state.message.payload));
+  if ((message && !message.success) || (parsed.data.messageVersion === 1 && !message?.success))
+    return null;
+  const timeline = withoutContainerIds(state.timeline) as ScheduleDocument['timeline'];
+  const activities = new Set<string>();
   return {
     definition: parsed.data,
-    prompt: state.prompt,
-    timeline: withoutContainerIds(state.timeline) as ScheduleDocument['timeline'],
+    // Complete messages are an atomic payload, not collaboratively appended text.
+    // Concurrent creation can concatenate the legacy LoroText projection.
+    prompt: message?.success ? scheduledMessagePrompt(message.data) : state.prompt,
+    ...(message?.success ? { message: message.data } : {}),
+    timeline: message?.success
+      ? timeline.filter((entry) => {
+          if (activities.has(entry.id)) return false;
+          activities.add(entry.id);
+          return true;
+        })
+      : timeline,
   };
 }
 
@@ -119,9 +148,14 @@ export class ScheduleRepository {
     try {
       mirror.setState({
         ...document,
+        message: { payload: document.message },
         // Spread `project` explicitly: it is optional on the definition but a
         // present (possibly undefined) key in the mirrored map.
-        definition: { ...document.definition, project: document.definition.project },
+        definition: {
+          ...document.definition,
+          project: document.definition.project,
+          messageVersion: document.definition.messageVersion,
+        },
         timeline: document.timeline.map((entry) => ({
           ...entry,
           requesterSessionId: entry.requesterSessionId,
@@ -172,8 +206,13 @@ export class ScheduleRepository {
     // idempotency comparison must see the same shape on both sides.
     const incoming: ScheduleDraft = {
       ...args.draft,
+      title: args.draft.title.trim(),
+      trigger: ScheduleTriggerSchema.parse(args.draft.trigger),
+      ...(args.draft.message ? { message: ScheduledMessageSchema.parse(args.draft.message) } : {}),
       destination: args.draft.destination ?? DEFAULT_SCHEDULE_DESTINATION,
     };
+    if (previous?.message && !incoming.message)
+      throw new Error('A scheduled message cannot lose its payload');
     const prior = previous?.timeline.find((entry) => entry.id === args.activityId);
     if (prior) {
       const {
@@ -198,6 +237,7 @@ export class ScheduleRepository {
         destination,
         retryPolicy,
         prompt: previous!.prompt,
+        ...(previous!.message ? { message: previous!.message } : {}),
       };
       if (
         prior.actorId !== args.actorId ||
@@ -211,14 +251,18 @@ export class ScheduleRepository {
       return previous!;
     }
     if (args.create && previous) throw new Error('Schedule id already exists');
-    const { prompt, ...draft } = incoming;
+    const { prompt, message, ...draft } = incoming;
     const definition = ScheduleDefinitionSchema.parse({
       ...draft,
+      ...(message ? { messageVersion: 1 } : {}),
       scheduleId: args.scheduleId,
       ownerId: args.actorId,
       enabled: previous?.definition.enabled ?? true,
       activationId: args.activationId,
-      activeFrom: args.now,
+      // The one-time slot is also its deterministic activation floor. Devices
+      // creating the same reservation must not fingerprint their local clocks.
+      activeFrom:
+        message && draft.trigger.kind === 'once' ? Date.parse(draft.trigger.at) : args.now,
       createdAt: previous?.definition.createdAt ?? args.now,
       createdBy: previous?.definition.createdBy ?? args.actorId,
       updatedAt: args.now,
@@ -229,7 +273,12 @@ export class ScheduleRepository {
       actorId: args.actorId,
       createdAt: args.now,
     });
-    const document = { definition, prompt, timeline: [...(previous?.timeline ?? []), activity] };
+    const document = {
+      definition,
+      prompt,
+      ...(message ? { message } : {}),
+      timeline: [...(previous?.timeline ?? []), activity],
+    };
     await this.write(document);
     return document;
   }

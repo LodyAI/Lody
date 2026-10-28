@@ -27,6 +27,14 @@
 
 ## 入口
 
+协议入口提供 `sealPresenceContent` / `openPresenceContent`、
+`sealRpcRequestContent` / `openRpcRequestContent` 和 `sealRpcResponseContent` /
+`openRpcResponseContent`，仅将现有 content v0 密码学按用途 7/8/9 组合到不透明正文。
+调用方提供可信资源上下文、已安装 epoch 钥与预期签名者；辅助函数拥有并释放派生叶钥。
+它们不验证 RPC 正文、请求／结果关联、presence TTL、机器绑定、账本权限或新鲜度。
+开放通道前须在可信宿主落实这些门槛。重试保留返回的原帧；再次运行 seal 会重新加密。
+本改动不启用产品传输。
+
 | 导入路径 | 内容 | 稳定性 |
 | --- | --- | --- |
 | `@lody/e2ee-core` | 流程（`KeyReceiver`、`EpochPublisher` 等）、它们的错误与结果、`E2eeWorkflows` | 公开 |

@@ -180,6 +180,7 @@ import {
   type AssistantTurnRenderBlock,
 } from './assistant-turn-render-blocks';
 import { SubagentTaskPanel, collectSubagentTasks, type SubagentTask } from './subagent-task-panel';
+import { isRunning as isSubagentTaskRunning } from './subagent-task-state';
 import { SubagentRunMessageList } from './subagent-run-history';
 import { styles as subagentHistoryStyles } from './subagent-run-history.stylex';
 import { SessionReadonlyContext } from './session-readonly-context';
@@ -279,11 +280,14 @@ import { toast } from '@/lib/toast';
 import { SessionPlanBar } from '@/components/sessions/session-plan-bar';
 import { ContainerQueryProvider } from './container-query-provider';
 import { ScheduleProposalNotice } from '@/components/schedules/schedule-proposal-notice';
+import { SessionLimitContinueAction } from '@/components/schedules/quota-continue-action';
+import { isClaudeSessionLimitMessage } from '@/components/schedules/quota-continue';
 import { isOperationSurfaceItem, shouldRenderSystemRowItem } from './message-content-guards';
 import {
   getOperationCompletionItems,
   hasVisibleOperationContent,
 } from './operation-completion-visibility';
+import { openExternalUrl } from '@/lib/native-browser';
 import { getChatFailedDiagnosticCopy } from './chat-failed-diagnostic-copy';
 import {
   buildChatFailedErrorReport,
@@ -1412,6 +1416,7 @@ export const buildChatVirtualRows = ({
       const [segmentStart, segmentEnd] = segment.blockRange;
       const isLastSegment = segmentIndex === lastSegmentIndex;
       const segmentSubagentTasks = isLastSegment ? subagentTasks : EMPTY_SUBAGENT_TASKS;
+      const hasRunningSubagentTasks = segmentSubagentTasks.some(isSubagentTaskRunning);
 
       let hasVisibleFinalContent = false;
       for (let blockIndex = segmentStart; blockIndex < segmentEnd; blockIndex += 1) {
@@ -1475,7 +1480,7 @@ export const buildChatVirtualRows = ({
             appendBlockRows(workedRows, block, blockIndex, true);
           }
         }
-        if (segmentSubagentTasks.length > 0) {
+        if (segmentSubagentTasks.length > 0 && !hasRunningSubagentTasks) {
           appendSubagentTasksRow(workedRows, true);
         }
       }
@@ -1517,6 +1522,9 @@ export const buildChatVirtualRows = ({
       }
       if (!didInsertWorkedGroup) {
         insertWorkedGroup();
+      }
+      if (hasRunningSubagentTasks) {
+        appendSubagentTasksRow(assistantRows, false);
       }
     }
 
@@ -2894,6 +2902,7 @@ const SystemMessageRowView = ({
           <SystemNoticeView
             key={`${item.name}-${itemIndex}`}
             notice={item}
+            entryId={message.id}
             sessionId={sessionId}
             onNavigateSession={onNavigateSession}
             capacityRetry={capacityRetry}
@@ -3107,97 +3116,91 @@ const DashedNoticeRule = () => (
 );
 
 const noticeStyles = stylex.create({
-  /**
-   * One wrapping row for the whole banner. Above the mobile breakpoint the
-   * detail and footer keep their own rows; at phone widths the copy-only case
-   * swaps those two orders so the footer rides the header's trailing edge
-   * instead of spending a row. When a capacity retry action is present the
-   * header is already occupied, so the footer keeps its row to avoid squeezing
-   * the title between two controls.
-   */
-  row: {
+  // One header row: glyph, label, and at most one trailing owner (retry or
+  // copy). `alignItems: center` keeps the 14px glyph on the label's optical
+  // line instead of relying on a hand-tuned top margin.
+  header: {
     display: 'flex',
-    flexWrap: 'wrap',
     alignItems: 'center',
     columnGap: space[2],
-    rowGap: space[1.5],
-    paddingInline: space[2],
-    paddingTop: space[1.5],
-    paddingBottom: space[1.5],
+    paddingInline: space[3],
+    paddingTop: space[2],
+    paddingBottom: space[1],
   },
-  /** A footer button's own bottom padding replaces the plain band's. */
-  rowWithFooter: {
-    paddingBottom: space[2],
+  headerOnly: {
+    paddingBottom: space[3],
   },
   label: {
     flexGrow: 1,
     flexShrink: 1,
     flexBasis: 0,
     minWidth: 0,
-    fontSize: textScale.footnoteSize,
-    lineHeight: textScale.footnoteLeading,
+    fontSize: textScale.subheadlineSize,
+    lineHeight: textScale.subheadlineLeading,
     fontWeight: 500,
   },
-  action: { flexShrink: 0 },
-  detail: {
-    order: 4,
-    width: '100%',
-    minWidth: 0,
+  trailing: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: space[1],
   },
-  /** Applied only when copy is the sole trailing control. */
-  detailAfterFooter: {
-    '@media (max-width: 767px)': { order: 5 },
+  detail: {
+    minWidth: 0,
+    paddingInline: space[3],
+    paddingBottom: space[3],
   },
   detailText: {
     display: 'block',
     minWidth: 0,
     whiteSpace: 'pre-wrap',
-    overflowWrap: 'break-word',
-    fontSize: textScale.footnoteSize,
+    overflowWrap: 'anywhere',
+    fontSize: textScale.subheadlineSize,
     lineHeight: textScale.bodyLeading,
     color: 'hsl(var(--muted-foreground))',
   },
   footer: {
-    order: 5,
-    width: '100%',
-    flexShrink: 0,
+    paddingInline: space[3],
+    paddingBottom: space[3],
   },
-  /** Applied only when copy is the sole trailing control. */
-  footerInHeader: {
-    '@media (max-width: 767px)': { order: 4, width: 'auto' },
+  afterDetail: {
+    order: 6,
+    width: '100%',
+    minWidth: 0,
   },
 });
 
 /**
- * Renders a single system notice as a divider with tooltip
- */
-/**
  * The one banner an agent notice takes, whatever its tone.
  *
- * Shaped like a fenced code block — the conversation already embeds those, so a
- * filled, hairline-ringed block reads as part of the prose rather than as chrome
- * dropped on top of it.
+ * A soft well, not an outlined alert: every other surface in the conversation
+ * is a fill without a border, and a hairline ring made the notice read as
+ * chrome dropped on top of the prose. The body starts at the well's leading
+ * edge, under the glyph, so agent text is not pushed into a narrower column.
  *
  * Always open and the full width of the column. A notice is a short aside, so
  * hiding it behind a disclosure asked for a click to read two lines, and a
  * fit-content card left a ragged right edge against the column's otherwise
  * straight rail.
  *
- * Tone is carried by the glyph and the leading sentence: amber is warning and
- * red is failure, by convention, over a ~6% fill that stays out of the way.
+ * Tone is carried by the glyph and the label: amber is warning and red is
+ * failure, by convention, over a ~4.5% fill that stays out of the way.
  */
-const AgentNoticeBanner = ({
+export const AgentNoticeBanner = ({
   tone,
   label,
   detail,
   action,
   footer,
+  afterDetail,
 }: {
   tone: 'error' | 'warning' | 'muted';
   label: string;
   detail?: string;
   action?: ReactNode;
   footer?: ReactNode;
+  /** A full-width row under the detail, for a follow-up action the detail explains. */
+  afterDetail?: ReactNode;
 }) => {
   // Error is a cross, warning a triangle, muted an info circle — an octagon
   // with an exclamation inside still read as "notice" at 14px.
@@ -3213,69 +3216,54 @@ const AgentNoticeBanner = ({
         ? 'text-amber-600 dark:text-amber-400'
         : 'text-muted-foreground';
 
-  // The surface keeps the tone but at a fraction of its saturation: the colour
-  // is mixed toward the neutral border rather than merely faded, so the card
-  // still reads as "warning" or "failure" at a glance without a vivid slab
-  // competing with the answer it comments on.
+  // The tone only tints the well. There is no ring: a notice sits in the
+  // conversation as a block of the same material as a user bubble or code
+  // block, not as a bordered component.
   const toneColor =
     tone === 'error'
       ? 'hsl(var(--destructive))'
       : tone === 'warning'
         ? 'rgb(245 158 11)'
         : 'hsl(var(--muted-foreground))';
-  // A hairline: Chromium rounds a 0.5px BORDER up to 1px at any DPR, so every
-  // `border-[0.5px]` in the app actually paints 1px. `ui/AGENTS.md` settled on
-  // this same shadow ring for menus.
-  const ringColor = `color-mix(in srgb, ${toneColor} 14%, hsl(var(--border)))`;
-  const fillColor = `color-mix(in srgb, ${toneColor} 3.5%, transparent)`;
+  const fillColor = `color-mix(in srgb, ${toneColor} 4.5%, transparent)`;
   // Only lift copy into the header when it would be the sole trailing control.
   // A capacity retry action already owns that edge, and moving copy beside it
   // wraps a short title into a tall column on phones.
   const copyRidesHeader = !action;
+  const headerTrailing = action ?? (copyRidesHeader ? footer : undefined);
+  const bodyFooter = copyRidesHeader ? null : footer;
+  const hasBody = Boolean(detail || bodyFooter);
 
   return (
-    <div
-      style={{ boxShadow: `0 0 0 0.5px ${ringColor}`, background: fillColor }}
-      className="w-full overflow-hidden rounded-lg"
-    >
-      {/* Header, detail, and footer share one wrapping row. On phones without a
-          retry action the footer keeps the header's trailing edge and the detail
-          drops to its own full-width line, so copy no longer spends a separate
-          row; wider viewports keep detail and footer on their own rows below. */}
-      <div {...stylex.props(noticeStyles.row, footer ? noticeStyles.rowWithFooter : undefined)}>
+    <div style={{ background: fillColor }} className="w-full overflow-hidden rounded-lg">
+      <div {...stylex.props(noticeStyles.header, !hasBody && noticeStyles.headerOnly)}>
         <Icon className={cn('h-3.5 w-3.5 shrink-0', accentClass)} aria-hidden="true" />
         <span {...withClassName(stylex.props(noticeStyles.label), accentClass)}>{label}</span>
-        {action ? <div {...stylex.props(noticeStyles.action)}>{action}</div> : null}
-        {detail ? (
-          <div
-            {...stylex.props(
-              noticeStyles.detail,
-              copyRidesHeader && noticeStyles.detailAfterFooter
-            )}
-          >
-            <span {...stylex.props(noticeStyles.detailText)}>{detail}</span>
-          </div>
+        {headerTrailing ? (
+          <div {...stylex.props(noticeStyles.trailing)}>{headerTrailing}</div>
         ) : null}
-        {footer ? (
-          <div
-            {...stylex.props(noticeStyles.footer, copyRidesHeader && noticeStyles.footerInHeader)}
-          >
-            {footer}
-          </div>
-        ) : null}
+        {afterDetail ? <div {...stylex.props(noticeStyles.afterDetail)}>{afterDetail}</div> : null}
       </div>
+      {detail ? (
+        <div {...stylex.props(noticeStyles.detail)}>
+          <span {...stylex.props(noticeStyles.detailText)}>{detail}</span>
+        </div>
+      ) : null}
+      {bodyFooter ? <div {...stylex.props(noticeStyles.footer)}>{bodyFooter}</div> : null}
     </div>
   );
 };
 
 const SystemNoticeView = ({
   notice,
+  entryId,
   sessionId,
   onNavigateSession,
   capacityRetry,
   inTurn = false,
 }: {
   notice: Extract<MessageContent, { type: 'system_notice' }>;
+  entryId: string;
   sessionId: SessionId;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   capacityRetry?: CapacityRetryControl;
@@ -3293,6 +3281,7 @@ const SystemNoticeView = ({
       return (
         <ChatFailedNoticeView
           notice={notice}
+          entryId={entryId}
           sessionId={sessionId}
           capacityRetry={capacityRetry}
           inTurn={inTurn}
@@ -3379,11 +3368,13 @@ const SystemNoticeView = ({
  */
 const ChatFailedNoticeView = ({
   notice,
+  entryId,
   sessionId,
   capacityRetry,
   inTurn = false,
 }: {
   notice: Extract<MessageContent, { type: 'system_notice' }>;
+  entryId: string;
   sessionId: SessionId;
   capacityRetry?: CapacityRetryControl;
   inTurn?: boolean;
@@ -3414,7 +3405,7 @@ const ChatFailedNoticeView = ({
       }
     | undefined;
 
-  const diagnosticCopy = getChatFailedDiagnosticCopy(meta?.code);
+  const diagnosticCopy = getChatFailedDiagnosticCopy(meta?.code, meta?.message);
 
   // Map reason codes to user-friendly messages
   const getReasonMessage = (reason?: string): string => {
@@ -3521,11 +3512,20 @@ const ChatFailedNoticeView = ({
   };
 
   const reasonMessage = getReasonMessage(meta?.reason);
+  const installUrl = diagnosticCopy?.installUrl;
   const actionMessage = diagnosticCopy
     ? t(diagnosticCopy.actionKey, diagnosticCopy.action)
     : undefined;
   const rawMessage = meta?.message?.trim() ? meta.message : undefined;
   const isProviderOverloaded = meta?.reason === 'acp_provider_overloaded';
+  // Mount the quota leaf only for a message that can carry the shortcut. The
+  // leaf still proves the terminal failure and exhausted 5h reset from history
+  // and provider quota before rendering; this gate only avoids a subscription
+  // for every unrelated chat_failed banner.
+  const quotaContinue =
+    sessionMeta && isClaudeSessionLimitMessage(rawMessage) ? (
+      <SessionLimitContinueAction session={sessionMeta} entryId={entryId} />
+    ) : null;
 
   const retryInSeconds = capacityRetry?.retryInSeconds ?? null;
   const isRetryCountdown = retryInSeconds !== null;
@@ -3609,11 +3609,19 @@ const ChatFailedNoticeView = ({
         message: rawMessage,
       })}
       action={retryAction}
+      afterDetail={quotaContinue}
       footer={
-        <Button variant="ghost" size="medium" onClick={() => void handleCopyError()}>
-          <Copy size={14} aria-hidden="true" />
-          {t('sessions.systemNotices.chatFailed.copyError', 'Copy error')}
-        </Button>
+        <>
+          {installUrl ? (
+            <Button variant="ghost" size="small" onClick={() => void openExternalUrl(installUrl)}>
+              {t('sessions.systemNotices.chatFailed.installNode', 'Download Node.js')}
+            </Button>
+          ) : null}
+          <Button variant="ghost" size="small" onClick={() => void handleCopyError()}>
+            <Copy size={14} aria-hidden="true" />
+            {t('sessions.systemNotices.chatFailed.copyError', 'Copy error')}
+          </Button>
+        </>
       }
     />
   );
@@ -4979,16 +4987,19 @@ function ActivityProcessStep({
   icon,
   children,
   className,
+  flush = false,
 }: {
   icon?: ReactNode;
   children: ReactNode;
   className?: string;
+  flush?: boolean;
 }) {
   return (
     <div
       className={cn(
         /* Keep the leading icon on the same inset as tool steps and prose. */
-        stylex.props(conversationSurface.processStep).className,
+        stylex.props(conversationSurface.processStep, flush && conversationSurface.thoughtStep)
+          .className,
         ACTIVITY_PROCESS_TEXT_CLASS,
         className
       )}
@@ -5232,22 +5243,23 @@ const AssistantThoughtVirtualRow = memo(function AssistantThoughtVirtualRow({
   fontSize: ConversationFontSize;
 }) {
   const { t } = useTranslation();
-  /* Only builtin DSH exposes these thought rows. Reuse answer typography,
+  /* Only builtin DSH exposes these thought rows. Reuse answer sizing,
      preserving thought search identity and the separate disclosure label.
      The thought is prose on the rail, with no glyph: it is the agent's own
      words, and an icon beside every paragraph of it read as a list of
      objects. The group header already says "Thought". */
   return (
-    <ActivityProcessStep>
+    <ActivityProcessStep flush>
       <span className="sr-only">
         {isThinking
           ? t('sessions.toolActivity.thinking', 'Thinking…')
           : t('sessions.toolActivity.thought', 'Thought')}
       </span>
-      <MarkdownBlock
+      <MarkdownRenderer
         text={text}
         size={fontSize}
         isStreaming={isStreaming}
+        muted
         searchBlockId={getThoughtSearchBlockId(messageId, itemIndex)}
       />
     </ActivityProcessStep>
@@ -6342,7 +6354,7 @@ const renderAssistantContent = (
     // agent's own notices arrive here; `buildChatStreamItems` leaves every other
     // kind on its own system row, where `SystemMessageItems` renders it.
     case 'system_notice':
-      return <SystemNoticeView notice={content} sessionId={sessionId} inTurn />;
+      return <SystemNoticeView notice={content} entryId={messageId} sessionId={sessionId} inTurn />;
     default:
       return null;
   }

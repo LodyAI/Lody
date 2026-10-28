@@ -1,3 +1,4 @@
+import { requireWorkspaceFeature, WorkspaceFeatureUnavailableError } from '@/lib/workspace-feature';
 import {
   requirePlaintextWorkspaceStreamsContent,
   type WorkspaceStreamsContent,
@@ -31,6 +32,7 @@ import {
   rpcDeliveredTurnsAtom,
 } from '@/atoms/session-dispatch-delivery';
 import { desktopWindowId } from '@/lib/desktop-window';
+import { encryptedLocalNamespace, type E2eeLocalDataIdentity } from '../lib/e2ee-local-data';
 import { navigationSidebarHiddenAtom } from '@/atoms/layout-state';
 import {
   getMachineRoomId,
@@ -201,13 +203,20 @@ export type WorkspaceRuntimeAnalyticsEvent = {
 
 export function resolveWorkspaceRuntimeCacheIdentity(
   workspaceId: WorkspaceId,
-  windowId: string
+  windowId: string,
+  identity?: E2eeLocalDataIdentity
 ): {
   namespace: string;
   repoDbName: string;
   remoteCursorDbName: string;
 } {
-  const namespace = windowId ? `${workspaceId}:${windowId}` : workspaceId;
+  if (identity && identity.workspaceId !== workspaceId)
+    throw new Error('e2ee_local_identity_mismatch');
+  const namespace = identity
+    ? encryptedLocalNamespace({ ...identity, windowId })
+    : windowId
+      ? `${workspaceId}:${windowId}`
+      : workspaceId;
   return {
     namespace,
     repoDbName: `lody-loro-repo-db-${namespace}`,
@@ -222,6 +231,7 @@ export type WorkspaceE2eeTransport = {
 type RuntimeDeps = {
   content: WorkspaceStreamsContent;
   e2ee?: WorkspaceE2eeTransport;
+  e2eeLocalIdentity?: E2eeLocalDataIdentity;
   /** Cancels an initialization retired by the provider before publication. */
   signal?: AbortSignal;
   accountId?: string | null;
@@ -472,7 +482,16 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   deps.signal?.throwIfAborted();
   const protectedContent = deps.content.mode === 'protected';
   if (protectedContent && !deps.e2ee) throw new Error('e2ee_transport_unavailable');
-  const cacheIdentity = resolveWorkspaceRuntimeCacheIdentity(deps.workspaceId, desktopWindowId());
+  if (
+    protectedContent &&
+    (!deps.e2eeLocalIdentity || deps.e2eeLocalIdentity.accountId !== deps.accountId)
+  )
+    throw new Error('e2ee_local_identity_required');
+  const cacheIdentity = resolveWorkspaceRuntimeCacheIdentity(
+    deps.workspaceId,
+    desktopWindowId(),
+    protectedContent ? deps.e2eeLocalIdentity : undefined
+  );
   const createDeferred = <T>() => {
     let resolve: ((value: T | PromiseLike<T>) => void) | undefined;
     let reject: ((reason?: unknown) => void) | undefined;
@@ -528,8 +547,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const transportReady = createDeferred<void>();
   // Runtime dispose intentionally rejects this deferred; swallow that expected rejection.
   void transportReady.promise.catch(() => {});
-  const syncMode: PlatformSyncMode =
-    protectedContent ? 'cloud' : deps.syncMode ?? (isElectronLocalDataPlaneEnabled() ? 'dual' : 'cloud');
+  const syncMode: PlatformSyncMode = protectedContent
+    ? 'cloud'
+    : (deps.syncMode ?? (isElectronLocalDataPlaneEnabled() ? 'dual' : 'cloud'));
   // Historical name: true whenever a local plane exists (dual OR local).
   const electronLocalDataPlane = syncMode !== 'cloud';
   // False only on the local-only platform: no Streams member, no token
@@ -1708,19 +1728,21 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     if (!streamsTokenProvider) {
       const controller = new AbortController();
       streamsTokenAbort = controller;
-      streamsTokenProvider = deps.e2ee ? deps.e2ee.createTokenProvider(controller.signal) : createLoroStreamsTokenProviderLegacy({
-        endpoint: buildLoroStreamsTokenEndpoint(import.meta.env.VITE_CONVEX_SITE_URL),
-        workspaceId,
-        authToken: () => authToken,
-        fetchImpl: (input, init) =>
-          fetch(input, {
-            ...init,
-            signal: init?.signal
-              ? AbortSignal.any([controller.signal, init.signal])
-              : controller.signal,
-          }),
-        onEvent: logTokenProviderEvent,
-      });
+      streamsTokenProvider = deps.e2ee
+        ? deps.e2ee.createTokenProvider(controller.signal)
+        : createLoroStreamsTokenProviderLegacy({
+            endpoint: buildLoroStreamsTokenEndpoint(import.meta.env.VITE_CONVEX_SITE_URL),
+            workspaceId,
+            authToken: () => authToken,
+            fetchImpl: (input, init) =>
+              fetch(input, {
+                ...init,
+                signal: init?.signal
+                  ? AbortSignal.any([controller.signal, init.signal])
+                  : controller.signal,
+              }),
+            onEvent: logTokenProviderEvent,
+          });
       eagerSyncAuthCallback = streamsTokenProvider.createAuthCallback();
     }
     return streamsTokenProvider;
@@ -1750,7 +1772,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     provider: LoroStreamsTokenProviderLegacy,
     streamsBaseUrl: string
   ): LoroStreamsJsonStreamClient => {
-    if (protectedContent) throw new Error('e2ee_rpc_unavailable');
+    requireWorkspaceFeature({ mode: protectedContent ? 'protected' : 'plaintext' }, 'rpc');
     if (!jsonStreamClient) {
       jsonStreamClient = createLoroStreamsJsonStreamClient({
         bucketId: LORO_STREAMS_BUCKET_ID,
@@ -1817,7 +1839,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const getMachineRpcClient = async (
     machineId: MachineId
   ): Promise<LoroStreamsMachineRpcClient> => {
-    if (protectedContent) throw new Error('e2ee_rpc_unavailable');
+    requireWorkspaceFeature({ mode: protectedContent ? 'protected' : 'plaintext' }, 'rpc');
     const streamClient = await waitForMachineRpcTransportReady();
     const responseDispatcher = getMachineRpcResponseDispatcher(streamClient);
 
@@ -1878,6 +1900,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestSessionHistoryRead,
     requestSessionHistoryWrite,
     requestFilePreview,
+    requestFileDownloadChunk,
     requestLocalCodeCollabFileIndex,
     requestCodeCollabOpenText,
     requestCodeCollabRefreshText,
@@ -1903,7 +1926,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestMachinePiExtensions,
   } = createWorkspaceMachineRpcFacade({
     getSessionToken: () => authToken,
-    ...(protectedContent ? { isLocalControlMachine: (machineId: MachineId) => machineId === sendLocalMachineId } : {}),
+    ...(protectedContent
+      ? { isLocalControlMachine: (machineId: MachineId) => machineId === sendLocalMachineId }
+      : {}),
     getMachineProtocolCapabilities,
     workspaceId,
     targetRouter,
@@ -3188,7 +3213,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         startPresenceTransport();
       }
 
-      if (!protectedContent) createMachineRpcJsonStreamClient(activeStreamsTokenProvider, streamsBaseUrl);
+      if (!protectedContent)
+        createMachineRpcJsonStreamClient(activeStreamsTokenProvider, streamsBaseUrl);
 
       if (isMetaRemoteCursorBypassActive()) {
         await dropSuspectMetaCheckpointBeforeAttach(streamsBaseUrl);
@@ -4172,42 +4198,45 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
    */
   const eagerSyncScope = workspaceId;
   const materializedSessionIds = new Set<SessionId>();
-  eagerSyncWorkerClient = protectedContent ? null : createEagerSyncWorkerClient({
-    content: { mode: deps.content.mode },
-    workspaceId,
-    scope: eagerSyncScope,
-    localConnection: createLocalLoroDataPlaneConnection,
-    resolveTransport: async (roomId) => {
-      await targetRouter.prepareDocTarget(roomId);
-      const plane = targetRouter.getReadinessTransportForRoom({ kind: 'doc', id: roomId });
-      if (plane === 'local') return { plane: 'local' };
-      if (!cloudPlaneEnabled || !streamsTokenProvider) {
-        throw new Error('Eager-sync cloud transport unavailable');
-      }
-      // Prime endpoint-derived routing before handing the transport to the worker.
-      await streamsTokenProvider.getToken();
-      // Match the mounted foreground transport. `transportStreamsBaseUrl`
-      // records the endpoint selected when that transport was attached.
-      const baseUrl = transportStreamsBaseUrl ?? getStreamsBaseUrlForProvider(streamsTokenProvider);
-      return {
-        plane: 'cloud',
-        streamId: getLoroStreamIdForDocId(workspaceId, roomId),
-        options: {
-          bucketId: LORO_STREAMS_BUCKET_ID,
-          metaStreamId: getLoroMetaStreamId(workspaceId),
-          baseUrl,
-          shardUrls: getLoroStreamsShardUrls(
-            baseUrl,
-            getStreamsShardHostSuffixForProvider(streamsTokenProvider)
-          ),
+  eagerSyncWorkerClient = protectedContent
+    ? null
+    : createEagerSyncWorkerClient({
+        content: { mode: deps.content.mode },
+        workspaceId,
+        scope: eagerSyncScope,
+        localConnection: createLocalLoroDataPlaneConnection,
+        resolveTransport: async (roomId) => {
+          await targetRouter.prepareDocTarget(roomId);
+          const plane = targetRouter.getReadinessTransportForRoom({ kind: 'doc', id: roomId });
+          if (plane === 'local') return { plane: 'local' };
+          if (!cloudPlaneEnabled || !streamsTokenProvider) {
+            throw new Error('Eager-sync cloud transport unavailable');
+          }
+          // Prime endpoint-derived routing before handing the transport to the worker.
+          await streamsTokenProvider.getToken();
+          // Match the mounted foreground transport. `transportStreamsBaseUrl`
+          // records the endpoint selected when that transport was attached.
+          const baseUrl =
+            transportStreamsBaseUrl ?? getStreamsBaseUrlForProvider(streamsTokenProvider);
+          return {
+            plane: 'cloud',
+            streamId: getLoroStreamIdForDocId(workspaceId, roomId),
+            options: {
+              bucketId: LORO_STREAMS_BUCKET_ID,
+              metaStreamId: getLoroMetaStreamId(workspaceId),
+              baseUrl,
+              shardUrls: getLoroStreamsShardUrls(
+                baseUrl,
+                getStreamsShardHostSuffixForProvider(streamsTokenProvider)
+              ),
+            },
+          };
         },
-      };
-    },
-    auth: async (context) => {
-      if (!cloudPlaneEnabled || !eagerSyncAuthCallback) return undefined;
-      return eagerSyncAuthCallback(context);
-    },
-  });
+        auth: async (context) => {
+          if (!cloudPlaneEnabled || !eagerSyncAuthCallback) return undefined;
+          return eagerSyncAuthCallback(context);
+        },
+      });
 
   const awaitSessionReaderMetadata = (
     roomId: string,
@@ -4731,7 +4760,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const createPreviewVisualCommentStore = async (
     sessionId: SessionId
   ): Promise<PreviewVisualCommentDocStore> => {
-    if (protectedContent) throw new Error('e2ee_feature_unavailable');
+    requireWorkspaceFeature(
+      { mode: protectedContent ? 'protected' : 'plaintext' },
+      'preview-comments'
+    );
     const roomId = getPreviewCommentRoomId(sessionId);
     const persistedDoc = await repo.openPersistedDoc(roomId);
 
@@ -4825,7 +4857,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     releaseDelayMs: STORE_RELEASE_DELAY_MS,
     unload: (id) => repo.unloadDoc(getScheduleRoomId(id)),
     create: async (id) => {
-      if (protectedContent) throw new Error('e2ee_feature_unavailable');
+      requireWorkspaceFeature({ mode: protectedContent ? 'protected' : 'plaintext' }, 'schedules');
       const roomId = getScheduleRoomId(id);
       const handle = await repo.openPersistedDoc(roomId);
       const mirror = new Mirror({
@@ -5373,10 +5405,14 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   }, RECONNECT_BACKSTOP_INTERVAL_MS);
 
   window.repo = repo;
-  const codeCollabFileIndexCache = protectedContent ? {
-    acquire: async () => { throw new Error('e2ee_feature_unavailable'); },
-    dispose: async () => {},
-  } : createCodeCollabFileIndexCache(repo);
+  const codeCollabFileIndexCache = protectedContent
+    ? {
+        acquire: async () => {
+          throw new WorkspaceFeatureUnavailableError('code-collab-index');
+        },
+        dispose: async () => {},
+      }
+    : createCodeCollabFileIndexCache(repo);
   const sendResources = createSessionSendResources({
     acquire: sessionStoreCache.acquire,
     releaseRef: sessionStoreCache.releaseRef,
@@ -5390,6 +5426,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       ),
     accountId: deps.accountId ?? `local:${workspaceId}`,
     workspaceId,
+    ...(protectedContent ? { localIdentity: deps.e2eeLocalIdentity } : {}),
     paused: !initialMetaSyncCompleted,
     runtime: {
       repo,
@@ -5560,6 +5597,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestSessionEditAndResend,
     requestSessionDispatchTurn,
     requestFilePreview,
+    requestFileDownloadChunk,
     requestLocalCodeCollabFileIndex,
     requestCodeCollabOpenText,
     requestCodeCollabRefreshText,

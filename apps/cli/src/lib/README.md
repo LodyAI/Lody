@@ -10,7 +10,10 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   compose native FileLocks and keep the file write inside its lease. Read-cache
   refresh orchestration remains Promise-based. Existing application entrypoints
   provide the lock through the shared `fileLocksLegacy` runtime until daemon
-  composition migrates.
+  composition migrates. Encrypted discovery uses a separate account/machine-bound sidecar.
+  Only authenticated online-list reconciliation can archive a corrupt sidecar and
+  rebuild it behind the invalid marker; offline and ordinary operations retain the error.
+  [Recovery decision](../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-catalog-recovery.md).
 
 ## Resource discovery
 
@@ -117,7 +120,9 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   ([decision](../../../../.agents/notes/implemented/bug-fix/2026-10-18-gc-respects-native-agent-work.md)). Per-OS
   measurement rationale:
   [`.agents/docs/cli-lib-memory-pressure.md`](../../../../.agents/docs/cli-lib-memory-pressure.md).
-- `session-transient-store.ts` — buffered ACP updates and their turn ownership.
+- `session-transient-store.ts` — buffered ACP updates and their turn ownership;
+  each active epoch retains independent event/content facts through flush. The
+  image owner drains before content is read and records successful history writes. Classification: [ACP rules](acp/AGENTS.md).
 - `session-activity-status.ts`, `session-live-status.ts` — derived busy/idle state.
 
 ## Projects and providers

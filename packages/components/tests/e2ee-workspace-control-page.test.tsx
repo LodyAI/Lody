@@ -1,3 +1,4 @@
+import { E2eeMemberActions } from '../src/components/pages/e2ee-member-actions';
 // @vitest-environment jsdom
 
 import { act } from 'react';
@@ -97,7 +98,7 @@ describe('encrypted workspace control page reading', () => {
   // Frozen synthetic ledger v1 vector signed by fixed test keys.
   const vector = JSON.parse(
     readFileSync(join(import.meta.dirname, '../../e2ee-core/test/ledger-v1-vector.json'), 'utf8')
-  ) as { anchor: string; records: { hex: string }[] };
+  ) as { anchor: string; records: { hex: string; hash: string }[] };
   const page = (count: number, headHash: string) => ({
     workspaceId: 'w',
     genesisHash: vector.anchor,
@@ -111,14 +112,14 @@ describe('encrypted workspace control page reading', () => {
     genesisHash: vector.anchor,
     localPin,
   });
-  // Record 10 declares a capability this client cannot verify past.
+  // The final record declares an unsupported capability after independent removal.
   const full = appendLedgerHistory(
     null,
-    page(10, '678d8a5fc4bb2ab0ef21032aa8d060056057958f15729fc53569158d07f5c0ce'),
+    page(vector.records.length, vector.records.at(-1)!.hash),
     expected(vector.anchor)
   );
   const history = (localPin: string | null) =>
-    appendLedgerHistory(null, page(9, full.records[8]!.hash), expected(localPin));
+    appendLedgerHistory(null, page(11, full.records[10]!.hash), expected(localPin));
 
   it('summarizes who did what and lists current members', () => {
     render({ history: history(vector.anchor) });
@@ -143,18 +144,38 @@ describe('encrypted workspace control page reading', () => {
 
   it('names the genesis member after this account only when this device holds the pin', () => {
     const you = { name: 'Alex Chen' };
-    const profiles = new Map([['0c'.repeat(16), { name: 'Jordan Lee' }]]);
-    render({ history: history(vector.anchor), you, memberProfiles: profiles });
+    const profiles = new Map([['03'.repeat(32), { name: 'Jordan Lee' }]]);
+    render({ history: history(vector.anchor), you });
     let text = container!.textContent!;
     expect(text).toContain('Alex Chen');
     expect(text).toContain('e2ee.control.you');
     expect(text).toContain('"actor":"Alex Chen"');
-    expect(text).toContain('Jordan Lee');
     act(() => root?.unmount());
     render({ history: history(null), you, memberProfiles: profiles });
     text = container!.textContent!;
     expect(text).not.toContain('Alex Chen');
     expect(text).toContain('Jordan Lee');
+  });
+
+  it('maps profiles through verified crypto users without changing roles, members or verification', () => {
+    const verified = history(vector.anchor);
+    const before = ledgerVerificationCode(verified).stateDigest;
+    const forged = { name: 'Display owner', role: 'guest', signingPublicKey: 'forged' };
+    const profiles = new Map([
+      ['03'.repeat(32), forged],
+      ['ff'.repeat(32), { name: 'Not a ledger member' }],
+    ]);
+    render({ history: verified, memberProfiles: profiles, you: { name: 'Wrong creator' } });
+    const members = container!.querySelector('section[aria-label="e2ee.control.members"]')!;
+    expect(members.querySelectorAll('li')).toHaveLength(2);
+    expect(members.textContent).toContain('Display owner');
+    expect(members.querySelector('li')!.textContent).toContain('e2ee.values.owner');
+    expect(container!.textContent).not.toContain('Not a ledger member');
+    expect(container!.textContent).not.toContain('Wrong creator');
+    expect(container!.querySelector('[aria-label="e2ee.verify.codeLabel"]')!.textContent).toBe(
+      before
+    );
+    expect(ledgerVerificationCode(verified).stateDigest).toBe(before);
   });
 
   it('shows no verdict about the genesis pin, only the ledger', () => {
@@ -173,6 +194,21 @@ describe('encrypted workspace control page reading', () => {
     expect(container!.textContent).toContain('e2ee.verify.hint');
   });
 
+  it('reads independent removal while preserving the published epoch', () => {
+    const count = vector.records.length - 1;
+    const verified = appendLedgerHistory(
+      null,
+      page(count, vector.records[count - 1]!.hash),
+      expected(vector.anchor)
+    );
+    render({ history: verified });
+    expect(container!.textContent).toContain('e2ee.summary.removeMember');
+    expect(
+      container!.querySelectorAll('section[aria-label="e2ee.control.members"] li')
+    ).toHaveLength(1);
+    expect(verified.view.inspectState().epoch).toMatchObject({ number: 2, rotationRequired: true });
+  });
+
   it('stops at an unverifiable capability and asks for an upgrade instead of offering more', () => {
     render({ history: full });
     expect(container!.querySelector('[role="alert"]')?.textContent).toContain(
@@ -180,4 +216,51 @@ describe('encrypted workspace control page reading', () => {
     );
     expect(button('e2ee.control.loadMore')).toBeUndefined();
   });
+});
+
+it('requires confirmation, carries the member incarnation, and hides forbidden member controls', async () => {
+  const remove = vi.fn(async () => {}),
+    setRole = vi.fn(async () => {});
+  const member = {
+    ordinal: 2,
+    membershipId: '12'.repeat(16),
+    userId: '23'.repeat(32),
+    role: 'member' as const,
+    devices: [],
+  };
+  container = document.createElement('div');
+  document.body.append(container);
+  root = createRoot(container);
+  const show = (actorRole: 'owner' | 'admin', role: 'owner' | 'admin' | 'member') =>
+    act(() =>
+      root!.render(
+        <E2eeMemberActions
+          member={{ ...member, role }}
+          name="Jordan"
+          management={{ actorRole, remove, setRole }}
+        />
+      )
+    );
+  show('admin', 'admin');
+  expect(container.querySelector('button')).toBeNull();
+  show('owner', 'owner');
+  expect(container.querySelector('button')).toBeNull();
+  show('owner', 'member');
+  await act(async () => container!.querySelector('button')!.click());
+  const action = (key: string) =>
+    [...document.querySelectorAll('[role="menuitem"]')].find(
+      (node) => node.textContent === key
+    ) as HTMLElement;
+  expect(action('e2ee.members.promote')).toBeDefined();
+  await act(async () => action('e2ee.members.remove').click());
+  expect(remove).not.toHaveBeenCalled();
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
+    'e2ee.members.removeDescription'
+  );
+  const confirm = [...document.querySelectorAll('[role="dialog"] button')].find(
+    (node) => node.textContent === 'e2ee.members.remove'
+  ) as HTMLButtonElement;
+  await act(async () => confirm.click());
+  expect(remove.mock.calls).toEqual([[member.membershipId]]);
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
 });

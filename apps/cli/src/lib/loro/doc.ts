@@ -343,7 +343,10 @@ export interface LoroDocumentManagerOptions {
   /** LoroDoc Streams cursors for this process; see `DocumentCursorScope`. */
   documentRemoteCursorStore?: RemoteCursorStore | null;
   remoteStreamsAttached?: boolean;
-  encryptedWorkspace?: Pick<CliE2eeWorkspaceLegacy, 'content' | 'bucketId' | 'refresh' | 'close'>;
+  encryptedWorkspace?: Pick<
+    CliE2eeWorkspaceLegacy,
+    'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory'
+  >;
   streamsTokens?: CloudStreamsTokenPort | null;
   cloudBilling?: CloudBillingPort | null;
   /** One-shot clients route history to the owner; daemons use installed local factories. */
@@ -392,7 +395,7 @@ export class LoroDocumentManager {
   private remoteTransportOpQueue: Promise<unknown> = Promise.resolve();
   private readonly encryptedWorkspace?: Pick<
     CliE2eeWorkspaceLegacy,
-    'content' | 'bucketId' | 'refresh' | 'close'
+    'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory'
   >;
   private readonly streamsTokens: CloudStreamsTokenPort | null;
   public readonly cloudBilling: CloudBillingPort | null;
@@ -428,7 +431,7 @@ export class LoroDocumentManager {
       documentCursorScope?: DocumentCursorScope;
       encryptedWorkspace?: Pick<
         CliE2eeWorkspaceLegacy,
-        'content' | 'bucketId' | 'refresh' | 'close'
+        'content' | 'bucketId' | 'refresh' | 'close' | 'repositoryDirectory'
       >;
       streamsTokens?: CloudStreamsTokenPort | null;
       cloudBilling?: CloudBillingPort | null;
@@ -444,11 +447,18 @@ export class LoroDocumentManager {
     // the Streams token is fetched only when the remote bridge attaches later
     // (attachRemoteStreamsTransport), not eagerly here.
     installCliHttpGlobalDispatcher({ logger });
+    if (options.encryptedWorkspace && !options.encryptedWorkspace.repositoryDirectory)
+      throw new Error('e2ee_invalid_input');
     const cliSqliteRepoStore = await traceAsync(
       logger,
       'startup.loro_sqlite_store',
       { workspaceId },
-      async () => await createCliSqliteRepoStore(workspaceId, options.onStorageWriteFailure)
+      async () =>
+        await createCliSqliteRepoStore(
+          workspaceId,
+          options.onStorageWriteFailure,
+          options.encryptedWorkspace?.repositoryDirectory
+        )
     );
     const createRepoTimeoutMs = readTimeoutEnv('LODY_LORO_CREATE_REPO_TIMEOUT_MS', 30_000);
     const joinMetaTimeoutMs = readTimeoutEnv('LODY_LORO_JOIN_META_TIMEOUT_MS', 30_000);
@@ -933,6 +943,11 @@ export class LoroDocumentManager {
     await this.repo.unloadDoc(docId);
     this.localLoroDataPlaneServer?.invalidateDocRoom(docId);
     this.logger.debug(`[${this.workspaceId}] Unloaded doc ${docId} and invalidated its local room`);
+  }
+
+  /** Capture a remote confirmation boundary without treating local-only as disconnected. */
+  getRemoteStreamsGeneration(): number | undefined {
+    return this.remoteStreamsAttached ? this.remoteStreamsGeneration : undefined;
   }
 
   isTransportConnected(): boolean {
@@ -2047,6 +2062,17 @@ export function subscribeSessionChanges(
 }
 
 export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'history'>, SessionMeta> {
+  private static readonly activityWritesByRepo = new WeakMap<LoroRepo, ConcurrentQueue<string>>();
+
+  private get activityWrites(): ConcurrentQueue<string> {
+    let queue = SessionDocument.activityWritesByRepo.get(this.repo);
+    if (!queue) {
+      queue = new ConcurrentQueue<string>(Infinity);
+      SessionDocument.activityWritesByRepo.set(this.repo, queue);
+    }
+    return queue;
+  }
+
   private mirror: SessionControlPlaneMirror | null = null;
   handle: RepoDocHandle | null = null;
   docSub: RepoRoomSubscription | null = null;
@@ -3010,22 +3036,21 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   }
 
   async setLastMessageAt(timestamp?: number) {
-    if (!this.mirror) {
-      throw new Error('SessionDocument not initialized');
-    }
+    if (!this.mirror) throw new Error('SessionDocument not initialized');
     const next =
       typeof timestamp === 'number' && Number.isFinite(timestamp) ? timestamp : getServerNow();
-    const current = await this.repo.getDocMeta(this.roomId);
-    if (isLoroRepoDocDeleted(current)) return;
-    const currentMeta = current?.meta as SessionMeta | undefined;
-    await this.repo.upsertDocMeta(this.roomId, {
-      lastMessageAt: next,
+    const parentSessionId = await this.activityWrites.enqueue(this.roomId, async () => {
+      const current = await this.repo.getDocMeta(this.roomId);
+      if (isLoroRepoDocDeleted(current)) return undefined;
+      const meta = current?.meta as SessionMeta | undefined;
+      if (typeof meta?.lastMessageAt !== 'number' || meta.lastMessageAt < next) {
+        await this.repo.upsertDocMeta(this.roomId, { lastMessageAt: next });
+      }
+      return meta?.parentSessionId;
     });
-    const parentSessionId = currentMeta?.parentSessionId;
-    if (!parentSessionId || parentSessionId === this.sessionId) {
-      return;
+    if (parentSessionId && parentSessionId !== this.sessionId) {
+      await this.setParentLastMessageAt(parentSessionId, next);
     }
-    await this.setParentLastMessageAt(parentSessionId, next);
   }
 
   /**
@@ -3050,18 +3075,20 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
 
   private async setParentLastMessageAt(parentSessionId: SessionId, timestamp: number) {
     const parentRoomId = getSessionRoomId(parentSessionId);
-    const parent = await this.repo.getDocMeta(parentRoomId);
-    if (isLoroRepoDocDeleted(parent)) return;
-    const parentMeta = parent?.meta as SessionMeta | undefined;
-    const parentLastMessageAt =
-      typeof parentMeta?.lastMessageAt === 'number' && Number.isFinite(parentMeta.lastMessageAt)
-        ? parentMeta.lastMessageAt
-        : null;
-    if (parentLastMessageAt !== null && parentLastMessageAt >= timestamp) {
-      return;
-    }
-    await this.repo.upsertDocMeta(parentRoomId, {
-      lastMessageAt: timestamp,
+    return this.activityWrites.enqueue(parentRoomId, async () => {
+      const parent = await this.repo.getDocMeta(parentRoomId);
+      if (isLoroRepoDocDeleted(parent)) return;
+      const parentMeta = parent?.meta as SessionMeta | undefined;
+      const parentLastMessageAt =
+        typeof parentMeta?.lastMessageAt === 'number' && Number.isFinite(parentMeta.lastMessageAt)
+          ? parentMeta.lastMessageAt
+          : null;
+      if (parentLastMessageAt !== null && parentLastMessageAt >= timestamp) {
+        return;
+      }
+      await this.repo.upsertDocMeta(parentRoomId, {
+        lastMessageAt: timestamp,
+      });
     });
   }
 

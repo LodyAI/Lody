@@ -1,4 +1,7 @@
-import { type LocalE2eePrepareResponse } from '@lody/shared/e2ee-local-pairing';
+import {
+  type LocalE2eePrepareReply,
+  type LocalE2eePrepareResponse,
+} from '@lody/shared/e2ee-local-pairing';
 import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
@@ -358,6 +361,54 @@ describe('local E2EE pairing transport', () => {
     for (const directory of tempDirs.splice(0))
       fs.rmSync(directory, { recursive: true, force: true });
   });
+  it('carries only the explicit superseded receipt over the real local prepare route', async () => {
+    const paths = makePaths();
+    const config = makeServerConfig(paths);
+    const receipt = {
+      ok: true as const,
+      type: 'prepare-superseded' as const,
+      machineId: 'machine-1',
+      pairingSessionId: '12'.repeat(16),
+    };
+    let reply: LocalE2eePrepareReply = receipt;
+    let calls = 0;
+    await startLocalIpcSocketServers({
+      ...config,
+      control: {
+        ...config.control,
+        dispatchE2eePairing: async (message) => {
+          expect(message.type).toBe('prepare');
+          calls++;
+          return reply;
+        },
+      },
+    });
+    const client = makeLocalControlClientSocket({ socketPath: paths.controlSocketPath });
+    const request = {
+      type: 'prepare' as const,
+      machineId: 'machine-1',
+      accountId: 'account',
+      workspaceId: 'workspace',
+      genesisHash: '78'.repeat(32),
+      genesisRecordHex: '01',
+      membershipId: '89'.repeat(16),
+      pairingSessionId: receipt.pairingSessionId,
+      frontendSigningPublicKey: 'ab'.repeat(32),
+    };
+    expect(await Effect.runPromise(client.e2eePrepare(request))).toEqual(receipt);
+    expect(calls).toBe(1);
+
+    // A material-shaped or malformed response cannot become a retirement receipt.
+    reply = Object.assign({}, receipt, { credentialHash: '67'.repeat(32) });
+    expect((await Effect.runPromise(Effect.result(client.e2eePrepare(request))))._tag).toBe(
+      'Failure'
+    );
+    reply = { ...receipt, pairingSessionId: 'not-a-session' };
+    expect((await Effect.runPromise(Effect.result(client.e2eePrepare(request))))._tag).toBe(
+      'Failure'
+    );
+    expect(calls).toBe(3);
+  });
   it('exchanges public pairing evidence and activation only over the same-user socket', async () => {
     const paths = makePaths();
     const config = makeServerConfig(paths);
@@ -395,15 +446,11 @@ describe('local E2EE pairing transport', () => {
       genesisRecordHex: '01',
       membershipId: '89'.repeat(16),
       pairingSessionId: material.pairingSessionId,
+      frontendSigningPublicKey: 'ab'.repeat(32),
     };
     expect(await Effect.runPromise(client.e2eePrepare(request))).toEqual(material);
     expect(activated).toBe(false);
-    const {
-      genesisRecordHex: _genesis,
-      membershipId: _member,
-      pairingSessionId: _session,
-      ...activation
-    } = request;
+    const { genesisRecordHex: _genesis, membershipId: _member, ...activation } = request;
     expect(
       await Effect.runPromise(
         client.e2eeActivate({

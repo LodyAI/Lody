@@ -151,6 +151,7 @@ export const makeLabScenarioFixture = Effect.fn('Lab.prepareExistingFixture')(fu
         membershipId: member,
         encryptionPublicKey: device.enc,
         kind: row.kind ?? 'personal',
+        ...(row.kind === 'machine' ? { machineId: row.id } : {}),
         signer: device,
       });
       records.push(

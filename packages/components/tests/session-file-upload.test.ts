@@ -1,3 +1,6 @@
+import i18next from 'i18next';
+import en from '../../../locales/en.json';
+import zhCN from '../../../locales/zh_CN.json';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   SESSION_FILE_HASH_CHUNK_SIZE_BYTES,
@@ -309,7 +312,31 @@ describe('multipart response and cancellation', () => {
   });
 });
 
-it('refuses protected uploads before constructing any network transfer', async () => {
-  vi.stubGlobal('XMLHttpRequest', class { constructor() { throw new Error('unexpected plaintext transfer'); } });
-  await expect(uploadSessionFile({ content: {mode:'protected'}, workspaceId:'workspace-1',sessionId:'session-1' as never,token:'synthetic',file:new File(['CANARY-synthetic'],'CANARY-name.txt'),sha256:'00'.repeat(32),textPreview:true })).rejects.toThrow('e2ee_attachments_unavailable');
-});
+it.each([
+  ['en', en, 'Encrypted workspaces do not yet support attachments.'],
+  ['zh_CN', zhCN, '加密工作区暂不支持附件'],
+] as const)(
+  'explains refused encrypted uploads in %s before any network transfer',
+  async (language, translations, message) => {
+    await i18next.init({ lng: language, resources: { [language]: { translation: translations } } });
+    vi.stubGlobal(
+      'XMLHttpRequest',
+      class {
+        constructor() {
+          throw new Error('unexpected plaintext transfer');
+        }
+      }
+    );
+    await expect(
+      uploadSessionFile({
+        content: { mode: 'protected' },
+        workspaceId: 'workspace-1',
+        sessionId: 'session-1' as never,
+        token: 'synthetic',
+        file: new File(['CANARY-synthetic'], 'CANARY-name.txt'),
+        sha256: '00'.repeat(32),
+        textPreview: true,
+      })
+    ).rejects.toThrow(message);
+  }
+);

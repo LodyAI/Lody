@@ -22,8 +22,8 @@ It renders through the bar's `queue` slot as an inset sheet (composer fill, roun
 top, square bottom) sitting directly on the bar, or on the composer when the bar
 has nothing to show; never with a gap, and never inside the input area.
 
-Coarse-pointer and narrow-screen actions use real, non-overlapping 44 px boxes
-on the message line; fine-pointer desktop actions stay compact. Intent:
+Mobile rows use a 44 px More button on the message line; its menu preserves Steer,
+move-to-top, edit and delete when applicable. Desktop actions stay compact. Prior intent:
 [queue touch actions](../../../../../../specs/message-queue-touch-actions.md).
 
 Queue-bound sends held in memory (`runtime.pendingSends`) while attachments
@@ -42,3 +42,7 @@ The queue disclosure is local display state, initially expanded. Keep its editin
 rows mounted while folded; focusing the disclosure must not commit or discard a
 row draft. Folded summaries retain pending/failed-send awareness. Intent:
 [queue presentation](../../../../../../specs/message-queue.md).
+
+When scheduled display rows are supplied, keep them after ordinary and local-pending
+rows, ordered by send time. Exclude them from drag sources/targets and move-to-top;
+time edits re-sort the view. This projection does not put reservations into `mq`.

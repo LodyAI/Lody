@@ -211,6 +211,8 @@ export function ledgerRecordFields(
       return { ...base, successorMembershipId: bytesToHex(op.successorMembershipId.toBytes()) };
     case 'publishEpoch':
       return { ...base, epoch: op.epoch, commitment: bytesToHex(op.commitment.toBytes()) };
+    case 'removeMember':
+      return { ...base, membershipId: bytesToHex(op.membershipId.toBytes()) };
     case 'removeMemberAndPublishEpoch':
       return {
         ...base,
@@ -225,13 +227,59 @@ export function ledgerRecordFields(
 }
 
 /** Decode the main process's own verified public view for display. Authority stays in the host. */
-export function hostLedgerHistory(input: import('@lody/platform').E2eeRuntimeLedgerView): VerifiedLedgerHistory {
+export function hostLedgerHistory(
+  input: import('@lody/platform').E2eeRuntimeLedgerView
+): VerifiedLedgerHistory {
   const status = input.status;
-  const view = Result.getOrThrow(restoreVerifiedState({ bytes: hexToBytes(input.stateHex), genesis: Result.getOrThrow(Bytes.genesisHash(hexToBytes(status.genesisHash))), head: Result.getOrThrow(Bytes.recordHash(hexToBytes(status.headHash))), length: status.length, stateDigest: Result.getOrThrow(Bytes.recordHash(hexToBytes(status.stateDigest))) }));
-  if (input.recordsHex.length !== view.length) throw new E2eeHistoryError('local-conflict', 'incomplete-local');
+  const view = Result.getOrThrow(
+    restoreVerifiedState({
+      bytes: hexToBytes(input.stateHex),
+      genesis: Result.getOrThrow(Bytes.genesisHash(hexToBytes(status.genesisHash))),
+      head: Result.getOrThrow(Bytes.recordHash(hexToBytes(status.headHash))),
+      length: status.length,
+      stateDigest: Result.getOrThrow(Bytes.recordHash(hexToBytes(status.stateDigest))),
+    })
+  );
+  const positions = input.recordPositions ?? input.recordsHex.map((_, index) => index);
+  if (
+    positions.length !== input.recordsHex.length ||
+    (input.recordPositions === undefined && input.recordsHex.length !== view.length) ||
+    positions.some(
+      (position, index) =>
+        !Number.isSafeInteger(position) ||
+        position < 0 ||
+        position >= view.length ||
+        (index > 0 && position <= positions[index - 1]!)
+    )
+  )
+    throw new E2eeHistoryError('local-conflict', 'incomplete-local');
   const records = input.recordsHex.map((rawHex, index) => {
     const bytes = hexToBytes(rawHex);
-    return { index, rawHex, hash: bytesToHex(hashRecordBytes(bytes).toBytes()), body: Result.getOrThrow(decodeRecord(bytes)).body };
+    const position = positions[index]!;
+    const hash = bytesToHex(hashRecordBytes(bytes).toBytes());
+    if (
+      (position === 0 && hash !== status.genesisHash) ||
+      (position === view.length - 1 && hash !== status.headHash)
+    )
+      throw new E2eeHistoryError('local-conflict', 'history-changed');
+    return { index: position, rawHex, hash, body: Result.getOrThrow(decodeRecord(bytes)).body };
   });
-  return { view, records, locallyPinned: true, continuityPending: status.continuityPending, ...(status.upgradeRequiredAt === undefined ? {} : { upgradeRequiredAt: status.upgradeRequiredAt }), page: { workspaceId: status.workspaceId, genesisHash: status.genesisHash, startIndex: 0, recordsHex: [...input.recordsHex], checkpoint: { length: status.length, headHash: status.headHash }, position: status.position ?? '-1', nextCursor: null } };
+  return {
+    view,
+    records,
+    locallyPinned: true,
+    continuityPending: status.continuityPending,
+    ...(status.upgradeRequiredAt === undefined
+      ? {}
+      : { upgradeRequiredAt: status.upgradeRequiredAt }),
+    page: {
+      workspaceId: status.workspaceId,
+      genesisHash: status.genesisHash,
+      startIndex: 0,
+      recordsHex: [...input.recordsHex],
+      checkpoint: { length: status.length, headHash: status.headHash },
+      position: status.position ?? '-1',
+      nextCursor: null,
+    },
+  };
 }

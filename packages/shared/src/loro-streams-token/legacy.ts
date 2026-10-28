@@ -114,7 +114,9 @@ export function createLoroStreamsTokenProviderLegacy(
     invalidate: (reason: 'manual' | 'unauthorized' = 'manual'): void => {
       // The imperative caller retains its old synchronous signature. A failed
       // invalidation stays observable through the retained provider/close receipt.
-      if (closing) throw new Error('Loro Streams token provider closed');
+      // Close already fenced publication. Teardown retries may invalidate the
+      // same retained owner again; cleanup/close receipts still report failure.
+      if (closing) return;
       const fiber = borrowed
         ? borrowed.executor.runFork(borrowed.provider.invalidate(reason))
         : runtime

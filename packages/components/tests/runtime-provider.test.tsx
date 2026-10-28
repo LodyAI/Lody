@@ -1,3 +1,7 @@
+import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
+import { encryptedLocalNamespace, retainEncryptedLocalIdentity, readEncryptedLocalIdentity } from '../src/lib/e2ee-local-data';
+import { resumeEncryptedWorkspaceCleanup } from '../src/lib/e2ee-member-removal';
+import { notifyE2eeLedgerChanged } from '../src/providers/e2ee-runtime-notifications';
 // @vitest-environment jsdom
 
 import React, { act, StrictMode } from 'react';
@@ -66,7 +70,10 @@ vi.mock('@/lib/posthog-analytics', () => ({ capturePostHogEvent: () => {} }));
 vi.mock('@/lib/clear-local-cache', () => ({ maybeClearLodyCacheOnBoot: async () => {} }));
 vi.mock('@/lib/electron', () => ({ isElectronRenderer: () => true }));
 vi.mock('@/lib/native-platform', () => ({ isNativeAppShell: () => false }));
-vi.mock('@/lib/desktop-window', () => ({ isWarmWindow: () => environment.warm }));
+vi.mock('@/lib/desktop-window', () => ({
+  isWarmWindow: () => environment.warm,
+  desktopWindowId: () => 'test-window',
+}));
 vi.mock('@lody/platform/react', () => ({
   usePlatformSession: () =>
     React.useSyncExternalStore(environment.session.subscribe, environment.session.get),
@@ -229,17 +236,41 @@ describe('RuntimeProvider warm workspace preparation', () => {
       contentMode: 'e2ee',
       contentModeVersion: 1,
       genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
       cryptoOrgId: '11'.repeat(32),
       activation: 'control-only',
     }) as const;
 
+  it('opens a re-invited member under the new device instance while retaining exact local identity', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    const original = {accountId: 'local:user', workspaceId: 'local:workspace', genesisHash: '11'.repeat(32), signingPublicKey: '22'.repeat(32)};
+    retainEncryptedLocalIdentity(original);
+    const installed = {...original, signingPublicKey: '33'.repeat(32)};
+    const status = {...installed, epoch: 0, hasCurrentKey: true, rotationRequired: false};
+    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor(original.workspaceId);
+    environment.e2eeWorkspaces!.runtime = {
+      open: async () => status,
+      status: async () => status,
+      refresh: async () => status,
+      close: async () => {},
+    } as unknown as E2eeWorkspaceRuntime;
+    await render();
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    const options = vi.mocked(createWorkspaceRuntime).mock.calls.at(-1)?.[0];
+    expect(options?.e2eeLocalIdentity).toEqual(installed);
+    expect(readEncryptedLocalIdentity(original.accountId, original.workspaceId)).toEqual(installed);
+    expect(encryptedLocalNamespace({...installed, windowId: 'test-window'})).not.toBe(encryptedLocalNamespace({...original, windowId: 'test-window'}));
+  });
+
   it.each(['success', 'temporary failure'])(
-    'keeps the local replica visible and announces a required key update after background refresh %s',
+    'keeps the local replica and resumes or offers retry after background refresh %s',
     async (outcome) => {
       ordinaryCloud();
       listEncrypted();
       const status = {
         genesisHash: '11'.repeat(32),
+        signingPublicKey: '22'.repeat(32),
         epoch: 0,
         hasCurrentKey: true,
         rotationRequired: false,
@@ -249,11 +280,13 @@ describe('RuntimeProvider warm workspace preparation', () => {
       environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
       environment.e2eeWorkspaces!.runtime = {
         open: async () => status,
-        refresh: () =>
-          new Promise((resolve, reject) => {
-            finishRefresh = resolve;
-            failRefresh = () => reject(new Error('temporary network failure'));
-          }),
+        refresh: (_workspaceId, options) =>
+          options?.installKeys === false
+            ? new Promise((resolve, reject) => {
+                finishRefresh = resolve;
+                failRefresh = () => reject(new Error('temporary network failure'));
+              })
+            : Promise.resolve({ ...status, epoch: 1 }),
         status: async () => ({ ...status, epoch: 1 }),
         close: async () => {},
       } as unknown as E2eeWorkspaceRuntime;
@@ -262,13 +295,399 @@ describe('RuntimeProvider warm workspace preparation', () => {
       await act(async () =>
         outcome === 'success' ? finishRefresh({ ...status, epoch: 1 }) : failRefresh()
       );
-      expect(container.querySelector('[role="status"]')?.textContent).toBe(
-        'e2ee.content.keyUpdateRequired'
-      );
+      if (outcome === 'success') expect(container.querySelector('[role="status"]')).toBeNull();
+      else
+        expect(container.querySelector('[role="status"]')?.textContent).toContain(
+          'e2ee.content.keyUpdateRequired'
+        );
       expect(store.get(runtimeAtom)).toBe(prepared);
       expect(prepared.disposed).toBe(false);
     }
   );
+
+  it('selects a manually installed key without mailbox I/O and isolates unrelated workspace/account notifications', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    let epoch = 0;
+    const status = () => ({
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+      epoch,
+      hasCurrentKey: true,
+      rotationRequired: false,
+    });
+    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+    environment.e2eeWorkspaces!.runtime = {
+      open: async () => status(),
+      status: async () => status(),
+      refresh: async () => status(),
+      close: async () => {},
+      seal: async (_workspace: string, input: { epoch: number }) => ({
+        header: new Uint8Array([3]),
+        sealed: new Uint8Array([input.epoch]),
+      }),
+    } as unknown as E2eeWorkspaceRuntime;
+    await render();
+    const content = vi.mocked(createWorkspaceRuntime).mock.calls.at(-1)![0].content!;
+    if (content.mode !== 'protected') throw new Error('expected encrypted content');
+    const room = content.resolve({ kind: 'doc', docId: 'preserved-room' });
+    if (room?.mode !== 'protected') throw new Error('expected encrypted room');
+    const request = {
+      context: {
+        protocol: 'loro-streams-crdt-payload-protection',
+        version: 2,
+        kind: 'update_batch',
+      } as const,
+      plaintext: new Uint8Array([1]),
+      additionalData: () => new Uint8Array([2]),
+    };
+    expect((await room.config.provider.seal(request)).sealed).toEqual(new Uint8Array([0]));
+    epoch = 1;
+    environment.e2eeWorkspaces!.runtime!.refresh = async () => {
+      throw new Error('unrelated mailbox outage');
+    };
+    await act(async () => {
+      notifyE2eeLedgerChanged('another-account', 'local:workspace');
+      notifyE2eeLedgerChanged('local:user', 'another-workspace');
+    });
+    expect((await room.config.provider.seal(request)).sealed).toEqual(new Uint8Array([0]));
+    await act(async () => notifyE2eeLedgerChanged('local:user', 'local:workspace'));
+    expect((await room.config.provider.seal(request)).sealed).toEqual(new Uint8Array([1]));
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    expect(prepared.disposed).toBe(false);
+  });
+
+  it('retires the local replica when native credential refresh confirms member removal', async () => {
+    vi.stubGlobal('indexedDB', new IDBFactory());
+    vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+    ordinaryCloud();
+    listEncrypted();
+    const status = {
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+      epoch: 0,
+      hasCurrentKey: true,
+      rotationRequired: false,
+    };
+    let rejectRefresh: (error: Error) => void = () => {};
+    let closed = false;
+    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+    environment.e2eeWorkspaces!.runtime = {
+      open: async () => status,
+      status: async () => status,
+      close: async () => {
+        closed = true;
+      },
+      refresh: () =>
+        new Promise((_resolve, reject) => {
+          rejectRefresh = reject;
+        }),
+    } as unknown as E2eeWorkspaceRuntime;
+    await render();
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    await act(async () =>
+      rejectRefresh(
+        new Error("Error invoking remote method 'e2ee.refresh': Error: e2ee_member_removed")
+      )
+    );
+    expect(store.get(runtimeAtom)).toBeNull();
+    expect(prepared.disposed).toBe(true);
+    expect(closed).toBe(true);
+    expect(store.get(workspaceRuntimeInitFailureAtom)).toMatchObject({
+      errorType: 'e2ee_member_removed',
+    });
+    await resumeEncryptedWorkspaceCleanup({
+      accountId: 'local:user',
+      workspaceId: 'local:workspace',
+      windowId: 'test-window',
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it.each([true, false])(
+    'cold native removal uses only a saved exact locator: %s',
+    async (saved) => {
+      const factory = new IDBFactory();
+      vi.stubGlobal('indexedDB', factory);
+      vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+      const identity = {
+        accountId: 'local:user',
+        workspaceId: 'local:workspace',
+        genesisHash: '11'.repeat(32),
+        signingPublicKey: '22'.repeat(32),
+      };
+      const scope = { ...identity, windowId: 'test-window' };
+      const original = 'lody-loro-repo-db-' + encryptedLocalNamespace(scope);
+      const replacement =
+        'lody-loro-repo-db-' +
+        encryptedLocalNamespace({ ...scope, signingPublicKey: '33'.repeat(32) });
+      for (const name of [original, replacement]) {
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+          const request = factory.open(name, 1);
+          request.onupgradeneeded = () => request.result.createObjectStore('content');
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+        db.close();
+      }
+      const deleted = Promise.withResolvers<void>();
+      const remove = factory.deleteDatabase.bind(factory);
+      factory.deleteDatabase = (name) => {
+        const request = remove(name);
+        if (name === original) request.addEventListener('success', () => deleted.resolve());
+        return request;
+      };
+      if (saved) retainEncryptedLocalIdentity(identity);
+      ordinaryCloud();
+      listEncrypted();
+      environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+      environment.e2eeWorkspaces!.runtime = {
+        open: async () => {
+          throw new Error('e2ee_member_removed');
+        },
+      } as unknown as E2eeWorkspaceRuntime;
+      await render();
+      if (saved) await deleted.promise;
+      expect(store.get(runtimeAtom)).toBeNull();
+      expect(store.get(workspaceRuntimeInitFailureAtom)).toMatchObject({
+        errorType: 'e2ee_member_removed',
+      });
+      const names = (await factory.databases()).map((row) => row.name);
+      expect(names).toContain(replacement);
+      expect(names.includes(original)).toBe(!saved);
+      if (saved) await resumeEncryptedWorkspaceCleanup(scope);
+      vi.unstubAllGlobals();
+    }
+  );
+
+  it('a failed removed-workspace deletion does not fail the next sibling initialization', async () => {
+    const factory = new IDBFactory();
+    vi.stubGlobal('indexedDB', factory);
+    vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+    const name =
+      'lody-loro-repo-db-' +
+      encryptedLocalNamespace({
+        accountId: 'local:user',
+        workspaceId: 'local:workspace',
+        windowId: 'test-window',
+        genesisHash: '11'.repeat(32),
+        signingPublicKey: '22'.repeat(32),
+      });
+    const blocked = Promise.withResolvers<void>();
+    const originalDelete = factory.deleteDatabase.bind(factory);
+    factory.deleteDatabase = (database) => {
+      const request = originalDelete(database);
+      if (database === name) request.addEventListener('blocked', () => blocked.resolve());
+      return request;
+    };
+    const held = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = factory.open(name, 1);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      ordinaryCloud();
+      listEncrypted();
+      const status = {
+        genesisHash: '11'.repeat(32),
+        signingPublicKey: '22'.repeat(32),
+        epoch: 0,
+        hasCurrentKey: true,
+        rotationRequired: false,
+      };
+      let rejectRefresh: (error: Error) => void = () => {};
+      environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+      environment.e2eeWorkspaces!.runtime = {
+        open: async () => status,
+        status: async () => status,
+        close: async () => {},
+        refresh: () =>
+          new Promise((_resolve, reject) => {
+            rejectRefresh = reject;
+          }),
+      } as unknown as E2eeWorkspaceRuntime;
+      await render();
+      await act(async () => {
+        rejectRefresh(new Error('e2ee_member_removed'));
+        await blocked.promise;
+      });
+      expect(prepared.disposed).toBe(true);
+      const sibling = { ...runtimeFixture(), workspaceId: 'sibling', workspaceSlug: 'sibling' };
+      vi.mocked(createWorkspaceRuntime).mockResolvedValue(sibling as never);
+      environment.e2eeWorkspaces!.describe = async ({ workspaceId }) => ({
+        workspaceId,
+        contentMode: 'plaintext',
+        contentModeVersion: 1,
+      });
+      environment.cachedWorkspaceId = 'sibling';
+      await act(async () => {
+        environment.workspaces.set({
+          status: 'ready',
+          activeWorkspaceId: 'sibling',
+          workspaces: [
+            {
+              id: 'sibling',
+              slug: 'sibling',
+              name: 'Sibling',
+              role: 'owner',
+              contentMode: 'plaintext',
+            },
+          ],
+        });
+        store.set(currentWorkspaceSlugAtom, 'sibling');
+        store.set(currentWorkspaceIdAtom, 'sibling');
+      });
+      expect(store.get(runtimeAtom)).toBe(sibling);
+      expect(store.get(workspaceRuntimeInitFailureAtom)).toBeNull();
+    } finally {
+      held.close();
+      await resumeEncryptedWorkspaceCleanup({
+        accountId: 'local:user',
+        workspaceId: 'local:workspace',
+        windowId: 'test-window',
+        genesisHash: '11'.repeat(32),
+        signingPublicKey: '22'.repeat(32),
+      }).catch(() => undefined);
+      await resumeEncryptedWorkspaceCleanup({
+        accountId: 'local:user',
+        workspaceId: 'local:workspace',
+        windowId: 'test-window',
+        genesisHash: '11'.repeat(32),
+        signingPublicKey: '22'.repeat(32),
+      });
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('shows automatic snapshot recovery while retaining the workspace, then clears it after a valid read', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    let valid = false;
+    const status = {
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+      epoch: 0,
+      hasCurrentKey: true,
+      rotationRequired: false,
+    };
+    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+    environment.e2eeWorkspaces!.runtime = {
+      open: async () => status,
+      refresh: async () => status,
+      status: async () => status,
+      openContent: async () => {
+        if (!valid) throw new Error('snapshot rejected');
+        return new Uint8Array([7]);
+      },
+      contentStreamsToken: async () => ({}),
+      close: async () => {},
+    } as unknown as E2eeWorkspaceRuntime;
+    await render();
+    const content = vi.mocked(createWorkspaceRuntime).mock.calls.at(-1)![0].content;
+    if (content.mode !== 'protected') throw new Error('expected protected content');
+    const room = content.resolve({ kind: 'meta' });
+    if (room.mode !== 'protected') throw new Error('expected protected room');
+    const context = {
+      protocol: 'loro-streams-crdt-payload-protection' as const,
+      version: 2 as const,
+      kind: 'snapshot' as const,
+      continuationOffset: '000001',
+    };
+    const request = {
+      context,
+      header: new Uint8Array([4]),
+      sealed: new Uint8Array([1]),
+      additionalData: new Uint8Array([2]),
+    };
+    await act(async () => {
+      await expect(room.config.provider.open(request)).rejects.toThrow('snapshot rejected');
+      content.snapshotUpload.onSnapshotRecovery!(
+        'https://streams.invalid/ds/encrypted/local%3Aworkspace%3Ameta',
+        true
+      );
+    });
+    expect(container.querySelector('[role="status"]')?.textContent).toBe(
+      'e2ee.content.snapshotRecoveryPending'
+    );
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    valid = true;
+    await act(async () => {
+      await room.config.provider.open(request);
+      content.snapshotUpload.onSnapshotRecovery!(
+        'https://streams.invalid/ds/encrypted/local%3Aworkspace%3Ameta',
+        false
+      );
+    });
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    expect(prepared.disposed).toBe(false);
+  });
+
+  it('installs a missing current key at cold open before any content sessions exist', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    let installed = false;
+    const status = () => ({
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+      epoch: 1,
+      hasCurrentKey: installed,
+      rotationRequired: false,
+    });
+    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+    environment.e2eeWorkspaces!.runtime = {
+      open: async () => status(),
+      refresh: async (_workspaceId, options) => {
+        if (options?.installKeys !== false) installed = true;
+        return status();
+      },
+      status: async () => status(),
+      close: async () => {},
+    } as unknown as E2eeWorkspaceRuntime;
+    await render();
+    expect(installed).toBe(true);
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    expect(prepared.disposed).toBe(false);
+  });
+
+  it('opens with a retained key while current-key reception fails', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    const status = {
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+      epoch: 1,
+      hasCurrentKey: false,
+      writeEpoch: 0,
+      rotationRequired: false,
+    };
+    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+    environment.e2eeWorkspaces!.runtime = {
+      open: async () => status,
+      status: async () => status,
+      refresh: async () => {
+        throw new Error('temporary staging failure');
+      },
+      close: async () => {},
+    } as unknown as E2eeWorkspaceRuntime;
+    await render();
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    expect(prepared.disposed).toBe(false);
+    expect(container.querySelector('[role="status"]')?.textContent).toContain(
+      'e2ee.content.keyUpdateRequired'
+    );
+    environment.e2eeWorkspaces!.runtime!.refresh = async () => ({
+      ...status,
+      hasCurrentKey: true,
+      writeEpoch: 1,
+    });
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('[role="status"] button')!.click()
+    );
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    expect(prepared.disposed).toBe(false);
+  });
 
   it('opens an ordinary workspace before authentication, verifies it in the background and keeps it through auth refresh', async () => {
     ordinaryCloud();
@@ -600,6 +1019,22 @@ describe('RuntimeProvider warm workspace preparation', () => {
     }
   );
 
+  it('retains an encrypted identity failure and its workspace ID when the listing has no encryption hint', async () => {
+    ordinaryCloud();
+    retainWorkspaceModeProof(localStorage, 'local:user', 'local', {
+      workspaceId: 'local:workspace',
+      contentMode: 'plaintext',
+      contentModeVersion: 1,
+    });
+    localStorage.setItem('lody-e2ee-known-mode:local%3Auser:local%3Aworkspace', '11'.repeat(32));
+    await render();
+    expect(store.get(workspaceRuntimeInitFailureAtom)).toMatchObject({
+      errorType: 'E2eeLocalEvidenceConflictError',
+      modeAdmission: { knownEncrypted: true, workspaceId: 'local:workspace' },
+    });
+    expect(store.get(runtimeAtom)).toBeNull();
+  });
+
   it('waits for the same account to authenticate, then preserves the runtime through auth refresh', async () => {
     ordinaryCloud();
     listEncrypted();
@@ -729,6 +1164,7 @@ describe('RuntimeProvider warm workspace preparation', () => {
           contentMode: 'e2ee',
           contentModeVersion: 1,
           genesisHash: '11'.repeat(32),
+          signingPublicKey: '22'.repeat(32),
           cryptoOrgId: '11'.repeat(32),
           activation: 'control-only',
         })
@@ -988,6 +1424,7 @@ describe('RuntimeProvider warm workspace preparation', () => {
         contentMode: 'e2ee',
         contentModeVersion: 1,
         genesisHash: '11'.repeat(32),
+        signingPublicKey: '22'.repeat(32),
         cryptoOrgId: '11'.repeat(32),
         activation: 'control-only',
       })
@@ -1199,6 +1636,7 @@ describe('RuntimeProvider warm workspace preparation', () => {
         contentMode: 'e2ee',
         contentModeVersion: 1,
         genesisHash: '11'.repeat(32),
+        signingPublicKey: '22'.repeat(32),
         cryptoOrgId: '11'.repeat(32),
         activation: 'control-only',
       })

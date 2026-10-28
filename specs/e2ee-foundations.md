@@ -46,195 +46,248 @@ mandatory caller responsibilities; HPKE validity does not establish sender ident
 
 ## Realtime RPC and presence (M5 review draft)
 
-This section records the selected realtime direction: iroh first, encrypted
-Streams RPC fallback, one shared signed encrypted frame and durable deduplication,
-ledger-bound machine IDs, and execution freshness obtained by the machine itself.
-The owner has selected these behavior boundaries, including the device identity
-used by iroh; **this Spec revision remains draft**. The existing candidate byte
-layout and limits below are unchanged; these choices do not approve a new ledger
-encoding or open product channels. The machine admission format change is separate
-work. Ordinary RPC, document content v0 and credential-binding/v1 stay unchanged.
+Remote execution needs the same authority and execution evidence whichever route
+wins. Use **iroh first → encrypted Streams RPC → encrypted history/Meta durable
+dispatch** as the final fallback. Keep that durable path available when both
+realtime paths fail; it must reach the same actual-start claim, not a second
+execution path. Ordinary workspaces keep their existing behavior. No encrypted
+route may fall back to plaintext.
 
-### Shared content frame
+**This concrete byte revision remains draft.** Two format choices below await
+owner approval: the 1 MiB RPC limit includes content v0's 143-byte overhead, and
+RPC resources use canonical unpadded base64url of the ledger machineId bytes.
+The body layout follows the unmerged PR-25 candidate at
+`daee5751fde6698e50960ca6a5627191c887e297`; that code is evidence of candidate
+bytes, not approval or a shipped realtime capability.
 
-Both transports carry exactly one content v0 frame per message: header39,
-nonce24, encrypted body with tag16, signature64. No transport field supplies
-authority. Derive with the existing `deriveContentKey`: pinned genesis,
-current epoch, `docEpoch=0`, purpose 7/8/9, and resource. Requests and responses
-use `rpc:<machineId>`; presence uses `presence:<roomId>`. Proposed identifier
-encoding is 1..128 printable ASCII bytes without whitespace, with literal
-prefixes (no URL normalization). Reject out-of-range IDs. One genesis maps to
-one workspace; the host separately checks that fixed workspace binding.
-Purpose is authenticated by content v0 even though it is absent from its header.
-Request, response, presence and document leaves never substitute for each other.
-No extra content additionalData is used in this proposed profile.
+### Shared content frame and resource bytes
 
-Proposed body encoding is fixed fields, not an outer JSON object. Integers are
-unsigned big endian; u64 values must be <= 2^53-1. `text16` means u16 byte length
-followed by strict UTF-8; `bytes32` means u32 byte length followed by exact bytes.
-Reject truncation, trailing bytes, unknown tags and limits before allocation.
-All listed limits include the entire plaintext body. Content v0 adds 143 bytes.
-All timestamps are proposed as nonnegative Unix UTC milliseconds. Expired means
-`now >= expiresAt`; presence requires `issuedAt <= now < expiresAt` and
-`0 < expiresAt - issuedAt <= 60_000`. Local clock uncertainty invalidates reuse.
+Each realtime message carries exactly one content v0 frame:
+`header39 || nonce24 || ciphertext || tag16 || signature64`. Derive with the
+existing `deriveContentKey`: pinned genesis, current epoch, `docEpoch=0`, purpose
+7/8/9 and the exact resource. Purpose is authenticated despite being absent from
+the header. Use no extra content additionalData in this profile. Request,
+response, presence and document leaves never substitute for each other.
+Transport metadata supplies no authority; the host separately checks the fixed
+genesis-to-workspace binding and independently trusted target/signer.
 
-| Purpose    | Proposed plaintext layout                                                                  | Proposed maximum                           |
-| ---------- | ------------------------------------------------------------------------------------------ | ------------------------------------------ |
-| 8 request  | `version:u8=0, requestId:16, expiresAt:u64, method:text16, params:bytes32`                 | 1 MiB; method 1..128 printable ASCII bytes |
-| 9 response | `version:u8=0, requestId:16, requestDigest:32, kind:u8, sequence:u32, payload:bytes32`     | 1 MiB per frame                            |
-| 7 presence | `version:u8=0, incarnation:16, sequence:u32, issuedAt:u64, expiresAt:u64, payload:bytes32` | 64 KiB; TTL <= 60 seconds                  |
+**Resource choice awaiting approval:** requests and responses use
+`rpc:<encodedMachineId>`, where encodedMachineId is RFC 4648 section 5 base64url
+of the exact ledger machineId's strict UTF-8 bytes, **without `=` padding**. The
+ledger permits 1..256 bytes, preserves a leading BOM, rejects lone surrogates and
+malformed UTF-8, and performs no Unicode normalization. Encode those original
+bytes without trimming, case folding, URL decoding or other normalization.
+The encoded segment uses only `A-Z a-z 0-9 - _`, is 2..342 ASCII bytes, and the
+complete resource is at most **346 ASCII bytes** including `rpc:`. For example,
+`a` becomes `rpc:YQ`, and `机器` becomes `rpc:5py65Zmo`.
+Reject padding, alternate alphabets, whitespace, impossible lengths, nonzero
+unused pad bits and any spelling that fails exact decode/re-encode equality;
+also validate the decoded 1..256-byte strict UTF-8 ledger identity. Thus every
+valid ledger ID has exactly one lossless resource spelling, including IDs longer
+than 128 bytes or containing non-ASCII characters. A decoded name alone grants
+no machine authority. This resource codec is absent from PR-25's body codec.
 
-`requestId` and presence incarnation are host-generated secure random 16-byte
-values. The request signer is the content header key. Target, genesis, epoch and
-purpose come from the independently trusted scope, not a decoded body or URL.
-`params` is the exact UTF-8 JSON produced by the existing method codec, validated
-by that method after frame authentication; it is not reserialized for hashing.
-JSON content does not choose a method, signer, target, ID or deadline. Binary
-method output needs an explicit method codec, not implicit JSON coercion.
+Presence uses `presence:<roomId>` with roomId restricted to 1..128 bytes in
+`0x21..0x7e`, concatenated literally without URL normalization. This room bound
+does not restrict the ledger machineId or its encoded RPC resource.
 
-Response kinds are proposed as 0 progress, 1 final success, 2 final error.
+### Body bytes and limits
+
+Bodies use fixed fields, not an outer JSON object. Integers are unsigned big
+endian; u64 values must be at most `2^53-1`. `text16` is a u16 byte length and
+exact ASCII bytes (a strict UTF-8 subset); `bytes32` is a u32 byte length and
+exact opaque bytes. Reject truncation, trailing bytes, unknown tags, invalid
+text/integers and size limits before allocation/copying. Decoded byte fields
+own their storage, including for offset Buffer inputs.
+
+| Purpose    | Plaintext field order                                                                      | Limit                                                                       |
+| ---------- | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| 8 request  | `version:u8=0, requestId:16, expiresAt:u64, method:text16, params:bytes32`                 | Complete sealed frame ≤1,048,576 bytes; method 1..128 bytes in `0x21..0x7e` |
+| 9 response | `version:u8=0, requestId:16, requestDigest:32, kind:u8, sequence:u32, payload:bytes32`     | Each complete sealed frame ≤1,048,576 bytes                                 |
+| 7 presence | `version:u8=0, incarnation:16, sequence:u32, issuedAt:u64, expiresAt:u64, payload:bytes32` | Plaintext body ≤65,536 bytes; TTL ≤60,000 ms                                |
+
+**RPC limit choice awaiting approval:** body size is at most **1,048,433 bytes**
+(`1,048,576 - 143`), not 1 MiB plus content overhead. Request body size is
+`31 + methodBytes + paramsBytes`; response body size is `58 + payloadBytes`.
+Presence body size is `41 + payloadBytes`; its separate 64 KiB body limit gives
+a complete content frame of at most 65,679 bytes. Transport envelopes are outside
+these content-frame bounds. Generic document content limits do not change.
+
+Response kind is exactly 0 progress, 1 final success, or 2 final error. A final
+error's entire payload is `code:text16, detail:bytes32`, **without another version
+byte**. Code is 1..64 ASCII letters, digits, `_` or `-`; payload size is
+`6 + codeBytes + detailBytes` and at most 1,048,375 bytes, leaving the response's
+58-byte prefix inside the RPC body bound. Both response encoding and decoding
+validate this nested error layout. Empty params, success/progress payloads,
+error detail and presence payload are permitted by the body codec; the method
+or presence schema applies its own requirements after authentication.
+
+Request IDs and presence incarnations are host-generated secure random 16-byte
+values. Timestamps are nonnegative Unix UTC milliseconds. Expired means
+`now >= expiresAt`; presence additionally requires `issuedAt <= now < expiresAt`
+and `0 < expiresAt - issuedAt <= 60_000`. The codec checks the TTL arithmetic,
+not current time, room, replay state, permissions or request freshness.
+
+Method params, success/progress and error details remain exact opaque bytes for
+the authorized method codec; JSON methods use their explicit UTF-8 JSON codec,
+without reserialization for hashing. Binary output requires an explicit codec.
+Decoded payloads cannot select another method, signer, target, ID or deadline.
+Error detail is an explicitly permitted encrypted method DTO; raw exceptions,
+paths, stacks and provider output stay in the trusted host's diagnostics unless
+explicitly part of that DTO.
+
 `requestDigest` is SHA-256 of the **entire original signed encrypted request**.
-Sequence starts at zero and strictly increases per request; exact duplicate
-frames are ignored, different bytes at the same sequence conflict. A terminal
-frame ends progress; sequence gaps allow a lost progress frame but never create
-success. Success/progress payload uses the existing method's UTF-8 JSON codec;
-error payload is `code:text16, detail:bytes32`, with code restricted to 1..64
-ASCII letters, digits, `_` or `-`, and detail an explicitly permitted encrypted
-method error DTO. Raw exceptions, paths, stacks and provider output stay in the
-corresponding trusted host's diagnostics unless explicitly part of that DTO.
-Response publication failure never replaces the stored business result.
+Sequence starts at zero and strictly increases per request without u32 wrapping;
+exact duplicate frames are ignored, different bytes at the same sequence
+conflict. A terminal frame ends progress; gaps allow lost progress but never
+create success. Stateful correlation and sequencing belong to integration, not
+the pure body codec.
 
-One durable response owner atomically saves each exact sealed response frame
-and its allocated sequence **before** publication, and retries those original
-bytes. Restart never re-encrypts a payload under a committed sequence. Sealing
-without that commit allocates no durable sequence; an uncertain commit must be
-reconciled before sealing another frame or publishing.
-After an unavailable/invalid response outbox, use a separately authorized result
-query rather than inventing another original response. No response evidence is
-automatically collected in this first version.
+One durable response owner atomically saves each exact sealed response frame and
+its allocated sequence **before publication**, then retries those original bytes.
+Restart never re-encrypts under a committed sequence. An uncertain commit must be
+reconciled before another seal or publication. If the response outbox is
+unavailable/invalid, use a separately authorized result query rather than inventing
+another original response. Publication or cleanup failure cannot replace a saved
+business outcome. No response evidence is automatically collected.
 
-Every response/progress must match the caller's persisted original ID/digest,
-genesis, target and epoch, and be signed by the independently bound target
-device **while it remains valid**. Another valid member with the same epoch key
-cannot reply for it. A request expiry blocks a new start, not delivery/query of
-an already retained result. Result lookup is itself authenticated and authorized;
-knowing an ID or digest does not grant access. A stored business result can be
-wrapped in a newly authorized response to a separate result-query request;
-this is not re-encryption or re-signing of the original request for retry.
+Responses/progress must match the caller's retained original ID/digest, genesis,
+target and epoch, signed by the independently bound target device **while it
+remains valid**. Another member holding the epoch key cannot reply for it.
+Request expiry blocks a new start, not delivery/query of a retained result.
+Lookup itself needs authentication and read authorization; an ID/digest grants
+no access. A retained outcome may become a fresh response to a separate authorized
+query; that does not re-sign/re-encrypt the original request for retry.
 
-### Machine binding: selected ledger admission
+### Machine binding and current-only development state
 
-Machine `AdmitDevice` records bind the exact product machineId and the device
-signing public key together under the approving personal device's ledger
-signature. Obtain `machineId → signing key` from the locally verified ledger,
-never from a directory row, a transport address or possession of an epoch key.
-Keep existing member/account and machine ownership/sharing checks; this binding
-does not grant new execution authority. Credential-binding/v1 remains unchanged
-and is not a machineId proof. The separate machine-binding proof alternative is
-not selected.
+Machine `AdmitDevice` signs the exact machineId and device public keys together;
+machine possession also covers that machineId. Obtain `machineId → signing key`
+only from a genuine locally verified ledger, never directory rows, addresses or
+possession of an epoch key. Keep existing member/account and machine
+ownership/sharing checks. Credential-binding/v1 still binds the pairing exchange
+to its session; it is not the machineId proof.
 
-Within a workspace, at most one active device may bind a given machineId. A
-replacement key for that machineId must revoke its previous key in the same
-signed ledger record, so a competing admission cannot create two active targets.
-The exact record encoding and its validation/vector changes belong to the
-separate machine admission format work; this draft does not choose their bytes.
-Old development machine records without machineId may continue authorized
-document synchronization, but cannot establish realtime authority. Do not infer
-a missing binding from metadata or migrate/re-sign their historical records.
+At most one active device binds a machineId in a workspace. Replacement names the
+same member's currently active device with that machineId and revokes its key in
+the same signed record. The current pre-freeze machine tag4/possession format is
+already implemented; it adds no new operation or capability declaration. See the
+[permission-ledger contract](e2ee/permission-ledger.zh.md) and the public
+[machine binding decision](../.agents/notes/proposed/architecture/2026-10-27-e2ee-machine-ledger-binding.md).
 
-### Permission freshness: machine-local authenticated read
+Old development ledgers without the required machineId are unsupported: recreate
+them with the current format. They do not retain a document-sync compatibility
+path; do not add legacy decoding, migration, metadata guesses or re-signing of
+history. Production has no encrypted workspaces requiring that compatibility.
+This does not authorize erasing uncertain operations or execution evidence.
 
-A verified ledger proves continuity, not that a remote endpoint just returned
-its latest state. A token, request timestamp, forwarded proof or received frame
-does not establish execution freshness. The host verifies the caller's current
-device/member role and existing machine ownership/sharing rules before a new
-start **and every later action**. Guest and recovery devices cannot execute;
-read-only queries use read permissions. Known revocation, epoch change,
-rotationRequired or conflicting local evidence immediately blocks affected sends
-and execution, including both transports and the durable dispatch path.
+### Permission freshness and the separate durable expiry clock
 
-The execution machine starts its own authenticated latest-ledger read, captures
-the local start time before network work, and verifies through that exact latest
-boundary. Its in-memory authorization cache lasts no more than the remaining
-part of 15 minutes from that read's start. Cached/forwarded pages do not restart
-it. A slow read that consumes the window grants nothing. Intersect this deadline
-with the request deadline and any applicable upstream credential deadline,
-reserving clock/stop margin. No network is awaited under a global account lock.
+A verified ledger proves continuity, not a fresh latest read. Tokens, timestamps,
+forwarded proofs and received frames do not grant execution freshness. Before a
+new start **and each later action**, check current member/device roles and existing
+machine ownership/sharing rules; Guest and recovery devices cannot execute.
+Read queries need read permissions. Known revocation, an incompatible epoch or
+conflicting evidence stops affected sends/execution across all three routes.
+**`rotationRequired` is an administrator advisory only:** keep prompting for key
+rotation, but the flag alone blocks neither new sealing, sending nor execution.
+Current verified authorization and usable epoch keys remain necessary.
 
-Execution freshness is memory-only. Restart discards it and requires an online,
-authenticated latest-ledger revalidation before accepting new remote execution;
-local retained checkpoints and journal timestamps cannot restore that grant.
-A live cache rejects clock rollback or uncertain suspend/resume elapsed time and
-revalidates. Select and test the concrete clock, stop margin and sleep detection
-per host without exceeding the bound. Source checkpoints/original windows may
-remain diagnostic evidence, never a new authorization window. This does not
-change the journal's separately accepted persistent expiry clock-floor behavior.
-Offline document content/editing and already retained results remain available;
-a failed refresh blocks new remote execution when its existing grant expires,
-not unrelated local work. Started-but-uncertain operations are not automatically
-restarted after revalidation.
+The execution machine initiates its own authenticated latest-ledger read and
+records local start time **before network I/O**. Verify through that read's latest
+boundary; cache only the remaining part of a maximum **15 minutes from that
+start**, in memory. Slow or failed reads and forwarded/cached pages cannot renew
+it. Intersect with request/upstream deadlines and reserve clock/stop margin;
+never wait on network under a global account lock. Restart discards this grant
+and requires online authenticated revalidation before new remote execution.
+Rollback or uncertain suspend/resume elapsed time invalidates the live cache.
+Retained checkpoints and journal timestamps cannot restore execution freshness.
+Offline documents/editing and retained results remain available; expired freshness
+blocks new remote execution, not unrelated local work. Revalidation never restarts
+an uncertain operation.
 
-### Iroh identity and trusted-host boundary
+The journal's **persistent expiry clock is a different mechanism**, not an
+execution grant. Current schema 3 retains a nondecreasing floor per
+`(genesis, workspaceId)` across reopen. With an independently authenticated current
+reference, claim rejects local time or the retained floor more than 600,000 ms
+ahead; accepted claims use `max(reference, retainedFloor)`. Without a reference,
+use `max(localNow, retainedFloor)` in that workspace. Never use frame timestamps
+as trusted time. Explicit evidence-preserving reset can clear a poisoned floor
+while retaining retired request IDs; it neither renews original deadlines nor
+restores freshness or replay authority. Follow the public
+[journal recovery decision](../.agents/notes/proposed/bug-fix/2026-10-27-e2ee-realtime-journal-recovery.md).
 
-Iroh reuses the workspace device's Ed25519 identity: its EndpointId is the same
-device signing public key. Only the trusted host supplies that device private
-key to iroh; it is never exported to the renderer or exposed by an arbitrary-sign
-IPC. An authenticated iroh peer still passes the shared frame, verified machine
-binding, current member/device permission, freshness and execution-journal gates.
-A transport connection does not grant workspace authority.
+### Routes, iroh identity and latency acceptance
 
-Before enabling this reuse, audit the concrete iroh TLS and discovery signing
-paths for domain separation from ledger/content signatures; the selected identity
-is not evidence that this audit has passed. Native SDK, discovery/relay settings
-and platform acceptance remain implementation work. An unavailable or slow iroh
-connection must leave encrypted Streams RPC usable with the same original
-request ID/frame and one machine-side execution claim.
+Iroh reuses the workspace device's Ed25519 identity: EndpointId equals its signing
+public key. Only the trusted host supplies the private key, with no renderer
+export or arbitrary-sign IPC. A connected peer still passes shared-frame,
+verified-binding, current-permission, freshness and execution-journal checks.
+Concrete TLS/discovery domain separation, native SDK/key lifetime and platform
+acceptance remain gates before enabling identity reuse.
 
-### Durable identities, result lookup and collection
+A slow/unavailable iroh connection must not hold up usable encrypted Streams RPC.
+If both are unusable, retain **encrypted history/Meta durable dispatch as the final
+fallback**. Retries across realtime routes reuse the original ID and exact signed
+ciphertext. Durable dispatch retains the same business identity (`userTurnId`
+where applicable) and original request correlation; all routes pass the same
+actual-start claim and current authorization. A durable arrival does not refresh
+the original deadline or start a second operation.
 
-Before sending, save the exact signed encrypted frame and fixed request ID.
-Before acknowledging reception, the machine saves that original in one journal
-shared by both transports. The logical identity is
-`(genesis, workspace, targetMachineId, requestId)`; requester and exact frame are
-immutable attributes. A different requester or different original under that
-identity is a conflict, never another execution. Record the original expiry;
-neither re-signing nor forwarding renews it.
+The acceptance target is **send-to-actual-execution-start ≤1 second**, measured
+from sender acceptance of the send to the machine's actual-start boundary, not
+to a receipt ACK or business completion. Measure ordinary/encrypted paths and
+transport/fallback selection separately under stated conditions. Offline durable
+catch-up has no one-second delivery guarantee; a passed deadline still forbids
+a new start. No latency result is claimed by this documentation revision.
 
-The journal records received, started, completed and an uncertain outcome after
-a start without durable completion. Atomically claim a received entry before
-the first business side effect; only one caller obtains the start permit.
-A crash after that claim is uncertain even if no side effect can be proved.
-Never automatically take it over or replay it. Reconcile using existing
-userTurnId/steer/fork execution evidence; associate the same business operation
-with the durable Meta dispatch path so it cannot bypass the journal.
+### Durable identities, actual start and retained outcomes
 
-In particular, `session/dispatch-turn` currently returns a delivery ACK from
-`offerRpcTurn`, not completion of an agent turn. In the proposed profile its
-accepted/queued receipt is progress, correlated to the original userTurnId;
-it must not mark the execution journal completed. The actual agent-start gate
-claims the journal, and business completion records the final outcome. An ACK
-does not permit the persistent watcher to start a second copy. Other methods
-retain their explicitly documented completion semantics.
+Before a realtime send, retain the exact signed ciphertext and fixed ID. Before
+receipt ACK, save the original in the shared journal. Identity is
+`(genesis, workspace, targetMachineId, requestId)`; requester, original bytes and
+original expiry are immutable. Another requester or another original at that
+identity is a conflict, not another execution. Forwarding never renews expiry.
+
+The journal retains received, started, completed and uncertain outcomes. Atomically
+claim received **immediately before the first business side effect**; one winner
+gets a start permit. A crash after claim remains uncertain even if no side effect
+can be proved. Never automatically take over or replay. Reconcile using existing
+userTurnId/steer/fork evidence, including arrivals through encrypted history/Meta.
+A reception-only journal cannot fence durable dispatch after restart.
+
+`session/dispatch-turn` returns an `offerRpcTurn` delivery ACK, not completed agent
+work. Accepted/queued is progress tied to the original userTurnId, not journal
+completion. The actual agent-start boundary claims the journal; business completion
+saves the final outcome. Other methods retain their documented completion semantics.
 
 Persist the business outcome before response delivery or auxiliary cleanup.
-Keep completed outcomes immutable and queryable on response loss or cleanup
-failure. Journal errors block only work depending on it; preserve the file and
-original cause at the host diagnostic boundary. Next calls may reopen after I/O
-recovers; unreadable data is never an empty journal. No timeout steals ownership.
+Completed results remain immutable and queryable after response loss or expiry.
+Journal errors block only dependent work; preserve evidence and original causes,
+allow reopening after I/O recovery, and never treat unreadable state as empty.
+Timeouts cannot steal ownership.
 
-**Initial collection rule: no automatic collection.** Passing expiresAt does not
-delete original, result or deduplication evidence. Explicit acknowledgement alone
-also does not make the ID reusable. A later size/retention policy must specify
-result consumption, uncertain operations, durable retired-ID evidence and backup
-rollback before any body collection is enabled. Capacity exhaustion rejects new
-work without evicting evidence. Exact originals are needed while retransmission
-or conflict comparison remains supported; a compact tombstone policy is not yet
-approved. Presence is ephemeral and never enters this journal or history.
+**No automatic collection:** expiry or acknowledgement deletes neither originals,
+results, responses nor deduplication evidence, and never makes an ID reusable.
+Later bounded retention needs an approved policy for result consumption, uncertain
+work, durable retired IDs and backup rollback. Until then, exhausted capacity
+rejects new work without evicting evidence. Presence is ephemeral, never journaled
+or copied into history; reject cross-room, forged, future-issued, expired and
+oversized presence before state changes. Replay state is scoped to the expected
+sender/incarnation lifetime; bad presence cannot stop unrelated documents.
 
-Presence authenticates the expected sender, genesis, room, epoch and original
-TTL. Reject forged, cross-room, expired, future-issued or oversized frames before
-updating state. Keep sequence state per sender/incarnation only for its lifetime;
-bad presence affects only that sender's state, never an unrelated document.
+### Revision evidence and limits
+
+The [public source audit](../.agents/notes/proposed/architecture/2026-10-26-e2ee-realtime-contract.md#source-audit-and-integration-boundary)
+pins merged primitives, machine binding and schema-3 journal to public main
+`76a4f28e8f22c0b405e57b731fb0a1e49c42d8a3`. Candidate body bytes and independent
+vectors are pinned to [PR-25 source](https://github.com/LodyAI/Lody/blob/daee5751fde6698e50960ca6a5627191c887e297/packages/loro-streams-rpc/src/e2ee-wire.ts)
+and its [vectors](https://github.com/LodyAI/Lody/blob/daee5751fde6698e50960ca6a5627191c887e297/packages/loro-streams-rpc/tests/fixtures/e2ee-wire-v0.json).
+Resource encoding, authenticated transport/freshness, sender outbox, actual
+execution and durable fallback wiring, result-query authorization, iroh custody,
+installed-platform and latency acceptance are not established by those subsets.
+Owner approval must identify this exact revision; neither document checks nor
+candidate code approval approves the whole Spec or enables product channels.
 
 ## Format compatibility
 
@@ -247,7 +300,29 @@ Ledger evolution is append-only:
 - A new operation becomes valid only after a capability declaration (operation tag 9) earlier in the same ledger. The declaration lists strictly ascending nonzero u32 capability codes, is signed by an Owner or Admin personal device and is monotonic. A client that does not implement a declared capability verifies the preceding records and stops at the declaration with `upgrade-required`; it never reports corruption or skips the record. Writers and hosts refuse a declaration they do not implement and any operation whose capability was not declared earlier.
 - Changing the cipher suite or another genesis-level parameter creates a new ledger with a new genesis. The old ledger is never rewritten; it ends with a link record introduced through a capability, as MLS ReInit links a replacement group.
 
-Every other format remains current-only. Content, journal, local-store and snapshot formats have no deployed data: support only the current format for each entrypoint, with no old-format decoders, dual readers, schema upgrades, legacy imports or compatibility facades. Snapshots can always be rebuilt from full v1 history, so a snapshot format change does not break ledger compatibility. Unsupported formats fail without rewriting their input. Normal reopening of current stores, verified history within the current ledger and epoch-key history recovery remain required. This scope choice does not select any pending replacement format or approve production activation.
+Every other format remains current-only. Content, journal, local-store and snapshot formats have no deployed data: support only the current format for each entrypoint, with no old-format decoders, dual readers, schema upgrades, legacy imports or compatibility facades. Snapshots can always be rebuilt from full v1 history, so a snapshot format change does not break ledger compatibility. Unsupported formats fail without application-level rewriting of their schema or committed evidence. SQLite may perform its own transaction rollback recovery and WAL checkpoint while opening or closing a database, including before the application can identify and reject an unsupported version; these native operations may change physical files but must preserve committed logical data and format. This does not permit application migrations or rebuilding an unsupported store. The host execution journal has a narrow operator-recovery exception: rename and retain an unsupported store, report its evidence path, and require explicit local reset before provisioning a fresh journal. Reset never imports or automatically re-executes archived work; current-format request IDs remain fenced across reset. A provably empty interrupted first creation may finish initialization. See the [MVP recovery decision](../.agents/notes/proposed/bug-fix/2026-10-27-e2ee-realtime-journal-recovery.md). Normal reopening of current stores, verified history within the current ledger and epoch-key history recovery remain required. This scope choice does not select any pending replacement format or approve production activation.
+
+## Machine identity before the ledger freeze
+
+The owner-approved pre-freeze change extends existing machine AdmitDevice (tag4),
+without a new operation, capability code or tag9 declaration. Both the approving
+record and machine possession proof bind machineId using the same strict UTF-8
+byte string, 1..256 bytes, with no normalization. Producers reject invalid strings;
+verifiers reject invalid UTF-8, empty and oversized identities. Byte-distinct IDs
+stay distinct. Personal-device possession is unchanged. Session IDs remain one-time
+pairing context bound by the separate bindingSignature, never permanent ledger facts.
+
+Only one device may currently bind a machineId within one workspace. Replacing it
+requires the existing same-member personal-device authority and revokes the exact
+old key while admitting the new one in the same record. Historical keys stay
+non-reusable; rotationRequired advises administrators to update keys without blocking
+new seals or workspace use. Snapshot, retained and digest version 4 preserve the binding
+and historical device kind.
+Old developer machine records require workspace recreation, without a legacy reader
+or migration. The independent v1 vector is regenerated under this explicit pre-freeze
+approval. This does not approve production activation. The generic advisory permission
+policy is adopted from [#1956](https://github.com/LodyAI/Lody/pull/1956); this ledger
+change adds no send guard.
 
 ## Retained verified state (proposed)
 
@@ -261,7 +336,7 @@ Full replay costs about 5.4 ms per record on an idle desktop-class host (4,096 r
 - **One state encoding.** Retained state, endorsed snapshots and the comparison digest share one authorization-state encoding, so all three sources (full replay, qualified snapshot import, retained restore) agree on the state, its digest and every author at the same position. The retained envelope adds only the verification source, which survives a round trip and is never upgraded; verified hashes before the restore point are not kept. Layout and acceptance: [compact state note](../.agents/notes/proposed/architecture/2026-10-20-e2ee-compact-ledger-state.md).
 - **Digest use.** `stateDigest` identifies a state for cross-party comparison (comparison notes) and for background audits. Restore checks it only when the caller supplies it, which costs one hash and no re-verification.
 - **Background audit (deferred).** A full replay from genesis compared with the retained digest can catch bugs or storage corruption. It is optional, not part of this change, and may run outside the host's request runtime (for example a separate worker that reads the stored ledger and the retained digest). If added, a mismatch is an incident that stops writes for that ledger until resolved.
-- **Format.** The retained encoding is current-format only and versioned: retained envelope version 2, snapshot body version 2 and the `snapshot-digest/v2` digest domain (version 1 was the pre-compact layout). Any other version fails with `unknown-version`; the party then discards its retained state and rebuilds it by one full replay of v1 history. Changing the encoding bumps these versions.
+- **Format.** The retained encoding is current-format only and versioned: retained envelope version 4, snapshot body version 4 and the `snapshot-digest/v4` digest domain (version 1 was the pre-compact layout). Any other version fails with `unknown-version`; the party then discards its retained state and rebuilds it by one full replay of v1 history. Changing the encoding bumps these versions.
 - **Reads.** A host serving history pages needs no verification on the read path; clients verify what they receive. Host verification belongs to write admission.
 - **Local stores.** If adopted, clients may restore their local retained state on open instead of revalidating all stored records, which supersedes the full revalidation described below.
 

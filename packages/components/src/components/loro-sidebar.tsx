@@ -277,6 +277,7 @@ export interface LoroSidebarProps {
   /** Shows the Schedules entry; absent where there is nowhere to go. */
   onSchedulesClicked?: () => void;
   onSettingsClicked?: () => void;
+  settingsIcon?: ReactNode;
   onDocsClicked?: () => void;
   onGithubClicked?: () => void;
   onJoinCommunityClicked?: () => void;
@@ -878,6 +879,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   onArchiveClicked,
   onSchedulesClicked,
   onSettingsClicked,
+  settingsIcon,
   onDocsClicked,
   onGithubClicked,
   onJoinCommunityClicked,
@@ -1750,7 +1752,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             )}
 
             <IconButton label={t('settings.title', 'Settings')} onClick={onSettingsClicked}>
-              <Settings className="size-full" strokeWidth={1.5} />
+              {settingsIcon ?? <Settings className="size-full" strokeWidth={1.5} />}
             </IconButton>
           </div>
 

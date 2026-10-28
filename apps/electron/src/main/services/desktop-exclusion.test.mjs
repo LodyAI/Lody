@@ -4,7 +4,9 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import test from 'node:test'
-import { acquireDesktopLease } from './desktop-exclusion.ts'
+import { acquireDesktopLease, handOffDesktopDeepLink } from './desktop-exclusion.ts'
+import { toPortableDesktopDeepLink } from './desktop-deep-link-handoff.ts'
+import { createDesktopLaunchAdmission } from './desktop-launch-admission.ts'
 import { createDesktopLaunchBuffer } from './desktop-launch-buffer.ts'
 import { createDesktopQuitBarrier } from './desktop-shutdown.ts'
 
@@ -25,10 +27,13 @@ void test('desktop ownership excludes a second owner and can be handed off after
 
 void test('crashing an owner releases the OS lease without deleting a lock file', async (t) => {
   const moduleUrl = new URL('./desktop-exclusion.ts', import.meta.url).href
+  const resolveHookUrl = new URL('../../../scripts/node-test-ts-resolve.mjs', import.meta.url).href
   const child = spawn(
     process.execPath,
     [
       '--experimental-strip-types',
+      '--import',
+      resolveHookUrl,
       '--input-type=module',
       '-e',
       `
@@ -59,6 +64,201 @@ void test('crashing an owner releases the OS lease without deleting a lock file'
 
 void test('lease setup errors fail rather than admitting an unprotected desktop', async () => {
   await assert.rejects(acquireDesktopLease({ host: '127.0.0.1', port: -1 }))
+})
+
+void test('a losing channel hands a portable link to the desktop that owns the lease', async (t) => {
+  const received = Promise.withResolvers()
+  const owner = await acquireDesktopLease(loopback, {
+    onDeepLink: (url) => {
+      received.resolve(url)
+      return true
+    }
+  })
+  assert.ok(owner)
+  t.after(() => owner.close())
+
+  const accepted = await handOffDesktopDeepLink(
+    'ai.lody.nightly://session/session-1?workspace=workspace-1',
+    { host: '127.0.0.1', port: owner.port }
+  )
+  assert.equal(accepted, true)
+  assert.equal(await received.promise, 'lody://session/session-1?workspace=workspace-1')
+})
+
+void test('handoff waits for asynchronous startup admission before reporting success', async (t) => {
+  const started = Promise.withResolvers()
+  const decision = Promise.withResolvers()
+  let received
+  const owner = await acquireDesktopLease(loopback, {
+    onDeepLink: async (url) => {
+      received = url
+      started.resolve()
+      return await decision.promise
+    }
+  })
+  assert.ok(owner)
+  t.after(() => owner.close())
+  const endpoint = { host: '127.0.0.1', port: owner.port }
+
+  const accepted = handOffDesktopDeepLink('lody://session/slow-startup', endpoint)
+  await started.promise
+  assert.equal(received, 'lody://session/slow-startup')
+  decision.resolve(true)
+  assert.equal(await accepted, true)
+})
+
+void test('a rejected startup makes its pending handoff fail explicitly', async (t) => {
+  const started = Promise.withResolvers()
+  const decision = Promise.withResolvers()
+  const owner = await acquireDesktopLease(loopback, {
+    onDeepLink: async (url) => {
+      assert.equal(url, 'lody://session/rejected-startup')
+      started.resolve()
+      return await decision.promise
+    }
+  })
+  assert.ok(owner)
+  t.after(() => owner.close())
+  const endpoint = { host: '127.0.0.1', port: owner.port }
+
+  const accepted = handOffDesktopDeepLink('lody://session/rejected-startup', endpoint)
+  await started.promise
+  decision.resolve(false)
+  assert.equal(await accepted, false)
+})
+
+void test('a lease never accepts cloud callbacks or unsupported routes', async (t) => {
+  let received
+  const owner = await acquireDesktopLease(loopback, {
+    onDeepLink: (url) => {
+      received = url
+      return true
+    }
+  })
+  assert.ok(owner)
+  t.after(() => owner.close())
+  const endpoint = { host: '127.0.0.1', port: owner.port }
+
+  assert.equal(
+    await handOffDesktopDeepLink(
+      'ai.lody.nightly://auth/callback#token=synthetic-attempt',
+      endpoint
+    ),
+    false
+  )
+  assert.equal(
+    await handOffDesktopDeepLink('lody://invite/open?invitation=synthetic', endpoint),
+    false
+  )
+  assert.equal(received, undefined)
+
+  assert.equal(
+    await handOffDesktopDeepLink('lody://chat/new?machine=machine-1&project=project-1', endpoint),
+    true
+  )
+  assert.equal(received, 'lody://chat/new?machine=machine-1&project=project-1')
+})
+
+void test('slow startup holds handoffs until the launch handler is ready', async () => {
+  const delivered = []
+  const admission = createDesktopLaunchAdmission((url) => delivered.push(url))
+  const accepted = admission.accept('lody://session/slow-startup')
+  let settled = false
+  void accepted.then(() => {
+    settled = true
+  })
+  await Promise.resolve()
+  assert.equal(settled, false)
+  assert.deepEqual(delivered, [])
+
+  admission.markReady()
+  assert.equal(await accepted, true)
+  assert.deepEqual(delivered, ['lody://session/slow-startup'])
+})
+
+void test('rejected startup refuses pending and later handoffs without delivery', async () => {
+  const delivered = []
+  const admission = createDesktopLaunchAdmission((url) => delivered.push(url))
+  const pending = admission.accept('lody://session/pending')
+  admission.markRejected()
+
+  assert.equal(await pending, false)
+  assert.equal(await admission.accept('lody://session/later'), false)
+  assert.deepEqual(delivered, [])
+})
+
+void test('concurrent pending handoffs are delivered in arrival order after ready', async () => {
+  const delivered = []
+  const admission = createDesktopLaunchAdmission((url) => delivered.push(url))
+  const first = admission.accept('lody://session/first')
+  const second = admission.accept('lody://session/second')
+
+  admission.markReady()
+  const third = admission.accept('lody://session/third')
+  assert.equal(await first, true)
+  assert.equal(await second, true)
+  assert.equal(await third, true)
+  assert.deepEqual(delivered, [
+    'lody://session/first',
+    'lody://session/second',
+    'lody://session/third'
+  ])
+})
+
+void test('the first admission decision is final and later handoffs use it', async () => {
+  const readyDelivered = []
+  const ready = createDesktopLaunchAdmission((url) => readyDelivered.push(url))
+  ready.markReady()
+  ready.markRejected()
+  assert.equal(await ready.accept('lody://session/ready-later'), true)
+  assert.deepEqual(readyDelivered, ['lody://session/ready-later'])
+
+  const rejectedDelivered = []
+  const rejected = createDesktopLaunchAdmission((url) => rejectedDelivered.push(url))
+  rejected.markRejected()
+  rejected.markReady()
+  assert.equal(await rejected.accept('lody://session/rejected-later'), false)
+  assert.deepEqual(rejectedDelivered, [])
+})
+
+void test('a delivery failure preserves the original error and does not block later handoffs', async () => {
+  const failure = new Error('synthetic delivery failure')
+  const delivered = []
+  const admission = createDesktopLaunchAdmission((url) => {
+    delivered.push(url)
+    if (url === 'lody://session/bad') throw failure
+  })
+  admission.markReady()
+
+  await assert.rejects(admission.accept('lody://session/bad'), (error) => error === failure)
+  assert.equal(await admission.accept('lody://session/good'), true)
+  assert.deepEqual(delivered, ['lody://session/bad', 'lody://session/good'])
+})
+
+void test('portable destinations use the common resource scheme', () => {
+  assert.equal(
+    toPortableDesktopDeepLink('ai.lody.nightly://session/session-1?workspace=workspace-1'),
+    'lody://session/session-1?workspace=workspace-1'
+  )
+  assert.equal(
+    toPortableDesktopDeepLink('ai.lody.stable://provider/import?v=1&data=synthetic'),
+    'lody://provider/import?v=1&data=synthetic'
+  )
+  assert.equal(toPortableDesktopDeepLink('session://legacy'), null)
+  assert.equal(toPortableDesktopDeepLink('lody://session/session-1#fragment'), null)
+  assert.equal(toPortableDesktopDeepLink('lody://auth/callback#token=synthetic'), null)
+  assert.equal(toPortableDesktopDeepLink('https://lody.ai/session/session-1'), null)
+})
+
+void test('startup event buffer can hand its pending events to another installation', () => {
+  const buffer = createDesktopLaunchBuffer()
+  buffer.push({ url: 'lody://session/pending' })
+  buffer.push({ activate: true })
+  assert.deepEqual(buffer.takePending(), [{ url: 'lody://session/pending' }, { activate: true }])
+  const received = []
+  buffer.bind((event) => received.push(event))
+  buffer.push({ url: 'lody://session/after-ready' })
+  assert.deepEqual(received, [{ url: 'lody://session/after-ready' }])
 })
 
 void test('startup retains login and activation events until the application is loaded', () => {

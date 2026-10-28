@@ -1,4 +1,4 @@
-# M5 实时契约评审
+# M5 实时契约修订
 
 Status: proposed
 Translation: current
@@ -7,63 +7,77 @@ Translation: current
 
 ## 摘要
 
-加密 RPC 需要认证目标，并通过持久边界避免重试引发第二次执行。owner 已选择账本签名
-绑定 machineId、机器主动取得且仅在内存缓存的执行权限新鲜度，以及 iroh 复用工作区
-设备 Ed25519 身份、加密 Streams RPC 回退。foundations 修订记录这些行为方向，已有
-候选帧编码和上限不变。Spec 仍为 draft，不开放产品通道；记录格式、域隔离审计和平台／
-运行时验收仍是独立门槛。
+加密远程执行需要明确字节，并让实时和持久派发共用一个持久启动边界。本修订对齐已
+合入的用途专用加密原语、账本机器绑定和 schema-3 journal 恢复，候选正文字节钉在
+未合入 PR-25。保留加密 history/Meta 最终回退，区分持久请求过期与仅内存执行新鲜度。
+完整 Spec 仍为 draft；RPC 完整帧上限与机器资源规范编码待 owner 批准，产品传输、
+执行和延迟验收仍未证实。
 
-## 已选方向与替代方案
+## 决定与替代方案
 
-保留 content v0 算法和用途 7/8/9，两通道传同一原帧。已有的候选编码和上限集中在
-[所属草案](../../../../specs/e2ee-foundations.zh.md#实时-rpc-与-presencem5-评审草案)，
-不在这里重复。本次更新不改候选实时帧字段，也不规定新账本字节编码。
+[所属草案](../../../../specs/e2ee-foundations.zh.md#实时-rpc-与-presencem5-评审草案)
+保存唯一字节 profile。保留 content v0 用途 7/8/9，实时重试原密文。iroh 优先，其次
+加密 Streams RPC，最后加密 history/Meta 持久派发；三路汇入同一个实际启动 claim。
+派发 ACK 是接收／progress，不是 agent 完成。保留 userTurnId 和既有 steer／fork
+证据，不自动重启不确定操作。执行／请求／响应证据不自动回收；容量耗尽拒绝新工作，
+不驱逐去重证据。
 
-机器 `AdmitDevice` 记录在批准个人设备的签名下绑定 machineId 与公钥。只有本地已验证
-账本提供 machineId 到公钥的对应关系，目录元数据和 credential-binding/v1 不能代替。
-同工作区的同一 machineId 最多对应一台有效设备；更换时在同一记录撤销旧公钥。这取代
-此前推荐的独立机器绑定证明，也不采用“仅按账本公钥路由”的替代方案。编码和向量更新
-归独立机器接纳工作。无 machineId 的旧开发机器记录可继续经授权的文档同步，但不能
-授予实时权限；不迁移、不重签。
+此前审计与开发兼容建议已由合入的机器绑定格式取代：旧开发账本按 current-only
+重建，没有旧机器记录 reader 或文档同步例外。生产没有需要兼容的加密工作区。签名
+tag4 和机器 possession 绑定严格 UTF-8 machineId；credential-binding/v1 继续
+绑定配对 session。不另造机器绑定证明或 capability code。`rotationRequired` 只
+提示管理员，单独不阻断封装、发送或执行；当前授权和 epoch 钥检查保留。
 
-执行机器自己经认证拉最新账本。最多 15 分钟从读取前开始计，只在内存缓存剩余窗口。
-重启后联网重新核查才接受新的远程执行，不阻断离线文档使用，也不复活不确定操作。
-转发页和已保存的 journal 时间戳不续期。具体时钟／停止余量／休眠处理仍须逐宿主测试；
-这不改变 journal 已单独接受的持久过期时钟下限。
+执行新鲜度从机器自己经认证读取最新账本前开始，最多 15 分钟，只缓存于内存；重启
+联网认证重查。journal 独立的持久工作区过期下限不能授予该新鲜度；其认证时间偏差
+检查及保留证据的显式 reset 有独立契约。reset／刷新均不续请求期限，也不允许接管
+不确定操作。
 
-Iroh 以工作区设备签名公钥作为 EndpointId。私钥只在可信宿主内交给 iroh，不导出给
-renderer，也不开放任意签名 IPC。启用复用前，须核查具体 TLS／discovery 签名域与
-账本／内容域的隔离。身份决定不选择 SDK、发现／中继配置，也不代表平台验收通过。
-iroh 很慢或不可用时不能阻断加密 Streams，两者保留同一原请求 ID／帧和共用执行 journal。
+两个字节点需要 owner 批准具体 revision：
 
-请求过期不回收执行证据，首版保留；后续有限留存设计须有持久退役 ID 与待确认处理。
-代价是磁盘增长，容量耗尽时明确拒绝新接纳。
+1. 对齐 PR-25：完整 RPC 内容帧最多 1,048,576 字节，包含 143 字节开销，正文最多
+   1,048,433 字节。取代此前仅明文 1 MiB 的解释；presence 仍为 65,536 字节正文。
+2. 将账本精确的 1..256 字节严格 UTF-8 machineId 编为规范无填充 base64url，使用
+   `rpc:<encodedMachineId>`，不归一化、不容许替代写法。编码段最多 342 ASCII 字节，
+   完整资源最多 346。拒绝非 ASCII 或超过 128 字节的原 ID 会排除合法账本机器；有损
+   归一化可能合并不同身份。PR-25 未实现此资源 codec。
+
+Iroh EndpointId 仍为工作区设备签名公钥，仅在可信宿主交付私钥。具体签名域／密钥
+生命周期和平台审计仍未完成。发送到实际启动目标为 ≤1 秒，不是 ACK 或业务完成；
+不声称已测得，离线持久补同步不保证一秒交付。
 
 ## 源码审计与接线边界
 
-核对公开 main `274d74a724de7bfb42c6ff0685c52c0abce7d487`：
+核对公开 main `76a4f28e8f22c0b405e57b731fb0a1e49c42d8a3`：
 
-- `packages/e2ee-core/src/internal/foundation/content-format.ts` 与
-  `crypto/content.ts` 已隔离非文档派生叶，content v0 固定开销为 143 字节。
-  `internal/content/index.ts` 刻意限制 sealDocument 只接文档用途，继续保留。
-- `foundation/device-credential-binding.ts` 签 genesis／session／key／credential
-  hash，不含 machineId。`apps/electron/src/main/services/e2ee-local-pairing.mts`
-  保留机器响应，但凭证证明不向其他设备认证其中 machineId。账本 AdmitDevice 也无此字段。
-- `internal/ledger/verified-ledger.ts` 证明已见历史连续。CLI `lib/e2ee/runtime.ts`
-  保存 history／cache／pin，没有新鲜度时钟。
-- `apps/cli/src/session/session-dispatch-watcher.ts` 按 userTurnId 暂存 RPC；
-  `session-dispatch-logic.ts` 刻意在重启后恢复 processing 回合。只围住 RPC 接收层的
-  journal 不能限制这个持久派发入口。
-- `packages/loro-streams-rpc/src/machine-rpc-server.ts` 只在内存里合并并发 history
-  task，完成即删除；CLI `session-history-rpc-rejections.ts` 只保留部分拒绝到过期。
-  两者都不是完整执行 journal。
-- `session-execution-service.ts` 已保存 steer 提交不确定证据，应复用而非重跑已提交
-  动作。其有界内存终态表不足以支持持久去重。
+| 公开源码                                                                                                                         | 已有能力与限制                                                                                                                                        |
+| -------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/e2ee-core/src/internal/content/realtime.ts`                                                                            | presence／请求／响应共六个专用 seal/open API，处理不透明字节，不授予资源／正文、新鲜度或执行权限。sealDocument 保持仅文档。                           |
+| `packages/e2ee-core/src/internal/ledger/{records,admission,machine-id,policy}.ts`                                                | 签名 machineId／possession，严格 UTF-8 1..256 字节，同成员原子替换及有效绑定索引。已支持 capability 1 对应独立移除成员；机器 tag4 不新增 capability。 |
+| `packages/e2ee-core/src/internal/ledger/verified-ledger.ts` 与 CLI `lib/e2ee/runtime.ts`                                         | 已验证连续性和 history／cache／pin，不是机器主动 latest-read 的执行新鲜度缓存。                                                                       |
+| `apps/cli/src/lib/e2ee/realtime-journal.ts`                                                                                      | 尚未接线的 schema-3 存储：原件、不可变首结果、单次 claim、响应原件、工作区时钟下限及跨 reset 退役 ID。没有发送 outbox、认证、执行接线或新鲜度授权。   |
+| `apps/cli/src/session/session-dispatch-watcher.ts` 与 `session-dispatch-logic.ts`                                                | RPC offer 暂存和包含重启的 history 持久派发。实际执行与 Meta/history 必须共用 claim；只在接收层去重不够。                                             |
+| `packages/loro-streams-rpc/src/machine-rpc-server.ts`、CLI `session-history-rpc-rejections.ts` 和 `session-execution-service.ts` | 既有内存 history task 去重、过期拒绝和 steer 不确定证据可复用，不是已经接好的持久执行门。                                                             |
+
+PR-25 **尚未合入**，钉在
+[`daee5751fde6698e50960ca6a5627191c887e297`](https://github.com/LodyAI/Lody/pull/1990)：
+[纯正文 codec](https://github.com/LodyAI/Lody/blob/daee5751fde6698e50960ca6a5627191c887e297/packages/loro-streams-rpc/src/e2ee-wire.ts)
+与[独立 Python 向量](https://github.com/LodyAI/Lody/blob/daee5751fde6698e50960ca6a5627191c887e297/packages/loro-streams-rpc/tests/fixtures/generate-e2ee-wire.py)
+给出字段顺序、安全大端整数、ASCII 方法／错误文本、原样不透明 payload、嵌套错误
+验证及大小上限。不认证调用方、不查当前时间、不关联响应、不分配持久序号、不实现
+资源编码。本修订只改文档，不改这些代码字节。
+
+相关公开决定：[机器绑定](2026-10-27-e2ee-machine-ledger-binding.zh.md)、
+[实时原语](2026-10-26-e2ee-realtime-content-primitives.zh.md)、
+[journal](2026-10-26-e2ee-realtime-journal.zh.md) 和
+[journal 恢复](../bug-fix/2026-10-27-e2ee-realtime-journal-recovery.zh.md)。
+本修订只取代过时的 M5 契约审计，不改写这些所属记录。
 
 ## 验证边界
 
-以上源码审计是基线观察，不代表已实现所选账本扩展、新鲜度门或 iroh 装配，也不把缺口
-当成普通 RPC 已上线漏洞。文档检查只验证元数据和链接。固定向量、崩溃／I/O 测试、真实
-授权产品执行、canary 与普通／加密延迟对照仍须分别留证。Spec 保持 draft：方向已选不
-批准完整修订、独立机器记录编码或尚未审计的跨协议密钥复用。本次文档 PR 不改变普通
-工作区路径或产品开关。
+[PR #1894](https://github.com/LodyAI/Lody/pull/1894) 保持 draft；四份 Spec 均为 draft，
+双语 Note 均 proposed/current。文档检查只验证元数据／链接，不代表人工批准、原生
+域隔离或运行时行为。已对照指定 PR-25 codec 和独立生成的向量，不复制候选实现，也
+不加新测试套件。认证传输／新鲜度、发送 outbox、查询授权、实际执行和持久回退、真实
+网关、原生／平台和延迟验收仍待接线。本 revision 的检查记录在 PR 描述；旧检查／评审
+结果不作为此次 revision 的证据。

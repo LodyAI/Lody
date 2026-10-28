@@ -1,3 +1,4 @@
+import { compareUnifiedProjectOptions } from './chat-landing-derived';
 import { useDeferredValue, useMemo, useState, type ReactNode } from 'react';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 import {
@@ -33,22 +34,31 @@ import { contextPill } from './context-pill-class';
 import { Menu, MenuSearchInput } from '@/ui/menu';
 import { Tooltip } from '@lody/ui/tooltip';
 
-function GitHubOwnerAvatarIcon({ repoFullName }: { repoFullName: string }) {
+export function GitHubOwnerAvatarIcon({ repoFullName }: { repoFullName: string }) {
   const ownerHandle = (repoFullName.split('/')[0] ?? '').trim();
-  const [failed, setFailed] = useState(false);
+  const [loadedOwner, setLoadedOwner] = useState<string | null>(null);
+  const [failedOwner, setFailedOwner] = useState<string | null>(null);
 
-  if (!ownerHandle || failed) {
+  if (!ownerHandle || failedOwner === ownerHandle) {
     return <Github className="h-4 w-4 shrink-0 opacity-70" />;
   }
 
   return (
-    <CachedAvatarImg
-      src={getGitHubOwnerAvatarUrl(ownerHandle)}
-      alt=""
-      aria-hidden="true"
-      className="h-4 w-4 shrink-0 rounded-sm object-cover"
-      onError={() => setFailed(true)}
-    />
+    <span className="relative inline-flex h-4 w-4 shrink-0">
+      {loadedOwner !== ownerHandle && <Github className="h-4 w-4 opacity-70" />}
+      <CachedAvatarImg
+        key={ownerHandle}
+        src={getGitHubOwnerAvatarUrl(ownerHandle)}
+        alt=""
+        aria-hidden="true"
+        className={cn(
+          'absolute inset-0 h-4 w-4 rounded-sm object-cover',
+          loadedOwner !== ownerHandle && 'opacity-0'
+        )}
+        onLoad={() => setLoadedOwner(ownerHandle)}
+        onError={() => setFailedOwner(ownerHandle)}
+      />
+    </span>
   );
 }
 
@@ -99,20 +109,7 @@ export type UnifiedLocalProjectOption = {
   sharing?: SessionSharingState;
 };
 
-export function compareUnifiedProjectOptions(
-  left: Pick<UnifiedProjectOption, 'label' | 'value' | 'lastUsedAt'>,
-  right: Pick<UnifiedProjectOption, 'label' | 'value' | 'lastUsedAt'>
-): number {
-  if (left.lastUsedAt !== undefined && right.lastUsedAt !== undefined) {
-    if (left.lastUsedAt !== right.lastUsedAt) return right.lastUsedAt - left.lastUsedAt;
-  } else if (left.lastUsedAt !== undefined) {
-    return -1;
-  } else if (right.lastUsedAt !== undefined) {
-    return 1;
-  }
-  const labelComparison = left.label.localeCompare(right.label);
-  return labelComparison !== 0 ? labelComparison : left.value.localeCompare(right.value);
-}
+export { compareUnifiedProjectOptions } from './chat-landing-derived';
 
 function selectUnifiedProjectOptionsForRender<
   TOption extends Pick<UnifiedProjectOption, 'label' | 'description' | 'selection'>,
@@ -267,6 +264,8 @@ export interface UnifiedProjectSelectorViewProps extends Omit<
    * available source, while search still evaluates the complete option list.
    */
   renderLimit?: number;
+  /** Opens the project creator; omitted by surfaces that cannot start multi-repository work. */
+  onCreateProject?: () => void;
 }
 
 function ProjectAccessStatus({
@@ -412,6 +411,7 @@ export function UnifiedProjectSelectorView({
   contentClassName,
   contentStyle,
   renderLimit,
+  onCreateProject,
 }: UnifiedProjectSelectorViewProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -656,14 +656,12 @@ export function UnifiedProjectSelectorView({
                 }}
               >
                 {filteredOptions.map((option) => {
-                  // Local projects show only the name; the path lives in a hover
-                  // tooltip. GitHub repos keep their inline description line.
+                  // Local and GitHub projects show only the name; local paths
+                  // live in a hover tooltip. Groups keep their member summary.
                   const localPath =
                     option.selection.kind === 'local' ? option.description : undefined;
                   const inlineDescription =
-                    option.selection.kind === 'github' || option.selection.kind === 'group'
-                      ? option.description
-                      : undefined;
+                    option.selection.kind === 'group' ? option.description : undefined;
                   const labelNode = (
                     <span
                       className={cn('truncate', option.value === selectedValue && 'font-medium')}
@@ -720,6 +718,11 @@ export function UnifiedProjectSelectorView({
           <Menu.Item icon={CircleSlash2} onClick={() => onChange({ kind: 'none' })}>
             {clearLabel}
           </Menu.Item>
+          {onCreateProject ? (
+            <Menu.Item icon={Folders} onClick={onCreateProject}>
+              {t('chat.projectPicker.createProject', 'Create project')}
+            </Menu.Item>
+          ) : null}
           <Menu.Item icon={FolderPlus} onClick={onAddLocalProject}>
             {t('chat.contextSwitch.addProject', 'Add a folder')}
           </Menu.Item>

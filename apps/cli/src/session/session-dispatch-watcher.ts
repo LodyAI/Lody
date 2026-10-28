@@ -1890,6 +1890,21 @@ export class SessionDispatchWatcher {
     if (updatedAt <= (meta.messageQueueCheckedAt ?? 0)) {
       return;
     }
+    // Metadata can arrive before its control-document mutation. An empty local
+    // queue is not evidence that this signal's content has arrived. Older writers
+    // have no causal receipt: retain their activation until a versioned update,
+    // archive or watcher shutdown, rather than silently stranding a late row.
+    const receipt = meta.messageQueueUpdateVersion;
+    if (!receipt || receipt.updatedAt !== updatedAt || !sessionDoc.handle?.doc) return;
+    const version = sessionDoc.handle.doc.version();
+    if (!receipt.frontiers.every(({ peer, counter }) => (version.get(peer) ?? 0) > counter)) {
+      return;
+    }
+    // A row that could not be promoted yet keeps the signal open, so the session
+    // stays watched and a later change retries it instead of stranding it.
+    if ((await sessionDoc.getMessageQueue()).length > 0) {
+      return;
+    }
     await this.deps.workspaceDocument.repo.upsertDocMeta(sessionDoc.roomId, {
       messageQueueCheckedAt: updatedAt,
     } satisfies Partial<SessionMeta>);

@@ -50,7 +50,7 @@ Ownership: [README.md](README.md).
   steps. Execute calls are not cards. Disclosure labels lead, chevrons trail
   (desktop: hover-only, body type, no fill). Only builtin DSH shows thoughts:
   separate groups default thoughts open and tools closed; explicit toggles win.
-  DSH prose uses answer typography and shared work folding. Other providers
+  DSH thought prose uses answer typography, secondary ink and shared work folding. Other providers
   hide thoughts. Footers show config, not author identity.
 - An expanded tool step is ONE `ToolDetailSheet` (`tool-call-detail.tsx`): composer
   fill + card shadow, no header restating the row, sections in content order. Only
@@ -67,7 +67,7 @@ Ownership: [README.md](README.md).
   Fork controls and loading need a finished turn.
 - `ConversationColumn` owns the gutter; row shells add no horizontal pad. EVERY
   row shares one rail: prose, process labels/steps, live status and the mobile
-  footer sit at `conversation.railInset`; expansion never shifts content right.
+  footer sit at `conversation.railInset`; thought prose aligns with its label.
   Footer bleed is trailing-only (`-mr-[7px]`). See `AssistantTurnAlignment.stories`.
 - Follow the StyleX [spacing contract](../../../../../specs/conversation-rhythm.md).
   User rows own `responseGap`; assistant tails own `roundGap` (desktop: including

@@ -8,8 +8,11 @@ import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { useAuthSignOut } from '../providers/convex-provider';
+import { sidebarSurface } from './sidebar-surface';
+import { cn } from '@/lib/utils';
 
 const styles = stylex.create({
+  entry: { display: 'flex', alignItems: 'center' },
   announcement: {
     position: 'absolute',
     width: 1,
@@ -18,7 +21,6 @@ const styles = stylex.create({
     clipPath: 'inset(50%)',
     whiteSpace: 'nowrap',
   },
-  icon: { display: 'inline-flex', alignItems: 'center', width: 14, height: 14 },
   trigger: { pointerEvents: 'auto' },
   warning: { color: colors.warning },
   panel: { width: 'min(320px, calc(100vw - 32px))' },
@@ -67,34 +69,44 @@ export function AuthRecoveryErrorView({
       : t('authRecovery.failedDescription');
 
   return (
-    <div>
+    <div {...stylex.props(styles.entry)}>
       <span role="status" {...stylex.props(styles.announcement)}>
         {title}
       </span>
       <Popover.Root modal={false}>
         <Popover.Trigger
           render={
-            <Button
-              variant="ghost"
-              size="mini"
-              icon
+            <button
+              type="button"
               aria-label={title}
               title={title}
-              className={stylex.props(styles.trigger).className}
+              className={cn(
+                stylex.props(sidebarSurface.iconButton, styles.trigger).className,
+                'outline-hidden focus-visible:ring-1 focus-visible:ring-sidebar-ring/40'
+              )}
             />
           }
         >
-          <span
-            {...stylex.props(styles.icon, (isOffline || !isRecovering) && styles.warning)}
-            aria-hidden="true"
-          >
-            {isOffline ? (
-              <WifiOff size={14} />
-            ) : isRecovering ? (
-              <Spinner />
-            ) : (
-              <TriangleAlert size={14} />
-            )}
+          <span className="grid size-4 place-items-center" aria-hidden="true">
+            {[
+              { active: isOffline, icon: <WifiOff size={16} strokeWidth={1.5} /> },
+              { active: !isOffline && isRecovering, icon: <Spinner size="small" label={null} /> },
+              {
+                active: !isOffline && !isRecovering,
+                icon: <TriangleAlert size={16} strokeWidth={1.5} />,
+              },
+            ].map(({ active, icon }, index) => (
+              <span
+                key={index}
+                className={cn(
+                  'col-start-1 row-start-1 flex size-4 items-center justify-center transition-[opacity,filter,transform] duration-150 ease-out motion-reduce:transition-opacity',
+                  active ? 'scale-100 opacity-100 blur-none' : 'scale-90 opacity-0 blur-[2px]',
+                  index !== 1 && stylex.props(styles.warning).className
+                )}
+              >
+                {icon}
+              </span>
+            ))}
           </span>
         </Popover.Trigger>
         <Popover.Content

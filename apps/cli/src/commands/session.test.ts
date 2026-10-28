@@ -17,7 +17,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LoroRepo, RepoSyncError, RepoTransportError } from 'loro-repo';
 import { FlockSyncTimeoutError } from '@/lib/loro/timeout-utils';
 import { FlockSyncUnavailableError } from '@/lib/loro/flock-sync-errors';
@@ -77,6 +77,9 @@ import {
   readDelegatedMachineAccess,
   resolveSessionRequester,
   sendSessionChatResult,
+  ensureTargetMachineNotOffline,
+  MachineOfflineError,
+  readSessionLiveStatusesMany,
   resolveSessionCommandRequesterUserId,
   resolveChatArgs,
   resolveRenameArgs,
@@ -2452,6 +2455,91 @@ describe('MCP selection at turn authoring', () => {
     expect(parseCliMcpServerIds('["a", " a ", "b"]')).toEqual(['a', 'b']);
     for (const value of ['{}', '[1]', '[""]', 'null'])
       expect(() => parseCliMcpServerIds(value)).toThrow();
+  });
+});
+
+describe('target Machine availability from presence', () => {
+  const target = {
+    auth: {
+      machineId: 'caller-machine' as MachineId,
+      userId: 'user-1',
+      token: '',
+      userName: 'User',
+      userEmail: 'user@example.test',
+      machineName: 'Caller',
+    },
+    workspaceId: 'workspace-1' as WorkspaceId,
+    machineId: 'target-machine' as MachineId,
+  };
+  const presence = (online: MachineId[] | null) => ({
+    getOnlineMachineIds: async () => (online === null ? null : new Set(online)),
+  });
+  // A Streams path slow enough that every one-shot Machine RPC times out.
+  const rpcTimesOut = () =>
+    vi
+      .spyOn(commandRuntime, 'withMachineRpcClient')
+      .mockRejectedValue(new Error('timeout: Machine status request timed out'));
+  const sessionId = 'session-1' as SessionId;
+  const sessions = [{ id: sessionId, machineId: target.machineId }];
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('admits online or unknown presence even while Machine RPC times out', async () => {
+    rpcTimesOut();
+    await expect(
+      ensureTargetMachineNotOffline({ ...target, manager: presence([target.machineId]) })
+    ).resolves.toBe('online');
+    await expect(
+      ensureTargetMachineNotOffline({ ...target, manager: presence(null) })
+    ).resolves.toBe('unknown');
+  });
+
+  it('rejects only definite presence offline, as retryable MACHINE_OFFLINE', async () => {
+    const error = await ensureTargetMachineNotOffline({ ...target, manager: presence([]) }).catch(
+      (caught: unknown) => caught
+    );
+    expect(error).toBeInstanceOf(MachineOfflineError);
+    expect((error as MachineOfflineError).toLodyError()).toEqual({
+      code: 'MACHINE_OFFLINE',
+      message: 'Target Machine is offline: target-machine',
+      retryable: true,
+    });
+  });
+
+  it('reports a presence-online Machine as online but stale when live status RPC times out', async () => {
+    rpcTimesOut();
+    const online = await readSessionLiveStatusesMany({
+      ...target,
+      sessions,
+      manager: presence([target.machineId]),
+    });
+    expect(online.get(sessionId)).toEqual({
+      sessionId,
+      machineOnline: true,
+      fresh: false,
+      reason: 'timeout: Machine status request timed out',
+    });
+
+    const unknown = await readSessionLiveStatusesMany({
+      ...target,
+      sessions,
+      manager: presence(null),
+    });
+    expect(unknown.get(sessionId)?.machineOnline).toBe(false);
+
+    const offline = await readSessionLiveStatusesMany({
+      ...target,
+      sessions,
+      manager: presence([]),
+    });
+    expect(offline.get(sessionId)).toEqual({
+      sessionId,
+      machineOnline: false,
+      fresh: false,
+      reason: 'Target Machine is offline: target-machine',
+    });
   });
 });
 

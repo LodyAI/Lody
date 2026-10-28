@@ -22,6 +22,76 @@ afterEach(() => {
 });
 
 describe('createWorkspaceMachineRpcFacade', () => {
+  it('requires fileDownload capability before requesting paid download bytes', async () => {
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => ({}),
+      getMachineRpcClient: async () => {
+        throw new Error('Old daemon must not receive a download request');
+      },
+    });
+    expect(
+      await facade.requestFileDownloadChunk(remoteMachineId, {
+        sessionId,
+        path: 'a.bin',
+        offset: 0,
+      })
+    ).toEqual({ status: 'error', code: 'unsupported_protocol' });
+  });
+
+  it('does not fall back to cloud for a local file download without IPC', async () => {
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => ({ fileDownload: 1 }),
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: async () => 'local',
+      },
+      getMachineRpcClient: async () => {
+        throw new Error('Local files must not use cloud');
+      },
+    });
+    expect(
+      await facade.requestFileDownloadChunk(localMachineId, { sessionId, path: 'a.bin', offset: 0 })
+    ).toEqual({ status: 'error', code: 'unsupported_protocol' });
+  });
+
+  it('routes authorized chunk responses with the owning session and member root', async () => {
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => ({ fileDownload: 1 }),
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () =>
+        ({
+          requestFileDownloadChunk: async (request: {
+            ownerSessionId?: string;
+            rootId?: string;
+          }) => {
+            if (request.ownerSessionId !== 'parent' || request.rootId !== 'member:docs')
+              return { status: 'error', code: 'permission_denied' };
+            return {
+              status: 'ok',
+              path: 'a.bin',
+              revision: 'a'.repeat(64),
+              offset: 0,
+              sizeBytes: 1,
+              data: '/w==',
+            };
+          },
+        }) as never,
+    });
+    expect(
+      await facade.requestFileDownloadChunk(
+        remoteMachineId,
+        { sessionId, path: 'a.bin', rootId: 'member:docs', offset: 0 },
+        'parent'
+      )
+    ).toMatchObject({ status: 'ok', data: '/w==' });
+  });
+
   it('negotiates relative-link discovery without downgrading to an ordinary preview', async () => {
     const facade = createWorkspaceMachineRpcFacade({
       workspaceId,

@@ -23,6 +23,7 @@ import {
   mergeSessionLaunchConfig,
   parseMachineFlockDocId,
   parseMachineFlockKey,
+  parseMachineFlockRow,
   readMachineFlockRowsFromFlock,
   serializeMachineFlockKey,
   writeAgentConfigToFlock,
@@ -280,6 +281,24 @@ describe('machine Flock helpers', () => {
       },
     });
     expect(next).not.toBe(previous);
+  });
+
+  it('round-trips standalone visibility while retaining the registration', () => {
+    const key = machineFlockKeys.localProject('folder-1' as LocalProjectId);
+    const value = {
+      id: 'folder-1',
+      name: 'api',
+      rootPath: '/workspace/api',
+      createdAtMs: 1,
+      standaloneVisible: false,
+    };
+    const row = parseMachineFlockRow(key, value);
+    expect(row?.value).toEqual(value);
+    expect(getMachineFlockLocalProjects(row ? [row] : [])['folder-1']).toEqual(value);
+    expect(parseMachineFlockRow(key, { ...value, standaloneVisible: true })?.value).toEqual({
+      ...value,
+      standaloneVisible: true,
+    });
   });
 
   it('extracts local project rows', () => {

@@ -1,3 +1,4 @@
+import type { FileDownloadRequest, FileDownloadResponse } from '@lody/shared';
 import type {
   MemoryProviderRequest,
   MemoryProviderResponse,
@@ -433,6 +434,11 @@ export type WorkspaceRuntime = {
    * File Preview v3: read one file from the machine. Never activates Code Collab
    * there, and always resolves (transport failures come back as `status: 'error'`).
    */
+  requestFileDownloadChunk: (
+    machineId: MachineId,
+    request: FileDownloadRequest,
+    ownerSessionId?: string
+  ) => Promise<FileDownloadResponse>;
   requestFilePreview: (
     machineId: MachineId,
     request: Omit<FilePreviewV3Request, 'v'>,
@@ -584,7 +590,7 @@ export type WorkspaceRuntimeInitFailure = {
   errorType: string;
   /** Present only when content-mode admission failed. Encryption wording is shown
    * only when the workspace is known to be encrypted or encrypted creation is on. */
-  modeAdmission?: { knownEncrypted: boolean };
+  modeAdmission?: { knownEncrypted: boolean; workspaceId?: string };
 };
 
 export const workspaceRuntimeInitFailureAtom = atom<WorkspaceRuntimeInitFailure | null>(null);

@@ -18,3 +18,7 @@ Publish complete encrypted files atomically and preserve the first original. Cor
 ## Acceptance boundary
 
 Owning tests use real native crypto/files/OS-child reopen and a synthetic authenticated safeStorage boundary. They verify backend rejection, tamper/AAD rejection, absence of generated secret bytes on disk and actual close waiting. This is not a claim that an OS keychain was exercised. Before product activation, packaged Electron must be verified against actual safeStorage on each supported desktop OS.
+
+## Confirmed membership removal
+
+An authenticated whole-member removal result is an explicit exception to ordinary key retention. Before erasing anything, match the originating account, workspace, genesis, signing key and device credential against the installed local incarnation, persist a terminal receipt and stop new workspace admission. Drain that workspace’s native stores, synchronization and execution owners, then automatically remove its managed content, device credential, private keys and epoch stores. Preserve shared account custody and other workspaces. Interrupted cleanup retries before reopening; a later invitation must install a new membership/device identity, which a late old-credential response cannot erase. Public trust pins and a small cleanup receipt may remain. This protects honest local clients, not copied data or malicious endpoints.

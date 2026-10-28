@@ -5,6 +5,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MarkdownRenderer } from '../src/components/ai-gui/markdown-renderer';
+import { writeTextToClipboard } from '../src/lib/clipboard';
+
+vi.mock('../src/lib/clipboard', () => ({
+  writeTextToClipboard: vi.fn(async () => true),
+}));
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -40,7 +45,29 @@ describe('agent file links in finished turns', () => {
     root = undefined;
     container?.remove();
     container = undefined;
+    vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it('resets copy feedback while mounted and releases its timer on unmount', async () => {
+    vi.useFakeTimers();
+    await act(async () => {
+      root?.render(createElement(MarkdownRenderer, { text: '[Guide](./guide.md)' }));
+    });
+    const link = container?.querySelector<HTMLButtonElement>('button[title="./guide.md"]');
+    expect(link).not.toBeNull();
+    await act(async () => link!.click());
+    expect(writeTextToClipboard).toHaveBeenLastCalledWith('./guide.md');
+    expect(link?.querySelector('.lucide-check')).not.toBeNull();
+    await act(async () => vi.advanceTimersByTime(1200));
+    expect(link?.querySelector('.lucide-check')).toBeNull();
+    expect(link?.querySelector('.lucide-copy')).not.toBeNull();
+
+    await act(async () => link!.click());
+    expect(link?.querySelector('.lucide-check')).not.toBeNull();
+    await act(async () => root?.unmount());
+    root = undefined;
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('renders one clickable chip per cited file, keeping the surrounding prose intact', async () => {

@@ -118,8 +118,9 @@ describe('current content-v0 protected snapshots with the released SDK', () => {
               const tailAfterSuffix = yield* Effect.promise(() => raw.head());
               if (!tailAfterSuffix.ok) throw new Error('missing actual suffix head');
               // Move an authentic old snapshot to a later existing position, or alter
-              // its signed raw offset bytes. Neither failure may persist native state
-              // or advance the exact durable SDK cursor.
+              // its signed raw offset bytes. Native retention has trimmed the
+              // prefix, so fallback must report unavailable recovery material and
+              // preserve native state and the exact durable SDK cursor.
               for (const attack of ['move-context', 'tamper-content-offset'] as const) {
                 let writes = 0,
                   modified = false;
@@ -143,7 +144,15 @@ describe('current content-v0 protected snapshots with the released SDK', () => {
                 const refused = yield* Effect.result(attacked.pull());
                 expect(Result.isFailure(refused) && refused.failure).toMatchObject({
                   _tag: 'LabContentError',
-                  code: 'decrypt_failed',
+                  code: 'protocol_error',
+                  cause: {
+                    status: 410,
+                    context: {
+                      source: 'payload_protection',
+                      stage: 'bootstrap',
+                      originalCode: 'gone',
+                    },
+                  },
                 });
                 expect(modified).toBe(true);
                 expect(writes).toBe(0);

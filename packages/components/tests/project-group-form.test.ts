@@ -8,16 +8,18 @@ import type {
 } from '@lody/shared';
 import {
   addProjectGroupMember,
-  applySourceSelection,
+  bindProjectGroupToMachine,
+  addProjectGroupDirectory,
   applyDetectedProjectSubmodules,
   buildProjectGroupFormValue,
   buildWorkspaceProjectFromForm,
   collectProjectSubmoduleDescendants,
   EMPTY_PROJECT_GROUP_FORM_VALUE,
   removeProjectGroupMember,
+  retainProjectGroupScope,
+  normalizeProjectGroupName,
+  suggestProjectGroupName,
   suggestProjectMemberDir,
-  updateProjectGroupMemberPlacement,
-  upgradeProjectGroupRepositoryMembers,
   validateProjectGroupForm,
   type ProjectGroupFormValue,
   type ProjectGroupMemberDraft,
@@ -40,6 +42,18 @@ const labelOf = (member: ProjectGroupMemberDraft) =>
   member.source.kind === 'github' ? member.source.repoFullName : member.source.localProjectId;
 const repoOf = (member: ProjectGroupMemberDraft) =>
   member.source.kind === 'github' ? member.source.repoFullName : undefined;
+
+/** A placement set by hand, as a saved project's are. */
+const place = (
+  value: ProjectGroupFormValue,
+  memberId: ProjectMemberId,
+  placement: ProjectGroupMemberDraft['placement']
+): ProjectGroupFormValue => ({
+  ...value,
+  members: value.members.map((member) =>
+    member.id === memberId ? { ...member, placement, placementOrigin: 'user' as const } : member
+  ),
+});
 
 function threeRepos(): ProjectGroupFormValue {
   const createId = ids();
@@ -84,10 +98,13 @@ describe('project group form', () => {
       placementOrigin: 'detected',
     });
 
-    const userFlat = updateProjectGroupMemberPlacement(value, proto!.id, {
-      kind: 'root',
-      dir: 'proto',
-    });
+    // A saved placement is the user's (`buildProjectGroupFormValue`).
+    const userFlat = {
+      ...value,
+      members: value.members.map((member) =>
+        member.id === proto!.id ? { ...member, placementOrigin: 'user' as const } : member
+      ),
+    };
     expect(applyDetectedProjectSubmodules(userFlat, detected, repoOf, labelOf)).toBe(userFlat);
     expect(web!.placement).toEqual({ kind: 'root', dir: 'web' });
   });
@@ -126,7 +143,7 @@ describe('project group form', () => {
     const value = threeRepos();
     const api = value.members[1]!;
     const proto = value.members[2]!;
-    const nested = updateProjectGroupMemberPlacement(value, proto.id, {
+    const nested = place(value, proto.id, {
       kind: 'submodule',
       parent: api.id,
       path: 'proto',
@@ -141,8 +158,8 @@ describe('project group form', () => {
   it('reports per-member errors for duplicate and invalid directories', () => {
     const value = threeRepos();
     const [web, api, proto] = value.members;
-    let edited = updateProjectGroupMemberPlacement(value, api!.id, { kind: 'root', dir: 'WEB' });
-    edited = updateProjectGroupMemberPlacement(edited, proto!.id, { kind: 'root', dir: 'a/b' });
+    let edited = place(value, api!.id, { kind: 'root', dir: 'WEB' });
+    edited = place(edited, proto!.id, { kind: 'root', dir: 'a/b' });
     const result = validateProjectGroupForm({ ...edited, name: ' ' });
     expect(result.valid).toBe(false);
     expect(result.errors).toEqual(['name_required']);
@@ -210,37 +227,6 @@ describe('project group form', () => {
     ]);
   });
 
-  it('adds ticked sources and removes unticked ones from one multi-select change', () => {
-    const value = threeRepos();
-    const option = (repo: string) => ({
-      key: `github:${repo}`,
-      source: github(repo),
-      label: repo,
-    });
-    const previous = ['acme/web', 'acme/api', 'acme/proto'].map(option);
-    const api = value.members[1]!;
-    const proto = value.members[2]!;
-    const nested = updateProjectGroupMemberPlacement(value, proto.id, {
-      kind: 'submodule',
-      parent: api.id,
-      path: 'proto',
-    });
-    const next = applySourceSelection(
-      nested,
-      previous,
-      [option('acme/web'), option('acme/proto'), option('acme/docs')],
-      labelOf,
-      ids()
-    );
-    expect(next.members.map((member) => labelOf(member))).toEqual([
-      'acme/web',
-      'acme/proto',
-      'acme/docs',
-    ]);
-    // Its parent left, so the submodule becomes a top-level directory.
-    expect(next.members[1]!.placement).toEqual({ kind: 'root', dir: 'proto' });
-  });
-
   it('rejects local members on a machine other than the first local member', () => {
     const createId = ids();
     let value: ProjectGroupFormValue = { ...EMPTY_PROJECT_GROUP_FORM_VALUE, name: 'Shop' };
@@ -260,34 +246,128 @@ describe('project group form', () => {
     expect(result.valid).toBe(false);
     expect([...result.memberErrors]).toEqual([[value.members[2]!.id, 'machine_mismatch']]);
   });
+});
 
-  it('turns local members with a published remote into repository members in place', () => {
-    const createId = ids();
-    let value: ProjectGroupFormValue = { ...EMPTY_PROJECT_GROUP_FORM_VALUE, name: 'Shop' };
-    value = addProjectGroupMember(value, local('web'), 'web', createId);
-    value = addProjectGroupMember(value, local('notes'), 'notes', createId);
-    value = addProjectGroupMember(value, local('api'), 'api', createId);
-    value = addProjectGroupMember(value, github('acme/api'), 'acme/api', createId);
-    value = updateProjectGroupMemberPlacement(value, value.members[0]!.id, {
-      kind: 'root',
-      dir: 'frontend',
-    });
-    const remotes: Record<string, string> = { web: 'acme/web', api: 'Acme/API' };
-    const next = upgradeProjectGroupRepositoryMembers(
-      value,
-      (source) => remotes[source.localProjectId]
+describe('direct folder drafts', () => {
+  const directory = {
+    machineId: 'machine-1' as MachineId,
+    localProjectId: 'folder-1' as LocalProjectId,
+    name: 'api',
+    rootPath: '/workspace/api',
+    inspection: { isGit: true, repoFullName: 'acme/api', submodules: [] },
+  };
+  it('deduplicates folders and repository entries without persisting machine paths', () => {
+    const first = addProjectGroupDirectory(
+      { name: 'Product', instructions: '', members: [] },
+      directory
     );
-    // web keeps its id and the directory the user chose.
-    expect(next.members[0]).toEqual({
-      ...value.members[0]!,
-      source: { kind: 'github', repoFullName: 'acme/web', preferLocal: true },
+    expect(first.members[0]?.source).toEqual({
+      kind: 'github',
+      repoFullName: 'acme/api',
+      preferLocal: true,
     });
-    // notes has no remote; api is already in the group from GitHub, so the
-    // folder stays and validation reports the duplicate.
-    expect(next.members.slice(1)).toEqual(value.members.slice(1));
-    expect(
-      upgradeProjectGroupRepositoryMembers(next, (source) => remotes[source.localProjectId])
-    ).toBe(next);
-    expect(upgradeProjectGroupRepositoryMembers(value, () => undefined)).toBe(value);
+    expect(addProjectGroupDirectory(first, directory)).toBe(first);
+    const project = buildWorkspaceProjectFromForm(first, {
+      id: '73a09c4f-b99f-4a37-8fd7-c647c4c9971a' as ProjectId,
+      ownerUserId: 'user-1',
+      now: 1,
+    });
+    expect(project?.members).toHaveLength(1);
+    expect(project?.members[0]).not.toHaveProperty('directory');
+    expect(JSON.stringify(project)).not.toContain('/workspace/api');
+  });
+  it('attaches a selected local copy to a repository already in the draft', () => {
+    const value = addProjectGroupMember(
+      EMPTY_PROJECT_GROUP_FORM_VALUE,
+      { kind: 'github', repoFullName: 'acme/api', preferLocal: true },
+      'api'
+    );
+    const next = addProjectGroupDirectory(value, directory);
+    expect(next.members).toHaveLength(1);
+    expect(next.members[0]?.directory).toEqual(directory);
+  });
+  it('keeps ordinary folders machine-bound and rejects mixing machines', () => {
+    const localDirectory = { ...directory, inspection: { isGit: false, submodules: [] } };
+    const first = addProjectGroupDirectory(
+      { name: 'Folders', instructions: '', members: [] },
+      localDirectory
+    );
+    expect(first.members[0]?.source).toEqual({
+      kind: 'local',
+      machineId: directory.machineId,
+      localProjectId: directory.localProjectId,
+    });
+    const next = addProjectGroupDirectory(first, {
+      ...localDirectory,
+      machineId: 'machine-2' as MachineId,
+    });
+    expect(validateProjectGroupForm(next).valid).toBe(false);
+    expect(validateProjectGroupForm(first).valid).toBe(true);
+  });
+  it('keeps only what the chosen scope can hold when the wizard answer changes', () => {
+    const createId = ids();
+    let value = addProjectGroupMember(
+      EMPTY_PROJECT_GROUP_FORM_VALUE,
+      { kind: 'github', repoFullName: 'acme/web', preferLocal: true },
+      'acme/web',
+      createId
+    );
+    value = addProjectGroupMember(value, local('notes'), 'notes', createId);
+    value = addProjectGroupDirectory(value, directory);
+    const machine1 = { kind: 'machine', machineId: 'machine-1' as MachineId } as const;
+    expect(retainProjectGroupScope(value, machine1, labelOf)).toBe(value);
+
+    const machine2 = { kind: 'machine', machineId: 'machine-2' as MachineId } as const;
+    expect(retainProjectGroupScope(value, machine2, labelOf).members.map(labelOf)).toEqual([
+      'acme/web',
+    ]);
+    // GitHub-only drops a picked folder even when its remote made it portable.
+    const githubOnly = retainProjectGroupScope(value, { kind: 'github' }, labelOf);
+    expect(githubOnly.members.map(labelOf)).toEqual(['acme/web']);
+    // GitHub only clones for each conversation rather than using a machine's copy.
+    expect(githubOnly.members[0]?.source).toEqual({ kind: 'github', repoFullName: 'acme/web' });
+    expect(validateProjectGroupForm({ ...githubOnly, name: 'Web' }).valid).toBe(true);
+  });
+  it('rejects a name another project has, ignoring case and spaces, and suggests a free one', () => {
+    const value = addProjectGroupMember(
+      { ...EMPTY_PROJECT_GROUP_FORM_VALUE, name: ' Shop ' },
+      github('acme/web'),
+      'web'
+    );
+    const taken = new Set([normalizeProjectGroupName('shop'), normalizeProjectGroupName('web')]);
+    expect(validateProjectGroupForm(value, undefined, taken).errors).toEqual(['name_taken']);
+    expect(validateProjectGroupForm({ ...value, name: 'Shop 2' }, undefined, taken).valid).toBe(
+      true
+    );
+    expect(suggestProjectGroupName({ ...value, name: '' }, labelOf, taken)).toBe('web 2');
+  });
+  it('names a new project after its first member unless a name was typed', () => {
+    const value = addProjectGroupMember(EMPTY_PROJECT_GROUP_FORM_VALUE, github('acme/web'), 'web');
+    expect(suggestProjectGroupName(value, labelOf)).toBe('web');
+    expect(suggestProjectGroupName({ ...value, name: 'Shop' }, labelOf)).toBe('Shop');
+    expect(suggestProjectGroupName(EMPTY_PROJECT_GROUP_FORM_VALUE, labelOf)).toBe('');
+  });
+  it('binds folders to the machine they were chosen on, leaving clones portable', () => {
+    const createId = ids();
+    let value = addProjectGroupMember(
+      EMPTY_PROJECT_GROUP_FORM_VALUE,
+      { kind: 'github', repoFullName: 'acme/web', preferLocal: true },
+      'acme/web',
+      createId
+    );
+    value = addProjectGroupMember(value, github('acme/proto'), 'acme/proto', createId);
+    value = addProjectGroupDirectory(value, directory);
+    const machine = 'machine-1' as MachineId;
+    const bound = bindProjectGroupToMachine(value, machine, (repo) =>
+      repo === 'acme/web' ? ('web-copy' as LocalProjectId) : undefined
+    );
+    expect(bound.members.map((member) => member.source)).toEqual([
+      { kind: 'local', machineId: machine, localProjectId: 'web-copy' },
+      { kind: 'github', repoFullName: 'acme/proto' },
+      { kind: 'local', machineId: machine, localProjectId: directory.localProjectId },
+    ]);
+    // Bound to the folders' machine: the project can no longer run elsewhere.
+    expect(validateProjectGroupForm({ ...bound, name: 'Shop' }).valid).toBe(true);
+    expect(bindProjectGroupToMachine(bound, machine, () => undefined)).toBe(bound);
   });
 });

@@ -22,20 +22,21 @@
 ## Dispatch
 
 - Queue promotion preserves frozen fields; remove only after history+activation succeed.
-- Absent session meta is "unknown", not foreign: hold the TTL-bounded RPC stash until meta lands;
-  drop it only on a definitive verdict.
+- Absent meta is unknown, not foreign: hold the TTL-bounded RPC stash until meta lands or
+  a definitive verdict.
 - Subscribe to RPC offers BEFORE awaiting Doc Room join/sync and never dispatch from the RPC
-  handler; history sync is the durable fallback, not a fast path.
-- Missing-history recovery never advances `lastHandledUserMsgId`: set the permanent one-shot
-  `lastMissingHistoryUserMsgId` ack for that turn and surface `chat_failed`.
-- Retire an already-terminal stale activation into `settledActivationUserMsgId`; never claim the
+  handler; history sync is the durable fallback.
+- Missing-history recovery never advances `lastHandledUserMsgId`: set that turn's permanent
+  one-shot `lastMissingHistoryUserMsgId` ack and surface `chat_failed`.
+- Retire a terminal stale activation into `settledActivationUserMsgId`; never claim the
   marker or rewrite `latestUserMsgId`, and report settled only if none survives.
 - Never replay late history; recovery is a new send. Use last row per ID; stop no-progress repairs.
-- `hasPendingUserTurnActivation` is the ONLY pending-turn predicate; never compare those two
-  pointers in a consumer.
+- `hasPendingUserTurnActivation` is the ONLY pending-turn predicate; consumers never compare
+  pointers.
 - Stop data: control doc; meta: pointer. Never scan old docs for work or change active presence
   here (`../lib/loro/session-active-presence.ts`).
-- Keep reconciliation bounded per README; no per-trigger scans or throttles.
+- Bound reconciliation per README (no per-trigger scans/throttles); close
+  [dead turns](README.md#dead-turns); ack empty queues only with causal proof.
 
 ## Turn execution
 
@@ -59,11 +60,11 @@
   `finished`/`endedAt`/`permissionWaitMs` there only; never write `finished=false` from teardown.
 - Keep JSON-RPC/transport matching in `acp-error-classification.ts`: disposed/stale `-32603` =
   `agent_disconnected`, Harness compression mismatch = `acp_session_storage_incompatible`.
-- Stale ACP: retry once before output; retire, retain cleanup, keep the turn. Never retry submitted
+- Stale ACP: retry once before any event; retire, retain cleanup, keep the turn. Never retry submitted
   Inbox inputs (human-plus-batch too).
-- Agent-input turns skip completion notices only. Use the completed invocation's exact input.
-- No ACP updates: `recordSilentTurnFailure`, not `setDispatchHandled`. Read
-  `turnProducedVisibleOutput` before `finalizeTurn` clears it; finalize, advance pointers, fail open.
+- Completion publication follows [notification ownership](../lib/notifications/AGENTS.md).
+- No content: `recordSilentTurnFailure`, not `setDispatchHandled`. Await
+  `turnProducedVisibleOutput` before `finalizeTurn`; finalize, advance pointers, fail open.
 - Diff content comes only from the CLI-local ACP evidence store; GitHub `diffStats` use PR compare
   semantics; `session-diff-stats-target.ts` skips, never overwrites, a good total.
 
@@ -73,13 +74,13 @@
   removed-history revival, uncertain steer replay/retry or log/receipt pruning. Atomic edits/digests/metadata;
   agent v2/renderer v3. SDK owns input/permission/branch; local causes+RPC stage/code/ID.
   Native proofs gate path reuse/goal read elision; head/watch replaces Loro cursor.
-- `Session.createAgent` gates each ACP spawn; failures reject JSON-RPC. Terminals use protocol argv (`sh -c` for unsplit commands only). Managed Codex reused-refresh startup
-  retries once after process cleanup, delay, and live Provider recheck; other auth errors do not.
+- `Session.createAgent` gates ACP spawn; failures reject JSON-RPC. Terminals: argv (shell for
+  unsplit lines only), direct exit and bounded drain. Managed Codex reused-refresh retries once after process cleanup, delay and live Provider recheck; other auth errors do not.
 - Child tabs reuse parent workspace. No per-session paths in `MachineMeta`:
   machines publish `['dotlodyPath']`; frontends derive them.
 - `sandbox.spawn` returning OUTPUT requires `captureOutput: true` and a 4 MiB buffer cap;
   ACP stdio does not capture.
-- Session start failures: [rules](README.md#start-failures).
+- Keep startup stderr: [rules](README.md#start-failures).
 - Shutdown: `cleanUp({ keepWorkspaceDocumentOpen: true })`, MessageHandler's final flush,
   then `cleanUp()`; never close the doc first.
 

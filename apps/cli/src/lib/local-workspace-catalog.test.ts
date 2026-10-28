@@ -33,6 +33,7 @@ const legacyCatalogSchema = z.object({
 });
 
 let tempDir: string | undefined;
+const originalLocksDir = process.env.LODY_LOCKS_DIR;
 
 const makeCatalog = () => {
   if (!tempDir) {
@@ -46,12 +47,15 @@ const makeCatalog = () => {
 
 describe('LocalWorkspaceCatalog', () => {
   beforeEach(async () => {
-    runtime = ManagedRuntime.make(fileLockLayer);
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-local-catalog-'));
+    process.env.LODY_LOCKS_DIR = path.join(tempDir, 'locks');
+    runtime = ManagedRuntime.make(fileLockLayer);
   });
 
   afterEach(async () => {
     await runtime.dispose();
+    if (originalLocksDir === undefined) delete process.env.LODY_LOCKS_DIR;
+    else process.env.LODY_LOCKS_DIR = originalLocksDir;
     if (tempDir) {
       await fs.rm(tempDir, { recursive: true, force: true });
       tempDir = undefined;
@@ -158,6 +162,35 @@ describe('LocalWorkspaceCatalog', () => {
     ).toEqual([normal]);
   });
 
+  it('never caches an unsupported content mode, so offline restarts cannot open it as plaintext', async () => {
+    const normal = { id: 'ordinary', name: 'Ordinary', slug: null, role: 'owner' };
+    const encrypted = {
+      id: 'future',
+      name: 'Future',
+      slug: null,
+      role: 'owner',
+      contentMode: 'e2ee',
+      genesisHash: 'ab'.repeat(32),
+    };
+    const identity = { userId: 'user-1' };
+    const machine = { machineId: 'machine-1', machineName: 'host' };
+    await runCatalog(
+      makeCatalog().cacheRemoteWorkspaces({ identity, machine, workspaces: [normal, encrypted] })
+    );
+    // The same workspace later reports a mode this client does not implement.
+    await runCatalog(
+      makeCatalog().cacheRemoteWorkspaces({
+        identity,
+        machine,
+        workspaces: [normal, { ...encrypted, contentMode: 'e2ee-v2' }],
+      })
+    );
+    const reopened = await runCatalog(makeCatalog().listActiveWorkspaces());
+    expect(reopened.map(localCatalogWorkspaceToWorkspaceListItem)).toEqual([normal]);
+    const snapshot = await runCatalog(makeCatalog().read());
+    expect(snapshot.workspaces.map((workspace) => workspace.workspaceId)).toEqual(['ordinary']);
+  });
+
   it('records workspace access snapshots and preserves them across remote refreshes', async () => {
     const catalog = makeCatalog();
     await runCatalog(
@@ -215,7 +248,7 @@ describe('LocalWorkspaceCatalog', () => {
   });
 
   it.each(['corrupt', 'EACCES'])(
-    'preserves an unreadable %s encrypted index while ordinary offline rows remain writable',
+    'isolates an unreadable %s encrypted index and recovers only corrupt bytes from an online list',
     async (condition) => {
       if (!tempDir) throw new Error('tempDir not initialized');
       const filePath = path.join(tempDir, 'workspace-catalog.json');
@@ -232,6 +265,7 @@ describe('LocalWorkspaceCatalog', () => {
         },
       ];
       const input = {
+        authenticatedOnline: true as const,
         identity: { userId: 'user-1' },
         machine: { machineId: 'machine-1' },
         workspaces,
@@ -272,10 +306,32 @@ describe('LocalWorkspaceCatalog', () => {
         expect((await runCatalog(catalog.read())).workspaces[0]?.accessSnapshot?.ownerUserId).toBe(
           'user-1'
         );
-        const degraded = await runCatalog(catalog.cacheRemoteWorkspaces(input));
-        expect(degraded?.encryptedCatalogError).toBeInstanceOf(
-          condition === 'corrupt' ? CatalogCorruptError : CatalogPermissionError
-        );
+        if (condition === 'corrupt') {
+          const { authenticatedOnline: _online, ...localInput } = input;
+          const local = await runCatalog(catalog.cacheRemoteWorkspaces(localInput));
+          expect(local?.encryptedCatalogError).toBeInstanceOf(CatalogCorruptError);
+          expect(await readFile(sidecarPath, 'utf8')).toBe(originalBytes);
+        }
+        const receipt = await runCatalog(catalog.cacheRemoteWorkspaces(input));
+        if (condition === 'corrupt') {
+          expect(receipt).toBeUndefined();
+          const archives = (await fs.readdir(tempDir)).filter((entry) =>
+            entry.startsWith('workspace-catalog.json.e2ee.corrupt-')
+          );
+          expect(archives).toHaveLength(1);
+          expect(await fs.readFile(path.join(tempDir, archives[0] ?? ''), 'utf8')).toBe(
+            originalBytes
+          );
+          const reopened = await runCatalog(makeCatalog().read());
+          expect(reopened.encryptedCatalogUnavailable).toBeUndefined();
+          expect(reopened.encryptedCatalogError).toBeUndefined();
+          expect(reopened.workspaces.map((workspace) => workspace.workspaceId)).toEqual([
+            'ordinary',
+            'encrypted',
+          ]);
+          return;
+        }
+        expect(receipt?.encryptedCatalogError).toBeInstanceOf(CatalogPermissionError);
         expect(await readFile(sidecarPath, 'utf8')).toBe(originalBytes);
       } finally {
         restore();
@@ -296,6 +352,130 @@ describe('LocalWorkspaceCatalog', () => {
       ]);
     }
   );
+
+  it.each(['archive', 'publish'])(
+    'keeps encrypted discovery fenced when recovery fails at %s, then retries from the online list',
+    async (failure) => {
+      if (!tempDir) throw new Error('tempDir not initialized');
+      const filePath = path.join(tempDir, 'workspace-catalog.json');
+      const sidecar = `${filePath}.e2ee`;
+      const input = {
+        authenticatedOnline: true as const,
+        identity: { userId: 'user-1' },
+        machine: { machineId: 'machine-1' },
+        workspaces: [
+          { id: 'ordinary', name: 'Ordinary', slug: null, role: 'owner' },
+          {
+            id: 'encrypted',
+            name: 'Encrypted',
+            slug: null,
+            role: 'owner',
+            contentMode: 'e2ee',
+            genesisHash: 'ab'.repeat(32),
+          },
+        ],
+      };
+      await runCatalog(makeCatalog().cacheRemoteWorkspaces(input));
+      const damaged = '{damaged original';
+      await fs.writeFile(sidecar, damaged);
+      const rename = fs.rename;
+      const fault = Object.assign(new Error('synthetic recovery write failure'), {
+        code: 'EACCES',
+      });
+      const spy = vi
+        .spyOn(fs, 'rename')
+        .mockImplementation((source, target) =>
+          (failure === 'archive' ? source === sidecar : target === sidecar)
+            ? Promise.reject(fault)
+            : rename(source, target)
+        );
+      try {
+        const receipt = await runCatalog(
+          makeCatalog().cacheRemoteWorkspaces({
+            ...input,
+            workspaces: input.workspaces.map((workspace) => ({ ...workspace, name: 'Updated' })),
+          })
+        );
+        expect(receipt?.encryptedCatalogError).toBeDefined();
+        const cold = await runCatalog(makeCatalog().read());
+        expect(cold.encryptedCatalogUnavailable).toBe(true);
+        expect(cold.workspaces.map((workspace) => workspace.workspaceId)).toEqual(['ordinary']);
+        expect(cold.workspaces[0]?.name).toBe('Updated');
+        const archives = (await fs.readdir(tempDir)).filter((entry) =>
+          entry.startsWith('workspace-catalog.json.e2ee.corrupt-')
+        );
+        if (failure === 'archive') {
+          expect(archives).toEqual([]);
+          expect(await fs.readFile(sidecar, 'utf8')).toBe(damaged);
+        } else {
+          expect(archives).toHaveLength(1);
+          expect(await fs.readFile(path.join(tempDir, archives[0] ?? ''), 'utf8')).toBe(damaged);
+        }
+      } finally {
+        spy.mockRestore();
+      }
+      await expect(runCatalog(makeCatalog().cacheRemoteWorkspaces(input))).resolves.toBeUndefined();
+      expect(
+        (await runCatalog(makeCatalog().read())).workspaces.map(
+          (workspace) => workspace.workspaceId
+        )
+      ).toEqual(['ordinary', 'encrypted']);
+    }
+  );
+
+  it('rebuilds only the current account and machine online list without reviving removed or unknown-mode rows', async () => {
+    if (!tempDir) throw new Error('tempDir not initialized');
+    const filePath = path.join(tempDir, 'workspace-catalog.json');
+    await runCatalog(
+      makeCatalog().cacheRemoteWorkspaces({
+        identity: { userId: 'old-account' },
+        machine: { machineId: 'old-machine' },
+        workspaces: [
+          {
+            id: 'old',
+            name: 'Old',
+            slug: null,
+            role: 'owner',
+            contentMode: 'e2ee',
+            genesisHash: 'ab'.repeat(32),
+          },
+        ],
+      })
+    );
+    await fs.writeFile(`${filePath}.e2ee`, '{damaged old sidecar');
+    await expect(
+      runCatalog(
+        makeCatalog().cacheRemoteWorkspaces({
+          authenticatedOnline: true,
+          identity: { userId: 'new-account' },
+          machine: { machineId: 'new-machine' },
+          workspaces: [
+            {
+              id: 'unknown',
+              name: 'Unknown',
+              slug: null,
+              role: 'owner',
+              contentMode: 'future-encrypted',
+            },
+            {
+              id: 'new',
+              name: 'New',
+              slug: null,
+              role: 'owner',
+              contentMode: 'e2ee',
+              genesisHash: 'cd'.repeat(32),
+            },
+          ],
+        })
+      )
+    ).resolves.toBeUndefined();
+    const cold = await runCatalog(makeCatalog().read());
+    expect(cold.identity?.userId).toBe('new-account');
+    expect(cold.machine?.machineId).toBe('new-machine');
+    expect(cold.workspaces.map((workspace) => workspace.workspaceId)).toEqual(['new']);
+    const ordinary = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    expect(ordinary.workspaces).toEqual([]);
+  });
 
   it('does not rewrite the encrypted sidecar for an ordinary mutation', async () => {
     if (!tempDir) throw new Error('tempDir not initialized');
