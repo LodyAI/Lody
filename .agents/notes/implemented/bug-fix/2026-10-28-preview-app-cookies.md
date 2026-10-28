@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/2016
 
 [中文](2026-10-28-preview-app-cookies.zh.md)
 
