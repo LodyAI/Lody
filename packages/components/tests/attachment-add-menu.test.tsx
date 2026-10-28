@@ -72,7 +72,7 @@ describe('AttachmentAddMenu', () => {
     expect(onAddAttachment).toHaveBeenCalledOnce();
   });
   it.each([false, true])(
-    'permits encrypted schedule send while keeping attachments disabled (mobile %s)',
+    'permits encrypted attachments and schedule send (mobile %s)',
     async (isMobile) => {
       const store = createStore();
       store.set(workspaceContentModeAtom, {
@@ -83,16 +83,16 @@ describe('AttachmentAddMenu', () => {
       } as never);
       function Menu() {
         const [scheduled, setScheduled] = useState(false);
+        const [attached, setAttached] = useState(false);
         return (
           <>
             <AttachmentAddMenu
               isMobile={isMobile}
-              onAddAttachment={() => {
-                throw new Error('attachment must stay disabled');
-              }}
+              onAddAttachment={() => setAttached(true)}
               onScheduleSend={() => setScheduled(true)}
             />
-            {scheduled && <output>Schedule time picker opened</output>}
+            {attached && <output data-testid="attached">Attachment picker opened</output>}
+            {scheduled && <output data-testid="scheduled">Schedule time picker opened</output>}
           </>
         );
       }
@@ -115,13 +115,24 @@ describe('AttachmentAddMenu', () => {
       });
       const items = [...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')];
       expect(items).toHaveLength(2);
-      expect(items[0]?.getAttribute('aria-disabled')).toBe('true');
+      expect(items[0]?.getAttribute('aria-disabled')).not.toBe('true');
       expect(items[1]?.getAttribute('aria-disabled')).not.toBe('true');
-      expect(document.body.textContent).toContain(
-        'Encrypted workspaces do not yet support attachments.'
+      await act(async () => items[0]?.click());
+      expect(container.querySelector('[data-testid=attached]')?.textContent).toBe(
+        'Attachment picker opened'
       );
-      await act(async () => items[1]?.click());
-      expect(container.querySelector('output')?.textContent).toBe('Schedule time picker opened');
+      await act(async () => {
+        trigger!.dispatchEvent(
+          new TestPointerEvent('mousedown', { bubbles: true, button: 0, pointerType: 'mouse' })
+        );
+        await vi.advanceTimersByTimeAsync(40);
+      });
+      await act(async () =>
+        document.body.querySelectorAll<HTMLElement>('[role=menuitem]')[1]?.click()
+      );
+      expect(container.querySelector('[data-testid=scheduled]')?.textContent).toBe(
+        'Schedule time picker opened'
+      );
     }
   );
   it('explains a disabled schedule send on hover', async () => {

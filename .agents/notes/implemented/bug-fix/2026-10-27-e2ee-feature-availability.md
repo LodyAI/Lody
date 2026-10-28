@@ -32,10 +32,7 @@ sharing, exports or Code Collab indexes.
   with neutral copy instead of claiming the machine is offline. Code Collab terminates
   its disabled-index loading state with an unavailable reason. Confirmed same-machine
   desktop file preview keeps its provider and IPC operation; the index remains off.
-- Attachment admission rejects before callbacks, stores or the pending-send queue
-  consume a draft. Prompt, reserved session ID, source bytes and image preview survive
-  navigation. Prepared local file receipts remain admissible. A failed local handoff
-  cannot fall back to an unprotected upload.
+- Attachment admission rejects unprotected cloud references and preserves prepared local file receipts. Protected attachment preparation now uses the [file-key decision](../../proposed/architecture/2026-10-28-encrypted-attachments.md); failed uploads retain their draft sources. A failed local handoff cannot fall back to an unprotected upload.
 - Ordinary capability verdicts and transport branches are unchanged. These synchronous
   guards do not change resource ownership or justify a lifecycle migration. Existing
   [M2 restrictions](../../proposed/architecture/2026-10-22-e2ee-m2-product-integration.md#unencrypted-exits)

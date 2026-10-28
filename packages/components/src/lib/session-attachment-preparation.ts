@@ -56,6 +56,7 @@ export async function prepareDraftAttachments(args: {
   resources: SessionSendResources;
   signal: AbortSignal;
   token(): string | null;
+  attachmentToken?: () => Promise<string>;
   localMachineId(): MachineId | null;
   update(attachments: DraftAttachmentSend['attachments']): void;
   report(id: string, progress: number): void;
@@ -85,6 +86,7 @@ export async function prepareDraftAttachments(args: {
                 workspaceId: args.record.workspaceId as WorkspaceId,
                 sessionId: args.record.sessionId,
                 token,
+                attachmentToken: args.attachmentToken,
                 file,
                 signal,
                 onProgress: (progress) => args.report(attachment.id, progress),
@@ -139,6 +141,7 @@ export async function prepareDraftAttachments(args: {
           workspaceId: args.record.workspaceId as WorkspaceId,
           sessionId: args.record.sessionId as SessionId,
           token: args.token(),
+          attachmentToken: args.attachmentToken,
           machineId,
           canSendLocally:
             !!machineId && machineId === args.localMachineId() && canUseElectronLocalFileSend(),

@@ -25,6 +25,8 @@ describe('encrypted workspace room domains', () => {
       getMachineFlockDocId(workspace, 'local' as MachineId),
       getWorkspaceFlockDocId(workspace),
       getScheduleRegistryFlockDocId(workspace),
+      `${workspace}:fi:session`,
+      `${workspace}:fis:session`,
     ])
       expect(encryptedWorkspaceRoom(workspace, { kind: 'flock', flockDocId })).toEqual({
         resource: `flock:${flockDocId}`,
@@ -48,6 +50,9 @@ describe('encrypted workspace room domains', () => {
       'mf:local',
       `${workspace}:schedule:registry`,
       `${workspace}:collab:index`,
+      `other:fi:session`,
+      `${workspace}:fi:`,
+      `${workspace}:fis:session:extra`,
     ])
       expect(() => encryptedWorkspaceRoom(workspace, { kind: 'flock', flockDocId })).toThrow(
         'Encrypted workspace room is unavailable'

@@ -214,7 +214,8 @@ export interface E2eeWorkspaceRuntime {
   contentStreamsToken(
     workspaceId: string,
     rejectedToken?: string,
-    requestSnapshotFor?: string
+    requestSnapshotFor?: string,
+    rpcOnly?: true
   ): Promise<import('@lody/cloud-api').E2eeContentToken>;
   seal(
     workspaceId: string,
@@ -222,6 +223,15 @@ export interface E2eeWorkspaceRuntime {
   ): Promise<{ header: Uint8Array; sealed: Uint8Array }>;
   openContent(workspaceId: string, input: E2eeContentOpen): Promise<Uint8Array>;
   /** Purpose-bound native preparation; persists the original before returning ciphertext. */
+  prepareFeatureRpc?(
+    workspaceId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput
+  ): Promise<import('@lody/shared/e2ee-rpc').E2eePreparedDispatch>;
+  acceptFeatureRpcResponse?(
+    workspaceId: string,
+    input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput,
+    frame: string
+  ): Promise<import('@lody/shared/local-machine-rpc').LocalMachineRpcResponse | null>;
   prepareDispatch?(
     workspaceId: string,
     targetMachineId: string,

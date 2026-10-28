@@ -45,6 +45,25 @@ machine binding, ledger permissions or freshness. Keep those gates in the truste
 host before enabling a channel. Retain the returned original frame for retries;
 running a seal again creates a new encryption. No product transport is enabled.
 
+The protocol entry also provides an owner-signed complete machine-sharing codec,
+resource binding, version verification and pure execution gate.
+`readMachineSharingHistoryStep` returns authenticated historical full state for
+fresh owner intent, including after its personal signer is revoked; it grants no
+execution authority. The backend
+entry admits opaque owner frames; platform/cloud-api define the matching CAS
+DTOs. These are inert primitives, with no network, UI or execution integration.
+The [sharing proposal](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md)
+records the pending Spec increment and remaining host responsibilities.
+
+The signed sharing format is current-only v2. Every scope includes a generation:
+the initial machine signing key of its uninterrupted atomic-replacement chain.
+`verifyMachineSharingGeneration` qualifies that chain's original admission records
+at their genuine ledger positions. Supply its opaque `machineGeneration` evidence
+to seal/open/history/admission/execution calls. Removal/readmission starts a new
+resource at revision 1 with private defaults; atomic replacement retains the root.
+A compact view without those ledger checkpoints needs qualification against a
+full verified endpoint; server hints or removed-policy high waters are insufficient.
+
 | Import | Contents | Stability |
 | --- | --- | --- |
 | `@lody/e2ee-core` | workflows (`KeyReceiver`, `EpochPublisher`, …), their errors and results, `E2eeWorkflows` | public |

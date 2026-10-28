@@ -362,6 +362,41 @@ export function buildInjectedHtmlHeaders(
   return headers;
 }
 
+// Namespacing applies to both local and remote endpoints so only cookies issued
+// by this endpoint can be sent to the target, never the capability cookie.
+export function rewritePreviewRequestCookies(value: string | undefined, prefix: string): string {
+  return (value ?? '')
+    .split(';')
+    .map((part) => part.trim())
+    .filter((part) => {
+      const separator = part.indexOf('=');
+      return separator > prefix.length && part.slice(0, separator).startsWith(prefix);
+    })
+    .map((part) => part.slice(prefix.length))
+    .join('; ');
+}
+
+export function rewritePreviewSetCookie(value: string, prefix: string): string | null {
+  const [pair, ...attributes] = value.split(';');
+  const separator = pair?.indexOf('=') ?? -1;
+  if (!pair || separator <= 0) return null;
+  const name = pair.slice(0, separator).trim();
+  if (!name || !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name)) return null;
+  const retained = attributes
+    .map((attribute) => attribute.trim())
+    .filter((attribute) => {
+      const key = attribute.split('=', 1)[0]?.trim().toLowerCase();
+      return attribute && !['domain', 'secure', 'samesite', 'partitioned'].includes(key ?? '');
+    });
+  return [
+    `${prefix}${name}=${pair.slice(separator + 1)}`,
+    ...retained,
+    'Secure',
+    'SameSite=None',
+    'Partitioned',
+  ].join('; ');
+}
+
 export function headersToEntries(
   headers: Headers,
   options?: { localOrigin: URL; previewOrigin: URL }
@@ -384,6 +419,7 @@ export function headersToEntries(
       ]);
     }
   }
+  for (const cookie of headers.getSetCookie()) responseHeaders.push(['set-cookie', cookie]);
   responseHeaders.push([PREVIEW_PROXY_RESPONSE_HEADER, PREVIEW_PROXY_RESPONSE_VERSION]);
   return responseHeaders;
 }

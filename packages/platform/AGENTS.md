@@ -67,6 +67,9 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
 - Optional `memberProfiles` is a display directory scoped to the live account and
   workspace. Resolve its crypto user IDs through verified ledger members; it cannot
   grant permissions, pin keys, identify the creator, or block ledger availability.
+- Account-only machine-policy display reads return opaque ciphertext and untrusted
+  metadata. They never replace device-authenticated execution freshness, and a
+  server removal tombstone never substitutes for a verified policy-history pin.
 
 - `e2eeMachineScope` is an explicit single-workspace machine-service composition.
   It has no ordinary Streams/account capabilities or account catalog bootstrap.

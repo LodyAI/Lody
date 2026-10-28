@@ -1,4 +1,5 @@
-import { workspaceSupports } from '@lody/shared/workspace-streams-content';
+import { isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
+import type { EncryptedFeatureContext } from './e2ee/feature-rpc';
 import {
   type LocalSessionControlRequestValidated,
   type LocalSessionControlResponse,
@@ -39,6 +40,26 @@ export class MachineRuntime {
   async offerEncryptedRpcTurn(input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput) {
     if (!this.options.handlerConfig.encryptedWorkspace) throw new Error('e2ee_rpc_unavailable');
     return this.requireHandler().offerEncryptedRpcTurn(input);
+  }
+  /** Verified encrypted feature ingress reuses same-member machine authority. */
+  async handleEncryptedFeatureRpc(
+    request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest,
+    context?: EncryptedFeatureContext
+  ) {
+    const config = this.options.handlerConfig;
+    if (
+      !config.encryptedWorkspace ||
+      request.workspaceId !== config.workspaceId ||
+      request.machineId !== config.machineId
+    )
+      throw new Error('e2ee_feature_scope');
+    if ('requestedByUserId' in request.params && request.params.requestedByUserId !== config.userId)
+      throw new Error('e2ee_feature_requester');
+    if (isE2eeReadQuery(request.method, request.params)) {
+      if (!context) throw new Error('e2ee_rpc_unavailable');
+      return this.requireHandler().readEncryptedMachineRequest(request, context);
+    }
+    return this.dispatchLocalMachineRpc(request);
   }
   private handler: MessageHandler | null = null;
   private sessionManager: SessionManager | null = null;
@@ -349,14 +370,8 @@ export class MachineRuntime {
     message: LocalMachineRpcRequestValidated
   ): Promise<LocalMachineRpcResponse> {
     if (
-      !workspaceSupports(
-        { mode: this.options.handlerConfig.encryptedWorkspace ? 'protected' : 'plaintext' },
-        'code-collab-index'
-      ) &&
-      (message.method.startsWith('code-collab/') ||
-        message.method === 'session/dispatch-turn' ||
-        message.method.startsWith('ios-simulator/') ||
-        message.method.startsWith('file/'))
+      this.options.handlerConfig.encryptedWorkspace &&
+      (message.method === 'session/dispatch-turn' || message.method.startsWith('ios-simulator/'))
     )
       throw new Error('e2ee_feature_unavailable');
     const handler = this.requireHandler();

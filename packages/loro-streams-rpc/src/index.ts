@@ -3,3 +3,4 @@ export * from './rpc';
 export * from './rpc-secret';
 export * from './machine-rpc-server';
 export * from './e2ee-wire';
+export { callEncryptedReadFeature } from './e2ee-read-adapter';

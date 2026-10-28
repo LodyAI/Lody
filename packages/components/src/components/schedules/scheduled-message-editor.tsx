@@ -317,18 +317,21 @@ export function ScheduledMessageEditor({
           {t('scheduledMessage.cancel')}
         </Button>
       ) : null}
-      <Button
-        disabled={
-          disabled ||
-          !Number.isFinite(Date.parse(at)) ||
-          Date.parse(at) <= getServerNow() ||
-          (!text.trim() && !blocks.some((block) => block.type !== 'text') && !attachments.length)
-        }
-        onClick={() => void save()}
-      >
-        <Clock size={14} />
-        {saving ? t('schedules.saving') : t('scheduledMessage.saveChanges')}
-      </Button>
+      {/* A sent, cancelled or failed message is finished: nothing to save. */}
+      {sent || state === 'cancelled' || state === 'failed' ? null : (
+        <Button
+          disabled={
+            disabled ||
+            !Number.isFinite(Date.parse(at)) ||
+            Date.parse(at) <= getServerNow() ||
+            (!text.trim() && !blocks.some((block) => block.type !== 'text') && !attachments.length)
+          }
+          onClick={() => void save()}
+        >
+          <Clock size={14} />
+          {saving ? t('schedules.saving') : t('scheduledMessage.saveChanges')}
+        </Button>
+      )}
     </div>
   );
 }

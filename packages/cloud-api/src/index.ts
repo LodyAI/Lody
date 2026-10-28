@@ -8,6 +8,8 @@ import type {
 } from './e2ee-device';
 import type { E2eeJoinRequests, E2eeJoinReplies } from './e2ee-join';
 import type { E2eeMemberRequests, E2eeMemberReplies } from './e2ee-members';
+import type { E2eeMachineSharingRequests, E2eeMachineSharingReplies } from './e2ee-machine-sharing';
+export type * from './e2ee-machine-sharing';
 export type * from './e2ee-members';
 export type * from './e2ee-join';
 export type * from './e2ee-device';
@@ -402,6 +404,22 @@ export type SeatInvitePreview =
     };
 
 export type CloudApi = {
+  e2eeMachineSharing: {
+    latestForMember: Query<
+      E2eeMachineSharingRequests['latestForMember'],
+      E2eeMachineSharingReplies['latestForMember']
+    >;
+    readHead: Action<E2eeMachineSharingRequests['readHead'], E2eeMachineSharingReplies['readHead']>;
+    readVersion: Action<
+      E2eeMachineSharingRequests['readVersion'],
+      E2eeMachineSharingReplies['readVersion']
+    >;
+    readRequest: Action<
+      E2eeMachineSharingRequests['readRequest'],
+      E2eeMachineSharingReplies['readRequest']
+    >;
+    commit: Action<E2eeMachineSharingRequests['commit'], E2eeMachineSharingReplies['commit']>;
+  };
   e2eeMembers: {
     workspaces: Query<Record<string, never>, import('./e2ee-members').E2eeMemberWorkspace[]>;
     createInvitation: Mutation<

@@ -34,6 +34,7 @@ import {
 } from '@lody/shared';
 import type { AuthContext } from '../src/lib/command-runtime';
 import type { WorkspaceSummary } from '../src/lib/workspace';
+import { makeE2eeRpcNative, E2eeRpcOriginals } from '@lody/loro-streams-rpc/e2ee-native';
 import { makeStreamsUpdateBinding } from '@lody/e2ee-core/adapters/loro-streams';
 import { makeExecutionOriginRecovery } from '../src/lib/e2ee/execution-origin-recovery';
 import { ExecutionOrigins } from '../src/lib/e2ee/execution-origins';
@@ -157,7 +158,8 @@ const setup = (
   count = 2,
   machineDirectory = join(directory, 'machine'),
   includeRotation = false,
-  publishRotation = false
+  publishRotation = false,
+  includeGuestMachine = false
 ) =>
   Effect.gen(function* () {
     const custody = yield* makeNodeE2eeCustody({ directory: join(directory, 'owner'), wrapper });
@@ -200,6 +202,9 @@ const setup = (
     let current = Result.getOrThrow(
       extendLedger(view, [record], { length: 2, head: hashRecordBytes(record) })
     );
+    let guestMachine:
+      | { device: typeof machine; custody: typeof machineCustody; requester: string }
+      | undefined;
     if (count > 2) {
       const joining = yield* custody.prepareDevice();
       const member = Result.getOrThrow(Bytes.membershipId(new Uint8Array(16).fill(40)));
@@ -228,6 +233,54 @@ const setup = (
         current = Result.getOrThrow(
           extendLedger(current, [next], { length: records.length, head: hashRecordBytes(next) })
         );
+      }
+      if (includeGuestMachine) {
+        const guestCustody = yield* makeCliE2eeCustody({
+          directory: join(directory, 'guest-machine'),
+          keyring: noKeyring,
+        });
+        const guestDevice = yield* guestCustody.createDevice(signed.genesis);
+        const command = yield* prepareDeviceAdmission({
+          genesis: signed.genesis,
+          membershipId: member,
+          signer: guestDevice,
+          encryptionPublicKey: guestDevice.enc,
+          kind: 'machine',
+          machineId: 'guest-machine',
+        });
+        const admitted = yield* signLedgerRecord(
+          Result.getOrThrow(prepareLedgerCommand(current, joining.publicKey, command)),
+          joining
+        );
+        records.push(admitted);
+        current = Result.getOrThrow(
+          extendLedger(current, [admitted], {
+            length: records.length,
+            head: hashRecordBytes(admitted),
+          })
+        );
+        const demoted = yield* signLedgerRecord(
+          Result.getOrThrow(
+            prepareLedgerCommand(current, owner.publicKey, {
+              _tag: 'SetRole',
+              membershipId: member,
+              role: 'guest',
+            })
+          ),
+          owner
+        );
+        records.push(demoted);
+        current = Result.getOrThrow(
+          extendLedger(current, [demoted], {
+            length: records.length,
+            head: hashRecordBytes(demoted),
+          })
+        );
+        guestMachine = {
+          device: guestDevice,
+          custody: guestCustody,
+          requester: hex(joining.publicKey.toBytes()),
+        };
       }
       yield* custody.discardDevice(joining);
     }
@@ -340,6 +393,7 @@ const setup = (
       yield* custody.discardDevice(other);
     }
     return {
+      guestMachine,
       owner,
       current,
       membershipId,
@@ -5380,6 +5434,70 @@ describe('machine execution authorization freshness', () => {
           released.resolve(page(fixture.records));
           expect(yield* Fiber.join(other)).toEqual({ _tag: 'Denied', reason: 'closed' });
           expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+            _tag: 'Denied',
+            reason: 'closed',
+          });
+        })
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('authorizes Guest reads on its own admitted machine while denying execution and foreign machines', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'guest-read-authority-'));
+    try {
+      await execute(
+        Effect.gen(function* () {
+          const f = yield* setup(directory, 3, join(directory, 'machine'), false, false, true);
+          const guest = f.guestMachine;
+          if (!guest) throw new Error('missing Guest machine fixture');
+          const runtime = yield* makeCliE2eeRuntime({
+            directory: join(directory, 'guest-runtime'),
+            workspaceId: 'workspace',
+            custody: guest.custody,
+            device: guest.device,
+            genesisRecord: f.genesisRecord,
+          });
+          yield* runtime.ingest(page(f.records));
+          const gate = yield* makeCliE2eeExecutionAuthorization({
+            workspaceId: 'workspace',
+            credential: 'synthetic',
+            runtime,
+            cloud: { getHistory: async () => page(f.records) },
+          });
+          const rpc = makeE2eeRpcNative({
+            workspaceId: 'workspace',
+            requesterDevice: hex(guest.device.publicKey.toBytes()),
+            originals: new E2eeRpcOriginals(join(directory, 'guest-rpc.sqlite')),
+            ledger: runtime.executionLedger,
+            binding: () => Effect.die('Guest dispatch must never reach signing'),
+          });
+          const prepared = yield* rpc
+            .prepareDispatch('guest-machine', {
+              sessionId: 'synthetic-session',
+              userTurnId: 'synthetic-turn',
+              userId: 'display-only',
+              timestamp: new Date(0).toISOString(),
+              inputConfig: { prompt: 'synthetic' },
+            })
+            .pipe(Effect.result);
+          expect(prepared._tag).toBe('Failure');
+          if (prepared._tag === 'Failure')
+            expect(prepared.failure).toMatchObject({ message: 'e2ee_rpc_denied' });
+          expect(yield* gate.authorizeRead('workspace', guest.requester)).toEqual({
+            _tag: 'Authorized',
+          });
+          expect(yield* gate.authorizeExecution('workspace', guest.requester)).toEqual({
+            _tag: 'Denied',
+            reason: 'not-authorized',
+          });
+          expect(yield* gate.authorizeRead('workspace', f.sender)).toEqual({
+            _tag: 'Denied',
+            reason: 'e2ee_machine_not_owned',
+          });
+          gate.invalidate();
+          expect(yield* gate.authorizeRead('workspace', guest.requester)).toEqual({
             _tag: 'Denied',
             reason: 'closed',
           });

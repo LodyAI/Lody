@@ -333,6 +333,7 @@ export class CodeCollabV2Service {
         readonly ownerSessionId: SessionId;
         readonly workspaceRoot: string;
       }) => Promise<void>;
+      readonly readOnly?: boolean;
       readonly publishFileIndex?: CodeCollabV2FileIndexPublisher;
       readonly publishFileIndexSignal?: CodeCollabV2FileIndexSignalPublisher;
       readonly maxRawTextBytes?: number;
@@ -2071,6 +2072,7 @@ export class CodeCollabV2Service {
   private async ensureWorkspaceWatch(
     resolved: Pick<ResolvedPath, 'projectRun' | 'ownerSessionId' | 'workspaceRoot'>
   ): Promise<void> {
+    if (this.deps.readOnly) return;
     if (!this.deps.publishFileIndex || !this.deps.workspaceWatchCoordinator) {
       return;
     }
@@ -2168,6 +2170,7 @@ export class CodeCollabV2Service {
   }
 
   private async reconcilePathState(resolved: ResolvedPath): Promise<void> {
+    if (this.deps.readOnly) return;
     await this.runTask(resolved.ownerSessionId, (signal) =>
       this.reconcilePathStateNow(resolved, signal)
     );

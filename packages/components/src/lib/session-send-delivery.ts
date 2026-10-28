@@ -42,7 +42,7 @@ export type SessionSendRuntime = Pick<
   'repo' | 'writer' | 'sendResources' | 'requestSessionDispatchTurn' | 'requestSessionSteer'
 > &
   Partial<
-    Pick<WorkspaceRuntime, 'isMachineRpcUnreachable' | 'contentMode' | 'prepareEncryptedDispatch'>
+    Pick<WorkspaceRuntime, 'isMachineRpcUnreachable' | 'contentMode' | 'prepareEncryptedDispatch' | 'attachmentToken'>
   >;
 
 /** Trusted human-send provenance, committed before history or queue activation. */

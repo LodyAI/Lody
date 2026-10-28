@@ -1,3 +1,4 @@
+import { isWorkspaceCodeCollabFlockDocId } from './code-collab-rooms';
 import { parseMachineFlockDocId } from './machine-flock';
 import { getScheduleRegistryFlockDocId } from './schedule-registry';
 import { getWorkspaceFlockDocId } from './workspace-flock';
@@ -68,7 +69,8 @@ export function encryptedWorkspaceRoom(
     if (
       (machine && machine.workspaceId === workspaceId) ||
       room.flockDocId === getWorkspaceFlockDocId(workspaceId as WorkspaceId) ||
-      room.flockDocId === getScheduleRegistryFlockDocId(workspaceId as WorkspaceId)
+      room.flockDocId === getScheduleRegistryFlockDocId(workspaceId as WorkspaceId) ||
+      isWorkspaceCodeCollabFlockDocId(workspaceId, room.flockDocId)
     )
       return { resource: `flock:${room.flockDocId}`, model: 'flock' };
   }
@@ -109,7 +111,19 @@ export function workspaceSupports(
   content: WorkspaceStreamsMode,
   feature: WorkspaceRestrictedFeature
 ): boolean {
-  return content.mode === 'plaintext' || feature === 'presence' || feature === 'export' || feature === 'schedules';
+  if (
+    feature === 'preview-comments' ||
+    feature === 'code-collab-index' ||
+    feature === 'remote-preview'
+  )
+    return true;
+  return (
+    content.mode === 'plaintext' ||
+    feature === 'presence' ||
+    feature === 'export' ||
+    feature === 'attachments' ||
+    feature === 'schedules'
+  );
 }
 
 /** Verified host facts only. This state never supplies ledger authority. */

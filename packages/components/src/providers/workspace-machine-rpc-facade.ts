@@ -121,8 +121,11 @@ type LspRequest = {
 };
 
 export type WorkspaceMachineRpcFacadeDeps = {
+  requestEncryptedFeature?: (
+    request: LocalMachineRpcRequest
+  ) => Promise<import('@lody/shared/local-machine-rpc').LocalMachineRpcResponse>;
   getSessionToken?: () => string | null;
-  /** Same-computer control only; never enables network RPC or a local file API. */
+  /** Trusted same-computer control/file surfaces only; never enables network RPC. */
   isLocalControlMachine?: (machineId: MachineId) => boolean;
   workspaceId: WorkspaceId;
   targetRouter: Pick<WorkspaceTargetRouter, 'getPlaneForMachine' | 'resolvePlaneForMachine'>;
@@ -170,6 +173,11 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
   };
 
   const canUseLocalMachineRpc = async (machineId: MachineId): Promise<boolean> => {
+    if (deps.isLocalControlMachine?.(machineId)) {
+      if (typeof window === 'undefined' || !window.__LODY_ELECTRON__ || !getLocalMachineRpcSender())
+        throw new Error('Local Machine RPC is not available.');
+      return true;
+    }
     await waitForMachineRoute(machineId);
     return Boolean(
       typeof window !== 'undefined' &&
@@ -204,6 +212,11 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           | TResult
           | CodeCollabV2Error
           | null;
+      }
+      if (deps.requestEncryptedFeature) {
+        const response = await deps.requestEncryptedFeature(localRequest);
+        if (!response.ok) throw new Error(response.error);
+        return response.result as TResult;
       }
       return await cloudRequest(await getMachineRpcClient(machineId));
     } catch (error) {
@@ -372,6 +385,18 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           }
           if (request.resolveMarkdownLink && !(await supportsMarkdownLinks(machineId)))
             return unsupportedMarkdownLinks();
+          if (deps.requestEncryptedFeature) {
+            const response = await deps.requestEncryptedFeature({
+              machineId,
+              workspaceId,
+              method: 'file/preview',
+              params,
+              ...ownerSessionFields(options),
+              timeoutMs: options?.timeoutMs ?? 30_000,
+            });
+            if (!response.ok) throw new Error(response.error);
+            return FilePreviewV3ResponseSchema.parse(response.result);
+          }
           const client = await getMachineRpcClient(machineId);
           return await client.requestFilePreview({
             ...params,
@@ -381,6 +406,18 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         }
         if (request.resolveMarkdownLink && !(await supportsMarkdownLinks(machineId)))
           return unsupportedMarkdownLinks();
+        if (deps.requestEncryptedFeature) {
+          const response = await deps.requestEncryptedFeature({
+            machineId,
+            workspaceId,
+            method: 'file/preview',
+            params,
+            ...ownerSessionFields(options),
+            timeoutMs: options?.timeoutMs ?? 30_000,
+          });
+          if (!response.ok) throw new Error(response.error);
+          return FilePreviewV3ResponseSchema.parse(response.result);
+        }
         const client = await getMachineRpcClient(machineId);
         return await client.requestFilePreview({
           ...params,
@@ -1002,7 +1039,10 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
   ): Promise<SessionPreviewCreateResponse | null> => {
     try {
       await waitForMachineRoute(machineId);
-      if (targetRouter.getPlaneForMachine(machineId) === 'local') {
+      if (
+        deps.isLocalControlMachine?.(machineId) ||
+        targetRouter.getPlaneForMachine(machineId) === 'local'
+      ) {
         const response = await getLocalMachineRpcSender()?.({
           method: 'session/preview-create',
           machineId,
@@ -1011,6 +1051,17 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           timeoutMs: options?.timeoutMs ?? DEFAULT_PREVIEW_CREATE_TIMEOUT_MS,
         });
         if (!response) throw new Error('Local preview control is unavailable.');
+        if (!response.ok) throw new Error(response.error);
+        return response.result as SessionPreviewCreateResponse;
+      }
+      if (deps.requestEncryptedFeature) {
+        const response = await deps.requestEncryptedFeature({
+          machineId,
+          workspaceId,
+          method: 'session/preview-create',
+          params: { sessionId, requestedByUserId, target, approval, restart: options?.restart },
+          timeoutMs: options?.timeoutMs ?? 30_000,
+        });
         if (!response.ok) throw new Error(response.error);
         return response.result as SessionPreviewCreateResponse;
       }
@@ -1159,7 +1210,10 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
   ): Promise<SessionPreviewStatusResponse | null> => {
     try {
       await waitForMachineRoute(machineId);
-      if (targetRouter.getPlaneForMachine(machineId) === 'local') {
+      if (
+        deps.isLocalControlMachine?.(machineId) ||
+        targetRouter.getPlaneForMachine(machineId) === 'local'
+      ) {
         const response = await getLocalMachineRpcSender()?.({
           method: 'session/preview-status',
           machineId,
@@ -1168,6 +1222,17 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           timeoutMs: options?.timeoutMs ?? 15_000,
         });
         if (!response) throw new Error('Local preview control is unavailable.');
+        if (!response.ok) throw new Error(response.error);
+        return response.result as SessionPreviewStatusResponse;
+      }
+      if (deps.requestEncryptedFeature) {
+        const response = await deps.requestEncryptedFeature({
+          machineId,
+          workspaceId,
+          method: 'session/preview-status',
+          params: { sessionId, requestedByUserId, renewEndpointId: options?.renewEndpointId },
+          timeoutMs: options?.timeoutMs ?? 30_000,
+        });
         if (!response.ok) throw new Error(response.error);
         return response.result as SessionPreviewStatusResponse;
       }
@@ -1281,7 +1346,10 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
   ): Promise<SessionPreviewRevokeResponse | null> => {
     try {
       await waitForMachineRoute(machineId);
-      if (targetRouter.getPlaneForMachine(machineId) === 'local') {
+      if (
+        deps.isLocalControlMachine?.(machineId) ||
+        targetRouter.getPlaneForMachine(machineId) === 'local'
+      ) {
         const response = await getLocalMachineRpcSender()?.({
           method: 'session/preview-revoke',
           machineId,
@@ -1290,6 +1358,17 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           timeoutMs: options?.timeoutMs ?? 15_000,
         });
         if (!response) throw new Error('Local preview control is unavailable.');
+        if (!response.ok) throw new Error(response.error);
+        return response.result as SessionPreviewRevokeResponse;
+      }
+      if (deps.requestEncryptedFeature) {
+        const response = await deps.requestEncryptedFeature({
+          machineId,
+          workspaceId,
+          method: 'session/preview-revoke',
+          params: { sessionId, requestedByUserId, reason: options?.reason },
+          timeoutMs: options?.timeoutMs ?? 30_000,
+        });
         if (!response.ok) throw new Error(response.error);
         return response.result as SessionPreviewRevokeResponse;
       }

@@ -171,3 +171,46 @@ adapters (`E2eeWorkflows` plus your ports) and drive receive, distribute,
 repair and publish. The core test suites in `test/keys/` show the
 fault cases worth reproducing: lost acknowledgements, retries after restart,
 rejected frames and revocation during a request.
+
+## Machine sharing policy storage (unconnected contract)
+
+Every Scope includes workspace/genesis, machine, owner membership instance and
+`generation` (hex32 initial machine-admission signing key of the uninterrupted
+replacement chain). A verified initial admission plus exact atomic replacements
+qualifies generation through `verifyMachineSharingGeneration`. Pass its opaque
+`machineGeneration` to all core policy operations. The original ledger records and
+snapshot/retained formats do not change. Unknown checkpoint prefixes need genuine
+ledger-history qualification, never a server-chosen root or counter.
+
+Control operations require device credentials/current ledger eligibility. New
+commits require the machine owner's active personal device and
+`admitMachineSharingFrame`. Recheck current generation and eligibility inside the
+same internal mutation as full scope/status/revision/digest CAS, request-intent
+deduplication and original/head insertion. Action-level verification alone cannot
+fence a removal between verification and commit. Every new generation starts at
+revision 1/null parent. Within it, increment by one and reference the complete
+original ciphertext's SHA-256 digest; the frame limit remains 262287 bytes.
+
+Removal permanently closes the old generation and captures its cleanup cutoff.
+Readmission, even for the same member and machineId, has a new initial key and
+resource: require fresh owner intent, private defaults and a new revision-one
+chain, without old policy bytes or pins. Old pending requests must conflict with
+the current ledger generation; no old head can be reactivated. Atomic same-member
+replacement preserves generation/policy. Cleanup and request receipts are scoped
+to the old generation, so delayed deletion cannot touch the new one. Exact old
+committed retries may return their retained receipt or removed after purge, never
+reinsert ciphertext. Keep lightweight original-intent digests to reject altered
+requestId reuse. Purged version reads may return null; old readHead retains its
+removed high water as storage evidence only, never a client verification pin.
+
+`latestForMember` remains an independent account-authenticated query for current
+workspace members, returning ciphertext/untrusted metadata only. It accepts no
+device credential and cannot renew execution freshness; machines use their own
+credential-authenticated latest-head action.
+
+Local cache age is strictly less than 15 minutes from before latest-read I/O,
+intersected with ledger/request deadlines. A server withholding newer versions
+can hide unknown withdrawal indefinitely despite those reads. Signatures and
+local chains provide no globally-latest proof; trusting complete latest delivery
+remains pending owner confirmation. No network or execution integration is enabled
+by this contract. See the [pending Spec increment](../../../specs/e2ee-foundations.md#machine-sharing-policy-pending-approval-increment).

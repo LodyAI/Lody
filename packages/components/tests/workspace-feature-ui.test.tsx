@@ -23,6 +23,8 @@ import {
   saveScheduledMessage,
 } from '../src/components/schedules/scheduled-message-write';
 import type { WorkspaceRuntime } from '../src/atoms/runtime';
+import { createSessionSendResources } from '../src/lib/session-send-resources';
+import type { SessionAttachmentDraft } from '../src/lib/session-attachment-draft';
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import type { SessionMeta } from '@lody/shared';
 import { useWorkspaceFeature } from '../src/hooks/use-workspace-feature';
@@ -131,31 +133,55 @@ it('prepares and saves an encrypted scheduled message through the ordinary repos
   }
 });
 
-it('refuses encrypted scheduled attachment preparation before transferring source bytes', async () => {
-  const runtime = { contentMode: 'e2ee' } as WorkspaceRuntime;
-  await expect(
-    prepareScheduledMessage({
-      runtime,
-      sessionId: 'session' as never,
-      machineId: 'machine' as never,
-      actorId: 'owner',
-      inputBlocks: [],
-      attachments: [
-        {
-          id: 'file',
-          kind: 'file',
-          source: new Blob(['private source']),
-          name: 'private.txt',
-          mimeType: 'text/plain',
-          lastModified: 0,
+it('retains the encrypted scheduled attachment draft when its attachment grant is unavailable', async () => {
+  const resources = createSessionSendResources({
+    acquire: async () => {
+      throw new Error('Unexpected session acquisition');
+    },
+    releaseRef: () => {},
+  });
+  const runtime = {
+    contentMode: 'e2ee',
+    workspaceId: 'workspace',
+    sendResources: resources,
+  } as WorkspaceRuntime;
+  let retained: SessionAttachmentDraft[] = [];
+  try {
+    await expect(
+      prepareScheduledMessage({
+        runtime,
+        sessionId: 'session' as never,
+        machineId: 'machine' as never,
+        actorId: 'owner',
+        inputBlocks: [],
+        attachments: [
+          {
+            id: 'file',
+            kind: 'file',
+            source: new Blob(['private source']),
+            name: 'private.txt',
+            mimeType: 'text/plain',
+            lastModified: 0,
+          },
+        ],
+        token: 'synthetic-auth',
+        localMachineId: null,
+        signal: new AbortController().signal,
+        onAttachments: (attachments) => {
+          retained = attachments;
         },
-      ],
-      token: null,
-      localMachineId: null,
-      signal: new AbortController().signal,
-      onAttachments: () => {},
-    })
-  ).rejects.toThrow('Encrypted workspaces do not yet support attachments.');
+      })
+    ).rejects.toThrow('e2ee_attachment_unavailable');
+    expect(retained[0]).toMatchObject({
+      id: 'file',
+      name: 'private.txt',
+      error: 'e2ee_attachment_unavailable',
+    });
+    expect(retained[0]?.source).toBeInstanceOf(Blob);
+    expect(retained[0]?.ready).toBeUndefined();
+  } finally {
+    await resources.dispose();
+  }
 });
 
 function encryptedStore() {
@@ -185,7 +211,7 @@ it('keeps the ordinary workspace readiness error for encrypted scheduled message
   expect(container.textContent).toBe('Wait for the workspace to finish loading.');
 });
 
-it('renders a Code Collab restriction instead of an endless loading state', async () => {
+it('keeps encrypted Code Collab available while its runtime is starting', async () => {
   function FileStatus() {
     const state = useCodeCollabSessionFileProvider({
       sessionId: 'session',
@@ -205,9 +231,9 @@ it('renders a Code Collab restriction instead of an endless loading state', asyn
       </Provider>
     )
   );
-  expect(container.querySelector('output')?.dataset.status).toBe('unavailable');
+  expect(container.querySelector('output')?.dataset.status).toBe('checking');
   expect(container.querySelector('output')?.dataset.provider).toBe('false');
-  expect(container.textContent).toBe('Encrypted workspaces do not yet support Code Collab.');
+  expect(container.textContent).not.toContain('Encrypted workspaces do not yet support');
 });
 
 it('hides remote machine controls and provider forms with the same explanation', async () => {
@@ -229,12 +255,21 @@ it('hides remote machine controls and provider forms with the same explanation',
   expect(container.querySelector('button')).toBeNull();
 });
 
-it.each(['en', 'zh_CN'])('enables local export controls in encrypted workspaces in %s', async (language) => {
-  await initI18n(language);
-  function ExportControl() {
-    const available = useWorkspaceFeature('export');
-    return <button disabled={!available}>Export</button>;
+it.each(['en', 'zh_CN'])(
+  'enables local export controls in encrypted workspaces in %s',
+  async (language) => {
+    await initI18n(language);
+    function ExportControl() {
+      const available = useWorkspaceFeature('export');
+      return <button disabled={!available}>Export</button>;
+    }
+    await act(async () =>
+      root.render(
+        <Provider store={encryptedStore()}>
+          <ExportControl />
+        </Provider>
+      )
+    );
+    expect(container.querySelector('button')?.disabled).toBe(false);
   }
-  await act(async () => root.render(<Provider store={encryptedStore()}><ExportControl /></Provider>));
-  expect(container.querySelector('button')?.disabled).toBe(false);
-});
+);
