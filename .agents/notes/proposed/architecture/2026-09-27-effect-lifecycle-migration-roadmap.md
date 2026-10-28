@@ -529,6 +529,8 @@ not an exhaustive inventory of the repository.
 | dispatch, MessageHandler and daemon integration      | Turn, delivery and document flush                                    | Pending                     | Promise orchestration                | Shell root runtime exists; broader ownership pending | Stop sessions → flush final writes → tear down documents; report external release failures                                                                                                                                                           |
 | Renderer / Electron / supervisor upper orchestration | Actual per-unit platform and sync dependencies                       | Pending        | Existing islands and process callers | Upper resource/task owners pending                   | Existing islands unassessed; process caller unification is not upper workflow completion; refine into units before delivery                                                                                                                                                       |
 
+| Local MCP authentication / credential relay          | MCP SDK 2.0.0, OS vault, Node listeners                              | Native (local change) | Legacy SessionManager and local RPC facade | Workspace service Scope; attempt and exact-runtime child scopes | [Authorization decision](../../implemented/architecture/2026-10-26-mcp-oauth-local-credentials.md); synthetic flow/isolation tests; OS acceptance and live Slim consent pending                                                                      |
+
 ## Delivery dependency graph
 
 Arrows mean prerequisites, not a global serial ordering. File locks, Git leaves,

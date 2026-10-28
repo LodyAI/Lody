@@ -3150,6 +3150,11 @@ const noticeStyles = stylex.create({
     paddingInline: space[3],
     paddingBottom: space[3],
   },
+  // The follow-up row brings its own hairline and top padding, so the detail
+  // above it closes with the same space[2] the row opens with.
+  detailBeforeAfterDetail: {
+    paddingBottom: space[2],
+  },
   detailText: {
     display: 'block',
     minWidth: 0,
@@ -3163,10 +3168,12 @@ const noticeStyles = stylex.create({
     paddingInline: space[3],
     paddingBottom: space[3],
   },
+  // Its own block under the detail, not a header flex child: inside the header
+  // it took the full row width and squeezed the label into a one-glyph column.
   afterDetail: {
-    order: 6,
-    width: '100%',
     minWidth: 0,
+    paddingInline: space[3],
+    paddingBottom: space[3],
   },
 });
 
@@ -3232,7 +3239,7 @@ export const AgentNoticeBanner = ({
   const copyRidesHeader = !action;
   const headerTrailing = action ?? (copyRidesHeader ? footer : undefined);
   const bodyFooter = copyRidesHeader ? null : footer;
-  const hasBody = Boolean(detail || bodyFooter);
+  const hasBody = Boolean(detail || afterDetail || bodyFooter);
 
   return (
     <div style={{ background: fillColor }} className="w-full overflow-hidden rounded-lg">
@@ -3242,13 +3249,18 @@ export const AgentNoticeBanner = ({
         {headerTrailing ? (
           <div {...stylex.props(noticeStyles.trailing)}>{headerTrailing}</div>
         ) : null}
-        {afterDetail ? <div {...stylex.props(noticeStyles.afterDetail)}>{afterDetail}</div> : null}
       </div>
       {detail ? (
-        <div {...stylex.props(noticeStyles.detail)}>
+        <div
+          {...stylex.props(
+            noticeStyles.detail,
+            afterDetail ? noticeStyles.detailBeforeAfterDetail : null
+          )}
+        >
           <span {...stylex.props(noticeStyles.detailText)}>{detail}</span>
         </div>
       ) : null}
+      {afterDetail ? <div {...stylex.props(noticeStyles.afterDetail)}>{afterDetail}</div> : null}
       {bodyFooter ? <div {...stylex.props(noticeStyles.footer)}>{bodyFooter}</div> : null}
     </div>
   );

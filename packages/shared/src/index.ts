@@ -126,6 +126,7 @@ export * from './file-preview';
 export * from './file-download';
 export * from './machine-flock';
 export * from './workspace-mcp';
+export * from './mcp-authentication';
 export * from './agent-role';
 export * from './agent-role-proposal';
 export * from './workspace-flock';

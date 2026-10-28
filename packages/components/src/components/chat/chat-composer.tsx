@@ -78,41 +78,64 @@ const typography = stylex.create({
 });
 
 const promptSuggestionStyles = stylex.create({
-  // The hint rides over the empty textarea's first line, so its text sits where
-  // typing will appear. Only the mobile "Apply" control takes pointer events;
-  // everything else lets the press reach the input.
+  // The hint is ghost text over the empty textarea, set in the textarea's own
+  // size and line height so it sits exactly where typing will appear. The
+  // empty textarea grows to the hint's height (see the auto-resize effect), so
+  // a wrapped hint never covers the footer. Only the mobile "Apply" control
+  // takes pointer events; everything else lets the press reach the input.
   anchor: { position: 'relative' },
   anchorSheet: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' },
-  overlaySheet: { insetInlineStart: '1.25rem', insetInlineEnd: '1.25rem', top: space[4] },
   overlay: {
     position: 'absolute',
     insetInlineStart: space[1],
     insetInlineEnd: space[1],
+    // The empty textarea's caret blinks at the line start; leave room so it
+    // shows just before the hint instead of under the key cap.
+    paddingInlineStart: space[1.5],
     top: 0,
     zIndex: 20,
     display: 'flex',
-    alignItems: 'center',
-    gap: space[1.5],
+    alignItems: 'flex-start',
+    gap: space[2],
     minWidth: 0,
     pointerEvents: 'none',
     userSelect: 'none',
     color: colors.secondaryLabel,
     fontSize: textScale.bodySize,
+    // The session textarea's `leading-6`.
+    lineHeight: '1.5rem',
+  },
+  overlayLanding: {
+    insetInlineStart: 0,
+    insetInlineEnd: 0,
     lineHeight: textScale.bodyLeading,
   },
-  overlayLanding: { insetInlineStart: 0, insetInlineEnd: 0 },
+  // The sheet textarea's `px-5 py-4 text-base leading-7`.
+  overlaySheet: {
+    insetInlineStart: '1.25rem',
+    insetInlineEnd: '1.25rem',
+    top: space[4],
+    fontSize: '1rem',
+    lineHeight: '1.75rem',
+  },
   text: {
     minWidth: 0,
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 3,
     overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'anywhere',
   },
-  apply: {
+  // Leads the hint, away from the send button. One line tall, so the key cap or
+  // Apply control centres on the hint's first line.
+  accept: {
     display: 'inline-flex',
     flexShrink: 0,
     alignItems: 'center',
-    pointerEvents: 'auto',
+    height: '1lh',
   },
+  apply: { pointerEvents: 'auto' },
 });
 
 type ChatComposerTone = 'light' | 'dark';
@@ -583,6 +606,22 @@ export function ChatComposer({
     promptSuggestion.trim().length > 0
       ? promptSuggestion
       : null;
+  // The wrapped hint's rendered height; the empty textarea grows to it.
+  const promptSuggestionRef = useRef<HTMLDivElement>(null);
+  const [promptSuggestionHeight, setPromptSuggestionHeight] = useState(0);
+  useLayoutEffect(() => {
+    const overlay = promptSuggestionRef.current;
+    if (!overlay) {
+      setPromptSuggestionHeight(0);
+      return undefined;
+    }
+    const measure = () => setPromptSuggestionHeight(overlay.offsetHeight);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(overlay);
+    return () => observer.disconnect();
+  }, [visiblePromptSuggestion]);
   // Written only after the owner's controlled value carries the text, so the
   // caret lands at the end of the accepted draft. A ref, not state: acceptance
   // is a one-shot handoff, not a rendered mode.
@@ -748,7 +787,11 @@ export function ChatComposer({
     // mirror and forcing layout while an empty composer mounts on session switch.
     const hasValue = (promptValue ?? '').length > 0;
     if (!hasValue) {
-      textarea.style.height = `${minHeight}px`;
+      // A visible prompt suggestion overlays the empty box; grow to hold it so
+      // a wrapped hint never runs over the footer.
+      const suggestionHeight =
+        promptSuggestionHeight > 0 ? promptSuggestionHeight + paddingTop + paddingBottom : 0;
+      textarea.style.height = `${Math.min(maxHeight, Math.max(minHeight, suggestionHeight))}px`;
       textarea.style.overflowY = 'hidden';
       return;
     }
@@ -760,7 +803,7 @@ export function ChatComposer({
 
     textarea.style.height = `${newHeight}px`;
     textarea.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
-  }, [autoResize, promptValue, promptRef, effectivePromptRows, maxRows]);
+  }, [autoResize, promptValue, promptRef, effectivePromptRows, maxRows, promptSuggestionHeight]);
 
   const boxTextareaClassName = getChatComposerTextareaClassName({ tone, variant, isMobile });
 
@@ -1226,9 +1269,15 @@ export function ChatComposer({
                       isSheet && promptSuggestionStyles.overlaySheet
                     )}
                     data-prompt-suggestion=""
+                    ref={promptSuggestionRef}
                   >
                     {isMobile ? (
-                      <span {...stylex.props(promptSuggestionStyles.apply)}>
+                      <span
+                        {...stylex.props(
+                          promptSuggestionStyles.accept,
+                          promptSuggestionStyles.apply
+                        )}
+                      >
                         <Button
                           type="button"
                           variant="secondary"
@@ -1244,9 +1293,11 @@ export function ChatComposer({
                         </Button>
                       </span>
                     ) : (
-                      // Literal "Tab": the shared binding formatter renders the
-                      // Mac tab glyph, which is not the word this hint teaches.
-                      <KbdPrimitive>Tab</KbdPrimitive>
+                      <span {...stylex.props(promptSuggestionStyles.accept)}>
+                        {/* Literal "Tab": the shared binding formatter renders the
+                            Mac tab glyph, which is not the word this hint teaches. */}
+                        <KbdPrimitive>Tab</KbdPrimitive>
+                      </span>
                     )}
                     <span {...stylex.props(promptSuggestionStyles.text)}>
                       {visiblePromptSuggestion}

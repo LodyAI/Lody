@@ -115,7 +115,7 @@ export function workspaceSupports(
     feature === 'remote-preview'
   )
     return true;
-  return content.mode === 'plaintext' || feature === 'presence';
+  return content.mode === 'plaintext' || feature === 'presence' || feature === 'export';
 }
 
 /** Verified host facts only. This state never supplies ledger authority. */
