@@ -63,6 +63,10 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
 
 ## Message hub and transports
 
+`message-processor.ts` separates health reads, cancellation, per-provider refreshes
+and per-agent installs from slow probes; restart/upgrade share one lifecycle lane.
+Unlisted requests retain their existing ordering. [Local control lane decision](../../../../.agents/notes/implemented/bug-fix/2026-09-20-acp-authenticate-queue-lane.md).
+
 - `github-git-transport.ts` — generated Git wrapper and HTTP credential adapters.
   HTTP helper redispatch preserves the parent operation's read/write context;
   independent commands classify themselves, and missing/invalid helper context

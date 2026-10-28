@@ -66,7 +66,10 @@ context/message-flow.md "Upstream".
   URLs, device codes, expiry, and Claude's optional browser-returned code input.
 - `acp-binary-manager.ts` — registry binary-distribution agents (tar/zip install).
 - `npx-cache.ts` — npx cache isolation plus poisoning detection/purge for resilient
-  registry launches.
+  registry launches. Cold initialize timeouts retain downloaded `_cacache` content and
+  unrelated installs; only matching package `_npx` directories may be removed before
+  the existing cleanup/retry. True npm cache corruption retains the whole Lody-cache
+  fallback. [Recovery decision](../../../../.agents/notes/implemented/bug-fix/2026-09-20-acp-authenticate-queue-lane.md).
 - `acp-capabilities.ts` / `acp-startup-monitor.ts` / `acp-analytics.ts` — capability probing,
   startup health, analytics. Each capability probe owns a unique writable temporary
   workspace for process startup and `session/new`, independent of the daemon cwd.
