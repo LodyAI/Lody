@@ -27,6 +27,10 @@ import {
 } from '../src/index';
 
 it('keeps machine sharing tombstones and account display outside execution credentials', () => {
+  expectTypeOf<E2eeMachineSharingRequests['commit']>().toMatchTypeOf<{ generation: string }>();
+  expectTypeOf<E2eeMachineSharingReplies['readHead']>()
+    .exclude<null>()
+    .toMatchTypeOf<{ generation: string }>();
   expectTypeOf<
     E2eeMachineSharingRequests['commit']['expectedHead']
   >().toEqualTypeOf<E2eeMachineSharingHeadState | null>();

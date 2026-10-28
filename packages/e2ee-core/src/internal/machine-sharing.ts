@@ -9,6 +9,10 @@ import type { DeviceSigner } from './foundation/signing';
 import { decodeMachineId, encodeMachineId } from './ledger/machine-id';
 import { contentPermissions, requireLedgerContinuation, type LedgerView } from './ledger';
 import { historicalDeviceKind } from './ledger/replay';
+import {
+  requireMachineSharingGeneration,
+  type VerifiedMachineSharingGeneration,
+} from './machine-sharing-generation';
 import { admitDocument, openDocument, sealDocument, type DocumentKey } from './content';
 
 /** Independent trusted resource identity. Membership is an instance, never an account/display ID. */
@@ -17,6 +21,8 @@ export interface MachineSharingBinding {
   readonly genesisHash: string;
   readonly machineId: string;
   readonly ownerMembershipId: string;
+  /** Initial admission signing key (hex32) of the current uninterrupted replacement chain. */
+  readonly generation: string;
 }
 /** Complete sharing state. Listed localProjectIds are shared only while the machine switch is on. */
 export interface MachineSharingState {
@@ -61,7 +67,7 @@ const policies = new WeakMap<
   VerifiedMachineSharingPolicy,
   { policy: MachineSharingPolicy; ledger: LedgerView }
 >();
-const domain = () => new TextEncoder().encode('lody-e2ee/machine-sharing/v1\0');
+const domain = () => new TextEncoder().encode('lody-e2ee/machine-sharing/v2\0');
 const fail = (code: string) => Result.fail(new ContentError({ code }));
 const mapped = <A, E>(value: Result.Result<A, E>, code = 'invalid-policy') =>
   Result.mapError(value, () => new ContentError({ code }));
@@ -112,7 +118,7 @@ export function updateMachineSharingState(
     });
   });
 }
-/** Canonical, bounded v1 business body. No ledger format change; project order is bytewise UTF-8, duplicates fail. */
+/** Canonical, bounded v2 business body. No ledger format change; project order is bytewise UTF-8, duplicates fail. */
 export function encodeMachineSharingPolicy(
   policy: MachineSharingPolicy
 ): Result.Result<Uint8Array, ContentError> {
@@ -123,6 +129,8 @@ export function encodeMachineSharingPolicy(
       owner = yield* rawHex(policy.ownerMembershipId, 16);
     const signer = yield* rawHex(policy.signer, 32),
       request = yield* rawHex(policy.requestId, 16);
+    const generation = yield* rawHex(policy.generation, 32);
+    yield* mapped(Bytes.signingPublicKey(generation));
     yield* mapped(Bytes.signingPublicKey(signer));
     if (
       !Number.isSafeInteger(policy.revision) ||
@@ -138,7 +146,7 @@ export function encodeMachineSharingPolicy(
     const projects = yield* projectSet(policy.projects);
     return yield* mapped(
       encodeMachineSharingCbor([
-        1,
+        2,
         1,
         workspace,
         genesis,
@@ -151,18 +159,19 @@ export function encodeMachineSharingPolicy(
         signer,
         policy.issuedAt,
         request,
+        generation,
       ])
     );
   });
 }
-/** Decode exact canonical v1 bytes. Does not establish signature, authority, ordering or freshness. */
+/** Decode exact canonical v2 bytes. Does not establish signature, authority, ordering or freshness. */
 export function decodeMachineSharingPolicy(
   bytes: Uint8Array
 ): Result.Result<MachineSharingPolicy, ContentError> {
   return Result.gen(function* () {
     const row = yield* mapped(decodeMachineSharingCbor(bytes));
-    if (!Array.isArray(row) || row.length !== 13) return yield* fail('invalid-policy');
-    if (row[0] !== 1) return yield* fail('unsupported-policy-version');
+    if (!Array.isArray(row) || row.length !== 14) return yield* fail('invalid-policy');
+    if (row[0] !== 2) return yield* fail('unsupported-policy-version');
     if (row[1] !== 1) return yield* fail('invalid-policy-purpose');
     const [
       ,
@@ -178,6 +187,7 @@ export function decodeMachineSharingPolicy(
       signer,
       issuedAt,
       request,
+      generation,
     ] = row;
     const text = (value: unknown) => mapped(decodeMachineId(value));
     if (
@@ -185,6 +195,7 @@ export function decodeMachineSharingPolicy(
       !(owner instanceof Uint8Array) ||
       !(signer instanceof Uint8Array) ||
       !(request instanceof Uint8Array) ||
+      !(generation instanceof Uint8Array) ||
       (previous !== null && !(previous instanceof Uint8Array)) ||
       typeof revision !== 'number' ||
       typeof issuedAt !== 'number' ||
@@ -206,6 +217,7 @@ export function decodeMachineSharingPolicy(
       signer: keyId(signer),
       issuedAt,
       requestId: keyId(request),
+      generation: keyId(generation),
     });
     const encoded = yield* encodeMachineSharingPolicy(policy);
     const canonical = bytesEqual(encoded, bytes);
@@ -223,6 +235,7 @@ export function machineSharingContentScope(
     yield* identity(binding.workspaceId);
     yield* rawHex(binding.genesisHash, 32);
     yield* rawHex(binding.ownerMembershipId, 16);
+    yield* mapped(Bytes.signingPublicKey(yield* rawHex(binding.generation, 32)));
     const machine = yield* identity(binding.machineId);
     const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
     let encoded = '';
@@ -239,7 +252,7 @@ export function machineSharingContentScope(
       epoch,
       docEpoch: 0,
       purpose: 'doc-update',
-      resource: `machine-access:${encoded}:${binding.ownerMembershipId}`,
+      resource: `machine-access:${encoded}:${binding.ownerMembershipId}:${binding.generation}`,
     });
     yield* encodeContentContext(scope);
     return scope;
@@ -253,10 +266,12 @@ export function machineSharingDigest(frame: Uint8Array): Result.Result<string, C
 }
 function policyAuthority(
   ledger: LedgerView,
-  policy: MachineSharingBinding & { readonly signer: string }
+  policy: MachineSharingBinding & { readonly signer: string },
+  machineGeneration: VerifiedMachineSharingGeneration
 ) {
   return Result.gen(function* () {
     yield* mapped(requireLedgerContinuation(ledger, ledger), 'invalid-policy-ledger');
+    yield* requireMachineSharingGeneration(ledger, policy, machineGeneration);
     if (keyId(ledger.genesis.toBytes()) !== policy.genesisHash)
       return yield* fail('policy-binding-mismatch');
     const state = ledger.inspectState(),
@@ -283,7 +298,8 @@ function sameBinding(a: MachineSharingBinding, b: MachineSharingBinding) {
     a.workspaceId === b.workspaceId &&
     a.genesisHash === b.genesisHash &&
     a.machineId === b.machineId &&
-    a.ownerMembershipId === b.ownerMembershipId
+    a.ownerMembershipId === b.ownerMembershipId &&
+    a.generation === b.generation
   );
 }
 /** Backend admission without decryption. The authenticated device must be the current machine owner's personal
@@ -295,13 +311,18 @@ export function admitMachineSharingFrame(input: {
   readonly epoch: number;
   readonly frame: Uint8Array;
   readonly authenticatedDevice: Bytes.SigningPublicKey;
+  readonly machineGeneration: VerifiedMachineSharingGeneration;
 }) {
   return Result.gen(function* () {
     const scope = yield* machineSharingContentScope(input.binding, input.epoch);
-    yield* policyAuthority(input.ledger, {
-      ...input.binding,
-      signer: keyId(input.authenticatedDevice.toBytes()),
-    });
+    yield* policyAuthority(
+      input.ledger,
+      {
+        ...input.binding,
+        signer: keyId(input.authenticatedDevice.toBytes()),
+      },
+      input.machineGeneration
+    );
     const digest = yield* machineSharingDigest(input.frame);
     yield* admitDocument(input.ledger, scope, input.frame, input.authenticatedDevice, domain());
     return Object.freeze({ digest });
@@ -316,6 +337,7 @@ export const sealMachineSharingPolicy = Effect.fnUntraced(function* (input: {
   readonly documentKey: DocumentKey;
   readonly signer: DeviceSigner;
   readonly ledger: () => Effect.Effect<LedgerView, ContentError>;
+  readonly machineGeneration: VerifiedMachineSharingGeneration;
 }) {
   return yield* Effect.acquireUseRelease(
     Effect.suspend(() => Effect.fromResult(encodeMachineSharingPolicy(input.policy))),
@@ -333,9 +355,10 @@ export const sealMachineSharingPolicy = Effect.fnUntraced(function* (input: {
         if (keyId(signer.publicKey.toBytes()) !== policy.signer)
           return yield* new ContentError({ code: 'policy-signer-ineligible' });
         const lookup = input.ledger;
+        const machineGeneration = input.machineGeneration;
         const documentKey = input.documentKey;
         const before = yield* lookup();
-        yield* Effect.fromResult(policyAuthority(before, policy));
+        yield* Effect.fromResult(policyAuthority(before, policy, machineGeneration));
         const frame = yield* sealDocument({
           scope,
           documentKey,
@@ -348,7 +371,7 @@ export const sealMachineSharingPolicy = Effect.fnUntraced(function* (input: {
         yield* Effect.fromResult(
           mapped(requireLedgerContinuation(before, after), 'invalid-policy-ledger')
         );
-        yield* Effect.fromResult(policyAuthority(after, policy));
+        yield* Effect.fromResult(policyAuthority(after, policy, machineGeneration));
         return frame;
       }),
     (plaintext) => Effect.sync(() => plaintext.fill(0))
@@ -358,6 +381,7 @@ export const sealMachineSharingPolicy = Effect.fnUntraced(function* (input: {
  * Equal revision/digest is idempotent; rollback, fork, skipped revision and wrong previous digest fail. Wipes plaintext.
  * Reopening retained pins and proving an authenticated latest read are host duties, not granted by expectedHead. */
 interface OpenPolicyInput {
+  readonly machineGeneration: VerifiedMachineSharingGeneration;
   readonly ledger: LedgerView;
   readonly binding: MachineSharingBinding;
   readonly epoch: number;
@@ -368,6 +392,7 @@ interface OpenPolicyInput {
 }
 function readPolicyFrame(input: OpenPolicyInput) {
   return Result.gen(function* () {
+    yield* requireMachineSharingGeneration(input.ledger, input.binding, input.machineGeneration);
     const digest = yield* machineSharingDigest(input.frame);
     if (digest !== input.expectedHead.digest) return yield* fail('policy-version-conflict');
     const scope = yield* machineSharingContentScope(input.binding, input.epoch);
@@ -447,7 +472,7 @@ export function openMachineSharingPolicy(
 ): Result.Result<VerifiedMachineSharingPolicy, ContentError> {
   return Result.gen(function* () {
     const { policy, head } = yield* readPolicyFrame(input);
-    yield* policyAuthority(input.ledger, policy);
+    yield* policyAuthority(input.ledger, policy, input.machineGeneration);
     const evidence: VerifiedMachineSharingPolicy = Object.freeze({
       [verified]: true as const,
       head,
@@ -466,6 +491,7 @@ export type MachineExecutionDecision =
         | 'ledger-unverified'
         | 'requester-ineligible'
         | 'target-ineligible'
+        | 'target-generation-mismatch'
         | 'policy-unavailable'
         | 'policy-unverified'
         | 'policy-ledger-conflict'
@@ -479,6 +505,7 @@ export type MachineExecutionDecision =
  * Recovery/Guest never execute; same-owner execution needs no sharing policy. Each later action must call again
  * with the newest verified policy/ledger. Host freshness, actual project resolution and durable-start deduplication remain mandatory. */
 export function authorizeMachineExecution(input: {
+  readonly machineGeneration: VerifiedMachineSharingGeneration;
   readonly ledger: LedgerView;
   readonly policy: VerifiedMachineSharingPolicy | null;
   readonly signer: Bytes.SigningPublicKey;
@@ -487,6 +514,7 @@ export function authorizeMachineExecution(input: {
     readonly workspaceId: string;
     readonly genesisHash: string;
     readonly machineId: string;
+    readonly generation: string;
     readonly device: Bytes.SigningPublicKey;
   };
 }): MachineExecutionDecision {
@@ -512,6 +540,16 @@ export function authorizeMachineExecution(input: {
     return deny('target-ineligible');
   if (input.localProjectId !== undefined && Result.isFailure(identity(input.localProjectId)))
     return deny('invalid-project');
+  if (
+    Result.isFailure(
+      requireMachineSharingGeneration(
+        input.ledger,
+        { ...target, ownerMembershipId: keyId(machine.membershipId.toBytes()) },
+        input.machineGeneration
+      )
+    )
+  )
+    return deny('target-generation-mismatch');
   const requester = state.devices.get(keyId(input.signer.toBytes()))!;
   if (requester.membershipId.equals(machine.membershipId))
     return { allowed: true, reason: 'owner' };
@@ -523,7 +561,7 @@ export function authorizeMachineExecution(input: {
   const policy = evidence.policy;
   if (!sameBinding(policy, { ...target, ownerMembershipId: keyId(machine.membershipId.toBytes()) }))
     return deny('policy-binding-mismatch');
-  if (Result.isFailure(policyAuthority(input.ledger, policy)))
+  if (Result.isFailure(policyAuthority(input.ledger, policy, input.machineGeneration)))
     return deny('policy-signer-ineligible');
   if (!policy.sharedWithTeam) return deny('machine-not-shared');
   if (input.localProjectId !== undefined && !policy.projects.includes(input.localProjectId))

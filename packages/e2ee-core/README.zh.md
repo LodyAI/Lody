@@ -42,6 +42,12 @@ platform/cloud-api 定义对应 CAS DTO。这些原语
 开放通道前须在可信宿主落实这些门槛。重试保留返回的原帧；再次运行 seal 会重新加密。
 本改动不启用产品传输。
 
+共享签名格式为 current-only v2；每份 scope 包含 generation，即连续原子替换链的
+首次机器签名公钥。`verifyMachineSharingGeneration` 通过真实账本位置验证准入原文链，
+其不透明 `machineGeneration` 证据必须传给签发、打开、历史读取、宿主准入和执行判断。
+移除后重新准入使用新资源，从私有默认值和第 1 版开始；原子替换保留原代次。压缩视图
+若缺少这些账本检查点，需用完整已验证终点核验，不能相信服务端提示或旧策略高水位。
+
 | 导入路径 | 内容 | 稳定性 |
 | --- | --- | --- |
 | `@lody/e2ee-core` | 流程（`KeyReceiver`、`EpochPublisher` 等）、它们的错误与结果、`E2eeWorkflows` | 公开 |

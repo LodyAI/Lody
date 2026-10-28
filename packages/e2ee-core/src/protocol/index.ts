@@ -81,6 +81,11 @@ export {
 
 // Machine sharing
 export {
+  verifyMachineSharingGeneration,
+  type VerifiedMachineSharingGeneration,
+  type MachineSharingAdmission,
+} from '../internal/machine-sharing-generation';
+export {
   updateMachineSharingState,
   encodeMachineSharingPolicy,
   decodeMachineSharingPolicy,

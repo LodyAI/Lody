@@ -55,6 +55,15 @@ DTOs. These are inert primitives, with no network, UI or execution integration.
 The [sharing proposal](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md)
 records the pending Spec increment and remaining host responsibilities.
 
+The signed sharing format is current-only v2. Every scope includes a generation:
+the initial machine signing key of its uninterrupted atomic-replacement chain.
+`verifyMachineSharingGeneration` qualifies that chain's original admission records
+at their genuine ledger positions. Supply its opaque `machineGeneration` evidence
+to seal/open/history/admission/execution calls. Removal/readmission starts a new
+resource at revision 1 with private defaults; atomic replacement retains the root.
+A compact view without those ledger checkpoints needs qualification against a
+full verified endpoint; server hints or removed-policy high waters are insufficient.
+
 | Import | Contents | Stability |
 | --- | --- | --- |
 | `@lody/e2ee-core` | workflows (`KeyReceiver`, `EpochPublisher`, …), their errors and results, `E2eeWorkflows` | public |

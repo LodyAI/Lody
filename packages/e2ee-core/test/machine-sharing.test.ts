@@ -29,9 +29,11 @@ async function fixture() {
   const f = envelopeFixture(1);
   cleanup.push(() => disposeEpochKey(f.secret));
   let view = f.view();
+  const records: Uint8Array[] = f.records();
   const command = async (intent: P.LedgerCommand, signer = f.owner.signer) => {
     const prepared = ok(P.prepareLedgerCommand(view, signer.publicKey, intent));
     const original = await Effect.runPromise(P.signLedgerRecord(prepared, signer));
+    records.push(original);
     view = ok(
       P.extendLedger(view, [original], {
         head: P.hashRecordBytes(original),
@@ -70,8 +72,41 @@ async function fixture() {
       )
     );
   }
+  const machineGeneration = (device = f.phone.publicKey) => {
+    const byKey = new Map<string, P.MachineSharingAdmission & { replaces: string | null }>();
+    records.forEach((record, i) => {
+      const body = ok(P.decodeRecord(record)).body;
+      if (
+        body.type === 'ordinary' &&
+        body.operation.type === 'admitDevice' &&
+        body.operation.kind === 'machine'
+      )
+        byKey.set(hex(body.operation.signingPublicKey), {
+          record,
+          length: i + 1,
+          replaces: body.operation.replaces ? hex(body.operation.replaces) : null,
+        });
+    });
+    const admissionChain: P.MachineSharingAdmission[] = [];
+    let key: string | null = hex(device);
+    while (key !== null) {
+      const step: P.MachineSharingAdmission & { replaces: string | null } = byKey.get(key)!;
+      admissionChain.unshift(step);
+      key = step.replaces;
+    }
+    return ok(
+      P.verifyMachineSharingGeneration({
+        ledger: view,
+        machineId: 'fixture-machine',
+        device,
+        admissionChain,
+      })
+    );
+  };
+  const generation = machineGeneration();
   const binding: P.MachineSharingBinding = {
     workspaceId: 'workspace-a',
+    generation: generation.generation,
     genesisHash: hex(view.genesis),
     machineId: 'fixture-machine',
     ownerMembershipId: hex(view.inspectState().owner),
@@ -92,6 +127,7 @@ async function fixture() {
   const seal = (body = policy, signer = f.owner.signer) =>
     Effect.runPromise(
       P.sealMachineSharingPolicy({
+        machineGeneration: generation,
         policy: body,
         epoch: 0,
         documentKey: key,
@@ -101,6 +137,7 @@ async function fixture() {
     );
   const open = (frame: Uint8Array, previous: P.MachineSharingHead | null = null, revision = 1) =>
     P.openMachineSharingPolicy({
+      machineGeneration: generation,
       ledger: view,
       binding,
       epoch: 0,
@@ -115,6 +152,7 @@ async function fixture() {
     localProjectId?: string
   ) =>
     P.authorizeMachineExecution({
+      machineGeneration: generation,
       ledger: view,
       policy: evidence,
       signer,
@@ -122,6 +160,7 @@ async function fixture() {
         workspaceId: binding.workspaceId,
         genesisHash: binding.genesisHash,
         machineId: binding.machineId,
+        generation: binding.generation,
         device: f.phone.publicKey,
       },
       localProjectId,
@@ -133,6 +172,8 @@ async function fixture() {
     second,
     recovery,
     binding,
+    machineGeneration,
+    generation,
     scope,
     key,
     policy,
@@ -242,6 +283,7 @@ describe('owner-signed complete machine sharing policies', () => {
       expect(
         Result.isFailure(
           P.openMachineSharingPolicy({
+            machineGeneration: f.generation,
             ledger: f.current(),
             binding: { ...f.binding, ...change },
             epoch: 0,
@@ -257,6 +299,7 @@ describe('owner-signed complete machine sharing policies', () => {
       const outcome = await Effect.runPromise(
         Effect.result(
           P.sealMachineSharingPolicy({
+            machineGeneration: f.generation,
             policy: { ...f.policy, signer: hex(signer.publicKey) },
             epoch: 0,
             documentKey: f.key,
@@ -270,12 +313,14 @@ describe('owner-signed complete machine sharing policies', () => {
     const verified = ok(f.open(frame));
     expect(
       P.authorizeMachineExecution({
+        machineGeneration: f.generation,
         ledger: f.current(),
         policy: verified,
         signer: f.bob.publicKey,
         target: {
           workspaceId: 'workspace-a',
           genesisHash: f.binding.genesisHash,
+          generation: f.binding.generation,
           machineId: 'wrong',
           device: f.phone.publicKey,
         },
@@ -297,6 +342,7 @@ describe('owner-signed complete machine sharing policies', () => {
     // A fresh machine may traverse revoked history, but that result is no execution capability.
     const historical = ok(
       P.verifyMachineSharingHistoryStep({
+        machineGeneration: f.generation,
         ledger: f.current(),
         binding: f.binding,
         epoch: 0,
@@ -312,6 +358,7 @@ describe('owner-signed complete machine sharing policies', () => {
       reason: 'policy-unverified',
     });
     const historyInput = {
+      machineGeneration: f.generation,
       ledger: f.current(),
       binding: f.binding,
       epoch: 0,
@@ -331,9 +378,15 @@ describe('owner-signed complete machine sharing policies', () => {
       reason: 'policy-unverified',
     });
     const retained = ok(P.restoreVerifiedState(ok(P.exportVerifiedState(f.current()))));
-    expect(ok(P.readMachineSharingHistoryStep({ ...historyInput, ledger: retained }))).toEqual(
-      history
-    );
+    expect(
+      ok(
+        P.readMachineSharingHistoryStep({
+          ...historyInput,
+          ledger: retained,
+          machineGeneration: f.machineGeneration(),
+        })
+      )
+    ).toEqual(history);
     expect(
       Result.isFailure(
         P.readMachineSharingHistoryStep({
@@ -377,15 +430,221 @@ describe('owner-signed complete machine sharing policies', () => {
       })
     );
     await f.command({ ...admission, replaces: f.phone.publicKey });
+    expect(f.machineGeneration(replacement.publicKey).generation).toBe(f.binding.generation);
     expect(f.authorize(verified)).toEqual({ allowed: false, reason: 'target-ineligible' });
     expect(
       P.authorizeMachineExecution({
         ledger: f.current(),
         policy: verified,
         signer: f.bob.publicKey,
+        machineGeneration: f.machineGeneration(replacement.publicKey),
         target: { ...f.binding, device: replacement.publicKey },
       })
     ).toEqual({ allowed: true, reason: 'team' });
+  });
+
+  it('fences old intents/evidence after remove and same-member readmission, then bootstraps a new revision-one resource without old policy history', async () => {
+    const f = await fixture(),
+      oldFrame = await f.seal(),
+      oldPolicy = ok(f.open(oldFrame));
+    const pending = await f.seal({
+      ...f.policy,
+      revision: 2,
+      previousDigest: oldPolicy.head.digest,
+      requestId: '42'.repeat(16),
+    });
+    await f.command({ _tag: 'RevokeDevice', target: f.phone.publicKey });
+    const machine = f.ed(27);
+    await f.command(
+      await Effect.runPromise(
+        P.prepareDeviceAdmission({
+          genesis: f.current().genesis,
+          membershipId: f.current().inspectState().owner,
+          kind: 'machine',
+          machineId: f.binding.machineId,
+          encryptionPublicKey: ok(P.Bytes.encryptionPublicKey(filled(127))),
+          signer: machine.signer,
+        })
+      )
+    );
+    const generation = f.machineGeneration(machine.publicKey);
+    expect(generation.generation).not.toBe(f.binding.generation);
+    const binding = { ...f.binding, generation: generation.generation };
+    const target = { ...binding, device: machine.publicKey };
+    const authorize = (policy: P.VerifiedMachineSharingPolicy | null) =>
+      P.authorizeMachineExecution({
+        ledger: f.current(),
+        machineGeneration: generation,
+        target,
+        signer: f.bob.publicKey,
+        policy,
+        localProjectId: 'project-a',
+      });
+    expect(authorize(oldPolicy)).toEqual({ allowed: false, reason: 'policy-binding-mismatch' });
+    expect(authorize(null)).toEqual({ allowed: false, reason: 'policy-unavailable' });
+    expect(
+      Result.isFailure(
+        admitMachineSharingFrame({
+          ledger: f.current(),
+          binding: f.binding,
+          machineGeneration: generation,
+          epoch: 0,
+          frame: pending,
+          authenticatedDevice: f.owner.publicKey,
+        })
+      )
+    ).toBe(true);
+    expect(
+      Result.isFailure(
+        admitMachineSharingFrame({
+          ledger: f.current(),
+          binding,
+          machineGeneration: generation,
+          epoch: 0,
+          frame: pending,
+          authenticatedDevice: f.owner.publicKey,
+        })
+      )
+    ).toBe(true);
+    expect(
+      Result.isFailure(
+        P.openMachineSharingPolicy({
+          ledger: f.current(),
+          binding: f.binding,
+          machineGeneration: f.generation,
+          epoch: 0,
+          frame: oldFrame,
+          documentKey: f.key,
+          expectedHead: oldPolicy.head,
+          previous: null,
+        })
+      )
+    ).toBe(true);
+    const scope = ok(P.machineSharingContentScope(binding, 0));
+    expect(scope.resource).not.toBe(f.scope.resource);
+    const key = ok(P.deriveDocumentKey(scope, f.secret));
+    cleanup.push(() => P.disposeDocumentKey(key));
+    const policy = {
+      ...f.policy,
+      ...binding,
+      sharedWithTeam: false,
+      projects: [],
+      revision: 1,
+      previousDigest: null,
+      requestId: '43'.repeat(16),
+    };
+    const seal = (body: P.MachineSharingPolicy) =>
+      Effect.runPromise(
+        P.sealMachineSharingPolicy({
+          policy: body,
+          machineGeneration: generation,
+          epoch: 0,
+          documentKey: key,
+          signer: f.owner.signer,
+          ledger: () => Effect.succeed(f.current()),
+        })
+      );
+    const open = (frame: Uint8Array, previous: P.MachineSharingHead | null, revision: number) =>
+      P.openMachineSharingPolicy({
+        ledger: f.current(),
+        binding,
+        machineGeneration: generation,
+        epoch: 0,
+        documentKey: key,
+        frame,
+        previous,
+        expectedHead: { revision, digest: ok(P.machineSharingDigest(frame)) },
+      });
+    const first = ok(open(await seal(policy), null, 1));
+    expect(authorize(first)).toEqual({ allowed: false, reason: 'machine-not-shared' });
+    const shared = {
+      ...policy,
+      ...ok(
+        P.updateMachineSharingState(policy, {
+          kind: 'project',
+          localProjectId: 'project-a',
+          sharedWithTeam: true,
+        })
+      ),
+      revision: 2,
+      previousDigest: first.head.digest,
+      requestId: '44'.repeat(16),
+    };
+    expect(authorize(ok(open(await seal(shared), first.head, 2)))).toEqual({
+      allowed: true,
+      reason: 'team',
+    });
+  });
+
+  it('requires ledger-included initial admission and an unbroken replacement chain, never a server generation hint', async () => {
+    const f = await fixture(),
+      root = { record: f.records()[1]!, length: 2 };
+    expect(
+      ok(
+        P.verifyMachineSharingGeneration({
+          ledger: f.current(),
+          machineId: f.binding.machineId,
+          device: f.phone.publicKey,
+          admissionChain: [root],
+        })
+      ).generation
+    ).toBe(f.binding.generation);
+    const corrupted = root.record.slice();
+    const compact = ok(P.restoreVerifiedState(ok(P.exportVerifiedState(f.current()))));
+    expect(
+      Result.isFailure(
+        P.verifyMachineSharingGeneration({
+          ledger: compact,
+          machineId: f.binding.machineId,
+          device: f.phone.publicKey,
+          admissionChain: [root],
+        })
+      )
+    ).toBe(true);
+    corrupted[corrupted.length - 1]! ^= 1;
+    for (const admissionChain of [
+      [],
+      [{ ...root, length: 3 }],
+      [{ ...root, record: corrupted }],
+      [root, root],
+    ])
+      expect(
+        Result.isFailure(
+          P.verifyMachineSharingGeneration({
+            ledger: f.current(),
+            machineId: f.binding.machineId,
+            device: f.phone.publicKey,
+            admissionChain,
+          })
+        )
+      ).toBe(true);
+    const frame = await f.seal();
+    expect(
+      Result.isSuccess(
+        P.openMachineSharingPolicy({
+          ledger: compact,
+          binding: f.binding,
+          machineGeneration: f.machineGeneration(),
+          epoch: 0,
+          documentKey: f.key,
+          frame,
+          previous: null,
+          expectedHead: { revision: 1, digest: ok(P.machineSharingDigest(frame)) },
+        })
+      )
+    ).toBe(true);
+    expect(
+      Result.isFailure(
+        admitMachineSharingFrame({
+          ledger: f.current(),
+          binding: f.binding,
+          machineGeneration: { ...f.generation } as P.VerifiedMachineSharingGeneration,
+          epoch: 0,
+          frame,
+          authenticatedDevice: f.owner.publicKey,
+        })
+      )
+    ).toBe(true);
   });
 
   it('refuses policies from a newer ledger on an older/forged view and never trusts detached state', async () => {
@@ -394,6 +653,7 @@ describe('owner-signed complete machine sharing policies', () => {
     await f.command({ _tag: 'SetRole', membershipId: f.bobMembership, role: 'admin' });
     const verified = ok(f.open(await f.seal()));
     const input = {
+      machineGeneration: f.generation,
       policy: verified,
       signer: f.bob.publicKey,
       target: { ...f.binding, device: f.phone.publicKey },
@@ -412,6 +672,7 @@ describe('owner-signed complete machine sharing policies', () => {
     expect(
       P.authorizeMachineExecution({
         ...input,
+        machineGeneration: f.generation,
         ledger: f.current(),
         target: { ...input.target, workspaceId: 'other' },
       })
@@ -456,9 +717,14 @@ describe('owner-signed complete machine sharing policies', () => {
     );
     await f.command(admission, rejoined.signer);
     const input = {
+      machineGeneration: f.machineGeneration(machine.publicKey),
       ledger: f.current(),
       signer: f.bob.publicKey,
-      target: { ...f.binding, device: machine.publicKey },
+      target: {
+        ...f.binding,
+        generation: f.machineGeneration(machine.publicKey).generation,
+        device: machine.publicKey,
+      },
     };
     expect(P.authorizeMachineExecution({ ...input, policy: verified })).toEqual({
       allowed: false,
@@ -519,7 +785,7 @@ describe('owner-signed complete machine sharing policies', () => {
     }
     const rows = ok(decodeMachineSharingCbor(plaintext)) as P.CborValue[];
     for (const [position, value] of [
-      [0, 2],
+      [0, 1],
       [1, 2],
       [6, 0],
       [10, filled(0)],
@@ -539,6 +805,7 @@ describe('owner-signed complete machine sharing policies', () => {
     const f = await fixture(),
       frame = await f.seal();
     const input = {
+      machineGeneration: f.generation,
       ledger: f.current(),
       binding: f.binding,
       epoch: 0,
@@ -563,7 +830,7 @@ describe('owner-signed complete machine sharing policies', () => {
           signer,
           ledger: () => Effect.succeed(f.current()),
           plaintext,
-          additionalData: new TextEncoder().encode('lody-e2ee/machine-sharing/v1\0'),
+          additionalData: new TextEncoder().encode('lody-e2ee/machine-sharing/v2\0'),
         })
       );
       plaintext.fill(0);
@@ -574,6 +841,7 @@ describe('owner-signed complete machine sharing policies', () => {
       expect(
         Result.isFailure(
           P.readMachineSharingHistoryStep({
+            machineGeneration: f.generation,
             ledger: f.current(),
             binding: f.binding,
             epoch: 0,
@@ -610,7 +878,7 @@ describe('owner-signed complete machine sharing policies', () => {
       ok(P.decodeMachineSharingPolicy(ok(P.encodeMachineSharingPolicy(policy)))).projects
     ).toHaveLength(4);
     expect(ok(P.machineSharingContentScope(policy, 0)).resource).toBe(
-      `machine-access:${Buffer.from(policy.machineId).toString('base64url')}:${policy.ownerMembershipId}`
+      `machine-access:${Buffer.from(policy.machineId).toString('base64url')}:${policy.ownerMembershipId}:${policy.generation}`
     );
     const many = { ...f.policy, projects: Array.from({ length: 100 }, (_, n) => `project-${n}`) };
     expect(
@@ -648,6 +916,7 @@ describe('owner-signed complete machine sharing policies', () => {
           };
           const fiber = yield* Effect.forkChild(
             P.sealMachineSharingPolicy({
+              machineGeneration: f.generation,
               policy: mutable,
               epoch: 0,
               documentKey: f.key,
@@ -687,6 +956,7 @@ describe('owner-signed complete machine sharing policies', () => {
           const fiber = yield* Effect.forkChild(
             Effect.result(
               P.sealMachineSharingPolicy({
+                machineGeneration: f.generation,
                 policy: f.policy,
                 epoch: 0,
                 documentKey: f.key,

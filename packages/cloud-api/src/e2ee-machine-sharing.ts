@@ -6,11 +6,13 @@ export type E2eeMachineSharingScope = {
   genesisHash: string;
   machineId: string;
   ownerMembershipId: string;
+  /** Hex32 initial machine admission signing key; stable only across uninterrupted atomic replacements. */
+  generation: string;
 };
 /** Digest is lowercase SHA-256 of the complete original encrypted frame, never its plaintext. */
 export type E2eeMachineSharingHead = { revision: number; digest: string };
 /** A storage-removal barrier, not a signed policy or a verified client pin. Preserve the last committed
- * position even after ciphertext cleanup. Only a never-written resource uses revision 0/digest null. */
+ * position even after ciphertext cleanup. This generation is terminal and cannot become active again. Only a never-written resource uses revision 0/digest null. */
 export type E2eeMachineSharingRemovedHead = E2eeMachineSharingScope & {
   status: 'removed';
 } & (E2eeMachineSharingHead | { revision: 0; digest: null });
@@ -37,11 +39,14 @@ export type E2eeMachineSharingLatestForMember =
   | (E2eeMachineSharingVersion & { status: 'active' })
   | E2eeMachineSharingRemovedHead
   | null;
-/** Device-authenticated control operations; account login alone is insufficient. Version 1 starts at revision 1/null parent.
+/** Device-authenticated control operations; account login alone is insufficient. Each new generation starts at revision 1/null parent.
  * commit atomically inserts original bytes and CASes head; exact retries return the original receipt even after
  * later commits, or a removal barrier after cleanup. Retain lightweight request intent digests for this check.
+ * New commits must match the current verified machine generation inside the atomic mutation, in addition
+ * to full-head CAS; a removed or superseded generation always conflicts. Exact old receipts may report removed.
  * Reusing requestId with different intent/bytes fails. A confirmed conflict never auto-rebases. Only explicit
- * fresh owner intent may reactivate removed state at n+1 with previousDigest=digest (0/null resumes at 1/null).
+ * Removed generations are terminal. Re-admission creates a different generation/resource and fresh owner
+ * intent starts its revision 1/null parent; never resume an old generation at n+1 or migrate its pins/grants.
  * The separate account read returns only ciphertext/routing metadata, never execution authority. */
 export type E2eeMachineSharingRequests = {
   readHead: E2eeDeviceAccess & E2eeMachineSharingScope;
