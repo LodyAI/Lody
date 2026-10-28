@@ -53,15 +53,25 @@ describe('start command cli type selection', () => {
         claude: false as const,
         codex: false as const,
       });
-      expect(resolveCliTypesSelection({ availability: availability() }).configuredCliTypes).toEqual([]);
+      expect(resolveCliTypesSelection({ availability: availability() }).configuredCliTypes).toEqual(
+        []
+      );
       mkdirSync(join(home, '.kimi-code', 'credentials'), { recursive: true });
       writeFileSync(join(home, '.kimi-code', 'credentials', 'kimi-code.json'), '{}');
-      expect(resolveCliTypesSelection({ availability: availability() }).configuredCliTypes).toEqual(['kimi']);
+      expect(resolveCliTypesSelection({ availability: availability() }).configuredCliTypes).toEqual(
+        ['kimi']
+      );
       mkdirSync(join(home, '.grok'), { recursive: true });
       writeFileSync(join(home, '.grok', 'auth.json'), '{}');
-      expect(resolveCliTypesSelection({ availability: availability() }).configuredCliTypes).toEqual(['kimi', 'grok']);
-      expect(hasBuiltinAgentCredentials('kimi', home, { KIMI_CODE_HOME: join(home, 'other') })).toBe(false);
-      expect(hasBuiltinAgentCredentials('grok', home, { GROK_HOME: join(home, 'other') })).toBe(false);
+      expect(resolveCliTypesSelection({ availability: availability() }).configuredCliTypes).toEqual(
+        ['kimi', 'grok']
+      );
+      expect(
+        hasBuiltinAgentCredentials('kimi', home, { KIMI_CODE_HOME: join(home, 'other') })
+      ).toBe(false);
+      expect(hasBuiltinAgentCredentials('grok', home, { GROK_HOME: join(home, 'other') })).toBe(
+        false
+      );
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

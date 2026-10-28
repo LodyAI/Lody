@@ -13,7 +13,9 @@ export function hasBuiltinAgentCredentials(
       ? env.KIMI_CODE_HOME || join(homeDir, '.kimi-code')
       : env.GROK_HOME || join(homeDir, '.grok');
   const file =
-    type === 'kimi' ? join(directory, 'credentials', 'kimi-code.json') : join(directory, 'auth.json');
+    type === 'kimi'
+      ? join(directory, 'credentials', 'kimi-code.json')
+      : join(directory, 'auth.json');
   try {
     return statSync(file).isFile();
   } catch {
