@@ -40,3 +40,24 @@ export type {
   E2eeMachineSharingRequests,
   E2eeMachineSharingReplies,
 } from '@lody/cloud-api';
+
+/** Verified host view for switch UI. No credential, keys or generic signing capability. */
+export interface E2eeMachineSharingView {
+  machineId: string;
+  ownerMembershipId: string;
+  head: { readonly revision: number; readonly digest: string } | null;
+  sharedWithTeam: boolean;
+  projects: readonly string[];
+  removed?: boolean;
+  /** Discover an interrupted local intent so a new window can reconcile the same request. */
+  pendingRequest?: { requestId: string; change: E2eeMachineSharingChange };
+  /** Pending intent is retained, but no latest policy was verified by this read. */
+  unavailable?: true;
+}
+export type E2eeMachineSharingWriteResult = {
+  status: 'saved' | 'pending' | 'conflict' | 'removed';
+  requestId: string;
+};
+export type E2eeMachineSharingChange =
+  | { readonly kind: 'machine'; readonly sharedWithTeam: boolean }
+  | { readonly kind: 'project'; readonly localProjectId: string; readonly sharedWithTeam: boolean };

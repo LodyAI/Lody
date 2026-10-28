@@ -18,7 +18,7 @@
 - `runtime.ts` composes Feed/VerifiedLedger, installed keys and optional receiver.
   Offline open/status; cloud I/O stays in cloud-cli-port.
   Distinguish damaged history/pins; never reset trusted pins from remote hints.
-- Execution: `authorizeExecution`; same ledger membership as machine; authenticated read;
+- Execution: `authorizeExecution`; same membership or verified owner-signed machine/project policy; authenticated read;
   RAM-only <15min/read-start. Credential revoke: fence/clear grants before drain,
   never network-retry.
 - Journal originals before feed/pin; rebase core pin first after 64 records.

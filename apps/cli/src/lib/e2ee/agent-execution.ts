@@ -21,15 +21,17 @@ const intentSchema = z.object({
   /** Display metadata only; execution identity comes from the verified signer. */
   requesterUserId: z.string().optional(),
   inputConfig: z.unknown().optional(),
+  localProjectId: z.string().min(1).optional(),
 });
 export type EncryptedExecutionIntent = z.infer<typeof intentSchema>;
 /** The shape is structurally compatible with the workspace host freshness gate. */
 export type ExecutionAuthorization =
-  | { readonly _tag: 'Authorized' }
+  | { readonly _tag: 'Authorized'; readonly isCurrent?: () => boolean }
   | { readonly _tag: 'Denied'; readonly reason: string };
 export type AuthorizeEncryptedExecution = (
   workspaceId: string,
-  requesterDevice: string
+  requesterDevice: string,
+  localProjectId?: string
 ) => Effect.Effect<ExecutionAuthorization, unknown>;
 export type VerifiedExecutionOriginal = {
   requesterDevice: string;
@@ -44,7 +46,7 @@ export type ResolveVerifiedExecutionOriginal = (
 
 export type EncryptedExecutionClaim =
   | { state: 'claimed'; permit: RealtimeStartPermit }
-  | { state: 'denied'; reason?: 'e2ee_machine_not_owned' }
+  | { state: 'denied'; reason?: 'e2ee_machine_not_shared' }
   | { state: 'uncertain' | 'completed' | 'expired' | 'pending-evidence' };
 
 /** One owner per encrypted workspace. Journal opening stays lazy so a broken
@@ -110,10 +112,14 @@ export function makeEncryptedAgentExecution(options: {
       return { state: 'denied' };
     const authorizeExecution = options.authorizeExecution;
     if (!authorizeExecution) return { state: 'denied' };
-    const authorization = yield* authorizeExecution(intent.workspaceId, verified.requesterDevice);
+    const authorization = yield* authorizeExecution(
+      intent.workspaceId,
+      verified.requesterDevice,
+      intent.localProjectId
+    );
     if (authorization._tag !== 'Authorized')
-      return authorization.reason === 'e2ee_machine_not_owned'
-        ? { state: 'denied', reason: 'e2ee_machine_not_owned' }
+      return authorization.reason === 'e2ee_machine_not_shared'
+        ? { state: 'denied', reason: 'e2ee_machine_not_shared' }
         : { state: 'denied' };
     // Authorization can yield. Re-read before receive so concurrent channels
     // reuse the first expiry instead of replacing or extending its evidence.
@@ -129,7 +135,8 @@ export function makeEncryptedAgentExecution(options: {
     };
     return yield* attempt(() => {
       // No await between the terminal lifecycle fence and the durable start.
-      if (options.isExecutionOpen?.() === false) return { state: 'denied' as const };
+      if (options.isExecutionOpen?.() === false || authorization.isCurrent?.() === false)
+        return { state: 'denied' as const };
       journal.receive(request);
       const result = journal.claim(request);
       if (result.state === 'claimed') {

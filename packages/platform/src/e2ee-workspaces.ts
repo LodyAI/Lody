@@ -108,6 +108,9 @@ export interface E2eeManagementState {
 }
 /** Desktop-only purpose-limited IPC; opening an existing workspace never creates an identity. */
 export interface E2eeWorkspaceRuntime {
+  readMachineSharing?(workspaceId: string, machineId: string): Promise<import('./e2ee-machine-sharing').E2eeMachineSharingView>;
+  updateMachineSharing?(workspaceId: string, machineId: string, requestId: string, change: import('./e2ee-machine-sharing').E2eeMachineSharingChange): Promise<import('./e2ee-machine-sharing').E2eeMachineSharingWriteResult>;
+
   managementState?(workspaceId: string): Promise<E2eeManagementState>;
   updateKeys?(workspaceId: string): Promise<void>;
   revokeDevice?(workspaceId: string, signingPublicKey: string): Promise<void>;

@@ -21,6 +21,10 @@ import {
   extendLedger,
   hashRecordBytes,
   prepareEpochEnvelope,
+  machineSharingContentScope,
+  scopedDocumentKey,
+  sealMachineSharingPolicy,
+  machineSharingDigest,
 } from '@lody/e2ee-core/protocol';
 import { makeStreamsUpdateBinding } from '@lody/e2ee-core/adapters/loro-streams';
 import { createTestCloudPort } from './test-cloud-port';
@@ -2853,6 +2857,8 @@ describe('SessionExecutionService', () => {
       | 'removed-member'
       | 'same-member'
       | 'other-member'
+      | 'other-member-shared'
+      | 'other-member-closed'
       | 'backfill-member-removed'
       | 'backfill-device-revoked'
       | 'backfill-network'
@@ -2877,7 +2883,8 @@ describe('SessionExecutionService', () => {
       mode === 'revoked-device' ||
       mode === 'guest' ||
       mode === 'removed-member' ||
-      mode === 'other-member';
+      mode === 'other-member' ||
+      mode === 'other-member-closed';
     const identity = cliE2eeIdentityDirectory(accountId, workspaceId);
     const noKeyring = async () => {
       throw new Error('synthetic missing keyring');
@@ -2974,7 +2981,7 @@ describe('SessionExecutionService', () => {
             | typeof owner
             | Effect.Success<ReturnType<typeof ownerCustody.prepareDevice>> = owner;
           const senderMemberId = Result.getOrThrow(Bytes.membershipId(new Uint8Array(16).fill(40)));
-          if (deniedSigner || mode === 'same-member') {
+          if (deniedSigner || mode === 'same-member' || mode === 'other-member-shared') {
             const other = yield* ownerCustody.prepareDevice();
             originalSigner = other;
             if (mode === 'revoked-device' || mode === 'same-member') {
@@ -3106,7 +3113,43 @@ describe('SessionExecutionService', () => {
             yield* append({ _tag: 'DeclareCapabilities', capabilities: [1] });
           if (mode === 'removed-member')
             yield* append({ _tag: 'RemoveMember', membershipId: senderMemberId });
+          const sharingScope = {
+            workspaceId,
+            genesisHash: hex(genesis.genesis.toBytes()),
+            machineId: 'machine-1',
+            ownerMembershipId: hex(membershipId.toBytes()),
+          };
+          const sharingPolicy = {
+            ...sharingScope,
+            sharedWithTeam: mode === 'other-member-shared',
+            projects: [],
+            revision: 1,
+            previousDigest: null,
+            requestId: '81'.repeat(16),
+            signer: hex(owner.publicKey.toBytes()),
+            issuedAt: Date.now(),
+          };
+          const leaf = yield* scopedDocumentKey(
+            Result.getOrThrow(machineSharingContentScope(sharingScope, 0)),
+            Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(20)))
+          );
+          const sharingFrame = yield* sealMachineSharingPolicy({
+            policy: sharingPolicy,
+            epoch: 0,
+            documentKey: leaf,
+            signer: owner,
+            ledger: () => Effect.succeed(view),
+          });
+          const sharingVersion = {
+            ...sharingScope,
+            revision: 1,
+            previousDigest: null,
+            requestId: sharingPolicy.requestId,
+            digest: Result.getOrThrow(machineSharingDigest(sharingFrame)),
+            frameHex: hex(sharingFrame),
+          };
           return {
+            sharingVersion,
             genesis,
             snapshot,
             snapshotAAD,
@@ -3142,6 +3185,26 @@ describe('SessionExecutionService', () => {
       let originalAvailable = mode !== 'delayed' && !backfillFailure;
       const recoveredRooms: string[] = [];
       const cloud = {
+        ...(mode === 'other-member-shared' || mode === 'other-member-closed'
+          ? {
+              machineSharing: {
+                readHead: async () => ({
+                  workspaceId,
+                  genesisHash: fixture.sharingVersion.genesisHash,
+                  machineId: 'machine-1',
+                  ownerMembershipId: fixture.sharingVersion.ownerMembershipId,
+                  revision: 1,
+                  digest: fixture.sharingVersion.digest,
+                  status: 'active' as const,
+                }),
+                readVersion: async () => fixture.sharingVersion,
+                readRequest: async () => null,
+                commit: async () => {
+                  throw new Error('unexpected machine policy write');
+                },
+              },
+            }
+          : {}),
         readExecutionOriginPage: async (input: { docId: string }) => {
           recoveredRooms.push(input.docId);
           if (!originalAvailable && mode === 'backfill-member-removed')
@@ -3250,7 +3313,7 @@ describe('SessionExecutionService', () => {
       if (backfillFailure) {
         expect(
           await Effect.runPromise(host.authorizeExecution(workspaceId, fixture.sender))
-        ).toEqual({ _tag: 'Authorized' });
+        ).toMatchObject({ _tag: 'Authorized' });
         const waiting = await dispatch();
         expect(submitted).toEqual([]);
         expect(recoveredRooms).toEqual(['session-production-session']);
@@ -3293,8 +3356,8 @@ describe('SessionExecutionService', () => {
       expect(submitted).toEqual(deniedSigner ? [] : ['hi']);
       expect(result.getHistory()[0]?.status).toBe(deniedSigner ? 'failed' : 'handled');
       expect(result.failureMessages).toEqual(
-        mode === 'other-member'
-          ? [expect.stringContaining('e2ee_machine_not_owned')]
+        mode === 'other-member' || mode === 'other-member-closed'
+          ? [expect.stringContaining('e2ee_machine_not_shared')]
           : deniedSigner
             ? [expect.stringContaining('not authorized')]
             : []
@@ -3337,6 +3400,8 @@ describe('SessionExecutionService', () => {
     'expired',
     'same-member',
     'other-member',
+    'other-member-shared',
+    'other-member-closed',
     'revoked-device',
     'guest',
     'removed-member',

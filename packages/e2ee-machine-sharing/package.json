@@ -1,0 +1,28 @@
+{
+  "name": "@lody/e2ee-machine-sharing",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schemas": "./src/schemas.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "vitest run",
+    "format": "oxfmt 'src/**/*.ts' 'test/**/*.ts'"
+  },
+  "dependencies": {
+    "@lody/e2ee-core": "workspace:*",
+    "@lody/platform": "workspace:*",
+    "@lody/cloud-api": "workspace:*",
+    "effect": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "5.0.2",
+    "oxfmt": "^0.65.0"
+  }
+}

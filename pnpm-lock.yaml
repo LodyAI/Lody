@@ -179,9 +179,6 @@ overrides:
 packageExtensionsChecksum: sha256-qx78IuVw57JU2mPjJTu+fdHElVbU1c7U2OLk+VEmKU4=
 
 patchedDependencies:
-  '@loro-dev/streams-crdt@0.19.2':
-    hash: 1ceebd2af6eaee03774b433ba7e6341244aa754c2e5085b1cf1bf3f688a31284
-    path: patches/@loro-dev__streams-crdt@0.19.2.patch
   '@better-auth/api-key@1.6.33':
     hash: f1baa101f9ee2553089669ac0eb647dad29f30179ccb48dd43b270c9a3d74a7d
     path: patches/@better-auth__api-key@1.6.33.patch
@@ -194,6 +191,9 @@ patchedDependencies:
   '@loro-dev/sqlite-riverrun@0.3.0':
     hash: 9e80924ae904a7643f397cefaef1e404070b0dae3bac55cd525ae97e6a975536
     path: patches/@loro-dev__sqlite-riverrun@0.3.0.patch
+  '@loro-dev/streams-crdt@0.19.2':
+    hash: 1ceebd2af6eaee03774b433ba7e6341244aa754c2e5085b1cf1bf3f688a31284
+    path: patches/@loro-dev__streams-crdt@0.19.2.patch
   '@pierre/diffs@1.6.1':
     hash: 81fee0e6119069b9daedfafa8c01a42553aca722131eefa59e5c36ca54c360e0
     path: patches/@pierre__diffs@1.6.1.patch
@@ -314,6 +314,9 @@ importers:
       '@lody/e2ee-core':
         specifier: workspace:*
         version: link:../../packages/e2ee-core
+      '@lody/e2ee-machine-sharing':
+        specifier: workspace:*
+        version: link:../../packages/e2ee-machine-sharing
       '@lody/loro-streams-rpc':
         specifier: workspace:*
         version: link:../../packages/loro-streams-rpc
@@ -648,6 +651,9 @@ importers:
       '@lody/e2ee-core':
         specifier: workspace:*
         version: link:../../packages/e2ee-core
+      '@lody/e2ee-machine-sharing':
+        specifier: workspace:*
+        version: link:../../packages/e2ee-machine-sharing
       '@lody/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -1685,6 +1691,37 @@ importers:
       vitest:
         specifier: 3.2.4
         version: 3.2.4(@types/debug@4.1.12)(@types/node@24.10.12)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.7)(yaml@2.8.2)
+
+  packages/e2ee-machine-sharing:
+    dependencies:
+      '@lody/cloud-api':
+        specifier: workspace:*
+        version: link:../cloud-api
+      '@lody/e2ee-core':
+        specifier: workspace:*
+        version: link:../e2ee-core
+      '@lody/platform':
+        specifier: workspace:*
+        version: link:../platform
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.2
+      zod:
+        specifier: 4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.10.12
+      oxfmt:
+        specifier: ^0.65.0
+        version: 0.65.0
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 5.0.2
+        version: 5.0.2(@opentelemetry/api@1.9.0)(@types/node@24.10.12)(@vitest/coverage-v8@5.0.2)(jsdom@26.1.0)(vite@8.2.2(@types/node@24.10.12)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2))
 
   packages/ignore:
     dependencies:

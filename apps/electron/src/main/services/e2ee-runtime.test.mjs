@@ -3953,3 +3953,128 @@ void test('member operation history releases on workspace close without reenteri
     })
   )
 })
+
+void test('sharing host retains an unknown owner original across reopen and preserves execution refusals', async (t) => {
+  const directory = await fixture(t)
+  let prepared,
+    head = null,
+    version = null,
+    lost = true
+  let commits = 0
+  const remote = {
+    readHead: () => Effect.succeed(head),
+    readVersion: () => Effect.succeed(version),
+    readRequest: () => Effect.succeed(version),
+    commit: (input) =>
+      Effect.gen(function* () {
+        commits++
+        const { credential: _credential, expectedHead: _expectedHead, ...original } = input
+        const { machineSharingDigest } = yield* Effect.promise(
+          () => import('@lody/e2ee-core/protocol')
+        )
+        version = {
+          ...original,
+          digest: Result.getOrThrow(machineSharingDigest(Buffer.from(input.frameHex, 'hex')))
+        }
+        head = {
+          workspaceId,
+          genesisHash: input.genesisHash,
+          machineId: input.machineId,
+          ownerMembershipId: input.ownerMembershipId,
+          revision: input.revision,
+          digest: version.digest,
+          status: 'active'
+        }
+        if (lost) return yield* Effect.fail(new Error('synthetic lost response'))
+        return { status: 'committed', version }
+      })
+  }
+  const change = { kind: 'project', localProjectId: 'project-a', sharedWithTeam: true }
+  const rid = '19'.repeat(16)
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory)
+      prepared = yield* bind(owner)
+      yield* owner.host.open(workspaceId)
+      const genesis = Result.getOrThrow(
+        Bytes.genesisHash(Buffer.from(prepared.genesisHashHex, 'hex'))
+      )
+      const signer = yield* owner.custody.openDevice(genesis)
+      const machine = yield* owner.custody.prepareDevice()
+      let view = Result.getOrThrow(
+        verifyLedger({
+          anchor: genesis,
+          records: [Buffer.from(prepared.genesisRecordHex, 'hex')],
+          checkpoint: {
+            length: 1,
+            head: hashRecordBytes(Buffer.from(prepared.genesisRecordHex, 'hex'))
+          }
+        })
+      )
+      const admission = yield* prepareDeviceAdmission({
+        genesis,
+        membershipId: view.inspectState().owner,
+        encryptionPublicKey: machine.enc,
+        kind: 'machine',
+        machineId: 'synthetic-machine',
+        signer: machine
+      })
+      const record = yield* signLedgerRecord(
+        Result.getOrThrow(prepareLedgerCommand(view, signer.publicKey, admission)),
+        signer
+      )
+      yield* owner.host.ingestLedgerRecords(
+        workspaceId,
+        page([Buffer.from(prepared.genesisRecordHex, 'hex'), record], prepared.genesisHashHex, 0)
+      )
+      assert.deepEqual(
+        yield* owner.host.updateMachineSharing(
+          workspaceId,
+          'synthetic-machine',
+          rid,
+          change,
+          remote
+        ),
+        { status: 'pending', requestId: rid }
+      )
+    })
+  )
+  const original = version.frameHex
+  lost = false
+  await execute(
+    Effect.gen(function* () {
+      const owner = yield* ownerWithHost(directory)
+      yield* owner.host.open(workspaceId)
+      assert.deepEqual(
+        yield* owner.host.updateMachineSharing(
+          workspaceId,
+          'synthetic-machine',
+          rid,
+          change,
+          remote
+        ),
+        { status: 'saved', requestId: rid }
+      )
+      const state = yield* owner.host.readMachineSharing(workspaceId, 'synthetic-machine', remote)
+      assert.equal(state.sharedWithTeam, true)
+      assert.deepEqual(state.projects, ['project-a'])
+      const refused = yield* Effect.result(
+        owner.host.prepareDispatch(
+          workspaceId,
+          'missing-machine',
+          {
+            sessionId: 'session',
+            userTurnId: 'turn',
+            userId: 'display-only',
+            timestamp: new Date(0).toISOString(),
+            inputConfig: {}
+          },
+          remote
+        )
+      )
+      assert.equal(refused.failure.code, 'machine_not_owned')
+    })
+  )
+  assert.equal(version.frameHex, original)
+  assert.equal(commits, 1)
+})

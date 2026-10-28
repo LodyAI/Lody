@@ -1,3 +1,5 @@
+import { sharingReplySchemas } from '@lody/e2ee-machine-sharing/schemas'
+import type { SharingRemote } from '@lody/e2ee-machine-sharing'
 import { E2eeMemberRemovedError } from './e2ee-cloud-errors.mjs'
 import { RemoteMachineStatusSchema } from '@lody/shared/e2ee-remote-pairing'
 import type { E2eeMachinePairingRequests } from '@lody/cloud-api'
@@ -609,6 +611,32 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
       const original = { ...requestInput }
       return request((client) => client.action(api.e2eeWorkspaces.appendRecord, original), appended)
     },
+    machineSharing: (signal?: AbortSignal): SharingRemote => ({
+      readHead: (sharingInput) =>
+        request(
+          (client) => client.action(api.e2eeMachineSharing.readHead, sharingInput),
+          sharingReplySchemas.readHead,
+          signal
+        ),
+      readVersion: (sharingInput) =>
+        request(
+          (client) => client.action(api.e2eeMachineSharing.readVersion, sharingInput),
+          sharingReplySchemas.readVersion,
+          signal
+        ),
+      readRequest: (sharingInput) =>
+        request(
+          (client) => client.action(api.e2eeMachineSharing.readRequest, sharingInput),
+          sharingReplySchemas.readRequest,
+          signal
+        ),
+      commit: (sharingInput) =>
+        request(
+          (client) => client.action(api.e2eeMachineSharing.commit, sharingInput),
+          sharingReplySchemas.commit,
+          signal
+        )
+    }),
     contentStreamsToken: (access: E2eeContentTokenRequest) =>
       request(
         (client) => client.action(api.e2eeContent.contentStreamsToken, { ...access }),

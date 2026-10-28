@@ -4456,12 +4456,12 @@ describe('machine execution authorization freshness', () => {
             io.monotonic += 60_000;
             return page(fixture.records);
           };
-          expect(yield* gate.authorizeExecution('workspace', sender)).toEqual({
+          expect(yield* gate.authorizeExecution('workspace', sender)).toMatchObject({
             _tag: 'Authorized',
           });
           io.wall = io.monotonic = 899_999;
           io.offline = true;
-          expect(yield* gate.authorizeExecution('workspace', sender)).toEqual({
+          expect(yield* gate.authorizeExecution('workspace', sender)).toMatchObject({
             _tag: 'Authorized',
           });
           // Another device cannot borrow this device's cached authorization.
@@ -4474,7 +4474,7 @@ describe('machine execution authorization freshness', () => {
             reason: 'unavailable',
           });
           io.offline = false;
-          expect(yield* gate.authorizeExecution('workspace', sender)).toEqual({
+          expect(yield* gate.authorizeExecution('workspace', sender)).toMatchObject({
             _tag: 'Authorized',
           });
           expect(yield* gate.authorizeExecution('other-workspace', sender)).toMatchObject({
@@ -4552,8 +4552,8 @@ describe('machine execution authorization freshness', () => {
           );
           yield* Fiber.interrupt(first);
           released.resolve(page(fixture.records));
-          expect(yield* Fiber.join(sibling)).toEqual({ _tag: 'Authorized' });
-          expect(yield* Fiber.join(machineSibling)).toEqual({ _tag: 'Authorized' });
+          expect(yield* Fiber.join(sibling)).toMatchObject({ _tag: 'Authorized' });
+          expect(yield* Fiber.join(machineSibling)).toMatchObject({ _tag: 'Authorized' });
           expect(io.reads).toBe(1);
           io.wall = io.monotonic = 900_000;
           const failing = Promise.withResolvers<ReturnType<typeof page>>();
@@ -4579,7 +4579,7 @@ describe('machine execution authorization freshness', () => {
           ]);
           expect(io.reads).toBe(2);
           io.respond = async () => page(fixture.records);
-          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
             _tag: 'Authorized',
           });
         })
@@ -4595,7 +4595,7 @@ describe('machine execution authorization freshness', () => {
       await execute(
         Effect.gen(function* () {
           const { fixture, gate, io, device } = yield* executionFixture(directory);
-          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
             _tag: 'Authorized',
           });
           const entered = Promise.withResolvers<void>();
@@ -4667,7 +4667,7 @@ describe('machine execution authorization freshness', () => {
               yield* append({ _tag: 'SetRole', membershipId: device.membershipId, role });
             expect(yield* gate.authorizeExecution('workspace', key)).toMatchObject({
               _tag: 'Denied',
-              reason: role === 'guest' ? 'not-authorized' : 'e2ee_machine_not_owned',
+              reason: role === 'guest' ? 'not-authorized' : 'e2ee_machine_not_shared',
             });
           }
           const extraCustody = yield* makeNodeE2eeCustody({
@@ -4685,7 +4685,7 @@ describe('machine execution authorization freshness', () => {
             })
           );
           const extraKey = hex(extra.publicKey.toBytes());
-          expect(yield* gate.authorizeExecution('workspace', extraKey)).toEqual({
+          expect(yield* gate.authorizeExecution('workspace', extraKey)).toMatchObject({
             _tag: 'Authorized',
           });
           // Historical author records remain, but known revocation rejects the cached grant immediately.
@@ -4716,7 +4716,7 @@ describe('machine execution authorization freshness', () => {
             _tag: 'Denied',
             reason: 'not-authorized',
           });
-          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
             _tag: 'Authorized',
           });
           yield* append({ _tag: 'DeclareCapabilities', capabilities: [1] });
@@ -4724,7 +4724,7 @@ describe('machine execution authorization freshness', () => {
           expect(yield* gate.authorizeExecution('workspace', key)).toMatchObject({
             _tag: 'Denied',
           });
-          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
             _tag: 'Authorized',
           });
           yield* append({
@@ -4766,14 +4766,18 @@ describe('machine execution authorization freshness', () => {
           expect(
             yield* first.gate.authorizeExecution('workspace', first.fixture.sender)
           ).toMatchObject({ _tag: 'Denied' });
-          expect(yield* other.gate.authorizeExecution('workspace', other.fixture.sender)).toEqual({
+          expect(
+            yield* other.gate.authorizeExecution('workspace', other.fixture.sender)
+          ).toMatchObject({
             _tag: 'Authorized',
           });
           // Neither local reads nor a previously created content binding depend on this gate.
           expect(yield* first.runtime.status()).toMatchObject({ length: 2 });
           yield* first.runtime.binding('local-document', 'loro', 0);
           first.io.respond = async () => page(first.fixture.records);
-          expect(yield* first.gate.authorizeExecution('workspace', first.fixture.sender)).toEqual({
+          expect(
+            yield* first.gate.authorizeExecution('workspace', first.fixture.sender)
+          ).toMatchObject({
             _tag: 'Authorized',
           });
           // Wall-clock rollback cannot lengthen the monotonic lease.
@@ -4814,7 +4818,7 @@ describe('machine execution authorization freshness', () => {
           // A stopped producer has no continuation that could ingest a late response.
           late.resolve({ ...page(fixture.records), recordsHex: ['00'] });
           io.respond = async () => page(fixture.records);
-          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
             _tag: 'Authorized',
           });
           expect(yield* runtime.status()).toMatchObject({ length: 2 });
@@ -4842,7 +4846,7 @@ describe('machine execution authorization freshness', () => {
           });
           io.respond = async (input) =>
             input.cursor ? page(fixture.records, 64) : page(fixture.records, 0, 64);
-          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toEqual({
+          expect(yield* gate.authorizeExecution('workspace', fixture.sender)).toMatchObject({
             _tag: 'Authorized',
           });
         })

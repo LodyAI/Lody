@@ -38,7 +38,12 @@ export function makeEncryptedRpcReceiver(options: {
     if (opened.requestId !== envelope.id) yield* Effect.fail(new Error('e2ee_rpc_request_binding'));
     yield* mark('verified', opened.args.userTurnId);
     const authorization = yield* options.authorize(options.workspaceId, opened.requesterDevice);
-    if (authorization._tag !== 'Authorized' || !options.isOpen()) return;
+    if (
+      authorization._tag !== 'Authorized' ||
+      !options.isOpen() ||
+      authorization.isCurrent?.() === false
+    )
+      return;
     const journal = yield* attempt(options.journal);
     const request = {
       genesis: options.genesis,

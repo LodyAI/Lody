@@ -1,3 +1,4 @@
+import { makeLazyMachineSharingHost, sharingRemoteFromTransport } from '@lody/e2ee-machine-sharing';
 import { makeExecutionOriginRecovery } from './execution-origin-recovery';
 import { makeEncryptedRpcReceiver } from './realtime-rpc';
 import { lazyExecutionJournal } from './agent-execution';
@@ -607,14 +608,50 @@ async function openWorkspaceOwned(
             }
           : undefined,
       });
+      let sharing: Effect.Success<ReturnType<typeof makeLazyMachineSharingHost>> | undefined;
+      const sharingRemote = options.cloud.machineSharing
+        ? sharingRemoteFromTransport(options.cloud.machineSharing)
+        : undefined;
       const executionAuthorization = yield* makeCliE2eeExecutionAuthorization({
         workspaceId: options.workspaceId,
         credential,
         cloud: options.cloud,
         onCredentialFailure: (cause) => credentialFailureHandler(cause),
         runtime,
+        sharing: sharingRemote
+          ? (requester, localProjectId) =>
+              Effect.gen(function* () {
+                const state = (yield* runtime.executionLedger()).inspectState();
+                const machine = state.devices.get(hex(device.publicKey.toBytes()));
+                if (!sharing || machine?.kind !== 'machine' || !machine.machineId)
+                  return { allowed: false };
+                return yield* sharing.authorize(
+                  machine.machineId,
+                  requester,
+                  localProjectId,
+                  sharingRemote
+                );
+              })
+          : undefined,
+      });
+      sharing = yield* makeLazyMachineSharingHost({
+        filename: join(
+          directory,
+          'runtime',
+          hex(device.publicKey.toBytes()),
+          'machine-sharing.sqlite'
+        ),
+        workspaceId: options.workspaceId,
+        genesisHash: binding.genesisHash,
+        signer: device,
+        ledger: () => runtime.executionLedger(),
+        readEpochKey: runtime.readSharingEpochKey,
+        credential,
+        refreshLedger: () => executionAuthorization.refreshLedger,
       });
       return {
+        sharing,
+        sharingRemote,
         runtime,
         executionAuthorization,
         credential,
@@ -684,6 +721,12 @@ async function openWorkspaceOwned(
   const rpc = makeE2eeRpcNative({
     workspaceId: options.workspaceId,
     requesterDevice: opened.signingPublicKey,
+    authorizeTarget: (machineId) =>
+      opened.sharingRemote
+        ? opened.sharing
+            .authorize(machineId, opened.signingPublicKey, undefined, opened.sharingRemote)
+            .pipe(Effect.map((result) => result.allowed))
+        : Effect.succeed(false),
     originals: new E2eeRpcOriginals(
       join(
         repositoryDirectory(directory, binding.genesisHash, opened.signingPublicKey),
@@ -887,6 +930,7 @@ async function openWorkspaceOwned(
     deviceRevoked = reason === 'device-revoked';
     closed = true;
     opened.executionAuthorization.invalidate();
+    opened.sharing.stop();
     ledgerBlocked = true;
     clearLedgerRetry();
     removalRecorded = (async () => {
@@ -1056,6 +1100,7 @@ async function openWorkspaceOwned(
   const close = () => {
     closed = true;
     opened.executionAuthorization.invalidate();
+    opened.sharing.stop();
     clearLedgerRetry();
     return (closeReceipt ??= (async () => {
       await stopRpc();
@@ -1218,11 +1263,27 @@ async function openWorkspaceOwned(
       ),
     stopRpc,
     isExecutionOpen: () => !closed,
-    authorizeExecution: (workspaceId: string, requesterDevice: string) =>
+    readMachineSharing: (machineId: string) =>
+      opened.sharingRemote
+        ? run(opened.sharing.read(machineId, opened.sharingRemote))
+        : Promise.reject(new Error('e2ee_sharing_unavailable')),
+    updateMachineSharing: (
+      machineId: string,
+      requestId: string,
+      change: import('@lody/platform').E2eeMachineSharingChange
+    ) =>
+      opened.sharingRemote
+        ? run(opened.sharing.write(machineId, requestId, change, opened.sharingRemote))
+        : Promise.reject(new Error('e2ee_sharing_unavailable')),
+    authorizeExecution: (workspaceId: string, requesterDevice: string, localProjectId?: string) =>
       Effect.suspend(() =>
         closed
           ? Effect.succeed({ _tag: 'Denied' as const, reason: 'closed' as const })
-          : opened.executionAuthorization.authorizeExecution(workspaceId, requesterDevice)
+          : opened.executionAuthorization.authorizeExecution(
+              workspaceId,
+              requesterDevice,
+              localProjectId
+            )
       ),
     assertPairingConfirmed: () => {
       if (!pairing || !pairingConfirmed)

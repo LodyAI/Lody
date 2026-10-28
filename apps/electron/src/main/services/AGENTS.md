@@ -120,3 +120,7 @@ until verified admission/history settlement (including later revocation); see [r
 denial/I/O failure cannot gate mailbox receipt. Show file protection; socket timeout stays pending. Await CLI current-key install.
 
 Only rotate resumes candidates. Keep errors transport-free.
+
+Machine sharing uses the lazy native host in `packages/e2ee-machine-sharing`.
+Policy errors affect dependent execution only. Narrow read/update methods keep keys
+and device credentials in main. See the [policy decision](../../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).

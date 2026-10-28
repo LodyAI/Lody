@@ -64,6 +64,8 @@ export function makeE2eeRpcNative(options: {
   workspaceId: string;
   requesterDevice: string;
   originals: E2eeRpcOriginals;
+  /** Native host policy preflight. The recipient still resolves the actual project and checks at start. */
+  authorizeTarget?: (machineId: string) => Effect.Effect<boolean, unknown>;
   ledger: () => Effect.Effect<LedgerView, unknown>;
   binding: (resource: string) => Effect.Effect<Binding, unknown, Scope.Scope>;
 }) {
@@ -75,12 +77,7 @@ export function makeE2eeRpcNative(options: {
       ([, device]) => device.kind === 'machine' && device.machineId === machineId
     );
     const candidate = candidates[0];
-    if (
-      !own ||
-      candidates.length !== 1 ||
-      !candidate ||
-      !own.membershipId.equals(candidate[1].membershipId)
-    )
+    if (!own || candidates.length !== 1 || !candidate)
       return yield* Effect.fail(new Error('e2ee_machine_not_owned'));
     return candidate[0];
   });
@@ -120,11 +117,26 @@ export function makeE2eeRpcNative(options: {
       opened.plaintext.fill(0);
     }
   });
-  const prepareDispatch = (machineId: string, input: E2eeDispatchInput) =>
+  const prepareDispatch = (
+    machineId: string,
+    input: E2eeDispatchInput,
+    authorizeTarget = options.authorizeTarget
+  ) =>
     Effect.scoped(
       Effect.gen(function* () {
         const args = yield* attempt(() => normalizeInput(input));
         const signer = yield* targetSigner(machineId);
+        const state = (yield* options.ledger()).inspectState();
+        const sameOwner = state.devices
+          .get(options.requesterDevice)
+          ?.membershipId.equals(state.devices.get(signer)!.membershipId);
+        if (
+          !sameOwner &&
+          !(yield* (authorizeTarget?.(machineId) ?? Effect.succeed(false)).pipe(
+            Effect.catch(() => Effect.succeed(false))
+          ))
+        )
+          return yield* Effect.fail(new Error('e2ee_machine_not_shared'));
         let saved = yield* attempt(() => options.originals.read('sent', key(args)));
         if (!saved) {
           const now = yield* Clock.currentTimeMillis;
@@ -147,7 +159,11 @@ export function makeE2eeRpcNative(options: {
             body.fill(0);
           }
         }
-        if (saved.target !== machineId || saved.signer !== signer)
+        if (
+          saved.target !== machineId ||
+          saved.signer !== signer ||
+          saved.signer !== (yield* targetSigner(machineId))
+        )
           return yield* Effect.fail(new Error('e2ee_rpc_target_changed'));
         const checked = yield* open(machineId, saved.frame);
         if (

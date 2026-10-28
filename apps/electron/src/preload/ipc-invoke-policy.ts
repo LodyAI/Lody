@@ -50,6 +50,8 @@ export function isIpcInvokeChannel(channel: string): boolean {
       'seal',
       'openContent',
       'prepareDispatch',
+      'readMachineSharing',
+      'updateMachineSharing',
       'acceptDispatchResponse',
       'contentStreamsToken',
       'removeMember',

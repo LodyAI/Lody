@@ -202,6 +202,35 @@ describe('CloudPlatformProvider', () => {
     }
   });
 
+  it('routes sharing reads and pending reconciliation through the real preload and provider', async () => {
+    fixture.electron = true;
+    fixture.usePreload = true;
+    window.ipc = ipcBridge;
+    refetch('Encrypted');
+    const view = { machineId: 'machine-a', ownerMembershipId: '11'.repeat(16), head: { revision: 2, digest: '22'.repeat(32) }, sharedWithTeam: true, projects: ['project-a'] };
+    const rid = '33'.repeat(16);
+    const change = { kind: 'project', localProjectId: 'project-a', sharedWithTeam: true } as const;
+    let pending = true;
+    fixture.invoke = async (channel, ...args) => {
+      if (channel === 'e2ee.readMachineSharing') {
+        expect(args).toEqual(['workspace-a', 'machine-a']);
+        return view;
+      }
+      if (channel === 'e2ee.updateMachineSharing') {
+        expect(args).toEqual(['workspace-a', 'machine-a', rid, change]);
+        const result = { status: pending ? 'pending' : 'saved', requestId: rid };
+        pending = false;
+        return result;
+      }
+      throw new Error(`unexpected IPC invocation: ${channel}`);
+    };
+    await render();
+    const runtime = seen.at(-1)!.e2eeWorkspaces!.runtime!;
+    expect(await runtime.readMachineSharing!('workspace-a', 'machine-a')).toEqual(view);
+    expect(await runtime.updateMachineSharing!('workspace-a', 'machine-a', rid, change)).toEqual({ status: 'pending', requestId: rid });
+    expect(await runtime.updateMachineSharing!('workspace-a', 'machine-a', rid, change)).toEqual({ status: 'saved', requestId: rid });
+  });
+
   it('keeps ordinary access unauthenticated while E2EE opens with an expired snapshot and retained bearer after network retries fail', async () => {
     fixture.electron = true;
     refetch('Encrypted');
