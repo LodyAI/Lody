@@ -30,15 +30,15 @@ test('keeps join requests in the mobile section rhythm and centers the edit icon
 }) => {
   const response = await page.goto(STORY_URL);
   expect(response?.ok()).toBeTruthy();
+  const workspaceHeading = page.getByRole('heading', { level: 2, name: '工作区' });
+  await expect(workspaceHeading).toBeVisible({ timeout: 60_000 });
 
-  const workspaceSection = page
-    .getByRole('heading', { level: 2, name: '工作空间' })
-    .locator('xpath=ancestor::section[1]');
+  const workspaceSection = workspaceHeading.locator('xpath=ancestor::section[1]');
   const membersSection = page
     .getByRole('heading', { level: 2, name: '成员' })
     .locator('xpath=ancestor::section[1]');
   const joinCard = page
-    .getByRole('heading', { level: 3, name: '开放式加入链接' })
+    .getByText('开放式加入链接', { exact: true })
     .locator('xpath=ancestor::section[1]');
 
   const [workspaceCardBox, membersCardBox, joinCardBox] = await Promise.all([
@@ -51,7 +51,7 @@ test('keeps join requests in the mobile section rhythm and centers the edit icon
   expect(Math.abs(joinCardBox.width - workspaceCardBox.width)).toBeLessThan(0.5);
   expect(joinCardBox.y - (membersCardBox.y + membersCardBox.height)).toBeCloseTo(20, 5);
 
-  const editButton = page.getByRole('button', { name: '修改工作空间名称' });
+  const editButton = page.getByRole('button', { name: '修改工作区名称' });
   const [editTextBox, editIconBox] = await Promise.all([
     getVisibleBox(editButton.locator('span')),
     getVisibleBox(editButton.locator('svg')),
