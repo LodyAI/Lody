@@ -63,7 +63,8 @@ generation before requestId/change); stale window intents cannot enable a new
 generation. Reads also return current personal-owner authority, the verified
 signer and whether the complete historical policy needs re-signing. Historical
 state remains separate from execution credentials; only an active verified policy
-can advance accepted pins. No signing or private-key IPC is introduced. Proxy dispatch retains the existing two-actor access intersection;
+can advance accepted pins. No signing or private-key IPC is introduced. Proxy
+dispatch retains the existing two-actor access intersection;
 entries without authenticated actor evidence remain closed.
 
 Decision: [owner-signed policy](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).
