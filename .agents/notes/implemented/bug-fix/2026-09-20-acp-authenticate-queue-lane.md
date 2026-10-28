@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#2028](https://github.com/LodyAI/Lody/pull/2028)
 
 [中文](2026-09-20-acp-authenticate-queue-lane.zh.md)
 
