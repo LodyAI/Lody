@@ -57,9 +57,12 @@ export const makePresenceContentBinding = Effect.fnUntraced(function* (input: {
     );
   const ledger = Effect.fnUntraced(function* () {
     if (closed) return yield* fail();
-    const view = yield* input.ledger();
+    const view = yield* input
+      .ledger()
+      .pipe(Effect.mapError(() => new ContentError({ code: 'presence-local-unavailable' })));
     yield* Effect.fromResult(requireLedgerContinuation(previous ?? view, view));
-    if (!genesis.equals(view.genesis)) return yield* fail();
+    if (!genesis.equals(view.genesis))
+      return yield* new ContentError({ code: 'presence-local-unavailable' });
     previous = view;
     return view;
   });
@@ -73,22 +76,32 @@ export const makePresenceContentBinding = Effect.fnUntraced(function* (input: {
     resource,
     epoch,
   });
-  const withKey = <A, E>(
+  const withKey = Effect.fnUntraced(function* <A, E>(
     view: LedgerView,
     epoch: number,
     use: (key: Bytes.EpochKey) => Effect.Effect<A, E>
-  ) =>
-    Effect.acquireUseRelease(
-      input.readEpochKey(epoch),
+  ) {
+    // Future epochs are invalid input. A missing retained publication/key for a
+    // known epoch means this receiver cannot determine liveness.
+    if (epoch > view.inspectState().epoch.number)
+      return yield* new ContentError({ code: 'invalid-presence-epoch' });
+    const publication = yield* Effect.fromResult(epochHistoryPacket(view, epoch)).pipe(
+      Effect.mapError(() => new ContentError({ code: 'presence-local-unavailable' }))
+    );
+    return yield* Effect.acquireUseRelease(
+      input
+        .readEpochKey(epoch)
+        .pipe(Effect.mapError(() => new ContentError({ code: 'presence-local-unavailable' }))),
       (key) =>
         Effect.gen(function* () {
-          const publication = yield* Effect.fromResult(epochHistoryPacket(view, epoch));
           const commitment = yield* Effect.fromResult(commitEpochKey(genesis, epoch, key));
-          if (!publication.commitment.equals(commitment)) return yield* fail();
+          if (!publication.commitment.equals(commitment))
+            return yield* new ContentError({ code: 'presence-local-unavailable' });
           return yield* use(key);
         }),
       (key) => Effect.sync(() => disposeEpochKey(key))
     );
+  });
   return {
     seal: (plaintext: Uint8Array, epoch: number) =>
       lease(

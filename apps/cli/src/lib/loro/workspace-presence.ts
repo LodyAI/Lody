@@ -93,7 +93,7 @@ export class PresenceHost extends Context.Service<
   }
 >()('lody/loro/PresenceHost') {}
 export class PresenceUnavailable extends Data.TaggedError('PresenceUnavailable')<{
-  readonly stage: 'closed' | 'detached' | 'bootstrap' | 'configuration';
+  readonly stage: 'closed' | 'detached' | 'bootstrap' | 'configuration' | 'crypto';
 }> {}
 export class PresenceDeliveryStalled extends Data.TaggedError('PresenceDeliveryStalled')<{
   readonly generation: number;
@@ -596,6 +596,8 @@ export const makeWorkspacePresence = Effect.fnUntraced(function* (
         const g = generation;
         if (stopped) return Effect.fail(new PresenceUnavailable({ stage: 'closed' }));
         if (!g?.active) return Effect.fail(new PresenceUnavailable({ stage: 'detached' }));
+        if (!replica.isRemoteAvailable())
+          return Effect.fail(new PresenceUnavailable({ stage: 'crypto' }));
         if (g.joined && g.stream?.stats.status === 'joined') return Effect.void;
         return Deferred.await(g.ready).pipe(
           Effect.timeoutOrElse({
@@ -604,9 +606,11 @@ export const makeWorkspacePresence = Effect.fnUntraced(function* (
           }),
           Effect.andThen(
             Effect.suspend(() =>
-              g.active && g.joined && generation === g && g.stream?.stats.status === 'joined'
-                ? Effect.void
-                : Effect.fail(new PresenceUnavailable({ stage: 'detached' }))
+              !replica.isRemoteAvailable()
+                ? Effect.fail(new PresenceUnavailable({ stage: 'crypto' }))
+                : g.active && g.joined && generation === g && g.stream?.stats.status === 'joined'
+                  ? Effect.void
+                  : Effect.fail(new PresenceUnavailable({ stage: 'detached' }))
             )
           )
         );

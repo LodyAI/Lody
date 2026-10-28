@@ -341,8 +341,24 @@ it('requires an explicit native presence capability and retires projections when
   if (!supported.e2ee.presence) throw new Error('Expected the explicit native presence capability');
   const bridge = createEncryptedPresenceAdaptorLegacy(store, supported.e2ee.presence);
   try {
-    supported.updateStatus({ epoch: 0, rotationRequired: false, headHash: 'first' });
-    await bridge.adaptor.applyRemoteUpdates([new Uint8Array([77])]);
+    supported.updateStatus({
+      epoch: 0,
+      rotationRequired: false,
+      headHash: 'first',
+      hasCurrentKey: false,
+    });
+    const envelope = new EphemeralStore(60000);
+    envelope.set('a'.repeat(32), new Uint8Array([77]));
+    const bootstrap = envelope.encodeAll();
+    envelope.destroy();
+    await bridge.adaptor.applyRemoteUpdates([bootstrap]);
+    expect(store.get('author:machine:m:i')).toBeDefined();
+    supported.updateStatus({
+      epoch: 0,
+      rotationRequired: false,
+      headHash: 'first',
+      hasCurrentKey: true,
+    });
     expect(store.get('author:machine:m:i')).toBeDefined();
     supported.updateStatus({ epoch: 0, rotationRequired: false, headHash: 'next' });
     expect(store.get('author:machine:m:i')).toBeUndefined();

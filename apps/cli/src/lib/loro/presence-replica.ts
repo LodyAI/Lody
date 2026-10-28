@@ -23,6 +23,7 @@ export class PresenceReplica {
   private machineKey: string | undefined;
   private closed = false;
   private encrypted = false;
+  private remoteAvailable = true;
   private destroyed = false;
 
   constructor(readonly instanceId: LodyPresenceInstanceId) {}
@@ -91,6 +92,12 @@ export class PresenceReplica {
       const state = this.local.get(key) as LodySessionPresenceState | undefined;
       if (state) this.write(key, { ...state, updatedAt: now });
     }
+  }
+  setRemoteAvailable(available: boolean): void {
+    this.remoteAvailable = available;
+  }
+  isRemoteAvailable(): boolean {
+    return this.remoteAvailable;
   }
   useEncryptedPresence(): void {
     this.encrypted = true;

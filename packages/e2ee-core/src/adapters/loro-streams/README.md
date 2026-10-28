@@ -51,5 +51,7 @@ the journal. They are not deployed-backend acceptance.
 It checks genuine current membership before and after cryptography, verifies the
 signature before reading an epoch key, checks its published commitment, and wipes
 owned keys/plaintext. Its open callback borrows plaintext only for that callback.
+Local key/publication/ledger access failures use `presence-local-unavailable`,
+separately from invalid remote frames; callers must project unknown liveness.
 The caller owns body schemas, machine/viewer identity, replay and TTL. Closing its
 Scope retires admission and drains active operations. This uses no document stream.

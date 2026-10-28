@@ -91,3 +91,6 @@ Module rules: [ledger](src/internal/ledger/AGENTS.md), [keys](src/internal/keys/
 
 `makePresenceContentBinding` borrows plaintext only within its open callback;
 application codecs, machine/viewer identity, replay and expiry remain outside core.
+
+Presence local key/ledger access failure means unknown liveness, never an empty
+online set; keep it distinct from invalid remote packets.

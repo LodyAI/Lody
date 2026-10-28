@@ -28,6 +28,7 @@
     "@loro-dev/loro-cli": "catalog:",
     "@types/node": "catalog:",
     "typescript": "catalog:",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "loro-crdt": "catalog:"
   }
 }

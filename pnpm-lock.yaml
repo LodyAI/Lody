@@ -1720,6 +1720,9 @@ importers:
         specifier: 4.3.6
         version: 4.3.6
     devDependencies:
+      loro-crdt:
+        specifier: 'catalog:'
+        version: 1.17.0
       '@loro-dev/loro-cli':
         specifier: 'catalog:'
         version: 0.6.0

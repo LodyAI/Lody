@@ -1,11 +1,17 @@
 import { Effect } from 'effect';
 import { makePresenceContentBinding } from '@lody/e2ee-core/adapters/loro-streams';
-import type { Bytes, DeviceSigner, LedgerView } from '@lody/e2ee-core/protocol';
+import {
+  ContentError,
+  type Bytes,
+  type DeviceSigner,
+  type LedgerView,
+} from '@lody/e2ee-core/protocol';
 import {
   parseEncryptedPresencePublication,
   ENCRYPTED_PRESENCE_MAX_BYTES,
   ENCRYPTED_PRESENCE_TTL_MS,
   type EncryptedPresenceEntry,
+  type EncryptedPresenceOpenResult,
 } from '@lody/shared/encrypted-presence';
 import { encodeE2eePresenceBody, decodeE2eePresenceBody } from './e2ee-wire';
 
@@ -151,8 +157,16 @@ export const makeEncryptedPresence = Effect.fnUntraced(function* (input: {
             } finally {
               body.payload.fill(0);
             }
-          })
+          }).pipe(Effect.catch(() => Effect.succeed(null)))
         )
-        .pipe(Effect.catch(() => Effect.succeed(null))),
+        .pipe(
+          Effect.catch((error) =>
+            Effect.succeed<EncryptedPresenceOpenResult>(
+              error instanceof ContentError && error.code !== 'presence-local-unavailable'
+                ? null
+                : { unavailable: true }
+            )
+          )
+        ),
   };
 });

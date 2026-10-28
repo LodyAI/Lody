@@ -72,25 +72,32 @@ export function createDesktopE2eeContent(input: {
       if (phase !== 'ready' && phase !== 'closed') input.onKeyUpdateRequired?.();
     },
   });
-  const presenceListeners = new Set<() => void>();
+  const presenceListeners = new Set<(reason?: 'ledger' | 'keys') => void>();
   let presenceHead: string | undefined;
+  let presenceKeyState: string | undefined;
   const updateStatus = (status: {
     headHash?: string;
     epoch: number;
     rotationRequired: boolean;
     hasCurrentKey?: boolean;
+    writeEpoch?: number | null;
   }) => {
+    let invalidatePresence: 'ledger' | 'keys' | undefined;
+    const keys = `${status.hasCurrentKey}:${status.writeEpoch}`;
+    if (presenceKeyState !== undefined && keys !== presenceKeyState) invalidatePresence = 'keys';
+    presenceKeyState = keys;
     if (status.headHash && status.headHash !== presenceHead) {
-      if (presenceHead)
-        for (const listener of presenceListeners) {
-          try {
-            listener();
-          } catch {
-            /* Observational only. */
-          }
-        }
+      if (presenceHead) invalidatePresence = 'ledger';
       presenceHead = status.headHash;
     }
+    if (invalidatePresence)
+      for (const listener of presenceListeners) {
+        try {
+          listener(invalidatePresence);
+        } catch {
+          /* Observational only. */
+        }
+      }
     transition.observe({ ...status, hasCurrentKey: status.hasCurrentKey ?? false });
     if (transition.needsUpdate()) input.onKeyUpdateRequired?.();
   };
@@ -143,7 +150,7 @@ export function createDesktopE2eeContent(input: {
       presence:
         input.encryptedPresence && input.runtime.sealPresence && input.runtime.openPresence
           ? {
-              subscribeInvalidation: (listener: () => void) => {
+              subscribeInvalidation: (listener: (reason?: 'ledger' | 'keys') => void) => {
                 presenceListeners.add(listener);
                 return () => {
                   presenceListeners.delete(listener);

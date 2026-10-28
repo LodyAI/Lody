@@ -439,11 +439,13 @@ describe('machine E2EE local runtime', () => {
         expect((await host.status()).headHash).toBe(verified.headHash);
         expect((await host.status()).length).toBe(verified.length);
         await expect(protection.config.provider.seal(input)).rejects.toThrow('e2ee_invalid_ledger');
+        expect(await host.presence.open(new Uint8Array([0]))).toEqual({ unavailable: true });
         history = page(fixture.records);
         await vi.advanceTimersByTimeAsync(100_000);
         expect(reads - before).toBe(3);
         await host.refresh(); // Explicit retry resets the bounded episode.
         await expect(protection.config.provider.seal(input)).resolves.toHaveProperty('sealed');
+        expect(await host.presence.open(new Uint8Array([0]))).toBeNull();
         history = rejectedHistory();
         await host.refresh();
         history = page(fixture.records);

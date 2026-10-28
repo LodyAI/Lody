@@ -232,7 +232,7 @@ export interface E2eeWorkspaceRuntime {
   openPresence?(
     workspaceId: string,
     frame: Uint8Array
-  ): Promise<import('@lody/shared/encrypted-presence').EncryptedPresenceEntry | null>;
+  ): Promise<import('@lody/shared/encrypted-presence').EncryptedPresenceOpenResult>;
   /** Explicitly archive local originals and require fresh independently approved pairing. */
   resetIdentity?(input: {
     workspaceId?: string;

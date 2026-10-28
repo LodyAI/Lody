@@ -1,6 +1,9 @@
 import { EphemeralStreamCrdt } from '@loro-dev/streams-crdt/loro';
 import { createEncryptedPresenceAdaptorLegacy } from '@lody/shared/encrypted-presence-adaptor-legacy';
-import type { EncryptedPresencePort } from '@lody/shared/encrypted-presence';
+import type {
+  EncryptedPresencePort,
+  EncryptedPresenceEntry,
+} from '@lody/shared/encrypted-presence';
 import { EphemeralStore, type Value } from 'loro-crdt';
 import {
   LODY_PRESENCE_HEARTBEAT_MS,
@@ -83,21 +86,23 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
   private readonly viewingInstanceId = createViewingInstanceId();
   private viewing: { sessionId: SessionId; userId: string; since: number } | null = null;
   private viewingHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
-  /** UI-facing liveness state: the raw state, held through a brief in-place reconnect. */
+  private cryptoAvailable = true;
+  private detachReceiptInvalidation: (() => void) | undefined;
+  private readonly encryptedReceipts = new Map<string, EncryptedPresenceEntry>();
+  /** UI liveness includes local crypto availability as well as the transport. */
   private displaySyncState: RoomSyncState = 'idle';
   private displayGraceTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly displaySyncStateListeners = new Set<(state: RoomSyncState) => void>();
   /**
-   * `start()` replaces the store, so its snapshot is empty until the new join
-   * bootstraps. Never let the display grace cover that: unlike an SSE recycle,
-   * it has no retained snapshot to speak for.
+   * `start()` replaces the physical store. Authenticated unexpired receipts may
+   * rehydrate it, but display grace must not pretend the new room has joined.
    */
   private replacingStore = false;
 
   /**
    * Presence health as the UI should read it. This equals the raw transport
-   * state except during a brief in-place reconnect, when the last synced state
-   * still describes the retained snapshot. Recovery and reconnect decisions
+   * state except during a brief in-place reconnect or local crypto unavailability.
+   * Unavailable keys project unknown even while SSE remains joined. Recovery and reconnect decisions
    * must use {@link getSyncState} / {@link subscribeSyncState} instead.
    */
   getDisplaySyncState(): RoomSyncState {
@@ -113,12 +118,25 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
   }
 
   override start(args: EphemeralRoomStartArgs): void {
+    this.detachReceiptInvalidation ??= this.options.encryptedPresence?.subscribeInvalidation?.(
+      (reason) => {
+        if (reason !== 'keys') this.encryptedReceipts.clear();
+      }
+    );
     this.replacingStore = true;
     try {
       super.start(args);
     } finally {
       this.replacingStore = false;
     }
+  }
+
+  /** Terminal runtime release; ordinary stop/start preserves authenticated receipts. */
+  async dispose(): Promise<void> {
+    this.detachReceiptInvalidation?.();
+    this.detachReceiptInvalidation = undefined;
+    this.encryptedReceipts.clear();
+    if (this.getSyncState() !== 'idle' || this.store || this.transport) await this.stop();
   }
 
   protected override setSyncState(next: RoomSyncState): void {
@@ -128,6 +146,10 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
 
   private advanceDisplaySyncState(next: RoomSyncState): void {
     this.clearDisplayGrace();
+    if (!this.cryptoAvailable && next !== 'idle') {
+      this.publishDisplaySyncState('connecting');
+      return;
+    }
     const briefRecovery = next === 'connecting' || next === 'reconnecting';
     if (this.displaySyncState === 'synced' && briefRecovery && !this.replacingStore) {
       this.displayGraceTimer = setTimeout(() => {
@@ -213,7 +235,15 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
     if (!this.options.encryptedPresence) return super.createTransport(args);
     const encrypted = createEncryptedPresenceAdaptorLegacy(
       args.store as EphemeralStore,
-      this.options.encryptedPresence
+      this.options.encryptedPresence,
+      {
+        retained: this.encryptedReceipts,
+        initialAvailable: this.cryptoAvailable,
+        onAvailabilityChange: (available) => {
+          this.cryptoAvailable = available;
+          this.advanceDisplaySyncState(this.getSyncState());
+        },
+      }
     );
     const transport = new EphemeralStreamCrdt({
       streamUrl: args.streamUrl,

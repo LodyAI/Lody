@@ -5307,6 +5307,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         }
       }
 
+      try {
+        await presenceTransport.dispose();
+      } catch (error) {
+        if (!isDestroyedError(error)) teardownTransportError ??= error;
+      }
+
       // Teardown first fences/removes live bindings; SDK work can then unwind.
       // Joining includes superseded generations, not just the latest attach.
       await Promise.allSettled([

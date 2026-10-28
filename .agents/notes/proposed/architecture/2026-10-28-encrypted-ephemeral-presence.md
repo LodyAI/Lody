@@ -13,9 +13,10 @@ small liveness DTOs with signed purpose-7 ciphertext on the same ephemeral SDK
 channel, while leaving durable documents and ordinary workspaces independent.
 The host checks current device membership, workspace/room, machine/viewer identity,
 validity and bounded replay floors; invalid presence is discarded locally.
-The body codec depends on the public draft [#1990](https://github.com/LodyAI/Lody/pull/1990),
-which is overlaid only for local checks. No deployed or installed-product acceptance
-is claimed while that dependency and two-device/gateway checks remain outstanding.
+The body codec is adopted from merged [#1990](https://github.com/LodyAI/Lody/pull/1990)
+(`c7b3c715`) through main. No deployed or installed-product acceptance is claimed;
+real gateway and installed two-device checks remain outstanding. Implementation:
+[draft #1994](https://github.com/LodyAI/Lody/pull/1994).
 
 ## Responsibilities and trade-offs
 
@@ -30,6 +31,12 @@ protected documents -------------------------> independent durable SDK transport
   ledger, checks current non-Guest personal/machine permission around crypto,
   verifies signatures before key lookup, checks epoch commitments and disposes
   owned keys/plaintext. The open callback cannot retain borrowed plaintext.
+- The server materializes a Loro `EphemeralStore`, so a bare purpose-7 frame is
+  not a transport update. A stable random 128-bit outer key carries a binary
+  ciphertext value in `EphemeralStore.encode(key)`. No machine/session key or
+  plaintext DTO appears in the outer wrapper. Readers decode materialized
+  bootstrap/live updates and authenticate every candidate ciphertext separately;
+  outer values and deletions never establish author or removal authority.
 - The RPC host entry consumes the body codec rather than copying its format.
   It independently pins `presence:<workspaceId>` and genesis. Machine/session state
   must match a current machine device; personal viewing derives the crypto user ID
@@ -53,11 +60,24 @@ protected documents -------------------------> independent durable SDK transport
   ledger changes clear cached remote receipts and fence late projections, while
   preserving local-origin state. Ordinary presence retains its original transport,
   room, auth, 90-second TTL and payloads. Native capability status gates the UI notice.
+  A renderer retains only unexpired authenticated receipts across store replacement,
+  so a host's correct replay rejection cannot erase the receiver's last known state.
+  Signed clear, verified invalidation, expiry and terminal runtime disposal remove
+  those receipts; a terminal dispose also releases its invalidation subscription.
 
 ## Failure containment and Effect boundary
 
-A bad frame, missing key or signature failure ends only that presence operation;
-remote intake continues and document crypto remains usable. Desktop presence borrows
+Malformed outer/inner frames, bad signatures and unauthorized senders are discarded
+without poisoning remote intake. Local key/retained-publication/ledger unavailability
+is a distinct outcome: SDK `joined` remains network status, while native readiness
+and UI liveness stay unknown. Missing machines then cannot trigger `MACHINE_OFFLINE`.
+The bridge retains at most 4096 unavailable originals within the workspace lifetime,
+retries on key/ledger invalidation or fresh updates of the same outer key, and
+restores availability only after authenticated state succeeds with no unresolved
+failures. Key availability alone preserves already authenticated receipts; only
+ledger invalidation retires their authority. Bad frames cannot clear a prior
+unavailable-key marker. Document crypto
+remains independent. Desktop presence borrows
 the workspace under the short admission lock, then performs crypto outside that lock;
 a paused presence key read cannot hold document admission. Encrypted ephemeral
 attach failure is observed as a bounded warning and cannot roll back durable
@@ -89,8 +109,10 @@ independently usable document after bad presence. The native desktop fixture use
 synthetic authenticated custody with real crypto/SQLite, not a user's keychain.
 Temporarily removing expiry and replay gates makes three boundary cases fail;
 restoring them passes. A held native key read also proves document seal/open can
-complete while presence remains pending. Affected checks and final revision are
-recorded in the draft PR. Real gateway
+complete while presence remains pending. Real Loro server-style `apply` → `encodeAll` and real SDK bootstrap tests cover
+late readers, store-replacing reconnects and unknown/recovery with unavailable keys.
+Both original defects had failing tests before their fixes. Affected checks and
+final revision are recorded in the draft PR. Real gateway
 bootstrap/fanout, installed two-device operation, all-platform custody/packaging and
-production delivery remain unverified. The public body profile is still a draft;
-this note approves neither that Spec nor its dependency.
+production delivery remain unverified. The public body profile remains reviewable separately; this note does not approve
+a Spec or claim server deployment.

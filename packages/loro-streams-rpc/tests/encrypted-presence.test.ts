@@ -1,5 +1,7 @@
+import { EphemeralStore } from 'loro-crdt';
+import { createEncryptedPresenceAdaptorLegacy } from '@lody/shared/encrypted-presence-adaptor-legacy';
 import { createPrivateKey, createPublicKey, sign } from 'node:crypto';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Effect, Result } from 'effect';
 import { Bytes, sealPresenceContent } from '@lody/e2ee-core/protocol';
 import { makePresenceContentBinding } from '@lody/e2ee-core/adapters/loro-streams';
@@ -33,7 +35,8 @@ function fixture(kind: 0 | 1 | 2 = 1) {
     genesis: f.view().genesis,
     signer: f.phone.signer,
     ledger: f.ledger,
-    readEpochKey: () => Effect.sync(() => Result.getOrThrow(Bytes.epochKey(keyBytes))),
+    readEpochKey: (): Effect.Effect<Bytes.EpochKey, unknown> =>
+      Effect.sync(() => Result.getOrThrow(Bytes.epochKey(keyBytes))),
     now: () => now,
     incarnation: new Uint8Array(16).fill(1),
   };
@@ -263,4 +266,75 @@ describe('encrypted presence admission', () => {
           ?.state
       ).toBeNull();
     }));
+});
+
+it('distinguishes a locked local epoch key from an invalid remote frame', () =>
+  run(function* () {
+    const f = fixture();
+    const sender = yield* f.make();
+    const receiver = yield* f.make({
+      readEpochKey: () => Effect.fail(new Error('local-key-locked')),
+    });
+    const frame = yield* sender.seal({ key, state: machine() }, 0);
+    expect(yield* receiver.open(frame)).toEqual({ unavailable: true });
+    expect(yield* receiver.open(new Uint8Array([0]))).toBeNull();
+  }));
+
+it('authenticates every signed frame after the real server apply/encodeAll bootstrap round trip', async () => {
+  vi.useFakeTimers({
+    toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+  });
+  vi.setSystemTime(1000);
+  try {
+    await run(function* () {
+      const f = fixture();
+      const sender = yield* f.make(),
+        receiver = yield* f.make();
+      const wire = new EphemeralStore(60000),
+        server = new EphemeralStore(90000),
+        target = new EphemeralStore(60000);
+      const bridge = createEncryptedPresenceAdaptorLegacy(target, {
+        seal: async () => new Uint8Array(),
+        open: (frame) => Effect.runPromise(receiver.open(frame)),
+      });
+      try {
+        const publications = [
+          { key, state: machine() },
+          {
+            key: 'session:s:instance',
+            state: {
+              kind: 'session',
+              sessionId: 's',
+              machineId: 'fixture-machine',
+              instanceId: 'instance',
+              status: { type: 'running' },
+              updatedAt: 1000,
+            },
+          },
+        ];
+        for (const [index, publication] of publications.entries()) {
+          const frame = yield* sender.seal(publication, 0);
+          const opaque = String(index).padStart(32, '0');
+          wire.set(opaque, frame);
+          server.apply(wire.encode(opaque));
+        }
+        // One malformed peer cannot poison either valid bootstrap entry.
+        wire.set('f'.repeat(32), new Uint8Array([0]));
+        server.apply(wire.encode('f'.repeat(32)));
+        expect(Object.keys(server.getAllStates())).toHaveLength(3);
+        yield* Effect.promise(() => bridge.adaptor.applyRemoteUpdates([server.encodeAll()]));
+        const states = Object.values(target.getAllStates());
+        expect(states).toHaveLength(2);
+        expect(states).toContainEqual({ ...machine(), expiresAt: 61000 });
+        expect(bridge.isAvailable()).toBe(true);
+      } finally {
+        yield* Effect.promise(() => bridge.close());
+        wire.destroy();
+        server.destroy();
+        target.destroy();
+      }
+    });
+  } finally {
+    vi.useRealTimers();
+  }
 });

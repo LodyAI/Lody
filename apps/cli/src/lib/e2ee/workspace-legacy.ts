@@ -608,16 +608,29 @@ async function openWorkspaceOwned(
     throw error;
   });
   const initialStatus = await run(opened.runtime.status());
-  const presenceListeners = new Set<() => void>();
+  const presenceListeners = new Set<(reason?: 'ledger' | 'keys') => void>();
   let presenceHead = initialStatus.headHash;
-  const invalidatePresence = () => {
+  let presenceKeyState = `${initialStatus.hasCurrentKey}:${initialStatus.writeEpoch}`;
+  const invalidatePresence = (reason: 'ledger' | 'keys' = 'ledger') => {
     for (const listener of presenceListeners) {
       try {
-        listener();
+        listener(reason);
       } catch {
         /* Observational only. */
       }
     }
+  };
+  const observePresence = (status: {
+    headHash: string;
+    hasCurrentKey: boolean;
+    writeEpoch: number | null;
+  }) => {
+    const keys = `${status.hasCurrentKey}:${status.writeEpoch}`;
+    if (status.headHash !== presenceHead) {
+      presenceHead = status.headHash;
+      invalidatePresence('ledger');
+    } else if (keys !== presenceKeyState) invalidatePresence('keys');
+    presenceKeyState = keys;
   };
   const tokensInUse = new Set<
     Awaited<Effect.Success<ReturnType<NonNullable<CloudE2eePort['createContentTokenProvider']>>>>
@@ -931,10 +944,7 @@ async function openWorkspaceOwned(
             invalidatePresence();
             throw error;
           });
-          if (status.headHash !== presenceHead) {
-            presenceHead = status.headHash;
-            invalidatePresence();
-          }
+          observePresence(status);
           ledgerBlocked = false;
           ledgerRetryAttempts = 0;
           epochTransition.observe(status);
@@ -950,6 +960,7 @@ async function openWorkspaceOwned(
               install: async () => {
                 await run(opened.runtime.receiveKeys());
                 const installed = await run(opened.runtime.status());
+                observePresence(installed);
                 if (installed.hasCurrentKey && installed.epoch > epochTransition.epoch()) {
                   for (const token of tokensInUse) await run(token.invalidate());
                 }
@@ -958,6 +969,7 @@ async function openWorkspaceOwned(
             });
           } else if (requireActivation || pairing) {
             await run(opened.runtime.receiveKeys());
+            observePresence(await run(opened.runtime.status()));
           }
         }
       }
@@ -1029,7 +1041,7 @@ async function openWorkspaceOwned(
       }) ?? Promise.resolve(),
     content,
     presence: {
-      subscribeInvalidation: (listener: () => void) => {
+      subscribeInvalidation: (listener: (reason?: 'ledger' | 'keys') => void) => {
         presenceListeners.add(listener);
         return () => {
           presenceListeners.delete(listener);
@@ -1044,7 +1056,9 @@ async function openWorkspaceOwned(
         return run(opened.runtime.sealPresence(input));
       },
       open: (frame: Uint8Array) =>
-        closed || ledgerBlocked ? Promise.resolve(null) : run(opened.runtime.openPresence(frame)),
+        closed || ledgerBlocked
+          ? Promise.resolve({ unavailable: true } as const)
+          : run(opened.runtime.openPresence(frame)),
     },
     tokens,
     bucketId: () => bucket?.(),

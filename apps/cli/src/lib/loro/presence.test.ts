@@ -229,7 +229,7 @@ describe('presence replica and local-origin contracts', () => {
 });
 // Native owner cases inject capabilities; the integration cases below use the published SDK fetch boundary.
 import { it as effectIt } from '@effect/vitest';
-import { Cause, Clock, Context, Deferred, Effect, Exit, Fiber, Layer } from 'effect';
+import { Cause, Clock, Context, Deferred, Effect, Exit, Fiber, Layer, Result } from 'effect';
 import { TestClock } from 'effect/testing';
 import {
   PresenceHost,
@@ -1387,5 +1387,22 @@ effectIt.effect(
       expect(application.isReleased()).toBe(true);
       expect((yield* tokens.native.health).state).toBe('closed');
       return undefined;
+    })
+);
+
+effectIt.effect(
+  'a joined room with unavailable presence keys stays unknown to native readiness',
+  () =>
+    Effect.gen(function* () {
+      const fixture = yield* nativeFixture();
+      const room = yield* readyNative(fixture);
+      expect(room.stats.status).toBe('joined');
+      fixture.owner.replica.setRemoteAvailable(false);
+      const unavailable = yield* Effect.result(fixture.owner.waitUntilJoined(1000));
+      expect(Result.isFailure(unavailable)).toBe(true);
+      if (Result.isFailure(unavailable)) expect(unavailable.failure.stage).toBe('crypto');
+      fixture.owner.replica.setRemoteAvailable(true);
+      yield* fixture.owner.waitUntilJoined(1000);
+      expect(room.stats.status).toBe('joined');
     })
 );

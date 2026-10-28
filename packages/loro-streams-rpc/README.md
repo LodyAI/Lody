@@ -73,8 +73,10 @@ then runs the transport tests against it.
 
 The host-only `@lody/loro-streams-rpc/encrypted-presence` entry composes purpose-7
 crypto with the presence body codec from [#1990](https://github.com/LodyAI/Lody/pull/1990).
-That dependency is locally overlaid for validation until it lands on main; its
-codec is not duplicated here. `makeEncryptedPresence` validates bounded existing
+The codec landed on main at `c7b3c715` and is consumed directly; it is not duplicated.
+Local key/ledger access failure returns an explicit unavailable outcome, whereas
+invalid remote frames return null. A joined transport cannot turn unavailable
+crypto into a definite offline result. `makeEncryptedPresence` validates bounded existing
 liveness DTOs, derives machine/viewer authority from the current ledger, limits
 validity to 60 seconds, and keeps bounded per-receiver replay floors through expiry.
 Document synchronization and ordinary RPC are independent. See the

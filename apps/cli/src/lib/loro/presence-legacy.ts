@@ -81,7 +81,13 @@ export const createCliPresenceRuntimeLegacy = async (workspaceId: WorkspaceId) =
             ? (store) =>
                 Effect.gen(function* () {
                   const bridge = yield* Effect.acquireRelease(
-                    Effect.sync(() => createEncryptedPresenceAdaptorLegacy(store, protection)),
+                    Effect.sync(() =>
+                      createEncryptedPresenceAdaptorLegacy(store, protection, {
+                        initialAvailable: owner.replica.isRemoteAvailable(),
+                        onAvailabilityChange: (available) =>
+                          owner.replica.setRemoteAvailable(available),
+                      })
+                    ),
                     (ownedBridge) => Effect.promise(() => ownedBridge.close())
                   );
                   return { adaptor: bridge.adaptor, retire: Effect.sync(bridge.retire) };

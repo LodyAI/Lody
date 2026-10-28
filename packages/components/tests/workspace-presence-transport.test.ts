@@ -726,3 +726,87 @@ it('selects the protected bucket and retains authenticated expiry only for an en
   });
   await presence.stop();
 });
+
+it('projects unavailable decryption as unknown while the real SDK remains joined, then recovers without reconnecting', async () => {
+  const { EphemeralStore } = await import('loro-crdt');
+  vi.useFakeTimers({
+    toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+  });
+  vi.setSystemTime(1000);
+  const server = new EphemeralStore(60000);
+  server.set('a'.repeat(32), new Uint8Array([77]));
+  const bootstrap = server.encodeAll();
+  server.destroy();
+  const invalidations = new Set<() => void>();
+  let locked = true;
+  const joined = Promise.withResolvers<void>(),
+    projected = Promise.withResolvers<void>();
+  vi.stubGlobal(
+    'fetch',
+    async (_url: unknown, init?: RequestInit) =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode(
+                `event: bootstrap\ndata: ${Buffer.from(bootstrap).toString('base64')}\n\n`
+              )
+            );
+            init?.signal?.addEventListener('abort', () => controller.close(), { once: true });
+          },
+        }),
+        { headers: { 'Content-Type': 'text/event-stream', 'Stream-SSE-Data-Encoding': 'base64' } }
+      )
+  );
+  const presence = new WorkspacePresenceTransport({
+    workspaceId: 'workspace' as WorkspaceId,
+    encryptedPresence: {
+      seal: async () => new Uint8Array(),
+      open: async () =>
+        locked
+          ? { unavailable: true }
+          : {
+              key: 'author:machine:m:i',
+              state: {
+                kind: 'machine',
+                machineId: 'm' as MachineId,
+                instanceId: 'i' as LodyPresenceInstanceId,
+                updatedAt: 1000,
+              },
+              expiresAt: 61000,
+            },
+      subscribeInvalidation: (listener) => {
+        invalidations.add(listener);
+        return () => {
+          invalidations.delete(listener);
+        };
+      },
+    },
+    onSnapshot: (states) => {
+      if (states['author:machine:m:i']) projected.resolve();
+    },
+  });
+  const detach = presence.subscribeSyncState((state) => {
+    if (state === 'synced') joined.resolve();
+  });
+  try {
+    presence.start({
+      baseUrl: 'https://synthetic.invalid',
+      bucketId: 'protected',
+      auth: async () => undefined,
+    });
+    await joined.promise;
+    expect(presence.getSyncState()).toBe('synced');
+    expect(presence.getDisplaySyncState()).toBe('connecting');
+    locked = false;
+    for (const invalidate of invalidations) invalidate();
+    await projected.promise;
+    expect(presence.getSyncState()).toBe('synced');
+    expect(presence.getDisplaySyncState()).toBe('synced');
+  } finally {
+    detach();
+    await presence.dispose();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  }
+});

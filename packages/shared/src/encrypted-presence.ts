@@ -13,12 +13,22 @@ export type EncryptedPresenceEntry = {
   state: LodyPresenceState | null;
   expiresAt: number;
 };
+/** Local key/ledger access failed; this is unknown liveness, never an empty online set. */
+export type EncryptedPresenceOpenResult =
+  | EncryptedPresenceEntry
+  | null
+  | {
+      unavailable: true;
+      key?: never;
+      state?: never;
+      expiresAt?: never;
+    };
 /** Purpose-limited host capability. No caller-selected room, key, signer or arbitrary plaintext. */
 export type EncryptedPresencePort = {
-  /** Verified ledger changes retire cached receipts and in-flight projections. */
-  subscribeInvalidation?(listener: () => void): () => void;
+  /** Verified ledger/key availability changes retire receipts and retry unavailable ciphertext. */
+  subscribeInvalidation?(listener: (reason?: 'ledger' | 'keys') => void): () => void;
   seal(input: { key: string; state: LodyPresenceState | null }): Promise<Uint8Array>;
-  open(frame: Uint8Array): Promise<EncryptedPresenceEntry | null>;
+  open(frame: Uint8Array): Promise<EncryptedPresenceOpenResult>;
 };
 export const ENCRYPTED_PRESENCE_TTL_MS = 60_000;
 export const ENCRYPTED_PRESENCE_MAX_BYTES = 4096;

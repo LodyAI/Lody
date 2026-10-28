@@ -202,8 +202,11 @@ separate P6/P7 ownership work; this does not finish Session/Turn lifecycle migra
 ## Encrypted workspaces
 
 An encrypted workspace explicitly supplies a purpose-7 presence capability and its
-protected bucket. It uses the same ephemeral channel and SDK, with a separate
-adaptor; the ordinary adaptor, room and TTL remain unchanged. The Legacy facade
+protected bucket. Its wire update is a real Loro EphemeralStore entry: a stable
+random opaque key maps to a binary purpose-7 frame. This lets the server's ordinary
+`apply`/`encodeAll` path preserve bootstrap state; raw ciphertext is not a valid
+outer update. Receivers decode the wrapper and authenticate each ciphertext value.
+It uses the same ephemeral channel and SDK, with a separate adaptor; the ordinary adaptor, room and TTL remain unchanged. The Legacy facade
 owns its Promise crypto bridge in the native generation Scope. The bridge limits
 pending distinct keys to 128, coalesces before signing, prioritizes machine heartbeats,
 and emits at most four frames/second, each with at most 4096 plaintext DTO bytes
@@ -224,8 +227,17 @@ Received state carries an authenticated expiry, honored by existing freshness
 readers and a store expiry timer. A verified ledger change clears cached remote
 receipts and fences in-flight projections. This can temporarily show missing
 presence until the next heartbeat; it cannot clear local-origin production or
-change document readiness. Invalid frames and crypto failures are discarded inside
-the ephemeral adaptor. Desktop crypto runs outside the short workspace-admission
+change document readiness. Invalid remote frames are discarded. Local key, retained-publication or ledger
+unavailability propagates separately: native `waitUntilJoined` projects unknown
+liveness despite network join, so CLI dispatch cannot infer `MACHINE_OFFLINE`.
+The UI likewise projects unknown without reconnecting a healthy SSE stream.
+Unavailable originals are bounded at 4096 within the workspace lifetime; native
+key/ledger status changes retry them, and fresh authenticated updates restore
+availability only after known failures resolve. Bad input cannot restore crypto
+availability. The renderer retains unexpired authenticated receipts across physical
+store replacement, while signed clears, invalidation, expiry and final runtime
+disposal remove them. Thus correctly rejected bootstrap replays do not erase the
+last known state. Desktop crypto runs outside the short workspace-admission
 lock, so paused presence key I/O cannot hold document admission. Failed encrypted
 presence attachment logs a bounded warning
 without detaching durable sync. Retirement synchronously cancels admission/timers,
