@@ -41,8 +41,8 @@ blocks and the selected execution configuration. New-chat scheduling is excluded
   so retries reuse reservation/activity identities. Clear only the captured composer
   draft after acceptance. At the due time, the existing prepared-input handoff takes
   frozen blocks/configuration and stable Session/Turn IDs through retries/restarts.
-- The queue's dedicated Scheduled section is read-only and opens Schedule details;
-  reservations never enter executable `mq`. Complete-message details retain the
+- The queue's dedicated Scheduled section edits a reservation's time in place and
+  opens Schedule details or cancels from the row; reservations never enter executable `mq`. Complete-message details retain the
   once/current-chat target and edit the full payload; generic manual-run/resume
   controls are hidden. Ownership, machine capabilities and workspace content gates
   remain required. Cancellation disables the reservation; show waiting-for-machine
@@ -177,18 +177,25 @@ therefore makes a reservation invisible and unexecutable, while a locally saved
 row that never reaches the owner can stay Pending forever. The failure-mode matrix
 lives in the review artboard; no production behavior changed in this audit.
 
-## Visual alternatives under review
+## Queue presentation (2026-10-28)
 
-The real queue exposes optional roomy rows and inline leading/trailing metadata.
-Three Storybook alternatives compare time first, content first, and a more spacious
-content-first row. Their title is simply Message queue; time is muted, regular-weight
-underlined text on the message line. The shared calendar/time picker removes its
-repeated timestamp/timezone summary and uses one confirmation action. These options
-are preview-only pending visual selection; ordinary queue defaults are preserved.
-Real-row editing tests (12) and component typecheck pass; browser checks exercise
-editing and time changes. No backend scheduling behavior changes in this iteration.
+The sheet is one list with a shared 16px gutter: the disclosure chevron, queued
+indices and the Scheduled label align, and every row's text starts on one column.
+Rows are inset tiles with a hover fill instead of hairline dividers; there is no
+header divider. Queued text is subheadline (13/18 at the default UI size).
+Desktop edit/remove and scheduled details/cancel appear on row hover or focus and
+remain visible on touch or hover-less pointers; Steer stays visible as a tray pill.
+A scheduled row ends with its send time as a chip that opens the time editor; a
+failed send marks the chip in the destructive tone with an alert glyph and a
+"Not sent" accessible label, never a status column. Relative labels start
+capitalized ("Tomorrow 9:00 AM").
 
-Mobile preview hides row numbers and keeps time plus message inline on one ellipsized line. Rows retain 12px leading padding, no vertical padding, and one trailing More menu containing icon-labelled Edit and destructive Delete; ordinary non-scheduled rows additionally offer Move to top through the existing reorder callback (disabled at the head), while scheduled rows never do. The queue sheet extends 16px behind the composer corners with a matching negative bottom margin, joining the side edges without adding visible spacing. The surrounding preview inset is reduced. Time editing uses the existing modal primitive on mobile devices; desktop retains its popover. Final rendered screenshots at 320/390/430px were inspected, and phone emulation verifies modal time changes plus menu edit/save/remove without overflow.
+Touch rows use a three-column grid (gutter, content, 44px More). Queued rows keep
+their indices and a one-line clamp. A scheduled row stacks its title over the
+send time as one button that opens the time editor; its More menu offers Edit
+scheduled time, Edit (details) and Cancel. Both More buttons are real 44px boxes,
+which the previous Button-based trigger (rendered at 32px) did not provide.
+The redesign is presentational; the data path, ordering and callbacks are unchanged.
 
 Presentation ordering is now specified: ordinary rows retain manual order, local attachment-preparation rows follow them, and scheduled rows always form the final section sorted by ascending send instant (ties retain input order). A time edit re-sorts the view. Scheduled rows are excluded from sortable IDs, drag sources/targets, move-to-top and steer. The display uses an explicit scheduled-time accessor; it does not infer scheduling from rendered text or add reservations to durable mq. Component tests cover sorting, changed times and the absence of scheduled drag handles. Backend reservation synchronization remains separate and unimplemented for this queue proposal.
 

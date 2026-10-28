@@ -1,13 +1,12 @@
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
-import { MoreHorizontal, Pencil, Trash2, X } from 'lucide-react';
+import { CircleAlert, Clock, Pencil, Trash2, X } from 'lucide-react';
 import { Menu } from '@lody/ui/menu';
-import { Button } from '@lody/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
 import { formatUpcoming } from '../../schedules/schedule-format';
 import { queueSurface } from './surface';
-import { IconAction } from './message-queue-row';
+import { IconAction, MoreTrigger, ROW_REVEAL_CLASS } from './message-queue-row';
 
 export type ScheduledQueueItem = {
   scheduleId: string;
@@ -19,98 +18,122 @@ export type ScheduledQueueItem = {
 
 /**
  * A reservation is not an executable queue item: no index, drag, steer or
- * reorder. The row is a read-only projection; opening it is the only action.
+ * reorder. Its send time is the row's one direct control (it opens the time
+ * editor); details and cancellation sit beside it like a queued row's actions.
  */
 export function ScheduledQueueRow({
   item,
   onOpen,
   onEditTime,
   onCancel,
-  divided = true,
 }: {
   item: ScheduledQueueItem;
   onOpen?: (item: ScheduledQueueItem) => void;
   onEditTime?: (item: ScheduledQueueItem) => void;
   onCancel?: (item: ScheduledQueueItem) => void;
-  divided?: boolean;
 }) {
   const { t, i18n } = useTranslation();
   const mobile = useIsMobile();
-  const hasActions = !!onOpen || !!onCancel;
-  const rowProps = stylex.props(queueSurface.scheduledRow);
-  const time = formatUpcoming(item.at, item.timeZone, Date.now(), i18n.language);
-  return (
-    <div
-      data-scheduled-row=""
-      title={item.title}
-      {...rowProps}
-      className={cn(rowProps.className, divided && 'border-t border-border/30')}
-    >
-      <button
-        type="button"
-        onClick={() => (onEditTime ?? onOpen)?.(item)}
-        aria-label={`${time} · ${t('sessions.messageQueue.editScheduledTime', 'Edit scheduled time')}`}
-        {...stylex.props(queueSurface.scheduledTimeButton)}
-      >
-        {time}
-      </button>
-      <span {...stylex.props(queueSurface.scheduledTitle)}>{item.title}</span>
-      {hasActions ? (
-        mobile ? (
+  const failed = item.state === 'failed';
+  const upcoming = formatUpcoming(item.at, item.timeZone, Date.now(), i18n.language);
+  // Standalone label: "tomorrow 9:00 AM" opens the line, so it starts capitalized.
+  const time = upcoming.charAt(0).toLocaleUpperCase(i18n.language) + upcoming.slice(1);
+  const editTime = onEditTime ?? onOpen;
+  const failedLabel = t('sessions.messageQueue.scheduledFailed', 'Not sent');
+  const timeLabel = [
+    time,
+    failed ? failedLabel : null,
+    t('sessions.messageQueue.editScheduledTime', 'Edit scheduled time'),
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const failedMark = failed ? <CircleAlert size={12} strokeWidth={2} aria-hidden="true" /> : null;
+
+  if (mobile) {
+    const rowProps = stylex.props(
+      queueSurface.row,
+      queueSurface.roomyRow,
+      queueSurface.roomyScheduledRow
+    );
+    return (
+      <div data-scheduled-row="" title={item.title} {...rowProps}>
+        <span aria-hidden="true" {...stylex.props(queueSurface.gutter)} />
+        <button
+          type="button"
+          aria-label={`${item.title} · ${timeLabel}`}
+          onClick={() => editTime?.(item)}
+          {...stylex.props(queueSurface.stackButton)}
+        >
+          <span {...stylex.props(queueSurface.stackTitle)}>{item.title}</span>
+          <span {...stylex.props(queueSurface.stackTime, failed && queueSurface.failed)}>
+            {failedMark}
+            {time}
+          </span>
+        </button>
+        {onOpen || onCancel || onEditTime ? (
           <Menu.Root>
-            <Menu.Trigger
-              render={
-                <Button
-                  icon
-                  variant="ghost"
-                  aria-label={t('common.more', 'More')}
-                  className="size-8 shrink-0"
-                >
-                  <MoreHorizontal size={16} />
-                </Button>
-              }
-            />
+            <Menu.Trigger render={<MoreTrigger />} />
             <Menu.Content align="end" width="compact">
+              {onEditTime ? (
+                <Menu.Item icon={Clock} onClick={() => onEditTime(item)}>
+                  {t('sessions.messageQueue.editScheduledTime', 'Edit scheduled time')}
+                </Menu.Item>
+              ) : null}
               {onOpen ? (
                 <Menu.Item icon={Pencil} onClick={() => onOpen(item)}>
                   {t('common.edit', 'Edit')}
                 </Menu.Item>
               ) : null}
               {onCancel ? (
-                <Menu.Item
-                  icon={Trash2}
-                  tone="destructive"
-                  onClick={() => {
-                    void onCancel(item);
-                  }}
-                >
+                <Menu.Item icon={Trash2} tone="destructive" onClick={() => onCancel(item)}>
                   {t('scheduledMessage.cancel')}
                 </Menu.Item>
               ) : null}
             </Menu.Content>
           </Menu.Root>
-        ) : (
-          <div {...stylex.props(queueSurface.scheduledActions)}>
-            {onOpen ? (
-              <IconAction
-                icon={Pencil}
-                label={t('common.edit', 'Edit')}
-                onClick={() => onOpen(item)}
-              />
-            ) : null}
-            {onCancel ? (
-              <IconAction
-                icon={X}
-                label={t('scheduledMessage.cancel')}
-                destructive
-                onClick={() => {
-                  void onCancel(item);
-                }}
-              />
-            ) : null}
-          </div>
-        )
+        ) : null}
+      </div>
+    );
+  }
+
+  const rowProps = stylex.props(queueSurface.row, queueSurface.scheduledRow);
+  return (
+    <div
+      data-scheduled-row=""
+      title={item.title}
+      {...rowProps}
+      className={cn(rowProps.className, 'group/row')}
+    >
+      <span aria-hidden="true" {...stylex.props(queueSurface.gutter)} />
+      <span {...stylex.props(queueSurface.text, queueSurface.scheduledTitle)}>{item.title}</span>
+      {onOpen || onCancel ? (
+        <div className={cn(stylex.props(queueSurface.actions).className, ROW_REVEAL_CLASS)}>
+          {onOpen ? (
+            <IconAction
+              icon={Pencil}
+              label={t('common.edit', 'Edit')}
+              onClick={() => onOpen(item)}
+            />
+          ) : null}
+          {onCancel ? (
+            <IconAction
+              icon={X}
+              label={t('scheduledMessage.cancel')}
+              destructive
+              onClick={() => onCancel(item)}
+            />
+          ) : null}
+        </div>
       ) : null}
+      <button
+        type="button"
+        onClick={() => editTime?.(item)}
+        aria-label={timeLabel}
+        {...stylex.props(queueSurface.timeChip, failed && queueSurface.failed)}
+      >
+        {failedMark}
+        {time}
+      </button>
     </div>
   );
 }

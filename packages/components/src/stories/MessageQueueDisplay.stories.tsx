@@ -6,6 +6,7 @@ import type { MessageQueueItem, SessionHistory, SessionId, WorkspaceId } from '@
 import { runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
 import { MessageQueueDisplay } from '@/components/sessions/message-queue';
+import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 import type { PendingSessionSend } from '@/lib/session-pending-sends';
 
 const TASKS = [
@@ -108,50 +109,96 @@ export const MobileWidth: Story = {
   },
 };
 
+/** A local wall-clock time `days` from today, so the labels read the same on any day. */
+function at(days: number, hour: number): number {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  date.setHours(hour, 0, 0, 0);
+  return date.getTime();
+}
+
+const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+const scheduledItems = [
+  {
+    scheduleId: 'scheduled-tomorrow',
+    title: 'Review these files tomorrow morning',
+    at: at(1, 9),
+    timeZone,
+    state: 'pending' as const,
+  },
+  {
+    scheduleId: 'scheduled-week',
+    title: 'Send the weekly summary to the team channel with the release notes',
+    at: at(3, 17),
+    timeZone,
+    state: 'pending' as const,
+  },
+  {
+    scheduleId: 'scheduled-failed',
+    title: 'Re-run the nightly benchmark',
+    at: at(0, 23),
+    timeZone,
+    state: 'failed' as const,
+  },
+];
+
+const scheduledArgs = {
+  onOpenScheduled: () => {},
+  onEditScheduledTime: () => {},
+  onCancelScheduled: () => {},
+};
+
+/** Production mobile: the touch layout, roomy rows and inline footers. */
+const mobileDecorator: NonNullable<Story['decorators']> = [
+  (Story) => (
+    <ForceMobileLayoutProvider force>
+      <Story />
+    </ForceMobileLayoutProvider>
+  ),
+];
+
 export const ScheduledSection: Story = {
   args: {
     ...commonArgs,
+    ...scheduledArgs,
     items: makeItems(2),
-    onOpenScheduled: () => {},
-    onCancelScheduled: () => {},
-    scheduledItems: [
-      {
-        scheduleId: 'scheduled-later',
-        title: 'Review these files tomorrow morning',
-        at: Date.parse('2026-10-28T01:00:00.000Z'),
-        timeZone: 'Asia/Shanghai',
-        state: 'pending',
-      },
-      {
-        scheduleId: 'scheduled-failed',
-        title: 'Send the weekly summary',
-        at: Date.parse('2026-10-27T09:00:00.000Z'),
-        timeZone: 'Asia/Shanghai',
-        state: 'failed',
-      },
-    ],
+    scheduledItems,
   },
+};
+
+export const ScheduledOnly: Story = {
+  args: {
+    ...commonArgs,
+    ...scheduledArgs,
+    items: [],
+    scheduledItems: scheduledItems.slice(0, 1),
+  },
+};
+
+export const ScheduledSectionMobile: Story = {
+  args: {
+    ...commonArgs,
+    ...scheduledArgs,
+    items: makeItems(2),
+    scheduledItems,
+    roomy: true,
+    footerPosition: 'inline',
+  },
+  decorators: mobileDecorator,
+  parameters: { containerWidth: 'w-[342px]' },
 };
 
 export const ScheduledOnlyMobile: Story = {
   args: {
     ...commonArgs,
+    ...scheduledArgs,
     items: [],
-    onOpenScheduled: () => {},
-    onCancelScheduled: () => {},
-    scheduledItems: [
-      {
-        scheduleId: 'scheduled-only',
-        title: 'Send the weekly summary',
-        at: Date.parse('2026-10-28T01:00:00.000Z'),
-        timeZone: 'Asia/Shanghai',
-        state: 'pending',
-      },
-    ],
+    scheduledItems: scheduledItems.slice(0, 1),
+    roomy: true,
+    footerPosition: 'inline',
   },
-  parameters: {
-    containerWidth: 'w-[320px]',
-  },
+  decorators: mobileDecorator,
+  parameters: { containerWidth: 'w-[342px]' },
 };
 
 export const EditingFirstItem: Story = {

@@ -22,8 +22,10 @@ It renders through the bar's `queue` slot as an inset sheet (composer fill, roun
 top, square bottom) sitting directly on the bar, or on the composer when the bar
 has nothing to show; never with a gap, and never inside the input area.
 
-Mobile rows use a 44 px More button on the message line; its menu preserves Steer,
-move-to-top, edit and delete when applicable. Desktop actions stay compact. Prior intent:
+Rows share one 16 px gutter and are inset tiles without hairline dividers.
+Mobile rows use a real 44 px More button on the message line; its menu preserves Steer,
+move-to-top, edit and delete when applicable. Desktop edit/remove surface on row
+hover or focus (always on touch); Steer stays visible. Prior intent:
 [queue touch actions](../../../../../../specs/message-queue-touch-actions.md).
 
 Queue-bound sends held in memory (`runtime.pendingSends`) while attachments
@@ -46,5 +48,6 @@ row draft. Folded summaries retain pending/failed-send awareness. Intent:
 Production passes a separate `scheduledItems` view model; never fake a
 `MessageQueueItem` for a reservation. Keep dedicated rows after ordinary and
 local-pending rows, ordered by send time, in a `Scheduled` section without index,
-drag, steer or move-to-top. Rows are read-only and open the Schedule details.
+drag, steer or move-to-top. The send time opens the time editor; details and
+cancel sit beside it (desktop) or in the More menu (touch).
 Never fake a scheduled row through a queue item or add a time field to durable `mq`.
