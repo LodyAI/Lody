@@ -2,6 +2,7 @@
 
 Status: proposed
 Translation: current
+PR: [#2026](https://github.com/LodyAI/Lody/pull/2026)
 
 [English](2026-10-28-e2ee-format-freeze-review.md)
 
