@@ -11,8 +11,9 @@ Local cookie names include the endpoint ID because cookies ignore TCP ports;
 opening another Session must not overwrite the first Session's credential.
 
 Every HTTP request and WebSocket upgrade still requires that endpoint's token.
-Matching Origin or a tokenless Referer cannot unlock the listener. Proxy cookies
-are stripped before forwarding to the development server. A 502 is a separate
+Matching Origin or a tokenless Referer cannot unlock the listener. Application cookies
+are scoped by endpoint and forwarded to the development server; capability cookies
+are never forwarded. The [cookie decision](../../../../.agents/notes/implemented/bug-fix/2026-10-28-preview-app-cookies.md) explains the attribute changes and limits. A 502 is a separate
 forwarding/upstream failure; inspect its response body instead of disabling
 authentication or the development server's origin checks.
 

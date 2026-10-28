@@ -23,8 +23,8 @@ path and name, so even a context accepting the cookie could replace one Session'
 token with another's. Local names now include the endpoint ID; remote names stay
 unchanged because remote viewers have distinct bound hostnames. Authorization
 still checks the exact active endpoint's token on every HTTP request and WebSocket
-upgrade. Bare Origin and tokenless Referer remain insufficient, and forwarding
-continues to strip all cookies before contacting the target.
+upgrade. Bare Origin and tokenless Referer remain insufficient, and capability cookies are never forwarded to the target.
+[Application cookies](2026-10-28-preview-app-cookies.md) use separate endpoint-scoped names.
 
 A real Chrome fixture embedded `127.0.0.1` under a `localhost` top-level page.
 With SameSite=Lax, no cookie was stored or sent on the entry or nested module.
@@ -42,7 +42,7 @@ and the revisit succeeded; a request without credentials returned 403. No sleeps
 external services, user project files or captured transcripts were involved.
 
 The existing proxy suite adds a shared cookie-jar regression, foreign-cookie and
-anonymous rejection, upstream cookie stripping, and cookie-authenticated WS data
+anonymous rejection, capability cookie isolation, and cookie-authenticated WS data
 transfer. Cookie attributes are checked at the HTTP response boundary; Node fetch
 does not itself model browser SameSite policy. The browser fixture was an ad hoc
 source-level check, not a new CI browser dependency or packaged Electron test.

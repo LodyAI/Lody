@@ -604,6 +604,99 @@ describe('LocalPreviewProxyManager', () => {
     await expect(fetch(second.viewerUrl)).rejects.toThrow();
   });
 
+  it('isolates application cookies across endpoints and forwards them over HTTP and WebSocket', async () => {
+    const observed: string[] = [];
+    const server = http.createServer((request, response) => {
+      const cookie = request.headers.cookie ?? '';
+      observed.push(cookie);
+      if (request.url?.startsWith('/login')) {
+        response.writeHead(200, {
+          'content-type': 'text/html',
+          'content-security-policy': "default-src 'self'; frame-ancestors 'none'",
+          'set-cookie': [
+            `session=${request.url?.includes('two') ? 'two' : 'one'}; Domain=localhost; Path=/; HttpOnly; SameSite=Strict`,
+            'other=value; Path=/; Expires=Wed, 21 Oct 2037 07:28:00 GMT',
+          ],
+        });
+        response.end('<html><body>login</body></html>');
+      } else if (
+        request.method === 'POST' &&
+        request.headers.origin !== `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+      ) {
+        response.writeHead(403).end('foreign origin');
+      } else {
+        response.writeHead(cookie.includes('session=') ? 200 : 403).end(cookie);
+      }
+    });
+    const wsServer = new WebSocketServer({ noServer: true });
+    server.on('upgrade', (request, socket, head) => {
+      observed.push(request.headers.cookie ?? '');
+      if (!/^session=(one|two); other=value$/.test(request.headers.cookie ?? '')) {
+        socket.end('HTTP/1.1 403 Forbidden\r\n\r\n');
+        return;
+      }
+      wsServer.handleUpgrade(request, socket, head, (client) => client.close());
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    servers.push(server);
+    const target: PreviewTarget = {
+      protocol: 'http',
+      host: '127.0.0.1',
+      port: (server.address() as AddressInfo).port,
+    };
+    const manager = new LocalPreviewProxyManager({ logger: createLogger() });
+    managers.push(manager);
+    const endpoints = await Promise.all(
+      ['one', 'two'].map((id) =>
+        manager.acquire({
+          sessionId: id as SessionId,
+          target: { ...target, path: `/login?${id}` },
+          visualAnnotation: false,
+        })
+      )
+    );
+    const jars: string[][] = [];
+    for (const endpoint of endpoints) {
+      const response = await fetch(endpoint.viewerUrl);
+      expect(response.headers.get('content-security-policy')).toBe("default-src 'self'");
+      const cookies = response.headers.getSetCookie();
+      expect(cookies).toHaveLength(3);
+      expect(cookies[0]).toContain('HttpOnly');
+      expect(cookies[0]).not.toMatch(/domain=/i);
+      expect(cookies[0]).toContain('Secure; SameSite=None; Partitioned');
+      expect(cookies[0]).not.toContain('SameSite=Strict');
+      expect(cookies[1]).toContain('Expires=Wed, 21 Oct 2037 07:28:00 GMT');
+      jars.push(cookies.map((cookie) => cookie.split(';')[0] ?? ''));
+      await response.text();
+    }
+    expect(jars[0]?.[0]).not.toEqual(jars[1]?.[0]);
+    const allCookies = jars.flat().join('; ');
+    for (const [index, endpoint] of endpoints.entries()) {
+      const url = new URL('/asset.js', endpoint.viewerUrl);
+      const response = await fetch(url, { headers: { cookie: allCookies } });
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe(`session=${index === 0 ? 'one' : 'two'}; other=value`);
+      const foreign = await fetch(url, {
+        method: 'POST',
+        headers: { cookie: allCookies, origin: 'https://foreign.example' },
+      });
+      expect(foreign.status).toBe(403);
+      await foreign.text();
+      const socketUrl = new URL('/ws', endpoint.viewerUrl);
+      socketUrl.protocol = 'ws:';
+      const socket = new WebSocket(socketUrl, { headers: { cookie: allCookies } });
+      await new Promise<void>((resolve, reject) => {
+        socket.once('open', resolve);
+        socket.once('error', reject);
+      });
+      socket.terminate();
+    }
+    expect(
+      observed.every((cookie) => !cookie.includes('lody_preview') && !cookie.includes('lody_app_'))
+    ).toBe(true);
+    wsServer.close();
+  });
+
   it('rejects redirects that leave the bound target origin', async () => {
     const { server, target } = await listenHtmlServer();
     servers.push(server);
@@ -641,8 +734,10 @@ describe('LocalPreviewProxyManager', () => {
     expect(response.status).toBe(200);
     await response.text();
     expect(response.headers.get('set-cookie')).toContain('Secure; SameSite=None; Partitioned');
-    expect(response.headers.getSetCookie()).toHaveLength(1);
-    expect(response.headers.get('set-cookie')).not.toContain('private');
+    expect(response.headers.getSetCookie()).toHaveLength(3);
+    expect(
+      response.headers.getSetCookie().filter((value) => value.includes('private'))
+    ).toHaveLength(2);
     expect(response.headers.get('x-preview-values')).toBe('first, second');
     expect(response.headers.get('cache-control')).toBe('no-store');
     const bare = new URL('/', remoteEndpoint.viewerUrl);

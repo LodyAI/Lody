@@ -31,6 +31,8 @@ import {
   maybeInjectVisualAnnotationRuntime,
   stripLocalWebSocketHeaders,
   assertRelativePreviewPath,
+  rewritePreviewRequestCookies,
+  rewritePreviewSetCookie,
 } from './preview-http';
 
 type LocalPreviewProxyRecord = {
@@ -75,6 +77,9 @@ const tokenCookieName = (record: LocalPreviewProxyRecord): string =>
   record.remote
     ? LOCAL_PREVIEW_TOKEN_COOKIE
     : `${LOCAL_PREVIEW_TOKEN_COOKIE}_${record.endpoint.endpointId}`;
+
+const appCookiePrefix = (record: LocalPreviewProxyRecord): string =>
+  `lody_app_${record.endpoint.endpointId}_`;
 
 const toUrlHost = (host: string): string => (host.includes(':') ? `[${host}]` : host);
 
@@ -397,6 +402,11 @@ export class LocalPreviewProxyManager {
       previewOrigin: record.proxyOrigin,
       localPreviewTokenQueryParam: LOCAL_PREVIEW_TOKEN_QUERY_PARAM,
     });
+    const appCookies = rewritePreviewRequestCookies(
+      request.headers.cookie,
+      appCookiePrefix(record)
+    );
+    if (appCookies) headers.set('cookie', appCookies);
     const method = request.method ?? 'GET';
     const controller = new AbortController();
     record.requests.add(controller);
@@ -501,12 +511,18 @@ export class LocalPreviewProxyManager {
       previewOrigin: record.proxyOrigin,
       localPreviewTokenQueryParam: LOCAL_PREVIEW_TOKEN_QUERY_PARAM,
     });
+    const appCookies = rewritePreviewRequestCookies(
+      request.headers.cookie,
+      appCookiePrefix(record)
+    );
+    const webSocketHeaders = Object.fromEntries(stripLocalWebSocketHeaders([...headers.entries()]));
+    if (appCookies) webSocketHeaders.cookie = appCookies;
     const upstream = new LocalWebSocket(
       buildLocalWebSocketUrl(record.localOrigin, `${targetUrl.pathname}${targetUrl.search}`),
       this.getWebSocketProtocols(request),
       {
         lookup: record.transport.lookup,
-        headers: Object.fromEntries(stripLocalWebSocketHeaders([...headers.entries()])),
+        headers: webSocketHeaders,
         maxPayload: limits.maxResponseBodyBytes,
         handshakeTimeout: Math.min(limits.maxRequestDurationMs, 10_000),
       }
@@ -617,26 +633,33 @@ export class LocalPreviewProxyManager {
     record: LocalPreviewProxyRecord,
     headers: HeaderEntry[],
     setTokenCookie: boolean
-  ): Record<string, string> {
+  ): Record<string, string | string[]> {
+    const cookies = headers
+      .filter(([name]) => name.toLowerCase() === 'set-cookie')
+      .map(([, value]) => rewritePreviewSetCookie(value, appCookiePrefix(record)))
+      .filter((value): value is string => value !== null);
     const sanitized = sanitizePreviewProxyResponseHeaders(headers).filter(
       ([name]) =>
-        !['cache-control', 'cross-origin-embedder-policy', 'cross-origin-resource-policy'].includes(
-          name.toLowerCase()
-        )
+        ![
+          'set-cookie',
+          'cache-control',
+          'cross-origin-embedder-policy',
+          'cross-origin-resource-policy',
+        ].includes(name.toLowerCase())
     );
     sanitized.push(['cache-control', 'no-store']);
     sanitized.push(...applyPreviewEmbeddingHeaders(new Headers()).entries());
     if (setTokenCookie) {
-      sanitized.push([
-        'set-cookie',
+      cookies.push(
         `${tokenCookieName(record)}=${encodeURIComponent(
           record.token
-        )}; Path=/; HttpOnly; Secure; SameSite=None; Partitioned`,
-      ]);
+        )}; Path=/; HttpOnly; Secure; SameSite=None; Partitioned`
+      );
     }
-    // Fetch Headers already combined repeated names; upstream cookies were
-    // stripped by headersToEntries, and only our capability cookie is added here.
-    return Object.fromEntries(sanitized);
+    return {
+      ...Object.fromEntries(sanitized),
+      ...(cookies.length ? { 'set-cookie': cookies } : {}),
+    };
   }
 
   private async readRequestBody(
