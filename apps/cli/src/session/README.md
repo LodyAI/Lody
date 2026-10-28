@@ -123,6 +123,8 @@ A notification failure cannot replay Agent execution.
   worktree tree against Session state: archived or deleted root Sessions lose their
   directory (after a backup commit, branch kept); contract in
   [specs/session-worktree-lifecycle.md](../../../../specs/session-worktree-lifecycle.md).
+  It also cleans `<data>/chats/<rootSessionId>`: deleted roots remove recursively,
+  archived roots remove only empty directories, with no scripts or Git operations.
 
 ## Background
 

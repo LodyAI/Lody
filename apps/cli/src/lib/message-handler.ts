@@ -3141,6 +3141,7 @@ export class MessageHandler {
     });
     this.worktreeGc = new WorktreeGarbageCollector({
       reposDir: path.join(getLodyDataDir(), 'repos'),
+      chatsDir: path.join(getLodyDataDir(), 'chats'),
       logger: this.logger,
       // Local mode has no remote to lag behind; in cloud mode the first full
       // metadata sync is what separates "deleted" from "not seen yet".

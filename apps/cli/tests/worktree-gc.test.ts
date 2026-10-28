@@ -48,6 +48,7 @@ const sessionMeta = (id: SessionId, patch: Partial<SessionMeta> = {}): SessionMe
 describe('WorktreeGarbageCollector', () => {
   let testDir: string;
   let reposDir: string;
+  let chatsDir: string;
   let originalDataDir: string | undefined;
   let originalLocksDir: string | undefined;
 
@@ -59,9 +60,11 @@ describe('WorktreeGarbageCollector', () => {
     process.env.LODY_DATA_DIR = path.join(testDir, 'data');
     process.env.LODY_LOCKS_DIR = path.join(testDir, 'locks');
     reposDir = path.join(testDir, 'data', 'repos');
+    chatsDir = path.join(testDir, 'data', 'chats');
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     if (originalDataDir === undefined) delete process.env.LODY_DATA_DIR;
     else process.env.LODY_DATA_DIR = originalDataDir;
     if (originalLocksDir === undefined) delete process.env.LODY_LOCKS_DIR;
@@ -95,20 +98,220 @@ describe('WorktreeGarbageCollector', () => {
     states: Record<string, WorktreeOwnerState>,
     overrides: Partial<WorktreeGcDeps> = {}
   ) => {
-    const runCleanupScript = vi.fn(async () => {});
-    const recordArchivedBranch = vi.fn(async () => {});
     const gc = new WorktreeGarbageCollector({
       reposDir,
+      chatsDir,
       logger: createSilentLogger(),
       hasCompleteMetadata: () => true,
       readOwnerState: async (sessionId) => states[sessionId] ?? { kind: 'unknown' },
       isRuntimeActive: () => false,
-      runCleanupScript,
-      recordArchivedBranch,
+      runCleanupScript: async () => {},
+      recordArchivedBranch: async () => {},
       ...overrides,
     });
-    return { gc, runCleanupScript, recordArchivedBranch };
+    return { gc };
   };
+
+  const createChatWorkdir = (sessionId: string, content?: string) => {
+    const workdir = path.join(chatsDir, sessionId);
+    fs.mkdirSync(workdir, { recursive: true });
+    if (content !== undefined) fs.writeFileSync(path.join(workdir, 'artifact.txt'), content);
+    return workdir;
+  };
+
+  it('removes deleted chat workdirs recursively without running worktree hooks', async () => {
+    const sessionId = 'gc-chat-deleted' as SessionId;
+    const workdir = createChatWorkdir(sessionId, 'generated file');
+    fs.mkdirSync(path.join(workdir, 'nested'));
+    fs.writeFileSync(path.join(workdir, 'nested', 'output.txt'), 'nested output');
+    const hookMarker = path.join(testDir, 'worktree-hook-ran');
+    const { gc } = createGc(
+      { [sessionId]: { kind: 'deleted', meta: undefined } },
+      {
+        runCleanupScript: async () => fs.writeFileSync(hookMarker, 'cleanup'),
+        recordArchivedBranch: async () => fs.writeFileSync(hookMarker, 'branch'),
+      }
+    );
+
+    expect(await gc.sweep()).toEqual({ scanned: 1, removed: [sessionId], failed: [] });
+    expect(fs.existsSync(workdir)).toBe(false);
+    expect(fs.existsSync(hookMarker)).toBe(false);
+  });
+
+  it('removes only empty archived chat workdirs and later deletes retained files', async () => {
+    const emptyId = 'gc-chat-empty' as SessionId;
+    const fullId = 'gc-chat-full' as SessionId;
+    const empty = createChatWorkdir(emptyId);
+    const full = createChatWorkdir(fullId, 'keep until deletion');
+    const states: Record<string, WorktreeOwnerState> = {
+      [emptyId]: { kind: 'archived', meta: sessionMeta(emptyId, { isArchived: true }) },
+      [fullId]: { kind: 'archived', meta: sessionMeta(fullId, { isArchived: true }) },
+    };
+    const warnings: string[] = [];
+    const { gc } = createGc(states, {
+      logger: { ...createSilentLogger(), warn: (message) => warnings.push(message) },
+      runCleanupScript: async () => fs.writeFileSync(path.join(full, 'hook-ran'), ''),
+      recordArchivedBranch: async () => fs.writeFileSync(path.join(full, 'hook-ran'), ''),
+    });
+
+    expect(await gc.sweep()).toEqual({ scanned: 2, removed: [emptyId], failed: [] });
+    expect(fs.existsSync(empty)).toBe(false);
+    expect(fs.readdirSync(full)).toEqual(['artifact.txt']);
+    expect(fs.readFileSync(path.join(full, 'artifact.txt'), 'utf8')).toBe('keep until deletion');
+    expect(warnings).toEqual([]);
+
+    // No retry backoff for ENOTEMPTY: deleting the owner takes effect immediately.
+    states[fullId] = { kind: 'deleted', meta: undefined };
+    expect((await gc.sweep()).removed).toEqual([fullId]);
+    expect(fs.existsSync(full)).toBe(false);
+  });
+
+  it('leaves active and unknown chat workdirs alone', async () => {
+    const activeId = 'gc-chat-active' as SessionId;
+    const unknownId = 'gc-chat-unknown' as SessionId;
+    const active = createChatWorkdir(activeId);
+    const unknown = createChatWorkdir(unknownId);
+    const { gc } = createGc({ [activeId]: { kind: 'active' } });
+
+    expect(await gc.sweep()).toEqual({ scanned: 2, removed: [], failed: [] });
+    expect(fs.existsSync(active)).toBe(true);
+    expect(fs.existsSync(unknown)).toBe(true);
+  });
+
+  it('waits for complete metadata and runtime release before removing chat workdirs', async () => {
+    const sessionId = 'gc-chat-deferred' as SessionId;
+    const workdir = createChatWorkdir(sessionId, 'pending files');
+    let complete = false;
+    let running = true;
+    const { gc } = createGc(
+      { [sessionId]: { kind: 'deleted', meta: undefined } },
+      { hasCompleteMetadata: () => complete, isRuntimeActive: () => running }
+    );
+
+    expect((await gc.sweep()).scanned).toBe(0);
+    expect(fs.existsSync(workdir)).toBe(true);
+    complete = true;
+    expect(await gc.sweep()).toEqual({ scanned: 1, removed: [], failed: [] });
+    expect(fs.existsSync(workdir)).toBe(true);
+    running = false;
+    expect((await gc.sweep()).removed).toEqual([sessionId]);
+    expect(fs.existsSync(workdir)).toBe(false);
+  });
+
+  it('silently accepts a missing chats root and still cleans worktrees', async () => {
+    const sessionId = 'gc-no-chats-root' as SessionId;
+    const { worktree } = await createLocalWorktree(sessionId);
+    const warnings: string[] = [];
+    const { gc } = createGc(
+      { [sessionId]: { kind: 'deleted', meta: undefined } },
+      { logger: { ...createSilentLogger(), warn: (message) => warnings.push(message) } }
+    );
+
+    expect(fs.existsSync(chatsDir)).toBe(false);
+    expect(await gc.sweep()).toEqual({ scanned: 1, removed: [sessionId], failed: [] });
+    expect(fs.existsSync(worktree.hostPath)).toBe(false);
+    expect(warnings).toEqual([]);
+  });
+
+  it.each(['deleted', 'archived', 'owner-read'] as const)(
+    'isolates a chat %s failure and retries after backoff while worktrees are cleaned',
+    async (failure) => {
+      const sessionId = 'gc-chat-retry' as SessionId;
+      const workdir = createChatWorkdir(sessionId, failure === 'archived' ? undefined : 'keep');
+      const worktreeId = 'gc-independent-worktree' as SessionId;
+      const { worktree } = await createLocalWorktree(worktreeId);
+      const states: Record<string, WorktreeOwnerState> = {
+        [sessionId]:
+          failure === 'archived'
+            ? { kind: 'archived', meta: sessionMeta(sessionId, { isArchived: true }) }
+            : { kind: 'deleted', meta: undefined },
+        [worktreeId]: { kind: 'deleted', meta: undefined },
+      };
+      let nowMs = 1_000_000;
+      let failing = true;
+      const error = Object.assign(new Error('synthetic busy directory'), { code: 'EBUSY' });
+      const remove = fs.promises.rm;
+      const rmdir = fs.promises.rmdir;
+      vi.spyOn(fs.promises, 'rm').mockImplementation(async (target, options) => {
+        if (failing && target === workdir && failure === 'deleted') throw error;
+        return remove(target, options);
+      });
+      vi.spyOn(fs.promises, 'rmdir').mockImplementation(async (target, options) => {
+        if (failing && target === workdir && failure === 'archived') throw error;
+        return rmdir(target, options);
+      });
+      const { gc } = createGc(states, {
+        now: () => nowMs,
+        retryBaseDelayMs: 1_000,
+        readOwnerState: async (id) => {
+          if (failing && id === sessionId && failure === 'owner-read') throw error;
+          return states[id] ?? { kind: 'unknown' };
+        },
+      });
+
+      expect(await gc.sweep()).toEqual({
+        scanned: 2,
+        removed: [worktreeId],
+        failed: [sessionId],
+      });
+      expect(fs.existsSync(worktree.hostPath)).toBe(false);
+      expect(fs.existsSync(workdir)).toBe(true);
+      failing = false;
+      nowMs += 999;
+      expect(await gc.sweep()).toEqual({ scanned: 1, removed: [], failed: [] });
+      expect(fs.existsSync(workdir)).toBe(true);
+      nowMs += 1;
+      expect((await gc.sweep()).removed).toEqual([sessionId]);
+      expect(fs.existsSync(workdir)).toBe(false);
+    }
+  );
+
+  it('backs off an unreadable chats root without blocking worktree cleanup', async () => {
+    const sessionId = 'gc-chat-root-retry' as SessionId;
+    const { worktree } = await createLocalWorktree(sessionId);
+    fs.mkdirSync(path.dirname(chatsDir), { recursive: true });
+    fs.writeFileSync(chatsDir, 'not a directory');
+    let nowMs = 1_000_000;
+    const { gc } = createGc(
+      { [sessionId]: { kind: 'deleted', meta: undefined } },
+      { now: () => nowMs, retryBaseDelayMs: 1_000 }
+    );
+
+    expect((await gc.sweep()).removed).toEqual([sessionId]);
+    expect(fs.existsSync(worktree.hostPath)).toBe(false);
+    fs.rmSync(chatsDir);
+    const workdir = createChatWorkdir(sessionId, 'retry root read');
+    expect((await gc.sweep()).scanned).toBe(0);
+    expect(fs.existsSync(workdir)).toBe(true);
+    nowMs += 1_000;
+    expect((await gc.sweep()).removed).toEqual([sessionId]);
+    expect(fs.existsSync(workdir)).toBe(false);
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'skips symlinks, files and unsafe chat directory names',
+    async () => {
+      const sessionId = 'gc-chat-link' as SessionId;
+      const target = path.join(testDir, 'external');
+      fs.mkdirSync(target);
+      fs.writeFileSync(path.join(target, 'keep.txt'), 'outside chats');
+      const unsafe = createChatWorkdir('unsafe.name', 'keep unsafe');
+      fs.symlinkSync(target, path.join(chatsDir, sessionId), 'dir');
+      fs.writeFileSync(path.join(chatsDir, 'regular-file'), 'keep file');
+      const { gc } = createGc(
+        {},
+        {
+          readOwnerState: async () => ({ kind: 'deleted', meta: undefined }),
+        }
+      );
+
+      expect(await gc.sweep()).toEqual({ scanned: 0, removed: [], failed: [] });
+      expect(fs.lstatSync(path.join(chatsDir, sessionId)).isSymbolicLink()).toBe(true);
+      expect(fs.readFileSync(path.join(target, 'keep.txt'), 'utf8')).toBe('outside chats');
+      expect(fs.readFileSync(path.join(unsafe, 'artifact.txt'), 'utf8')).toBe('keep unsafe');
+      expect(fs.readFileSync(path.join(chatsDir, 'regular-file'), 'utf8')).toBe('keep file');
+    }
+  );
 
   it.each(['local', 'github'] as const)(
     'backs up and restores non-ignored work in a %s worktree without preserving ignored files',
@@ -223,7 +426,7 @@ describe('WorktreeGarbageCollector', () => {
     const unknownId = 'gc-unknown' as SessionId;
     const active = await createLocalWorktree(activeId);
     const unknown = await createLocalWorktree(unknownId);
-    const { gc, runCleanupScript } = createGc({ [activeId]: { kind: 'active' } });
+    const { gc } = createGc({ [activeId]: { kind: 'active' } });
 
     const result = await gc.sweep();
 
@@ -231,7 +434,6 @@ describe('WorktreeGarbageCollector', () => {
     expect(result.removed).toEqual([]);
     expect(fs.existsSync(active.worktree.hostPath)).toBe(true);
     expect(fs.existsSync(unknown.worktree.hostPath)).toBe(true);
-    expect(runCleanupScript).not.toHaveBeenCalled();
   });
 
   it('does nothing until workspace metadata is complete', async () => {
@@ -273,7 +475,7 @@ describe('WorktreeGarbageCollector', () => {
     const { rootPath, worktree } = await createLocalWorktree(sessionId);
     fs.writeFileSync(path.join(worktree.hostPath, 'only-copy.txt'), 'keep me\n', 'utf8');
     fs.rmSync(rootPath, { recursive: true, force: true });
-    const { gc, runCleanupScript } = createGc({
+    const { gc } = createGc({
       [sessionId]: { kind: 'deleted', meta: undefined },
     });
 
@@ -282,7 +484,6 @@ describe('WorktreeGarbageCollector', () => {
     expect(result.removed).toEqual([]);
     expect(result.failed).toEqual([sessionId]);
     expect(fs.existsSync(path.join(worktree.hostPath, 'only-copy.txt'))).toBe(true);
-    expect(runCleanupScript).not.toHaveBeenCalled();
   });
 
   it('archives a worktree of a project registered as a subdirectory of its repository', async () => {
@@ -326,16 +527,24 @@ describe('WorktreeGarbageCollector', () => {
     const { rootPath, worktree } = await createLocalWorktree(sessionId);
     const renamed = `${worktree.branch}-renamed`;
     runGit(worktree.hostPath, ['branch', '-m', renamed]);
-    const { gc, recordArchivedBranch } = createGc({
-      [sessionId]: {
-        kind: 'archived',
-        meta: sessionMeta(sessionId, { isArchived: true, branchName: worktree.branch }),
+    const meta = sessionMeta(sessionId, { isArchived: true, branchName: worktree.branch });
+    const { gc } = createGc(
+      {
+        [sessionId]: {
+          kind: 'archived',
+          meta,
+        },
       },
-    });
+      {
+        recordArchivedBranch: async (_, branchName) => {
+          meta.branchName = branchName;
+        },
+      }
+    );
 
     await gc.sweep();
 
-    expect(recordArchivedBranch).toHaveBeenCalledWith(sessionId, renamed);
+    expect(meta.branchName).toBe(renamed);
     expect(runGit(rootPath, ['branch', '--list', renamed])).toContain(renamed);
   });
 
