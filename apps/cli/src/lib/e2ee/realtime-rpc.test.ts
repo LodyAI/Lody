@@ -330,3 +330,148 @@ effectIt.effect(
       expect(streams.activeReads()).toBe(0);
     })
 );
+
+effectIt.effect(
+  'transfers encrypted feature data and replays the retained response after publication failure without repeating the save',
+  () =>
+    Effect.gen(function* () {
+      const { makeEncryptedFeatureReceiver } = yield* Effect.promise(() => import('./feature-rpc'));
+      const f = fixture();
+      const streams = memoryStreams();
+      const input = {
+        requestId: '55'.repeat(16),
+        request: {
+          workspaceId: f.workspaceId,
+          machineId: f.machineId,
+          method: 'code-collab/save-text' as const,
+          params: {
+            sessionId: f.input.sessionId,
+            requestedByUserId: 'owner',
+            path: 'private.ts',
+            baseDigest: 'sha256:' + '11'.repeat(32),
+            text: { encoding: 'plain' as const, text: 'SYNTHETIC_ENCRYPTED_SAVE', rawBytes: 24 },
+          },
+        },
+      };
+      const original = yield* f.sender.prepareFeature(input);
+      const saved: string[] = [];
+      let authorized = true;
+      const receive = makeEncryptedFeatureReceiver({
+        workspaceId: f.workspaceId,
+        genesis: Buffer.from(f.ledger.context.genesis.toBytes()).toString('hex'),
+        machineId: f.machineId,
+        native: f.nativeReceiver,
+        journal: () => f.receipts,
+        authorize: () =>
+          Effect.succeed(
+            authorized
+              ? { _tag: 'Authorized' as const }
+              : { _tag: 'Denied' as const, reason: 'revoked' }
+          ),
+        isOpen: () => true,
+        client: streams.client,
+        handle: async (request) => {
+          if (
+            request.method !== 'code-collab/save-text' ||
+            request.params.text.encoding !== 'plain'
+          )
+            throw new Error('unexpected request');
+          saved.push(request.params.text.text);
+          return { ok: false, error: 'synthetic saved outcome' };
+        },
+      });
+      streams.failResponses(true);
+      yield* Effect.result(receive({ id: original.requestId, frame: original.frameHex }));
+      expect(saved).toEqual(['SYNTHETIC_ENCRYPTED_SAVE']);
+      const first = streams.writes.filter((write) => write.stream.includes(':res:'));
+      streams.failResponses(false);
+      yield* receive({ id: original.requestId, frame: original.frameHex });
+      expect(saved).toEqual(['SYNTHETIC_ENCRYPTED_SAVE']);
+      const replies = streams.writes.filter((write) => write.stream.includes(':res:'));
+      expect(replies.slice(first.length)).toEqual(first);
+      const envelope = replies.at(-1)?.value as { frame: string };
+      const part = yield* f.sender.acceptFeatureResponse(input, envelope.frame);
+      expect(JSON.parse(new TextDecoder().decode(part.bytes))).toEqual({
+        ok: false,
+        error: 'synthetic saved outcome',
+      });
+      authorized = false;
+      yield* receive({ id: original.requestId, frame: original.frameHex });
+      expect(streams.writes.filter((write) => write.stream.includes(':res:'))).toEqual(replies);
+      expect(JSON.stringify(streams.writes)).not.toContain('SYNTHETIC_ENCRYPTED_SAVE');
+    })
+);
+
+it('connects the renderer feature facade to the CLI listener with large encrypted request and response chunks', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(1000);
+  const { makeEncryptedFeatureReceiver } = await import('./feature-rpc');
+  const { createEncryptedDispatchLegacy } =
+    await import('../../../../../packages/components/src/providers/encrypted-dispatch-legacy');
+  const f = fixture();
+  const streams = memoryStreams();
+  const text = 'SYNTHETIC_PRIVATE_TEXT'.repeat(60_000);
+  const paths = new Map<string, string>();
+  const receive = makeEncryptedFeatureReceiver({
+    workspaceId: f.workspaceId,
+    genesis: Buffer.from(f.ledger.context.genesis.toBytes()).toString('hex'),
+    machineId: f.machineId,
+    native: f.nativeReceiver,
+    journal: () => f.receipts,
+    authorize: () => Effect.succeed({ _tag: 'Authorized' as const }),
+    isOpen: () => true,
+    client: streams.client,
+    handle: async (request) => {
+      if (request.method !== 'code-collab/save-text' || request.params.text.encoding !== 'plain')
+        throw new Error('unexpected method');
+      paths.set(request.params.path, request.params.text.text);
+      return { ok: false, error: request.params.text.text };
+    },
+  });
+  const renderer = createEncryptedDispatchLegacy({
+    workspaceId: f.workspaceId,
+    prepare: (machine, input) => Effect.runPromise(f.sender.prepareDispatch(machine, input)),
+    accept: (machine, input, frame) =>
+      Effect.runPromise(f.sender.acceptResponse(machine, input, frame)),
+    prepareFeature: (input) => Effect.runPromise(f.sender.prepareFeature(input)),
+    acceptFeature: (input, frame) =>
+      Effect.runPromise(f.sender.acceptFeatureResponse(input, frame)),
+    client: async () => streams.client,
+  });
+  try {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* makeEncryptedRpcListener({
+            workspaceId: f.workspaceId,
+            machineId: f.machineId,
+            client: streams.client,
+            receive: (envelope) => receive(envelope).pipe(Effect.asVoid),
+          });
+          const result = yield* Effect.promise(() =>
+            renderer.requestFeature({
+              workspaceId: f.workspaceId,
+              machineId: f.machineId,
+              method: 'code-collab/save-text',
+              params: {
+                sessionId: f.input.sessionId,
+                requestedByUserId: 'owner',
+                path: 'private.ts',
+                baseDigest: 'sha256:' + '11'.repeat(32),
+                text: { encoding: 'plain', text, rawBytes: text.length },
+              },
+            })
+          );
+          expect(result).toEqual({ ok: false, error: text });
+          expect(paths.get('private.ts')).toBe(text);
+          expect(JSON.stringify(streams.writes)).not.toContain('SYNTHETIC_PRIVATE_TEXT');
+          yield* Effect.promise(() => renderer.close());
+        })
+      )
+    );
+    expect(streams.activeReads()).toBe(0);
+  } finally {
+    await renderer.close();
+    vi.useRealTimers();
+  }
+});

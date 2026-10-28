@@ -841,20 +841,38 @@ describe('createWorkspaceMachineRpcFacade', () => {
     let delivered: unknown;
     const invoke = async (_channel: string, request: unknown) => {
       delivered = request;
-      return bridgeAvailable ? {ok:true,result:{type:'session/cancel_response',sessionId,success:true}} : undefined;
+      return bridgeAvailable
+        ? { ok: true, result: { type: 'session/cancel_response', sessionId, success: true } }
+        : undefined;
     };
-    vi.stubGlobal('window',{__LODY_ELECTRON__:true,ipc:{invoke}});
+    vi.stubGlobal('window', { __LODY_ELECTRON__: true, ipc: { invoke } });
     let networkUsed = false;
     const facade = createWorkspaceMachineRpcFacade({
-      workspaceId, getMachineProtocolCapabilities:async()=>CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
-      targetRouter:{getPlaneForMachine:()=> 'cloud',resolvePlaneForMachine:async()=> 'cloud'},
-      isLocalControlMachine: machine => machine === localMachineId,
-      getMachineRpcClient:async()=>{networkUsed=true;throw new Error('cloud RPC unavailable');},
+      workspaceId,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      isLocalControlMachine: (machine) => machine === localMachineId,
+      getMachineRpcClient: async () => {
+        networkUsed = true;
+        throw new Error('cloud RPC unavailable');
+      },
     });
-    expect(await facade.requestSessionCancel(localMachineId,sessionId,'turn-1')).toMatchObject({success:true});
-    expect(delivered).toMatchObject({workspaceId,machineId:localMachineId,method:'session/cancel'});
-    bridgeAvailable=false;
-    expect(await facade.requestSessionCancel(localMachineId,sessionId,'turn-1')).toMatchObject({success:false,error:'Local machine RPC is unavailable.'});
+    expect(await facade.requestSessionCancel(localMachineId, sessionId, 'turn-1')).toMatchObject({
+      success: true,
+    });
+    expect(delivered).toMatchObject({
+      workspaceId,
+      machineId: localMachineId,
+      method: 'session/cancel',
+    });
+    bridgeAvailable = false;
+    expect(await facade.requestSessionCancel(localMachineId, sessionId, 'turn-1')).toMatchObject({
+      success: false,
+      error: 'Local machine RPC is unavailable.',
+    });
     expect(networkUsed).toBe(false);
   });
   it('uses the cloud Machine RPC client for a remote machine', async () => {
@@ -1197,3 +1215,100 @@ it.each([{ operationInbox: 1 }, {}])(
     ]);
   }
 );
+
+describe('encrypted file and preview routing', () => {
+  it('uses protected RPC for file contents and preview control without opening the ordinary RPC client', async () => {
+    const results = new Map<string, unknown>();
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () => {
+        throw new Error('plaintext RPC must stay closed');
+      },
+      requestEncryptedFeature: async (request) => {
+        expect(request.workspaceId).toBe(workspaceId);
+        expect(request.machineId).toBe(remoteMachineId);
+        results.set(request.method, request.params);
+        if (request.method === 'code-collab/open-text')
+          return {
+            ok: true,
+            result: {
+              status: 'ok',
+              path: 'private.ts',
+              digest: 'sha256:' + '11'.repeat(32),
+              text: { encoding: 'plain', text: 'private text', rawBytes: 12 },
+            },
+          };
+        if (request.method === 'session/preview-status')
+          return {
+            ok: true,
+            result: {
+              type: 'session/preview-status_response',
+              sessionId,
+              success: true,
+            },
+          };
+        throw new Error('unexpected feature');
+      },
+    });
+    expect(
+      await facade.requestCodeCollabOpenText(
+        remoteMachineId,
+        { sessionId, path: 'private.ts' },
+        { ownerSessionId: 'parent' }
+      )
+    ).toMatchObject({ status: 'ok', text: { text: 'private text' } });
+    expect(
+      await facade.requestSessionPreviewStatus(remoteMachineId, sessionId, 'owner', {
+        renewEndpointId: 'endpoint',
+      })
+    ).toMatchObject({ success: true });
+    expect(results.get('session/preview-status')).toMatchObject({ renewEndpointId: 'endpoint' });
+  });
+});
+
+it('keeps encrypted same-machine Code Collab on local IPC even when its document plane is cloud-only', async () => {
+  const saved = new Map<string, string>();
+  vi.stubGlobal('window', {
+    __LODY_ELECTRON__: true,
+    ipc: {
+      invoke: async (
+        channel: string,
+        request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest
+      ) => {
+        expect(channel).toBe('machineRpc.send');
+        if (request.method !== 'code-collab/save-text' || request.params.text.encoding !== 'plain')
+          throw new Error('unexpected request');
+        saved.set(request.params.path, request.params.text.text);
+        return { ok: true, result: { status: 'ok' } };
+      },
+    },
+  });
+  const facade = createWorkspaceMachineRpcFacade({
+    workspaceId,
+    getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+    targetRouter: {
+      getPlaneForMachine: () => 'cloud',
+      resolvePlaneForMachine: async () => 'cloud',
+    },
+    isLocalControlMachine: (machine) => machine === localMachineId,
+    getMachineRpcClient: async () => {
+      throw new Error('plaintext network must stay closed');
+    },
+    requestEncryptedFeature: async () => {
+      throw new Error('same-machine controls must remain offline');
+    },
+  });
+  await facade.requestCodeCollabSaveText(localMachineId, {
+    sessionId,
+    requestedByUserId: 'owner',
+    path: 'private.ts',
+    baseDigest: 'sha256:' + '11'.repeat(32),
+    text: { encoding: 'plain', text: 'local edit', rawBytes: 10 },
+  });
+  expect(saved.get('private.ts')).toBe('local edit');
+});

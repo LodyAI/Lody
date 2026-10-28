@@ -7,12 +7,23 @@ SameSite=None, Partitioned cookie on both local and remote endpoints. Chromium
 accepts Secure cookies on the literal loopback listener. SameSite=Lax cannot
 bootstrap cookies inside cross-site preview frames: first-level resources may
 authenticate through a token-bearing Referer, but nested module imports lack it.
-Local cookie names include the endpoint ID because cookies ignore TCP ports;
-opening another Session must not overwrite the first Session's credential.
+Each local Session and target origin uses a stable `lody-<scope>.localhost`
+viewer hostname. Chromium resolves it to loopback and gives it a separate
+partitioned-cookie quota, so one preview cannot evict another preview’s token.
+It may connect to IPv6 first, so the proxy reserves the same port on 127.0.0.1
+and ::1 before publishing the URL. Port conflicts retry with a new port; only an
+unavailable IPv6 stack permits IPv4-only operation. Closing joins both listeners.
+Reopening the target reuses the hostname and cookie names, but generates a new
+token. When an application sets cookies the proxy reissues the capability last;
+under Chromium quota pressure application cookies may be evicted. Chromium limits
+partitioned cookies to about 10 KiB per embedded site and partition. Local headers
+remain limited to 1 MiB for clients with larger cookie jars, not as a browser quota.
 
 Every HTTP request and WebSocket upgrade still requires that endpoint's token.
-Matching Origin or a tokenless Referer cannot unlock the listener. Proxy cookies
-are stripped before forwarding to the development server. A 502 is a separate
+Matching Origin or a tokenless Referer cannot unlock the listener. Application cookies
+are scoped by Session and target origin locally and forwarded to the development
+server; capability cookies
+are never forwarded. The [cookie decision](../../../../.agents/notes/implemented/bug-fix/2026-10-28-preview-app-cookies.md) explains the attribute changes and limits. A 502 is a separate
 forwarding/upstream failure; inspect its response body instead of disabling
 authentication or the development server's origin checks.
 

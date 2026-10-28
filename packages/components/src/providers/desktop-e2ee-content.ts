@@ -127,9 +127,25 @@ export function createDesktopE2eeContent(input: {
     e2ee: {
       attachmentToken: async () => {
         if (memberRemoved || transition.phase() === 'closed') throw new Error('e2ee_closed');
-        const result = await input.runtime.contentStreamsToken(input.workspaceId).catch((error) => { observeRemoval(error); throw error; });
+        const result = await input.runtime.contentStreamsToken(input.workspaceId).catch((error) => {
+          observeRemoval(error);
+          throw error;
+        });
         if (!result.attachmentToken) throw new Error('e2ee_attachment_unavailable');
         return result.attachmentToken;
+      },
+      prepareFeatureRpc: (args: import('@lody/shared/e2ee-rpc').E2eeFeatureInput) => {
+        if (!input.runtime.prepareFeatureRpc)
+          return Promise.reject(new Error('e2ee_rpc_unavailable'));
+        return input.runtime.prepareFeatureRpc(input.workspaceId, args);
+      },
+      acceptFeatureRpcResponse: (
+        args: import('@lody/shared/e2ee-rpc').E2eeFeatureInput,
+        frame: string
+      ) => {
+        if (!input.runtime.acceptFeatureRpcResponse)
+          return Promise.reject(new Error('e2ee_rpc_unavailable'));
+        return input.runtime.acceptFeatureRpcResponse(input.workspaceId, args, frame);
       },
       prepareDispatch: (
         machineId: string,

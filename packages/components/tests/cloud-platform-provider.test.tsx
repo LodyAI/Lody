@@ -202,6 +202,68 @@ describe('CloudPlatformProvider', () => {
     }
   });
 
+  it('routes encrypted feature preparation and response verification through the production provider, IPC proxy and preload', async () => {
+    fixture.electron = true;
+    fixture.usePreload = true;
+    window.ipc = ipcBridge;
+    refetch('Encrypted');
+    const dispatchInput = {
+      sessionId: 'session-a',
+      userTurnId: 'turn-a',
+      userId: 'user-a',
+      timestamp: new Date(1000).toISOString(),
+      inputConfig: { prompt: 'synthetic input' },
+    };
+    const input = {
+      requestId: '55'.repeat(16),
+      request: {
+        workspaceId: 'workspace-a',
+        machineId: 'machine-a',
+        method: 'code-collab/open-text' as const,
+        params: { sessionId: dispatchInput.sessionId, path: 'private.ts' },
+      },
+    };
+    const original = {
+      targetMachineId: 'machine-a',
+      requesterDevice: '11'.repeat(32),
+      requestId: '22'.repeat(16),
+      frameHex: '33'.repeat(143),
+      expiresAt: 901000,
+    };
+    const ack = { sequence: 0, final: true, bytes: new Uint8Array([7]) };
+    const retained: unknown[][] = [];
+    fixture.invoke = async (channel, ...args) => {
+      // The mock is below the real preload allowlist, at ipcRenderer.invoke.
+      // Returning a value requires the exact production route and arguments.
+      if (channel === 'e2ee.prepareFeatureRpc') {
+        expect(args).toEqual(['workspace-a', input]);
+        retained.push(args);
+        return original;
+      }
+      if (channel === 'e2ee.acceptFeatureRpcResponse') {
+        expect(retained).toEqual([['workspace-a', input]]);
+        expect(args).toEqual(['workspace-a', input, '44'.repeat(143)]);
+        return ack;
+      }
+      throw new Error(`unexpected IPC invocation: ${channel}`);
+    };
+    await render();
+    const runtime = seen.at(-1)!.e2eeWorkspaces!.runtime!;
+    const access = createDesktopE2eeContent({
+      runtime,
+      workspaceId: 'workspace-a',
+      genesisHash: 'aa'.repeat(32),
+      epoch: 0,
+      authToken: () => 'synthetic-account-token',
+    });
+    try {
+      expect(await access.e2ee.prepareFeatureRpc!(input)).toEqual(original);
+      expect(await access.e2ee.acceptFeatureRpcResponse!(input, '44'.repeat(143))).toEqual(ack);
+    } finally {
+      await access.close();
+    }
+  });
+
   it('keeps ordinary access unauthenticated while E2EE opens with an expired snapshot and retained bearer after network retries fail', async () => {
     fixture.electron = true;
     refetch('Encrypted');

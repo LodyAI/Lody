@@ -386,7 +386,7 @@ describe('SessionHeaderMenu', () => {
     await act(async () => menuItem('Cursor').click());
     expect(onSelect).toHaveBeenCalledWith(cursorLauncher);
   });
-  it('enables local encrypted export while keeping sharing and remote controls restricted', async () => {
+  it('allows encrypted local export and preview while keeping sharing and unsupported operations restricted', async () => {
     let exported = false;
     const store = createStore();
     store.set(workspaceContentModeAtom, {
@@ -424,13 +424,15 @@ describe('SessionHeaderMenu', () => {
     await openMenu();
     for (const reason of [
       'Encrypted workspaces do not yet support sharing.',
-      'Encrypted workspaces do not yet support remote preview.',
       'Encrypted workspaces do not yet support remote machine operations.',
     ]) {
       const item = menuItem(reason);
       expect(item.getAttribute('aria-disabled')).toBe('true');
       await act(async () => item.click());
     }
+    expect(document.body.textContent).not.toContain(
+      'Encrypted workspaces do not yet support remote preview.'
+    );
     expect(document.body.textContent).not.toContain('Share with team');
     expect(container?.querySelector('[data-testid="copy-result"]')?.textContent).toBe('not copied');
     expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe('none');

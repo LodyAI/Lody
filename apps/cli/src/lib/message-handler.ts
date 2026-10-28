@@ -10,7 +10,6 @@ import {
   listWorkspaceProjects,
   readWorkspaceFlockRowsFromFlock,
 } from '@lody/shared';
-import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import { encodeSessionFilePath, resolveSessionPullRequests } from '@lody/shared';
 import type { SessionFileRoot } from '@lody/shared';
 import { resolveProjectFileRoots } from '@/session/worktree/project-member-access';
@@ -3083,13 +3082,7 @@ export class MessageHandler {
         updateSessionDiffStats: async (sessionId, session, options) =>
           await this.turnPostProcessingService.updateSessionDiffStats(sessionId, session, options),
         refreshCodeCollabSharedState: async (sessionId) => {
-          if (
-            workspaceSupports(
-              { mode: config.encryptedWorkspace ? 'protected' : 'plaintext' },
-              'code-collab-index'
-            )
-          )
-            await this.codeCollabV2Service.refreshSharedStateAfterTurn({ sessionId });
+          await this.codeCollabV2Service.refreshSharedStateAfterTurn({ sessionId });
         },
         detectAndAssociatePR: async (ctx) =>
           await this.turnPostProcessingService.detectAndAssociatePR(ctx),

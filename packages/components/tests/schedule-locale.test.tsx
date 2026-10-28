@@ -151,8 +151,8 @@ describe('Chinese is a product language, not an Intl locale', () => {
       />
     );
     expect(container.textContent).toContain('每天回顾');
-    // The frequency column is a real localized sentence, not a cron expression.
-    expect(container.textContent).toContain(zh['schedules.column.frequency']);
+    // The frequency is a real localized sentence, not a cron expression.
+    expect(container.textContent).toContain(zh['schedules.column.status']);
     expect(container.textContent).not.toContain('* * MON-FRI');
   });
 

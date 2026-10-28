@@ -1,3 +1,7 @@
+import {
+  LORO_CODE_COLLAB_FILE_INDEX_STREAM_SEGMENT,
+  LORO_CODE_COLLAB_FILE_INDEX_SIGNAL_STREAM_SEGMENT,
+} from './code-collab-rooms';
 export * from './preview-control';
 import { CliType } from './ai';
 export * from './history-writer';
@@ -152,8 +156,10 @@ export const LORO_STREAMS_REMOTE_CURSOR_HISTORICAL_ALIAS_BASE_URLS = [
 export const LORO_STREAMS_LARGE_POST_SHARD_MIN_BYTES = 64 * 1024;
 export const LORO_META_STREAM_SUFFIX = 'meta';
 export const LORO_SESSION_STREAM_SEGMENT = 's';
-export const LORO_CODE_COLLAB_FILE_INDEX_STREAM_SEGMENT = 'fi';
-export const LORO_CODE_COLLAB_FILE_INDEX_SIGNAL_STREAM_SEGMENT = 'fis';
+export {
+  LORO_CODE_COLLAB_FILE_INDEX_STREAM_SEGMENT,
+  LORO_CODE_COLLAB_FILE_INDEX_SIGNAL_STREAM_SEGMENT,
+} from './code-collab-rooms';
 export const CODE_COLLAB_FILE_INDEX_FLOCK_TTL_MS = 180 * 24 * 60 * 60 * 1000;
 const LORO_STREAMS_CONTROL_SHARD_IDS = ['a', 'b', 'c'] as const;
 const LORO_STREAMS_OTHER_SHARD_IDS = ['a', 'b'] as const;
