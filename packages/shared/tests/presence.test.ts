@@ -26,6 +26,38 @@ const legacyRunningStatus = z.object({
 });
 
 describe('presence helpers', () => {
+  it('uses a separate minimal allowlist and ignores arbitrary details before validation', () => {
+    const input = {
+      entry: {
+        kind: 'session',
+        sessionId,
+        machineId,
+        instanceId,
+        updatedAt: 120,
+        extra: 'secret',
+        status: {
+          type: 'initializing',
+          stage: 'acp',
+          detail: 'x'.repeat(1000),
+          futureText: 'secret',
+        },
+      },
+    };
+    expect(parseLodyPresenceStates(input, { minimal: true })).toEqual({
+      entry: {
+        kind: 'session',
+        sessionId,
+        machineId,
+        instanceId,
+        updatedAt: 120,
+        status: { type: 'initializing', stage: 'acp' },
+      },
+    });
+    expect(parseLodyPresenceStates(input)).toEqual({});
+    input.entry.status.detail = 'ordinary detail';
+    expect(parseLodyPresenceStates(input).entry).toHaveProperty('status.detail', 'ordinary detail');
+  });
+
   it('keeps an optional running phase on session presence', () => {
     const sessionKey = getLodySessionPresenceKey(sessionId, instanceId);
     const parsed = parseLodyPresenceStates({
@@ -53,6 +85,72 @@ describe('presence helpers', () => {
     expect(legacyRunningStatus.safeParse({ type: 'running', activity: 'finalizing' }).success).toBe(
       false
     );
+  });
+
+  it('keeps only identifiers, enums and timestamps across all minimal entry kinds', () => {
+    const common = {
+      instanceId,
+      updatedAt: 100,
+      detail: 'private detail',
+      futureText: 'private text',
+    };
+    const states = {
+      machine: { ...common, kind: 'machine', machineId },
+      viewing: { ...common, kind: 'session-viewing', userId: 'viewer', sessionId, since: 50 },
+      running: {
+        ...common,
+        kind: 'session',
+        machineId,
+        sessionId,
+        status: {
+          type: 'running',
+          activity: 'image_generation',
+          phase: 'finalizing',
+          detail: 'private text',
+        },
+      },
+      permission: {
+        ...common,
+        kind: 'session',
+        machineId,
+        sessionId,
+        status: { type: 'requestPermission', detail: 'private text' },
+      },
+      invalid: {
+        ...common,
+        kind: 'session',
+        machineId,
+        sessionId,
+        status: { type: 'running', activity: 'arbitrary free text' },
+      },
+    };
+    expect(parseLodyPresenceStates(states, { minimal: true })).toEqual({
+      machine: { kind: 'machine', machineId, instanceId, updatedAt: 100 },
+      viewing: {
+        kind: 'session-viewing',
+        userId: 'viewer',
+        sessionId,
+        instanceId,
+        since: 50,
+        updatedAt: 100,
+      },
+      running: {
+        kind: 'session',
+        machineId,
+        sessionId,
+        instanceId,
+        updatedAt: 100,
+        status: { type: 'running', activity: 'image_generation', phase: 'finalizing' },
+      },
+      permission: {
+        kind: 'session',
+        machineId,
+        sessionId,
+        instanceId,
+        updatedAt: 100,
+        status: { type: 'requestPermission' },
+      },
+    });
   });
 
   it('uses a 90 second presence TTL', () => {

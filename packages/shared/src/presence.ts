@@ -153,6 +153,49 @@ export const LodyPresenceStateSchema = z.discriminatedUnion('kind', [
   PresenceSessionViewingStateSchema,
 ]);
 
+/** Independent allowlist: adding an ordinary detail never widens encrypted-workspace metadata. */
+const MinimalActiveSessionStatusSchema = z.preprocess(
+  omitNullValues,
+  z.discriminatedUnion('type', [
+    z.object({
+      type: z.literal('running'),
+      activity: z.enum(['image_generation']).optional(),
+      phase: z.literal('finalizing').optional(),
+    }),
+    z.object({ type: z.literal('requestPermission') }),
+    z.object({
+      type: z.literal('initializing'),
+      stage: z.enum(['git-clone', 'managed-runtime', 'acp', 'resuming']).optional(),
+    }),
+  ])
+);
+
+/** Only IDs, fixed discriminators/enums and timestamps; z.object strips extra fields. */
+export const MinimalLodyPresenceStateSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('machine'),
+    machineId: PresenceMachineStateSchema.shape.machineId,
+    instanceId: PresenceInstanceIdSchema,
+    updatedAt: z.number().finite(),
+  }),
+  z.object({
+    kind: z.literal('session'),
+    sessionId: PresenceSessionStateSchema.shape.sessionId,
+    machineId: PresenceMachineStateSchema.shape.machineId,
+    instanceId: PresenceInstanceIdSchema,
+    status: MinimalActiveSessionStatusSchema,
+    updatedAt: z.number().finite(),
+  }),
+  z.object({
+    kind: z.literal('session-viewing'),
+    userId: z.string().min(1),
+    instanceId: PresenceInstanceIdSchema,
+    sessionId: PresenceSessionStateSchema.shape.sessionId,
+    since: z.number().finite(),
+    updatedAt: z.number().finite(),
+  }),
+]);
+
 export const getLodyMachinePresenceKey = (
   machineId: MachineId,
   instanceId: LodyPresenceInstanceId
@@ -174,10 +217,14 @@ export const toLodyPresenceStreamUrl = (durableStreamUrl: string): string => {
   return url.toString();
 };
 
-export const parseLodyPresenceStates = (states: Record<string, unknown>): LodyPresenceStateMap => {
+export const parseLodyPresenceStates = (
+  states: Record<string, unknown>,
+  options: { minimal?: boolean } = {}
+): LodyPresenceStateMap => {
+  const schema = options.minimal ? MinimalLodyPresenceStateSchema : LodyPresenceStateSchema;
   const parsed: LodyPresenceStateMap = {};
   for (const [key, value] of Object.entries(states)) {
-    const result = LodyPresenceStateSchema.safeParse(value);
+    const result = schema.safeParse(value);
     if (!result.success) continue;
     parsed[key] = result.data;
   }

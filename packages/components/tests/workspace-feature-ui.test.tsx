@@ -22,7 +22,9 @@ import {
   saveScheduledMessage,
 } from '../src/components/schedules/scheduled-message-write';
 import type { WorkspaceRuntime } from '../src/atoms/runtime';
+import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import type { SessionMeta } from '@lody/shared';
+import { useWorkspaceFeature } from '../src/hooks/use-workspace-feature';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root;
@@ -38,21 +40,34 @@ afterEach(async () => {
   container.remove();
 });
 
-it.each(['en', 'zh_CN'])('explains unavailable encrypted presence in %s', async (language) => {
-  await initI18n(language);
-  const state = resolveSessionStatusStripState({
-    browserOnline: true,
-    machineRemoved: false,
-    machineOnlineStatus: 'offline',
-    presenceAvailable: false,
-  });
-  await act(async () => root.render(<SessionStatusStrip state={state} />));
-  expect(container.textContent).toBe(
-    language === 'en'
-      ? 'Encrypted workspaces do not yet provide online status.'
-      : '加密工作区暂不提供在线状态'
-  );
-});
+it.each(['en', 'zh_CN'])(
+  'enables encrypted presence without the unavailable notice in %s',
+  async (language) => {
+    await initI18n(language);
+    function PresenceStatus() {
+      const available = useWorkspaceFeature('presence');
+      return (
+        <SessionStatusStrip
+          state={resolveSessionStatusStripState({
+            browserOnline: true,
+            machineRemoved: false,
+            machineOnlineStatus: 'unknown',
+            presenceAvailable: available,
+          })}
+        />
+      );
+    }
+    expect(workspaceSupports({ mode: 'protected' }, 'presence')).toBe(true);
+    await act(async () =>
+      root.render(
+        <Provider store={encryptedStore()}>
+          <PresenceStatus />
+        </Provider>
+      )
+    );
+    expect(container.textContent).toBe('');
+  }
+);
 
 it('keeps ordinary unknown presence silent', async () => {
   const state = resolveSessionStatusStripState({

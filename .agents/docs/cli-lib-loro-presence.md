@@ -51,6 +51,26 @@ workspace on a slow socket shares its export/drain backpressure. This lower unit
 does not migrate the workspace presence producer or cloud transport. See the
 [local-plane writer](cli-lib-local-loro-data-plane.md#shape).
 
+## Encrypted-workspace metadata exception
+
+Encrypted workspaces reuse the same plaintext Loro adaptor, 30s heartbeat, 90s TTL
+and serial SDK queue in their authorized workspace bucket. `doc.ts` selects minimal
+mode when creating the owner, before any local publication or relay can occur.
+`PresenceReplica` applies the independent shared allowlist before writing both stores;
+its receive projection applies that allowlist again. The renderer does the same for
+cloud snapshots, local IPC snapshots and viewing publication. Unknown fields are stripped
+before validating the permitted fields, so a legacy detail cannot drop valid liveness.
+
+The allowed fields are machine/instance/session/user IDs, `kind`, the fixed status
+`type`/`activity`/`phase`/`stage` enums, and `since`/`updatedAt` timestamps. Text such as
+initialization `detail` stays out even if ordinary presence supports it. Metadata is
+visible to the presence service and is not cryptographic authorization. Document
+protection and the other unavailable side channels retain their own boundaries.
+Ordinary workspace publication and parsing are unchanged. The
+[decision note](../notes/proposed/architecture/2026-10-28-minimal-plaintext-presence.md)
+records the trade-off and acceptance limits; the presence body codec from #1990
+remains unused and is retained for separate follow-up.
+
 ## Token-provider ownership
 
 Durable and ephemeral consumers may borrow the same token provider, but each

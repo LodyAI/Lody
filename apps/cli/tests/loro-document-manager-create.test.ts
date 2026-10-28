@@ -626,6 +626,66 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
     await manager.cleanUp({ fast: true });
   });
 
+  it('creates minimal encrypted presence locally and joins its remote room without other side channels', async () => {
+    const repo = {
+      joinMetaRoom: async () => createMetaSubscription(),
+      destroy: async () => {},
+      addTransport: mocks.repoAddTransport,
+      removeTransport: mocks.repoRemoveTransport,
+      transportRooms: mocks.repoTransportRooms,
+    };
+    mocks.repoCreate.mockResolvedValueOnce(repo);
+    const manager = await LoroDocumentManager.create(
+      'workspace-minimal' as WorkspaceId,
+      'user-1',
+      createSilentLogger(),
+      {
+        streamsTokens: testStreamsTokens,
+        encryptedWorkspace: {
+          repositoryDirectory: path.join(tempHomeDir!, 'encrypted-repo'),
+          content: {
+            mode: 'protected',
+            namespace: 'synthetic',
+            resolve: () => {
+              throw new Error('unused');
+            },
+            snapshotUpload: { canUpload: () => false },
+          },
+          bucketId: () => 'protected-bucket',
+          refresh: async () => {},
+          close: async () => {},
+        },
+      }
+    );
+    try {
+      // No remote room means unknown, even though local entries are already authored.
+      expect(await manager.getOnlineMachineIds({ timeoutMs: 1 })).toBeNull();
+      manager.publishSessionPresence('minimal-session' as SessionId, 'machine' as MachineId, {
+        type: 'initializing',
+        stage: 'acp',
+        detail: 'private path',
+      });
+      expect(Object.values(manager.getPresenceStates() ?? {})).toEqual([
+        {
+          kind: 'session',
+          sessionId: 'minimal-session',
+          machineId: 'machine',
+          instanceId: 'synthetic-document-manager',
+          updatedAt: expect.any(Number),
+          status: { type: 'initializing', stage: 'acp' },
+        },
+      ]);
+      await manager.attachRemoteStreamsTransport();
+      // The real owner has joined; absent remote machine heartbeats now form a known empty set.
+      expect(await manager.getOnlineMachineIds({ timeoutMs: 100 })).toEqual(new Set());
+      expect(repo.addTransport).toHaveBeenCalledWith('streams', expect.anything(), {
+        ephemeral: true,
+      });
+    } finally {
+      await manager.cleanUp({ fast: true });
+    }
+  });
+
   it('configures zstd snapshot codec on the streams transport adapter', async () => {
     mocks.repoCreate.mockResolvedValueOnce({
       joinMetaRoom: vi.fn(async () => createMetaSubscription()),

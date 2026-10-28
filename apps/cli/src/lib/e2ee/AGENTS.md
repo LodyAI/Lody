@@ -2,19 +2,17 @@
 
 `CLAUDE.md` is a symlink to this file. Parent CLI rules apply.
 
-- Lazy machine-only module; ordinary CLI startup never probes keyring.
-- First creation write/read-probes OS keystore, permanently selecting OS or file
-  protection. Reopen requires original selector/KEK; never probe or switch.
-- File protection requires owner-only directories/files, no symlinks; Windows uses actual
-  owner/DACL checks through the official process Layer, not Unix mode bits.
+- Lazy machine-only custody; ordinary startup never probes keyring.
+- First creation probes OS keystore write/read, permanently choosing OS/file protection.
+  Reopen requires original selector/KEK; never re-probe or switch.
+- File protection: owner-only dirs/files, no symlinks. Windows: owner/DACL via official
+  process Layer, never Unix mode bits.
 - Core node-custody owns blobs; no personal management, private exports, plaintext device files
   or silent keyring downgrade.
-- Show file protection before approval.
+- Disclose file protection before approval.
 
-- Keyring helper: 10-second timeout, stdin secrets. Confirm termination before
-  fallback; retain failed release owners.
-- Batch Windows ACL checks. Retry SQLite BUSY asynchronously with a bound;
-  never block busy_timeout during keyring work.
+- Keyring: 10s timeout, stdin secrets; confirm termination before fallback, retain failed owners.
+- Batch Windows ACL checks; bound async SQLite BUSY retries. Never block busy_timeout during keyring work.
 
 - Resume first Windows ACL setup only with empty custody; otherwise validate.
 - `runtime.ts` composes Feed/VerifiedLedger, installed keys and optional receiver.
@@ -23,7 +21,8 @@
 - Execution: `authorizeExecution`; authenticated read; RAM-only <15min from read start.
 - Journal originals before feed/pin; rebase core pin first after 64 records.
   Retired cache cleanup cannot fail open.
-- No plaintext RPC, presence, attachments or schedules until encrypted channels exist.
+- No plaintext RPC/attachments/schedules until encrypted. Presence uses shared minimal
+  plaintext allowlists on publish/receive, ordinary adaptor/90s TTL.
 - `realtime-journal.ts`: schema 3 only; no migration. Recover SQLite first;
   Init only v0/no objects. Archive intact after retiring readable current
   keys despite damage; unreadable keys refuse reset. No auto-replace/GC/archive replay/import.

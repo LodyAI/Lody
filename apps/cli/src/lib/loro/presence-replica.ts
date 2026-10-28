@@ -1,6 +1,7 @@
 import { EphemeralStore, type Value } from 'loro-crdt';
 import {
   LODY_PRESENCE_TTL_MS,
+  MinimalLodyPresenceStateSchema,
   getLodyMachinePresenceKey,
   getLodySessionPresenceKey,
   parseLodyPresenceStates,
@@ -24,12 +25,20 @@ export class PresenceReplica {
   private closed = false;
   private destroyed = false;
 
-  constructor(readonly instanceId: LodyPresenceInstanceId) {}
+  constructor(
+    readonly instanceId: LodyPresenceInstanceId,
+    private readonly options: { minimal?: boolean } = {}
+  ) {}
 
   private write(key: string, state: LodyPresenceState): void {
     if (this.closed) return;
-    this.store.set(key, state as unknown as Value);
-    this.local.set(key, state as unknown as Value);
+    const parsed = this.options.minimal
+      ? MinimalLodyPresenceStateSchema.safeParse(state)
+      : undefined;
+    if (parsed && !parsed.success) return;
+    const published = parsed?.data ?? state;
+    this.store.set(key, published as unknown as Value);
+    this.local.set(key, published as unknown as Value);
     for (const listener of this.listeners) listener();
   }
   private remove(key: string): void {
@@ -92,7 +101,10 @@ export class PresenceReplica {
     }
   }
   getPresenceStates(): LodyPresenceStateMap {
-    return parseLodyPresenceStates(this.store.getAllStates() as Record<string, unknown>);
+    return parseLodyPresenceStates(
+      this.store.getAllStates() as Record<string, unknown>,
+      this.options
+    );
   }
   encodeLocalOriginPresence(): Uint8Array {
     return this.local.encodeAll();

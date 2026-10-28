@@ -1,7 +1,10 @@
+import { EphemeralStore } from 'loro-crdt';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_LORO_STREAMS_BASE_URL,
   LODY_PRESENCE_CHANNEL,
+  LODY_PRESENCE_TTL_MS,
+  type LodyPresenceStateMap,
   LODY_PRESENCE_HEARTBEAT_MS,
   getLodyMachinePresenceKey,
   parseLodyPresenceStates,
@@ -112,6 +115,102 @@ const installTestWindow = (): {
 };
 
 describe('WorkspacePresenceTransport', () => {
+  it.each([false, true])(
+    'projects received fields and publishes viewing through real Loro (minimal=%s)',
+    async (minimal) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(10_000);
+      const store = new EphemeralStore(LODY_PRESENCE_TTL_MS);
+      const transport = new FakePresenceTransport();
+      let snapshot: LodyPresenceStateMap = {};
+      let streamUrl = '';
+      const presence = new WorkspacePresenceTransport({
+        workspaceId: 'workspace-1' as WorkspaceId,
+        minimal,
+        presenceShardId: 0,
+        createStore: () => store,
+        onSnapshot: (states) => {
+          snapshot = states;
+        },
+        createTransport: (args) => {
+          streamUrl = args.streamUrl;
+          return transport;
+        },
+      });
+      const peer = new EphemeralStore(LODY_PRESENCE_TTL_MS);
+      const wire = new EphemeralStore(LODY_PRESENCE_TTL_MS);
+      try {
+        presence.start({
+          baseUrl: 'https://synthetic.invalid',
+          bucketId: 'protected-bucket',
+          auth: async () => 'token',
+        });
+        expect(streamUrl).toContain('/protected-bucket/');
+        presence.publishSessionViewing({
+          sessionId: 'viewed' as SessionId,
+          userId: 'viewer',
+          detail: 'must be ignored',
+        } as never);
+        wire.apply(store.encodeAll());
+        expect(Object.values(wire.getAllStates())).toEqual([
+          {
+            kind: 'session-viewing',
+            userId: 'viewer',
+            instanceId: expect.any(String),
+            sessionId: 'viewed',
+            since: 10_000,
+            updatedAt: 10_000,
+          },
+        ]);
+        peer.set('remote', {
+          kind: 'session',
+          sessionId: 'remote',
+          machineId: 'machine',
+          instanceId: 'remote',
+          updatedAt: 10_000,
+          status: { type: 'initializing', stage: 'acp', detail: 'secret' },
+          unknownText: 'ignored',
+        });
+        store.apply(peer.encodeAll());
+        expect(snapshot.remote).toEqual({
+          kind: 'session',
+          sessionId: 'remote',
+          machineId: 'machine',
+          instanceId: 'remote',
+          updatedAt: 10_000,
+          status: minimal
+            ? { type: 'initializing', stage: 'acp' }
+            : { type: 'initializing', stage: 'acp', detail: 'secret' },
+        });
+        transport.emitStatus('joined');
+        expect(presence.getDisplaySyncState()).toBe('synced');
+        const deleted = Promise.withResolvers<void>();
+        const unsubscribeWire = store.subscribeLocalUpdates((bytes) => {
+          wire.apply(bytes);
+          deleted.resolve();
+        });
+        vi.advanceTimersByTime(1);
+        presence.publishSessionViewing(null);
+        await deleted.promise;
+        unsubscribeWire();
+        expect(
+          Object.values(wire.getAllStates()).some(
+            (entry) =>
+              typeof entry === 'object' &&
+              entry !== null &&
+              'kind' in entry &&
+              entry.kind === 'session-viewing'
+          )
+        ).toBe(false);
+      } finally {
+        await presence.stop();
+        peer.destroy();
+        wire.destroy();
+        vi.useRealTimers();
+      }
+    }
+  );
+
   afterEach(() => {
     if (typeof window !== 'undefined') {
       delete window.lodyPresence;

@@ -2439,7 +2439,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
 
     await runtime.dispose();
   });
-  it('opens protected local content without a token and refuses unencrypted side channels', async () => {
+  it('opens protected content offline, then enables only minimal presence on authentication', async () => {
     const provider = () =>
       createLoroStreamsTokenProviderLegacy({
         endpoint: 'https://encrypted.example.test/token',
@@ -2491,7 +2491,9 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       };
       expect(adapter.bucketId).toBe('synthetic-encrypted-content');
       expect(adapter.payloadProtection).toBeDefined();
-      expect(mocks.presenceStart.mock.calls).toEqual([]);
+      expect(mocks.presenceStart.mock.calls.at(-1)?.[0]).toMatchObject({
+        bucketId: 'synthetic-encrypted-content',
+      });
       expect(mocks.machineRpcConstructors.mock.calls).toEqual([]);
     } finally {
       await runtime.dispose();
