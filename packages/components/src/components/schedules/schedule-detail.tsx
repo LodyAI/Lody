@@ -1,4 +1,4 @@
-import { Fragment, type ComponentType, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import {
@@ -21,7 +21,7 @@ import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { Dialog } from '@/ui/dialog';
 import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
-import { ScheduleStatusText } from './schedule-list';
+import { ScheduleMenuItems, ScheduleStatusText, type ScheduleAction } from './schedule-list';
 import type { ScheduleStatus } from './schedule-format';
 import { scheduleCardProps } from './schedule-property-row';
 
@@ -259,15 +259,6 @@ export function ScheduleDetailPage({ children }: { children: ReactNode }) {
   return <div {...stylex.props(styles.page)}>{children}</div>;
 }
 
-export type ScheduleDetailAction = {
-  key: string;
-  label: string;
-  icon: ComponentType<{ className?: string }>;
-  onClick: () => void;
-  destructive?: boolean;
-  disabled?: boolean;
-};
-
 /**
  * The open schedule's head: what kind of thing it is, its name and status in
  * words, the one control that changes whether it runs (an enable switch, or Run
@@ -289,13 +280,14 @@ export function ScheduleDetailHeader({
   status?: ScheduleStatus;
   enabled?: { value: boolean; disabled?: boolean; onChange: () => void };
   run?: { disabled?: boolean; onRun: () => void };
-  actions: ScheduleDetailAction[];
+  actions: ScheduleAction[];
   onClose: () => void;
   mobile?: boolean;
 }) {
   const { t } = useTranslation();
   // On a phone this is the page's top edge, where Electron's drag strip lies.
   const windowDrag = useWindowDragRegionClass();
+  const closeLabel = mobile ? t('schedules.back', 'Back') : t('schedules.close', 'Close');
   const close = (
     <Tooltip.Root>
       <Tooltip.Trigger
@@ -306,7 +298,7 @@ export function ScheduleDetailHeader({
             icon
             onClick={onClose}
             className={WINDOW_DRAG_EXEMPT_CLASS}
-            aria-label={mobile ? t('schedules.back', 'Back') : t('schedules.close', 'Close')}
+            aria-label={closeLabel}
           >
             {mobile ? (
               <ChevronLeft {...stylex.props(styles.icon16)} />
@@ -316,9 +308,7 @@ export function ScheduleDetailHeader({
           </Button>
         }
       />
-      <Tooltip.Content>
-        {mobile ? t('schedules.back', 'Back') : t('schedules.close', 'Close')}
-      </Tooltip.Content>
+      <Tooltip.Content>{closeLabel}</Tooltip.Content>
     </Tooltip.Root>
   );
   return (
@@ -386,19 +376,7 @@ export function ScheduleDetailHeader({
                 <MoreHorizontal {...stylex.props(styles.icon16)} />
               </Menu.Trigger>
               <Menu.Content align="end">
-                {actions.map((action) => (
-                  <Fragment key={action.key}>
-                    {action.destructive ? <Menu.Separator /> : null}
-                    <Menu.Item
-                      icon={action.icon}
-                      tone={action.destructive ? 'destructive' : undefined}
-                      disabled={action.disabled}
-                      onClick={action.onClick}
-                    >
-                      {action.label}
-                    </Menu.Item>
-                  </Fragment>
-                ))}
+                <ScheduleMenuItems actions={actions} Item={Menu.Item} Separator={Menu.Separator} />
               </Menu.Content>
             </Menu.Root>
           ) : null}
@@ -450,14 +428,12 @@ export function ScheduleRunList({
   loading,
   chat,
   onOpen,
-  footer,
 }: {
   runs: ScheduleRunEntry[];
   loading?: boolean;
   /** The chat every run goes into; absent for a new chat per run. */
   chat?: { title: string; sessionId?: string };
   onOpen: (sessionId: string) => void;
-  footer?: ReactNode;
 }) {
   const { t } = useTranslation();
   return (
@@ -515,7 +491,6 @@ export function ScheduleRunList({
           </div>
         </>
       )}
-      {footer}
     </div>
   );
 }

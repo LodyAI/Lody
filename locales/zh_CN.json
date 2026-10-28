@@ -5862,5 +5862,6 @@
   "schedules.status.waiting": "等待发送",
   "schedules.status.wasPlanned": "原定 {{time}}",
   "schedules.tab.settings": "设置",
-  "schedules.whatIs": "什么是{{title}}？"
+  "schedules.whatIs": "什么是{{title}}？",
+  "schedules.clearEndedFailed": "有 {{count}} 条未能清除：{{error}}"
 }

@@ -67,10 +67,10 @@ import {
   ScheduleDetailModal,
   ScheduleDetailPage,
   ScheduleRunList,
-  type ScheduleDetailAction,
   type ScheduleRunEntry,
 } from './schedule-detail';
 import { useScheduleChatRuns } from './use-schedule-chat-runs';
+import type { ScheduleAction } from './schedule-list';
 import { collectScheduleSaveIssues, type ScheduleIssueField } from './schedule-save-blockers';
 import { ScheduleDestinationRows, type PickableSession } from './schedule-destination-rows';
 import { ScheduleAgentControls } from './schedule-agent-controls';
@@ -331,14 +331,36 @@ function SupportedSchedulesWorkspace({
         'schedules.clearEndedHelp',
         'They are removed from this list. Anything already sent stays in its chat.'
       ),
+      // Each deletion stands alone: one failure keeps what was deleted and
+      // does not stop the rest. The first original error is reported.
       accept: async () => {
-        for (const item of items) await deleteSchedule(item.scheduleId)();
+        const results = await Promise.allSettled(
+          items.map((item) => deleteSchedule(item.scheduleId)())
+        );
+        const failures = results.filter(
+          (result): result is PromiseRejectedResult => result.status === 'rejected'
+        );
+        if (failures.length)
+          throw new Error(
+            t('schedules.clearEndedFailed', '{{count}} could not be cleared: {{error}}', {
+              count: failures.length,
+              error:
+                failures[0]!.reason instanceof Error
+                  ? failures[0]!.reason.message
+                  : String(failures[0]!.reason),
+            })
+          );
       },
       destructive: true,
       confirmLabel: t('schedules.clear', 'Clear'),
     });
   const sessions = useAtomValue(sessionListAtom);
   const archivedSessions = useAtomValue(archivedSessionListAtom);
+  // Every row looks up its chat; index once rather than scanning per row.
+  const sessionsById = useMemo(
+    () => new Map([...sessions, ...archivedSessions].map((meta) => [meta.id as string, meta])),
+    [sessions, archivedSessions]
+  );
   const chatFor = (item: ScheduleRegistryRow): ScheduleRowContext['chat'] => {
     const id =
       item.destination.kind === 'existing_session'
@@ -347,7 +369,7 @@ function SupportedSchedulesWorkspace({
           ? scheduleOwnSessionId(item.scheduleId, item.destination.epoch)
           : undefined;
     if (!id) return undefined;
-    const meta = [...sessions, ...archivedSessions].find((entry) => entry.id === id);
+    const meta = sessionsById.get(id);
     return {
       title:
         meta?.title ||
@@ -418,7 +440,7 @@ function SupportedSchedulesWorkspace({
       ),
       accept: requestRun(item.scheduleId),
     });
-  const detailActions: ScheduleDetailAction[] = [];
+  const detailActions: ScheduleAction[] = [];
   if (row && rowContext) {
     if (!row.scheduledMessage && row.trigger.kind !== 'manual')
       detailActions.push({
@@ -436,7 +458,7 @@ function SupportedSchedulesWorkspace({
         icon: MessageSquare,
         onClick: () => openSession(chatId),
       });
-    if (row.scheduledMessage && status && !status.ended && row.enabled)
+    if (row.scheduledMessage && status && status.group !== 'ended' && row.enabled)
       detailActions.push({
         key: 'cancel',
         label: t('scheduledMessage.cancel', 'Cancel scheduled message'),
@@ -453,48 +475,31 @@ function SupportedSchedulesWorkspace({
       onClick: () => confirmDelete(row),
     });
   }
-  const header =
-    scheduleId === 'new' ? (
-      <ScheduleDetailHeader
-        kind="task"
-        title={t('schedules.new', 'New schedule')}
-        actions={[]}
-        onClose={() => open()}
-        mobile={mobile}
-      />
-    ) : row ? (
-      <ScheduleDetailHeader
-        kind={row.scheduledMessage ? 'message' : 'task'}
-        title={row.title}
-        status={status}
-        enabled={
-          row.scheduledMessage || row.trigger.kind === 'manual'
-            ? undefined
-            : {
-                value: row.enabled,
-                disabled: !(row.enabled ? isOwner : canManage),
-                onChange: () => toggle(row),
-              }
-        }
-        run={
-          !row.scheduledMessage && row.trigger.kind === 'manual'
-            ? { disabled: !canManage, onRun: () => confirmRun(row) }
-            : undefined
-        }
-        actions={detailActions}
-        onClose={() => open()}
-        mobile={mobile}
-      />
-    ) : (
-      <ScheduleDetailHeader
-        kind="task"
-        title=""
-        actions={[]}
-        onClose={() => open()}
-        mobile={mobile}
-      />
-    );
-  const showTabs = !!row && !row.scheduledMessage && scheduleId !== 'new';
+  const header = (
+    <ScheduleDetailHeader
+      kind={row?.scheduledMessage ? 'message' : 'task'}
+      title={row?.title ?? (scheduleId === 'new' ? t('schedules.new', 'New schedule') : '')}
+      status={status}
+      enabled={
+        !row || row.scheduledMessage || row.trigger.kind === 'manual'
+          ? undefined
+          : {
+              value: row.enabled,
+              disabled: !(row.enabled ? isOwner : canManage),
+              onChange: () => toggle(row),
+            }
+      }
+      run={
+        row && !row.scheduledMessage && row.trigger.kind === 'manual'
+          ? { disabled: !canManage, onRun: () => confirmRun(row) }
+          : undefined
+      }
+      actions={detailActions}
+      onClose={() => open()}
+      mobile={mobile}
+    />
+  );
+  const showTabs = !!row && !row.scheduledMessage;
   // Saving and closing return to the full list.
   const settings = !scheduleId ? null : scheduleId === 'new' ? (
     <ScheduleEditor
@@ -519,19 +524,17 @@ function SupportedSchedulesWorkspace({
           )}
         </p>
       ) : null}
-      {registry.runtimes
-        .filter((r) => r === rowRuntime && r.blockedCode)
-        .map((r) => (
-          <p {...stylex.props(styles.blockedMessage)} key={r.machineId}>
-            <AlertTriangle {...stylex.props(styles.warningIcon)} />
-            <span>
-              {t(
-                `schedules.errors.${r.blockedCode}`,
-                'Check the target machine, Agent and Project, then save the schedule again.'
-              )}
-            </span>
-          </p>
-        ))}
+      {rowRuntime?.blockedCode ? (
+        <p {...stylex.props(styles.blockedMessage)}>
+          <AlertTriangle {...stylex.props(styles.warningIcon)} />
+          <span>
+            {t(
+              `schedules.errors.${rowRuntime.blockedCode}`,
+              'Check the target machine, Agent and Project, then save the schedule again.'
+            )}
+          </span>
+        </p>
+      ) : null}
       {detail.document.message ? (
         <ScheduledMessageEditor
           key={`${runtime?.workspaceId}:${scheduleId}:${row.activationId}`}

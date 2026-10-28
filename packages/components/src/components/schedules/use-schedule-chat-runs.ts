@@ -59,7 +59,16 @@ export function useScheduleChatRuns(
       return undefined;
     }
     let current = true;
+    // One full read at a time; changes during it ask for exactly one more, so
+    // a burst of new turns costs two reads and an older result never lands last.
+    let reading = false;
+    let stale = false;
     const read = () => {
+      if (reading) {
+        stale = true;
+        return;
+      }
+      reading = true;
       void history
         .readAll()
         .then((turns) => {
@@ -67,6 +76,13 @@ export function useScheduleChatRuns(
         })
         .catch(() => {
           if (current) setState((previous) => ({ ...previous, loading: false }));
+        })
+        .finally(() => {
+          reading = false;
+          if (current && stale) {
+            stale = false;
+            read();
+          }
         });
     };
     read();

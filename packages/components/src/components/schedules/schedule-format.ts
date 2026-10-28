@@ -28,18 +28,28 @@ import {
  */
 const intl = toIntlLocaleOrEn;
 
+// Intl formatters are expensive to build and the list formats every row on
+// every render; keep one per locale + options.
+const dateFormats = new Map<string, Intl.DateTimeFormat>();
+const dateFormat = (locale: string, options: Intl.DateTimeFormatOptions) => {
+  const key = `${locale}|${JSON.stringify(options)}`;
+  let format = dateFormats.get(key);
+  if (!format) dateFormats.set(key, (format = new Intl.DateTimeFormat(locale, options)));
+  return format;
+};
+
 /** Locale weekday names, narrow for toggles and short for summaries. */
 export function weekdayNames(
   locale: string | undefined,
   width: 'narrow' | 'short' | 'long'
 ): string[] {
-  const format = new Intl.DateTimeFormat(intl(locale), { weekday: width, timeZone: 'UTC' });
+  const format = dateFormat(intl(locale), { weekday: width, timeZone: 'UTC' });
   // 2023-01-01 was a Sunday, which is index 0 in the cron convention.
   return Array.from({ length: 7 }, (_, day) => format.format(new Date(Date.UTC(2023, 0, 1 + day))));
 }
 
 export function formatTimeOfDay(hour: number, minute: number, locale?: string): string {
-  return new Intl.DateTimeFormat(intl(locale), {
+  return dateFormat(intl(locale), {
     hour: 'numeric',
     minute: '2-digit',
     timeZone: 'UTC',
@@ -158,7 +168,7 @@ export function triggerTimeZone(
 }
 
 export function formatInstant(at: number, timeZone: string, locale?: string): string {
-  return new Intl.DateTimeFormat(intl(locale), {
+  return dateFormat(intl(locale), {
     dateStyle: 'medium',
     timeStyle: 'short',
     timeZone,
@@ -167,12 +177,12 @@ export function formatInstant(at: number, timeZone: string, locale?: string): st
 
 /** A clock time with its zone, for a compact "send at 2:31 PM UTC" action. */
 export function formatClockWithZone(at: number, timeZone: string, locale?: string): string {
-  const time = new Intl.DateTimeFormat(intl(locale), {
+  const time = dateFormat(intl(locale), {
     hour: 'numeric',
     minute: '2-digit',
     timeZone,
   }).format(new Date(at));
-  const zone = new Intl.DateTimeFormat(intl(locale), {
+  const zone = dateFormat(intl(locale), {
     timeZone,
     timeZoneName: 'short',
   })
@@ -186,8 +196,8 @@ export function formatUpcoming(at: number, timeZone: string, now: number, locale
   const language = intl(locale);
   // `en-CA` is a fixed ISO-shaped calendar key for comparing days, never shown.
   const day = (value: number) =>
-    new Intl.DateTimeFormat('en-CA', { timeZone, dateStyle: 'short' }).format(new Date(value));
-  const time = new Intl.DateTimeFormat(language, {
+    dateFormat('en-CA', { timeZone, dateStyle: 'short' }).format(new Date(value));
+  const time = dateFormat(language, {
     timeZone,
     hour: 'numeric',
     minute: '2-digit',
@@ -196,7 +206,7 @@ export function formatUpcoming(at: number, timeZone: string, now: number, locale
   const target = day(at);
   if (target === today) return time;
   const tomorrow = day(now + 86_400_000);
-  const relative = new Intl.DateTimeFormat(language, {
+  const relative = dateFormat(language, {
     timeZone,
     ...(target === tomorrow
       ? {}
@@ -224,9 +234,10 @@ export type ScheduleStatus = {
   detail?: string;
   tone: ScheduleStatusTone;
   icon?: ScheduleStatusIcon;
-  /** Finished for good: a sent, cancelled or failed message, a Once task that ran. */
-  ended: boolean;
-  /** Bucket for the list's status filter. */
+  /**
+   * Bucket for the list's status filter. `ended` is finished for good: a sent,
+   * cancelled or failed message, or a Once task that ran.
+   */
   group: 'running' | 'paused' | 'attention' | 'ended';
 };
 
@@ -242,9 +253,8 @@ export function describeScheduleState(
 ): ScheduleStatus {
   const { timeZone, now, locale } = options;
   const at = (value: number) => formatUpcoming(value, timeZone, now, locale);
-  const blockedDetail = runtime?.blockedCode
-    ? t(`schedules.errors.${runtime.blockedCode}`, '')
-    : undefined;
+  const blockedDetail =
+    (runtime?.blockedCode && t(`schedules.errors.${runtime.blockedCode}`, '')) || undefined;
   if (row.scheduledMessage) {
     const planned = row.trigger.kind === 'once' ? Date.parse(row.trigger.at) : undefined;
     switch (runtime?.messageState ?? 'pending') {
@@ -254,7 +264,6 @@ export function describeScheduleState(
           detail: runtime?.lastDispatch ? at(runtime.lastDispatch.dispatchedAt) : undefined,
           tone: 'muted',
           icon: 'sent',
-          ended: true,
           group: 'ended',
         };
       case 'cancelled':
@@ -266,16 +275,14 @@ export function describeScheduleState(
               : undefined,
           tone: 'muted',
           icon: 'cancelled',
-          ended: true,
           group: 'ended',
         };
       case 'failed':
         return {
           label: t('schedules.status.notSent', 'Not sent'),
-          detail: blockedDetail || undefined,
+          detail: blockedDetail,
           tone: 'attention',
           icon: 'attention',
-          ended: true,
           group: 'ended',
         };
       default:
@@ -283,7 +290,6 @@ export function describeScheduleState(
           return {
             label: t('schedules.status.cancelling', 'Cancelling…'),
             tone: 'muted',
-            ended: false,
             group: 'paused',
           };
         return {
@@ -292,7 +298,6 @@ export function describeScheduleState(
               ? t('schedules.status.sendsAt', 'Sends {{time}}', { time: at(planned) })
               : t('schedules.status.waiting', 'Waiting to send'),
           tone: 'normal',
-          ended: false,
           group: 'running',
         };
     }
@@ -302,16 +307,14 @@ export function describeScheduleState(
       label: t('schedules.paused', 'Paused'),
       tone: 'muted',
       icon: 'paused',
-      ended: false,
       group: 'paused',
     };
   if (runtime?.queueState === 'blocked')
     return {
       label: t('schedules.state.blocked', 'Needs attention'),
-      detail: blockedDetail || undefined,
+      detail: blockedDetail,
       tone: 'attention',
       icon: 'attention',
-      ended: false,
       group: 'attention',
     };
   if (runtime?.queueState === 'retrying')
@@ -319,7 +322,6 @@ export function describeScheduleState(
       label: t('schedules.state.retrying', 'Retrying dispatch'),
       tone: 'attention',
       icon: 'attention',
-      ended: false,
       group: 'attention',
     };
   const next = runtime?.nextScheduledAt;
@@ -332,7 +334,6 @@ export function describeScheduleState(
       detail: next != null ? at(next) : undefined,
       tone: 'progress',
       icon: 'due',
-      ended: false,
       group: 'running',
     };
   const last = runtime?.lastDispatch;
@@ -343,14 +344,12 @@ export function describeScheduleState(
         ? t('schedules.status.lastRan', 'Last ran {{time}}', { time: at(last.dispatchedAt) })
         : undefined,
       tone: 'muted',
-      ended: false,
       group: 'running',
     };
   if (next != null)
     return {
       label: t('schedules.status.runsAt', 'Runs {{time}}', { time: at(next) }),
       tone: 'normal',
-      ended: false,
       group: 'running',
     };
   if (row.trigger.kind === 'once' && last)
@@ -359,14 +358,12 @@ export function describeScheduleState(
       detail: at(last.dispatchedAt),
       tone: 'muted',
       icon: 'sent',
-      ended: true,
       group: 'ended',
     };
   return {
     label: t('schedules.notScheduledYet', 'Not scheduled yet'),
     detail: t('schedules.awaitingMachine', 'Waiting for the machine to check the schedule'),
     tone: 'muted',
-    ended: false,
     group: 'running',
   };
 }

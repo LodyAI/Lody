@@ -5871,5 +5871,6 @@
   "schedules.status.waiting": "Waiting to send",
   "schedules.status.wasPlanned": "Was due {{time}}",
   "schedules.tab.settings": "Settings",
-  "schedules.whatIs": "What are {{title}}?"
+  "schedules.whatIs": "What are {{title}}?",
+  "schedules.clearEndedFailed": "{{count}} could not be cleared: {{error}}"
 }

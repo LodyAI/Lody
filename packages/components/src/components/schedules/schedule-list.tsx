@@ -1,4 +1,4 @@
-import { Fragment, useState, type ReactNode } from 'react';
+import { Fragment, useState, type ComponentType, type ReactNode } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -63,6 +63,24 @@ export function matchingScheduleRuntime(row: ScheduleRegistryRow, runtimes: Sche
       runtime.activationId === row.activationId &&
       runtime.observedDefinitionFingerprint === row.definitionFingerprint
   );
+}
+
+/** `matchingScheduleRuntime` for many rows: one pass over the runtimes. */
+export function indexScheduleRuntimes(runtimes: ScheduleRuntimeRow[]) {
+  const key = (id: string, machine: string, activation: string, fingerprint: string) =>
+    `${id}\u0000${machine}\u0000${activation}\u0000${fingerprint}`;
+  const byKey = new Map<string, ScheduleRuntimeRow>();
+  for (const runtime of runtimes) {
+    const k = key(
+      runtime.scheduleId,
+      runtime.machineId,
+      runtime.activationId,
+      runtime.observedDefinitionFingerprint
+    );
+    if (!byKey.has(k)) byKey.set(k, runtime);
+  }
+  return (row: ScheduleRegistryRow) =>
+    byKey.get(key(row.scheduleId, row.machineId, row.activationId, row.definitionFingerprint));
 }
 
 export type ScheduleRowContext = {
@@ -453,16 +471,20 @@ export function ScheduleStatusText({
 }
 
 /** What the row's menus offer, in one order for the ⋯ menu and the context menu. */
+/** One schedule action, as the row's menus and the open schedule's ⋯ menu show it. */
+export type ScheduleAction = {
+  key: string;
+  label: string;
+  icon: ComponentType<{ className?: string }>;
+  onClick: () => void;
+  destructive?: boolean;
+  disabled?: boolean;
+};
+
 function useRowActions(entry: Entry, handlers: RowHandlers) {
   const { t } = useTranslation();
   const { row, runtime, context } = entry;
-  const actions: {
-    key: string;
-    label: string;
-    icon: typeof Play;
-    onClick: () => void;
-    destructive?: boolean;
-  }[] = [
+  const actions: ScheduleAction[] = [
     {
       key: 'open',
       label: t('schedules.open', 'Open'),
@@ -516,12 +538,13 @@ function useRowActions(entry: Entry, handlers: RowHandlers) {
   return actions;
 }
 
-function RowMenuItems({
+/** Destructive actions sit after a separator. */
+export function ScheduleMenuItems({
   actions,
   Item,
   Separator,
 }: {
-  actions: ReturnType<typeof useRowActions>;
+  actions: ScheduleAction[];
   Item: typeof Menu.Item | typeof ContextMenu.Item;
   Separator: typeof Menu.Separator | typeof ContextMenu.Separator;
 }) {
@@ -533,6 +556,7 @@ function RowMenuItems({
           <Item
             icon={action.icon}
             tone={action.destructive ? 'destructive' : undefined}
+            disabled={action.disabled}
             onClick={action.onClick}
           >
             {action.label}
@@ -606,13 +630,16 @@ function ScheduleListRow({
   const zone = triggerTimeZone(row.trigger, context?.timeZone);
   const offline = context ? context.presence === 'offline' : false;
   const frequency = describeTrigger(row.trigger, t, i18n.language, zone);
-  const primary = row.scheduledMessage
-    ? status.ended
-      ? actions.find((action) => action.key === 'delete')
+  // The one action worth a button: delete a finished message, run a manual
+  // task, pause or resume a timed one.
+  const primaryKey = row.scheduledMessage
+    ? status.group === 'ended'
+      ? 'delete'
       : undefined
     : row.trigger.kind === 'manual'
-      ? actions.find((action) => action.key === 'run')
-      : actions.find((action) => action.key === 'toggle');
+      ? 'run'
+      : 'toggle';
+  const primary = actions.find((action) => action.key === primaryKey);
   const rowElement = (
     <div
       data-schedule-row=""
@@ -621,7 +648,9 @@ function ScheduleListRow({
     >
       <button type="button" onClick={handlers.onOpen} {...stylex.props(styles.openButton)}>
         <span {...stylex.props(styles.rowHitTarget)} aria-hidden="true" />
-        <span {...stylex.props(styles.name, status.ended && styles.nameEnded)}>{row.title}</span>
+        <span {...stylex.props(styles.name, status.group === 'ended' && styles.nameEnded)}>
+          {row.title}
+        </span>
         <span {...stylex.props(styles.summary)}>
           <span {...stylex.props(styles.summaryPart)}>{frequency}</span>
           {context?.chat ? (
@@ -655,53 +684,55 @@ function ScheduleListRow({
       </button>
       <Destination entry={entry} onOpenSession={handlers.onOpenSession} />
       <ScheduleStatusText status={status} />
-      {
-        <div {...stylex.props(styles.actions)}>
-          {primary ? (
-            <Tooltip.Root>
-              <Tooltip.Trigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="small"
-                    icon
-                    className={stylex.props(styles.hoverAction).className}
-                    onClick={primary.onClick}
-                    aria-label={primary.label}
-                  >
-                    <primary.icon {...stylex.props(styles.icon14)} />
-                  </Button>
-                }
-              />
-              <Tooltip.Content>{primary.label}</Tooltip.Content>
-            </Tooltip.Root>
-          ) : null}
-          <Menu.Root>
-            <Menu.Trigger
+      <div {...stylex.props(styles.actions)}>
+        {primary ? (
+          <Tooltip.Root>
+            <Tooltip.Trigger
               render={
                 <Button
                   variant="ghost"
                   size="small"
                   icon
-                  aria-label={t('schedules.more', 'More actions')}
-                />
+                  className={stylex.props(styles.hoverAction).className}
+                  onClick={primary.onClick}
+                  aria-label={primary.label}
+                >
+                  <primary.icon {...stylex.props(styles.icon14)} />
+                </Button>
               }
-            >
-              <MoreHorizontal {...stylex.props(styles.icon14)} />
-            </Menu.Trigger>
-            <Menu.Content align="end">
-              <RowMenuItems actions={actions} Item={Menu.Item} Separator={Menu.Separator} />
-            </Menu.Content>
-          </Menu.Root>
-        </div>
-      }
+            />
+            <Tooltip.Content>{primary.label}</Tooltip.Content>
+          </Tooltip.Root>
+        ) : null}
+        <Menu.Root>
+          <Menu.Trigger
+            render={
+              <Button
+                variant="ghost"
+                size="small"
+                icon
+                aria-label={t('schedules.more', 'More actions')}
+              />
+            }
+          >
+            <MoreHorizontal {...stylex.props(styles.icon14)} />
+          </Menu.Trigger>
+          <Menu.Content align="end">
+            <ScheduleMenuItems actions={actions} Item={Menu.Item} Separator={Menu.Separator} />
+          </Menu.Content>
+        </Menu.Root>
+      </div>
     </div>
   );
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger render={rowElement} />
       <ContextMenu.Content>
-        <RowMenuItems actions={actions} Item={ContextMenu.Item} Separator={ContextMenu.Separator} />
+        <ScheduleMenuItems
+          actions={actions}
+          Item={ContextMenu.Item}
+          Separator={ContextMenu.Separator}
+        />
       </ContextMenu.Content>
     </ContextMenu.Root>
   );
@@ -855,6 +886,7 @@ export function ScheduleListView({
   const hasMacOSTitlebarInset =
     !isNativeAppShell() && isMacOSElectronRenderer() && !isElectronFullscreen;
   const showSidebarToggle = !isMobile && isLeftSidebarHidden;
+  const besideTrafficLights = showSidebarToggle && hasMacOSTitlebarInset;
   const headerChromeClassName = [
     windowDrag,
     windowsCaptionPadClass,
@@ -873,8 +905,9 @@ export function ScheduleListView({
   );
   const [sort, setSort] = useState<ScheduleListSort>(initialFilters?.sort ?? 'next');
 
+  const runtimeOf = indexScheduleRuntimes(runtimes);
   const entries: Entry[] = rows.map((row) => {
-    const runtime = matchingScheduleRuntime(row, runtimes);
+    const runtime = runtimeOf(row);
     const context = contextForRow?.(row);
     return {
       row,
@@ -955,12 +988,18 @@ export function ScheduleListView({
     ] as const
   ).map(([value, label]) => ({ value, label }));
 
-  const sections = [
+  const sections: {
+    key: 'tasks' | 'messages';
+    title: string;
+    info?: string;
+    entries: Entry[];
+    total: number;
+  }[] = [
     {
       key: 'tasks',
       title: t('schedules.section.tasks', 'Scheduled tasks'),
       // Tasks are the page's own subject; only the one-off messages need a word.
-      info: undefined as string | undefined,
+      info: undefined,
       entries: visible.filter((entry) => !entry.row.scheduledMessage),
       total: entries.filter((entry) => !entry.row.scheduledMessage).length,
     },
@@ -987,12 +1026,12 @@ export function ScheduleListView({
               stylex.props(
                 styles.header,
                 insetSafeArea && styles.headerSafeArea,
-                showSidebarToggle && hasMacOSTitlebarInset && styles.headerBesideTrafficLights
+                besideTrafficLights && styles.headerBesideTrafficLights
               ),
               headerChromeClassName
             )}
             data-safe-area-inset={insetSafeArea ? '' : undefined}
-            data-beside-traffic-lights={showSidebarToggle && hasMacOSTitlebarInset ? '' : undefined}
+            data-beside-traffic-lights={besideTrafficLights ? '' : undefined}
           >
             {showSidebarToggle ? (
               <Button
@@ -1144,7 +1183,7 @@ export function ScheduleListView({
                 .map((section) => {
                   const ended = section.entries.filter(
                     (entry) =>
-                      entry.status.ended &&
+                      entry.status.group === 'ended' &&
                       entry.row.scheduledMessage &&
                       entry.context?.canDelete !== false
                   );
