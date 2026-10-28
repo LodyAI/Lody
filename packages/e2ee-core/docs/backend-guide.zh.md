@@ -90,30 +90,30 @@ Loro / Durable Streams 直接提供这些能力：`@lody/e2ee-core/adapters/loro
 
 ## 机器共享策略存储（未接入契约）
 
-可选 cloud-api DTO 精确绑定工作区／genesis、机器与所有者成员实例。控制操作需要设备
-凭据及当前账本资格，提交仅限机器所有者的有效个人设备。保存原文前通过 host 入口的
-`admitMachineSharingFrame` 验证精确资源与固定业务签名／AAD 域，无需解密；这是
-共享策略必需的准入，与信箱的可选签名检查不同。
+所有 Scope 包含工作区／genesis、机器、所有者成员实例及 `generation`，后者为当前连续
+替换链首次机器准入签名公钥的小写 hex32。用 `verifyMachineSharingGeneration` 在真实
+账本中核验首次准入及精确原子替换链，其不透明 `machineGeneration` 必须传给所有 core
+策略操作。账本记录及快照／retained 格式不变；缺失检查点需要真实账本历史核验，不能
+相信服务端选择的根或计数。
 
-`latestForMember` 是独立账号 query，服务器检查当前工作区成员身份，只返回密文和
-未验证的路由／head 元数据，不返回权限结论、不接设备凭据、不续期执行新鲜度。机器
-仍使用自己的 credential 认证 `readHead`。
+控制操作需设备凭据与当前账本资格；新提交仅限机器所有者有效 personal 设备，并通过
+`admitMachineSharingFrame`。在同一个 internal mutation 中复查当前代次／资格，
+比较完整 scope／status／版本／摘要，去重意图并插入原文／head；仅 Action 验证无法
+阻止验签到提交之间发生移除。每个新代次从 1/null 父项开始，同代后续加一并引用完整
+原始密文帧的 SHA-256 摘要，帧上限仍为 262287 字节。
 
-原子插入不可变原文并 CAS 完整 head：scope、status、revision、digest。签名首版为
-1/null 父项，后续加一并引用完整原始帧的 SHA-256 摘要，帧上限 262287 字节。保留
-轻量请求意图摘要；完全相同的重试在原文仍保留时返回原收据，清理后返回 removed 屏障。
-同 requestId 的不同意图要失败，确认冲突不得自动重放。
+移除永久关闭旧代次并保存清理 cutoff；即使成员／machineId 相同，重新准入也有新初始
+公钥和资源，需要新所有者意图、私有默认值及新的首版链，不读取旧策略正文或 pin。旧
+pending 请求必须因当前账本代次不符而冲突，不能重新激活旧 head。同成员原子替换保留
+代次／策略。清理和收据绑定旧代次，延迟删除不能碰新代。旧已提交精确重试可返回保留
+收据或清理后的 removed，绝不能重新插入密文；保留最小原意图摘要，拒绝 requestId
+变意图复用。版本清理后可返回 null；旧 readHead 保留 removed 高水位，仅作存储证据，
+不能当客户端验证 pin。
 
-撤回共享发布新的签名完整策略；真正移除机器则先把 head 标成 removed，清空密文后仍
-保留最后已提交版本／摘要。从未写过的资源使用 removed revision 0/digest null。
-新的明确所有者意图以 removed head 做 CAS，提交 n+1 并以前摘要为父项，0/null 则
-提交 1/null。CAS 比较 status，避免旧 pending active 请求复活共享。同成员原子替换
-机器保持策略 active，不进入移除清理。即使重新启用也保留移除 cutoff 和最小请求收据；
-后台清理只删除 cutoff 及以下版本的密文，不碰更新的提交。已清理的版本读取可返回 null，
-readHead 仍保留 removed 高水位；请求读取保留 removed 屏障，旧提交精确重试返回
-removed，不能恢复旧原文。
+`latestForMember` 仍是独立账号 query，检查当前工作区成员，只返密文／未验证元数据，
+不接设备凭据、不续期执行新鲜度；机器自己调用 credential 认证的最新 head action。
 
-服务端 tombstone 是存储／CAS 屏障，不是签名策略或已验证客户端 pin。原文缺失形成的
-历史缺口当前 core 仍会拒绝；A3 须提供明确审核的缺口恢复，才能声称清理后可执行，不能
-直接把服务端 tombstone 当已验证 pin。最新 head 投递仍只支持有界新鲜度。这里不启用
-服务端或传输，见[待批准 Spec 增量](../../../specs/e2ee-foundations.zh.md#机器共享策略待批准增量)。
+本地缓存年龄严格小于 15 分钟，从最新读取的网络请求前计时，与账本／请求期限取交集。
+服务端持续隐瞒新版本仍可无限隐藏未知撤回；签名和本地链没有全局最新证明，是否信任
+完整最新投递仍待 owner 确认。这里不启用网络或执行接入，见
+[待批准 Spec 增量](../../../specs/e2ee-foundations.zh.md#机器共享策略待批准增量)。

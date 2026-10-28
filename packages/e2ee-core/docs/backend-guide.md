@@ -174,42 +174,43 @@ rejected frames and revocation during a request.
 
 ## Machine sharing policy storage (unconnected contract)
 
-The optional `cloud-api` machine-sharing DTOs address one workspace/genesis,
-machine and owner membership instance. Control operations require device credentials
-and current ledger eligibility. Commits require the machine owner's active personal
-device and `admitMachineSharingFrame` before storing an opaque original. This verifies
-the exact resource and fixed business signature/AAD domain without decryption; it is
-required sharing admission, separate from the optional mailbox signature tier above.
+Every Scope includes workspace/genesis, machine, owner membership instance and
+`generation` (hex32 initial machine-admission signing key of the uninterrupted
+replacement chain). A verified initial admission plus exact atomic replacements
+qualifies generation through `verifyMachineSharingGeneration`. Pass its opaque
+`machineGeneration` to all core policy operations. The original ledger records and
+snapshot/retained formats do not change. Unknown checkpoint prefixes need genuine
+ledger-history qualification, never a server-chosen root or counter.
 
-`latestForMember` is a separate account-authenticated query for current workspace
-members. It returns only ciphertext and untrusted routing/head metadata. It never
-returns permission conclusions, accepts device credentials, or renews execution
-freshness. Machines retain their own credential-authenticated `readHead` path.
+Control operations require device credentials/current ledger eligibility. New
+commits require the machine owner's active personal device and
+`admitMachineSharingFrame`. Recheck current generation and eligibility inside the
+same internal mutation as full scope/status/revision/digest CAS, request-intent
+deduplication and original/head insertion. Action-level verification alone cannot
+fence a removal between verification and commit. Every new generation starts at
+revision 1/null parent. Within it, increment by one and reference the complete
+original ciphertext's SHA-256 digest; the frame limit remains 262287 bytes.
 
-Atomically insert immutable originals and CAS the full head identity: scope, status,
-revision and digest. First signed revision is 1/null parent; subsequent revisions
-increment by one and reference the complete original frame's SHA-256 digest. The
-maximum frame is 262287 bytes. Retain lightweight request intent digests for exact
-retry checks. Exact retries return the original receipt while retained, or a removed
-barrier after purge; changed intent under the same requestId fails. Confirmed
-conflicts must not auto-rebase.
+Removal permanently closes the old generation and captures its cleanup cutoff.
+Readmission, even for the same member and machineId, has a new initial key and
+resource: require fresh owner intent, private defaults and a new revision-one
+chain, without old policy bytes or pins. Old pending requests must conflict with
+the current ledger generation; no old head can be reactivated. Atomic same-member
+replacement preserves generation/policy. Cleanup and request receipts are scoped
+to the old generation, so delayed deletion cannot touch the new one. Exact old
+committed retries may return their retained receipt or removed after purge, never
+reinsert ciphertext. Keep lightweight original-intent digests to reject altered
+requestId reuse. Purged version reads may return null; old readHead retains its
+removed high water as storage evidence only, never a client verification pin.
 
-Sharing withdrawal is a new signed complete policy. Actual machine removal first
-marks its head removed, retaining its last committed revision/digest even when
-ciphertext is purged. A never-written resource uses removed revision 0/digest null.
-Explicit new owner intent CASes that removed head to n+1 with its digest as parent
-(0/null to 1/null). Comparing status prevents old pending active-head requests
-from reactivating a removed resource. Atomic same-member machine replacement keeps
-the policy active and does not run removal cleanup. Retain the removal cutoff and
-minimal request receipts even after reactivation; cleanup deletes only ciphertext
-at/below that cutoff, never newer commits. Purged version reads may return null;
-readHead retains the removed high water. Purged request reads retain their removal
-barrier; an exact commit retry returns removed and must never restore its original
-frame.
+`latestForMember` remains an independent account-authenticated query for current
+workspace members, returning ciphertext/untrusted metadata only. It accepts no
+device credential and cannot renew execution freshness; machines use their own
+credential-authenticated latest-head action.
 
-A server tombstone is a storage/CAS barrier, not a signed policy or verified client
-pin. Missing originals leave a history gap that the core currently rejects; A3 must
-provide explicit reviewed gap recovery before claiming execution after such cleanup.
-Never silently seed a verified pin from the server tombstone. Latest-head delivery
-still supports only bounded freshness. No server or transport is enabled here; see
-the [pending Spec increment](../../../specs/e2ee-foundations.md#machine-sharing-policy-pending-approval-increment).
+Local cache age is strictly less than 15 minutes from before latest-read I/O,
+intersected with ledger/request deadlines. A server withholding newer versions
+can hide unknown withdrawal indefinitely despite those reads. Signatures and
+local chains provide no globally-latest proof; trusting complete latest delivery
+remains pending owner confirmation. No network or execution integration is enabled
+by this contract. See the [pending Spec increment](../../../specs/e2ee-foundations.md#machine-sharing-policy-pending-approval-increment).
