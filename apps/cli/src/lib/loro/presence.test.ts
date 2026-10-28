@@ -26,11 +26,11 @@ import {
   LoroStreamsTokenPorts,
 } from '@lody/shared';
 
-const SESSION_ID = 'session-presence-1' as SessionId;
-const MACHINE_ID = 'machine-presence-1' as MachineId;
-const REMOTE_SESSION_ID = 'session-presence-remote' as SessionId;
-const REMOTE_MACHINE_ID = 'machine-presence-remote' as MachineId;
-const REMOTE_INSTANCE_ID = 'remote-instance' as LodyPresenceInstanceId;
+const SESSION_ID = '01020304-1111-4222-8333-010203040501' as SessionId;
+const MACHINE_ID = '01020304-1111-4222-8333-010203040502' as MachineId;
+const REMOTE_SESSION_ID = '01020304-1111-4222-8333-010203040503' as SessionId;
+const REMOTE_MACHINE_ID = '01020304-1111-4222-8333-010203040504' as MachineId;
+const REMOTE_INSTANCE_ID = '01020304-1111-4222-8333-010203040505' as LodyPresenceInstanceId;
 /** Synthetic transport, real CRDT/adaptor/queue. Every pending request has an
  * explicit gate; no network, polling, sleeps or private transport fields. */
 const controlledTransport = (autoAck = false) => {
@@ -155,10 +155,43 @@ const diagnosticLogger = () => {
 };
 
 describe('presence replica and local-origin contracts', () => {
+  it('discards invalid IDs throughout publish, heartbeat and clear without wire bytes', () => {
+    for (const instance of [
+      REMOTE_INSTANCE_ID,
+      'private instance /path' as LodyPresenceInstanceId,
+    ]) {
+      const replica = new PresenceReplica(instance, { minimal: true });
+      const wire: Uint8Array[] = [];
+      const detach = replica.store.subscribeLocalUpdates((bytes) => wire.push(bytes));
+      try {
+        replica.setMachineOnline('private machine /path' as MachineId, 100);
+        replica.setSessionPresence(
+          {
+            sessionId: 'private session /path' as SessionId,
+            machineId: MACHINE_ID,
+            status: { type: 'running' },
+          },
+          100
+        );
+        replica.republish(200);
+        replica.clear();
+        expect(replica.getPresenceStates()).toEqual({});
+        expect([...replica.encodeLocalOriginPresence()]).toEqual([0]);
+        expect(wire).toEqual([]);
+      } finally {
+        detach();
+        replica.destroy();
+      }
+    }
+  });
+
   it.each([false, true])(
     'filters encrypted presence before both wire exports (minimal=%s)',
     (minimal) => {
-      const replica = new PresenceReplica('local-replica' as LodyPresenceInstanceId, { minimal });
+      const replica = new PresenceReplica(
+        '01020304-1111-4222-8333-010203040506' as LodyPresenceInstanceId,
+        { minimal }
+      );
       const decoded = new EphemeralStore(LODY_PRESENCE_TTL_MS);
       try {
         replica.setMachineOnline(MACHINE_ID, 100);
@@ -188,7 +221,7 @@ describe('presence replica and local-origin contracts', () => {
           kind: 'session',
           sessionId: SESSION_ID,
           machineId: MACHINE_ID,
-          instanceId: 'local-replica',
+          instanceId: '01020304-1111-4222-8333-010203040506',
           updatedAt: 200,
           status: minimal
             ? { type: 'initializing', stage: 'acp' }

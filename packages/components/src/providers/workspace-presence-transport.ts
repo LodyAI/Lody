@@ -178,6 +178,21 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
       return;
     }
     if (
+      this.options.minimal &&
+      !MinimalLodyPresenceStateSchema.safeParse({
+        kind: 'session-viewing',
+        sessionId: args.sessionId,
+        userId: args.userId,
+        instanceId: this.viewingInstanceId,
+        since: 0,
+        updatedAt: 0,
+      }).success
+    ) {
+      // An unchecked route must not publish text or keep heartbeating the previous session.
+      this.publishSessionViewing(null);
+      return;
+    }
+    if (
       this.viewing &&
       this.viewing.sessionId === args.sessionId &&
       this.viewing.userId === args.userId
@@ -272,11 +287,13 @@ export class WorkspacePresenceTransport extends EphemeralRoomTransport<
       since: this.viewing.since,
       updatedAt: getServerNow(),
     };
+    const minimal = this.options.minimal
+      ? MinimalLodyPresenceStateSchema.safeParse(state)
+      : undefined;
+    if (minimal && !minimal.success) return;
     this.store.set(
       getLodySessionViewingPresenceKey(this.viewing.userId, this.viewingInstanceId),
-      (this.options.minimal
-        ? MinimalLodyPresenceStateSchema.parse(state)
-        : state) as unknown as Value
+      (minimal?.data ?? state) as unknown as Value
     );
   }
 

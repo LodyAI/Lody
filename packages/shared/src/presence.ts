@@ -153,6 +153,42 @@ export const LodyPresenceStateSchema = z.discriminatedUnion('kind', [
   PresenceSessionViewingStateSchema,
 ]);
 
+// Minimal metadata must not accept arbitrary strings disguised as branded IDs.
+// Sessions/instances use UUIDs, or the browser's legacy timestamp + base36 fallback.
+const MinimalUuidIdSchema = z.string().length(36).uuid();
+const MinimalBrowserIdSchema = z
+  .string()
+  .max(30)
+  .regex(/^\d{13}-[0-9a-z]{1,16}$(?![\s\S])/);
+const MinimalSessionIdSchema = z
+  .union([MinimalUuidIdSchema, MinimalBrowserIdSchema])
+  .transform((value) => value as SessionId);
+const MinimalInstanceIdSchema = z
+  .union([MinimalUuidIdSchema, MinimalBrowserIdSchema])
+  .transform((value) => value as LodyPresenceInstanceId);
+// New installations use UUIDs; retained legacy machine identities may be SHA-256 hex.
+const MinimalMachineIdSchema = z
+  .union([
+    MinimalUuidIdSchema,
+    z
+      .string()
+      .length(64)
+      .regex(/^[0-9a-f]{64}$/),
+  ])
+  .transform((value) => value as MachineId);
+// Auth IDs use 32 alphanumerics (or UUID); local identities use local:<32 hex>.
+const MinimalUserIdSchema = z.union([
+  z
+    .string()
+    .length(32)
+    .regex(/^[0-9A-Za-z]{32}$/),
+  MinimalUuidIdSchema,
+  z
+    .string()
+    .length(38)
+    .regex(/^local:[0-9a-f]{32}$/),
+]);
+
 /** Independent allowlist: adding an ordinary detail never widens encrypted-workspace metadata. */
 const MinimalActiveSessionStatusSchema = z.preprocess(
   omitNullValues,
@@ -174,23 +210,23 @@ const MinimalActiveSessionStatusSchema = z.preprocess(
 export const MinimalLodyPresenceStateSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('machine'),
-    machineId: PresenceMachineStateSchema.shape.machineId,
-    instanceId: PresenceInstanceIdSchema,
+    machineId: MinimalMachineIdSchema,
+    instanceId: MinimalInstanceIdSchema,
     updatedAt: z.number().finite(),
   }),
   z.object({
     kind: z.literal('session'),
-    sessionId: PresenceSessionStateSchema.shape.sessionId,
-    machineId: PresenceMachineStateSchema.shape.machineId,
-    instanceId: PresenceInstanceIdSchema,
+    sessionId: MinimalSessionIdSchema,
+    machineId: MinimalMachineIdSchema,
+    instanceId: MinimalInstanceIdSchema,
     status: MinimalActiveSessionStatusSchema,
     updatedAt: z.number().finite(),
   }),
   z.object({
     kind: z.literal('session-viewing'),
-    userId: z.string().min(1),
-    instanceId: PresenceInstanceIdSchema,
-    sessionId: PresenceSessionStateSchema.shape.sessionId,
+    userId: MinimalUserIdSchema,
+    instanceId: MinimalInstanceIdSchema,
+    sessionId: MinimalSessionIdSchema,
     since: z.number().finite(),
     updatedAt: z.number().finite(),
   }),

@@ -14,6 +14,8 @@ Free-text details are excluded before either local origin store or cloud publica
 This exposes liveness metadata to the service while avoiding a separate encryption,
 key-availability and replay pipeline; protected documents remain independent.
 
+Implementation draft: [#1999](https://github.com/LodyAI/Lody/pull/1999).
+
 ## Decision and boundaries
 
 This supersedes the presence-disabled part of the
@@ -30,6 +32,13 @@ another crypto lifecycle and its availability costs for this feature.
   `type`/`activity`/`phase`/`stage` enums, and `since`/`updatedAt`. Unknown fields are
   ignored, including `detail`, future text fields and malformed extra content.
   Known invalid fields discard only that entry.
+- ID validation is separate from branding: session/instance IDs are UUIDs or the
+  bounded legacy browser timestamp/base36 form; machines are UUIDs or 64 lowercase
+  hex; users are 32 alphanumerics, UUIDs or `local:` plus 32 lowercase hex.
+  Invalid viewing parameters clear the previous view before any retention/heartbeat.
+  CLI rejects invalid IDs before retaining producer keys: Loro deletes emit a key
+  even when no corresponding set was admitted. Validation failures never throw.
+  These formats establish neither actual session existence nor identity authority.
 - CLI creation selects minimal mode before writing either the local-origin or
   workspace store. Heartbeat republishing cannot recover stripped details. Cloud
   and local renderer snapshots both use the minimal receive parser. Viewing
@@ -50,7 +59,11 @@ is not used or removed. Its later disposition is outside this change.
 Deterministic regressions first failed for detail leakage, receive parsing, disabled
 presence and the unavailable UI verdict. They now exercise real Loro encoding,
 SDK POST bytes, server-style apply/encodeAll bootstrap, received extra fields,
-local-origin republishing and ordinary payload preservation. CLI composition tests
+local-origin republishing and ordinary payload preservation. Additional RED→GREEN
+coverage rejects text/paths/oversized IDs in every ID field and rejects invalid
+viewing routes before start, after start, on heartbeat and during clear, including
+Loro deletion bytes. Generated ID formats and ordinary arbitrary-ID compatibility
+are covered separately. CLI composition tests
 check unknown before join and the joined online set; existing dispatch tests retain
 unknown allowance and definite-offline refusal. Fake/injected clocks and explicit
 signals avoid sleeps and network timing.

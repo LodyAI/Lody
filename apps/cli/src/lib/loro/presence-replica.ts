@@ -48,6 +48,16 @@ export class PresenceReplica {
   }
   setMachineOnline(machineId: MachineId, now: number): void {
     if (this.closed) return;
+    if (
+      this.options.minimal &&
+      !MinimalLodyPresenceStateSchema.safeParse({
+        kind: 'machine',
+        machineId,
+        instanceId: this.instanceId,
+        updatedAt: now,
+      }).success
+    )
+      return;
     this.machineId = machineId;
     this.machineKey = getLodyMachinePresenceKey(machineId, this.instanceId);
     this.heartbeat(now);
@@ -75,16 +85,19 @@ export class PresenceReplica {
       return this.clearSessionPresence(args.sessionId);
     const machineId = args.machineId ?? this.machineId;
     if (!machineId) return;
-    const key = getLodySessionPresenceKey(args.sessionId, this.instanceId);
-    this.sessions.set(args.sessionId, key);
-    this.write(key, {
+    const state: LodySessionPresenceState = {
       kind: 'session',
       sessionId: args.sessionId,
       machineId,
       instanceId: this.instanceId,
       status: args.status,
       updatedAt: now,
-    });
+    };
+    // Validate before retaining a key: deleting an absent Loro key still emits its bytes.
+    if (this.options.minimal && !MinimalLodyPresenceStateSchema.safeParse(state).success) return;
+    const key = getLodySessionPresenceKey(args.sessionId, this.instanceId);
+    this.sessions.set(args.sessionId, key);
+    this.write(key, state);
   }
   clearSessionPresence(sessionId: SessionId): void {
     if (this.closed) return;

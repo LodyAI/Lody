@@ -61,6 +61,16 @@ its receive projection applies that allowlist again. The renderer does the same 
 cloud snapshots, local IPC snapshots and viewing publication. Unknown fields are stripped
 before validating the permitted fields, so a legacy detail cannot drop valid liveness.
 
+The ID fields also have format bounds: session/instance IDs are UUIDs (36 chars)
+or the legacy browser timestamp/base36 form (at most 30); machine IDs are UUIDs or
+64 lowercase hex characters; user IDs are 32 alphanumerics, UUIDs, or `local:` plus
+32 lowercase hex characters. These are syntax checks, not proof of session existence
+or identity. Invalid viewing routes are discarded before retention/heartbeat and
+clear a previous viewing entry. CLI validates before retaining producer keys:
+Loro emits deletion updates even for absent keys, so filtering only set values
+would still leak an invalid ID during clear. All invalid IDs are dropped without
+throwing; ordinary ID rules stay unchanged.
+
 The allowed fields are machine/instance/session/user IDs, `kind`, the fixed status
 `type`/`activity`/`phase`/`stage` enums, and `since`/`updatedAt` timestamps. Text such as
 initialization `detail` stays out even if ordinary presence supports it. Metadata is

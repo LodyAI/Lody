@@ -41,7 +41,7 @@ const testPresenceLayer = WorkspacePresenceOwnersLive.pipe(
   Layer.provide(
     Layer.merge(
       Layer.succeed(PresenceHost, {
-        instanceId: () => 'synthetic-document-manager' as LodyPresenceInstanceId,
+        instanceId: () => '01020304-1111-4222-8333-010203040506' as LodyPresenceInstanceId,
         serverOffsetMs: () => 0,
         report: () => {},
       }),
@@ -660,17 +660,21 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
     try {
       // No remote room means unknown, even though local entries are already authored.
       expect(await manager.getOnlineMachineIds({ timeoutMs: 1 })).toBeNull();
-      manager.publishSessionPresence('minimal-session' as SessionId, 'machine' as MachineId, {
-        type: 'initializing',
-        stage: 'acp',
-        detail: 'private path',
-      });
+      manager.publishSessionPresence(
+        '01020304-1111-4222-8333-010203040507' as SessionId,
+        '01020304-1111-4222-8333-010203040508' as MachineId,
+        {
+          type: 'initializing',
+          stage: 'acp',
+          detail: 'private path',
+        }
+      );
       expect(Object.values(manager.getPresenceStates() ?? {})).toEqual([
         {
           kind: 'session',
-          sessionId: 'minimal-session',
-          machineId: 'machine',
-          instanceId: 'synthetic-document-manager',
+          sessionId: '01020304-1111-4222-8333-010203040507',
+          machineId: '01020304-1111-4222-8333-010203040508',
+          instanceId: '01020304-1111-4222-8333-010203040506',
           updatedAt: expect.any(Number),
           status: { type: 'initializing', stage: 'acp' },
         },
