@@ -61,8 +61,9 @@ CLI help. Encrypted agent starts, including Meta/history dispatch and RPC offers
 share a `userTurnId` execution claim in `execution.sqlite` under the active encrypted
 workspace's `repositoryDirectory`. Stop the daemon before reset. There is no desktop
 reset button. The execution gate resolves the turn's original signed update, checks its verified
-signer/user, and calls the injected `authorizeEncryptedExecution(workspaceId,
-requesterDevice)` capability. Missing signer or authorization denies new starts;
+signer/user, then calls the same host's `authorizeExecution(workspaceId, requesterDevice)`
+by default. `LodyOptions.authorizeEncryptedExecution` can override this capability
+with the same signature. Missing signer or authorization denies new starts;
 revoking a device cannot borrow another device's authority from the same user.
 Original ciphertext receipts live in `execution-origins.sqlite`; snapshot authors
 cannot substitute for the original turn signer. Ordinary workspaces do not open this log.

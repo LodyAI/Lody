@@ -147,9 +147,7 @@ export class Lody {
         workspaceId: options.workspaceId,
         targetMachineId: options.machineId,
         journal: lazyExecutionJournal(join(e2ee.repositoryDirectory, 'execution.sqlite'), Date.now),
-        authorizeExecution:
-          options.authorizeEncryptedExecution ??
-          (() => Effect.succeed({ _tag: 'Denied', reason: 'unavailable' })),
+        authorizeExecution: options.authorizeEncryptedExecution ?? e2ee.authorizeExecution,
         resolveVerifiedOriginal: (intent) => {
           const doc = manager?.sessions.get(intent.sessionId as SessionId)?.handle?.doc;
           return doc && e2ee

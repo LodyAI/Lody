@@ -45,7 +45,7 @@ export function makeEncryptedAgentExecution(options: {
   workspaceId: string;
   targetMachineId: string;
   journal: () => RealtimeJournal;
-  authorizeExecution: AuthorizeEncryptedExecution;
+  authorizeExecution?: AuthorizeEncryptedExecution;
   resolveVerifiedOriginal: ResolveVerifiedExecutionOriginal;
 }) {
   const claim = Effect.fnUntraced(function* (
@@ -83,10 +83,9 @@ export function makeEncryptedAgentExecution(options: {
       verified.expiresAt < 0
     )
       return { state: 'denied' };
-    const authorization = yield* options.authorizeExecution(
-      intent.workspaceId,
-      verified.requesterDevice
-    );
+    const authorizeExecution = options.authorizeExecution;
+    if (!authorizeExecution) return { state: 'denied' };
+    const authorization = yield* authorizeExecution(intent.workspaceId, verified.requesterDevice);
     if (authorization._tag !== 'Authorized') return { state: 'denied' };
     // Authorization can yield. Re-read before receive so concurrent channels
     // reuse the first expiry instead of replacing or extending its evidence.

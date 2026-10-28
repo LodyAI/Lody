@@ -1425,6 +1425,23 @@ describe('host-only E2EE realtime journal', () => {
         authorizeExecution: () => Effect.succeed({ _tag: 'Authorized' }),
       });
 
+    it('denies a verified original when no authorization capability is available', async () => {
+      const execution = makeEncryptedAgentExecution({
+        genesis: key.genesis,
+        workspaceId: key.workspaceId,
+        targetMachineId: key.targetMachineId,
+        journal: () => journal,
+        resolveVerifiedOriginal: () =>
+          Effect.succeed({
+            requesterDevice: 'ab'.repeat(32),
+            requesterUserId: intent.requesterUserId,
+            expiresAt: 1000,
+          }),
+      });
+      expect(await Effect.runPromise(execution.claim(intent))).toEqual({ state: 'denied' });
+      expect(journal.read(key)).toBeNull();
+    });
+
     it('preserves the first execution deadline through reauthorization and a backwards clock', async () => {
       const first = gate(() => journal, 100);
       expect(await Effect.runPromise(first.claim(intent))).toMatchObject({ state: 'expired' });

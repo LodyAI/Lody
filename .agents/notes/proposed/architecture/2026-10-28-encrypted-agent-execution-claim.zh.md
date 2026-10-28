@@ -10,7 +10,7 @@ Translation: current
 Meta/history 持久派发和实时请求可能表达同一个用户 turn，却拥有不同传输请求。
 内存去重不能阻止 daemon 重启后再次启动。两个入口现通过已有 SQLite journal，
 在创建、恢复 agent 或提交 prompt 前，以稳定的 `userTurnId` 获取执行 claim。
-结果未知不会允许重试；授权仍由注入能力负责，缺少实现时拒绝启动。
+结果未知不会允许重试；生产授权默认使用同一工作区宿主，允许可选注入覆盖，缺少能力时拒绝启动。
 本提案覆盖主机执行准入，不表示加密实时传输已经交付或产品端到端验收完成。
 
 ## 边界与授权
@@ -54,7 +54,7 @@ type AuthorizeEncryptedExecution = (
 直接从当前文档的相同编号状态推断签名覆盖的内容。
 
 验证所得历史 actor 必须等于 `requesterUserId`（账本的规范十六进制用户身份）；代码
-不根据资料目录猜测普通账号到加密用户的映射。已验证设备公钥再交给注入的当前权限
+不根据资料目录猜测普通账号到加密用户的映射。已验证设备公钥再交给当前权限
 检查。因此同一用户的其他设备仍有效，也不能使被撤销设备的待执行 turn 获得授权。
 缺少原件、签名者证据冲突、执行输入被修改或 signer 与用户不一致，都拒绝新启动。
 快照签名者不是其中每条历史 turn 的原作者；只有快照的 turn，在原始签名 update
@@ -63,8 +63,9 @@ type AuthorizeEncryptedExecution = (
 持久 History 的原执行窗口截止于已认证 turn 时间戳后 15 分钟。重新打开来源证明或
 刷新权限缓存不会延长它；宿主从账本读取起算的 15 分钟权限缓存是独立期限。未来实时
 入口须通过同一执行边界提供同等验证的原件和意图证据。错误仍是错误，取消归调用方
-Effect fiber 管理。本改动已接入宿主来源解析，生产新鲜度能力注入仍单独完成；缺少
-`authorizeEncryptedExecution` 时继续拒绝新启动。
+Effect fiber 管理。生产 `Lody.create` 默认调用同一宿主的 `authorizeExecution`；
+`LodyOptions.authorizeEncryptedExecution` 保留为兼容的可选覆盖。缺少授权能力时拒绝启动；
+省略覆盖回调会使用原生宿主授权，不会拒绝所有加密 turn。
 
 执行键为 `(genesis, workspaceId, targetMachineId, agent-start:<userTurnId>)`。
 不可变原件只编码意图版本、会话、turn 和请求用户。传输 request ID 及签名密文帧仍有各自
@@ -103,11 +104,14 @@ Session/Repo/MessageHandler 迁移仍因现有 Promise 依赖而延后；本改�
 共用 SQLite gate 后 GREEN。合成测试覆盖 RPC 与 prepared 持久派发重叠、重新打开的
 completed/uncertain 日志、持久 create 被拒绝或过期、断连后不重试、损坏工作区隔离、
 普通及健康工作区执行、精确意图绑定、准入前取消、时钟回退、结束写入失败、已使用日志
-主文件丢失以及显式 reset。组合测试验证惰性访问、缺省拒绝及普通路径没有 gate。
+主文件丢失以及显式 reset。组合测试验证惰性访问、缺少能力时拒绝及普通路径没有 gate。
 原 journal 与 dispatch 测试也参与本地验证。
 
 测试使用真实 SQLite、注入时间和显式同步信号，不断言吞吐量阈值，也不证明真实加密
 网络交付。真实签名账本、内容帧和 SQLite 测试还覆盖来源日志重开后的设备归属、同一
 用户设备撤销、用户不匹配、内容修改、验签拒绝及相同 peer/counter 的内容替换。
 临时移除设备与用户检查使回归 RED，恢复后 GREEN；精确内容替换测试也在改为向依赖
-快照导入实际签名字节前失败。新鲜度仍由独立宿主能力注入，测试不代表生产交付。
+快照导入实际签名字节前失败。生产构造回归使用真实 custody、签名账本与内容、SQLite、
+原生授权和实际 `Lody.create` 组合，不注入授权回调或 mock host；合成 cloud I/O 提供
+签名记录，ACP 测试边界记录 prompt 提交。缺少生产适配器时 RED，默认接通同一宿主后
+GREEN。这些测试不代表生产交付。

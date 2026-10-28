@@ -12,7 +12,8 @@ user turn while carrying different transport requests. In-memory dispatch guards
 cannot prevent another start after a daemon restart. Both entry paths now use the
 existing SQLite execution journal with a stable `userTurnId` intent before creating
 or restoring an agent or submitting its prompt. Unknown outcomes never permit a
-retry; authorization remains an injected capability and denies starts when absent.
+retry; production authorization uses the same workspace host, with an optional
+injected override and fail-closed behavior when the capability is absent.
 This proposal covers host admission, not delivered encrypted realtime transport or
 end-to-end product acceptance.
 
@@ -62,7 +63,7 @@ different operations, so inspecting the live document at matching counters is un
 
 The verified historical actor must equal `requesterUserId` (the ledger's canonical
 hex user identity); this code does not guess account-to-crypto-user mappings from
-profiles. The verified device key goes to the injected current-authority gate.
+profiles. The verified device key goes to the current-authority gate.
 Thus revoking one device denies its pending turns even while its user and another
 device stay active. Missing originals, conflicting signer attestations, modified
 execution input and user/signer mismatches refuse new starts. A snapshot signer
@@ -74,8 +75,10 @@ turn timestamp. Reopening proofs and refreshing the authorization cache do not
 change it; the host's 15-minute ledger-read cache is independent. A fresh realtime
 entry must supply equally verified origin/intent evidence through the same execution
 boundary. Errors remain errors; cancellation belongs to the caller's Effect fiber.
-The new host resolver is wired here; production freshness implementation injection
-remains separate. Missing `authorizeEncryptedExecution` still denies new starts.
+Production `Lody.create` defaults to the same owned host's `authorizeExecution`;
+`LodyOptions.authorizeEncryptedExecution` remains an optional compatible override.
+A missing capability denies new starts; omitting the override uses native host
+authorization rather than denying every encrypted turn.
 
 The execution key is `(genesis, workspaceId, targetMachineId,
 agent-start:<userTurnId>)`. Its immutable bytes encode only the intent version,
@@ -134,7 +137,7 @@ execution, reopened completed and uncertain journals, denied/expired durable cre
 disconnected submission without retry, corrupted-workspace isolation, ordinary and
 healthy-workspace execution, exact intent binding, cancellation before admission,
 backwards clocks, failed completion writes, missing used journals and explicit reset.
-Composition tests verify lazy journal access, default deny and ordinary-path absence.
+Composition tests verify lazy journal access, missing-capability denial and ordinary-path absence.
 The existing journal and dispatch suites also remain part of local validation.
 
 These tests use real SQLite, injected time and explicit synchronization signals;
@@ -144,5 +147,9 @@ through origin-store reopen, same-user device revocation, user mismatch, payload
 changes, signature rejection and same-peer/counter payload substitution. The device
 and user admission regressions were RED under temporary removal of those checks;
 restoring them is GREEN. The exact-payload provenance test also failed before the
-signed update was imported into its dependency snapshot. Freshness remains the
-separate injected host capability; these tests do not claim deployment acceptance.
+signed update was imported into its dependency snapshot. A production-construction regression uses real custody, signed ledger/content,
+SQLite, native authorization and the actual `Lody.create` composition without an
+authorization callback or mock host. Synthetic cloud I/O supplies the signed
+records; the ACP harness records prompt submission. It was RED with the absent
+production adapter and GREEN after defaulting to the owned host. These tests do
+not claim deployment acceptance.

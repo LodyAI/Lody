@@ -1,3 +1,26 @@
+import { bindTestPresenceApplication } from './presence-application-fixture';
+import { Lody } from '../src/lib/lody';
+import type { MachineRuntimeOptions } from '../src/lib/machine-runtime';
+import type { CliE2eeWorkspaceLegacy } from '../src/lib/e2ee/workspace-legacy';
+import { makeCliE2eeCustody } from '../src/lib/e2ee/custody';
+import {
+  retainCliE2eeWorkspaceBinding,
+  cliE2eeIdentityDirectory,
+} from '../src/lib/e2ee/workspace-legacy';
+import { makeNodeE2eeCustody } from '@lody/e2ee-core/adapters/node-custody';
+import {
+  Bytes,
+  signGenesisRecord,
+  prepareDeviceAdmission,
+  signLedgerRecord,
+  prepareLedgerCommand,
+  verifyLedger,
+  extendLedger,
+  hashRecordBytes,
+  prepareEpochEnvelope,
+} from '@lody/e2ee-core/protocol';
+import { makeStreamsUpdateBinding } from '@lody/e2ee-core/adapters/loro-streams';
+import { createTestCloudPort } from './test-cloud-port';
 import { makeEncryptedAgentExecution, lazyExecutionJournal } from '../src/lib/e2ee/agent-execution';
 import { RealtimeJournal } from '../src/lib/e2ee/realtime-journal';
 import { AcpStartupProcessError } from '../src/agent/acp-startup-monitor';
@@ -42,10 +65,10 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import Database from 'better-sqlite3';
-import { Data, Effect, Fiber } from 'effect';
+import { Data, Effect, Fiber, Result } from 'effect';
 import type { LoroRepo } from 'loro-repo';
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -2581,6 +2604,7 @@ describe('SessionExecutionService', () => {
   const runSilentPromptTurn = async (options: {
     sessionId: string;
     workspaceId?: WorkspaceId;
+    requesterUserId?: string;
     inputAuthor?: SessionHistoryInput['author'];
     earlierInputAuthor?: SessionHistoryInput['author'];
     attempts?: number;
@@ -2723,7 +2747,7 @@ describe('SessionExecutionService', () => {
         project: undefined,
         acpSessionConfig: { prompt: 'hi', cliType: 'builtin' as const, agentType: 'codex' },
         userTurnId: 'turn-user-1',
-        userId: 'user-1',
+        userId: options.requesterUserId ?? 'user-1',
         userName: 'User',
         userEmail: 'user@example.com',
       };
@@ -2813,6 +2837,252 @@ describe('SessionExecutionService', () => {
       close: () => fs.rmSync(directory, { recursive: true, force: true }),
     };
   };
+
+  it('executes a signed durable turn through production Lody construction without injected authorization', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-native-execution-'));
+    vi.stubEnv('LODY_DATA_DIR', directory);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.parse('2026-10-28T02:00:00Z'));
+    const hex = (value: Uint8Array) => Buffer.from(value).toString('hex');
+    const accountId = 'synthetic-account';
+    const workspaceId = 'workspace-1' as WorkspaceId;
+    const sessionId = 'production-session' as SessionId;
+    const user = '1e'.repeat(32);
+    const identity = cliE2eeIdentityDirectory(accountId, workspaceId);
+    const noKeyring = async () => {
+      throw new Error('synthetic missing keyring');
+    };
+    const wrapKey = Buffer.alloc(32, 7);
+    let lody: Lody | undefined;
+    const { LoroDoc, LoroMap } = await import('loro-crdt');
+    const source = new LoroDoc();
+    const submitted: string[] = [];
+    const presence = bindTestPresenceApplication(createSilentLogger());
+    const execute = <A, E>(effect: Effect.Effect<A, E, import('effect').Scope.Scope>) =>
+      Effect.runPromise(Effect.scoped(effect));
+    try {
+      const fixture = await execute(
+        Effect.gen(function* () {
+          const ownerCustody = yield* makeNodeE2eeCustody({
+            directory: path.join(directory, 'owner'),
+            wrapper: {
+              protection: 'os-keystore',
+              wrap: async (value) => {
+                const nonce = randomBytes(12);
+                const cipher = createCipheriv('aes-256-gcm', wrapKey, nonce);
+                return Buffer.concat([
+                  nonce,
+                  cipher.update(value),
+                  cipher.final(),
+                  cipher.getAuthTag(),
+                ]);
+              },
+              unwrap: async (value) => {
+                const cipher = createDecipheriv('aes-256-gcm', wrapKey, value.subarray(0, 12));
+                cipher.setAuthTag(value.subarray(-16));
+                return {
+                  result: Buffer.concat([
+                    cipher.update(value.subarray(12, -16)),
+                    cipher.final(),
+                  ]).toString(),
+                  shouldReEncrypt: false,
+                };
+              },
+            },
+          });
+          const prepared = yield* ownerCustody.prepareDevice();
+          const membershipId = Result.getOrThrow(Bytes.membershipId(new Uint8Array(16).fill(10)));
+          const genesis = yield* signGenesisRecord({
+            signer: prepared,
+            encryptionPublicKey: prepared.enc,
+            initialKey: Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(20))),
+            userId: Result.getOrThrow(Bytes.userId(new Uint8Array(32).fill(30))),
+            membershipId,
+          });
+          const owner = yield* ownerCustody.retainDevice(genesis.genesis, prepared);
+          const custody = yield* makeCliE2eeCustody({
+            directory: path.join(identity, 'custody'),
+            keyring: noKeyring,
+          });
+          const machine = yield* custody.createDevice(genesis.genesis);
+          let view = Result.getOrThrow(
+            verifyLedger({
+              anchor: genesis.genesis,
+              records: [genesis.record],
+              checkpoint: { length: 1, head: hashRecordBytes(genesis.record) },
+            })
+          );
+          const admission = yield* prepareDeviceAdmission({
+            genesis: genesis.genesis,
+            membershipId,
+            signer: machine,
+            encryptionPublicKey: machine.enc,
+            kind: 'machine',
+            machineId: 'machine-1',
+          });
+          const record = yield* signLedgerRecord(
+            Result.getOrThrow(prepareLedgerCommand(view, owner.publicKey, admission)),
+            owner
+          );
+          view = Result.getOrThrow(
+            extendLedger(view, [record], { length: 2, head: hashRecordBytes(record) })
+          );
+          yield* custody.prepareDeviceCredential(genesis.genesis, machine.publicKey);
+          const frame = yield* prepareEpochEnvelope({
+            context: {
+              genesis: genesis.genesis,
+              epoch: Result.getOrThrow(Bytes.epochNumber(0)),
+              sender: owner.publicKey,
+              recipient: machine.publicKey,
+            },
+            key: Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(20))),
+            signer: owner,
+            ledger: () => Effect.succeed(view),
+          });
+          const binding = yield* makeStreamsUpdateBinding({
+            genesis: genesis.genesis,
+            resource: 'doc:session-production-session',
+            model: 'loro',
+            writeEpoch: 'current',
+            signer: owner,
+            ledger: () => Effect.succeed(view),
+            readEpochKey: () => Effect.fromResult(Bytes.epochKey(new Uint8Array(32).fill(20))),
+          });
+          const inputConfig = { prompt: 'hi', cliType: 'builtin', agentType: 'codex' };
+          const row = source.getList('history').insertContainer(0, new LoroMap());
+          row.set('id', 'turn-user-1');
+          row.set('role', 'user');
+          row.set('userId', user);
+          row.set('timestamp', new Date().toISOString());
+          row.set('status', 'pending');
+          row.set('inputConfig', inputConfig);
+          row.set('items', [{ type: 'text', text: 'hi' }]);
+          source.commit();
+          const update = source.export({ mode: 'update' });
+          const plaintext = new Uint8Array(update.length + 4);
+          new DataView(plaintext.buffer).setUint32(0, update.length, false);
+          plaintext.set(update, 4);
+          const context = {
+            protocol: 'loro-streams-crdt-payload-protection',
+            version: 2,
+            kind: 'update_batch',
+          } as const;
+          const sealed = yield* binding.seal({
+            context,
+            plaintext,
+            additionalData: (header) => Uint8Array.from([...header, 9]),
+          });
+          return {
+            genesis,
+            records: [genesis.record, record],
+            frame,
+            sender: hex(owner.publicKey.toBytes()),
+            machine: hex(machine.publicKey.toBytes()),
+            sealed,
+            context,
+          };
+        })
+      );
+      await retainCliE2eeWorkspaceBinding(accountId, {
+        workspaceId,
+        genesisHash: hex(fixture.genesis.genesis.toBytes()),
+        genesisRecordHex: hex(fixture.genesis.record),
+      });
+      fs.writeFileSync(
+        path.join(identity, 'activation.json'),
+        JSON.stringify({
+          genesisHash: hex(fixture.genesis.genesis.toBytes()),
+          signingPublicKey: fixture.machine,
+        })
+      );
+      const historyReads: string[] = [];
+      const cloud = {
+        getHistory: async (request: { credential: string }) => {
+          historyReads.push(request.credential);
+          return {
+            startIndex: 0,
+            recordsHex: fixture.records.map(hex),
+            position: 'p1:workspace-1:2:fixture',
+            nextCursor: null,
+            checkpoint: { length: 2, headHash: hex(hashRecordBytes(fixture.records[1]).toBytes()) },
+          };
+        },
+        mailboxCall: async (method: string, input: { slot?: unknown }) => {
+          if (method === 'fetch')
+            return {
+              items: [{ sender: fixture.sender, frameHex: hex(fixture.frame) }],
+              next: null,
+            };
+          if (method === 'status')
+            return { ...(input.slot as object), revision: 0, status: 'EnvelopeStored' };
+          if (method === 'report') return null;
+          throw new Error('unexpected mailbox request');
+        },
+      };
+      lody = await Lody.create({
+        logger: createSilentLogger(),
+        workspaceId,
+        contentMode: 'e2ee',
+        genesisHash: hex(fixture.genesis.genesis.toBytes()),
+        token: 'synthetic-token',
+        userId: accountId,
+        machineId: 'machine-1',
+        machineName: 'Synthetic',
+        cloudPort: createTestCloudPort({ kind: 'cloud', e2ee: cloud as never }),
+        memoryPressure: {} as never,
+        machineLifecycleCapability: {
+          launchMode: 'foreground',
+          canRemoteRestart: false,
+          canRemoteUpgrade: false,
+          reason: 'not_daemon',
+        },
+      });
+      const composed = lody as unknown as {
+        runtime: { options: MachineRuntimeOptions };
+        encryptedWorkspace: CliE2eeWorkspaceLegacy;
+      };
+      const host = composed.encryptedWorkspace;
+      await host.refresh();
+      const sessionDoc = await lody.documentManager.getOrCreateSessionDoc(sessionId);
+      const protection = host.content.resolve({ kind: 'doc', docId: 'session-production-session' });
+      if (protection.mode !== 'protected' || !sessionDoc.handle)
+        throw new Error('missing signed session');
+      await protection.config.provider.open({
+        ...fixture.sealed,
+        context: fixture.context,
+        additionalData: Uint8Array.from([...fixture.sealed.header, 9]),
+      });
+      sessionDoc.handle.doc.import(source.export({ mode: 'update' }));
+      const before = historyReads.length;
+      const result = await runSilentPromptTurn({
+        sessionId,
+        workspaceId,
+        requesterUserId: user,
+        hasPromptEventsForTurn: true,
+        prepared: true,
+        encryptedExecution: composed.runtime.options.handlerConfig.encryptedExecution,
+        onPrompt: async () => {
+          submitted.push('hi');
+        },
+      });
+      expect(submitted).toEqual(['hi']);
+      expect(result.getHistory()[0]?.status).toBe('handled');
+      expect(result.failureMessages).toEqual([]);
+      expect(historyReads.length).toBeGreaterThan(before);
+      expect(
+        historyReads.every(
+          (credential) => credential.length > 0 && credential !== 'synthetic-token'
+        )
+      ).toBe(true);
+    } finally {
+      await lody?.documentManager.cleanUp();
+      await presence.closeLegacy();
+      source.free();
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
 
   it.each(['revoked-device', 'wrong-user', 'missing-signer'] as const)(
     'refuses encrypted durable execution with %s evidence',
