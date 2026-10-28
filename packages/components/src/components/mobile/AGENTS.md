@@ -104,7 +104,8 @@ before touching gestures.
   Home restores last-sent target; project entry/drafts win.
   Group/folder icons, GitHub avatars; recency/name/id order.
   Explain Role clearing on machine change. Hide after session presents;
-  suppress entrance across renders. Back animates.
+  suppress entrance across renders. Back/edge drag slide out; the native
+  drag binds the page (no strip), skipping the composer.
   [Details](README.md#sheets-and-session-surfaces).
 - `mobile-inline-picker.tsx` stays keyboard-operable (↑/↓/Enter/Esc, desktop
   search autofocus on `pointer: fine`) and virtualizes lists >40 options. Its
@@ -113,8 +114,7 @@ before touching gestures.
   offering a field at all. The input is `type="text"`, never `type="search"`.
 - Any mobile sheet that can put a FIELD on screen owes the native-keyboard
   contract, the run-config sheet included: call `useKeyboardAwareSheet()` rather
-  than assembling its three parts separately. Desktop landing keyboard nav:
-  [chat-landing-keyboard-nav.md](chat-landing-keyboard-nav.md).
+  than assembling its three parts separately.
 
 ## Settings
 
