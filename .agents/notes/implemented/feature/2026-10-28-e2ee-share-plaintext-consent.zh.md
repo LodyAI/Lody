@@ -20,3 +20,5 @@ Translation: current
 ## 证据与限制
 
 [发布 hook 测试](../../../../packages/components/tests/use-session-share-management.test.tsx)挂载生产管理器，覆盖中英文文案、确认前及取消后零读取、零变更、零上传，并在确认后解码真实 HTTP 对象上传字节。[源适配器测试](../../../../packages/components/tests/session-share-publisher.test.ts)以两种工作区模式运行真实压缩打包路径。[MCP 卡片测试](../../../../packages/components/tests/session-share-request-cards.test.tsx)覆盖批准及取消的生产装配。这些合成测试证明客户端顺序与内容行为，不代表线上后端或已安装设备验收。
+
+实现: [PR #2022](https://github.com/LodyAI/Lody/pull/2022).

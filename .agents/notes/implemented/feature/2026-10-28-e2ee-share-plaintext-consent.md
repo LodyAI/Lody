@@ -20,3 +20,5 @@ This resolves the deferred sharing decision in [file and preview availability](2
 ## Evidence and limits
 
 The [publication-hook tests](../../../../packages/components/tests/use-session-share-management.test.tsx) render the production manager with English and Chinese copy, check zero capture/mutation/upload before confirmation and after cancellation, and decode actual HTTP object-upload bytes after confirmation. The [source-adapter suite](../../../../packages/components/tests/session-share-publisher.test.ts) exercises both workspace modes with the real compressed package path. [MCP-card tests](../../../../packages/components/tests/session-share-request-cards.test.tsx) exercise its approval and cancellation wiring. These synthetic tests establish client ordering and payload behavior, not live hosted-backend or installed-device acceptance.
+
+Implementation: [PR #2022](https://github.com/LodyAI/Lody/pull/2022).
