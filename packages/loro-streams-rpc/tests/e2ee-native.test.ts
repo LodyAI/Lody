@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { buildSessionTurnInputConfig } from '../../shared/src/session-input';
 import { Effect } from 'effect';
 import { decodeE2eeRpcResponseBody, encodeE2eeRpcResponseBody } from '../src/e2ee-wire';
 import { e2eeRpcResource } from '../src/e2ee-resource';
@@ -44,6 +45,75 @@ describe('trusted-host encrypted dispatch originals', () => {
       )
     ).rejects.toThrow('intent_conflict');
     expect(await Effect.runPromise(reopened.prepareDispatch(f.machineId, f.input))).toEqual(first);
+  });
+
+  it('retains one original for real composer configs with undefined optional fields', async () => {
+    const f = fixture();
+    const inputConfig = buildSessionTurnInputConfig({
+      inputBlocks: [{ type: 'text', text: 'Synthetic composer input' }],
+      cliType: 'builtin',
+      agentType: 'codex',
+    });
+    expect(Object.hasOwn(inputConfig, 'modelId')).toBe(true);
+    expect(inputConfig.modelId).toBeUndefined();
+    const input = { ...f.input, inputConfig };
+    const canonical = JSON.parse(JSON.stringify(input));
+    const original = await Effect.runPromise(f.sender.prepareDispatch(f.machineId, input));
+    const reopened = f.native('owner');
+    expect(await Effect.runPromise(reopened.prepareDispatch(f.machineId, canonical))).toEqual(
+      original
+    );
+    expect(await Effect.runPromise(reopened.prepareDispatch(f.machineId, input))).toEqual(original);
+    const opened = await Effect.runPromise(f.receiver.openDispatch(f.machineId, original.frameHex));
+    expect(opened.args).toStrictEqual(canonical);
+    await expect(
+      Effect.runPromise(
+        reopened.prepareDispatch(f.machineId, {
+          ...input,
+          inputConfig: { ...inputConfig, prompt: 'changed composer input' },
+        })
+      )
+    ).rejects.toThrow('intent_conflict');
+    expect(await Effect.runPromise(reopened.prepareDispatch(f.machineId, input))).toEqual(original);
+  });
+
+  it('accepts ACKs using the same composer JSON representation without replacing stored originals', async () => {
+    const f = fixture();
+    const input = {
+      ...f.input,
+      inputConfig: buildSessionTurnInputConfig({
+        inputBlocks: [{ type: 'text', text: 'Synthetic composer ACK' }],
+        cliType: 'builtin',
+        agentType: 'codex',
+      }),
+    };
+    // Seed a JSON wire original to independently exercise response acceptance.
+    const original = await Effect.runPromise(
+      f.sender.prepareDispatch(f.machineId, JSON.parse(JSON.stringify(input)))
+    );
+    const opened = await Effect.runPromise(f.receiver.openDispatch(f.machineId, original.frameHex));
+    const response = await Effect.runPromise(f.receiver.sealAck(f.machineId, opened, f.ack));
+    const responseHex = Buffer.from(response).toString('hex');
+    const reopened = f.native('owner');
+    expect(
+      await Effect.runPromise(reopened.acceptResponse(f.machineId, input, responseHex))
+    ).toEqual(f.ack);
+    expect(await Effect.runPromise(reopened.prepareDispatch(f.machineId, input))).toEqual(original);
+    await expect(
+      Effect.runPromise(
+        reopened.acceptResponse(
+          f.machineId,
+          {
+            ...input,
+            inputConfig: { ...input.inputConfig, prompt: 'conflicting ACK intent' },
+          },
+          responseHex
+        )
+      )
+    ).rejects.toThrow('intent_conflict');
+    expect(
+      await Effect.runPromise(f.sender.acceptResponse(f.machineId, input, responseHex))
+    ).toEqual(f.ack);
   });
 
   it('accepts only the original target-signed ACK and retains its exact bytes across reopen', async () => {

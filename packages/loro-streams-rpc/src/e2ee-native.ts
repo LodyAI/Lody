@@ -26,6 +26,11 @@ const inputSchema = z.object({
   timestamp: z.string().max(128),
   inputConfig: z.unknown(),
 });
+// Compare the wire DTO, not JS-only optional fields. Composer objects retain
+// undefined properties that JSON omits; both send and ACK lookup must agree with
+// the already signed original without regenerating its ID or ciphertext.
+const normalizeInput = (input: unknown) =>
+  inputSchema.parse(JSON.parse(JSON.stringify(inputSchema.parse(input))));
 const ackSchema = z.object({
   type: z.literal('session/dispatch-turn_response'),
   sessionId: z.string(),
@@ -118,7 +123,7 @@ export function makeE2eeRpcNative(options: {
   const prepareDispatch = (machineId: string, input: E2eeDispatchInput) =>
     Effect.scoped(
       Effect.gen(function* () {
-        const args = yield* attempt(() => inputSchema.parse(input));
+        const args = yield* attempt(() => normalizeInput(input));
         const signer = yield* targetSigner(machineId);
         let saved = yield* attempt(() => options.originals.read('sent', key(args)));
         if (!saved) {
@@ -162,7 +167,7 @@ export function makeE2eeRpcNative(options: {
   const acceptResponse = (machineId: string, input: E2eeDispatchInput, frameHex: string) =>
     Effect.scoped(
       Effect.gen(function* () {
-        const args = yield* attempt(() => inputSchema.parse(input));
+        const args = yield* attempt(() => normalizeInput(input));
         const saved = yield* attempt(() => options.originals.read('sent', key(args)));
         if (
           !saved ||

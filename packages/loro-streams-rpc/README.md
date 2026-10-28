@@ -26,6 +26,8 @@ The resource is `rpc:<base64url(machineId)>`, with strict UTF-8 machine IDs.
 `./e2ee-native` owns crypto and immutable SQLite originals in trusted hosts;
 `./e2ee-streams` owns bounded shared readers and request correlation. The browser
 uses narrow host preparation/response methods and never receives signing keys.
+Preparation and ACK verification compare the parsed DTO's JSON wire representation,
+so omitted optional fields reuse the saved original without changing its ID/frame.
 An 800 ms acceleration deadline falls back to the encrypted history/Meta path.
 Both paths use the same user turn and original frame; the CLI's existing
 `agent-start:<userTurnId>` journal and current membership authorization decide

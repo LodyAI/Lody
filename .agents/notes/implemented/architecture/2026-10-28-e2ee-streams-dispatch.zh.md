@@ -17,6 +17,9 @@ Streams 收件通道，同时保留持久派发路径。可信宿主保留原始
 已批准的[基础协议](../../../../specs/e2ee-foundations.md)规定用途 8/9、严格的
 机器资源编码和完整帧 1 MiB 上限。本次集成[正文 codec](../../proposed/architecture/2026-10-28-e2ee-realtime-body-codecs.md)；旧记录中的协议待批准前提已由已批准 Spec 取代。本次不引入 iroh。
 
+原生宿主先把已解析 DTO 统一为 JSON 线上表示，避免 composer 的可选 `undefined`
+字段与签名正文冲突。请求准备与 ACK 验收使用同一规则，不重写已保存的原件或 ID。
+生产 `CloudPlatformProvider` 将这两个窄接口转发到 renderer IPC proxy 与 preload 策略。
 原生宿主仅封装派发请求，在返回前把 ID、签名者、目标与完整密文存入不可变
 SQLite 原件库。浏览器先将原帧写入加密会话文档，再发送实时请求。原生准备或
 传输失败时，history/Meta 仍继续派发。重试复用原件；同一 turn 的冲突内容被拒绝。
@@ -37,7 +40,10 @@ renderer 不获得签名私钥或通用签名操作。
 合成真实密钥/SQLite 测试覆盖原件保留、目标/签名者/摘要绑定、原 ACK 重放、
 冲突请求、授权失败、共享实际执行 claim、超时重发和关闭。新增关闭断言在修复前
 发现仍有两个底层读存活，修复后通过。UI 测试覆盖原帧落入加密文档，以及成功和
-失败时持久派发仍启用。已有运行时/注册检查与受影响包类型检查已在本地运行；
+失败时持久派发仍启用。挂载生产 provider 的回归使用真实 IPC proxy 和 preload
+bridge，仅替换最底层 `ipcRenderer.invoke`；移除任意一个 preload 权限均会失败。
+真实 composer builder 产物覆盖准备、已有原件复用和 ACK 验收，并验证修改请求仍被
+拒绝。已有运行时/注册检查与受影响包类型检查已在本地运行；
 没有等待托管 CI。
 
 ## 受控延迟对照

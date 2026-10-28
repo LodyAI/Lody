@@ -22,6 +22,11 @@ The approved [foundations](../../../../specs/e2ee-foundations.md) define purpose
 are integrated here; their pending wire-approval prerequisite is superseded by
 the approved foundations. No iroh channel is introduced.
 
+The native host first normalizes the parsed dispatch DTO to its JSON wire
+representation, so composer-owned optional `undefined` fields cannot conflict
+with the signed JSON body. Preparation and ACK acceptance use the same rule;
+retained originals and IDs are never rewritten. Production `CloudPlatformProvider`
+forwards both narrow operations through the renderer IPC proxy and preload policy.
 The native host seals one dispatch request and saves its ID, signer, target and
 exact ciphertext in an immutable SQLite store before returning it. Browser code
 persists that original in the encrypted session document before sending. Durable
@@ -50,7 +55,11 @@ binding, exact ACK replay, conflicting intents, authorization failure, shared
 actual-start claims, timeout/resend and scope closure. The new shared-channel
 close assertion failed with two active raw reads before the cleanup fix and
 passes after it. UI tests preserve encrypted document originals and durable
-activation on success and failures. Existing runtime/registration checks and
+activation on success and failures. A mounted production-provider regression
+uses the real IPC proxy and preload bridge, with only `ipcRenderer.invoke` stubbed;
+removing either preload permission makes it fail. Real composer-builder inputs
+cover request preparation, existing-original reuse and ACK verification, including
+rejection of changed intents. Existing runtime/registration checks and
 affected package typechecks were run locally; hosted CI has not been awaited.
 
 ## Controlled latency comparison
