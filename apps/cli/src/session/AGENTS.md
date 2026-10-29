@@ -42,8 +42,9 @@
 
 - Gate LIST writes on user-entry sync (`turn-history-gate.ts`, 20s), never status/meta.
 - Goals obey [this contract](../../../../specs/session-goal-control.md).
-- Stop ends steer waits, not the owner fiber. Drain raw ACP or confirm termination, then clear
-  presence before reuse. [Inbox admission](../orchestration/AGENTS.md); execution IDs stay fixed.
+- Stop ends steer waits, not the owner fiber. Drain raw ACP or confirm termination before
+  reusing an Agent. If release fails, detach that Agent, return the turn slot and report
+  bounded background cleanup; the next input creates a new ACP. [Inbox admission](../orchestration/AGENTS.md); execution IDs stay fixed.
   Assistant ids use `userTurnId`; `invocation` owns source/requester/config; steer replaces it.
 - Only dispatch producers publish `latestUserMsgId`, with history in `appendUserTurn`
   or Roost's `accept_input_and_dispatch` writer queue. Save human provenance first;

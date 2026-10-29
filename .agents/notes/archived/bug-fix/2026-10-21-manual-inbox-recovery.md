@@ -2,6 +2,7 @@
 
 Date: 2026-10-21
 Status: implemented
+Archived: 2026-10-29
 Translation: current
 PR: [#1778](https://github.com/LodyAI/Lody/pull/1778)
 
@@ -20,7 +21,7 @@ not establish descendant release.
 
 ## Decision and evidence
 
-The [Inbox implementation](../architecture/2026-10-12-operation-inbox.md) already had
+The [Inbox implementation](../../implemented/architecture/2026-10-12-operation-inbox.md) already had
 startup resource probing and an offline `recover-inbox` command. It was not a
 missing startup scan. The automatic probe intentionally refuses Windows identities;
 existing PID journals cannot prove tree disappearance. The original absent release

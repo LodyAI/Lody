@@ -51,11 +51,7 @@ import type {
 import { SYNC_CONFIRMATION_TIMEOUT_MS, withTimeout } from '@/lib/loro/timeout-utils';
 import type { MemoryPressureEvictionResult } from '@/lib/session-gc-manager';
 import type { OperationInboxLegacy } from '@/orchestration/inbox/legacy';
-import {
-  blockedInboxRecoveryMessage,
-  InboxExecutionBlocked,
-  InboxExecutionRejected,
-} from '@/orchestration/inbox/admission-failure';
+import { InboxExecutionRejected } from '@/orchestration/inbox/admission-failure';
 import {
   batchHistoryMembers,
   batchPreview,
@@ -395,10 +391,8 @@ export type SessionExecutionSnapshot = {
   hasRewriteBarrier: boolean;
   /**
    * Set when the active turn ended but could not confirm releasing its execution
-   * resources (in-flight ACP requests, the Inbox execution record). Successors
-   * stay blocked, since an unconfirmed release may still be running, until
-   * `requestReleaseRecovery` proves release. This is not "the agent process
-   * should have exited": a normally released turn keeps its process for reuse.
+   * resources. Diagnostic only: retirement detaches the failed Agent and returns
+   * the input slot before the next turn. Normal release keeps its process for reuse.
    */
   releaseBlocked?: { reason: string };
 };
@@ -899,11 +893,14 @@ export class SessionExecutionService {
     const failures = [...this.turnRuntimeBySession.values()].flatMap((runtime) =>
       runtime.releaseFailure ? [runtime.releaseFailure] : []
     );
-    if (failures.length) throw new AggregateError(failures, 'Execution resources remain owned');
+    if (failures.length)
+      this.deps.logger.warn(
+        `Execution cleanup incomplete for ${failures.length} turns; continuing shutdown`
+      );
   }
   async recoverUnreleasedInboxExecutions(): Promise<void> {
     for (const runtime of this.turnRuntimeBySession.values())
-      if (runtime.releaseFailure) await this.recoverInboxExecution(runtime.sessionId);
+      if (runtime.releaseFailure) await this.requestReleaseRecovery(runtime.sessionId);
   }
   private notificationWork:
     | {
@@ -951,11 +948,6 @@ export class SessionExecutionService {
       kind: 'human',
       config: args.config,
     });
-    if (this.turnRuntimeBySession.get(args.sessionId)?.releaseFailure) {
-      await this.recoverInboxExecution(args.sessionId).catch((cause) =>
-        this.deps.logger.warn(`Inbox resources remain unreleased: ${formatErrorMessage(cause)}`)
-      );
-    }
   }
   async abandonInboxInput(sessionId: SessionId, inputId: string): Promise<void> {
     await this.operationInbox?.abandonInput(this.deps.workspaceId, sessionId, inputId);
@@ -984,41 +976,42 @@ export class SessionExecutionService {
 
   private readonly releaseRecoveryBySession = new Map<SessionId, Promise<boolean>>();
 
-  /**
-   * Retry proving release for a turn whose release could not be confirmed.
-   *
-   * Called by the next input that waits on this session (a dispatch check or an
-   * Inbox readiness check), so recovery follows the fault clearing without a
-   * timer. Single-flight per session; a failed attempt keeps the slot and the
-   * next waiting input retries. Resolves true once the slot was released.
-   *
-   * Recovery may terminate the session's agent process: that is how it proves an
-   * unconfirmed release ended. It runs only for a blocked release, never after a
-   * normally released turn, whose process is kept for reuse.
-   */
-  requestReleaseRecovery(sessionId: SessionId): Promise<boolean> {
+  /** One bounded cleanup attempt; callers never wait for it to admit a successor. */
+  requestReleaseRecovery(sessionId: SessionId, retired?: TurnRuntimeState): Promise<boolean> {
     const inFlight = this.releaseRecoveryBySession.get(sessionId);
     if (inFlight) return inFlight;
-    if (this.turnRuntimeBySession.get(sessionId)?.releaseFailure === undefined) {
+    const runtime = retired ?? this.turnRuntimeBySession.get(sessionId);
+    if (runtime?.releaseFailure === undefined) {
       return Promise.resolve(false);
     }
-    const recovery = this.recoverInboxExecution(sessionId)
-      .then(() => this.turnRuntimeBySession.get(sessionId)?.releaseFailure === undefined)
+    const recovery = withTimeout(
+      this.recoverInboxExecution(sessionId, runtime),
+      5_000,
+      'Background execution cleanup timed out'
+    )
+      .then(() => true)
       .catch((cause: unknown) => {
         this.deps.logger.warn(
-          `[${sessionId}] Turn resources remain unreleased; the next waiting input retries: ${formatErrorMessage(cause)}`
+          `[${sessionId}] Background execution cleanup incomplete; continuing: ${formatErrorMessage(cause)}`
         );
         return false;
       })
       .finally(() => {
+        try {
+          runtime.inboxOwner?.detach();
+        } catch (cause) {
+          this.deps.logger.warn(`Cleanup observer detach failed: ${formatErrorMessage(cause)}`);
+        }
         this.releaseRecoveryBySession.delete(sessionId);
       });
     this.releaseRecoveryBySession.set(sessionId, recovery);
+    this.ownedWork.add(recovery);
+    void recovery.then(() => this.ownedWork.delete(recovery));
     return recovery;
   }
 
-  async recoverInboxExecution(sessionId: SessionId): Promise<void> {
-    const runtime = this.turnRuntimeBySession.get(sessionId);
+  async recoverInboxExecution(sessionId: SessionId, retired?: TurnRuntimeState): Promise<void> {
+    const runtime = retired ?? this.turnRuntimeBySession.get(sessionId);
     if (!runtime?.releaseFailure) return;
     if (runtime.inboxOwner) {
       await runtime.inboxOwner.recover(
@@ -1044,9 +1037,6 @@ export class SessionExecutionService {
       );
     } else if (runtime.session) await runtime.session.terminate(true);
     runtime.releaseFailure = undefined;
-    this.releaseTurnRuntime(sessionId, runtime.turnId);
-    await this.operationInbox?.wake();
-    this.onInboxReleased?.(sessionId);
   }
 
   private readonly canceledTurnBySession = new Map<SessionId, string>();
@@ -3177,13 +3167,22 @@ export class SessionExecutionService {
           await session.terminate(true);
         } catch (error) {
           this.deps.logger.warn(
-            `[${session.sessionId}] Failed to terminate cancelled session; waiting for ACP completion: ${formatErrorMessage(error)}`
+            `[${session.sessionId}] Failed to terminate cancelled session; retiring Agent: ${formatErrorMessage(error)}`
           );
           if (turnId) {
-            this.reportSessionStopFailure(session.sessionId, turnId, 'terminate', error, runtime);
+            this.reportSessionStopFailure(
+              session.sessionId,
+              turnId,
+              'terminate',
+              new Error(`${formatErrorMessage(error)}; continuing with a new Agent`),
+              runtime
+            );
           }
           // Failed termination is not permission to reuse a busy agent.
-          if (runtime) runtime.releaseFailure = error;
+          if (runtime) {
+            runtime.releaseFailure = error;
+            this.requestTurnInterrupt(runtime);
+          }
           throw error;
         }
       }
@@ -3296,15 +3295,16 @@ export class SessionExecutionService {
             .tryPromise(() => sessionToTerminate.terminate(true))
             .pipe(
               Effect.tapError((error) =>
-                Effect.sync(() =>
+                Effect.sync(() => {
+                  if (runtime) runtime.releaseFailure = error;
                   self.reportSessionStopFailure(
                     options.sessionId,
                     options.turnId,
                     'terminate',
                     error,
                     runtime
-                  )
-                )
+                  );
+                })
               )
             )
         );
@@ -4306,11 +4306,7 @@ export class SessionExecutionService {
       try {
         // A rejected begin acquired nothing. Its deterministic ID can match an
         // older blocked execution, which only the recovery owner may release.
-        if (
-          inboxInput &&
-          !(cause instanceof InboxExecutionBlocked) &&
-          !(cause instanceof InboxExecutionRejected)
-        )
+        if (inboxInput && !(cause instanceof InboxExecutionRejected))
           await inbox!.release({ ...inboxInput, executionId: turnId, outcome: 'failed' });
         this.releaseTurnRuntime(sessionId, turnId);
       } catch (releaseCause) {
@@ -4318,29 +4314,6 @@ export class SessionExecutionService {
           [cause, releaseCause],
           'Inbox preparation and release failed'
         );
-      }
-      if (cause instanceof InboxExecutionBlocked) {
-        // Inbox preparation precedes the scoped turn error handler. Persist its
-        // verified diagnostic here so a rejected send is not only a daemon log.
-        await this.recordKnownChatFailure({
-          sessionId,
-          sessionDoc,
-          userTurnId,
-          reason: 'turn_pre_prompt_failed',
-          message: blockedInboxRecoveryMessage(
-            cause,
-            { machineId: this.deps.machineId, workspaceId: this.deps.workspaceId, sessionId },
-            process.platform
-          ),
-        });
-        // Keep Inbox eligibility aligned with the terminal visible failure.
-        // A repeated ID must not alter the original active input's evidence;
-        // unrelated queued input is also untouched.
-        if (inboxInput)
-          await inbox!.abandonInput(this.deps.workspaceId, sessionId, inboxInput.inputId, true);
-        await closeLeftoverEntry();
-        span.end({ outcome: 'inbox-blocked' });
-        throw cause;
       }
       if (
         !runtime.releaseFailure &&
@@ -5029,9 +5002,8 @@ export class SessionExecutionService {
    * eviction, archive, or an abnormal path (an agent that ignores Stop, a lost
    * connection) ends it.
    *
-   * A release that cannot be confirmed keeps `releaseFailure` and the slot, so
-   * successors stay blocked until `recoverInboxExecution` proves release; the
-   * next input that waits on this session requests that recovery.
+   * An unconfirmed release retires the old Session and returns the slot. Cleanup
+   * gets one bounded background attempt with the old handles, never the successor.
    */
   private async releaseVisibleTurn(options: {
     sessionId: SessionId;
@@ -5091,16 +5063,39 @@ export class SessionExecutionService {
       }
     } catch (cause) {
       runtime.releaseFailure ??= cause;
-      throw cause;
+      this.deps.logger.warn(
+        `[${sessionId}] Inbox release incomplete: ${formatErrorMessage(cause)}`
+      );
     } finally {
       // Freeze the outcome before waking a successor; delivery owns no prompt slot.
       const fact = this.resolveTurnOutcomeFact(runtime, !!inboxInput);
       const completedAt = getServerNow();
       try {
-        if (inboxInput && !runtime.releaseFailure) {
+        if (runtime.releaseFailure) {
+          if (runtime.session) this.deps.sessionManager.detachSession(runtime.session);
+          else if (runtime.pendingSession)
+            this.deps.sessionManager.abandonPendingSessionCreate(sessionId, 'unconfirmed-release');
+          this.reportSessionStopFailure(
+            sessionId,
+            runtime.turnId,
+            'terminate',
+            new Error(
+              'Some processes from the previous turn could not be confirmed stopped; continuing.'
+            ),
+            runtime
+          );
+          void this.requestReleaseRecovery(sessionId, runtime);
+        }
+        if (inboxInput || runtime.releaseFailure) {
           this.releaseTurnRuntime(sessionId, runtime.turnId);
-          if (outcome !== 'execution-deferred') {
-            await inbox!.wake();
+          if (inbox && outcome !== 'execution-deferred') {
+            await inbox!
+              .wake()
+              .catch((cause: unknown) =>
+                this.deps.logger.warn(
+                  `[${sessionId}] Inbox wake failed: ${formatErrorMessage(cause)}`
+                )
+              );
             this.onInboxReleased?.(sessionId);
           }
         }

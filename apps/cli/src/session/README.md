@@ -292,7 +292,7 @@ turn under the rewrite lease), the entry is dead:
 
 - Stop on that turn closes it: it cancels a still-unsettled user input, then force-finishes
   the entry. Stop still does not run the queue.
-- A dispatch that settles its input before the prompt (Inbox blocked, input already ended)
+- A dispatch that settles its input before the prompt (interrupted Inbox input already ended)
   closes the entry a crashed run left open, at that failure point. A `processing` input is
   never closed this way: it still owes its crash-recovery run on the same entry. Dispatch
   checks do not sweep for dead turns; that would read history on every trigger.
@@ -952,3 +952,5 @@ unknown local content is retained. Setup retains the prior serial traversal orde
 including parents before children.
 The [submodule preparation decision](../../../../.agents/notes/implemented/bug-fix/2026-10-26-project-submodule-preparation.md)
 records the source-layout and incomplete-startup recovery boundaries.
+
+Failed release detaches the old Agent and returns its slot; see the [Inbox availability decision](../../../../.agents/notes/implemented/bug-fix/2026-10-29-inbox-no-durable-block.md).

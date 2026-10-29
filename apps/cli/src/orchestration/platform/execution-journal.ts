@@ -6,7 +6,12 @@ import type { InboxSqlite } from '../inbox/sqlite';
 export const executionJournalLayer = (sql: InboxSqlite) => {
   const io = <A>(f: () => A) => Effect.try({ try: f, catch: (cause) => cause });
   return Layer.succeed(ExecutionJournal, {
-    record: (i, id, identity) => io(() => sql.registerResources(i, id, identity)),
+    record: (i, id, identity) =>
+      io(() => sql.registerResources(i, id, identity)).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning('Inbox resource journal failed; continuing', cause)
+        )
+      ),
     confirm: (i, id) => io(() => sql.confirmReleased(i, id)),
     members: (batch) => io(() => sql.members(batch, 0, INBOX_INLINE_MEMBERS)),
     identity: (roots, complete) => ({

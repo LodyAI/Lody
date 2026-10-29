@@ -164,9 +164,9 @@ not promise simultaneous cancellation or rollback of already performed work.
 ## Idempotent message consumption
 
 Operation completion receipts enter the durable Inbox with wake eligibility. If a
-Session is idle, unpaused and has no unreleased resources or accepted queued input,
+Session is idle, unpaused and has no active execution or accepted queued input,
 one wakeable receipt grants a persistent automatic intent. Busy Sessions defer
-consumption until normal completion and actual release. Stop blocks receipt-driven
+consumption until the current execution returns its slot. Stop blocks receipt-driven
 wakes until fresh human or Agent-chat input. Result persistence and wake intent creation
 share the completion transaction; reopen recovers an unsubmitted intent without a new event.
 Suppressing user-facing completion notifications for Agent-initiated turns does not
@@ -185,17 +185,15 @@ while retaining history. The pause blocks only automatic completion wakes. Input
 after Stop by a human or by another Session's Agent chat ranks the same: it is admitted,
 clears the pause and carries saved results; old instructions require a new send.
 Receipts still decide only whether an input is recorded as human. Failed exits
-never auto-continue; unreleased resources block all successors. Normal future human
-turns resume the same receipt-driven scheduling rule. A failed exit alone grants no
-wake, but a later wakeable receipt may grant one after physical resource release.
+never auto-continue. Normal future turns resume receipt-driven scheduling. A failed exit
+alone grants no wake, but later wakeable receipts may grant one after slot retirement.
 
-Missing or incomplete recovery journals must remain visible and recoverable. A local
-operator may explicitly attest that all old resources, including unrecorded ones,
-have been released while holding exclusive Host ownership; known live resources or
-uncertain probes still block recovery. Atomically retire the exact old execution and
-pause the session. Do not replay unknown submissions or manufacture a normal-release
-intent. Only fresh human or Agent-chat input resumes work afterward. A dead daemon PID alone
-is not release evidence. This maintenance action is not available through Agent/MCP tools.
+Unconfirmed resource release never blocks later input. Retire interrupted executions,
+finish their inputs as unknown without replay, clear legacy blocks and preserve queued
+work. Report uncertainty and attempt bounded background cleanup; cleanup failure cannot
+prevent input or shutdown. Never reuse an Agent whose termination failed: detach the old
+Session and create a new ACP. Restart retirement may log a warning when history is not
+available. Resource journals remain cleanup evidence; offline attestation is not required.
 
 An automatic batch yields atomically to pre-submission human acceptance. A human input
 already being prepared survives later queued human input. Keep admission from the
@@ -212,7 +210,7 @@ individual members use ordered JSON fragments, not additional model turns.
 Post-fence uncertainty is permanent unknown submission, never replay. Human-plus-batch
 inputs also disable whole-input stale-ACP replay. Retry settlement writes only. Raw
 request/resource release differs from waiter cancellation or Scope close: retain full
-failures, shared shutdown receipts and independent recovery owners until actual release.
+failures and shared shutdown receipts; recovery uses old handles without blocking successors.
 
 Preserve released Operation rows, author/input snapshots, recovery state and retired
 IDs across upgrade; active Operations continue reconciliation. Delete only per-Delivery

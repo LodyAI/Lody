@@ -1,3 +1,4 @@
+import { SessionExecutionService } from '../session/session-execution-service';
 import { Cause, Effect, Exit } from 'effect';
 import { CoordinatorWorkflow } from './coordinator-workflow';
 import type { CoordinatorActivity } from './coordinator-activity';
@@ -1491,4 +1492,26 @@ describe('native coordinator failure boundaries', () => {
       }
     }
   );
+});
+
+it('closes Inbox and SQLite even when an execution drain has a release failure', async () => {
+  const h = await makeHarness();
+  h.coordinatorOptions.executionService.drainInboxExecutions = () =>
+    SessionExecutionService.prototype.drainInboxExecutions.call({
+      ownedWork: new Set(),
+      turnRuntimeBySession: new Map([
+        ['failed', { releaseFailure: new Error('terminate failed') }],
+      ]),
+      deps: { logger: h.logger },
+    } as never);
+  h.coordinator.start();
+  await h.coordinator.idle();
+  const internal = h.coordinator as unknown as {
+    inbox: { wake(): Promise<void> };
+    store: LodyOperationStore | null;
+  };
+  const inbox = internal.inbox;
+  await expect(h.coordinator.stop()).resolves.toBeUndefined();
+  expect(internal.store).toBeNull();
+  await expect(inbox.wake()).rejects.toBeDefined();
 });

@@ -209,7 +209,7 @@ export const makeExecutionOwner = Effect.fnUntraced(function* (
     awaitReleased: Deferred.await(released),
     detach,
     recover: (prepare: Effect.Effect<void, unknown>, beforeRelease: Effect.Effect<void, unknown>) =>
-      releaseGate.withPermit(recoverWork(prepare, beforeRelease).pipe(Effect.uninterruptible)),
+      releaseGate.withPermit(recoverWork(prepare, beforeRelease)),
   };
 });
 export type ExecutionOwner = Effect.Success<ReturnType<typeof makeExecutionOwner>>;

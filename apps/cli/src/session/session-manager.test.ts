@@ -1432,6 +1432,10 @@ describe('SessionManager failed agent creation', () => {
     const reconfigured = await manager.createSession({ ...config, memory });
     expect(reconfigured.getMemoryBinding?.()).toEqual(memory);
     expect(manager.getSession(sessionId)).toBe(reconfigured);
+    manager.detachSession(replacement);
+    expect(manager.getSession(sessionId)).toBe(reconfigured);
+    await replacement.terminate(true);
+    expect(manager.getSession(sessionId)).toBe(reconfigured);
     await manager.terminateSession(sessionId, true);
     expect(terminated).toHaveBeenCalledTimes(1);
     expect(terminated).toHaveBeenCalledWith(expect.objectContaining({ sessionId }));

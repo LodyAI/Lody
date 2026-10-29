@@ -61,56 +61,22 @@ retry first recovers retained resources, then starts a replacement.
 `inbox/sqlite.ts` indexes results in the existing completion transaction, fixes release
 watermarks and persists input/batch/resource receipts. `inbox/service.ts` owns coalesced
 signals, scoped workers and the shared admission gate. `inbox/legacy.ts` registers the
-single host runtime and the unfinished Session adapter. `inbox/recovery.ts` supplies the pure disappearance rule; the process probe is a platform capability. It proves
-resource disappearance conservatively; unsupported or missing identities remain blocked.
-Session admission locks retain both waiters and holders, then evict only at zero references.
-Projected receipt cache entries follow retained SQLite receipt identities/statuses. Release
-retries own a private mutable receipt, leaving the caller event unchanged.
+single host runtime and the unfinished Session adapter. Interrupted executions retire without replay; `inbox/recovery.ts` retains only the resource identity type. Startup retires old active inputs and clears legacy
+blocks; missing identities and unsupported platforms never gate admission. Restart retirement
+currently emits a warning rather than a history notice because activation owns SQLite only.
 
-Missing or incomplete journals stay fail-closed across restart, including the gap
-between `begin` and the first acquisition. A rejected send with confirmed blocked
-ownership writes a durable `chat_failed` notice containing exact machine, workspace,
-session and execution context plus an inspection-only command. Ordinary admission
-conflicts are not described as stale-resource proof.
+Unconfirmed release returns the slot, preserves its diagnostic journal and detaches the old
+Agent before waking a successor. Cleanup gets one background attempt with a five-second
+budget; failure is logged and never delays input or shutdown. Cleanup addresses only the
+retired execution, so it cannot clear a successor's slot. Failed exits grant no automatic
+intent, but later wakeable receipts can proceed. Resource registration remains unchanged;
+restart orphan-process cleanup is deferred. The offline recovery command and startup PID
+proof are removed. See the [availability decision](../../../../.agents/notes/implemented/bug-fix/2026-10-29-inbox-no-durable-block.md).
 
-Quit Desktop and stop the daemon on the owning machine. Outside an Agent session,
-run the notice's command using the same local account and `LODY_DATA_DIR`:
+Session admission locks retain waiters and holders until zero references. Projected
+receipt caches follow SQLite identities/statuses; release retries own a private receipt.
 
-```sh
-lody session recover-inbox --machine '<machineId>' --workspace '<workspaceId>' -- '<sessionId>'
-```
-
-Inspection holds the Host lease and opens SQLite read-only without migrating. It
-returns resource evidence, a snapshot token and a separate recovery command; an
-unsupported schema fails explicitly. Commands are quoted for POSIX shells or
-PowerShell on Windows. Only after independently verifying **all** old processes and
-requests, including unrecorded descendants, are released, run the matching command:
-
-```sh
-# Exact execution; copy both values from inspection.
-lody session recover-inbox --machine '<machineId>' --workspace '<workspaceId>' --execution '<executionId>' --snapshot '<token>' --confirm-resources-released -- '<sessionId>'
-# blocked=1 with no active execution has a dedicated path, not a fabricated ID.
-lody session recover-inbox --machine '<machineId>' --workspace '<workspaceId>' --orphan '<token>' --confirm-resources-released -- '<sessionId>'
-```
-
-Missing ownership or a dead daemon PID is not release evidence. Known live roots,
-probe warnings, cross-platform records and ambiguous owners reject recovery. The
-transaction compares the snapshot of all session ownership, resource, input, batch
-and intent facts after the probe. Any change requires another inspection. A dedicated
-recovery audit stores the token and nullable real execution ID atomically with pause,
-old-input retirement and resource release. Repeating a completed request performs no
-writes and reports that the Inbox is no longer blocked.
-
-Unlike Stop, operator recovery does not cancel unrelated queued input. History and
-unconsumed results survive; already submitted/unknown results cannot enter another
-batch. Recovery creates no wake intent and stays paused. After restart, fresh human
-**or Agent-chat** input clears the pause and allows saved work to proceed; recovery
-is not a durable human-only hold. Unknown old requests require a new send. No remote
-RPC, MCP recovery tool, automatic Windows unlock, or live-process termination is added.
-See the [manual recovery decision](../../../../.agents/notes/implemented/bug-fix/2026-10-21-manual-inbox-recovery.md)
-and [deferred Windows containment proposal](../../../../.agents/notes/proposed/architecture/2026-10-21-windows-inbox-containment.md).
-
-`session-execution-service.ts` calls the actual prompt primitive while holding admission.
+`session-execution-service.ts` calls`session-execution-service.ts` calls the actual prompt primitive while holding admission.
 A batch is one system history item plus one model input, even when details require pages.
 Inline context intentionally previews at most 50 members and 64 KiB; batch_get reads all fixed members.
 `batch-page.ts` returns complete large members in bounded JSON fragments. The execution
@@ -160,7 +126,7 @@ A persistent sequence counter survives deletion so post-claim results cannot ent
 Settlement records consumption time; consumed payloads expire after seven days, while
 unfinished creation progress keeps its Operation until projection is settled. Retired
 Operation IDs still prevent replay. Pending result data is passive, not busy work;
-automation admission observes active Operations, executions, blocked resources and runnable intents.
+automation admission observes active Operations, executions and runnable intents.
 
 Schema v2 deletes only `deliveries` and `delivery_execution_state`. Released Operation
 rows, author/input snapshots, materialization/progress state and retired IDs survive

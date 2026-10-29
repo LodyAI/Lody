@@ -1,6 +1,7 @@
+import { getLogger } from '@/utils/logger';
 import type { StoredLodyOperation } from '@lody/shared';
 import type Database from 'better-sqlite3';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { OrchestrationConnection } from '../platform/database';
 import {
@@ -11,7 +12,7 @@ import {
   type InboxRelease,
   type InboxScope,
 } from './model';
-import type { BlockedInboxExecution, InboxResourceIdentity } from './recovery';
+import type { InboxResourceIdentity } from './recovery';
 import { canFenceBatch, inputAcceptance, operationInboxCompletion } from './rules';
 
 const StateRow = z.object({
@@ -375,10 +376,56 @@ export class InboxSqlite {
       this.db
         .prepare("UPDATE inbox_batches SET owner=? WHERE workspace_id=? AND state='prepared'")
         .run(owner, workspaceId);
-      // Process exit does not prove release of arbitrary external requests. Fail closed.
+      const interrupted = this.db
+        .prepare(
+          'SELECT workspace_id,session_id,user_id,active_execution,active_input FROM inbox_sessions WHERE workspace_id=? AND (active_execution IS NOT NULL OR blocked=1)'
+        )
+        .all(workspaceId) as Array<{
+        workspace_id: string;
+        session_id: string;
+        user_id: string;
+        active_execution: string | null;
+        active_input: string | null;
+      }>;
+      for (const row of interrupted) {
+        if (row.active_input) {
+          this.supersedeInput(workspaceId, row.session_id, row.active_input);
+          this.db
+            .prepare(
+              'UPDATE inbox_inputs SET finished=1 WHERE workspace_id=? AND session_id=? AND input_id=?'
+            )
+            .run(workspaceId, row.session_id, row.active_input);
+        }
+        this.writeDiagnostic(() => {
+          if (row.active_execution)
+            this.db
+              .prepare('INSERT OR IGNORE INTO inbox_releases VALUES(?,?,?,?,?,?)')
+              .run(
+                workspaceId,
+                row.session_id,
+                row.user_id,
+                row.active_execution,
+                'failed',
+                this.watermark({ workspaceId, sessionId: row.session_id, userId: row.user_id })
+              );
+          this.db
+            .prepare(
+              "UPDATE inbox_resources SET state='unreleased',cause=COALESCE(cause,?) WHERE workspace_id=? AND session_id=? AND execution_id=?"
+            )
+            .run(
+              'Previous owner exited; result unknown, not retried',
+              workspaceId,
+              row.session_id,
+              row.active_execution
+            );
+        });
+        getLogger('inbox').warn(
+          `[${row.session_id}] Previous run was interrupted when Lody exited; result unknown, not retried`
+        );
+      }
       this.db
         .prepare(
-          'UPDATE inbox_sessions SET blocked=1,revision=revision+1 WHERE workspace_id=? AND (active_execution IS NOT NULL OR blocked=1)'
+          'UPDATE inbox_sessions SET blocked=0,active_execution=NULL,active_input=NULL,revision=revision+1 WHERE workspace_id=? AND (active_execution IS NOT NULL OR blocked=1)'
         )
         .run(workspaceId);
     });
@@ -763,72 +810,60 @@ export class InboxSqlite {
     });
   }
   release(event: InboxRelease): void {
-    const prior = this.db
-      .prepare(
-        'SELECT outcome,user_id FROM inbox_releases WHERE workspace_id=? AND session_id=? AND execution_id=?'
-      )
-      .get(event.workspaceId, event.sessionId, event.executionId) as
-      | { outcome: string; user_id: string }
-      | undefined;
-    if (prior && (prior.outcome !== event.outcome || prior.user_id !== event.userId)) {
-      this.db
-        .prepare('UPDATE inbox_sessions SET blocked=1 WHERE workspace_id=? AND session_id=?')
-        .run(event.workspaceId, event.sessionId);
-      throw new Error('Conflicting release receipt; session recovery required');
-    }
     this.transaction(() => {
       const existing = this.db
         .prepare(
-          'SELECT outcome FROM inbox_releases WHERE workspace_id=? AND session_id=? AND execution_id=?'
+          'SELECT outcome,user_id FROM inbox_releases WHERE workspace_id=? AND session_id=? AND execution_id=?'
         )
         .get(event.workspaceId, event.sessionId, event.executionId) as
-        | { outcome: string }
+        | { outcome: string; user_id: string }
         | undefined;
       if (existing) {
-        if (existing.outcome !== event.outcome) throw new Error('Conflicting release receipt');
+        if (existing.outcome !== event.outcome || existing.user_id !== event.userId)
+          getLogger('inbox').warn(
+            `[${event.sessionId}] Conflicting release receipt ignored; keeping the first receipt`
+          );
         return;
       }
       const current = this.state(event);
       if (current.active_execution !== event.executionId) return;
       const watermark = (event.releaseWatermark ??= this.watermark(event));
       this.supersedeInput(event.workspaceId, event.sessionId, event.inputId);
-      this.db
-        .prepare('INSERT INTO inbox_releases VALUES(?,?,?,?,?,?)')
-        .run(
-          event.workspaceId,
-          event.sessionId,
-          event.userId,
-          event.executionId,
-          event.outcome,
-          watermark
-        );
+      this.writeDiagnostic(() => {
+        this.db
+          .prepare('INSERT INTO inbox_releases VALUES(?,?,?,?,?,?)')
+          .run(
+            event.workspaceId,
+            event.sessionId,
+            event.userId,
+            event.executionId,
+            event.outcome,
+            watermark
+          );
+      });
       this.db
         .prepare(
-          "UPDATE inbox_sessions SET active_execution=CASE WHEN ?='unreleased' THEN active_execution ELSE NULL END,blocked=? WHERE workspace_id=? AND session_id=? AND user_id=?"
+          'UPDATE inbox_sessions SET active_execution=NULL,active_input=NULL,blocked=0 WHERE workspace_id=? AND session_id=? AND user_id=?'
         )
-        .run(
-          event.outcome,
-          event.outcome === 'unreleased' ? 1 : 0,
-          event.workspaceId,
-          event.sessionId,
-          event.userId
-        );
+        .run(event.workspaceId, event.sessionId, event.userId);
       this.db
         .prepare(
           'UPDATE inbox_inputs SET finished=1 WHERE workspace_id=? AND session_id=? AND input_id=?'
         )
         .run(event.workspaceId, event.sessionId, event.inputId);
-      this.db
-        .prepare(
-          'UPDATE inbox_resources SET state=?,cause=COALESCE(?,cause) WHERE workspace_id=? AND session_id=? AND execution_id=?'
-        )
-        .run(
-          event.outcome === 'unreleased' ? 'unreleased' : 'released',
-          event.cause ?? null,
-          event.workspaceId,
-          event.sessionId,
-          event.executionId
-        );
+      this.writeDiagnostic(() => {
+        this.db
+          .prepare(
+            'UPDATE inbox_resources SET state=?,cause=COALESCE(?,cause) WHERE workspace_id=? AND session_id=? AND execution_id=?'
+          )
+          .run(
+            event.outcome === 'unreleased' ? 'unreleased' : 'released',
+            event.cause ?? null,
+            event.workspaceId,
+            event.sessionId,
+            event.executionId
+          );
+      });
       const accepted = this.db
         .prepare(
           'SELECT revision FROM inbox_inputs WHERE workspace_id=? AND session_id=? AND input_id=?'
@@ -868,267 +903,20 @@ export class InboxSqlite {
         identity ? JSON.stringify(identity) : null
       );
   }
-  unreleased(
-    workspaceId: string
-  ): Array<{ scope: InboxScope; executionId: string; identity: InboxResourceIdentity }> {
-    return this.db
-      .prepare(
-        "SELECT r.* FROM inbox_resources r JOIN inbox_sessions s USING(workspace_id,session_id,user_id) WHERE r.workspace_id=? AND r.state IN ('active','unreleased') AND s.blocked=1 AND s.active_execution=r.execution_id AND r.identity_json IS NOT NULL"
-      )
-      .all(workspaceId)
-      .map((row) => {
-        const r = z
-          .object({
-            workspace_id: z.string(),
-            session_id: z.string(),
-            user_id: z.string(),
-            execution_id: z.string(),
-            identity_json: z.string(),
-          })
-          .parse(row);
-        const identity = z
-          .object({
-            platform: z.enum([
-              'aix',
-              'android',
-              'darwin',
-              'freebsd',
-              'haiku',
-              'linux',
-              'openbsd',
-              'sunos',
-              'win32',
-              'cygwin',
-              'netbsd',
-            ]),
-            roots: z.array(z.number().int().positive()),
-            complete: z.boolean().optional(),
-          })
-          .parse(JSON.parse(r.identity_json));
-        return {
-          scope: { workspaceId: r.workspace_id, sessionId: r.session_id, userId: r.user_id },
-          executionId: r.execution_id,
-          identity,
-        };
-      });
+  private writeDiagnostic(write: () => void): void {
+    try {
+      write();
+    } catch (cause) {
+      getLogger('inbox').warn(`Inbox diagnostic write failed; continuing: ${String(cause)}`);
+    }
   }
-  private recoverySnapshot(workspaceId: string, sessionId: string) {
-    const sessions = this.db
-      .prepare(
-        'SELECT user_id,revision,paused,blocked,active_execution,active_input FROM inbox_sessions WHERE workspace_id=? AND session_id=? ORDER BY user_id'
-      )
-      .all(workspaceId, sessionId)
-      .map((row) => StateRow.extend({ user_id: z.string() }).parse(row));
-    // Prior v2 stores can be inspected without migrating; mutation adds generation zero.
-    const hasGeneration = (
-      this.db.prepare('PRAGMA table_info(inbox_resources)').all() as { name: string }[]
-    ).some((column) => column.name === 'generation');
-    const resources = this.db
-      .prepare(
-        `SELECT execution_id,user_id,identity_json,state,cause,${hasGeneration ? 'generation' : '0 AS generation'} FROM inbox_resources WHERE workspace_id=? AND session_id=? AND state<>'released' ORDER BY execution_id`
-      )
-      .all(workspaceId, sessionId)
-      .map((row) =>
-        z
-          .object({
-            execution_id: z.string(),
-            user_id: z.string(),
-            identity_json: z.string().nullable(),
-            state: z.enum(['active', 'unreleased']),
-            cause: z.string().nullable(),
-            generation: z.number().int().nonnegative(),
-          })
-          .parse(row)
-      );
-    const facts = {
-      workspaceId,
-      sessionId,
-      sessions,
-      resources,
-      owner: this.db
-        .prepare('SELECT owner,protocol FROM inbox_modes WHERE workspace_id=?')
-        .get(workspaceId),
-      inputs: this.db
-        .prepare(
-          'SELECT * FROM inbox_inputs WHERE workspace_id=? AND session_id=? ORDER BY input_id'
-        )
-        .all(workspaceId, sessionId),
-      batches: this.db
-        .prepare(
-          'SELECT batch_id,input_id,user_id,revision,owner,state FROM inbox_batches WHERE workspace_id=? AND session_id=? ORDER BY batch_id'
-        )
-        .all(workspaceId, sessionId),
-      intents: this.db
-        .prepare(
-          'SELECT intent_id,state,batch_id FROM inbox_intents WHERE workspace_id=? AND session_id=? ORDER BY intent_id'
-        )
-        .all(workspaceId, sessionId),
-    };
-    return {
-      sessions,
-      resources,
-      token: createHash('sha256').update(JSON.stringify(facts)).digest('hex'),
-    };
-  }
-  blockedExecutions(workspaceId: string, sessionId?: string): BlockedInboxExecution[] {
-    const sessions = this.db
-      .prepare(
-        'SELECT DISTINCT session_id FROM inbox_sessions WHERE workspace_id=? AND blocked=1 AND (? IS NULL OR session_id=?) ORDER BY session_id'
-      )
-      .all(workspaceId, sessionId ?? null, sessionId ?? null) as { session_id: string }[];
-    return sessions.map(({ session_id }) => {
-      const snapshot = this.recoverySnapshot(workspaceId, session_id);
-      const active = snapshot.sessions.filter((row) => row.active_execution !== null);
-      const target = active[0] ?? snapshot.sessions[0];
-      if (!target) throw new Error('Blocked Inbox snapshot disappeared');
-      const resources = snapshot.resources.map((row) => ({
-        executionId: row.execution_id,
-        userId: row.user_id,
-        ...(row.identity_json ? { identity: this.decodeResourceIdentity(row.identity_json) } : {}),
-      }));
-      const identity = resources.find(
-        (row) => row.executionId === target.active_execution
-      )?.identity;
-      return {
-        scope: { workspaceId, sessionId: session_id, userId: target.user_id },
-        executionId: target.active_execution,
-        snapshotToken: snapshot.token,
-        resources,
-        ...(identity ? { identity } : {}),
-        reason:
-          active.length > 1
-            ? 'ambiguous_ownership'
-            : !target.active_execution
-              ? 'missing_active_execution'
-              : !identity
-                ? 'missing_identity'
-                : identity.complete !== true
-                  ? 'incomplete_identity'
-                  : 'resources_unreleased',
-      };
-    });
-  }
-  private decodeResourceIdentity(json: string): InboxResourceIdentity {
-    return z
-      .object({
-        platform: z.enum([
-          'aix',
-          'android',
-          'darwin',
-          'freebsd',
-          'haiku',
-          'linux',
-          'openbsd',
-          'sunos',
-          'win32',
-          'cygwin',
-          'netbsd',
-        ]),
-        roots: z.array(z.number().int().positive()),
-        complete: z.boolean().optional(),
-      })
-      .parse(JSON.parse(json));
-  }
-  /** Offline attestation only. The snapshot CAS includes every Session owner and resource journal. */
-  recoverBlocked(s: InboxScope, executionId: string, snapshotToken?: string): boolean {
-    const record = this.blockedExecutions(s.workspaceId, s.sessionId)[0];
-    if (!record || record.executionId !== executionId || record.scope.userId !== s.userId)
-      return false;
-    return this.recoverBlockedSnapshot(record, snapshotToken ?? record.snapshotToken);
-  }
-  recoverOrphanedBlock(s: InboxScope, snapshotToken: string): boolean {
-    const record = this.blockedExecutions(s.workspaceId, s.sessionId)[0];
-    if (!record || record.executionId !== null) return false;
-    return this.recoverBlockedSnapshot(record, snapshotToken);
-  }
-  private recoverBlockedSnapshot(record: BlockedInboxExecution, snapshotToken: string): boolean {
-    return this.transaction(() => {
-      const s = record.scope;
-      const current = this.blockedExecutions(s.workspaceId, s.sessionId)[0];
-      if (
-        !current ||
-        current.snapshotToken !== snapshotToken ||
-        current.executionId !== record.executionId ||
-        current.reason === 'ambiguous_ownership'
-      )
-        return false;
-      const snapshot = this.recoverySnapshot(s.workspaceId, s.sessionId);
-      const uncertainInputs = new Set(
-        snapshot.sessions.flatMap((row) => (row.active_input ? [row.active_input] : []))
-      );
-      // Fenced work is never made eligible again, even if its active execution pointer is missing.
-      const submitted = this.db
-        .prepare(
-          "SELECT * FROM inbox_batches WHERE workspace_id=? AND session_id=? AND state IN ('submitting','submitted','unknown')"
-        )
-        .all(s.workspaceId, s.sessionId);
-      for (const row of submitted) {
-        const batch = this.decodeBatch(row);
-        uncertainInputs.add(batch.inputId);
-        this.settle(batch, 'unknown', 'Operator recovery cannot determine the old request outcome');
-      }
-      for (const inputId of uncertainInputs) {
-        this.supersedeInput(s.workspaceId, s.sessionId, inputId);
-        this.db
-          .prepare(
-            'UPDATE inbox_inputs SET finished=1 WHERE workspace_id=? AND session_id=? AND input_id=?'
-          )
-          .run(s.workspaceId, s.sessionId, inputId);
-      }
-      // Unlike Stop, recovery does not cancel unrelated queued human/task input.
-      this.supersedePrepared(s);
-      this.db
-        .prepare(
-          'UPDATE inbox_sessions SET blocked=0,paused=1,revision=revision+1,active_execution=NULL,active_input=NULL WHERE workspace_id=? AND session_id=?'
-        )
-        .run(s.workspaceId, s.sessionId);
-      this.db
-        .prepare(
-          "UPDATE inbox_resources SET state='released',cause='Operator confirmed all resources released' WHERE workspace_id=? AND session_id=? AND state<>'released'"
-        )
-        .run(s.workspaceId, s.sessionId);
-      if (record.executionId)
-        this.db
-          .prepare(
-            "INSERT OR IGNORE INTO inbox_resources(workspace_id,session_id,user_id,execution_id,state,cause) VALUES(?,?,?,?,'released','Operator confirmed all resources released')"
-          )
-          .run(s.workspaceId, s.sessionId, s.userId, record.executionId);
-      this.db
-        .prepare('INSERT INTO inbox_recoveries VALUES(?,?,?,?,?)')
-        .run(s.workspaceId, s.sessionId, snapshotToken, record.executionId, this.now());
-      return true;
-    });
-  }
+  /** Cleanup confirms only this execution's journal, never a successor's slot. */
   confirmReleased(s: InboxScope, executionId: string): void {
-    this.transaction(() => {
-      const before = this.state(s);
-      if (before.active_execution !== executionId) return;
-      if (before.active_input) {
-        this.supersedeInput(s.workspaceId, s.sessionId, before.active_input);
-        this.db
-          .prepare(
-            'UPDATE inbox_inputs SET finished=1 WHERE workspace_id=? AND session_id=? AND input_id=?'
-          )
-          .run(s.workspaceId, s.sessionId, before.active_input);
-      }
-
-      if (
-        this.db
-          .prepare(
-            'UPDATE inbox_sessions SET blocked=0,active_execution=NULL,active_input=NULL WHERE workspace_id=? AND session_id=? AND user_id=? AND active_execution=?'
-          )
-          .run(s.workspaceId, s.sessionId, s.userId, executionId).changes
-      ) {
-        this.db
-          .prepare('UPDATE inbox_sessions SET blocked=0 WHERE workspace_id=? AND session_id=?')
-          .run(s.workspaceId, s.sessionId);
-        this.db
-          .prepare(
-            "UPDATE inbox_resources SET state='released' WHERE workspace_id=? AND session_id=? AND execution_id=?"
-          )
-          .run(s.workspaceId, s.sessionId, executionId);
-      }
-    });
+    this.db
+      .prepare(
+        "UPDATE inbox_resources SET state='released' WHERE workspace_id=? AND session_id=? AND execution_id=?"
+      )
+      .run(s.workspaceId, s.sessionId, executionId);
   }
   private watermark(s: InboxScope): number {
     return (
