@@ -5922,5 +5922,7 @@
   "e2ee.machineSharing.enable": "enable",
   "e2ee.machineSharing.disable": "disable",
   "e2ee.machineSharing.state.pending": "Pending confirmation",
-  "e2ee.machineSharing.lastVersion": "Last verified version"
+  "e2ee.machineSharing.lastVersion": "Last verified version",
+  "Lody could not fully quit. Please restart Lody.": "Lody could not fully quit. Please restart Lody.",
+  "Retry quit": "Retry quit"
 }

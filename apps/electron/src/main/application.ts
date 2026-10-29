@@ -40,7 +40,7 @@ import { CliService } from './services/cli-service'
 import { createElectronStorageGuard } from './services/storage-guard-electron'
 import { observeCliStorageWriteFailures } from './services/storage-guard-cli'
 import type { DesktopExecutionHost } from './services/desktop-execution-host'
-import { createDesktopQuitBarrier } from './services/desktop-shutdown'
+import { createDesktopQuitBarrier, waitForQuitRecovery } from './services/desktop-shutdown'
 import { cancelRequestedRelaunch, relaunchIfRequested } from './relaunch-intent'
 import { applyPendingDesktopLocalReset } from './services/local-reset-service'
 import { TerminalRelay } from './services/terminal-relay'
@@ -57,7 +57,7 @@ import {
   WindowBadgeService,
   bindWindowBadgeToBrowserWindows
 } from './services/window-badge-service'
-import { setupApplicationMenu } from './menu'
+import { setupApplicationMenu, translateAppText } from './menu'
 import { isRendererReloadShortcut } from './reload-shortcut'
 import { requestRendererReload } from './renderer-recovery'
 import { closeProductWindowsForQuit } from './renderer-unload'
@@ -98,13 +98,12 @@ type E2EGlobal = typeof globalThis & {
 }
 
 export function startApplication(executionHost?: DesktopExecutionHost): void {
-  const applicationRuntime = makeApplicationRuntime(
-    LoginShellCacheLive.pipe(Layer.provide(loginShellEnvLayer())),
-    {
+  const createShellRuntime = () =>
+    makeApplicationRuntime(LoginShellCacheLive.pipe(Layer.provide(loginShellEnvLayer())), {
       recover: recoverLoginShellCacheShutdown,
       project: squashProcessFailure
-    }
-  )
+    })
+  let applicationRuntime = createShellRuntime()
   bindUserShellEnvCacheLegacy(applicationRuntime)
   if (typeof __LODY_DESKTOP_BUILD_JSON__ === 'string') {
     console.info('[desktop-build]', __LODY_DESKTOP_BUILD_JSON__)
@@ -249,8 +248,8 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
         await authService.login.complete(token)
       })
     }
-    const terminalRelay = new TerminalRelay(getLocalTerminalSocketPath(mainPlatformKind))
-    const loroDataPlaneRelay = new LoroDataPlaneRelay(
+    let terminalRelay = new TerminalRelay(getLocalTerminalSocketPath(mainPlatformKind))
+    let loroDataPlaneRelay = new LoroDataPlaneRelay(
       getLocalLoroDataPlaneSocketPath(mainPlatformKind)
     )
     loroDataPlaneRelay.setEnabled(cliService.getCliAutoStartEnabled())
@@ -311,7 +310,7 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
       setMainWindowOnboardingReloadTarget(window)
       requestRendererReload(window)
     }
-    registerIpcServices({
+    const ipcDeps = {
       appIconService,
       cliService,
       appUpdaterService,
@@ -327,7 +326,8 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
       completeOnboarding,
       restartOnboarding,
       reloadMainWindowForDevbar
-    })
+    }
+    registerIpcServices(ipcDeps)
 
     setupApplicationMenu({
       appUpdaterService,
@@ -365,7 +365,9 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
     cliService.autoStart(getMainWindow()?.webContents ?? undefined)
     appUpdaterService.start()
 
+    let quitRecoveryOnly = false
     app.on('activate', () => {
+      if (quitRecoveryOnly) return
       const windows = BrowserWindow.getAllWindows()
       if (windows.length === 0) {
         openMainWindow({ icon })
@@ -401,17 +403,50 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
           throw new AggregateError(failures, 'Desktop resource cleanup failed')
       },
       quit: () => app.quit(),
-      reportFailure: (error) => {
+      recover: async () => {
+        // One bounded owner retry before rebuilding services, never a second live CLI.
+        const retried = await waitForQuitRecovery(
+          Promise.allSettled([
+            cliService.shutdownForQuit(),
+            applicationRuntime.closeLegacy(),
+            closeDesktopE2eeAccount({ quit: true })
+          ])
+        )
+        if (!retried || retried.some((result) => result.status === 'rejected')) return false
+        if (!applicationRuntime.isReleased()) return false
+        applicationRuntime = createShellRuntime()
+        bindUserShellEnvCacheLegacy(applicationRuntime)
+        terminalRelay = new TerminalRelay(getLocalTerminalSocketPath(mainPlatformKind))
+        loroDataPlaneRelay = new LoroDataPlaneRelay(
+          getLocalLoroDataPlaneSocketPath(mainPlatformKind)
+        )
+        loroDataPlaneRelay.setEnabled(cliService.getCliAutoStartEnabled())
+        ipcDeps.terminalRelay = terminalRelay
+        ipcDeps.loroDataPlaneRelay = loroDataPlaneRelay
+        quitRecoveryOnly = false
+        setAppQuitting(false)
+        setWindowsTrayAvailable(windowsTrayService.start())
+        appUpdaterService.start()
         resumeDesktopE2eeAccount()
+        cliService.autoStart(undefined)
+        openOrFocusMainWindow({ icon })
+        return true
+      },
+      reportFailure: (error, recovered) => {
         // A timeout does not prove exit. Keep ownership until quit succeeds.
         console.error('[Electron] Quit blocked by owned resources', error)
-        dialog.showErrorBox(
-          PRODUCT_NAME,
-          'A local process has not confirmed that it stopped. Lody will stay open to prevent ' +
-            'another desktop from using its data. Wait for the agent to stop, then quit again.'
-        )
-        // Quit preparation already closed every window; keep a surface to retry from.
-        openOrFocusMainWindow({ icon })
+        if (recovered) return
+        quitRecoveryOnly = true
+        // Both actions re-enter the ownership barrier; neither force-exits a live owner.
+        dialog.showMessageBoxSync({
+          type: 'error',
+          title: PRODUCT_NAME,
+          message: translateAppText('Lody could not fully quit. Please restart Lody.'),
+          buttons: [translateAppText('desktop.unloadConfirm.quit'), translateAppText('Retry quit')],
+          defaultId: 1,
+          cancelId: 1
+        })
+        queueMicrotask(() => app.quit())
       },
       cancelled: () => {
         resumeDesktopE2eeAccount()

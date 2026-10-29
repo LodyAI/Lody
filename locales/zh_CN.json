@@ -5913,5 +5913,7 @@
   "e2ee.machineSharing.enable": "开启",
   "e2ee.machineSharing.disable": "关闭",
   "e2ee.machineSharing.state.pending": "等待确认",
-  "e2ee.machineSharing.lastVersion": "上次验证版本"
+  "e2ee.machineSharing.lastVersion": "上次验证版本",
+  "Lody could not fully quit. Please restart Lody.": "Lody 未能完全退出，请重新启动。",
+  "Retry quit": "重试退出"
 }

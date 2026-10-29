@@ -1855,21 +1855,30 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     this.speculativeWorktreeRecoveryGeneration += 1;
     this.detachSpeculativeWorktreeRecovery?.();
     this.detachSpeculativeWorktreeRecovery = null;
-    await this.speculativeWorktreeRecoveryChain;
-    await this.cleanupSessions();
-    // MessageHandler owns the final ACP/Code Collab drain. It first stops all
-    // session producers through this phase, persists their last callbacks while
-    // the document manager is still usable, then calls cleanUp() again for the
-    // remaining shared-resource teardown.
-    if (options.keepWorkspaceDocumentOpen) {
-      return;
+    const failures: unknown[] = [];
+    const attempt = async (step: () => Promise<unknown>) => {
+      try {
+        await step();
+      } catch (error) {
+        failures.push(error);
+      }
+    };
+    await attempt(() => this.speculativeWorktreeRecoveryChain);
+    await attempt(() => this.cleanupSessions());
+    // MessageHandler drains final callbacks between these two cleanup phases.
+    if (!options.keepWorkspaceDocumentOpen) {
+      await attempt(() => this.mcpAuthentication.close());
+      await attempt(() => this.workspaceDocument.cleanUp());
+      await attempt(async () => {
+        await this.gitCredentialBroker?.shutdown();
+        this.gitCredentialBroker = null;
+      });
+      await attempt(async () => {
+        await this.githubTokenManager?.shutdown();
+        this.githubTokenManager = null;
+      });
     }
-    await this.mcpAuthentication.close();
-    await this.workspaceDocument.cleanUp();
-    await this.gitCredentialBroker?.shutdown();
-    this.gitCredentialBroker = null;
-    await this.githubTokenManager?.shutdown();
-    this.githubTokenManager = null;
+    if (failures.length) throw new AggregateError(failures, 'Session manager cleanup failed');
   }
 
   private async cleanupSessions(): Promise<void> {

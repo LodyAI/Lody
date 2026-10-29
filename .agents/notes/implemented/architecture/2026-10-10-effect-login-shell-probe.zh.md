@@ -54,6 +54,8 @@ CLI 和原生应用拥有者，失败保留供下一次退出重试。初始化�
 服务后删除。应用编排仍使用 Promise，所以应用关闭入口也显式叫 closeLegacy。
 不保留第二套探测/缓存实现，也不提供隐藏的惰性 runtime。
 
+退出失败后，由应用入口重试一次已有 owner 的清理。确认释放后，才创建新的 shell cache 和 IPC 中继，再打开普通窗口；旧 runtime 已关闭接收请求，不能服务新窗口。释放仍未确认时，显示本地化的退出/重试对话框，并保留原有进程所有权检查；两个操作都不能强制退出仍持有资源的进程。这只修改 Promise 应用编排，不扩展 native cache 或 Session/Loro 迁移范围。
+
 ## 依据与边界
 
 使用已安装的 Effect/@effect-vitest 4.0.2 Context、Layer、Scope、Fiber、ManagedRuntime、

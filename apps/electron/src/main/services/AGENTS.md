@@ -89,7 +89,9 @@ resets. Relaunching quits the embedded CLI: never make it a default recovery ste
 LoginShellCache Layer owns the shell environment; getUserShellEnvCachedLegacy
 is launcher-only. After renderer unload approval, quit awaits application disposal
 and CLI exit. Retain failed process owners for quit/recovery; never substitute null
-or bind replacements before release. See the
+or bind replacements before release. After a failed quit, retry owners once before rebuilding
+the shell and relays and reopening a product window; unresolved owners use the localized
+quit/retry dialog. See the
 [decision](../../../../../.agents/notes/implemented/architecture/2026-10-10-effect-login-shell-probe.md).
 
 ## E2EE runtime

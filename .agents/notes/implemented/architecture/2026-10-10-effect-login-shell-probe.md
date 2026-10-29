@@ -57,7 +57,13 @@ then closes the shell owner before releasing the host lease; fatal and one-shot
 entries also await disposal. Failed graceful cleanup cannot exit successfully.
 Electron's existing renderer-unload approval runs before teardown; its quit barrier
 waits for the CLI and native application owner and keeps failures available for a
-later quit. Startup failure also awaits application disposal before failure exit.
+later quit. A failed quit gets one owner-cleanup retry; confirmed release permits a new
+application shell cache and new IPC relays before a product window reopens. The old
+runtime cannot serve the reopened window because disposal closed admission. If release
+remains unconfirmed, the localized quit/retry dialog retains the existing process
+ownership barrier; neither action force-exits an unresolved owner. This changes only
+Promise application wiring, leaving the native cache and Session/Loro migration separate.
+Startup failure also awaits application disposal before failure exit.
 The existing explicit force-exit policy remains; abrupt OS death cannot await Scope.
 These roots own this service, not the as-yet-unmigrated daemon Session/Turn/Loro stack.
 
