@@ -39,7 +39,7 @@ async function captureShareImage(element: HTMLElement): Promise<Blob> {
   let blob: Blob;
   try {
     // Capture the natural-size card inside the scaled preview, without its scroll container.
-    blob = await snapdom.toBlob(element, {
+    const options: import('@zumer/snapdom').SnapdomOptions = {
       type: 'png',
       scale: 2,
       dpr: 1,
@@ -55,7 +55,37 @@ async function captureShareImage(element: HTMLElement): Promise<Blob> {
           },
         },
       ],
-    });
+    };
+    const ua = navigator.userAgent;
+    const webKit =
+      /AppleWebKit/i.test(ua) &&
+      (/iPhone|iPad|iPod/i.test(ua) ||
+        (/Safari/i.test(ua) && !/Chrome|Chromium|Android/i.test(ua)));
+    if (webKit) {
+      // SnapDOM's WebKit shadow workaround rasterizes at natural size before
+      // scaling. Resize its SVG first so the intermediate raster has real detail.
+      const snapshot = await snapdom(element, options);
+      const { vbW, vbH } = snapshot.meta;
+      const scale = Math.min(2, 16384 / vbW, 16384 / vbH, Math.sqrt((16384 * 16384) / (vbW * vbH)));
+      const width = Math.max(1, Math.floor(vbW * scale));
+      const height = Math.max(1, Math.floor(vbH * scale));
+      const image = await snapshot.toSvg({ width, height });
+      if (!image.src.startsWith('data:image/svg+xml')) throw new Error('SVG rendering failed');
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Image rendering failed');
+      context.drawImage(image, 0, 0, width, height);
+      blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (result) => (result ? resolve(result) : reject(new Error('PNG encoding failed'))),
+          'image/png'
+        );
+      });
+    } else {
+      blob = await snapdom.toBlob(element, options);
+    }
   } finally {
     restoreLists();
   }
