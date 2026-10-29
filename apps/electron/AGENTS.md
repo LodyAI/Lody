@@ -58,6 +58,16 @@ Root rules apply. For `src/**`, read module, IPC and window contracts in
 
 ## Embedded CLI and native dependencies
 
+- Main-process E2EE also uses `better-sqlite3`. Declare it in this app's runtime
+  dependencies, externalize it in every main composition, and unpack the installed
+  package including its target prebuild. Never rely on the embedded CLI's separate
+  dependency tree.
+- Both desktop compositions build `src/main/native-storage-smoke.mts` in the same
+  main graph as `application.ts`. The afterPack hook runs that ASAR entry through
+  the packaged Electron runtime on matching hosts, checking E2EE SQLite close/reopen
+  and encrypted Node custody with synthetic temporary state. Keep this separate
+  from the CLI binding probe; it proves no real OS-keychain acceptance.
+
 - The embedded CLI runs built JavaScript, never source-loader/Jiti. Development
   and packaged builds share the output layout.
 - `@loro-dev/roost-node`, `better-sqlite3`, `@lydell/node-pty`, and Node-only `loro-crdt` remain external and must be

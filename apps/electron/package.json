@@ -53,6 +53,7 @@
     "@lody/shared": "workspace:*",
     "@tanstack/react-router": "catalog:",
     "better-auth": "catalog:",
+    "better-sqlite3": "catalog:",
     "conf": "^15.1.0",
     "convex": "catalog:",
     "devframe": "catalog:",
