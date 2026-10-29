@@ -8,6 +8,7 @@ import type { TokensFromVarGroup } from '@stylexjs/stylex/lib/types/StyleXTypes'
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import { Button } from '@lody/ui/button';
 import { button } from '@lody/ui/button/button.tokens.stylex';
+import { dialog } from '@lody/ui/dialog/dialog.tokens.stylex';
 import { cn } from '@/lib/utils';
 import { messageActionInkTheme } from '../../style/message-action-button.stylex';
 import { Dialog } from '@/ui/dialog';
@@ -68,6 +69,17 @@ const dialogNavigationLayoutTheme = stylex.createTheme(button, {
 });
 
 const styles = stylex.create({
+  dialogTitle: {
+    [dialog.titleSize]: 'var(--text-base)',
+    [dialog.titleLeading]: 'var(--tw-leading, var(--text-base--line-height))',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  dialogDescription: {
+    [dialog.descriptionSize]: 'var(--text-xs)',
+    [dialog.descriptionLeading]: 'var(--tw-leading, var(--text-xs--line-height))',
+  },
   errorLine: {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -289,10 +301,13 @@ export function OperationReplyCard(props: OperationReplyCardProps) {
           <Dialog.Content width="42rem" padding="none" gap="none" className="max-h-[80vh]">
             <div {...stylex.props(styles.dialogHeader)}>
               <div {...stylex.props(styles.body)}>
-                <Dialog.Description className="text-xs">
+                <Dialog.Description className={stylex.props(styles.dialogDescription).className}>
                   {t('sessions.operationReply.received', 'Reply received')}
                 </Dialog.Description>
-                <Dialog.Title className="truncate text-base font-medium" title={title}>
+                <Dialog.Title
+                  className={cn(stylex.props(styles.dialogTitle).className, 'font-medium')}
+                  title={title}
+                >
                   {title}
                 </Dialog.Title>
               </div>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
+import { dialog } from '@lody/ui/dialog/dialog.tokens.stylex';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
@@ -13,6 +14,10 @@ import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { themeSpace } from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  titleTypography: {
+    [dialog.titleSize]: 'var(--text-base)',
+    [dialog.titleLeading]: 'var(--tw-leading, var(--text-base--line-height))',
+  },
   content: { overflow: 'hidden' },
   header: {
     borderBottomWidth: 1,
@@ -156,7 +161,7 @@ export function RenameSessionDialogView({
         className={clsx(stylex.props(styles.content).className, 'max-w-sm')}
       >
         <Dialog.Header className={stylex.props(styles.header).className}>
-          <Dialog.Title className="text-base">
+          <Dialog.Title className={stylex.props(styles.titleTypography).className}>
             {t('sidebar.renameChat.title', 'Rename Chat')}
           </Dialog.Title>
           <Dialog.Description className="leading-5">

@@ -1,0 +1,209 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 900,
+      "device": "iPhone SE"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "settings-usageshareimagedialog--default",
+    "components-renamesessiondialog--interactive",
+    "components-chatfaileddetaildialog--long-raw-payload",
+    "migration-ownedprivatebuttonlayout--operation-scoped",
+    "ai-sessionfilepreviewpanel--wide-markdown",
+    "ai-sessionfilepreviewpanel--mobile-markdown-attachment"
+  ],
+  "allowBlankIds": [
+    "settings-usageshareimagedialog--default",
+    "components-chatfaileddetaildialog--long-raw-payload",
+    "ai-sessionfilepreviewpanel--wide-markdown",
+    "ai-sessionfilepreviewpanel--mobile-markdown-attachment"
+  ],
+  "ready": {
+    "settings-usageshareimagedialog--default": [
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const h=document.querySelector('[role=dialog] h2');return h&&getComputedStyle(h).fontSize==='16px'&&getComputedStyle(h).lineHeight==='24px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "components-renamesessiondialog--interactive": [
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const h=document.querySelector('[role=dialog] h2');return h&&getComputedStyle(h).fontSize==='16px'&&getComputedStyle(h).lineHeight==='24px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "components-chatfaileddetaildialog--long-raw-payload": [
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const h=document.querySelector('[role=dialog] h2');return h&&getComputedStyle(h).fontSize==='16px'&&getComputedStyle(h).lineHeight==='24px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedprivatebuttonlayout--operation-scoped": [
+      {
+        "action": "visible",
+        "selector": "button[title=\"View full reply\"]"
+      },
+      {
+        "action": "click",
+        "selector": "button[title=\"View full reply\"]"
+      },
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const h=document.querySelector('[role=dialog] h2');return h&&getComputedStyle(h).fontSize==='16px'&&getComputedStyle(h).lineHeight==='24px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "ai-sessionfilepreviewpanel--wide-markdown": [
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const h=document.querySelector('[role=dialog] h2');return h&&getComputedStyle(h).fontSize==='14px'&&getComputedStyle(h).lineHeight==='17.5px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "ai-sessionfilepreviewpanel--mobile-markdown-attachment": [
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const h=document.querySelector('[role=dialog] h2');return h&&getComputedStyle(h).fontSize==='14px'&&getComputedStyle(h).lineHeight==='17.5px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {
+    "settings-usageshareimagedialog--default": [
+      {
+        "name": "focus-control",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#usage-share-metric"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "components-renamesessiondialog--interactive": [
+      {
+        "name": "edited-title",
+        "steps": [
+          {
+            "action": "fill",
+            "role": "textbox",
+            "value": "Synthetic renamed title \u4e2d\u6587 with preserved interactions"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('textarea')?.value==='Synthetic renamed title \u4e2d\u6587 with preserved interactions'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "saved-receipt",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Save",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[role=dialog]')&&document.querySelector('[data-rename-result]')?.textContent==='Saved: Synthetic renamed title \u4e2d\u6587 with preserved interactions'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "components-chatfaileddetaildialog--long-raw-payload": [
+      {
+        "name": "focus-control",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[role=dialog] button[data-variant=secondary]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "migration-ownedprivatebuttonlayout--operation-scoped": [
+      {
+        "name": "title-long-ellipsis",
+        "steps": [
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const h=document.querySelector('[role=dialog] h2');return h&&getComputedStyle(h).textOverflow==='ellipsis'&&getComputedStyle(h).whiteSpace==='nowrap'&&getComputedStyle(h).overflow==='hidden'&&getComputedStyle(document.querySelector('[role=dialog] p')).fontSize==='12px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "ai-sessionfilepreviewpanel--wide-markdown": [
+      {
+        "name": "raw-tab",
+        "steps": [
+          {
+            "action": "click",
+            "role": "tab",
+            "name": "Raw",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => [...document.querySelectorAll('[role=tab]')].some(e=>e.textContent==='Raw'&&e.getAttribute('aria-selected')==='true')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "ai-sessionfilepreviewpanel--mobile-markdown-attachment": [
+      {
+        "name": "raw-tab",
+        "steps": [
+          {
+            "action": "click",
+            "role": "tab",
+            "name": "Raw",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => [...document.querySelectorAll('[role=tab]')].some(e=>e.textContent==='Raw'&&e.getAttribute('aria-selected')==='true')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -6,6 +6,7 @@ import { Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Dialog } from './dialog';
 import { ScrollArea } from '@lody/ui/scroll-area';
+import { dialog } from '@lody/ui/dialog/dialog.tokens.stylex';
 import { themeColors } from '../style/theme-colors.stylex';
 import {
   themeFontSize,
@@ -15,6 +16,22 @@ import {
 } from '../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  dialogPanel: {
+    height: 'min(640px, 72vh)',
+    overflow: 'hidden',
+    borderStyle: 'var(--tw-border-style)',
+    borderWidth: 0,
+  },
+  dialogBackdrop: {
+    [dialog.overlay]: {
+      default: '#0006',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, var(--color-black) 40%, transparent)',
+    },
+    '--tw-backdrop-blur': 'blur(2px)',
+    backdropFilter:
+      'var(--tw-backdrop-blur,) var(--tw-backdrop-brightness,) var(--tw-backdrop-contrast,) var(--tw-backdrop-grayscale,) var(--tw-backdrop-hue-rotate,) var(--tw-backdrop-invert,) var(--tw-backdrop-opacity,) var(--tw-backdrop-saturate,) var(--tw-backdrop-sepia,)',
+  },
   command: {
     display: 'flex',
     height: '100%',
@@ -140,8 +157,14 @@ const CommandDialog = ({
         noAnimation
         padding="none"
         gap="none"
-        className="z-[var(--z-command-palette,85)] h-[min(640px,72vh)] max-w-2xl overflow-hidden border-0 bg-transparent shadow-none"
-        backdropClassName="z-[var(--z-command-palette,85)] bg-black/40 backdrop-blur-[2px]"
+        className={cn(
+          stylex.props(styles.dialogPanel).className,
+          'z-[var(--z-command-palette,85)] max-w-2xl bg-transparent shadow-none'
+        )}
+        backdropClassName={cn(
+          stylex.props(styles.dialogBackdrop).className,
+          'z-[var(--z-command-palette,85)]'
+        )}
       >
         <Command
           shouldFilter={shouldFilter}

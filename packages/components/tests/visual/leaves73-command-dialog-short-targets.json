@@ -1,0 +1,146 @@
+{
+  "viewports": [
+    {
+      "name": "short-desktop",
+      "width": 1280,
+      "height": 600
+    },
+    {
+      "name": "short-phone",
+      "device": "iPhone SE",
+      "width": 390,
+      "height": 600
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": ["ui-commandmigration--in-dialog"],
+  "ready": {
+    "ui-commandmigration--in-dialog": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Open command dialog"
+      },
+      {
+        "action": "focus",
+        "role": "combobox",
+        "name": "Search commands"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[role=dialog]');if(!p)return false;const c=getComputedStyle(p),r=p.getBoundingClientRect(),dark=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');return document.documentElement.classList.contains('dark')===dark&&c.display==='flex'&&c.flexDirection==='column'&&c.paddingTop==='0px'&&c.paddingRight==='0px'&&c.paddingBottom==='0px'&&c.paddingLeft==='0px'&&c.gap==='0px'&&parseFloat(c.height)===Math.min(640,innerHeight*.72)&&c.opacity==='1'&&!p.hasAttribute('data-starting-style')&&!p.hasAttribute('data-ending-style')&&p.contains(document.activeElement)&&(innerWidth===390?(c.width==='512px'&&c.maxWidth==='672px'&&Math.abs(r.left+61)<.1&&Math.abs(r.right-451)<.1):(r.left>=-.1&&r.right<=innerWidth+.1))&&r.top>=-.1&&r.bottom<=innerHeight+.1&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {
+    "ui-commandmigration--in-dialog": [
+      {
+        "name": "filtered",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "[role=dialog] [cmdk-input]",
+            "value": "settings"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const rows=[...document.querySelectorAll('[cmdk-item]')];return rows.length===1&&rows[0].textContent==='Settings';}"
+          }
+        ]
+      },
+      {
+        "name": "empty",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "[role=dialog] [cmdk-input]",
+            "value": "no-synthetic-command-match"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll('[cmdk-item]').length===0&&document.querySelector('[role=dialog]')?.textContent.includes('No matching commands.')"
+          }
+        ]
+      },
+      {
+        "name": "selected",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "[role=dialog] [cmdk-input]",
+            "value": ""
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll('[cmdk-item]').length===5"
+          },
+          {
+            "action": "press",
+            "selector": "[role=dialog] [cmdk-input]",
+            "key": "Home"
+          },
+          {
+            "action": "press",
+            "selector": "[role=dialog] [cmdk-input]",
+            "key": "ArrowDown"
+          },
+          {
+            "action": "press",
+            "selector": "[role=dialog] [cmdk-input]",
+            "key": "ArrowDown"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[cmdk-item][aria-selected=true]')?.textContent==='Settings'&&document.querySelector('[cmdk-item][aria-disabled=true]')?.textContent==='Sync unavailable'"
+          },
+          {
+            "action": "press",
+            "selector": "[role=dialog] [cmdk-input]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !!document.querySelector('[role=dialog]')&&document.querySelector('output[aria-label=\\\"Selected command\\\"]')?.textContent==='settings'"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[role=dialog] [cmdk-input]",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "dialog"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement?.textContent==='Open command dialog'"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open command dialog"
+          },
+          {
+            "action": "focus",
+            "role": "combobox",
+            "name": "Search commands"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[role=dialog]');if(!p)return false;const c=getComputedStyle(p),r=p.getBoundingClientRect(),dark=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');return document.documentElement.classList.contains('dark')===dark&&c.display==='flex'&&c.flexDirection==='column'&&c.paddingTop==='0px'&&c.paddingRight==='0px'&&c.paddingBottom==='0px'&&c.paddingLeft==='0px'&&c.gap==='0px'&&parseFloat(c.height)===Math.min(640,innerHeight*.72)&&c.opacity==='1'&&!p.hasAttribute('data-starting-style')&&!p.hasAttribute('data-ending-style')&&p.contains(document.activeElement)&&(innerWidth===390?(c.width==='512px'&&c.maxWidth==='672px'&&Math.abs(r.left+61)<.1&&Math.abs(r.right-451)<.1):(r.left>=-.1&&r.right<=innerWidth+.1))&&r.top>=-.1&&r.bottom<=innerHeight+.1&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('output[aria-label=\\\"Selected command\\\"]')?.textContent==='settings'&&document.querySelector('[role=dialog] [cmdk-input]')?.value===''"
+          }
+        ]
+      }
+    ]
+  }
+}

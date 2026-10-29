@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
 import { toast } from '@/lib/toast';
 import { AlertCircle, Check, Copy } from 'lucide-react';
 
@@ -26,6 +25,8 @@ const styles = stylex.create({
     textAlign: 'left',
   },
   title: {
+    [dialog.titleSize]: 'var(--text-base)',
+    [dialog.titleLeading]: 'var(--tw-leading, var(--text-base--line-height))',
     display: 'flex',
     alignItems: 'flex-start',
     gap: themeSpace[2],
@@ -156,13 +157,7 @@ export function ChatFailedDetailDialog({
           rung's own viewport cap still bounds it on phones. */}
       <Dialog.Content width="42rem" className={stylex.props(styles.panelSpacing).className}>
         <Dialog.Header className={stylex.props(styles.header).className}>
-          <Dialog.Title
-            className={clsx(
-              // The title's own size belongs to the primitive that owns it.
-              'text-base',
-              stylex.props(styles.title).className
-            )}
-          >
+          <Dialog.Title className={stylex.props(styles.title).className}>
             <AlertCircle {...stylex.props(styles.titleGlyph)} aria-hidden="true" />
             <span {...stylex.props(styles.titleText)}>{title}</span>
           </Dialog.Title>

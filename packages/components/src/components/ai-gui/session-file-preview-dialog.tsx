@@ -9,6 +9,7 @@ import type { SessionFilePayload } from '@lody/shared';
 import { Dialog } from '@/ui/dialog';
 import { Drawer } from '@lody/ui/drawer';
 import { space } from '@lody/ui/tokens/scales.stylex';
+import { dialog } from '@lody/ui/dialog/dialog.tokens.stylex';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Button } from '@lody/ui/button';
 import { Tabs } from '@lody/ui/tabs';
@@ -95,7 +96,7 @@ export function SessionFilePreviewPanel({
         <div {...stylex.props(styles.headerText)}>
           <Title
             className={clsx(
-              'text-sm font-semibold leading-tight',
+              'font-semibold leading-tight',
               stylex.props(styles.titleText).className
             )}
           >
@@ -311,6 +312,7 @@ const styles = stylex.create({
   },
   /** The title's own size and weight stay with the primitive that owns them. */
   titleText: {
+    [dialog.titleSize]: 'var(--text-sm)',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',

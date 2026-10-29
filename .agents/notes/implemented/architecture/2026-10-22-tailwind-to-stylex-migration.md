@@ -1937,6 +1937,24 @@ failure. Those captures are excluded, while a later matching control does not
 close the original two differences. Known inline-token negatives, calibration
 errors and the actual Electron After-only images are separate evidence.
 
+The typography and command continuation removes twelve utilities in six files.
+Title and description overrides retain the original element-local `--text-*`
+size and `--tw-leading` fallback expressions, including the unchanged weight and
+explicit leading writers. The closed Command backdrop preserves its `#0006`
+fallback, feature-gated local black mix and complete nine-filter pipeline. Its
+panel keeps `bg-transparent`: publishing the background token changed a real
+child's inherited value and is unsafe for arbitrary public ReactNode children,
+even when the default panel pixels agree. Both rejected source versions remain.
+
+`leaves72-73-acceptance.html` retains **112 pairs / 111 byte-exact / 9,748 identical
+full standard records**. The original blurred background opener differs by 429
+raw pixels and zero threshold pixels. Independent Canvas and PNG decoding agree;
+a bounded same-flow control matches After, which does not identify the original
+cause. The legacy tool's `identical` status uses threshold/layout checks: the
+initial forty-pair candidate actually has 39 byte-exact PNGs. Its old label and
+explicit correction remain, alongside local-font positive controls, known inline
+negatives and real portal-gate calibration failures. Earlier OPENs stay unchanged.
+
 ## Remaining work
 
 The compiler-backed [inventory](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -1960,6 +1978,7 @@ completion percentage. Unresolved expressions remain a separate work list.
 | Exact source through 63, with partial visual acceptance    | v2             |       1,594 |   167 |        722 |
 | Exact source through 67, with partial visual acceptance    | v2             |       1,572 |   166 |        718 |
 | Exact source through 71, with partial visual acceptance    | v2             |       1,554 |   165 |        718 |
+| Exact source through 73, with partial visual acceptance    | v2             |       1,542 |   165 |        718 |
 
 Earlier method changes recognized single utilities, `withClassName`'s second
 argument and supported static class arrays. Historical per-batch counts remain
@@ -1979,12 +1998,13 @@ utility-looking strings in comparisons or unrelated properties. Ambiguous writes
 remain unresolved. Two adapter `className` writes expose four additional unresolved expressions,
 explaining the corresponding increase in that count.
 
-The published through 71 v2 split is components: 1,105 occurrences/149 files/625
-unresolved, legacy UI: 444/14/93 and routes: 5/2/0. These totals cover only those
+The published through 73 v2 split is components: 1,098 occurrences/149 files/625
+unresolved, legacy UI: 439/14/93 and routes: 5/2/0. These totals cover only those
 three source roots. Normalized paths retain the raw scanner output and all 688
-component JS/TS byte hashes. The through 71 component snapshot adds seven audited
-source updates to frozen through 67; UI/routes are frozen separately. It excludes
-later candidates. The through 67 transition below explains its unresolved changes.
+component JS/TS byte hashes. The through 73 snapshot adds five component updates
+and the command owner to frozen through 71; all 789 three-root files are recorded.
+It excludes later candidates. The through 67 transition below explains its
+unresolved changes.
 Five Usage templates and one Archive class lookup disappear; two FileError/Bub
 StyleX templates remain unresolved, not new unknown Tailwind utilities. A separate helper audit identifies another nine
 occurrences across two lib/hooks files, outside these three roots; it is neither

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { usePostHog } from '@posthog/react';
 import * as stylex from '@stylexjs/stylex';
+import { dialog } from '@lody/ui/dialog/dialog.tokens.stylex';
 import { Check, Copy, Download } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { Dialog } from '@/ui/dialog';
@@ -36,6 +37,10 @@ import type {
 const BACKDROPS: Exclude<UsageShareCardBackdrop, 'none'>[] = ['lody', 'aurora', 'ocean', 'sunset'];
 
 const styles = stylex.create({
+  titleTypography: {
+    [dialog.titleSize]: 'var(--text-base)',
+    [dialog.titleLeading]: 'var(--tw-leading, var(--text-base--line-height))',
+  },
   header: {
     borderBottomWidth: '1px',
     borderBottomStyle: 'var(--tw-border-style)',
@@ -380,7 +385,7 @@ export function UsageShareImageDialog({
         }}
       >
         <Dialog.Header {...stylex.props(styles.header)}>
-          <Dialog.Title className="text-base">
+          <Dialog.Title className={stylex.props(styles.titleTypography).className}>
             {t('workspace.usage.shareImage.dialogTitle')}
           </Dialog.Title>
           <Dialog.Description className="leading-5">

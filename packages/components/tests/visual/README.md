@@ -621,6 +621,7 @@ artifacts out of commits.
 | `artifacts/visual/leaves60-63-acceptance.html` | Eight utilities in six files: notification ink, popup dimensions/overflow and native dark maps                               | 132/134 PNG pairs exact; two OPEN, 43 raw pixels; 14 hidden-helper height records retained    | Partial acceptance; 60 rejected, six phone Role failures, inline-token negative controls and all historical OPENs remain                        |
 | `artifacts/visual/leaves64-67-acceptance.html` | 22 utilities in eight files: redundant Select widths, private archive fill and fixed control layout                          | 191/192 PNG pairs exact; 48,356 full standard records equal                                   | One 11-pixel OPEN, a separate four-node y−4px native OPEN, rejected theme-reset candidates and inline-token negatives retained                  |
 | `artifacts/visual/leaves68-71-acceptance.html` | 18 utilities in eight product files: modal/popup geometry, opt-in full-width Drawer and Tooltip padding                      | 200/208 product PNG pairs exact; 10,248 full standard records equal; fixture20 pairs separate | Eight corner OPENs, two original normal-motion OPENs, three proven wrong-pose captures and all known negative controls retained                 |
+| `artifacts/visual/leaves72-73-acceptance.html` | 12 utilities in six files: exact local title typography and closed command backdrop/layout                                   | 111/112 PNG pairs exact; 9,748 full standard records equal                                    | Original429raw/0thresholdOPEN retained; rejected fallback/descendant-token candidates, known negatives and legacy-label correction explicit     |
 
 The self-contained report keeps the original images and per-frame immutable build
 origins. Computed-only 55/56/57/59 probes add no PNG pairs. Keep SessionPin's actual
@@ -630,10 +631,10 @@ fallback visible to reviewers. Calendar's protected user formatting is outside t
 task-only patch. Local selector scopes do not establish a whole application palette;
 phone initial-preview visibility and native/backend/export behavior remain bounded.
 
-The normalized through 71 inventory is 1,554 occurrences/165 files/718 unresolved
+The normalized through 73 inventory is 1,542 occurrences/165 files/718 unresolved
 expressions across components, legacy UI and routes only. Its 688-file component
-snapshot includes seven verified component updates after 67, with UI/routes
-frozen separately, and excludes later candidates.
+snapshot adds five verified component updates and the command owner after 71;
+all 789 three-root files are frozen, excluding later candidates.
 Earlier inventories remain frozen. A separate lib/hooks audit identifies
 nine more occurrences in two files outside those roots; do not merge scopes or call
 that a product regression. Later source-locked through 63 components (620 files / 6,207 tests) and
