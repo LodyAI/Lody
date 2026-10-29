@@ -59,6 +59,7 @@ interface LodyOptions {
   ) => Promise<void>;
   onFatalAuthFailure?: (error: Error) => void;
   onStorageWriteFailure?: (error: Error) => void;
+  onInboxAvailabilityChange?: (message: string | undefined) => void;
   /** Drain this owner on confirmed member removal or device revocation.
    * The workspace host alone owns receipt-verified member-data erasure. */
   onEncryptedMemberRemoved?: (owner: Lody) => Promise<void>;
@@ -285,6 +286,7 @@ export class Lody {
         closeSessionTerminals: options.closeSessionTerminals,
         cleanupLocalProjectWorktreeSetupIfUnreferenced:
           options.cleanupLocalProjectWorktreeSetupIfUnreferenced,
+        onInboxAvailabilityChange: options.onInboxAvailabilityChange,
         onFatalAuthFailure: options.onFatalAuthFailure,
         onProcessLifecycleAction: options.onProcessLifecycleAction,
         workspaceWatchCoordinator: options.workspaceWatchCoordinator,

@@ -992,6 +992,8 @@ const readRequiredEnv = (...names: string[]): string => {
 };
 
 export interface McpSessionContext {
+  /** Daemon-local readiness check; never serialized or supplied by callers. */
+  assertOperationInboxAvailable?: () => void;
   machineId: string;
   workspaceId: string;
   sessionId: SessionId;
@@ -1037,6 +1039,7 @@ const resolveOperationStorePathForContext = (): string =>
   getLodyOperationStorePath(getSessionContext().machineId);
 
 const getSharedOperationStore = (): LodyOperationStore => {
+  getSessionContext().assertOperationInboxAvailable?.();
   const storePath = resolveOperationStorePathForContext();
   let store = sharedOperationStores.get(storePath);
   if (!store) {

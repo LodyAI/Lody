@@ -41,6 +41,22 @@ Stop request details now live in one replaceable `cancelRequest` control-documen
 
 Integration with main `09407b3b7` preserves raw ACP drain → presence clear → Turn/Inbox handoff. Presence cleanup failure retains the old execution owner. Daemon shutdown cancels history-owned work and drains/recover-closes Inbox. Merged dependency pins remain unchanged, including Streams 0.17.0 and Effect 4.0.2. Capability registration retains Inbox v2 alongside main’s new Magpie/DSH capabilities.
 
+## Database startup degradation
+
+SQLite open/activation failure belongs to the optional coordinator, not workspace
+startup. Ordinary human dispatch uses the existing no-Inbox path; dependent tools
+check the daemon's current availability before touching storage, including cached
+connections. This avoids accepting delegated work whose receipt cannot run.
+The facade owns one startup timer, doubles from 30 seconds to a 10-minute cap,
+closes a failed activation connection, and cancels retry on stop/recoverStop.
+Incompatible schema/protocol needs a compatible binary, so it does not auto-retry.
+The local runtime warning clears on recovery. Existing unknown-submission and
+resource-release rules remain authoritative; degradation cannot prove release.
+Startup remains in the registered application facade: migrating unfinished
+Session/ACP adapters would broaden this fix without improving its boundary.
+The coordinator, MCP and execution suites cover startup failure and recovery;
+installed-desktop and full-disk acceptance remain separate.
+
 ## Native orchestration unit
 
 Coordinator reconciliation, coalesced wake tickets and retry fibers now run as native

@@ -629,6 +629,7 @@ export interface MessageHandlerConfig {
    * retrying on a dead credential.
    */
   onFatalAuthFailure?: (error: Error) => void;
+  onInboxAvailabilityChange?: (message: string | undefined) => void;
   /**
    * Invoked after a machine lifecycle RPC has been ACKed to the caller. The
    * process boundary owns the actual exit/restart behavior.
@@ -3762,6 +3763,7 @@ export class MessageHandler {
       },
     });
     this.operationCoordinator = new LodyOperationCoordinator({
+      onAvailabilityChange: config.onInboxAvailabilityChange,
       workspaceId: this.workspaceId,
       machineId: this.machineId,
       userId: this.userId,
@@ -4376,6 +4378,7 @@ export class MessageHandler {
     try {
       // Transient non-owner open: skip the open-time maintenance writes so this
       // does not contend on the shared WAL store's write lock.
+      this.operationCoordinator.assertInboxAvailable();
       const operationStore = new LodyOperationStore(
         getLodyOperationStorePath(this.machineId),
         undefined,
@@ -7090,6 +7093,7 @@ export class MessageHandler {
               workspaceId: this.workspaceId,
               sessionId,
               localControlSocketPath: undefined,
+              assertOperationInboxAvailable: () => this.operationCoordinator.assertInboxAvailable(),
               workdir: sourceWorkdir ?? process.cwd(),
             },
             name,

@@ -1,3 +1,5 @@
+import { LodyOperationCoordinator } from '../src/orchestration/operation-coordinator';
+import { MessageHandler } from '../src/lib/message-handler';
 import { CloudE2eeMemberRemoved, CloudE2eeDeviceRevoked } from '../src/lib/cloud-e2ee-errors';
 import { encodeStreamsRoomAdditionalData } from 'loro-repo/transport/streams';
 import { bindTestPresenceApplication } from './presence-application-fixture';
@@ -12263,6 +12265,59 @@ describe('Operation Inbox execution boundary', () => {
       storePath: path.join(root, 'operations.sqlite3'),
     };
   }
+
+  it('starts dispatch and executes ordinary human input when the Inbox database cannot open', async () => {
+    const received: ContentBlock[][] = [];
+    const f = inboxExecutionFixture(async (blocks) => {
+      received.push(blocks);
+      return { stopReason: 'end_turn' };
+    });
+    let watching = false;
+    const dispatchWatcher = {
+      start: async () => {
+        watching = true;
+      },
+    };
+    const coordinator = new LodyOperationCoordinator({
+      workspaceId: f.message.workspaceId,
+      machineId: f.message.machineId as MachineId,
+      userId: f.message.userId,
+      workspaceDocument: f.deps.workspaceDocument,
+      executionService: f.service,
+      dispatchWatcher: dispatchWatcher as never,
+      logger: createSilentLogger(),
+      storeFactory: () => {
+        throw new Error('SQLITE_FULL');
+      },
+      materializeTarget: async () => {
+        throw new Error('must not materialize while degraded');
+      },
+    });
+    try {
+      await MessageHandler.prototype.startSessionDispatchWatcher.call({
+        sessionDispatchWatcher: dispatchWatcher,
+        operationCoordinator: coordinator,
+      } as never);
+      expect(watching).toBe(true);
+      await f.accept();
+      await f.service.continueSession(f.message);
+      expect(
+        received
+          .flat()
+          .filter((block) => block.type === 'text')
+          .map((block) => block.text)
+      ).toEqual(['CURRENT_REQUEST']);
+      expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
+      const history = await (await createSessionBackend(f.doc)).readHistory();
+      expect(history.find((turn) => turn.id === 'human-input')?.status).toBe('handled');
+      expect(
+        history.some((turn) => turn.role === 'assistant' && turn.userTurnId === 'human-input')
+      ).toBe(true);
+    } finally {
+      await coordinator.stop();
+      await f.close();
+    }
+  });
 
   it.each(['missing_identity', 'missing_active_execution', 'other_requester'] as const)(
     'persists the exact manual recovery entry for a blocked send (%s) without starting transport',

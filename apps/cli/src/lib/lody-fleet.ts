@@ -913,6 +913,17 @@ export class LodyFleet {
         lody = await Lody.create({
           logger: workspaceLogger,
           onStorageWriteFailure: () => this.runtimeStateReporter.reportStorageWriteFailure(),
+          onInboxAvailabilityChange: (message) => {
+            const code = `inbox_unavailable:${workspace.id}`;
+            if (message)
+              this.runtimeStateReporter.upsertIssue({
+                code,
+                severity: 'warning',
+                recoverable: true,
+                message,
+              });
+            else this.runtimeStateReporter.clearIssue(code);
+          },
           onEncryptedMemberRemoved: async (owner) => {
             memberRemoved = true;
             const state = this.runtimes.get(workspace.id);
