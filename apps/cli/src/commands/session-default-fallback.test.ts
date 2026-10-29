@@ -16,6 +16,7 @@ import {
   type SessionHistoryInput,
   type SessionId,
   type SessionMeta,
+  type SessionSteerResponse,
   type WorkspaceId,
 } from '@lody/shared';
 import type { SessionTurn } from '@lody/shared/session-data';
@@ -101,6 +102,9 @@ function createFixture(agentType: 'codex' | 'claude', capability?: AcpCapability
   let freshnessConfirmed = false;
   let failDispatchPointer = false;
   let invocationInputConfig: SessionHistoryInput['inputConfig'];
+  let activeTurnId: string | undefined;
+  let steerDisposition: SessionSteerResponse['disposition'] = 'applied';
+  const steered: Array<{ expectedTurnId: string; userTurnId: string; prompt?: string }> = [];
   const machine: MachineMeta = {
     id: machineId,
     name: 'Synthetic machine',
@@ -199,6 +203,22 @@ function createFixture(agentType: 'codex' | 'claude', capability?: AcpCapability
       cancelSession: async () => {
         throw new Error('Unexpected cancellation');
       },
+      readActiveTurnId: () => activeTurnId,
+      steerSession: async (input) => {
+        steered.push({
+          expectedTurnId: input.expectedTurnId,
+          userTurnId: input.userTurnId,
+          prompt: input.inputConfig.prompt,
+        });
+        return {
+          type: 'session/steer_response',
+          sessionId: input.sessionId,
+          userTurnId: input.userTurnId,
+          applied: steerDisposition === 'applied',
+          ...(steerDisposition === 'applied' ? {} : { recoveryOwned: true }),
+          disposition: steerDisposition,
+        };
+      },
       dispatchSession: async (id) => {
         const doc = await manager.getOrCreateSessionDoc(id);
         const meta = await doc.getMetaState();
@@ -244,7 +264,8 @@ function createFixture(agentType: 'codex' | 'claude', capability?: AcpCapability
   const run = (
     command: 'create' | 'chat',
     dispatchConfig: ResolvedTurnDispatchConfig,
-    turnId = userTurnId
+    turnId = userTurnId,
+    steerActiveTurn?: boolean
   ) =>
     runWithSessionCommandEnvironment(environment, () =>
       command === 'create'
@@ -271,7 +292,12 @@ function createFixture(agentType: 'codex' | 'claude', capability?: AcpCapability
             dispatchConfig,
             undefined,
             undefined,
-            { userTurnId: turnId, chainDepth: 0, bypassSessionQuota: true }
+            {
+              userTurnId: turnId,
+              chainDepth: 0,
+              bypassSessionQuota: true,
+              ...(steerActiveTurn ? { steerActiveTurn } : {}),
+            }
           )
     );
   const validateCreate = (dispatchConfig: ResolvedTurnDispatchConfig = {}) =>
@@ -290,6 +316,13 @@ function createFixture(agentType: 'codex' | 'claude', capability?: AcpCapability
     agentConfig,
     metadata,
     dispatched,
+    steered,
+    setActiveTurn: (turnId: string | undefined) => {
+      activeTurnId = turnId;
+    },
+    setSteerDisposition: (disposition: SessionSteerResponse['disposition']) => {
+      steerDisposition = disposition;
+    },
     history,
     seedChat,
     run,
@@ -327,6 +360,11 @@ function createFixture(agentType: 'codex' | 'claude', capability?: AcpCapability
     setCapability: (next: AcpCapabilityCacheEntry | undefined, confirmed: boolean) => {
       capability = next;
       freshnessConfirmed = confirmed;
+    },
+    setUserTurnStatus: async (turnId: string, status: 'delivery_unknown') => {
+      const doc = await manager.getOrCreateSessionDoc(sessionId);
+      const backend = await createSessionBackend(doc, await doc.getMetaState());
+      await backend.applyHistoryAction({ kind: 'user-status', turnId, status });
     },
     completeTurn: async (id = sessionId, turnId = userTurnId) => {
       const doc = await manager.getOrCreateSessionDoc(id);
@@ -1812,4 +1850,169 @@ describe.each([
       expect(fixture.dispatched).toEqual([]);
     }
   );
+});
+
+describe('agent chat to a busy target', () => {
+  const inputConfig = { prompt: 'Earlier prompt', cliType: 'builtin', agentType: 'codex' } as const;
+
+  it('steers into the running turn instead of activating a follow-up', async () => {
+    const fixture = createFixture('codex');
+    await fixture.seedChat(inputConfig);
+    fixture.setActiveTurn('assistant:earlier-turn');
+
+    await fixture.run('chat', {}, userTurnId, true);
+
+    expect(fixture.steered).toEqual([
+      { expectedTurnId: 'assistant:earlier-turn', userTurnId, prompt: 'Continue' },
+    ]);
+    const turn = (await fixture.history()).find((entry) => entry.id === userTurnId);
+    expect(turn?.status).toBe('pending_apply');
+    expect(fixture.metadata.get(getSessionRoomId(sessionId))).not.toHaveProperty(
+      'latestUserMsgId',
+      userTurnId
+    );
+    expect(fixture.dispatched).toEqual([]);
+  });
+
+  it('leaves a refused steer to the daemon instead of activating it twice', async () => {
+    const fixture = createFixture('codex');
+    await fixture.seedChat(inputConfig);
+    fixture.setActiveTurn('assistant:earlier-turn');
+    fixture.setSteerDisposition('unsupported');
+
+    await fixture.run('chat', {}, userTurnId, true);
+
+    expect(fixture.steered).toHaveLength(1);
+    expect(fixture.metadata.get(getSessionRoomId(sessionId))).not.toHaveProperty(
+      'latestUserMsgId',
+      userTurnId
+    );
+    expect(fixture.dispatched).toEqual([]);
+  });
+
+  it('dispatches ordinarily when the target is idle', async () => {
+    const fixture = createFixture('codex');
+    await fixture.seedChat(inputConfig);
+
+    await fixture.run('chat', {}, userTurnId, true);
+
+    expect(fixture.steered).toEqual([]);
+    expect(fixture.dispatched.map((entry) => entry.id)).toEqual([userTurnId]);
+  });
+
+  it('does not activate a steered turn when recovery replays its chat', async () => {
+    const fixture = createFixture('codex');
+    await fixture.seedChat(inputConfig);
+    fixture.setActiveTurn('assistant:earlier-turn');
+    await fixture.run('chat', {}, userTurnId, true);
+
+    await fixture.run('chat', {}, userTurnId);
+
+    expect(fixture.steered).toHaveLength(1);
+    expect(fixture.metadata.get(getSessionRoomId(sessionId))).not.toHaveProperty(
+      'latestUserMsgId',
+      userTurnId
+    );
+    expect(fixture.dispatched).toEqual([]);
+  });
+
+  it('does not steer an already dispatched turn when its chat is retried', async () => {
+    const fixture = createFixture('codex');
+    await fixture.seedChat(inputConfig);
+    await fixture.run('chat', {}, userTurnId, true);
+    fixture.setActiveTurn(`assistant:${userTurnId}`);
+
+    await fixture.run('chat', {}, userTurnId, true);
+
+    expect(fixture.steered).toEqual([]);
+  });
+
+  it('keeps recovery replay as an ordinary follow-up while the target is busy', async () => {
+    const fixture = createFixture('codex');
+    await fixture.seedChat(inputConfig);
+    fixture.setActiveTurn('assistant:earlier-turn');
+
+    await fixture.run('chat', {}, userTurnId);
+
+    expect(fixture.steered).toEqual([]);
+    expect(fixture.dispatched.map((entry) => entry.id)).toEqual([userTurnId]);
+  });
+});
+
+describe('MCP chat steering', () => {
+  it('steers a busy target and fails the Operation when delivery is unknown', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'lody-steer-chat-'));
+    roots.add(root);
+    vi.stubEnv('LODY_DATA_DIR', root);
+    const fixture = createFixture('codex');
+    await fixture.seedChat({ prompt: 'Running target', cliType: 'builtin', agentType: 'codex' });
+    fixture.setActiveTurn('assistant:earlier-turn');
+    fixture.setSteerDisposition('delivery-unknown');
+    const requesterSessionId = 'steer-chat-requester' as SessionId;
+    await fixture.seedChat(
+      { prompt: 'Correct the child', cliType: 'builtin', agentType: 'codex' },
+      requesterSessionId
+    );
+    const operationId = 'steer-chat-operation';
+    await fixture.runMcp(requesterSessionId, () =>
+      __lodyMcpServerInternals.startSessionChatOperation({
+        operationId,
+        sessionId,
+        prompt: 'Change direction',
+      })
+    );
+
+    const storePath = getLodyOperationStorePath(machineId);
+    const store = new LodyOperationStore(storePath);
+    const coordinator = new LodyOperationCoordinator({
+      workspaceId,
+      machineId,
+      userId,
+      workspaceDocument: fixture.manager,
+      executionService: { getExecutionSnapshot: () => ({ hasActiveTurn: false }) } as never,
+      dispatchWatcher: { hasPendingDispatch: () => false } as never,
+      logger: { warn: () => undefined, debug: () => undefined } as never,
+      storePath,
+      storeFactory: () => new LodyOperationStore(storePath),
+      operationStoreWatchFactory: () => ({ close: () => undefined }),
+      confirmTargetReadable: async () => undefined,
+      materializeTarget: async () => {
+        throw new Error('A steered chat must not be rematerialized');
+      },
+    });
+    coordinator.start();
+    try {
+      const item = store.get(requesterSessionId, operationId).items[0];
+      if (!item || item.status !== 'active') throw new Error('Expected active accepted chat');
+      expect(item.inputDurable).toBe(true);
+      expect(fixture.steered).toEqual([
+        {
+          expectedTurnId: 'assistant:earlier-turn',
+          userTurnId: item.target.userTurnId,
+          prompt: 'Change direction',
+        },
+      ]);
+      expect(fixture.dispatched).toEqual([]);
+      // The owning daemon projects an uncertain provider verdict into history.
+      await coordinator.idle();
+      await fixture.setUserTurnStatus(item.target.userTurnId, 'delivery_unknown');
+      await coordinator.wake('synthetic-steer-unknown');
+      await coordinator.idle();
+
+      expect(store.get(requesterSessionId, operationId)).toMatchObject({
+        state: 'finished',
+        items: [
+          {
+            status: 'failed',
+            target: item.target,
+            error: { code: 'STEER_DELIVERY_UNKNOWN', retryable: false },
+          },
+        ],
+      });
+    } finally {
+      await coordinator.idle();
+      await coordinator.stop();
+      store.close();
+    }
+  });
 });

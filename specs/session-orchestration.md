@@ -35,6 +35,23 @@ replaces this scope. Known Agent sender provenance is required; legacy inputs
 without it remain readable and retain existing behavior. This change does not add
 note tools or change result delivery timing.
 
+## Agent chat to a busy Session
+
+An orchestrating Agent sends corrections or new information to a Session that is
+still working. `lody_session_chat` and `lody_session_chat_many` steer that input
+into the running turn whenever the target runs on the calling Machine and its
+agent accepts steering, regardless of the human's queue or guide preference and
+of who started the running turn. The steered input gets its own reply, which
+becomes the Operation result; an earlier turn it interrupts ends at that point.
+
+A steer that is provably not delivered becomes the next ordinary turn, as it
+does for a human. An uncertain delivery is never replayed: the item fails with
+non-retryable `STEER_DELIVERY_UNKNOWN`, and the requesting Agent decides whether
+to resend. Idle targets, targets on other Machines and recovery replay keep
+ordinary dispatch. Evidence: `sendSessionChatResult` in
+`apps/cli/src/commands/session.ts`, its suite `session-default-fallback.test.ts`,
+and item reconciliation in `apps/cli/src/orchestration/coordinator-workflow.ts`.
+
 ## Session creation configuration
 
 An orchestrator can select the target Agent's advertised configuration on
