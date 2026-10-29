@@ -5,6 +5,7 @@ import { useCodeCollabRequestedRole } from '@/hooks/use-code-collab-requested-ro
 import { useCodeCollabSessionFileProvider } from '@/hooks/use-code-collab-session-file-provider';
 import { createAgentFileLinkIndex, type AgentFileLinkIndex } from '@/lib/agent-file-link-index';
 import type { SessionFileProviderEntry } from '@/lib/session-file-provider';
+import { describeCodeCollabError, warnCodeCollab } from '@/lib/code-collab-debug';
 import { AgentFileLinkContextMenuItemsContext } from '../ai-gui/markdown-renderer';
 import { AgentFileLinkIndexContext } from '../ai-gui/agent-file-link-context';
 
@@ -18,14 +19,25 @@ function FileLinkIndexSource({
   index: AgentFileLinkIndex;
 }) {
   const requestedRole = useCodeCollabRequestedRole();
-  const { provider, status } = useCodeCollabSessionFileProvider({
+  const [failed, setFailed] = useState(false);
+  const { provider, status, error } = useCodeCollabSessionFileProvider({
     sessionId: session.id,
     machineId: session.machineId,
     workspaceId,
     requestedRole,
+    enabled: !failed,
     debugLabel: 'conversation:file-links',
   });
   useEffect(() => {
+    if (status === 'error') {
+      // This optional borrower must not pin a failed resource for Files/Changes.
+      // Hiding and showing the conversation mounts a fresh attempt.
+      warnCodeCollab('conversation file-link index unavailable', {
+        sessionId: session.id,
+        error: describeCodeCollabError(error),
+      });
+      setFailed(true);
+    }
     if (!provider || (status !== 'ready' && status !== 'empty')) {
       index.setFiles([]);
       return undefined;
@@ -40,7 +52,7 @@ function FileLinkIndexSource({
       active = false;
       unsubscribe?.();
     };
-  }, [index, provider, status]);
+  }, [error, index, provider, session.id, status]);
   return null;
 }
 

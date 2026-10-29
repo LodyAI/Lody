@@ -24,7 +24,10 @@ the authored path directly, independent of index/daemon availability. Line ancho
 are navigation metadata, not part of the copied path. The
 [nested-worktree discovery protocol](../notes/implemented/bug-fix/2026-10-21-nested-worktree-file-links.md)
 remains available to explicit protocol callers; conversation clicks and menus do
-not invoke it.
+not invoke it. A failed conversation index attempt records the original error and
+releases its optional cache lease, so the next Files/Changes acquire can rebuild
+the failed resource. Link confirmation resumes when the conversation is shown
+again; it does not run a background retry loop.
 
 Rendered Markdown file previews enable Session links only when their caller supplies
 the navigation switch. SessionDetail derives it from the same callback used by chat.

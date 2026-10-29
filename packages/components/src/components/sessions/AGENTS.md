@@ -126,6 +126,8 @@ Read parent rules and linked context.
 
 - File actions use `hooks/use-session-file-actions.ts` + `lib/session-file-actions.ts`;
   never duplicate capability checks or expose unavailable local-host actions.
+- A failed conversation file-link index must release its optional cache lease and
+  pause until the conversation is shown again, leaving Files/Changes free to recover.
 - Mobile Changes starts at the shared file list; exact file/comment links open diffs.
   Retain diffs on Back; preserve drafts/expansion/focus. Viewport-gate bodies,
   pause hidden reads and use shared parse Workers for multi-file cache misses.
