@@ -120,4 +120,4 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
 Presence: E2EE requires UUID session IDs and bounded plaintext allowlists on publish/receive;
 ordinary behavior stays unchanged. [Contract](../../.agents/docs/cli-lib-loro-presence.md).
 
-Encrypted attachment manifests contain secret per-file keys and belong only in protected conversation content or local recovery receipts. Relay requests use opaque metadata and attachment-only grants; never publish a manifest or key in a URL. Format and recovery rationale: [attachment decision](../../.agents/notes/proposed/architecture/2026-10-28-encrypted-attachments.md).
+Encrypted attachment manifests contain secret per-file keys and belong only in protected conversation content or local recovery receipts. Relay requests use opaque metadata and attachment-only grants; never publish a manifest or key in a URL. Format and recovery rationale: [attachment decision](../../.agents/notes/implemented/architecture/2026-10-28-encrypted-attachments.md).

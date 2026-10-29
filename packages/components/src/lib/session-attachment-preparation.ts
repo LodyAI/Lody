@@ -1,3 +1,5 @@
+import { assertProtectedAttachmentReferences } from './encrypted-session-attachment';
+import { authorizePlaintextAttachmentPreparation } from './attachment-workspace-access';
 import type { WorkspaceStreamsMode } from '@lody/shared/workspace-streams-content';
 import {
   inputBlocksToHistoryItems,
@@ -61,6 +63,12 @@ export async function prepareDraftAttachments(args: {
   update(attachments: DraftAttachmentSend['attachments']): void;
   report(id: string, progress: number): void;
 }): Promise<PreparedSend> {
+  if (args.content.mode !== 'protected')
+    await authorizePlaintextAttachmentPreparation(
+      args.record.workspaceId,
+      args.signal,
+      args.record.entry.userId
+    );
   let attachments = args.record.attachments;
   let failure: unknown;
   // One transfer at a time per message bounds hashing memory and preserves
@@ -83,6 +91,7 @@ export async function prepareDraftAttachments(args: {
             (signal) =>
               uploadSessionImage({
                 content: args.content,
+                accountId: args.record.entry.userId,
                 workspaceId: args.record.workspaceId as WorkspaceId,
                 sessionId: args.record.sessionId,
                 token,
@@ -106,6 +115,7 @@ export async function prepareDraftAttachments(args: {
           // Keep the existing same-machine image fallback. Cancellation, remote
           // targets and a full file allowance never authorize a local transfer.
           if (
+            args.content.mode === 'protected' ||
             isUploadAbortedError(error) ||
             !machineId ||
             machineId !== args.localMachineId() ||
@@ -113,6 +123,11 @@ export async function prepareDraftAttachments(args: {
             fileCount >= SESSION_FILE_MAX_COUNT
           )
             throw error;
+          await authorizePlaintextAttachmentPreparation(
+            args.record.workspaceId,
+            args.signal,
+            args.record.entry.userId
+          );
           try {
             const outcome = await args.resources.run(
               (signal) =>
@@ -138,6 +153,7 @@ export async function prepareDraftAttachments(args: {
         const machineId = args.record.targetMachineId ?? null;
         const fileResult = await prepareSessionFile(args.resources, {
           content: args.content,
+          accountId: args.record.entry.userId,
           workspaceId: args.record.workspaceId as WorkspaceId,
           sessionId: args.record.sessionId as SessionId,
           token: args.token(),
@@ -152,6 +168,7 @@ export async function prepareDraftAttachments(args: {
         ready = fileResult;
       }
       throwIfSendAborted(args.signal);
+      if (args.content.mode === 'protected') assertProtectedAttachmentReferences([ready]);
       if (ready.type === 'image') {
         try {
           await seedSessionImageCache(

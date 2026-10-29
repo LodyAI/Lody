@@ -1,7 +1,10 @@
+import { createStaticStore, type PlatformProvider } from '@lody/platform';
+import { installAttachmentWorkspaceAccess } from '../src/lib/attachment-workspace-access';
+import { retainWorkspaceModeProof } from '../src/lib/e2ee-workspace-storage';
 import i18next from 'i18next';
 import en from '../../../locales/en.json';
 import zhCN from '../../../locales/zh_CN.json';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   SESSION_FILE_HASH_CHUNK_SIZE_BYTES,
   computeSha256HexInChunks,
@@ -71,7 +74,29 @@ const installMockXhr = (options: MockXhrOptions = {}) => {
   return { sentPartSizes };
 };
 
+let removeWorkspaceAccess: () => void;
+beforeEach(() => {
+  retainWorkspaceModeProof(localStorage, 'upload-test', 'workspace', {
+    workspaceId: 'workspace-1',
+    contentMode: 'plaintext',
+    contentModeVersion: 1,
+  });
+  removeWorkspaceAccess = installAttachmentWorkspaceAccess({
+    identity: {
+      session: createStaticStore({ status: 'authenticated', user: { id: 'upload-test' } } as never),
+      signOut: async () => {},
+    },
+    e2eeWorkspaces: {} as PlatformProvider['e2eeWorkspaces'],
+    workspaces: {
+      state: createStaticStore({ status: 'ready', workspaces: [], activeWorkspaceId: null }),
+      setActive: async () => {},
+    },
+  });
+});
+
 afterEach(() => {
+  removeWorkspaceAccess();
+  localStorage.clear();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });

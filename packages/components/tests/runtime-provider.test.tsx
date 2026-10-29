@@ -1,5 +1,13 @@
+import {
+  authorizePlaintextAttachmentUpload,
+  installAttachmentWorkspaceAccess,
+} from '../src/lib/attachment-workspace-access';
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
-import { encryptedLocalNamespace, retainEncryptedLocalIdentity, readEncryptedLocalIdentity } from '../src/lib/e2ee-local-data';
+import {
+  encryptedLocalNamespace,
+  retainEncryptedLocalIdentity,
+  readEncryptedLocalIdentity,
+} from '../src/lib/e2ee-local-data';
 import { resumeEncryptedWorkspaceCleanup } from '../src/lib/e2ee-member-removal';
 import { notifyE2eeLedgerChanged } from '../src/providers/e2ee-runtime-notifications';
 // @vitest-environment jsdom
@@ -244,10 +252,15 @@ describe('RuntimeProvider warm workspace preparation', () => {
   it('opens a re-invited member under the new device instance while retaining exact local identity', async () => {
     ordinaryCloud();
     listEncrypted();
-    const original = {accountId: 'local:user', workspaceId: 'local:workspace', genesisHash: '11'.repeat(32), signingPublicKey: '22'.repeat(32)};
+    const original = {
+      accountId: 'local:user',
+      workspaceId: 'local:workspace',
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+    };
     retainEncryptedLocalIdentity(original);
-    const installed = {...original, signingPublicKey: '33'.repeat(32)};
-    const status = {...installed, epoch: 0, hasCurrentKey: true, rotationRequired: false};
+    const installed = { ...original, signingPublicKey: '33'.repeat(32) };
+    const status = { ...installed, epoch: 0, hasCurrentKey: true, rotationRequired: false };
     environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor(original.workspaceId);
     environment.e2eeWorkspaces!.runtime = {
       open: async () => status,
@@ -260,7 +273,9 @@ describe('RuntimeProvider warm workspace preparation', () => {
     const options = vi.mocked(createWorkspaceRuntime).mock.calls.at(-1)?.[0];
     expect(options?.e2eeLocalIdentity).toEqual(installed);
     expect(readEncryptedLocalIdentity(original.accountId, original.workspaceId)).toEqual(installed);
-    expect(encryptedLocalNamespace({...installed, windowId: 'test-window'})).not.toBe(encryptedLocalNamespace({...original, windowId: 'test-window'}));
+    expect(encryptedLocalNamespace({ ...installed, windowId: 'test-window' })).not.toBe(
+      encryptedLocalNamespace({ ...original, windowId: 'test-window' })
+    );
   });
 
   it.each(['success', 'temporary failure'])(
@@ -889,6 +904,44 @@ describe('RuntimeProvider warm workspace preparation', () => {
     expect(store.get(runtimeAtom)).toBe(prepared);
     expect(prepared.disposed).toBe(false);
     expect(store.get(workspaceRuntimeInitFailureAtom)).toBeNull();
+  });
+
+  it('retires a provisional runtime when attachment admission discovers encryption after background verification failed', async () => {
+    ordinaryCloud();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    environment.e2eeWorkspaces!.describe = async () => {
+      throw new Error('Offline');
+    };
+    await render();
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    const remove = installAttachmentWorkspaceAccess({
+      identity: { session: environment.session, signOut: async () => {} },
+      workspaces: { state: environment.workspaces, setActive: async () => {} },
+      e2eeWorkspaces: environment.e2eeWorkspaces,
+    });
+    try {
+      environment.e2eeWorkspaces!.describe = async ({ workspaceId }) =>
+        encryptedDescriptor(workspaceId);
+      await act(async () => {
+        await expect(authorizePlaintextAttachmentUpload('other-workspace')).rejects.toThrow(
+          'e2ee_attachment_unprotected'
+        );
+      });
+      expect(prepared.disposed).toBe(false);
+      expect(store.get(runtimeAtom)).toBe(prepared);
+      await act(async () => {
+        await expect(authorizePlaintextAttachmentUpload('local:workspace')).rejects.toThrow(
+          'e2ee_attachment_unprotected'
+        );
+      });
+      expect(prepared.disposed).toBe(true);
+      expect(store.get(runtimeAtom)).toBeNull();
+      expect(store.get(workspaceContentModeAtom)?.descriptor).toMatchObject({
+        contentMode: 'e2ee',
+      });
+    } finally {
+      remove();
+    }
   });
 
   it('retries a mode read rejected while backend authentication catches up', async () => {

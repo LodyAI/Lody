@@ -1,9 +1,11 @@
+import { assertProtectedAttachmentReferences } from '../lib/encrypted-session-attachment';
 import {
   getMachineRoomId,
   getSessionRoomId,
   isLoroRepoDocDeleted,
   isSessionHistoryStatusAwaitingStart,
   machineSupportsSessionInputAcceptance,
+  normalizeSessionInputBlocks,
   machineSupportsSessionInputDispatch,
   type MachineId,
   type MachineMeta,
@@ -212,6 +214,11 @@ export function createWorkspacePendingSends(args: {
     },
     write: (send, signal) =>
       runtime.sendResources.run(async (owned) => {
+        if (runtime.contentMode === 'e2ee')
+          assertProtectedAttachmentReferences([
+            ...normalizeSessionInputBlocks(send.entry.inputConfig?.inputBlocks, ''),
+            ...send.attachments.flatMap((item) => (item.ready ? [item.ready] : [])),
+          ]);
         if (send.historyBackend !== 'roost') return writeUserTurn(runtime, send, owned);
         const predecessors = (await barriers.get(send.id)) ?? [];
         if (!send.queue) {
@@ -277,17 +284,14 @@ export function createWorkspacePendingSends(args: {
     hasPendingCreation: (sessionId: string) =>
       snapshot.some((send) => send.sessionId === sessionId && send.creation),
     enqueue(send: Parameters<typeof held.enqueue>[0]) {
-      if (
-        runtime.contentMode === 'e2ee' &&
-        (send.historyBackend === 'roost' ||
-          send.attachments.some(
-            (attachment) =>
-              !attachment.ready ||
-              attachment.ready.type !== 'file' ||
-              attachment.ready.transport !== 'local'
-          ))
-      )
-        throw new Error('e2ee_feature_unavailable');
+      if (send.workspaceId !== args.workspaceId) throw new Error('attachment_workspace_mismatch');
+      if (runtime.contentMode === 'e2ee') {
+        if (send.historyBackend === 'roost') throw new Error('e2ee_feature_unavailable');
+        assertProtectedAttachmentReferences([
+          ...normalizeSessionInputBlocks(send.entry.inputConfig?.inputBlocks, ''),
+          ...send.attachments.flatMap((item) => (item.ready ? [item.ready] : [])),
+        ]);
+      }
       admissionOrder.set(send.id, ++nextAdmission);
       if (
         send.historyBackend === 'roost' &&

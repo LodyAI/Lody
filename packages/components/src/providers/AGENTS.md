@@ -114,6 +114,8 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 
 ## Attachment transfer ownership
 
+The Loro pending queue admits new protected images/files and validates their manifests before writing history. Queue records remain bound to their originating workspace; Roost remains unavailable in protected mode.
+
 `sendResources` owns preparation/I/O/borrows; cancel/join before transports/caches
 close. Only caches dispose stores. Loro commits locally, then dispatches best-effort.
 Roost freezes input/target and shares ordered leases with queues. Ordinary input

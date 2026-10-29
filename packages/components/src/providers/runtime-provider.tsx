@@ -1,3 +1,4 @@
+import { subscribeAttachmentWorkspaceMode } from '@/lib/attachment-workspace-access';
 import { subscribeE2eeLedgerChanges } from './e2ee-runtime-notifications';
 import { useTranslation } from 'react-i18next';
 import { desktopWindowId } from '@/lib/desktop-window';
@@ -277,7 +278,13 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         setModeStorageRevision((value) => value + 1);
     };
     window.addEventListener('storage', changed);
-    return () => window.removeEventListener('storage', changed);
+    const stopAttachmentMode = subscribeAttachmentWorkspaceMode((owner, id) => {
+      if (owner === accountId && ids.includes(id)) setModeStorageRevision((value) => value + 1);
+    });
+    return () => {
+      window.removeEventListener('storage', changed);
+      stopAttachmentMode();
+    };
   }, [modeCloud, accountId, modeCandidateKey]);
   const savedMode = useMemo((): SavedMode => {
     // Relevant storage events, and an explicit retry after local repair, invalidate this read.
