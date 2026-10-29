@@ -375,7 +375,12 @@ export class Lody {
     if (this.cleanedUp) {
       return;
     }
-    const completed = await this.ensureBuiltinAgentConfigs(cliTypes);
+    let completed = false;
+    try {
+      completed = await this.ensureBuiltinAgentConfigs(cliTypes);
+    } catch (error) {
+      this.logger.debug(`[agent-config] Builtin registration failed: ${formatErrorMessage(error)}`);
+    }
     if (!completed) {
       this.scheduleBuiltinAgentConfigRetry(cliTypes);
       return;
@@ -402,37 +407,45 @@ export class Lody {
     // every startup.
     const optedOut = await this.documentManager.getBuiltinAgentOptOuts(this.machineId);
 
+    let completed = true;
     for (const cliType of cliTypes) {
-      const builtinRuntime = getManagedBuiltinRuntimeByAgentType(cliType);
-      if (!builtinRuntime) {
-        continue;
-      }
-      if (optedOut.has(cliType)) {
+      try {
+        const builtinRuntime = getManagedBuiltinRuntimeByAgentType(cliType);
+        if (!builtinRuntime) {
+          continue;
+        }
+        if (optedOut.has(cliType)) {
+          this.logger.debug(
+            `[agent-config] Skipping builtin agent registration for ${cliType} on machine ${this.machineId}; the user removed it on this machine`
+          );
+          continue;
+        }
+        // Keep the legacy row as the sole Pi provider until its owner confirms
+        // migration. Check legacy first so a completed migration is then caught
+        // by the builtin lookup below, rather than creating a second provider.
+        if (
+          cliType === 'pi' &&
+          (await this.documentManager.hasAgentConfig('registry', 'pi-acp', this.machineId))
+        ) {
+          continue;
+        }
+        const has = await this.documentManager.hasAgentConfig('builtin', cliType, this.machineId);
+        if (!has) {
+          await this.documentManager.createAgentConfig(
+            'builtin',
+            cliType,
+            this.machineId,
+            builtinRuntime.displayName
+          );
+        }
+      } catch (error) {
+        completed = false;
         this.logger.debug(
-          `[agent-config] Skipping builtin agent registration for ${cliType} on machine ${this.machineId}; the user removed it on this machine`
-        );
-        continue;
-      }
-      // Keep the legacy row as the sole Pi provider until its owner confirms
-      // migration. Check legacy first so a completed migration is then caught
-      // by the builtin lookup below, rather than creating a second provider.
-      if (
-        cliType === 'pi' &&
-        (await this.documentManager.hasAgentConfig('registry', 'pi-acp', this.machineId))
-      ) {
-        continue;
-      }
-      const has = await this.documentManager.hasAgentConfig('builtin', cliType, this.machineId);
-      if (!has) {
-        await this.documentManager.createAgentConfig(
-          'builtin',
-          cliType,
-          this.machineId,
-          builtinRuntime.displayName
+          `[agent-config] Builtin ${cliType} registration failed: ${formatErrorMessage(error)}`
         );
       }
     }
-    return true;
+    return completed;
   }
 
   private scheduleBuiltinAgentConfigRetry(cliTypes: CliType[]): void {
@@ -461,7 +474,8 @@ export class Lody {
 
       const retryCliTypes = [...this.pendingBuiltinAgentConfigRetryCliTypes];
       this.pendingBuiltinAgentConfigRetryCliTypes.clear();
-      void this.ensureBuiltinAgentConfigsOrRetry(retryCliTypes).catch((error: unknown) => {
+      void this.registerAgent(retryCliTypes).catch((error: unknown) => {
+        this.scheduleBuiltinAgentConfigRetry(retryCliTypes);
         this.logger.debug(
           `[agent-config] Retried builtin agent registration failed: ${formatErrorMessage(error)}`
         );
@@ -587,6 +601,8 @@ export class Lody {
       { workspaceId: this.workspaceId },
       async () => await this.registerAgent(this.options.builtinAgentConfigCliTypes ?? [])
     ).catch((error: unknown) => {
+      this.builtinAgentRegistrationStarted = false;
+      this.scheduleBuiltinAgentConfigRetry(this.options.builtinAgentConfigCliTypes ?? []);
       this.logger.debug(
         `[agent-config] Background builtin agent registration failed for workspace ${this.workspaceId}: ${formatErrorMessage(
           error

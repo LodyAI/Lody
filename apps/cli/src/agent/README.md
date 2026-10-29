@@ -420,6 +420,8 @@ OpenAI environment configuration and requires a user-installed ACP plugin.
 
 `login-shell-env.ts` contains only Legacy launcher/binding boundaries. CLI index owns
 the native LoginShellCache runtime and waits for its producer at daemon/command exit.
+Successful environments remain cached; completed failures retry on the next read after
+five seconds. Unconfirmed process release retains its owner and prevents a second probe.
 
 [Ownership decision](../../../../.agents/notes/implemented/architecture/2026-10-10-effect-login-shell-probe.md).
 

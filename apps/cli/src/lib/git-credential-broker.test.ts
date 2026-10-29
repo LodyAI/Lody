@@ -1,3 +1,5 @@
+import http from 'node:http';
+import { EventEmitter } from 'node:events';
 import { Effect, Exit, Scope } from 'effect';
 import { it as effectIt } from '@effect/vitest';
 import { describe, expect, it, vi } from 'vitest';
@@ -10,6 +12,36 @@ import type { GitHubTokenManager } from './github-token-manager';
 import type { Logger } from '../utils/logger';
 
 describe('GitCredentialBroker', () => {
+  it('shares a failed bind and serves a later start without restarting the broker owner', async () => {
+    let fail = true;
+    const server = Object.assign(new EventEmitter(), {
+      listen: (_port: number, _host: string, ready: () => void) => {
+        queueMicrotask(() =>
+          fail ? server.emit('error', new Error('bind unavailable')) : ready()
+        );
+      },
+      address: () => ({ port: 43210 }),
+      close: (done?: () => void) => done?.(),
+    });
+    const create = vi.spyOn(http, 'createServer').mockReturnValue(server as unknown as http.Server);
+    const broker = new GitCredentialBroker({
+      tokenManager: {} as GitHubTokenManager,
+      logger: { debug: () => {} } as unknown as Logger,
+    });
+    try {
+      const first = broker.ensureStarted();
+      expect(broker.ensureStarted()).toBe(first);
+      await expect(first).rejects.toThrow('bind unavailable');
+      fail = false;
+      const recovered = await broker.ensureStarted();
+      expect(recovered.url).toBe('http://127.0.0.1:43210');
+      expect(await broker.ensureStarted()).toBe(recovered);
+    } finally {
+      await broker.shutdown();
+      create.mockRestore();
+    }
+  });
+
   it('serves legacy context locally even when cloud policy is unavailable', async () => {
     const handler = createGitCredentialBrokerHandler({
       authToken: 'bearer',

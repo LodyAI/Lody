@@ -25,10 +25,15 @@ Clock 提供候选共用的 15 秒执行期限，进程释放另有上限。只�
 ## 缓存与应用所有权
 
 LoginShellCacheLive 使用 Ref/Semaphore，在拥有的子 Scope 中启动唯一生产 Fiber。
-保留 Fiber 的 Exit，不使用 Promise 缓存或计时器。get、peek、warmup 组合 Effect；
-get 可选的 Clock 超时只影响当前读取者。CLI 保留等待三秒后暂用空环境的行为，迟到
-成功或失败都提供给后续同步与异步读取者。报告器只记录安全错误名称，不输出 shell
-内容或环境。Electron 保留完整探测等待和禁用/null 行为。本地取消不会宣告进程已释放。
+成功结果保留 Fiber 的 Exit，不使用 Promise 缓存或计时器。get、peek、warmup 组合
+Effect；get 的 Clock 超时只影响当前读取者。CLI 保留等待三秒后暂用空环境的行为；
+Electron 保留完整等待和禁用/null 行为。报告器只记录安全错误名称，不输出 shell 内容或环境。
+
+原先所有失败 Exit 都持续缓存，以避免与退出未确认的 shell 重叠。但命令 Scope 已完成
+清理后，这个理由不足以支撑永久不可用。失败完成至少五秒后，下一次读取通过 Clock
+判断并重新探测；并发读取共享同一次尝试，成功结果继续缓存。ProcessReleaseFailed
+仍保留原始 Exit 和恢复拥有者，应用清理前不启动替代探测。读取者取消不释放生产任务。
+这次只改变失败恢复策略，启动器和 daemon 的后续迁移仍独立进行。
 
 关停禁止新请求，先中断并等待生产任务，再关闭子 Scope；并发调用共享 Deferred 结果。
 进程释放失败生成 LoginShellCacheShutdownFailed，并携带全部恢复租约。应用

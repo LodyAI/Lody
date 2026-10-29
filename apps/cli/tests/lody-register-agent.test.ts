@@ -322,6 +322,47 @@ describe('Lody.registerAgent', () => {
     expect(createAgentConfig).toHaveBeenCalledWith('builtin', 'codex', 'machine-1', 'Codex');
   });
 
+  it('recovers registration failures with backoff while later providers remain usable', async () => {
+    vi.useFakeTimers();
+    const rows = new Set<string>();
+    let fail = true;
+    const documentManager = {
+      hasCompletedInitialMetaSync: () => true,
+      syncMachineFlockDoc: async () => true,
+      getBuiltinAgentOptOuts: async () => new Set(),
+      hasAgentConfig: async (_type: string, agent: string) => rows.has(agent),
+      createAgentConfig: async (_type: string, agent: string) => {
+        if (agent === 'codex' && fail) throw new Error('temporary write failure');
+        rows.add(agent);
+        return agent;
+      },
+    } as unknown as LoroDocumentManager;
+    const { Lody } = await import('../src/lib/lody');
+    const lody = new Lody(
+      {
+        logger: createSilentLogger(),
+        workspaceId: 'workspace-1',
+        token: 'token',
+        userId: 'user-1',
+        machineId: 'machine-1',
+        machineName: 'machine',
+        builtinAgentConfigCliTypes: ['codex', 'claude'],
+      },
+      documentManager
+    );
+    mocks.initializeRuntime.mockRejectedValueOnce(new Error('temporary initialization failure'));
+    await lody.attachRemoteBridge();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(rows.size).toBe(0);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect([...rows]).toEqual(['claude']);
+    fail = false;
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect([...rows]).toEqual(['claude', 'codex']);
+    await lody.cleanup();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('does not write static capabilities during builtin agent registration', async () => {
     const updateAcpCapabilities = vi.fn(async () => {});
     const getAcpCapabilities = vi.fn(async () => ({

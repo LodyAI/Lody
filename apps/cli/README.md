@@ -118,6 +118,12 @@ which also includes setup. This is a scale regression test, not a network benchm
 
 ## Daemon upgrades and autostart
 
+Two V8 OOM exits within thirty minutes pause automatic launches for ten minutes.
+The host and lease stay alive; after cooldown one recovery launch resets the OOM
+window. Another OOM pair starts a fresh cooldown. Explicit start/restart recovers
+immediately; stop cancels recovery. Authentication, protocol and ownership failures
+retain their existing terminal behavior.
+
 Remote upgrades install globally using the daemon's npm environment, resolve the
 installed package's declared CLI entry via `npm root -g`, and verify its version.
 The watchdog launches that entry explicitly and only reports upgrade success after

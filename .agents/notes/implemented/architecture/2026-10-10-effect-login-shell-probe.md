@@ -30,12 +30,18 @@ the complete Cause. No new spawn, collector or termination backend is introduced
 ## Cache and application ownership
 
 LoginShellCacheLive uses Ref/Semaphore for one producer Fiber in an owned child Scope.
-It retains the producer Exit, not a Promise or timer. get/peek/warmup compose Effect;
-get's optional Clock timeout affects only its reader. CLI keeps the 3-second empty
-overlay while pending; later success or failure reaches both asynchronous and
-synchronous readers. A reporter records failures by safe error name without logging
-shell output or environment. Electron retains its full probe wait and opt-out/null
-behavior. Reader cancellation never marks the remote process released.
+Successful results retain the producer Exit, not a Promise or timer. get/peek/warmup
+compose Effect; get's optional Clock timeout affects only its reader. CLI keeps the
+3-second empty overlay while pending; Electron retains its full wait and opt-out/null
+behavior. The reporter records safe error names, never shell output or environment.
+
+Previously every failed Exit stayed cached to avoid overlapping an unresolved shell.
+That rationale does not justify permanent failure once command-scope cleanup has
+finished. After a completed failure, the next read retries no sooner than five seconds
+later using Clock; concurrent readers share that attempt. Success remains cached.
+A ProcessReleaseFailed still retains the original Exit and recovery owner, with no
+replacement probe until application cleanup. Reader cancellation never releases the
+producer. This changes failure recovery only; launcher/daemon migration stays separate.
 
 Shutdown closes admission, interrupts and joins the producer before closing its
 Scope, and shares a Deferred receipt across concurrent calls. Process-release
