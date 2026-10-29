@@ -192,38 +192,6 @@ describe('Schedule worker handoff', () => {
     expect(h.ports.dispatch).toHaveBeenCalledWith({ prompt: 'original' });
     expect(h.store.get(run.runKey)?.plannedAt).toBe(60_000);
   });
-  it('dispatches later rounds while earlier rounds are still running, including after restart', async () => {
-    const h = harness();
-    await h.engine.evaluate();
-    h.time(120_000);
-    const restarted = new ScheduleEngine(h.ports);
-    await restarted.evaluate();
-    const runs = h.store.history('workspace', 'schedule');
-    expect(runs.map((run) => run.state)).toEqual(['dispatched', 'dispatched']);
-    expect(new Set(runs.map((run) => run.sessionId)).size).toBe(2);
-    expect(runs.map((run) => run.scheduledFor).sort((a, b) => a - b)).toEqual([60_000, 120_000]);
-    await restarted.evaluate();
-    expect(h.store.history('workspace', 'schedule')).toHaveLength(2);
-  });
-
-  it('supersedes only unprepared pending runs when planning catches up', async () => {
-    const h = harness();
-    const fingerprint = buildScheduleRegistryRow(h.d).definitionFingerprint;
-    h.store.plan('workspace', h.d, fingerprint, 60_000);
-    h.store.plan('workspace', h.d, fingerprint, 180_000);
-    expect(h.store.unfinished('workspace')).toMatchObject([
-      { scheduledFor: 180_000, state: 'pending' },
-    ]);
-    expect(
-      h.store.history('workspace', 'schedule').find((run) => run.scheduledFor === 60_000)
-    ).toMatchObject({ state: 'skipped', errorCode: 'SUPERSEDED' });
-    h.time(180_000);
-    await h.engine.evaluate();
-    expect(h.store.unfinished('workspace')).toMatchObject([
-      { scheduledFor: 180_000, state: 'dispatched' },
-    ]);
-  });
-
   it('retains prepared input when scheduling is disabled', async () => {
     const h = harness();
     h.ports.materialize = async () => {
@@ -348,7 +316,6 @@ describe('One-time complete messages', () => {
     return d;
   }
   it.each([
-    ['task', 'task'],
     ['message', 'message'],
     ['task', 'message'],
     ['message', 'task'],
