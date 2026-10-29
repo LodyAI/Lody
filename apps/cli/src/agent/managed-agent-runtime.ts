@@ -51,7 +51,6 @@ import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 
 const COMPLETE_MARKER = '.lody-complete';
 const DOWNLOAD_IDLE_TIMEOUT_MS = 60_000;
-const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
 
 /**
  * Floor between managed-runtime progress emissions. A listener republishes these as
@@ -1522,7 +1521,6 @@ export class ManagedAgentRuntimeManager {
     const abort = () =>
       controller.abort(new ManagedRuntimeError('Managed runtime download timed out'));
     let idle = setTimeout(abort, DOWNLOAD_IDLE_TIMEOUT_MS);
-    const total = setTimeout(abort, DOWNLOAD_TIMEOUT_MS);
     const onData = () => {
       clearTimeout(idle);
       idle = setTimeout(abort, DOWNLOAD_IDLE_TIMEOUT_MS);
@@ -1542,7 +1540,6 @@ export class ManagedAgentRuntimeManager {
       );
     } finally {
       clearTimeout(idle);
-      clearTimeout(total);
     }
   }
 

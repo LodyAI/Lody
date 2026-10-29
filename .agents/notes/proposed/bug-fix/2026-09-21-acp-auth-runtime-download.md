@@ -70,7 +70,11 @@ Alternatives considered:
   before verified download/publication. Bad older entries are skipped during reuse.
   The former complete-marker argument cannot repair corruption after publication;
   preserving the bytes and verifying a replacement avoids permanent blockage.
-  Downloads have 60-second idle and ten-minute attempt limits; later calls retry.
+  Downloads stop after 60 seconds without data, with no total deadline: a fixed
+  ten-minute cap interrupts healthy slow transfers. Streaming writes directly to
+  `.downloads/*.part`, retained after idle timeout for the next Range request.
+  The outer cancellation catch only moves an already-complete archive back from
+  scratch; partial streaming recovery does not depend on that outer signal.
   Consumer cancellation retains the existing independent leases and cleanup join.
   Session/provider orchestration stays Promise-based; migrating those owners would
   exceed this local fix. Provider setup passes its stop signal, but forwarding it

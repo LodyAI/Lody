@@ -53,7 +53,10 @@ Translation: current
 - 损坏 metadata 仍不能启动；状态返回未安装并附提示，共享安装器先改名到同级
   `.corrupt-<time>-<uuid>`，再下载、校验和发布；复用扫描跳过损坏的旧条目。
   complete 标记不能修复发布后的损坏；保留原文并校验新副本，比永久阻塞更合适。
-  下载空闲上限 60 秒、单次上限十分钟，后续调用可重试；独立取消租约及清理等待不变。
+  下载在 60 秒无数据后中止，不设总时限：固定十分钟会打断仍在推进的慢网络传输。
+  流直接写入 `.downloads/*.part`，空闲超时后保留，下一次请求通过 Range 续传。
+  外层取消 catch 只负责把已完整下载的归档从临时目录搬回，流式片段保留不依赖外层信号。
+  独立取消租约及清理等待不变。
   Session/provider 编排保留 Promise；迁移其 owner 会超出局部修复范围。Provider setup
   传入 stop 信号，但 session-execution-service 内部转发留待后续，该文件不在本 PR 范围。
 

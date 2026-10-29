@@ -252,8 +252,8 @@ and minimum official version. Kimi is different: `packages/acp-extension-kimi` o
 Lody-maintained runtime source and implements the shared `acp-extension-core` contract.
 
 Corrupt caches are reported absent with a warning and quarantined by installation before
-verified replacement; launch never executes them. Download attempts have a 60-second idle
-deadline and ten-minute ceiling. [Decision](../../../../.agents/notes/proposed/bug-fix/2026-09-21-acp-auth-runtime-download.md).
+verified replacement; launch never executes them. Downloads have a 60-second idle deadline;
+progressing transfers have no total deadline. Idle timeout retains partial bytes for Range resume. [Decision](../../../../.agents/notes/proposed/bug-fix/2026-09-21-acp-auth-runtime-download.md).
 
 Completed caches written before metadata schema v1 remain reusable through a separate strict
 legacy schema; their old `name`/`version`/`platform` fields are normalized in memory and only

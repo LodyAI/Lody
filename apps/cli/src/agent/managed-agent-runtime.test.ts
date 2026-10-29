@@ -388,11 +388,13 @@ describe('ManagedAgentRuntimeManager', () => {
   });
 
   it.each(['headers', 'body'] as const)(
-    'ends a stalled download at %s and retries without restarting',
+    'retains partial bytes after idle timeout at %s and resumes with Range',
     async (stage) => {
       const { archiveBytes, definition, originalArchive } =
         await installTinyCodexArchiveDefinition('idle.tar.zst');
       const started = Promise.withResolvers<AbortSignal>();
+      const splitAt = Math.floor(archiveBytes.byteLength / 2);
+      let firstAttempt = true;
       let healthy = false;
       let bodyClosed = false;
       const manager = new ManagedAgentRuntimeManager({
@@ -401,7 +403,12 @@ describe('ManagedAgentRuntimeManager', () => {
         arch: 'x64',
         runtimeBaseUrl: 'https://runtime.example.test',
         fetchImpl: async (_url, init) => {
-          if (healthy) return new Response(archiveBytes);
+          if (firstAttempt) {
+            firstAttempt = false;
+            return new Response(archiveBytes.slice(0, splitAt));
+          }
+          expect(new Headers(init?.headers).get('Range')).toBe(`bytes=${splitAt}-`);
+          if (healthy) return new Response(archiveBytes.slice(splitAt), { status: 206 });
           const signal = init?.signal;
           if (!signal) throw new Error('missing download cancellation');
           started.resolve(signal);
@@ -414,7 +421,8 @@ describe('ManagedAgentRuntimeManager', () => {
               cancel() {
                 bodyClosed = true;
               },
-            })
+            }),
+            { status: 206 }
           );
         },
       });
@@ -427,6 +435,12 @@ describe('ManagedAgentRuntimeManager', () => {
         expect(signal.aborted).toBe(true);
         if (stage === 'body') expect(bodyClosed).toBe(true);
         vi.useRealTimers();
+        const partialPath = join(
+          rootDir,
+          '.downloads',
+          `codex-${CODEX_RUNTIME_VERSION}-linux-x64-idle.tar.zst.part`
+        );
+        expect(await readFile(partialPath)).toEqual(Buffer.from(archiveBytes.slice(0, splitAt)));
         healthy = true;
         const installed = await manager.ensureCurrentRuntime('codex');
         expect(await readFile(installed.command, 'utf8')).toBe('tiny-codex');
@@ -436,6 +450,40 @@ describe('ManagedAgentRuntimeManager', () => {
       }
     }
   );
+
+  it('completes a progressing download that takes longer than ten minutes', async () => {
+    const { archiveBytes, definition, originalArchive } =
+      await installTinyCodexArchiveDefinition('slow.tar.zst');
+    const chunkSize = Math.ceil(archiveBytes.byteLength / 24);
+    let offset = 0;
+    const manager = new ManagedAgentRuntimeManager({
+      rootDir,
+      platform: 'linux',
+      arch: 'x64',
+      runtimeBaseUrl: 'https://runtime.example.test',
+      fetchImpl: async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            async pull(controller) {
+              await vi.advanceTimersByTimeAsync(30_000);
+              controller.enqueue(archiveBytes.slice(offset, offset + chunkSize));
+              offset += chunkSize;
+              if (offset >= archiveBytes.byteLength) controller.close();
+            },
+          })
+        ),
+    });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const began = Date.now();
+    try {
+      const installed = await manager.ensureCurrentRuntime('codex');
+      expect(Date.now() - began).toBeGreaterThan(10 * 60_000);
+      expect(await readFile(installed.command, 'utf8')).toBe('tiny-codex');
+    } finally {
+      vi.useRealTimers();
+      definition.platforms['linux-x64'] = originalArchive;
+    }
+  });
 
   it('still finds updates for other runtimes when one cache cannot be read', async () => {
     await installCachedCodex({
