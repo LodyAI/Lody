@@ -19,9 +19,14 @@ import { redactUrlAuth } from '@/utils/github';
 import { getCredentialHelperHostPath } from '@/lib/git-credential-helper-script';
 import { formatErrorMessage } from '@/utils/format-error';
 
+import { CommandTimedOut } from '@lody/shared/node/process';
 import type { NodeProcessApi } from '@lody/shared/node/process';
 import { ensureLodyDataDir, getLodyDataDir } from '@lody/shared/node/installation-profile';
-import { WorktreeGitCommandFailed, WorktreeGitExecutionFailed } from './git-execution';
+import {
+  BEST_EFFORT_FETCH_TIMEOUT_MS,
+  WorktreeGitCommandFailed,
+  WorktreeGitExecutionFailed,
+} from './git-execution';
 import { WorktreeObservations, worktreeObservationLayer } from './worktree-observations';
 import {
   LocalWorktreePreparation,
@@ -376,9 +381,14 @@ export class WorktreeManager {
     }
   }
 
-  private runGit(args: string[], cwd: string, env?: NodeJS.ProcessEnv): Promise<string> {
+  private runGit(
+    args: string[],
+    cwd: string,
+    env?: NodeJS.ProcessEnv,
+    timeout?: number
+  ): Promise<string> {
     return worktreeGitLegacy.run(
-      { args, cwd, env },
+      { args, cwd, env, timeout },
       { logger: this.logger, logPrefix: `[${this.repoId}]`, nodeProcess: this.nodeProcess }
     );
   }
@@ -746,7 +756,8 @@ export class WorktreeManager {
       await this.runGit(
         ['fetch', 'origin', '--prune'],
         this.bareGitDir,
-        buildBrokerAuthEnv(brokerAuth)
+        buildBrokerAuthEnv(brokerAuth),
+        fetchMode === 'best-effort' ? BEST_EFFORT_FETCH_TIMEOUT_MS : undefined
       );
       let originHead: string | null = null;
       let originMain: string | null = null;
@@ -775,6 +786,16 @@ export class WorktreeManager {
         } origin/master=${originMaster ?? 'unknown'})`
       );
     } catch (error) {
+      // A bare timeout is projected only after the process Scope released.
+      // Mixed timeout/release failures retain ProcessCleanupFailed and still escape.
+      if (
+        fetchMode === 'best-effort' &&
+        error instanceof WorktreeGitExecutionFailed &&
+        error.cause instanceof CommandTimedOut
+      ) {
+        this.logger.warn(`[${this.repoId}] Fetch timed out; continuing from local refs`);
+        return;
+      }
       rethrowWorktreeGitInfrastructureFailure(error);
       const message = error instanceof Error ? error.message : 'Unknown error';
       await this.diagnoseGitHubGitAuthFailure({

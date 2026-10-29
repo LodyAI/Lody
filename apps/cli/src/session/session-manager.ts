@@ -866,6 +866,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       const launchResolutionStartedAt = performance.now();
       let managedRuntimeReadyLogged = false;
       const launch = await resolveACPProcessLaunchAsync({
+        signal,
         agentConfigId: config.agentConfigId,
         magpieGatewayUrl: config.magpieGatewayUrl,
         cliType: config.agentCliType,
