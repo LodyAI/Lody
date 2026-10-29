@@ -7,6 +7,8 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import type { LoroRepo, TransportAdapter, TransportSubscription } from 'loro-repo';
+import type { E2eeWorkspaceRuntime } from '@lody/platform';
+import { createE2eeContent } from '../src/providers/desktop-e2ee-content';
 
 const mocks = vi.hoisted(() => {
   const setTransportAdapter = vi.fn(async () => {});
@@ -2778,6 +2780,93 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       await runtime.dispose();
     }
   });
+
+  it.each(['none', 'dispatch-only', 'complete'])(
+    'binds protected remote execution capability to the actual host port (%s)',
+    async (support) => {
+      const supported = support !== 'none';
+      const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
+      const repo = await RealRepo.create({});
+      mocks.repoOverride = repo;
+      const intents: unknown[][] = [];
+      const original = {
+        requestId: '11'.repeat(16),
+        targetMachineId: 'remote-machine',
+        requesterDevice: '22'.repeat(32),
+        expiresAt: 123456,
+        frameHex: 'synthetic-original-ciphertext',
+      };
+      const host = (supported
+        ? {
+            prepareDispatch: async (...args: unknown[]) => {
+              intents.push(args);
+              return original;
+            },
+            acceptDispatchResponse: async () => ({}),
+            ...(support === 'complete'
+              ? {
+                  prepareFeatureRpc: async () => original,
+                  acceptFeatureRpcResponse: async () => null,
+                }
+              : {}),
+          }
+        : {}) as unknown as E2eeWorkspaceRuntime;
+      const access = createE2eeContent({
+        runtime: host,
+        workspaceId: 'workspace-1',
+        genesisHash: '11'.repeat(32),
+        epoch: 0,
+        authToken: () => null,
+      });
+      const runtime = await createWorkspaceRuntime({
+        content: access.content,
+        e2ee: access.e2ee,
+        accountId: 'synthetic-account',
+        workspaceSlug: 'workspace',
+        workspaceId: 'workspace-1',
+        apiBaseUrl: 'https://synthetic.invalid',
+        syncMode: 'cloud',
+        e2eeLocalIdentity: {
+          accountId: 'synthetic-account',
+          workspaceId: 'workspace-1',
+          genesisHash: '11'.repeat(32),
+          signingPublicKey: '22'.repeat(32),
+        },
+      });
+      try {
+        expect(runtime.protectedRpcAvailable).toBe(support === 'complete');
+        expect(Boolean(runtime.prepareEncryptedDispatch)).toBe(supported);
+        if (supported) {
+          const input = {
+            sessionId: 'session',
+            userTurnId: 'turn',
+            userId: 'member',
+            timestamp: '2026-10-30T00:00:00Z',
+            inputConfig: {},
+          };
+          const first = await runtime.prepareEncryptedDispatch!('remote-machine', input);
+          const retry = await runtime.prepareEncryptedDispatch!('remote-machine', input);
+          expect(first.original).toEqual(original);
+          expect(retry.original).toEqual(first.original);
+          expect(intents).toEqual([
+            ['workspace-1', 'remote-machine', input],
+            ['workspace-1', 'remote-machine', input],
+          ]);
+        } else {
+          await expect(
+            runtime.requestFilePreview('remote-machine' as MachineId, {} as never)
+          ).resolves.toMatchObject({ status: 'error', message: 'e2ee_rpc_unavailable' });
+        }
+        // Preparation needs no local agent or ordinary transport/token.
+        expect(cloudAttachCalls()).toEqual([]);
+        expect(mocks.authInvocations).toEqual([]);
+        expect(mocks.machineRpcConstructors.mock.calls).toEqual([]);
+      } finally {
+        await runtime.dispose();
+        await access.close();
+      }
+    }
+  );
 
   it('opens protected schedules offline through the production store cache and retains encrypted transport assembly', async () => {
     const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');

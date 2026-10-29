@@ -16,6 +16,7 @@ import {
  *   verified (rollback or fork). Resettable only after support confirms the server.
  * - `local-corrupt`: an unreadable optional cache; deleting it is safe. */
 export type E2eeControlFailureKind =
+  | 'approval-required'
   | 'local-identity'
   | 'network'
   | 'auth'
@@ -25,6 +26,13 @@ export type E2eeControlFailureKind =
   | 'identity-conflict'
   | 'progress-conflict'
   | 'local-corrupt';
+
+/** Project only the portable host's single typed failure, never a mixed cleanup cause. */
+export function personalHostFailureCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  if (!('_tag' in error) || error._tag !== 'PersonalHostError') return undefined;
+  return 'code' in error && typeof error.code === 'string' ? error.code : undefined;
+}
 
 export interface E2eeControlFailure {
   kind: E2eeControlFailureKind;
@@ -55,6 +63,9 @@ function serverCode(error: unknown): string | null {
 
 /** Classify a control-page failure. Unknown errors are treated as transport failures. */
 export function classifyE2eeControlFailure(error: unknown): E2eeControlFailure {
+  const portable = personalHostFailureCode(error);
+  if (portable === 'identity-lost' || portable === 'approval-required')
+    return { kind: 'approval-required', code: portable };
   const message = error instanceof Error ? error.message : '';
   if (message.includes('e2ee_local-evidence-conflict'))
     return { kind: 'progress-conflict', code: 'local-evidence-conflict' };

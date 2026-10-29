@@ -15,11 +15,16 @@ and durable state/cursor retention. This [P10 preparation](../notes/implemented/
 does not supply historical-author authorization, a production signer, host snapshot
 admission or client recovery from an unusable remote snapshot.
 
-## Unavailable encrypted-workspace features
+## Encrypted-workspace feature availability
 
-`workspaceSupports` owns capability verdicts. UI reads the existing admission-mode
+`workspaceSupports` owns ordinary-channel capability verdicts. UI reads the existing admission-mode
 atom through `useWorkspaceFeature` and gets localized reasons from
 `useWorkspaceFeatureReason`; operations still check their explicit content/runtime.
+Protected remote execution requires the host's real dispatch pair; feature reads
+additionally require its feature pair (`protectedRpcAvailable`). This is not a blanket UI grant:
+ordinary RPC/provider writes remain unavailable. Supported calls use the existing
+signed request/response bridge, dedicated RPC grants and final receiving-machine
+execution checks. A missing optional host port keeps protected dispatch unavailable.
 Unsupported composer and conversation actions and remote-machine controls
 explain the restriction before users begin editing or transfer. Presence
 uses a neutral status-slot message; Code Collab reports unavailable rather than
@@ -55,6 +60,15 @@ member's machine. Account/control, billing and encrypted publication APIs retain
 their own supported paths. Ordinary query failures still reach their owning error
 boundary. Devices without an admitted encrypted runtime open the workspace control
 route for pairing; paired runtimes retain the chat route.
+
+Portable personal hosts expose requester-only pairing without desktop endorsement
+methods. The control route shows desktop approval guidance for their typed missing
+identity/approval outcomes, while public ledger verification remains available.
+Only a successful host read-open offers the workspace entry; entering it rechecks
+content readiness in RuntimeProvider. Control reads capture account and reader
+labels, fence preallocated cold opens and retain incomplete closes across route
+changes. Unknown-genesis cold readers block only the same account/workspace until
+their actual close finishes; independent workspaces remain usable.
 
 The onboarding tour uses the real session composer. Scheduled-message draft atoms
 keep their identity while React reattaches subscriptions, and across simultaneous

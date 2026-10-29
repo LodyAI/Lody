@@ -36,6 +36,8 @@ export function E2eePersonalPairing(props: {
   workspaceId: string;
   runtime: Runtime;
   canApprove: boolean;
+  /** Display only: a successful host read-open already admitted this device. */
+  approved?: boolean;
   onJoined: () => void;
 }) {
   // A workspace owns its pending originals and async UI results. Never carry
@@ -47,11 +49,13 @@ function PersonalPairingSession({
   workspaceId,
   runtime,
   canApprove,
+  approved,
   onJoined,
 }: {
   workspaceId: string;
   runtime: Runtime;
   canApprove: boolean;
+  approved?: boolean;
   onJoined: () => void;
 }) {
   const { t } = useTranslation();
@@ -125,15 +129,17 @@ function PersonalPairingSession({
       busy.current = false;
     }
   };
-  if (
-    !runtime.preparePersonalJoin ||
-    !runtime.personalPairingOffer ||
-    !runtime.inspectPersonalJoin ||
-    !runtime.approvePersonalJoin ||
-    !runtime.claimPersonalJoin ||
-    !runtime.cancelPersonalJoin
-  )
-    return null;
+  const canRequest = Boolean(
+    runtime.preparePersonalJoin && runtime.claimPersonalJoin && runtime.cancelPersonalJoin
+  );
+  const canEndorse = Boolean(
+    canApprove &&
+    runtime.personalPairingOffer &&
+    runtime.inspectPersonalJoin &&
+    runtime.approvePersonalJoin &&
+    runtime.cancelPersonalJoin
+  );
+  if ((!canRequest && !canEndorse) || (approved && !canEndorse)) return null;
   const createOffer = () =>
     work(async () => {
       const value = await runtime.personalPairingOffer!(workspaceId);
@@ -235,11 +241,13 @@ function PersonalPairingSession({
         />
       )}
       <Card.Header>
-        <Card.Title>{t('e2ee.pair.title')}</Card.Title>
+        <Card.Title>
+          {t(canEndorse ? 'e2ee.pair.title' : 'e2ee.pair.desktopApprovalRequired')}
+        </Card.Title>
         <Card.Description>{t('e2ee.pair.help')}</Card.Description>
       </Card.Header>
       <div {...stylex.props(styles.actions)}>
-        {canApprove && !offer && (
+        {canEndorse && !offer && (
           <Button
             variant="secondary"
             disabled={phase === 'busy' || recovering}
@@ -272,7 +280,7 @@ function PersonalPairingSession({
           </Button>
         </>
       )}
-      {!canApprove && !joining && (
+      {canRequest && !canEndorse && !joining && (
         <>
           <Textarea
             aria-label={t('e2ee.pair.code')}

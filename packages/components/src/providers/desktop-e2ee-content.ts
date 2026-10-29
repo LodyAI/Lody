@@ -209,6 +209,15 @@ export function createE2eeContent(input: {
       return transition.close();
     },
     e2ee: {
+      supportsDispatch: Boolean(
+        input.runtime.prepareDispatch && input.runtime.acceptDispatchResponse
+      ),
+      supportsRpc: Boolean(
+        input.runtime.prepareFeatureRpc &&
+        input.runtime.acceptFeatureRpcResponse &&
+        input.runtime.prepareDispatch &&
+        input.runtime.acceptDispatchResponse
+      ),
       attachmentToken: () =>
         withinContent(async () => {
           if (memberRemoved || transition.phase() === 'closed') throw new Error('e2ee_closed');

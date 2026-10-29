@@ -226,6 +226,9 @@ export function resolveWorkspaceRuntimeCacheIdentity(
 }
 
 export type WorkspaceE2eeTransport = {
+  supportsDispatch?: boolean;
+  /** Whether the actual injected host implements the closed signed RPC ports. */
+  supportsRpc?: boolean;
   attachmentToken?: () => Promise<string>;
   createTokenProvider(signal: AbortSignal): ReturnType<typeof createLoroStreamsTokenProviderLegacy>;
   createRpcTokenProvider(
@@ -512,6 +515,24 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     owned.throwIfAborted();
   };
   const protectedContent = deps.content.mode === 'protected';
+  const protectedDispatchAvailable =
+    protectedContent &&
+    Boolean(
+      deps.e2ee?.supportsDispatch !== false &&
+      deps.e2ee?.prepareDispatch &&
+      deps.e2ee.acceptDispatchResponse &&
+      deps.e2ee.createRpcTokenProvider
+    );
+  const protectedRpcAvailable =
+    protectedDispatchAvailable &&
+    Boolean(
+      deps.e2ee?.supportsRpc !== false &&
+      deps.e2ee?.prepareFeatureRpc &&
+      deps.e2ee.acceptFeatureRpcResponse &&
+      deps.e2ee.prepareDispatch &&
+      deps.e2ee.acceptDispatchResponse &&
+      deps.e2ee.createRpcTokenProvider
+    );
   if (protectedContent && !deps.e2ee) throw new Error('e2ee_transport_unavailable');
   if (
     protectedContent &&
@@ -1930,7 +1951,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     return encryptedDispatch;
   };
   const prepareEncryptedDispatch =
-    protectedContent && deps.e2ee?.prepareDispatch && deps.e2ee.acceptDispatchResponse
+    protectedDispatchAvailable && deps.e2ee?.prepareDispatch && deps.e2ee.acceptDispatchResponse
       ? async (machineId: string, input: import('@lody/shared/e2ee-rpc').E2eeDispatchInput) =>
           (await ensureEncryptedRpc()).prepare(machineId, input)
       : undefined;
@@ -1941,6 +1962,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     await waitForContentAdmission();
     if (protectedContent) {
       if (
+        !protectedRpcAvailable ||
         !deps.e2ee?.prepareFeatureRpc ||
         !deps.e2ee.acceptFeatureRpcResponse ||
         !deps.e2ee.createRpcTokenProvider
@@ -5714,6 +5736,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     workspaceId,
     contentMode: protectedContent ? 'e2ee' : 'plaintext',
     waitForContentAdmission,
+    protectedRpcAvailable,
     attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
     ...(prepareEncryptedDispatch ? { prepareEncryptedDispatch } : {}),
     repo,

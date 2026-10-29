@@ -10,6 +10,35 @@ const context = {
 } as const;
 
 describe('desktop E2EE content epoch safety', () => {
+  it.each([false, true])(
+    'advertises only real purpose-bound RPC capabilities (%s)',
+    async (supported) => {
+      const host = (supported
+        ? {
+            prepareFeatureRpc: async () => ({}),
+            acceptFeatureRpcResponse: async () => null,
+            prepareDispatch: async () => ({}),
+            acceptDispatchResponse: async () => ({}),
+          }
+        : {}) as unknown as E2eeWorkspaceRuntime;
+      const access = createDesktopE2eeContent({
+        runtime: host,
+        workspaceId: 'workspace',
+        genesisHash: '11'.repeat(32),
+        epoch: 0,
+        authToken: () => null,
+      });
+      try {
+        expect(access.e2ee.supportsRpc).toBe(supported);
+        if (!supported)
+          await expect(access.e2ee.prepareFeatureRpc({} as never)).rejects.toThrow(
+            'e2ee_rpc_unavailable'
+          );
+      } finally {
+        await access.close();
+      }
+    }
+  );
   it('does not hydrate a previous epoch token when a retired provider left a cache row', async () => {
     const entries = new Map<string, string>();
     vi.stubGlobal('localStorage', {

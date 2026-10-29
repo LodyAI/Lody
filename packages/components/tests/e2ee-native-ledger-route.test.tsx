@@ -10,7 +10,12 @@ import {
   hashRecordBytes,
   verifyLedger,
 } from '@lody/e2ee-core/protocol';
-import type { PlatformE2eeWorkspaces, E2eeRuntimeLedgerView } from '@lody/platform';
+import type {
+  PlatformE2eeWorkspaces,
+  E2eeRuntimeLedgerView,
+  WorkspacesState,
+} from '@lody/platform';
+import { PersonalHostError } from '@lody/e2ee-client';
 const fixture = vi.hoisted(() => ({
   port: undefined as PlatformE2eeWorkspaces | undefined,
   session: { status: 'authenticated', user: { id: 'account', name: 'A', email: 'a@example.test' } },
@@ -18,17 +23,22 @@ const fixture = vi.hoisted(() => ({
   workspaceId: 'workspace-native',
   cachedUser: null as { id: string } | null,
   showTools: false,
+  workspaces: { status: 'loading' } as WorkspacesState,
+  navigation: [] as unknown[],
 }));
 vi.mock('@tanstack/react-router', () => ({
   createFileRoute: () => (options: unknown) => ({
     options,
     useParams: () => ({ workspaceId: fixture.workspaceId }),
   }),
-  useNavigate: () => () => {},
+  useNavigate: () => (target: unknown) => {
+    fixture.navigation.push(target);
+  },
 }));
 vi.mock('@lody/platform/react', () => ({
   usePlatform: () => ({ e2eeWorkspaces: fixture.port }),
   usePlatformSession: () => fixture.session,
+  usePlatformWorkspaces: () => fixture.workspaces,
 }));
 vi.mock('jotai', () => ({
   useSetAtom: () => fixture.clear,
@@ -43,11 +53,13 @@ vi.mock('@/components/pages/e2ee-workspace-control-page', () => ({
     failure,
     memberProfiles,
     children,
+    onOpen,
   }: {
     history: { view: { length: number }; upgradeRequiredAt?: number } | null;
     failure?: unknown;
     memberProfiles?: ReadonlyMap<string, { name: string }>;
     children?: ReactNode;
+    onOpen?: () => void;
   }) =>
     createElement(
       Fragment,
@@ -55,21 +67,28 @@ vi.mock('@/components/pages/e2ee-workspace-control-page', () => ({
       createElement(
         'p',
         { 'data-control-state': true },
-        failure
-          ? 'failed'
-          : history?.upgradeRequiredAt !== undefined
-            ? 'upgrade'
-            : (history?.view.length ?? 'loading'),
+        (failure as { kind?: string } | undefined)?.kind === 'approval-required'
+          ? 'approval-required'
+          : failure
+            ? 'failed'
+            : history?.upgradeRequiredAt !== undefined
+              ? 'upgrade'
+              : (history?.view.length ?? 'loading'),
         ...[...(memberProfiles?.values() ?? [])].map((profile) => ` ${profile.name}`)
       ),
-      children
+      children,
+      onOpen
+        ? createElement('button', { 'data-open-workspace': true, onClick: onOpen }, 'open')
+        : null
     ),
 }));
 vi.mock('@/components/settings/e2ee-team-settings', () => ({ E2eeTeamSettingsHost: () => null }));
 vi.mock('@/components/e2ee/email-admission-worker', () => ({ EmailAdmissionWorker: () => null }));
 vi.mock('@/components/pages/e2ee-personal-pairing', () => ({
-  E2eePersonalPairing: ({ workspaceId }: { workspaceId: string }) =>
-    fixture.showTools ? createElement('aside', { 'data-pairing': workspaceId }) : null,
+  E2eePersonalPairing: ({ workspaceId, approved }: { workspaceId: string; approved?: boolean }) =>
+    fixture.showTools
+      ? createElement('aside', { 'data-pairing': workspaceId, 'data-approved': Boolean(approved) })
+      : null,
 }));
 vi.mock('@/components/pages/e2ee-ledger-audit', () => ({
   E2eeLedgerAudit: ({ workspaceId }: { workspaceId: string }) =>
@@ -128,6 +147,8 @@ beforeEach(() => {
   fixture.workspaceId = workspaceId;
   fixture.cachedUser = null;
   fixture.showTools = false;
+  fixture.workspaces = { status: 'loading' };
+  fixture.navigation = [];
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -474,6 +495,236 @@ function displayPort(
     memberProfiles,
   };
 }
+
+it.each(['identity-lost', 'approval-required'] as const)(
+  'a pairing-only host retains public verification and pairing while %s',
+  async (code) => {
+    fixture.port = displayPort(async () => [] as never);
+    delete fixture.port.memberProfiles;
+    fixture.showTools = true;
+    saveE2eeGenesisPin(localStorage, 'account', workspaceId, genesisHash);
+    const body: string[] = [];
+    let reads = 0;
+    fixture.port.runtime = {
+      recordCreated: async () => {
+        throw new PersonalHostError({ code: 'unsupported' });
+      },
+      open: async () => {
+        reads++;
+        throw new PersonalHostError({ code });
+      },
+      close: async () => {},
+      contentStreamsToken: async () => {
+        body.push('token');
+        throw new Error('unapproved');
+      },
+      sealContent: async () => {
+        body.push('seal');
+        throw new Error('unapproved');
+      },
+    } as unknown as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+    const Component = Route.options.component as () => ReturnType<typeof createElement>;
+    await act(async () => root.render(createElement(Component)));
+    expect(reads).toBe(1);
+    expect(container.textContent).toBe('approval-required');
+    expect(container.querySelector('[data-pairing]')?.getAttribute('data-pairing')).toBe(
+      workspaceId
+    );
+    expect(body).toEqual([]);
+  }
+);
+
+it('closes only its captured portable reader and spares the workspace reader', async () => {
+  fixture.port = displayPort(async () => [] as never);
+  delete fixture.port.memberProfiles;
+  const readers = new Set(['workspace-reader']);
+  const closes: unknown[][] = [];
+  let controlReader: string | undefined;
+  fixture.port.runtime = {
+    readerLeases: 'preallocated-v1',
+    recordCreated: async () => {},
+    open: async (_id, _checkpoint, expected, requested) => {
+      expect(expected).toBe('account');
+      controlReader = requested;
+      readers.add(requested ?? 'legacy-control-reader');
+      return { ...local.status, readerOwner: requested };
+    },
+    ledgerView: async () => local,
+    ingestLedgerRecords: async () => local.status,
+    close: async (...args) => {
+      closes.push(args);
+      if (args[2]) readers.delete(args[2]);
+      else readers.clear();
+    },
+  } as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  expect(controlReader).toBeTypeOf('string');
+  await act(async () => root.unmount());
+  expect(new Set(closes.map((entry) => JSON.stringify(entry)))).toEqual(
+    new Set([JSON.stringify([workspaceId, 'account', controlReader])])
+  );
+  expect([...readers]).toEqual(['workspace-reader']);
+});
+
+it('fences the preallocated control reader before a cold open settles', async () => {
+  fixture.port = displayPort(async () => [] as never);
+  delete fixture.port.memberProfiles;
+  const opened = Promise.withResolvers<typeof local.status>();
+  const entered = Promise.withResolvers<void>();
+  const closes: unknown[][] = [];
+  let pendingReader: string | undefined;
+  fixture.port.runtime = {
+    readerLeases: 'preallocated-v1',
+    open: async (_id, _checkpoint, _account, requested) => {
+      pendingReader = requested;
+      entered.resolve();
+      return opened.promise;
+    },
+    close: async (...args) => {
+      closes.push(args);
+    },
+  } as unknown as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  try {
+    await act(async () => root.render(createElement(Component)));
+    await entered.promise;
+    await act(async () => root.unmount());
+    expect(pendingReader).toBeTypeOf('string');
+    expect(closes).toEqual([[workspaceId, 'account', pendingReader]]);
+  } finally {
+    await act(async () => opened.resolve({ ...local.status, readerOwner: pendingReader }));
+  }
+  expect(container.textContent).toBe('');
+  expect(closes.at(-1)).toEqual([workspaceId, 'account', pendingReader]);
+});
+
+it('does not let an old public-directory read block a newly available protected host', async () => {
+  const described =
+    Promise.withResolvers<Awaited<ReturnType<PlatformE2eeWorkspaces['describe']>>>();
+  const entered = Promise.withResolvers<void>();
+  fixture.port = displayPort(async () => [] as never);
+  const descriptor = await fixture.port.describe({ workspaceId });
+  fixture.port.describe = async () => {
+    entered.resolve();
+    return described.promise;
+  };
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  try {
+    await act(async () => root.render(createElement(Component)));
+    await entered.promise;
+    await act(async () => root.unmount());
+    fixture.port = displayPort(async () => [] as never);
+    fixture.port.runtime = {
+      open: async () => local.status,
+      recordCreated: async () => {},
+      close: async () => {},
+      ledgerView: async () => local,
+      ingestLedgerRecords: async () => local.status,
+    };
+    root = createRoot(container);
+    await act(async () => root.render(createElement(Component)));
+    expect(container.querySelector('[data-control-state]')?.textContent).toBe('1');
+  } finally {
+    await act(async () => described.resolve(descriptor));
+  }
+});
+
+it('retains an incomplete cold reader across remounts while independent workspaces remain usable', async () => {
+  const opened = Promise.withResolvers<typeof local.status>();
+  const entered = Promise.withResolvers<void>();
+  const incomplete = Object.assign(new Error('close incomplete'), { owner: {} });
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const attempts: string[] = [];
+  let blocked = true;
+  let firstReader: string | undefined;
+  fixture.port = displayPort(async () => [] as never);
+  delete fixture.port.memberProfiles;
+  fixture.port.runtime = {
+    readerLeases: 'preallocated-v1',
+    recordCreated: async () => {},
+    open: async (id, _checkpoint, _account, reader) => {
+      attempts.push(id);
+      if (attempts.length === 1) {
+        firstReader = reader;
+        entered.resolve();
+        return opened.promise;
+      }
+      return { ...local.status, workspaceId: id, readerOwner: reader };
+    },
+    ledgerView: async (id) => ({ ...local, status: { ...local.status, workspaceId: id } }),
+    ingestLedgerRecords: async (id) => ({ ...local.status, workspaceId: id }),
+    close: async (id, account, reader) => {
+      expect(account).toBe('account');
+      if (id === workspaceId && reader === firstReader && blocked) throw incomplete;
+    },
+  } as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  try {
+    await act(async () => root.render(createElement(Component)));
+    await entered.promise;
+    await act(async () => root.unmount());
+    // The replacement knows a genesis that the cancelled cold open has not returned.
+    saveE2eeGenesisPin(localStorage, 'account', workspaceId, genesisHash);
+    root = createRoot(container);
+    await act(async () => root.render(createElement(Component)));
+    expect(container.textContent).toBe('failed');
+    expect(attempts).toEqual([workspaceId]);
+    fixture.workspaceId = 'independent-workspace';
+    await act(async () => root.render(createElement(Component)));
+    expect(attempts).toEqual([workspaceId, 'independent-workspace']);
+    expect(container.querySelector('[data-control-state]')?.textContent).toBe('1');
+    blocked = false;
+    await act(async () => opened.resolve({ ...local.status, readerOwner: firstReader }));
+    fixture.workspaceId = workspaceId;
+    await act(async () => root.render(createElement(Component)));
+    expect(attempts).toEqual([workspaceId, 'independent-workspace', workspaceId]);
+    expect(container.textContent).toBe('1');
+    expect(errors.mock.calls).not.toEqual([]);
+    expect(errors.mock.calls.every((entry) => entry.length === 1)).toBe(true);
+  } finally {
+    blocked = false;
+    await act(async () => opened.resolve({ ...local.status, readerOwner: firstReader }));
+    errors.mockRestore();
+  }
+});
+
+it('offers the routed workspace only after a successful approved host open', async () => {
+  fixture.showTools = true;
+  fixture.workspaces = {
+    status: 'ready',
+    activeWorkspaceId: workspaceId,
+    workspaces: [{ id: workspaceId, slug: 'protected-home', name: 'Protected', role: 'member' }],
+  };
+  fixture.port = displayPort(async () => [] as never);
+  delete fixture.port.memberProfiles;
+  let approved = false;
+  fixture.port.runtime = {
+    open: async () => {
+      if (!approved) throw new PersonalHostError({ code: 'approval-required' });
+      return local.status;
+    },
+    ledgerView: async () => local,
+    ingestLedgerRecords: async () => local.status,
+    recordCreated: async () => {
+      throw new PersonalHostError({ code: 'unsupported' });
+    },
+    close: async () => {},
+  } as unknown as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+  const Component = Route.options.component as () => ReturnType<typeof createElement>;
+  await act(async () => root.render(createElement(Component)));
+  expect(container.querySelector('[data-open-workspace]')).toBeNull();
+  expect(container.querySelector('[data-pairing]')).not.toBeNull();
+  approved = true;
+  await act(async () => window.dispatchEvent(new Event('online')));
+  const open = container.querySelector<HTMLButtonElement>('[data-open-workspace]');
+  expect(open).not.toBeNull();
+  expect(container.querySelector('[data-pairing]')?.getAttribute('data-approved')).toBe('true');
+  await act(async () => open!.click());
+  expect(fixture.navigation).toEqual([
+    { to: '/$workspaceName/chat', params: { workspaceName: 'protected-home' } },
+  ]);
+});
 
 it('shows verified history during a slow or failed directory and recovers labels on refresh', async () => {
   const pending =

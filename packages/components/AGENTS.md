@@ -31,6 +31,10 @@ mobile surfaces. Background for the rules below:
 - Shared UI accesses optional hosted operations only through descriptors in
   `src/lib/cloud-api-operations.ts` and `@lody/platform/react`. Never import generated
   backend declarations or call a hosted database directly.
+- Protected RPC requires actual host capabilities and live operation admission;
+  its presence never permits ordinary RPC, unsupported controls or execution.
+  Control-page readers close their captured account/reader, including cold opens,
+  and retain incomplete owners until actual close before reusing that binding.
 - A descriptor marked `public` can run before authentication and must expose only an
   intentionally public or narrowly token-scoped DTO.
 - Renderer and worker builds that cannot use native top-level await must use

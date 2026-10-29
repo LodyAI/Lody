@@ -23,6 +23,7 @@ import {
   saveScheduledMessage,
 } from '../src/components/schedules/scheduled-message-write';
 import type { WorkspaceRuntime } from '../src/atoms/runtime';
+import { runtimeAtom } from '../src/atoms/runtime';
 import { createSessionSendResources } from '../src/lib/session-send-resources';
 import type { SessionAttachmentDraft } from '../src/lib/session-attachment-draft';
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
@@ -236,24 +237,34 @@ it('keeps encrypted Code Collab available while its runtime is starting', async 
   expect(container.textContent).not.toContain('Encrypted workspaces do not yet support');
 });
 
-it('hides remote machine controls and provider forms with the same explanation', async () => {
-  const store = encryptedStore();
-  store.set(localProbeResultAtom, { ok: true, machineId: 'local' });
-  const machine = { id: 'remote', name: 'Remote machine' };
-  await act(async () =>
-    root.render(
-      <Provider store={store}>
-        <MachineDetailPane {...({ machine, isLocal: false } as never)} />
-        <MachineProvidersSection {...({ machine } as never)} />
-      </Provider>
-    )
-  );
-  const notices = [...container.querySelectorAll('[role="status"]')];
-  expect(notices.map((item) => item.textContent)).toEqual(
-    Array(2).fill('Encrypted workspaces do not yet support remote machine operations.')
-  );
-  expect(container.querySelector('button')).toBeNull();
-});
+it.each([false, true])(
+  'keeps unsupported remote provider controls fenced despite signed RPC support (%s)',
+  async (protectedRpcAvailable) => {
+    const store = encryptedStore();
+    store.set(runtimeAtom, {
+      contentMode: 'e2ee',
+      protectedRpcAvailable,
+      accountId: 'user',
+      workspaceId: 'workspace',
+      workspaceSlug: 'encrypted',
+    } as unknown as WorkspaceRuntime);
+    store.set(localProbeResultAtom, { ok: true, machineId: 'local' });
+    const machine = { id: 'remote', name: 'Remote machine' };
+    await act(async () =>
+      root.render(
+        <Provider store={store}>
+          <MachineDetailPane {...({ machine, isLocal: false } as never)} />
+          <MachineProvidersSection {...({ machine } as never)} />
+        </Provider>
+      )
+    );
+    const notices = [...container.querySelectorAll('[role="status"]')];
+    expect(notices.map((item) => item.textContent)).toEqual(
+      Array(2).fill('Encrypted workspaces do not yet support remote machine operations.')
+    );
+    expect(container.querySelector('button')).toBeNull();
+  }
+);
 
 it.each(['en', 'zh_CN'])(
   'enables local export controls in encrypted workspaces in %s',
