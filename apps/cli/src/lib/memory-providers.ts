@@ -1,3 +1,4 @@
+import { isBuiltinMemoryBinding } from '@lody/memory';
 import { toShared } from '@/platform/process-options';
 import { runCommandTextLegacy } from '@lody/shared/node/process';
 
@@ -125,6 +126,7 @@ const providers: readonly MemoryProvider[] = [createNowledgeMemoryProvider()];
 export function memoryEnvironment(binding: MemoryBinding | undefined): Record<string, string> {
   if (!binding) return {};
   const validated = MemoryBindingSchema.parse(binding);
+  if (isBuiltinMemoryBinding(validated)) return {};
   const provider = providers.find((entry) => entry.id === validated.providerId);
   if (!provider) throw new Error(`Unsupported memory provider: ${validated.providerId}`);
   return provider.environment(validated.memoryId);

@@ -104,6 +104,12 @@ component details.
   The Role list is one flat list naming each row's machines; memory shortcuts
   scroll to a Role without filtering. Only a ready Provider
   inventory can mark an identity missing; deleting a link never deletes provider data.
+- Settings → Memory puts the person's Lody Memory section above the machine tabs and
+  keeps machine-bound providers, their machine tabs and Add under "Integrated
+  providers". Lody memories are created, renamed and deleted only there; the Role
+  picker lists them first and enables them only on the local machine tab with
+  `builtinMemory: 1`. Deleting a Lody memory removes its content and asks first.
+  Layout and storage: [memory package](../../../../memory/README.md).
 
 ## Workspace ownership
 

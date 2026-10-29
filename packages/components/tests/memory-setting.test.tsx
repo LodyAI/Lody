@@ -9,6 +9,10 @@ import type {
   MemoryProviderResponse,
   MemoryAssociation,
 } from '@lody/shared';
+import { atom } from 'jotai';
+import type { StorageAdapter } from 'loro-repo';
+import { MEMORY_ENTRY_PATH } from '@lody/memory';
+import { createPersonalMemoryRepository, type PersonalMemoryRepository } from '@lody/memory/repo';
 import { localProbeResultAtom } from '../src/atoms/local-probe';
 import { MemorySetting, RoleMemoryPicker } from '../src/components/settings/memory-setting';
 import { initI18n } from '../src/i18n';
@@ -39,6 +43,12 @@ const mocks = vi.hoisted(() => ({
     create: vi.fn(async () => undefined as MemoryProviderResponse | undefined),
   },
   openExternalUrl: vi.fn(async () => true),
+  runtime: null as unknown,
+}));
+
+vi.mock('../src/atoms/runtime', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/atoms/runtime')>()),
+  activeWorkspaceRuntimeAtom: atom(() => mocks.runtime),
 }));
 
 vi.mock('../src/hooks/use-open-settings', () => ({
@@ -146,6 +156,7 @@ beforeEach(async () => {
   mocks.provider.busy = false;
   mocks.provider.create.mockReset();
   mocks.openExternalUrl.mockClear();
+  mocks.runtime = null;
   stubResizeObserver();
   container = document.createElement('div');
   document.body.append(container);
@@ -458,4 +469,153 @@ it('uses the Agents machine pills and pane tabs and omits both on local-only pla
   await renderSetting();
   expect(container.querySelector('[role="tablist"]')).toBeNull();
   expect(container.textContent).not.toContain('Build box');
+});
+
+// A session-only store: these tests exercise the real repository, not disk durability.
+const sessionStorage: StorageAdapter = {
+  save: async () => {},
+  loadDoc: async () => undefined,
+  loadMeta: async () => undefined,
+};
+async function withLodyMemory() {
+  const repo = await createPersonalMemoryRepository({ ownerId: 'alice', storage: sessionStorage });
+  const user = () => ({
+    changeId: crypto.randomUUID(),
+    recordedAt: Date.now(),
+    source: { actor: 'user' as const },
+  });
+  mocks.runtime = {
+    personalMemory: {
+      openCatalog: () => repo.openCatalog(),
+      open: (memoryId: string) => repo.open(memoryId, user()),
+      create: (profile: { name: string; description?: string }) =>
+        repo.create(crypto.randomUUID(), profile, user()),
+      remove: (memoryId: string) => repo.remove(memoryId),
+    },
+  };
+  return repo;
+}
+async function settle(check: () => boolean) {
+  for (let attempt = 0; attempt < 50 && !check(); attempt += 1)
+    await act(async () => {
+      await Promise.resolve();
+    });
+}
+async function readEntry(repo: PersonalMemoryRepository, memoryId: string) {
+  const handle = await repo.open(memoryId, {
+    changeId: 'read',
+    recordedAt: 1,
+    source: { actor: 'user' },
+  });
+  try {
+    const page = handle.memory.read({ path: MEMORY_ENTRY_PATH });
+    return page.ok ? page.value.body : undefined;
+  } finally {
+    await handle.release();
+  }
+}
+
+it('places Lody Memory above the machine-bound providers and creates a named memory into MEMORY.md', async () => {
+  const repo = await withLodyMemory();
+  await renderSetting();
+  await settle(() => container.textContent!.includes('Create a memory, then link it to a Role'));
+  const text = container.textContent!;
+  expect(text).toContain('Create a memory, then link it to a Role');
+  expect(container.querySelector('svg[data-theme]')).not.toBeNull();
+  expect(text.indexOf('Lody Memory')).toBeLessThan(text.indexOf('Integrated providers'));
+  expect(text.indexOf('Integrated providers')).toBeLessThan(text.indexOf('This Mac'));
+
+  await click('New memory');
+  expect(button('Create').disabled).toBe(true);
+  await fill('Name', 'Work');
+  await fill('Description (optional)', 'Team conventions');
+  await submit();
+  await settle(() => !container.textContent!.includes('Create a memory, then link it to a Role'));
+  await settle(() => container.textContent!.includes('Team conventions'));
+  expect(container.textContent).toContain('Work');
+  expect(container.textContent).toContain('Team conventions');
+
+  const catalog = await repo.openCatalog();
+  const [created] = catalog.list();
+  await catalog.release();
+  expect(await readEntry(repo, created!.memoryId)).toBe(
+    '---\nname: Work\ndescription: Team conventions\n---\n'
+  );
+
+  await click('Edit Work');
+  await settle(() => document.querySelector('[aria-label="History"]') !== null);
+  await settle(() => !button('History').disabled);
+  await click('History');
+  const dialog = () => document.querySelector('[role="dialog"]')!.textContent!;
+  expect(dialog()).toContain('History of MEMORY.md');
+  expect(dialog()).toContain('You · Created');
+  await click('Back');
+  expect(dialog()).not.toContain('History of MEMORY.md');
+  expect(document.querySelector('[aria-label="Name"]')).not.toBeNull();
+  await act(async () => root.unmount());
+  root = createRoot(container);
+  await repo.close();
+});
+
+it('lists Lody memories first in the Role picker and binds them only on this device', async () => {
+  const repo = await withLodyMemory();
+  const created = await repo.create(
+    'memory-work',
+    { name: 'Work' },
+    {
+      changeId: 'create',
+      recordedAt: 1,
+      source: { actor: 'user' },
+    }
+  );
+  expect(created.ok).toBe(true);
+  ready();
+  mocks.entries = [saved];
+  mocks.machines = new Map([
+    [
+      localId,
+      {
+        ...machine(localId, 'This Mac'),
+        protocolCapabilities: { memoryProviders: 1, builtinMemory: 1 },
+      },
+    ],
+    [
+      remoteId,
+      {
+        ...machine(remoteId, 'Build box'),
+        protocolCapabilities: { memoryProviders: 1, builtinMemory: 1 },
+      },
+    ],
+  ]);
+  const onChange = vi.fn();
+  const store = createStore();
+  store.set(localProbeResultAtom, { ok: true, machineId: localId });
+  const render = (machineId: MachineId) =>
+    act(async () =>
+      root.render(
+        <Provider store={store}>
+          <RoleMemoryPicker key={machineId} machineId={machineId} onChange={onChange} />
+        </Provider>
+      )
+    );
+  await render(localId);
+  await settle(() => container.textContent!.includes('Work'));
+  const text = container.textContent!;
+  expect(text.indexOf('Work')).toBeLessThan(text.indexOf('Reviewer'));
+  const [lodyLink] = [...container.querySelectorAll<HTMLButtonElement>('button')].filter(
+    (node) => node.textContent?.trim() === 'Link'
+  );
+  await act(async () => lodyLink!.click());
+  expect(onChange).toHaveBeenCalledWith({ providerId: 'lody', memoryId: 'memory-work' });
+
+  await render(remoteId);
+  await settle(() => container.textContent!.includes('Work'));
+  expect(container.textContent).toContain("this device's machine tab");
+  const [remoteLink] = [...container.querySelectorAll<HTMLButtonElement>('button')].filter(
+    (node) => node.textContent?.trim() === 'Link'
+  );
+  expect(remoteLink!.disabled).toBe(true);
+  await act(async () => root.unmount());
+  root = createRoot(container);
+  await repo.close();
 });

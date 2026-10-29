@@ -1,3 +1,5 @@
+import { PERSONAL_MEMORY_DATABASE_PREFIX } from '@lody/memory';
+import { createPersonalMemoryRuntime } from './personal-memory-runtime';
 import { requireWorkspaceFeature } from '@/lib/workspace-feature';
 import {
   requirePlaintextWorkspaceStreamsContent,
@@ -583,6 +585,14 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     : (deps.syncMode ?? (isElectronLocalDataPlaneEnabled() ? 'dual' : 'cloud'));
   // Historical name: true whenever a local plane exists (dual OR local).
   const electronLocalDataPlane = syncMode !== 'cloud';
+  const personalMemory =
+    deps.accountId && electronLocalDataPlane
+      ? createPersonalMemoryRuntime(
+          deps.accountId,
+          deps.workspaceId,
+          `${PERSONAL_MEMORY_DATABASE_PREFIX}${cacheIdentity.repoDbName}:${encodeURIComponent(deps.accountId)}`
+        )
+      : null;
   // False only on the local-only platform: no Streams member, no token
   // provider, no cloud presence/RPC — zero cloud I/O by construction.
   const cloudPlaneEnabled = syncMode !== 'local';
@@ -5396,6 +5406,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       await pendingSends.dispose();
       // Cancel and join send I/O while its cache, transport and repo still exist.
       await sendResources.dispose();
+      let memoryCloseError: unknown;
+      try {
+        await personalMemory?.close();
+      } catch (error) {
+        memoryCloseError = error;
+      }
       cancelDelayedBackgroundSyncStart?.();
       cancelDelayedBackgroundSyncStart = null;
       cancelDelayedStartupAcpCapabilitiesRefresh?.();
@@ -5520,6 +5536,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         }
       }
 
+      if (memoryCloseError) throw memoryCloseError;
       if (destroyError) {
         throw destroyError;
       }
@@ -5718,6 +5735,26 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     ...(prepareEncryptedDispatch ? { prepareEncryptedDispatch } : {}),
     repo,
     accountId: deps.accountId ?? null,
+    personalMemory: personalMemory
+      ? {
+          openCatalog: async () => {
+            if (disposePromise) throw new Error('memory_unavailable');
+            return personalMemory.openCatalog();
+          },
+          open: async (memoryId) => {
+            if (disposePromise) throw new Error('memory_unavailable');
+            return personalMemory.open(memoryId);
+          },
+          create: async (profile) => {
+            if (disposePromise) throw new Error('memory_unavailable');
+            return personalMemory.create(profile);
+          },
+          remove: async (memoryId) => {
+            if (disposePromise) throw new Error('memory_unavailable');
+            return personalMemory.remove(memoryId);
+          },
+        }
+      : undefined,
     pendingSends,
     isMachineRpcUnreachable,
     codeCollabFileIndexCache,

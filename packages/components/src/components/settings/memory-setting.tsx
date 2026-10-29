@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { LODY_MEMORY_PROVIDER_ID, isBuiltinMemoryBinding, lodyMemoryBinding } from '@lody/memory';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -19,6 +20,7 @@ import {
   MEMORY_PROVIDERS,
   getAgentRoleEmoji,
   getAgentRoleTarget,
+  getAgentRoleTargets,
   type AgentRole,
   MemoryCreateInputSchema,
   isMemoryIdentityMissing,
@@ -31,6 +33,15 @@ import {
   type MemoryProviderResponse,
 } from '@lody/shared';
 import nowledgeLogo from '@/assets/nowledge-mem.png';
+import lodyLogo from '@/assets/lody-icon.png';
+import { useResolvedTheme } from '@/theme-provider';
+import { useLodyMemories, type LodyMemoriesState } from '@/hooks/use-lody-memories';
+import { LodyMemoryEmptyIllustration } from './lody-memory-empty-illustration';
+import {
+  LodyMemoryCreateDialog,
+  LodyMemoryDeleteDialog,
+  LodyMemoryEditor,
+} from './lody-memory-dialogs';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useMachineOnlineStatus, useOnlineMachineIds } from '@/hooks/use-machine-online-status';
@@ -45,7 +56,7 @@ import { Field, FormMessage } from './form-primitives';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import { SettingsEmptyList, settingsRecordsCard } from './compact-layout';
 import { SettingsLineTabs } from './settings-line-tabs';
-import { SettingsPageActions, SettingsPageLead, useInSettingsPane } from './settings-page-header';
+import { SettingsPageLead, useInSettingsPane } from './settings-page-header';
 
 type ProviderDefinition = {
   id: string;
@@ -124,6 +135,16 @@ const styles = stylex.create({
     whiteSpace: 'pre-wrap',
   },
   note: { padding: space[4] },
+  sectionStack: { display: 'flex', flexDirection: 'column', gap: space[3] },
+  emptyState: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: space[3],
+    paddingBlock: space[6],
+    paddingInline: space[4],
+    textAlign: 'center',
+  },
   layout: {
     display: 'flex',
     height: '100%',
@@ -181,6 +202,8 @@ const styles = stylex.create({
 });
 
 export function MemoryProviderLogo({ providerId }: { providerId: string }) {
+  if (providerId === LODY_MEMORY_PROVIDER_ID)
+    return <img src={lodyLogo} alt="Lody Memory" {...stylex.props(styles.logo)} />;
   return providerId === 'nowledge-mem' ? (
     <img src={nowledgeLogo} alt="Nowledge Mem" {...stylex.props(styles.logo)} />
   ) : null;
@@ -216,7 +239,13 @@ export function MemoryAssociationList({
   selected,
   onAssociateRole,
   getAssignedRoles,
+  disabled = false,
+  empty,
 }: {
+  /** Rows can be read but not selected here (e.g. Lody Memory on a remote machine). */
+  disabled?: boolean;
+  /** Replaces the default empty line; `null` renders nothing. */
+  empty?: ReactNode;
   onAssociateRole?: (entry: MemoryAssociation) => void;
   getAssignedRoles?: (entry: MemoryAssociation) => readonly AgentRole[];
   entries: MemoryAssociation[];
@@ -228,13 +257,18 @@ export function MemoryAssociationList({
 }) {
   const { t } = useTranslation();
   if (!entries.length)
-    return <SettingsEmptyList>{t('settings.memory.emptyLinked')}</SettingsEmptyList>;
+    return empty !== undefined ? (
+      empty
+    ) : (
+      <SettingsEmptyList>{t('settings.memory.emptyLinked')}</SettingsEmptyList>
+    );
   return (
     <div {...stylex.props(settingsRecordsCard)}>
       {entries.map((entry, index) => {
         const assignedRoles = getAssignedRoles?.(entry) ?? [];
         const Main = onSelect ? 'button' : 'div';
         const missing = isMemoryIdentityMissing(entry, inventory);
+        const unavailable = missing || disabled;
         const linked =
           selected?.providerId === entry.providerId && selected.memoryId === entry.memoryId;
         return (
@@ -251,7 +285,7 @@ export function MemoryAssociationList({
           >
             <Main
               type={onSelect ? 'button' : undefined}
-              disabled={onSelect ? missing : undefined}
+              disabled={onSelect ? unavailable : undefined}
               onClick={onSelect ? () => onSelect(entry) : undefined}
               aria-pressed={onSelect ? linked : undefined}
               {...stylex.props(catalog.rowMain)}
@@ -296,7 +330,7 @@ export function MemoryAssociationList({
                   type="button"
                   size="small"
                   variant={linked ? 'secondary' : 'ghost'}
-                  disabled={missing}
+                  disabled={unavailable}
                   aria-pressed={linked}
                   onClick={() => onSelect(entry)}
                 >
@@ -388,6 +422,41 @@ export function MemoryIdentityList({
   );
 }
 
+/** Lody memories in the shape of provider associations, so both share one row grammar. */
+function lodyMemoryRows(
+  state: LodyMemoriesState,
+  machineId: string,
+  untitled: string
+): MemoryAssociation[] {
+  return state.memories.map((memory) => ({
+    machineId,
+    providerId: LODY_MEMORY_PROVIDER_ID,
+    memoryId: memory.memoryId,
+    name: memory.name ?? untitled,
+    ...(memory.description ? { description: memory.description } : {}),
+  }));
+}
+
+function MemorySectionHeader({
+  title,
+  description,
+  actions,
+}: {
+  title: string;
+  description?: string;
+  actions?: ReactNode;
+}) {
+  return (
+    <header {...stylex.props(surface.sectionHeader)}>
+      <div {...stylex.props(surface.sectionHeading)}>
+        <p {...stylex.props(surface.sectionTitle)}>{title}</p>
+        {description ? <p {...stylex.props(surface.sectionDescription)}>{description}</p> : null}
+      </div>
+      {actions ? <div {...stylex.props(surface.sectionActions)}>{actions}</div> : null}
+    </header>
+  );
+}
+
 export function MemorySetting() {
   const { t } = useTranslation();
   const { machines, accessByMachineId } = useVisibleMachineMetas();
@@ -420,47 +489,190 @@ export function MemorySetting() {
         ),
     [machines, onlineIds, accessByMachineId, localId]
   );
+  const machineTabs =
+    remote && !inPane ? (
+      <MachinePills
+        pills={pills}
+        selectedId={machineId}
+        onSelect={(id) => setSelected(id as MachineId)}
+      />
+    ) : remote && inPane && pills.length > 1 ? (
+      <SettingsLineTabs
+        tabs={pills.map((pill) => ({
+          ...pill,
+          leading: (
+            <span
+              aria-hidden="true"
+              {...stylex.props(styles.machineDot, pill.online && styles.machineDotOnline)}
+            />
+          ),
+        }))}
+        current={machineId ?? ''}
+        onChange={(id) => setSelected(id as MachineId)}
+        label={t('settings.agent.machineTabs.machine', 'Machine')}
+      />
+    ) : null;
   return (
     <div {...stylex.props(surface.container, styles.stack)}>
       <SettingsPageLead>{t('settings.memory.description')}</SettingsPageLead>
-      {remote && !inPane ? (
-        <MachinePills
-          pills={pills}
-          selectedId={machineId}
-          onSelect={(id) => setSelected(id as MachineId)}
-        />
-      ) : null}
-      {remote && inPane && pills.length > 1 ? (
-        <SettingsLineTabs
-          tabs={pills.map((pill) => ({
-            ...pill,
-            leading: (
-              <span
-                aria-hidden="true"
-                {...stylex.props(styles.machineDot, pill.online && styles.machineDotOnline)}
-              />
-            ),
-          }))}
-          current={machineId ?? ''}
-          onChange={(id) => setSelected(id as MachineId)}
-          label={t('settings.agent.machineTabs.machine', 'Machine')}
-        />
-      ) : null}
-      {machineId ? (
-        <MachineMemories
-          key={machineId}
-          machineId={machineId}
-          supported={machineSupportsMemoryProviders(machines.get(machineId))}
-        />
-      ) : (
-        <p>{t('settings.memory.noMachine')}</p>
-      )}
+      <LodyMemorySection />
+      <section {...stylex.props(surface.section, surface.sectionTitled, styles.sectionStack)}>
+        {machineId ? (
+          <MachineMemories
+            key={machineId}
+            machineId={machineId}
+            machineTabs={machineTabs}
+            supported={machineSupportsMemoryProviders(machines.get(machineId))}
+          />
+        ) : (
+          <>
+            <MemorySectionHeader
+              title={t('settings.memory.integrations.title')}
+              description={t('settings.memory.integrations.description')}
+            />
+            <p {...stylex.props(catalog.meta)}>{t('settings.memory.noMachine')}</p>
+          </>
+        )}
+      </section>
     </div>
   );
 }
 
+/** Lody Memory belongs to the person, not a machine, so it sits above the machine tabs. */
+function LodyMemorySection() {
+  const { t } = useTranslation();
+  const theme = useResolvedTheme();
+  const state = useLodyMemories();
+  const { roles, synced } = useWorkspaceAgentRoles();
+  const { openSettings } = useOpenSettings();
+  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<string>();
+  const [removing, setRemoving] = useState<MemoryAssociation>();
+  return (
+    <>
+      <LodyMemorySectionView
+        status={state.status}
+        rows={lodyMemoryRows(state, '', t('settings.memory.lody.untitled'))}
+        theme={theme}
+        getAssignedRoles={(entry) =>
+          roles.filter((role) =>
+            getAgentRoleTargets(role).some(
+              (target) =>
+                target.runConfig.memory?.providerId === LODY_MEMORY_PROVIDER_ID &&
+                target.runConfig.memory.memoryId === entry.memoryId
+            )
+          )
+        }
+        onAssociateRole={synced ? () => openSettings('agent-roles') : undefined}
+        onCreate={() => setCreating(true)}
+        onEdit={(entry) => setEditing(entry.memoryId)}
+        onRemove={setRemoving}
+      />
+      {creating ? (
+        <LodyMemoryCreateDialog onClose={() => setCreating(false)} onCreated={setEditing} />
+      ) : null}
+      {editing ? (
+        <LodyMemoryEditor key={editing} memoryId={editing} onClose={() => setEditing(undefined)} />
+      ) : null}
+      {removing ? (
+        <LodyMemoryDeleteDialog
+          memoryId={removing.memoryId}
+          name={removing.name}
+          onClose={() => setRemoving(undefined)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+export function LodyMemorySectionView({
+  status,
+  rows,
+  theme,
+  getAssignedRoles,
+  onAssociateRole,
+  onCreate,
+  onEdit,
+  onRemove,
+}: {
+  status: LodyMemoriesState['status'];
+  rows: MemoryAssociation[];
+  theme?: 'light' | 'dark';
+  getAssignedRoles?: (entry: MemoryAssociation) => readonly AgentRole[];
+  onAssociateRole?: (entry: MemoryAssociation) => void;
+  onCreate: () => void;
+  onEdit: (entry: MemoryAssociation) => void;
+  onRemove: (entry: MemoryAssociation) => void;
+}) {
+  const { t } = useTranslation();
+  const available = status !== 'unavailable' && status !== 'error';
+  return (
+    <section {...stylex.props(surface.section, surface.sectionTitled, styles.sectionStack)}>
+      <MemorySectionHeader
+        title={t('settings.memory.lody.title')}
+        description={t('settings.memory.lody.description')}
+        actions={
+          rows.length > 0 ? (
+            <Button
+              type="button"
+              size="small"
+              variant="secondary"
+              disabled={!available}
+              onClick={onCreate}
+            >
+              <Plus size={14} />
+              {t('settings.memory.lody.create')}
+            </Button>
+          ) : null
+        }
+      />
+      {status === 'unavailable' ? (
+        <SettingsEmptyList>{t('settings.memory.lody.unavailable')}</SettingsEmptyList>
+      ) : status === 'error' ? (
+        <SettingsEmptyList>{t('settings.memory.lody.loadError')}</SettingsEmptyList>
+      ) : status === 'loading' ? (
+        <div {...stylex.props(settingsRecordsCard)}>
+          <div {...stylex.props(surface.cardNote)}>
+            <Spinner size="small" />
+          </div>
+        </div>
+      ) : (
+        <MemoryAssociationList
+          entries={rows}
+          getAssignedRoles={getAssignedRoles}
+          onAssociateRole={onAssociateRole}
+          onEdit={onEdit}
+          onRemove={onRemove}
+          empty={
+            <div {...stylex.props(settingsRecordsCard)}>
+              <div {...stylex.props(styles.emptyState)}>
+                <LodyMemoryEmptyIllustration theme={theme} />
+                <span {...stylex.props(styles.description)}>
+                  {t('settings.memory.lody.emptyHint')}
+                </span>
+                <Button type="button" size="small" onClick={onCreate}>
+                  <Plus size={14} />
+                  {t('settings.memory.lody.create')}
+                </Button>
+              </div>
+            </div>
+          }
+        />
+      )}
+    </section>
+  );
+}
+
 type Editor = { providerId: string; entry?: MemoryAssociation };
-function MachineMemories({ machineId, supported }: { machineId: MachineId; supported: boolean }) {
+function MachineMemories({
+  machineId,
+  supported,
+  machineTabs,
+}: {
+  machineId: MachineId;
+  supported: boolean;
+  machineTabs: ReactNode;
+}) {
   const { t } = useTranslation();
   const associations = useMemoryAssociations(machineId);
   const { roles, synced } = useWorkspaceAgentRoles();
@@ -481,28 +693,35 @@ function MachineMemories({ machineId, supported }: { machineId: MachineId; suppo
       providers.push({ id: entry.providerId, name: entry.providerId, createFields: [] });
   return (
     <>
-      <SettingsPageActions>
-        <Button
-          type="button"
-          size="small"
-          variant="ghost"
-          icon
-          disabled={!online || !supported}
-          aria-label={t('settings.memory.refresh')}
-          onClick={() => setRefreshToken((value) => value + 1)}
-        >
-          <RefreshCw size={14} />
-        </Button>
-        <Button
-          type="button"
-          size="small"
-          variant="secondary"
-          onClick={() => setEditor({ providerId: MEMORY_PROVIDERS[0].id })}
-        >
-          <Plus size={14} />
-          {t('settings.memory.add')}
-        </Button>
-      </SettingsPageActions>
+      <MemorySectionHeader
+        title={t('settings.memory.integrations.title')}
+        description={t('settings.memory.integrations.description')}
+        actions={
+          <>
+            <Button
+              type="button"
+              size="small"
+              variant="ghost"
+              icon
+              disabled={!online || !supported}
+              aria-label={t('settings.memory.refresh')}
+              onClick={() => setRefreshToken((value) => value + 1)}
+            >
+              <RefreshCw size={14} />
+            </Button>
+            <Button
+              type="button"
+              size="small"
+              variant="secondary"
+              onClick={() => setEditor({ providerId: MEMORY_PROVIDERS[0].id })}
+            >
+              <Plus size={14} />
+              {t('settings.memory.add')}
+            </Button>
+          </>
+        }
+      />
+      {machineTabs}
       {error ? <FormMessage tone="error">{t('settings.memory.saveError')}</FormMessage> : null}
       {providers.map((provider) => (
         <ProviderRecords
@@ -948,12 +1167,23 @@ export function RoleMemoryPicker({
   onChange: (value?: MemoryBinding) => void;
 }) {
   const { t } = useTranslation();
+  const { openSettings } = useOpenSettings();
   const { entries } = useMemoryAssociations(machineId);
   const { machines } = useVisibleMachineMetas();
+  const localId = useAtomValue(localMachineIdAtom);
+  const lody = useLodyMemories();
   const supported = machineSupportsMemoryProviders(machines.get(machineId));
+  // The Renderer's Lody Memory replica reaches only this device's daemon.
+  const lodyUsable =
+    machineId === localId &&
+    (machines.get(machineId)?.protocolCapabilities?.builtinMemory ?? 0) >= 1;
+  const lodyRows = lodyMemoryRows(lody, machineId, t('settings.memory.lody.untitled'));
+  const lodyMissing =
+    isBuiltinMemoryBinding(value) &&
+    lody.status === 'ready' &&
+    !lodyRows.some((row) => row.memoryId === value!.memoryId);
   return (
     <div {...stylex.props(styles.stack)}>
-      <span {...stylex.props(catalog.meta)}>{t('settings.memory.rolePromptHint')}</span>
       {value ? (
         <div {...stylex.props(styles.unlinkRow)}>
           <Button type="button" size="small" variant="ghost" onClick={() => onChange(undefined)}>
@@ -961,24 +1191,86 @@ export function RoleMemoryPicker({
           </Button>
         </div>
       ) : null}
-      {!entries.length ? (
-        <p {...stylex.props(catalog.meta)}>{t('settings.memory.emptyRole')}</p>
-      ) : (
-        MEMORY_PROVIDERS.map((provider) => (
-          <RoleProviderMemories
-            key={provider.id}
-            machineId={machineId}
-            provider={provider}
-            entries={entries.filter((entry) => entry.providerId === provider.id)}
-            supported={supported}
-            value={value}
-            onChange={onChange}
-          />
-        ))
-      )}
+      {lody.status !== 'unavailable' ? (
+        <RoleLodyMemoryList
+          rows={lodyRows}
+          value={value}
+          usable={lodyUsable}
+          missing={lodyMissing}
+          onSelect={onChange}
+          onCreate={() => openSettings('memory')}
+        />
+      ) : null}
+      {entries.length ? (
+        <div {...stylex.props(styles.stack)}>
+          <span {...stylex.props(catalog.meta)}>{t('settings.memory.integrations.title')}</span>
+          {!isBuiltinMemoryBinding(value) ? (
+            <span {...stylex.props(catalog.meta)}>{t('settings.memory.rolePromptHint')}</span>
+          ) : null}
+          {MEMORY_PROVIDERS.map((provider) => (
+            <RoleProviderMemories
+              key={provider.id}
+              machineId={machineId}
+              provider={provider}
+              entries={entries.filter((entry) => entry.providerId === provider.id)}
+              supported={supported}
+              value={value}
+              onChange={onChange}
+            />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
+/** The Role picker's Lody Memory group, listed before provider associations. */
+export function RoleLodyMemoryList({
+  rows,
+  value,
+  usable,
+  missing,
+  onSelect,
+  onCreate,
+}: {
+  rows: MemoryAssociation[];
+  value?: MemoryBinding;
+  /** Only this device's daemon can reach the Renderer's Lody Memory replica. */
+  usable: boolean;
+  missing: boolean;
+  onSelect: (value: MemoryBinding) => void;
+  onCreate: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div {...stylex.props(styles.stack)}>
+      <span {...stylex.props(catalog.meta)}>{t('settings.memory.lody.title')}</span>
+      {missing ? (
+        <FormMessage tone="warning">{t('settings.memory.lody.missing')}</FormMessage>
+      ) : null}
+      {!usable && rows.length > 0 ? (
+        <span {...stylex.props(catalog.meta)}>{t('settings.memory.lody.roleLocalOnly')}</span>
+      ) : null}
+      <MemoryAssociationList
+        entries={rows}
+        selected={value}
+        disabled={!usable}
+        onSelect={(entry) => onSelect(lodyMemoryBinding(entry.memoryId))}
+        empty={
+          <SettingsEmptyList
+            action={
+              <Button type="button" size="small" variant="secondary" onClick={onCreate}>
+                {t('settings.memory.lody.create')}
+              </Button>
+            }
+          >
+            {t('settings.memory.lody.roleEmpty')}
+          </SettingsEmptyList>
+        }
+      />
+    </div>
+  );
+}
+
 function RoleProviderMemories({
   machineId,
   provider,

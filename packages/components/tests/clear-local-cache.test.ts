@@ -151,6 +151,7 @@ describe('maybeClearLodyCacheOnBoot', () => {
   });
 
   it('clears only lody caches for a cache clear, and keeps the user signed in', async () => {
+    presentDatabases.push('lody-personal-memory:workspace:alice');
     localStorage.setItem('lody:auth-token', 'token');
     markCacheClearPending();
 
@@ -159,6 +160,7 @@ describe('maybeClearLodyCacheOnBoot', () => {
     expect(deletedDatabases).toContain('lody:repo-file-paths');
     expect(deletedDatabases).toContain('lody-loro-repo-db-ws1');
     expect(deletedDatabases).not.toContain('someone-elses-db');
+    expect(presentDatabases).toContain('lody-personal-memory:workspace:alice');
     expect(deletedCaches).toEqual(['lody-avatars']);
     expect(localStorage.getItem('lody:auth-token')).toBe('token');
     expect(readPendingLocalClearMode()).toBeNull();

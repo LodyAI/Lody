@@ -17,6 +17,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   dshProviderIsolation: 'dshProviderIsolation',
   terminalNotifications: 'terminalNotifications',
   memoryProviders: 'memoryProviders',
+  builtinMemory: 'builtinMemory',
   mcpToolDiscovery: 'mcpToolDiscovery',
   mcpLocalAuthentication: 'mcpLocalAuthentication',
   localProjectHistoryProvider: 'localProjectHistoryProvider',
@@ -155,6 +156,7 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.terminalNotifications]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionCollaborationControl]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.memoryProviders]: MEMORY_PROVIDERS_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.builtinMemory]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.mcpToolDiscovery]: MCP_TOOL_DISCOVERY_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.mcpLocalAuthentication]: MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectHistoryProvider]:

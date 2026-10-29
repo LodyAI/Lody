@@ -163,6 +163,7 @@ action to trigger CI. Existing releases and their assets are preserved on reruns
 - `packages/ui` — Base UI primitives and StyleX design tokens
 - `packages/platform` — Platform capabilities and integrations
 - `packages/shared` — Shared schemas, protocols, and utilities
+- `packages/memory` — Lody Memory: named personal memories, local persistence, and Agent integration ([architecture](packages/memory/README.md); cross-device sync disabled)
 - `packages/cloud-api` — Optional-cloud protocol names and DTOs
 - `packages/e2ee-core` — End-to-end encryption library: signed ledger, key delivery, services and adapters ([reading guide](packages/e2ee-core/README.md), not yet wired into the product)
 - `packages/e2ee-lab` — Local adversarial consumers and persistence probes for `@lody/e2ee-core`

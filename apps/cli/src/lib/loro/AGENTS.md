@@ -13,19 +13,17 @@ Replacement rules: [shared](../../../../../packages/shared/AGENTS.md#session-his
 
 ## Opening a doc pulls its stream
 
-`LoroDocumentManager.getOrCreateSessionDoc()` is not a cheap read.
-`SessionDocument.init()` joins and pulls the room immediately. It stays joined
-in the manager cache until `cleanSessionDoc`; each open costs a subscription and
-full initial sync.
+`getOrCreateSessionDoc()` initializes, joins and pulls the room immediately;
+the manager retains it until `cleanSessionDoc`. Each open costs a subscription
+and full initial sync.
 
 Rules:
 
 - Renderer metadata is imported into the meta Flock with no transport; the
   metadata live monitor must start at repo init (`ready()`), or
   `getDocMeta` stays stale and dispatch misses `latestUserMsgId`.
-- Never open docs in a loop over `listAliveRoomIds` or any other workspace-wide
-  enumeration. A long-lived workspace holds thousands of historical session
-  rooms; opening them all stalls startup and floods the Streams backend.
+- Never open docs in a `listAliveRoomIds` or other workspace-wide loop:
+  historical rooms would stall startup and flood Streams.
 - Bulk/startup/recovery scans must first filter to candidates through indexes
   that do not join rooms: `repo.getDocMeta(roomId)` meta records, the `e/`
   existence index (`lib/loro/repo-existence.ts`), or a purpose-built local index
@@ -57,11 +55,9 @@ Per identity, share `repo.sqlite3`, not replicas: Meta/Flock cursors use `create
 
 ## Shared ACP runtime config contains no secrets
 
-`SessionDocument.applyAcpRuntimeConfigPatch` is the durable boundary for the
-workspace-shared runtime baseline. It must remove every option id matched by
-`isSensitiveAcpConfigOptionId`, even when an upstream caller already filtered the
-ACP response; otherwise a future agent can persist and broadcast credential-like
-selector values to collaborators.
+`SessionDocument.applyAcpRuntimeConfigPatch` must remove every option matched by
+`isSensitiveAcpConfigOptionId`, even from already-filtered ACP responses, before
+persisting the workspace-shared baseline.
 
 ## Presence is ephemeral and partitioned by origin
 
@@ -143,3 +139,11 @@ session reconciles/minute. Backoff is flap-aware for the same reason: health tha
 not survive `LODY_LORO_HEALTH_STABILITY_WINDOW_MS` (5s) counts as a failed recovery and
 charges the attempt counter instead of resetting it, and `force` must not clear that
 history. Regression: `tests/reconnect-storm-repro.test.ts`.
+
+## Personal memory
+
+`personal-memory.ts` owns user/workspace SQLite storage. Never put personal Docs
+or metadata in the workspace Repo or Streams. Resolve local rooms only for the
+manager's user. Agent access uses frozen turns, live Role bindings and the owner's
+memory catalog; Renderer edits arrive through local Loro replication. Local room
+resolution replicates catalog and memory Docs as they are and never initializes one.
