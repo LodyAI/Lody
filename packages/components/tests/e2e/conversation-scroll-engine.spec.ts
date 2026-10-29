@@ -27,7 +27,14 @@ for (const timing of ['before native input', 'after native input'] as const) {
       ({ webKit, timing: inputTiming }) => {
         const viewport = document.querySelector<HTMLElement>('#viewport')!;
         const above = document.querySelector<HTMLElement>('#above')!;
-        const state = { step: 0, running: true, reversals: [] as number[], corrections: 0 };
+        const state = {
+          step: 0,
+          running: true,
+          reversals: [] as number[],
+          corrections: 0,
+          anchorDrifts: [] as number[],
+          nativeProgress: [] as number[],
+        };
         const testWindow = window as unknown as {
           compensationTest: typeof state;
           compensateScroll: typeof compensateConversationScroll;
@@ -39,11 +46,16 @@ for (const timing of ['before native input', 'after native input'] as const) {
         viewport.addEventListener('wheel', () => {}, { passive: false });
         let previous = new Map<Element, number>();
         let correctedStep = -1;
+        let correctedTop = viewport.scrollTop;
         const correct = () => {
           if (state.step > 0 && state.step % 12 === 0 && correctedStep !== state.step) {
             correctedStep = state.step;
+            state.nativeProgress.push(correctedTop - viewport.scrollTop);
+            const before = above.getBoundingClientRect().bottom;
             above.style.height = `${parseFloat(above.style.height || '10000') + 536}px`;
             testWindow.compensateScroll(viewport, 536, webKit);
+            state.anchorDrifts.push(above.getBoundingClientRect().bottom - before);
+            correctedTop = viewport.scrollTop;
             state.corrections++;
           }
         };
@@ -80,7 +92,13 @@ for (const timing of ['before native input', 'after native input'] as const) {
     const result = await page.evaluate(() => {
       const state = (
         window as unknown as {
-          compensationTest: { running: boolean; reversals: number[]; corrections: number };
+          compensationTest: {
+            running: boolean;
+            reversals: number[];
+            corrections: number;
+            anchorDrifts: number[];
+            nativeProgress: number[];
+          };
         }
       ).compensationTest;
       state.running = false;
@@ -93,17 +111,18 @@ for (const timing of ['before native input', 'after native input'] as const) {
     });
     expect(result.corrections).toBe(6);
     expect(result.reversals).toEqual([]);
-    const uninterruptedTop = 30_000 - 72 * 160 + 6 * 536;
-    if (browserName === 'webkit' && timing === 'before native input') {
-      // Releasing native ownership may cancel the in-flight input, just as a
-      // programmatic correction can end an iOS fling. Never lose the correction,
-      // reverse the reader's motion, or discard subsequent native inputs.
-      expect(result.top).toBeGreaterThanOrEqual(uninterruptedTop);
-      expect(result.top).toBeLessThanOrEqual(uninterruptedTop + result.corrections * 160);
-    } else {
-      expect(result.top).toBe(uninterruptedTop);
-    }
+    expect(result.anchorDrifts).toEqual(Array(6).fill(0));
+    // wheel() dispatches input without awaiting its native animation. WebKit's
+    // GTK and macOS ports do not turn the same input sequence into the same
+    // completed distance. Check actual progress between corrections instead.
+    expect(result.nativeProgress).toHaveLength(6);
+    for (const distance of result.nativeProgress) expect(distance).toBeGreaterThan(0);
     expect(result.overflow).toBe('auto');
+    await page.mouse.wheel(0, -160);
+    await page.waitForFunction(
+      (before) => document.querySelector<HTMLElement>('#viewport')!.scrollTop < before,
+      result.top
+    );
   });
 }
 

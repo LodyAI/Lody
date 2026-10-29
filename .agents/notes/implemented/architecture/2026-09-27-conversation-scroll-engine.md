@@ -378,7 +378,7 @@ The WebKit DOM adapter releases native scrolling ownership around each relative
 correction: commit `overflow-y: hidden` with a layout read, apply the relative
 write, commit again, and restore the exact inline value and priority in `finally`.
 Content remains painted at the same origin. A synchronous CSSOM read-back alone
-does not acknowledge the native scrolling tree: in Playwright WebKit 26.0, a
+does not acknowledge the native scrolling tree: in macOS Playwright WebKit 26.0, a
 synthetic leading-height change of +536 followed by -160 wheel inputs produced
 screen positions `0 → 696 → 320` instead of `0 → 160 → 320`. An empty non-passive
 wheel listener makes this crossing reproducible. Changing to absolute writes did
@@ -393,8 +393,10 @@ the coordinate origin. Other engines retain the ordinary relative write. The
 [adapter regression](../../../../packages/components/tests/engine-conversation-scroller.test.tsx)
 pins exception restoration; the
 [native wheel regression](../../../../packages/components/tests/e2e/conversation-scroll-engine.spec.ts)
-checks both input orderings, monotonic reading motion, the bounded cancellation
-of in-flight input, and complete input distance after native movement has arrived.
+checks both input orderings, unchanged anchor geometry during each correction,
+monotonic reading motion, and continued native input after the handoff. It uses
+observed viewport progress: `mouse.wheel()` does not await native animation, and
+GTK and macOS need not finish the same distance within the same frame count.
 Physical iOS touch and momentum acceptance remains open.
 
 **No deferral in v1: an accepted iOS regression.**

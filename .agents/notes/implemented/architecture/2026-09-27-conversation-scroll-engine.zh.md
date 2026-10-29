@@ -259,7 +259,7 @@ maxScrollTop     = max(0, extent + bottomPadding + replyRoom + contentTop - view
 
 WebKit DOM 适配器在每次相对补偿时释放原生滚动所有权：用一次布局读取提交
 `overflow-y: hidden`，执行相对写入，再提交一次，最后在 `finally` 中恢复原有内联值及优先级。
-内容始终绘制在原有坐标原点。同步 CSSOM 读回不代表原生滚动树已经确认：在 Playwright WebKit 26.0 中，
+内容始终绘制在原有坐标原点。同步 CSSOM 读回不代表原生滚动树已经确认：在 macOS Playwright WebKit 26.0 中，
 合成的前部高度增加 +536，随后输入 -160 的滚轮事件，得到的屏幕位置是 `0 → 696 → 320`，
 预期则是 `0 → 160 → 320`。空的非被动 wheel 监听器可使这种交错稳定复现；改用绝对写入也不能可靠消除它。
 WebKit 的[上游异步滚动核对修复](https://github.com/WebKit/WebKit/commit/e8697834ad4b3d036032823f29b7d4329ffb45ec)
@@ -269,7 +269,8 @@ overflow 交接为每次 WebKit 补偿增加两次同步布局读取，并可能
 这明确保留下文已接受的中断代价，不延期补偿，也不改变坐标原点。其他引擎仍执行普通相对写入。
 [适配器回归测试](../../../../packages/components/tests/engine-conversation-scroller.test.tsx)
 固定异常时的样式恢复；[原生滚轮回归测试](../../../../packages/components/tests/e2e/conversation-scroll-engine.spec.ts)
-覆盖两种输入顺序、阅读运动不反向、正在处理输入的取消上界，以及原生位移已经到达后的完整输入距离。
+覆盖两种输入顺序、每次补偿前后锚点位置不变、阅读运动不反向，以及交接后原生输入继续生效。
+断言使用视口的实际进度：`mouse.wheel()` 不等待原生动画完成，GTK 与 macOS 在相同帧数内完成的位移不必相同。
 实体 iOS 设备上的触摸与惯性验收仍未完成。
 
 **v1 不延期：接受的 iOS 行为回退。**现状 fork 在 iOS 滚动进行中会延期 jump（`store.ts`：`isIOSWebKit()` 时
