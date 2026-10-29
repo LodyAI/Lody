@@ -8,6 +8,8 @@ PR: [#1652](https://github.com/LodyAI/Lody/pull/1652)
 
 ## Abstract
 
+Current release and timeout policy is owned by the [availability decision](2026-10-29-inbox-no-durable-block.md). The incident, original decisions and verification below are historical: indefinite bookkeeping waits and release-proof admission are superseded.
+
 A Session stopped answering for good after an Inbox-delivered turn failed and
 its failure handler threw as well. The second exception skipped the Inbox
 release, so the turn registration leaked without a recorded release failure:

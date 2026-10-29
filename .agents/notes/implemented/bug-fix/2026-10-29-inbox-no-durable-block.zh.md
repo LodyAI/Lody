@@ -22,3 +22,5 @@ owner 提供的 0.107.2 事故中，桌面退出时三秒后强杀 CLI，没有�
 ## 证据与限制
 
 `apps/cli/src/orchestration/inbox/inbox.test.ts` 用真实 SQLite 覆盖退役、历史阻塞、未知不重放、首份回执与资源身份保留。 `apps/cli/tests/session-execution-service.test.ts` 覆盖终止失败、新 ACP 执行与可见提示，Coordinator 测试覆盖终止关闭。 上述事故数字由 owner 提供，未访问私有数据复现。不声称真实孤儿清理、Windows 主机或桌面安装包验收。
+
+原始 ACP 排空或确认终止后，先写释放回执，再做 Git、diff/usage、Code Collab 和 batch 历史投影。每个统计与展示步骤最多等待 30 秒；`ownedWork` 持有原始任务并观察迟到失败。yielded 链超时也继续归该 owner 管理，不阻断后继。退出时跳过这段可选等待，在消息队列 drain 前并行取消所有活跃执行；CLI 总预算七秒，其中先用最多六秒等待释放回执，桌面宽限十秒，实际退出则立即结束等待。取消历史、ACP 收尾和 idle 语义仍在释放前，因为 reconciliation 和下一轮会读取它们。Session／ACP 依赖链仍未完成，本次不扩大原生迁移。

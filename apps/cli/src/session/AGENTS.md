@@ -72,6 +72,8 @@
 
 ## Lifecycle
 
+- Optional turn bookkeeping follows release, has bounded waits, and stays owned through raw completion. Shutdown prioritizes active release receipts before queue drain and other cleanup.
+
 - [Roost](README.md#roost-history-paging): gate owner/backend. No keyring/rotation/fallback,
   removed-history revival, uncertain steer replay/retry or log/receipt pruning. Atomic edits/digests/metadata;
   agent v2/renderer v3. SDK owns input/permission/branch; local causes+RPC stage/code/ID.

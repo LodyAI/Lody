@@ -220,9 +220,12 @@ Raw prompt/steer requests and configuration work remain in the owner's five-seco
 termination failure keeps ownership. Steer configuration checks the local signal before each
 subsequent mutation. Already-applied handoff commits before queued completion can run.
 
-A failed release remains `releaseBlocked`, and the next waiting input drives a single-flight
-recovery. The [release decision](../../../../.agents/notes/implemented/bug-fix/2026-10-17-turn-release-survives-failure-handling.md)
-explains why slow finalization alone is not a release failure.
+Release receipts precede bounded, owned Git/diff/usage and history projections. Slow yielded
+bookkeeping stops delaying release after 30 seconds; shutdown skips that optional wait.
+Failed release detaches the old Agent and admits fresh input without replay. The
+[availability decision](../../../../.agents/notes/implemented/bug-fix/2026-10-29-inbox-no-durable-block.md)
+owns the current policy; the [original release fix](../../../../.agents/notes/implemented/bug-fix/2026-10-17-turn-release-survives-failure-handling.md)
+explains why failure classification cannot skip release.
 
 Stop reports a rejected provider cancellation, expiration of that five-second drain, and
 failed process termination through durable `agent_warning` notices. The execution runtime

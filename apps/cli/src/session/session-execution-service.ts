@@ -202,8 +202,8 @@ type FinalizeTurnContext = {
 const TURN_FINALIZATION_STAGE_WARN_MS = 5_000;
 /** Trailing history rows searched for the last assistant turn and its user input. */
 const DEAD_TURN_SCAN_ROWS = 64;
-/** Log, never fail, a yielded turn's finalization that is still running at release. */
-const YIELDED_FINALIZATION_SLOW_WARNING = '5 seconds';
+/** Bookkeeping waiters are bounded; raw work remains owned until it settles. */
+const TURN_BOOKKEEPING_TIMEOUT_MS = 30_000;
 // Renderer, local IPC, and Machine RPC wait at most 300s for the complete
 // authentication workflow. Keep the post-login capability proof inside that
 // envelope and leave a small delivery margin for the final response.
@@ -360,6 +360,7 @@ type TurnRuntimeState = {
   activePromptRun?: PromptHandoffRun;
   /** Serialized ancillary finalization for yielded logical turns. */
   yieldedFinalization: Promise<void>;
+  afterRelease: Array<() => Promise<unknown>>;
   pendingSession?: Promise<ISession>;
   /**
    * Latched when the initialization stall watchdog halted this turn. The halt is
@@ -886,7 +887,56 @@ export class SessionExecutionService {
     this.completionPublicationAbort.abort();
   }
 
+  private readonly shutdownAbort = new AbortController();
   private readonly ownedWork = new Set<Promise<unknown>>();
+
+  private ownBookkeeping<T>(sessionId: SessionId, work: Promise<T>): Promise<T | undefined> {
+    const observed = work.catch((error: unknown) => {
+      this.deps.logger.warn(`[${sessionId}] Turn bookkeeping failed: ${formatErrorMessage(error)}`);
+      return undefined;
+    });
+    this.ownedWork.add(observed);
+    void observed.then(() => this.ownedWork.delete(observed));
+    return observed;
+  }
+
+  private async runBookkeepingStage<T>(
+    sessionId: SessionId,
+    turnId: string,
+    stage: string,
+    run: () => Promise<T>
+  ): Promise<T | undefined> {
+    const raw = this.ownBookkeeping(sessionId, Promise.resolve().then(run));
+    try {
+      return await withTimeout(raw, TURN_BOOKKEEPING_TIMEOUT_MS, `${stage} timed out`);
+    } catch (error) {
+      this.deps.logger.warn(
+        `[${sessionId}] Turn ${turnId} bookkeeping continues in background: ${formatErrorMessage(error)}`
+      );
+      return undefined;
+    }
+  }
+
+  private afterTurnRelease(
+    sessionId: SessionId,
+    turnId: string,
+    run: () => Promise<unknown>
+  ): void {
+    const runtime = this.getTurnRuntime(sessionId, turnId);
+    if (runtime) runtime.afterRelease.push(run);
+    else this.ownBookkeeping(sessionId, Promise.resolve().then(run));
+  }
+
+  async waitForInboxReleases(): Promise<void> {
+    const releases = this.getActiveTurnIds().map(({ sessionId, turnId }) =>
+      this.waitForTurnRelease(sessionId, turnId)
+    );
+    await withTimeout(
+      Promise.all(releases),
+      6_000,
+      'Active execution releases exceeded shutdown budget'
+    ).catch((error: unknown) => this.deps.logger.warn(formatErrorMessage(error)));
+  }
   async drainInboxExecutions(): Promise<void> {
     // Completed executions can enqueue delivery while the first snapshot drains.
     while (this.ownedWork.size) await Promise.allSettled([...this.ownedWork]);
@@ -963,6 +1013,7 @@ export class SessionExecutionService {
     return this.operationInbox?.inputCanceled(this.deps.workspaceId, sessionId, inputId) ?? false;
   }
   quiesceInboxExecutions(): void {
+    this.shutdownAbort.abort();
     for (const runtime of this.turnRuntimeBySession.values()) {
       runtime.cancelRequested = true;
       runtime.pendingInputOnCancel = 'preserve';
@@ -2909,6 +2960,7 @@ export class SessionExecutionService {
       terminateSessionOnCancel: false,
       initializationStalled: false,
       yieldedFinalization: Promise.resolve(),
+      afterRelease: [],
     };
   }
 
@@ -3349,26 +3401,25 @@ export class SessionExecutionService {
             self.handleTurnError(options.sessionId, options.sessionDoc, new Error('cancelled'))
           )
         );
-      } else {
-        yield* self.ignoreWithWarning(
-          options.sessionId,
-          'Failed to refresh Code Collab v2 shared state for cancelled turn',
-          Effect.sync(() => self.refreshCodeCollabSharedStateAfterTurn(options.sessionId))
-        );
       }
 
-      // A stopped turn leaves the agent's edits on disk and nothing commits them
-      // or pushes on the session's behalf, so the dirty/unpushed flags that
-      // raise the Info Bar's Commit & Push have to be refreshed here too. This is the
-      // route a Stop during the PROMPT takes; the one in `finalizeTurn` only
-      // covers a Stop that raced finalization. Publish before idle so the flag
-      // has landed by the time the UI stops showing Working.
-      const cancelledSession = options.session;
-      if (cancelledSession) {
-        yield* self.tryPromise(() =>
-          self.syncWorkspaceGitStateOnce(options.sessionId, options.turnId, cancelledSession)
+      self.afterTurnRelease(options.sessionId, options.turnId, async () => {
+        const session = options.session;
+        if (session)
+          await self.runBookkeepingStage(
+            options.sessionId,
+            options.turnId,
+            'syncWorkspaceGitState',
+            () => self.syncWorkspaceGitStateOnce(options.sessionId, options.turnId, session)
+          );
+        await self.runBookkeepingStage(
+          options.sessionId,
+          options.turnId,
+          'persistTurnDiffsAndFlushUsage',
+          () => self.persistTurnDiffsAndFlushUsage(options.sessionId, options.turnId)
         );
-      }
+        self.refreshCodeCollabSharedStateAfterTurn(options.sessionId);
+      });
 
       yield* self.ignoreWithWarning(
         options.sessionId,
@@ -3396,7 +3447,6 @@ export class SessionExecutionService {
           'Failed to settle context compaction after cancelled ACP prompt stopped',
           self.tryPromise(async () => {
             await self.deps.turnFinalization.finalizeACPState(options.sessionId, options.turnId);
-            await self.persistTurnDiffsAndFlushUsage(options.sessionId, options.turnId);
           })
         );
       }
@@ -3925,7 +3975,11 @@ export class SessionExecutionService {
       }
     }
 
-    this.refreshCodeCollabSharedStateAfterTurn(sessionId);
+    this.afterTurnRelease(
+      sessionId,
+      this.turnRuntimeBySession.get(sessionId)?.turnId ?? '',
+      async () => this.refreshCodeCollabSharedStateAfterTurn(sessionId)
+    );
     await sessionDoc.waitUntilSynced();
     await sessionDoc.setStatus(SessionStatusFactory.idle());
   }
@@ -3935,15 +3989,9 @@ export class SessionExecutionService {
     if (!refresh) {
       return;
     }
-    // The Code Collab service owns cancellation, deadlines and publication repair.
-    // Optional file-view refresh must never retain the turn's execution/presence lease.
-    void Promise.resolve()
-      .then(() => refresh(sessionId))
-      .catch((error: unknown) => {
-        this.deps.logger.debug(
-          `[${sessionId}] Failed to refresh Code Collab v2 shared state after turn: ${formatErrorMessage(error)}`
-        );
-      });
+    void this.runBookkeepingStage(sessionId, '', 'refreshCodeCollabSharedState', () =>
+      refresh(sessionId)
+    );
   }
 
   private async persistCodeCollabTurnDiffsAfterACPFinalization(
@@ -3957,7 +4005,7 @@ export class SessionExecutionService {
     try {
       return await persist(sessionId, turnId);
     } catch (error) {
-      this.deps.logger.error(
+      this.deps.logger.warn(
         `[${sessionId}] Failed to persist Code Collab v2 turn diff evidence; not falling back to git history fileDiff: ${formatErrorMessage(error)}`
       );
       return true;
@@ -4043,13 +4091,6 @@ export class SessionExecutionService {
     return codeCollabHistoryFileDiffPersisted;
   }
 
-  private async finalizeTurnOutput(sessionId: SessionId, turnId: string): Promise<boolean> {
-    await this.runTurnFinalizationStage(sessionId, turnId, 'finalizeACPState', async () => {
-      await this.deps.turnFinalization.finalizeACPState(sessionId, turnId);
-    });
-    return await this.persistTurnDiffsAndFlushUsage(sessionId, turnId);
-  }
-
   private async finalizeYieldedTurnOutput(
     runtime: TurnRuntimeState,
     sessionId: SessionId,
@@ -4063,75 +4104,67 @@ export class SessionExecutionService {
         await this.persistTurnDiffsAndFlushUsage(sessionId, turnId);
       })
       .catch((error: unknown) => {
-        this.deps.logger.error(
+        this.deps.logger.warn(
           `[${sessionId}] Yielded turn ${turnId} ancillary finalization failed: ${formatErrorMessage(error)}`
         );
       });
   }
 
   private async finalizeTurn(ctx: FinalizeTurnContext): Promise<void> {
-    const {
-      sessionId,
-      session,
-      sessionDoc,
-      turnId,
-      baseCommitHash,
-      turnStartWorkingTreeDiff,
-      project,
-    } = ctx;
-    const isTurnCancelled = ctx.isTurnCancelled ?? (() => false);
-    const githubProject = resolveProjectGitHubRepo(project);
-    const stopIfTurnCancelled = async (stage: string): Promise<boolean> => {
-      if (!isTurnCancelled() && !ctx.abortSignal?.aborted) {
-        return false;
-      }
-      this.deps.logger.debug(
-        `[${sessionId}] Turn ${turnId} was cancelled during ${stage}; skipping remaining completion post-processing`
-      );
-      // The rest of finalization is skipped, but the agent's edits are still on
-      // disk. The dirty/unpushed flags are what raise the Info Bar's Commit &
-      // Push, and nothing commits or pushes on the session's behalf, so an
-      // interrupted turn that left stale `false`s here would hide real
-      // unpublished work behind a PR that looks current.
-      await this.syncWorkspaceGitStateOnce(sessionId, turnId, session);
+    const { sessionId, sessionDoc, turnId } = ctx;
+    await this.runTurnFinalizationStage(sessionId, turnId, 'finalizeACPState', () =>
+      this.deps.turnFinalization.finalizeACPState(sessionId, turnId)
+    );
+    if (ctx.isTurnCancelled?.() || ctx.abortSignal?.aborted) {
       await sessionDoc.setStatus(SessionStatusFactory.idle());
       this.deps.touchSession(sessionId);
-      return true;
-    };
-
-    const codeCollabHistoryFileDiffPersisted = await this.finalizeTurnOutput(sessionId, turnId);
-
-    if (await stopIfTurnCancelled('ACP finalization')) {
       return;
     }
-
     const notificationRuntime = this.getTurnRuntime(sessionId, turnId);
     if (notificationRuntime)
       notificationRuntime.notificationOutcome =
         ctx.producedOutput === false
           ? { kind: 'failed', code: 'no_agent_output' }
           : { kind: 'succeeded' };
+    // Capture turn-scoped analytics before a successor replaces their source.
+    await this.captureTurnCompleted(sessionId, sessionDoc, turnId);
+    this.afterTurnRelease(sessionId, turnId, () => this.finalizeTurnBookkeeping(ctx));
+    this.deps.touchSession(sessionId);
+  }
 
+  private async finalizeTurnBookkeeping(ctx: FinalizeTurnContext): Promise<void> {
+    const {
+      sessionId,
+      session,
+      sessionDoc,
+      turnId,
+      project,
+      baseCommitHash,
+      turnStartWorkingTreeDiff,
+    } = ctx;
+    const githubProject = resolveProjectGitHubRepo(project);
+    const codeCollabHistoryFileDiffPersisted = await this.runBookkeepingStage(
+      sessionId,
+      turnId,
+      'persistTurnDiffsAndFlushUsage',
+      () => this.persistTurnDiffsAndFlushUsage(sessionId, turnId)
+    );
     let preferredStatsBaseBranch = project?.branch;
     if (project?.kind === 'local') {
       preferredStatsBaseBranch =
         (await sessionDoc.getMetaState())?.baseBranch?.trim() || preferredStatsBaseBranch;
     }
 
-    const branchName = await this.runTurnFinalizationStage(
+    const branchName = await this.runBookkeepingStage(
       sessionId,
       turnId,
       'syncSessionBranchName',
       async () => await this.deps.syncSessionBranchName(sessionId, session)
     );
 
-    if (await stopIfTurnCancelled('branch synchronization')) {
-      return;
-    }
-
     if (githubProject) {
       try {
-        const detectedPr = await this.runTurnFinalizationStage(
+        const detectedPr = await this.runBookkeepingStage(
           sessionId,
           turnId,
           'detectAndAssociatePR',
@@ -4149,35 +4182,24 @@ export class SessionExecutionService {
         this.deps.logger.debug(`[${sessionId}] PR detection failed: ${formatErrorMessage(error)}`);
       }
 
-      if (await stopIfTurnCancelled('PR detection')) {
-        return;
-      }
-
       // No post-turn PR-poll hook: the reconciler's activity rule
       // (`lastMessageAt` within 10 min → high lane) already keeps this
       // session on the fast refresh cadence after a turn ends
       // (specs/pr-status-reconciler.md).
 
-      await this.runTurnFinalizationStage(sessionId, turnId, 'updateSessionDiffStats', async () => {
+      await this.runBookkeepingStage(sessionId, turnId, 'updateSessionDiffStats', async () => {
         await this.deps.turnFinalization.updateSessionDiffStats(sessionId, session, {
           turnId,
           baseCommitHash: baseCommitHash ?? undefined,
           turnStartWorkingTreeDiff,
           preferredBaseBranch: preferredStatsBaseBranch,
-          skipHistoryFileDiff: codeCollabHistoryFileDiffPersisted,
+          skipHistoryFileDiff: codeCollabHistoryFileDiffPersisted ?? true,
         });
         this.markWorkspaceGitStateSynced(sessionId, turnId);
       });
-
-      if (await stopIfTurnCancelled('diff recording')) {
-        return;
-      }
     }
 
     this.refreshCodeCollabSharedStateAfterTurn(sessionId);
-    await this.runTurnFinalizationStage(sessionId, turnId, 'captureTurnCompleted', async () => {
-      await this.captureTurnCompleted(sessionId, sessionDoc, turnId);
-    });
     this.deps.logger.info(`Session chat completed: ${sessionId}`);
 
     this.deps.touchSession(sessionId);
@@ -4411,31 +4433,6 @@ export class SessionExecutionService {
         (presenceScope, exit) =>
           Effect.gen(function* () {
             const turnRuntime = runtime;
-            // Yielded-turn finalization is Lody's own bookkeeping, and its chain
-            // catches every failure, so it always settles. A slow run is waited
-            // for and only logged: treating it as a release failure would block
-            // the session until a recovery that terminates its agent process.
-            const yieldedFinalizationSettled = yield* Effect.interruptible(
-              self.tryPromise(() => turnRuntime.yieldedFinalization)
-            ).pipe(
-              Effect.timeoutOption(YIELDED_FINALIZATION_SLOW_WARNING),
-              Effect.orElseSucceed(() => Option.some(undefined))
-            );
-            if (Option.isNone(yieldedFinalizationSettled)) {
-              self.deps.logger.warn(
-                `[${sessionId}] Yielded turn finalization is still running after ${YIELDED_FINALIZATION_SLOW_WARNING}; turn ${turnRuntime.turnId} waits for it before release`
-              );
-            }
-            yield* self
-              .tryPromise(() => turnRuntime.yieldedFinalization)
-              .pipe(
-                Effect.catchCause((cause) =>
-                  Effect.sync(() => {
-                    turnRuntime.releaseFailure = cause;
-                  }).pipe(Effect.andThen(Effect.failCause(cause)))
-                ),
-                Effect.orDie
-              );
             const wasInterrupted = Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause);
             const wasCancelled =
               turnRuntime.cancelRequested ||
@@ -4473,6 +4470,18 @@ export class SessionExecutionService {
                   Effect.orDie
                 );
             }
+            const yielded = self.ownBookkeeping(sessionId, turnRuntime.yieldedFinalization);
+            yield* self.ignoreWithWarning(
+              sessionId,
+              'Yielded bookkeeping continues after release',
+              self.tryPromise(() =>
+                withTimeout(
+                  waitForSteer(yielded, self.shutdownAbort.signal),
+                  TURN_BOOKKEEPING_TIMEOUT_MS,
+                  'Yielded finalization timed out'
+                )
+              )
+            );
             // Raw work drains before presence clears; failed cleanup retains the Inbox owner.
             yield* Scope.close(presenceScope, exit).pipe(
               Effect.catchCause((cause) =>
@@ -5088,28 +5097,6 @@ export class SessionExecutionService {
           return false;
         }));
       if (inboxInput && !withdrawn) {
-        if (inboxBatch)
-          await (
-            await createSessionBackend(sessionDoc)
-          )
-            .applyHistoryAction({
-              kind: 'operation-batch-status',
-              batchId: inboxBatch.batchId,
-              turnId:
-                inboxBatch.kind === 'automatic'
-                  ? inboxBatch.inputId
-                  : `operation-batch:${inboxBatch.batchId}`,
-              status: !runtime.promptStarted
-                ? 'not_submitted'
-                : outcome === 'completed' && !runtime.promptFailed
-                  ? 'settled'
-                  : 'unknown',
-            })
-            .catch((cause) =>
-              this.deps.logger.warn(
-                `Inbox history status projection failed: ${formatErrorMessage(cause)}`
-              )
-            );
         await runtime.inboxOwner!.finish(
           runtime.cancelRequested || outcome === 'cancelled'
             ? 'user_stop'
@@ -5118,6 +5105,28 @@ export class SessionExecutionService {
               : 'failed',
           runtime.releaseFailure
         );
+        if (inboxBatch)
+          runtime.afterRelease.push(() =>
+            this.runBookkeepingStage(
+              sessionId,
+              runtime.turnId,
+              'operation-batch-status',
+              async () =>
+                (await createSessionBackend(sessionDoc)).applyHistoryAction({
+                  kind: 'operation-batch-status',
+                  batchId: inboxBatch.batchId,
+                  turnId:
+                    inboxBatch.kind === 'automatic'
+                      ? inboxBatch.inputId
+                      : `operation-batch:${inboxBatch.batchId}`,
+                  status: !runtime.promptStarted
+                    ? 'not_submitted'
+                    : outcome === 'completed' && !runtime.promptFailed
+                      ? 'settled'
+                      : 'unknown',
+                })
+            )
+          );
         if (runtime.inboxOwner!.failure) runtime.releaseFailure = runtime.inboxOwner!.failure;
       }
       if (inboxInput && !runtime.releaseFailure)
@@ -5150,6 +5159,8 @@ export class SessionExecutionService {
         }
         if (inboxInput || runtime.releaseFailure) {
           this.releaseTurnRuntime(sessionId, runtime.turnId);
+          for (const run of runtime.afterRelease.splice(0))
+            this.ownBookkeeping(sessionId, Promise.resolve().then(run));
           if (inbox && outcome !== 'execution-deferred') {
             await inbox!
               .wake()
@@ -5162,6 +5173,8 @@ export class SessionExecutionService {
           }
         }
       } finally {
+        for (const run of runtime.afterRelease.splice(0))
+          this.ownBookkeeping(sessionId, Promise.resolve().then(run));
         const notify = async () => {
           if (fact) await this.publishTurnOutcomeFact(fact);
         };
@@ -6534,7 +6547,6 @@ export class SessionExecutionService {
       yield* abortIfCancelled();
 
       yield* promptWithStaleACPRecovery(promptBlocks);
-      yield* self.tryPromise(() => runtime.yieldedFinalization);
 
       const completedTurnId = runtime.turnId;
       const completedUserTurnId = runtime.userTurnId ?? executionUserTurnId;
@@ -7300,7 +7312,6 @@ export class SessionExecutionService {
           yield* abortIfCancelled();
 
           yield* prompt(promptBlocks);
-          yield* self.tryPromise(() => runtime.yieldedFinalization);
 
           const completedTurnId = runtime.turnId;
           const completedUserTurnId = runtime.userTurnId ?? userTurnId;

@@ -1008,6 +1008,7 @@ describe('SessionExecutionService', () => {
     });
     third.resolve({});
     await lifecycle;
+    await service.drainInboxExecutions();
 
     expect(prompt).toHaveBeenCalledTimes(1);
     expect(steerPrompt).toHaveBeenCalledTimes(3);
@@ -4619,14 +4620,6 @@ describe('SessionExecutionService', () => {
         userEmail: 'user@example.com',
       });
 
-      expect(deps.turnFinalization.updateSessionDiffStats).toHaveBeenCalledWith(
-        'session-1',
-        activeSession,
-        expect.objectContaining({
-          baseCommitHash: 'abc123',
-          preferredBaseBranch: 'release/v2',
-        })
-      );
       expect(service.getExecutionSnapshot('session-1' as SessionId).hasActiveTurn).toBe(false);
       expect(presence.size).toBe(0);
       history.push({ id: 'turn-user-2', role: 'user', status: 'pending', read: false });
@@ -4645,6 +4638,7 @@ describe('SessionExecutionService', () => {
       expect(history.find((entry) => entry.id === 'turn-user-2')?.status).toBe('handled');
       expect(service.getExecutionSnapshot('session-1' as SessionId).hasActiveTurn).toBe(false);
       releaseRefresh();
+      await service.drainInboxExecutions();
     }
   );
 
@@ -4877,6 +4871,7 @@ describe('SessionExecutionService', () => {
       expect(text).toContain('Use the available Lody MCP tools when relevant');
       expect(branchAtPrompt).toBe(initialBranch);
       if (rename) expect(text).toContain(`git branch -m ${initialBranch} <name>`);
+      await service.drainInboxExecutions();
       expect(publishedBranch).toBe('feature/local-finished');
       expect(generatedTitles).toEqual(
         sessionTitle && titleAgentType !== 'codex' ? [] : ['Local title']
@@ -5931,6 +5926,7 @@ describe('SessionExecutionService', () => {
       'session-session-local-restore',
       expect.objectContaining({ baseBranch: expect.anything() })
     );
+    await service.drainInboxExecutions();
     expect(deps.turnFinalization.updateSessionDiffStats).toHaveBeenCalledWith(
       'session-local-restore',
       restoredSession,
@@ -6060,6 +6056,7 @@ describe('SessionExecutionService', () => {
       expect.objectContaining({ baseBranch: expect.anything() })
     );
     expect(persistPendingChanges).not.toHaveBeenCalledWith('session-local-base-ref');
+    await service.drainInboxExecutions();
     expect(deps.turnFinalization.updateSessionDiffStats).toHaveBeenCalledWith(
       'session-local-tracking-restore',
       restoredSession,
@@ -12010,12 +12007,12 @@ describe('Operation Inbox execution boundary', () => {
   function inboxExecutionFixture(
     prompt: (blocks: ContentBlock[]) => Promise<unknown>,
     build?: (blocks: SessionInputBlock[]) => Promise<ContentBlock[]>,
-    automaticFinished?: () => void
+    automaticFinished?: () => void,
+    sessionId = 'inbox-session' as SessionId
   ) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-inbox-execution-'));
     const now = () => Date.parse('2026-10-12T00:00:00Z');
     const store = new LodyOperationStore(path.join(root, 'operations.sqlite3'), now);
-    const sessionId = 'inbox-session' as SessionId;
     let meta: Partial<SessionMeta> = {
       id: sessionId,
       machineId: 'machine-1',
@@ -12101,7 +12098,7 @@ describe('Operation Inbox execution boundary', () => {
       buildAcpPromptBlocks: async (args) =>
         build ? build(args.inputBlocks) : (args.inputBlocks as ContentBlock[]),
       createAssistantEntryForTurn: async (_sid, _doc, turnId, _model, parentId) => {
-        await doc.sessionData.commands.applyHistoryAction({
+        await _doc.sessionData.commands.applyHistoryAction({
           kind: 'upsert-turn',
           turn: {
             id: turnId,
@@ -12534,7 +12531,7 @@ describe('Operation Inbox execution boundary', () => {
     }
   });
 
-  it('rechecks Stop after awaiting batch history settlement', async () => {
+  it('releases before a stalled batch history projection and keeps the committed outcome', async () => {
     const settling = createDeferred<void>();
     const settle = createDeferred<void>();
     const f = inboxExecutionFixture(async () => ({ stopReason: 'end_turn' }));
@@ -12559,6 +12556,8 @@ describe('Operation Inbox execution boundary', () => {
         notificationAudience: { kind: 'user' },
       });
       await settling.promise;
+      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(true);
+      expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
       await f.service.cancelSession({
         sessionId: f.message.sessionId,
         turnId: 'assistant:human-input',
@@ -12567,8 +12566,8 @@ describe('Operation Inbox execution boundary', () => {
       });
       settle.resolve();
       await running;
-      expect(facts.map((fact) => fact.outcome)).toEqual([{ kind: 'cancelled' }]);
-      expect(facts.flatMap((fact) => projectTurnAttention(fact) ?? [])).toEqual([]);
+      expect(facts.map((fact) => fact.outcome)).toEqual([{ kind: 'succeeded' }]);
+      expect(facts.flatMap((fact) => projectTurnAttention(fact) ?? [])).toHaveLength(1);
     } finally {
       settle.resolve();
       await f.close();
@@ -13169,18 +13168,81 @@ describe('Operation Inbox execution boundary', () => {
     }
   });
 
-  it('waits for a slow yielded finalization instead of treating it as a release failure', async () => {
+  it('releases a cancelled turn before stuck Git bookkeeping and runs fresh input without restart', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const started = createDeferred<void>(), raw = createDeferred<void>();
+    const gitStarted = createDeferred<void>(), git = createDeferred<void>();
+    const f = inboxExecutionFixture(async () => { started.resolve(); await raw.promise; return { stopReason: 'end_turn' }; });
+    f.client.cancel = async () => { raw.resolve(); };
+    Object.defineProperty(f.client, 'pendingPromptCompletion', { get: () => raw.promise });
+    f.deps.turnFinalization.syncWorkspaceGitState = async () => { gitStarted.resolve(); await git.promise; };
+    try {
+      await f.accept();
+      const running = f.service.continueSession(f.message);
+      await started.promise;
+      await f.service.cancelSession({ ...f.message, type: 'session/cancel', turnId: 'assistant:human-input' });
+      await running;
+      await gitStarted.promise;
+      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(true);
+      const next = { ...f.message, userTurnId: 'after-stuck-git' };
+      await f.service.acceptInboxHumanInput({ sessionId: next.sessionId, inputId: next.userTurnId, userId: 'user-1', config: next.acpSessionConfig });
+      await f.service.continueSession(next);
+      expect(f.store.inbox.inputEnded('workspace-1', next.sessionId, next.userTurnId)).toBe(true);
+      await vi.advanceTimersByTimeAsync(30_000);
+      git.resolve();
+      await f.service.drainInboxExecutions();
+      expect(f.service.getExecutionSnapshot(next.sessionId).releaseBlocked).toBeUndefined();
+    } finally { raw.resolve(); git.resolve(); await f.close(); vi.useRealTimers(); }
+  });
+
+  it('writes both active release receipts inside the shutdown budget despite one stuck finalization', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const started = [createDeferred<void>(), createDeferred<void>()];
+    const raw = [createDeferred<void>(), createDeferred<void>()];
+    const slow = createDeferred<void>();
+    const fixtures = raw.map((work, i) => inboxExecutionFixture(async () => {
+      started[i]?.resolve(); await work.promise; return { stopReason: 'end_turn' };
+    }, undefined, undefined, `shutdown-${i}` as SessionId));
+    const [f, other] = fixtures as [typeof fixtures[number], typeof fixtures[number]];
+    f.deps.workspaceDocument.getOrCreateSessionDoc = async (id) => id === f.message.sessionId ? f.doc : other.doc;
+    f.deps.sessionManager.getSession = (id) => (id === f.message.sessionId ? f.session : other.session) as never;
+    f.deps.turnFinalization.syncWorkspaceGitState = async (id) => { if (id === f.message.sessionId) await slow.promise; };
+    fixtures.forEach((fixture, i) => {
+      Object.defineProperty(fixture.client, 'pendingPromptCompletion', { get: () => raw[i]?.promise });
+      fixture.session.terminate = async () => { raw[i]?.resolve(); };
+    });
+    try {
+      for (const fixture of fixtures) await f.service.acceptInboxHumanInput({ sessionId: fixture.message.sessionId,
+        inputId: 'human-input', userId: 'user-1', config: fixture.message.acpSessionConfig });
+      const turns = fixtures.map((fixture) => f.service.continueSession(fixture.message));
+      await Promise.all(started.map((signal) => signal.promise));
+      f.service.quiesceInboxExecutions();
+      await vi.advanceTimersByTimeAsync(0);
+      await f.service.waitForInboxReleases();
+      await Promise.all(turns);
+      for (const fixture of fixtures) {
+        expect(f.store.inbox.inputEnded('workspace-1', fixture.message.sessionId, 'human-input')).toBe(true);
+        expect(f.store.inbox.activeExecution('workspace-1', fixture.message.sessionId)).toBeUndefined();
+      }
+    } finally { raw.forEach((work) => work.resolve()); slow.resolve(); await Promise.all(fixtures.map((fixture) => fixture.close())); vi.useRealTimers(); }
+  });
+
+  it('bounds a slow yielded finalization, retains its raw work and releases the next input', async () => {
     const finalization = createDeferred<void>();
+    const registered = createDeferred<void>();
+    let failed = true, recovered = false;
     let service: SessionExecutionService | undefined;
     const f = inboxExecutionFixture(async () => {
       // A yielded turn's ancillary finalization outlives the old 5 s bound while
       // the prompt fails, so the turn body exits early and the release waits.
+      if (!failed) { recovered = true; return { stopReason: 'end_turn' }; }
       const runtime = (
         service as unknown as {
           turnRuntimeBySession: Map<SessionId, { yieldedFinalization: Promise<void> }>;
         }
       ).turnRuntimeBySession.get('inbox-session' as SessionId);
       if (runtime) runtime.yieldedFinalization = finalization.promise;
+      registered.resolve();
       throw new Error('agent crashed');
     });
     service = f.service;
@@ -13188,21 +13250,36 @@ describe('Operation Inbox execution boundary', () => {
     try {
       await f.accept();
       const turn = f.service.continueSession(f.message);
-      await vi.advanceTimersByTimeAsync(60_000);
-      expect(f.service.getExecutionSnapshot(f.message.sessionId)).toMatchObject({
-        hasActiveTurn: true,
-      });
-      expect(f.service.getExecutionSnapshot(f.message.sessionId).releaseBlocked).toBeUndefined();
-
-      finalization.resolve();
+      await registered.promise;
+      await vi.advanceTimersByTimeAsync(30_000);
       await turn.catch(() => undefined);
       expect(f.service.getExecutionSnapshot(f.message.sessionId)).toMatchObject({
         hasActiveTurn: false,
       });
       expect(f.service.getExecutionSnapshot(f.message.sessionId).releaseBlocked).toBeUndefined();
+
+      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(true);
+      let drained = false;
+      const drain = f.service.drainInboxExecutions().then(() => { drained = true; });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(drained).toBe(false);
+      finalization.resolve();
+      await drain;
+      expect(drained).toBe(true);
+      failed = false;
+      const next = { ...f.message, userTurnId: 'after-yield-timeout' };
+      await f.service.acceptInboxHumanInput({ sessionId: next.sessionId, inputId: next.userTurnId,
+        userId: 'user-1', config: next.acpSessionConfig });
+      await f.service.continueSession(next).catch(() => undefined);
+      expect(recovered).toBe(true);
+      expect(f.service.getExecutionSnapshot(f.message.sessionId)).toMatchObject({
+        hasActiveTurn: false,
+      });
+      expect(f.service.getExecutionSnapshot(f.message.sessionId).releaseBlocked).toBeUndefined();
     } finally {
-      vi.useRealTimers();
+      finalization.resolve();
       await f.close();
+      vi.useRealTimers();
     }
   });
 

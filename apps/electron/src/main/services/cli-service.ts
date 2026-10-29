@@ -89,9 +89,8 @@ import { resolveLocalSessionControlTimeoutMs } from './local-session-control-bud
 
 const CLI_OUTPUT_BUFFER_MAX_EVENTS = 2000
 // How long to wait for the embedded CLI to exit on SIGTERM during app quit before
-// force-killing it. Kept short so Command+Q feels responsive; with the CLI's own
-// fast socket teardown a clean exit normally lands well under this.
-const CLI_QUIT_GRACE_MS = 3000
+// force-killing it after the CLI's seven-second budget. Early exit finishes the wait.
+const CLI_QUIT_GRACE_MS = 10_000
 // How long a SIGKILLed embedded CLI may take to be reaped before quit reports it.
 const CLI_FORCE_KILL_WAIT_MS = 5000
 // The embedded CLI shares Electron's process group: it is not spawned detached,

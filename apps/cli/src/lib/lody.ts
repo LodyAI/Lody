@@ -493,6 +493,8 @@ export class Lody {
     );
   }
 
+  prepareForShutdown = () => this.runtime.prepareForShutdown();
+
   cleanup = async () => {
     this.cleanedUp = true;
     if (this.builtinAgentConfigRetryTimer) {

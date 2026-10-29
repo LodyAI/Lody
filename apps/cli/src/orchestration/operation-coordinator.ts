@@ -263,7 +263,7 @@ export class LodyOperationCoordinator {
         await this.options.executionService.drainInboxExecutions?.();
         await Promise.allSettled([...this.inboxExecutions, ...this.nativeRawWork]);
       })(),
-      15_000,
+      7_000,
       'Coordinator resources did not drain'
     );
     await this.inbox?.close();

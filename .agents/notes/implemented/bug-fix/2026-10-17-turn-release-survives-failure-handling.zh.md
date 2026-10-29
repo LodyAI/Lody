@@ -8,6 +8,8 @@ PR: [#1652](https://github.com/LodyAI/Lody/pull/1652)
 
 ## 摘要
 
+当前释放与超时策略由[可用性决定](2026-10-29-inbox-no-durable-block.zh.md)管理。以下事故、原决定和验证保留为历史；无限等待统计收尾和以释放证明阻断后继的策略已被取代。
+
 一个 Session 永久不再响应：一轮经 Inbox 投递的 turn 失败后，失败处理本身又抛出了异常。第二个异常跳过了 Inbox 释放，turn 登记随之泄漏，而且没有记录任何释放失败。此后每条输入都以 `active-session` 被拒，live status 一直显示 `initializing`，也没有任何恢复路径接管这个占用槽。现在，visible turn 的 owner 在分类完失败后一定会执行释放。yielded turn 的 finalization 慢时改为等待，不再记为释放失败。确实无法确认的释放会显示为忙碌的 `waiting` 状态，下一条等待这个 Session 的输入会请求恢复。释放 turn 从不终止 agent 进程。引发这次事故的"空闲 GC 销毁正在使用的文档"竞态，由后续的 [Session residency 工作](https://github.com/LodyAI/Lody/pull/1670)单独处理。
 
 ## 事故经过

@@ -10531,6 +10531,15 @@ export class MessageHandler {
   /**
    * Flush pending ACP updates and tear down session resources.
    */
+  async prepareForShutdown(): Promise<void> {
+    this.sessionDispatchWatcher.stop();
+    this.executionService.stopCompletionPublication();
+    void this.operationCoordinator
+      .recoverStop()
+      .catch((cause) => this.logger.warn('Inbox shutdown incomplete', cause));
+    await this.executionService.waitForInboxReleases();
+  }
+
   async cleanup(): Promise<void> {
     this.executionService.stopCompletionPublication();
     const inboxShutdown = this.operationCoordinator.recoverStop();

@@ -596,6 +596,11 @@ export class LodyFleet {
     });
   }
 
+  async prepareForShutdown(): Promise<void> {
+    const releases = [...this.runtimes.values()].map(({ lody }) => lody.prepareForShutdown());
+    await Promise.allSettled(releases);
+  }
+
   shutdown(): Promise<void> {
     return (this.shutdownReceipt ??= this.shutdownOnce());
   }
