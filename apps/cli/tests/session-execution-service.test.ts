@@ -12944,6 +12944,76 @@ describe('Operation Inbox execution boundary', () => {
     }
   );
 
+  it('retires a failed Inbox preparation even when its release transaction rolls back', async () => {
+    const received: ContentBlock[][] = [];
+    const f = inboxExecutionFixture(async (blocks) => {
+      received.push(structuredClone(blocks));
+      return { stopReason: 'end_turn' };
+    });
+    const db = new Database(f.storePath);
+    try {
+      f.add('result-before-prepare-failure');
+      await f.accept();
+      // Fail only after begin committed, then roll back the compensating release too.
+      db.exec(`CREATE TRIGGER prepare_outage BEFORE INSERT ON inbox_batches
+        WHEN NEW.input_id='human-input' AND EXISTS(
+          SELECT 1 FROM inbox_sessions WHERE active_execution='assistant:human-input')
+        BEGIN SELECT RAISE(ROLLBACK,'prepare failed'); END;
+        CREATE TRIGGER release_outage BEFORE UPDATE ON inbox_sessions
+        WHEN OLD.active_execution='assistant:human-input' AND NEW.active_execution IS NULL
+        BEGIN SELECT RAISE(ROLLBACK,'SQLITE_FULL'); END;`);
+      await expect(f.service.continueSession(f.message)).rejects.toThrow('prepare failed');
+      expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toMatchObject({
+        executionId: 'assistant:human-input',
+        inputId: 'human-input',
+      });
+      expect(received).toEqual([]);
+      expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
+
+      db.exec('DROP TRIGGER prepare_outage; DROP TRIGGER release_outage;');
+      const config = { ...f.message.acpSessionConfig, prompt: 'FRESH_REQUEST' };
+      await f.doc.sessionData.commands.applyHistoryAction({
+        kind: 'upsert-turn',
+        turn: {
+          id: 'fresh-input',
+          role: 'user',
+          userId: 'user-1',
+          status: 'pending',
+          inputConfig: config,
+          timestamp: '2026-10-30T00:00:00Z',
+          items: [{ type: 'text', text: config.prompt }],
+          fileDiff: [],
+          finished: true,
+        },
+      });
+      await f.service.acceptInboxHumanInput({
+        sessionId: f.message.sessionId,
+        inputId: 'fresh-input',
+        userId: 'user-1',
+        config,
+      });
+      await f.service.continueSession({
+        ...f.message,
+        userTurnId: 'fresh-input',
+        acpSessionConfig: config,
+      });
+      expect(received).toHaveLength(1);
+      expect(received[0]?.[0]).toEqual({ type: 'text', text: 'FRESH_REQUEST' });
+      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(true);
+      const backend = await createSessionBackend(f.doc);
+      expect((await backend.readTurn('fresh-input')).turn).toMatchObject({ status: 'handled' });
+      expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toBeUndefined();
+      expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
+      await f.service.continueSession(f.message);
+      expect((await backend.readTurn('human-input')).turn).toMatchObject({ status: 'failed' });
+      expect(received).toHaveLength(1);
+    } finally {
+      db.exec('DROP TRIGGER IF EXISTS prepare_outage; DROP TRIGGER IF EXISTS release_outage;');
+      db.close();
+      await f.close();
+    }
+  });
+
   it('detaches a failed Agent, continues with a new ACP and reports cleanup without blocking drain', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const started = createDeferred<void>();

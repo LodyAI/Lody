@@ -71,7 +71,10 @@ budget; cleanup failure is logged and cannot gate input or shutdown. Cleanup com
 always retries the old execution's release write. Admission retries retirement once for a
 slot absent from the service's live execution ID set; a persistent write failure emits a disk-space chat notice instead
 of leaving the session dependent on restart. IDs stay live until successful release or
-detached retirement, independently of the replaceable turn runtime index. Cleanup addresses only the
+detached retirement, independently of the replaceable turn runtime index. Preparation failure
+always drops its matching runtime/current-turn registration and any owned live execution ID,
+even if the compensating release rolls back; later admission can retry that stale database slot.
+Cleanup addresses only the
 retired execution, so it cannot clear a successor's slot. Failed exits grant no automatic
 intent, but later wakeable receipts can proceed. Resource registration remains unchanged;
 restart orphan-process cleanup is deferred. The offline recovery command and startup PID

@@ -4346,12 +4346,15 @@ export class SessionExecutionService {
         // older blocked execution, which only the recovery owner may release.
         if (inboxInput && !(cause instanceof InboxExecutionRejected))
           await inbox!.release({ ...inboxInput, executionId: turnId, outcome: 'failed' });
-        this.releaseTurnRuntime(sessionId, turnId);
       } catch (releaseCause) {
         runtime.releaseFailure = new AggregateError(
           [cause, releaseCause],
           'Inbox preparation and release failed'
         );
+      } finally {
+        // Preparation acquired no prompt; a failed release write cannot retain its slot.
+        if (runtime.inboxOwner) this.liveInboxExecutionIds.delete(runtime.inboxOwner.id);
+        this.releaseTurnRuntime(sessionId, turnId);
       }
       if (
         !runtime.releaseFailure &&
