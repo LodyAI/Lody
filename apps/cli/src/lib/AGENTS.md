@@ -73,6 +73,7 @@ never pushed to renderers as local room health.
   [Per-OS signals](../../../../.agents/docs/cli-lib-memory-pressure.md). Idle counts
   native work: never clean `running`, cap background waits. Post-turn output resets
   it only for `sessionActivity` agents.
+  Eligibility read failures retain only that session; foreground reclamation waits at most 10s.
 - **Session attachments**: before changing preparation, transfer, materialization,
   or backfill, read the [lifecycle rules](../../../../.agents/docs/cli-lib-session-files.md).
   CLI/MCP input preparation must finish before history/dispatch; recovery uses frozen

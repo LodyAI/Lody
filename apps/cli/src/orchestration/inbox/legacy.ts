@@ -2,12 +2,9 @@ import { Effect, Exit, Layer, ManagedRuntime } from 'effect';
 import { executionJournalLayer } from '../platform/execution-journal';
 import { makeInboxQueries } from '../platform/inbox-queries';
 import { inboxRepositoryLayer, recoveryRepositoryLayer } from '../platform/inbox-repository';
-import { inboxRecoveryProbeLayer } from '../platform/recovery-probe';
-import { InboxExecutionBlocked, InboxExecutionRejected } from './admission-failure';
 import { makeInboxCloseOwner } from './close-owner';
 import { makeExecutionOwner, type ExecutionResource } from './execution-owner';
 import type { InboxBatch, InboxInput, InboxRelease, InboxScope } from './model';
-import { InboxRecoveryProbe } from './recovery';
 import { InboxExecution, InboxRepository, OperationInbox } from './service';
 import type { InboxSqlite } from './sqlite';
 
@@ -24,7 +21,6 @@ export const operationInboxLegacy = (options: {
   report(cause: unknown): void;
   quiesce?(): void;
   openRecoveryRepository?(): { sql: InboxSqlite; close(): void };
-  recoveryProbe?: Layer.Layer<InboxRecoveryProbe>;
 }) => {
   const queries = makeInboxQueries(options.sql);
   const dependencies = Layer.merge(
@@ -48,28 +44,9 @@ export const operationInboxLegacy = (options: {
   void service.catch(options.report);
   let shutdown: Promise<void> | undefined;
   let recoveredClose: Promise<void> | undefined;
-  const recovery = runtime.runPromise(
-    Effect.gen(function* () {
-      const probe = yield* InboxRecoveryProbe;
-      for (const handle of options.sql.unreleased(options.workspaceId)) {
-        const gone = yield* probe
-          .released(handle.identity)
-          .pipe(Effect.catch(() => Effect.succeed(false)));
-        if (gone)
-          yield* Effect.try({
-            try: () => options.sql.confirmReleased(handle.scope, handle.executionId),
-            catch: (cause) => cause,
-          });
-      }
-    }).pipe(Effect.provide(options.recoveryProbe ?? inboxRecoveryProbeLayer))
-  );
-  void recovery.catch(options.report);
   const closeOwner = Effect.runSync(
     makeInboxCloseOwner({
-      dispose: Effect.tryPromise({
-        try: () => recovery.catch(options.report),
-        catch: (cause) => cause,
-      }).pipe(Effect.andThen(runtime.disposeEffect)),
+      dispose: runtime.disposeEffect,
       recover: Effect.scoped(
         Effect.gen(function* () {
           const inbox = yield* Effect.tryPromise({ try: () => service, catch: (cause) => cause });
@@ -92,6 +69,7 @@ export const operationInboxLegacy = (options: {
       if (Exit.isFailure(exit)) throw new Error(message, { cause: exit.cause });
     });
   return {
+    activeExecution: (w: string, s: string) => Effect.runSync(queries.activeExecution(w, s)),
     preferredHumanInput: (w: string, s: string) =>
       Effect.runSync(queries.preferredHumanInput(w, s)),
     inputCancellationReason: (w: string, s: string, id: string) =>
@@ -107,25 +85,7 @@ export const operationInboxLegacy = (options: {
         Effect.flatMap(OperationInbox, (inbox) => inbox.abandon(w, s, id, unlessActive))
       ),
     openExecution: async (input: InboxInput, id: string, batch?: InboxBatch) => {
-      // Startup proof of a dead previous boot's resources must settle before
-      // admission reads the block; otherwise the first post-restart dispatch
-      // reports a block that this probe clears moments later.
-      await recovery.catch(() => undefined);
-      const owner = await runtime.runPromise(
-        makeExecutionOwner(input, id, batch).pipe(
-          Effect.catch((cause) => {
-            if (!(cause instanceof InboxExecutionRejected)) return Effect.fail(cause);
-            return Effect.try({
-              try: () => options.sql.blockedExecutions(input.workspaceId, input.sessionId),
-              catch: (error) => error,
-            }).pipe(
-              Effect.flatMap((blocked) =>
-                Effect.fail(blocked.length > 0 ? new InboxExecutionBlocked({ blocked }) : cause)
-              )
-            );
-          })
-        )
-      );
+      const owner = await runtime.runPromise(makeExecutionOwner(input, id, batch));
       return {
         get input() {
           return owner.input;
@@ -154,10 +114,12 @@ export const operationInboxLegacy = (options: {
         retain: (resource: ExecutionResource) => runtime.runSync(owner.retain(resource)),
         recover: (prepare: () => Promise<void>, beforeRelease: () => Promise<void>) =>
           runtime.runPromise(
-            owner.recover(
-              Effect.tryPromise({ try: prepare, catch: (cause) => cause }),
-              Effect.tryPromise({ try: beforeRelease, catch: (cause) => cause })
-            )
+            owner
+              .recover(
+                Effect.tryPromise({ try: prepare, catch: (cause) => cause }),
+                Effect.tryPromise({ try: beforeRelease, catch: (cause) => cause })
+              )
+              .pipe(Effect.timeout('5 seconds'))
           ),
       };
     },

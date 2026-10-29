@@ -231,11 +231,27 @@ these contracts; minimum-OS devices, native plugins and power-loss durability
 remain separate acceptance.
 
 
-A4's current `host.close()` and `session.close()` wait without a deadline if an
-injected native call never settles. This accepted A4 limitation must be resolved
-before enabling mobile native custody ([tracking issue #2075](https://github.com/LodyAI/Lody/issues/2075)).
-The follow-up bounds the caller's wait and reports incomplete close explicitly;
-a controlled owner retains unsettled operations, physical locks and borrowed
-buffers until actual settlement or confirmed termination. Timeout cannot release
-those resources, report successful close, or permit an overlapping successor.
-The shared runtime bridge owns this follow-up or consumes its prerequisite fix.
+The scoped host constructor remains the actual drain primitive. Product assembly
+uses `makeOwnedPersonalDeviceHost(ports)`, which acquires the whole resource-owning
+port Layer in a retained Scope independent of its consumer. Host, session and
+parent-Scope close share a five-second waiter budget; timeout reports
+`PersonalCloseIncomplete` with a narrow recovery owner. Keep that full failure and
+its owner, including the physical lock, borrowed buffers and unresolved originals,
+until actual settlement or confirmed native termination. A deadline never proves
+successful close or permits same-binding runtime handoff.
+
+Only finite ticket creation is serialized. Native drains run outside that critical
+section, concurrent callers observe the same ticket, and independent readers remain
+usable while another session drains. Replacement drains every matching owned reader before the supplied external
+owner drain and atomic identity switch. Parent retirement joins every child ticket
+before releasing the complete port Layer; it cannot rely on a second `Scope.close`
+to join an already closing child. Late successful settlement permits explicit close
+confirmation; a closed handle never revives. Plaintext transfer also tracks whether
+the waiting consumer has disappeared, so a worker result cannot lose wipe ownership
+before publication or between publication and receipt.
+
+[#2075](https://github.com/LodyAI/Lody/issues/2075) tracks mandatory runtime-bridge
+adoption before mobile native custody is enabled. The owned-host prerequisite does
+not itself wire product runtime or mobile consumers. Browser tests with paused
+native encryption and explicit clock signals establish lock/buffer retention and
+actual cleanup, not mobile-device or native-process termination qualification.

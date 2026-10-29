@@ -8,7 +8,7 @@ import { localProjectsLegacy } from '@lody/shared/node/local-project';
 import type { SessionId, SessionProjectRun } from '@lody/shared';
 import { resolveGitBranch, type SessionExec } from '@/lib/git/resolve-git-branch-name';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
-import { runCommandTextLegacy } from '@lody/shared/node/process';
+import { CommandTimedOut, runCommandTextLegacy } from '@lody/shared/node/process';
 
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
@@ -105,7 +105,11 @@ export class WorkspaceGitService {
             check: 'exit-0',
           },
           toShared()
-        );
+        ).catch((error: unknown) => {
+          if (error instanceof CommandTimedOut)
+            this.deps.logger.warn('Workspace Git observation timed out');
+          throw error;
+        });
         return stdout;
       },
       true
@@ -126,7 +130,15 @@ export class WorkspaceGitService {
         const resolved = resolveSessionFilePath([{ id: 'main', absolutePath: root }], cwd);
         if (!resolved || resolved.relativePath !== member.path)
           throw new Error('Member path escaped its project group');
-        const git = (args: string[]) => exec('git', args, cwd, false);
+        let observationFailed = false;
+        const git = async (args: string[]) => {
+          try {
+            return await exec('git', args, cwd, false);
+          } catch (error) {
+            if (error instanceof CommandTimedOut) observationFailed = true;
+            throw error;
+          }
+        };
         const repository =
           member.src.kind === 'github'
             ? member.src.repoFullName
@@ -144,7 +156,7 @@ export class WorkspaceGitService {
         ]);
         if (dirty !== undefined) member.dirty = dirty;
         if (unpushed !== undefined) member.unpushed = unpushed;
-        if (stats) member.diff = stats.baseDiffStats.allChange;
+        if (stats && !observationFailed) member.diff = stats.baseDiffStats.allChange;
       } catch (error) {
         this.deps.logger.debug(
           `Project group member observation failed: ${formatErrorMessage(error)}`

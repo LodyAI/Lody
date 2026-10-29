@@ -23,3 +23,11 @@ export {
 } from './pairing';
 export { verifyPersonalHistory } from './admission';
 export { personalLedgerControl, type PersonalLedgerOrigin } from './ledger';
+
+export {
+  makeOwnedPersonalDeviceHost,
+  PersonalCloseIncomplete,
+  PERSONAL_CLOSE_BUDGET_MS,
+  type PersonalCloseOwner,
+  type PersonalHostPorts,
+} from './owned-host';

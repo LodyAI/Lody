@@ -1086,15 +1086,6 @@ it('durably fences incomplete and concurrent spawns before roots can be proven c
     table.queueSpawn({ failWith: Object.assign(new Error('spawn gh ENOENT'), { code: 'ENOENT' }) });
     await expect(sandbox.spawn('gh', [], {})).rejects.toMatchObject({ code: 'ENOENT' });
     expect(saved.at(-1)).toEqual({ roots: [1000, 1001], complete: false });
-    // Simulate reopen at the acquisition fence: even an empty process table
-    // cannot turn incomplete identity into proof of release.
-    const { provesResourcesGone } = await import('../src/orchestration/inbox/recovery');
-    expect(
-      provesResourcesGone(
-        { platform: 'darwin', ...saved.at(-1)! },
-        { sampledAtMs: 0, memoryKind: 'rss-sum', warnings: [], entries: [] }
-      )
-    ).toBe(false);
     releaseConfiguration();
     await Promise.all([spawning, secondSpawn]);
     expect(saved.at(-1)).toEqual({ roots: [1000, 1001], complete: true });

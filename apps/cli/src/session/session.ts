@@ -1,3 +1,4 @@
+import { CommandTimedOut } from '@lody/shared/node/process';
 import { nativeSessionCredentials, type SessionCredentials } from './session-credentials';
 import { memoryEnvironment } from '@/lib/memory-providers';
 import EventEmitter from 'eventemitter3';
@@ -948,8 +949,45 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
             );
           });
 
+          let timedOut = false;
+          const observation =
+            !isAI &&
+            command === 'git' &&
+            ([
+              'status',
+              'diff',
+              'rev-parse',
+              'rev-list',
+              'merge-base',
+              'ls-files',
+              'log',
+              'show',
+            ].includes(args[0] ?? '') ||
+              (args[0] === 'branch' && args[1] === '--show-current'));
+          const timeout = observation
+            ? setTimeout(() => {
+                timedOut = true;
+                this.logger.warn(`[${this.sessionId}] Git observation timed out after 15000ms`);
+                void processHandle.terminate(true).then(
+                  () => {
+                    cleanup();
+                    reject(
+                      new CommandTimedOut({
+                        command: 'git',
+                        message: 'Git observation timed out after 15000ms',
+                      })
+                    );
+                  },
+                  (error: unknown) => {
+                    cleanup();
+                    reject(error);
+                  }
+                );
+              }, 15_000)
+            : undefined;
           const cleanup = () => {
-            this.activeProcess = null;
+            clearTimeout(timeout);
+            if (this.activeProcess === processHandle) this.activeProcess = null;
             if (parser) {
               parser.end();
               parser.removeListener('data', this.handleParserData);
@@ -958,6 +996,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           };
 
           processHandle.onClose((code: number | null, signal: NodeJS.Signals | null) => {
+            if (timedOut) return;
             cleanup();
             void processHandle
               .inspectExit(code, signal)
@@ -1011,6 +1050,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           });
 
           processHandle.onError((error) => {
+            if (timedOut) return;
             cleanup();
             reject(error);
           });

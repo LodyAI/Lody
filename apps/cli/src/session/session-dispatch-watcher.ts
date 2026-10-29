@@ -439,6 +439,7 @@ export class SessionDispatchWatcher {
   private metadataReconcileChain: Promise<void> = Promise.resolve();
   private readonly pendingMetadataSessionIds = new Set<SessionId>();
   private metadataReconcileDrainScheduled = false;
+  private wakeMetadataReconcile?: () => void;
   private activeSessionReconciles = 0;
   private activeBootstrapReconciles = 0;
   private readonly sessionReconcileWaiters: SessionReconcileWaiter[] = [];
@@ -942,9 +943,10 @@ export class SessionDispatchWatcher {
    */
   private enqueueMetadataReconcile(sessionId: SessionId): void {
     // Reinsert so a fresh event moves ahead of stale catch-up work already in
-    // the queue. The drain takes from the newest end in bounded batches.
+    // the queue. The drain takes from the newest end as slots become free.
     this.pendingMetadataSessionIds.delete(sessionId);
     this.pendingMetadataSessionIds.add(sessionId);
+    this.wakeMetadataReconcile?.();
     this.scheduleMetadataReconcileDrain();
   }
 
@@ -957,28 +959,35 @@ export class SessionDispatchWatcher {
     const next = this.metadataReconcileChain
       .catch(() => {})
       .then(async () => {
-        while (
-          this.started &&
-          lifecycleGeneration === this.lifecycleGeneration &&
-          this.pendingMetadataSessionIds.size > 0
-        ) {
-          const sessionIds = [...this.pendingMetadataSessionIds]
-            .slice(-SESSION_RECONCILE_CONCURRENCY)
-            .reverse();
-          for (const sessionId of sessionIds) {
+        const running = new Set<Promise<void>>();
+        const isActive = () => this.started && lifecycleGeneration === this.lifecycleGeneration;
+        while (isActive() && (this.pendingMetadataSessionIds.size > 0 || running.size > 0)) {
+          while (
+            this.pendingMetadataSessionIds.size > 0 &&
+            running.size < SESSION_RECONCILE_CONCURRENCY
+          ) {
+            const sessionId = [...this.pendingMetadataSessionIds].at(-1);
+            if (!sessionId) break;
             this.pendingMetadataSessionIds.delete(sessionId);
+            const task = this.withSessionReconcileSlot('metadata', async () => {
+              await this.reconcileSessionWatch(sessionId, 'metadata-watch', {
+                awaitInitialChecks: true,
+                lifecycleGeneration,
+              });
+            })
+              .catch(() => undefined)
+              .finally(() => running.delete(task));
+            running.add(task);
           }
-          await Promise.all(
-            sessionIds.map((sessionId) =>
-              this.withSessionReconcileSlot('metadata', async () => {
-                await this.reconcileSessionWatch(sessionId, 'metadata-watch', {
-                  awaitInitialChecks: true,
-                  lifecycleGeneration,
-                });
-              }).catch(() => undefined)
-            )
-          );
+          await Promise.race([
+            ...running,
+            new Promise<void>((resolve) => {
+              this.wakeMetadataReconcile = resolve;
+            }),
+          ]);
+          this.wakeMetadataReconcile = undefined;
         }
+        await Promise.all(running);
       })
       .finally(() => {
         this.metadataReconcileDrainScheduled = false;

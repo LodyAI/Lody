@@ -2,6 +2,7 @@
 
 Date: 2026-10-21
 Status: implemented
+Archived: 2026-10-29
 Translation: current
 PR: [#1778](https://github.com/LodyAI/Lody/pull/1778)
 
@@ -13,7 +14,7 @@ PR: [#1778](https://github.com/LodyAI/Lody/pull/1778)
 
 ## 决策与证据
 
-[既有 Inbox 实现](../architecture/2026-10-12-operation-inbox.zh.md) 已有启动资源探测和离线 recover-inbox 命令，不是遗漏了启动扫描。自动探测有意拒绝 Windows 身份记录，因为现有 PID 日志无法证明整个进程树消失。[#1770](https://github.com/LodyAI/Lody/issues/1770) 中最初为何缺少释放回执仍未知，本次不声称修复该起因。
+[既有 Inbox 实现](../../implemented/architecture/2026-10-12-operation-inbox.zh.md) 已有启动资源探测和离线 recover-inbox 命令，不是遗漏了启动扫描。自动探测有意拒绝 Windows 身份记录，因为现有 PID 日志无法证明整个进程树消失。[#1770](https://github.com/LodyAI/Lody/issues/1770) 中最初为何缺少释放回执仍未知，本次不声称修复该起因。
 
 本次解决三个缺口：
 

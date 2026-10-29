@@ -93,12 +93,8 @@ import { MachineDocument, SessionDocument, type LoroDocumentManager } from '../s
 import type { SessionActivePresencePhase } from '../src/lib/loro/session-active-presence';
 import { SessionActivePresenceControllerLegacy } from '../src/lib/loro/session-active-presence-legacy';
 import { operationInboxLegacy } from '../src/orchestration/inbox/legacy';
-import { recoverBlockedInboxExecution } from '../src/orchestration/inbox/operator-recovery';
 import {
-  InboxExecutionBlocked,
   InboxExecutionRejected,
-  inboxRecoveryInspectionCommand,
-  quoteInboxRecoveryArgument,
 } from '../src/orchestration/inbox/admission-failure';
 import { LodyOperationStore } from '../src/orchestration/operation-store';
 import { applyAcpSessionRunConfig } from '../src/session/acp-session-config-applier';
@@ -369,6 +365,7 @@ const createBaseDeps = (
     ...overrides,
   };
 
+  deps.sessionManager.detachSession ??= vi.fn();
   const repo = (deps.workspaceDocument as unknown as { repo?: Record<string, unknown> }).repo;
   if (repo && !('openFlockDoc' in repo)) {
     repo.openFlockDoc = vi.fn(async () => ({
@@ -9205,34 +9202,13 @@ describe('SessionExecutionService', () => {
             },
           ]);
           expect(agentClient.pendingPromptCompletion).not.toBeNull();
-          expect(promptSignal?.aborted).toBe(false);
-          expect(history[1]).not.toHaveProperty('finished', true);
-          expect(service.getExecutionSnapshot(message.sessionId)).toMatchObject({
-            hasActiveTurn: true,
-          });
-          await service.continueSession(nextMessage);
-          expect(delivered).toEqual([[{ type: 'text', text: '/compact' }]]);
-          await service.cancelSession({
-            type: 'session/cancel',
-            sessionId: message.sessionId,
-            machineId: message.machineId,
-            workspaceId: message.workspaceId,
-            turnId: 'assistant-prompt-cancel',
-          });
-          expect(stopFailures).toHaveLength(2);
+          await running;
+          expect(promptSignal?.aborted).toBe(true);
+          expect(service.getExecutionSnapshot(message.sessionId).hasActiveTurn).toBe(false);
           nativeTerminal.resolve({ stopReason: 'cancelled' });
         }
       }
       await running;
-      // Preserve the existing blocked-release recovery. A pending notice adds
-      // no hold once that recovery confirms the process has terminated.
-      if (terminationFails) {
-        expect(service.getExecutionSnapshot(message.sessionId).releaseBlocked?.reason).toContain(
-          'Synthetic termination failure'
-        );
-        session.terminate.mockImplementationOnce(async () => {});
-        await expect(service.requestReleaseRecovery(message.sessionId)).resolves.toBe(true);
-      }
       expect(service.getExecutionSnapshot(message.sessionId).hasActiveTurn).toBe(false);
       cancelAck.resolve();
       await vi.advanceTimersByTimeAsync(5_000);
@@ -9550,12 +9526,7 @@ describe('SessionExecutionService', () => {
           await service.continueSession(nextMessage);
           expect(delivered).toEqual([[{ type: 'text', text: 'old request' }]]);
           termination.resolve();
-          if (completion === 'termination-failed') {
-            await service.continueSession(nextMessage);
-            expect(service.getExecutionSnapshot(sessionId)).toMatchObject({ hasActiveTurn: true });
-            expect(delivered).toEqual([[{ type: 'text', text: 'old request' }]]);
-            rawPrompt.resolve();
-          }
+          if (completion === 'termination-failed') rawPrompt.resolve();
           await running;
           expect(terminated).toBe(completion === 'timeout');
         } else {
@@ -9563,13 +9534,6 @@ describe('SessionExecutionService', () => {
           else rawPrompt.reject(new Error('Synthetic ACP connection closed'));
           await running;
           expect(terminated).toBe(false);
-        }
-        if (completion === 'termination-failed') {
-          expect(service.getExecutionSnapshot(sessionId)).toMatchObject({ hasActiveTurn: true });
-          session.terminate = async () => {
-            terminated = true;
-          };
-          await service.recoverInboxExecution(sessionId);
         }
         await released;
         expect(service.getExecutionSnapshot(sessionId)).toMatchObject({ hasActiveTurn: false });
@@ -12118,9 +12082,11 @@ describe('Operation Inbox execution boundary', () => {
       applyExecutionPlaneLimits: async () => {},
       getAcpCapabilities: () => ({ modes: [], models: [] }),
     };
+    let liveSession: typeof session | undefined = session;
     const deps = createBaseDeps({
       sessionManager: {
-        getSession: () => session,
+        getSession: () => liveSession,
+        detachSession: (old: typeof session) => { if (liveSession === old) liveSession = undefined; },
         getPendingSession: () => null,
         createSession: vi.fn(),
         setSessionError: vi.fn(),
@@ -12244,8 +12210,8 @@ describe('Operation Inbox execution boundary', () => {
         config,
       });
     const close = async () => {
-      await bridge.close();
       await service.drainInboxExecutions();
+      await bridge.close();
       store.close();
       fs.rmSync(root, { recursive: true, force: true });
     };
@@ -12319,238 +12285,81 @@ describe('Operation Inbox execution boundary', () => {
     }
   });
 
-  it.each(['missing_identity', 'missing_active_execution', 'other_requester'] as const)(
-    'persists the exact manual recovery entry for a blocked send (%s) without starting transport',
-    async (kind) => {
-      const received: ContentBlock[][] = [];
-      const f = inboxExecutionFixture(async (blocks) => {
-        received.push(blocks);
-        return { stopReason: 'end_turn' };
-      });
-      try {
-        const prior = {
-          workspaceId: 'workspace-1',
-          sessionId: f.message.sessionId,
-          userId: kind === 'other_requester' ? 'earlier-requester' : 'user-1',
-          inputId: 'earlier-input',
-          kind: 'human' as const,
-          config: f.message.acpSessionConfig,
-        };
-        expect(f.store.inbox.accept(prior)).toBe(true);
-        expect(f.store.inbox.begin(prior, 'blocked-execution')).toBe(true);
-        f.store.inbox.release({
-          ...prior,
-          executionId: 'blocked-execution',
-          outcome: 'unreleased',
-        });
-        if (kind === 'missing_active_execution') {
-          const db = new Database(f.storePath);
-          try {
-            db.prepare('UPDATE inbox_sessions SET active_execution=NULL WHERE session_id=?').run(
-              f.message.sessionId
-            );
-          } finally {
-            db.close();
-          }
-        }
-
-        await expect(f.service.continueSession(f.message)).rejects.toBeInstanceOf(
-          InboxExecutionBlocked
-        );
-        const history = await (await createSessionBackend(f.doc)).readHistory();
-        const notices = history
-          .flatMap((turn) => turn.items ?? [])
-          .filter((item) => item.type === 'system_notice' && item.name === 'chat_failed');
-        expect(notices).toHaveLength(1);
-        expect(notices[0]?.meta).toMatchObject({
-          reason: 'turn_pre_prompt_failed',
-          message: expect.stringContaining(
-            'Machine: "machine-1"; workspace: "workspace-1"; session: "inbox-session".'
-          ),
-        });
-        const message = notices[0]?.meta?.message;
-        expect(message).toContain(
-          kind === 'missing_active_execution'
-            ? 'Blocked execution: (missing active execution ID); reason: missing_active_execution.'
-            : 'Blocked execution: "blocked-execution"; reason: missing_identity.'
-        );
-        expect(message).toContain('Quit Lody Desktop and stop the Lody daemon');
-        expect(message).toContain(
-          "lody session recover-inbox --machine 'machine-1' --workspace 'workspace-1' -- 'inbox-session'"
-        );
-        expect(message).not.toContain('--confirm-resources-released');
-        expect(message).not.toContain('--execution');
-        expect(history.find((turn) => turn.id === 'human-input')?.status).toBe('failed');
-        expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
-        expect(received).toEqual([]);
-        expect(f.store.inbox.blockedExecutions('workspace-1')).not.toEqual([]);
-        expect(f.store.inbox.pending('workspace-1')).toEqual([]);
-      } finally {
-        await f.close();
-      }
-    }
-  );
-
-  it('does not mistake a live admission conflict for blocked recovery', async () => {
+  it('preserves a live execution while a later input waits', async () => {
+    const started = createDeferred<void>();
+    const finish = createDeferred<void>();
     const received: ContentBlock[][] = [];
     const f = inboxExecutionFixture(async (blocks) => {
       received.push(blocks);
+      started.resolve();
+      await finish.promise;
       return { stopReason: 'end_turn' };
     });
+    let running: Promise<unknown> | undefined;
     try {
-      const prior = {
-        workspaceId: 'workspace-1',
-        sessionId: f.message.sessionId,
-        userId: 'user-1',
-        inputId: 'live-input',
-        kind: 'human' as const,
-        config: f.message.acpSessionConfig,
-      };
-      expect(f.store.inbox.accept(prior)).toBe(true);
-      expect(f.store.inbox.begin(prior, 'live-execution')).toBe(true);
-      const unrelated = { ...prior, sessionId: 'different-session' };
-      expect(f.store.inbox.accept(unrelated)).toBe(true);
-      expect(f.store.inbox.begin(unrelated, 'unrelated-blocked-execution')).toBe(true);
-      f.store.inbox.release({
-        ...unrelated,
-        executionId: 'unrelated-blocked-execution',
-        outcome: 'unreleased',
-      });
-      await expect(f.service.continueSession(f.message)).rejects.toBeInstanceOf(
-        InboxExecutionRejected
-      );
+      await f.accept();
+      running = f.service.continueSession(f.message);
+      await started.promise;
+      const before = f.store.inbox.activeExecution('workspace-1', f.message.sessionId);
+      await f.service.continueSession({ ...f.message, userTurnId: 'waiting-input' });
+      expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toEqual(before);
+      expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(true);
       const notices = (await (await createSessionBackend(f.doc)).readHistory())
         .flatMap((turn) => turn.items ?? [])
         .filter((item) => item.type === 'system_notice' && item.name === 'chat_failed');
       expect(notices).toEqual([]);
-      expect(f.store.inbox.blockedExecutions('workspace-1', f.message.sessionId)).toEqual([]);
-      expect(received).toEqual([]);
+      expect(received).toEqual([[{ type: 'text', text: 'CURRENT_REQUEST' }]]);
     } finally {
+      finish.resolve();
+      await running;
       await f.close();
     }
   });
 
-  it('retires only the visibly rejected task so later child results can wake after manual recovery', async () => {
+  it('does not retire a live Inbox execution when admission registers a replacement runtime', async () => {
+    const started = createDeferred<void>();
+    const finish = createDeferred<void>();
     const received: ContentBlock[][] = [];
-    const automaticFinished = createDeferred<void>();
-    const f = inboxExecutionFixture(
-      async (blocks) => {
-        received.push(structuredClone(blocks));
-        return { stopReason: 'end_turn' };
-      },
-      undefined,
-      () => automaticFinished.resolve()
-    );
+    const f = inboxExecutionFixture(async (blocks) => {
+      received.push(structuredClone(blocks));
+      if (received.length === 1) {
+        started.resolve();
+        await finish.promise;
+      }
+      return { stopReason: 'end_turn' };
+    });
+    let running: Promise<unknown> | undefined;
     try {
-      const backend = await createSessionBackend(f.doc);
-      const source = (await backend.readHistory()).find((turn) => turn.id === 'human-input');
-      if (!source) throw new Error('Missing fixture user turn');
-      const prior = {
-        workspaceId: 'workspace-1',
-        sessionId: f.message.sessionId,
-        userId: 'user-1',
-        inputId: 'old-input',
-        kind: 'task' as const,
-        config: f.message.acpSessionConfig,
-      };
-      expect(f.store.inbox.accept(prior)).toBe(true);
-      expect(f.store.inbox.begin(prior, 'old-execution')).toBe(true);
-      f.store.inbox.release({ ...prior, executionId: 'old-execution', outcome: 'unreleased' });
-      const queued = { ...prior, inputId: 'queued-task', config: { prompt: 'QUEUED_REQUEST' } };
-      expect(f.store.inbox.accept(queued)).toBe(true);
-      await f.doc.sessionData.commands.applyHistoryAction({
-        kind: 'upsert-turn',
-        turn: {
-          ...source,
-          id: queued.inputId,
-          inputConfig: queued.config,
-          items: [{ type: 'text', text: queued.config.prompt }],
-        },
-      });
-      // No human receipt: this rejected Agent chat is recorded as a task.
-      await expect(f.service.continueSession(f.message)).rejects.toBeInstanceOf(
-        InboxExecutionBlocked
-      );
-      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(
-        true
-      );
-      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, queued.inputId)).toBe(
-        false
-      );
-      expect(received).toEqual([]);
-      // Exercise the native operator workflow with deterministic, resource-free ports.
-      // The platform's exclusive Host lease/probe behavior has its own Inbox suite.
-      await Effect.runPromise(
-        recoverBlockedInboxExecution(
-          {
-            blocked: Effect.sync(() => f.store.inbox.blockedExecutions('workspace-1')),
-            exclusive: (work) => work,
-            knownResourcesGone: () => Effect.succeed(true),
-            confirm: (record) =>
-              Effect.sync(
-                () =>
-                  record.executionId !== null &&
-                  f.store.inbox.recoverBlocked(
-                    record.scope,
-                    record.executionId,
-                    record.snapshotToken
-                  )
-              ),
-          },
-          f.message.sessionId,
-          'old-execution',
-          true
-        )
-      );
-      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, queued.inputId)).toBe(
-        false
-      );
-      expect(f.store.inbox.pending('workspace-1')).toEqual([]);
-
-      const freshConfig = { ...f.message.acpSessionConfig, prompt: 'FRESH_REQUEST' };
-      await f.doc.sessionData.commands.applyHistoryAction({
-        kind: 'upsert-turn',
-        turn: {
-          ...source,
-          id: 'fresh-human',
-          inputConfig: freshConfig,
-          items: [{ type: 'text', text: freshConfig.prompt }],
-        },
-      });
-      await f.service.acceptInboxHumanInput({
-        sessionId: f.message.sessionId,
-        inputId: 'fresh-human',
-        userId: 'user-1',
-        config: freshConfig,
-      });
-      await f.service.continueSession({
-        ...f.message,
-        userTurnId: 'fresh-human',
-        acpSessionConfig: freshConfig,
-      });
-      await f.service.continueSession({
-        ...f.message,
-        userTurnId: queued.inputId,
-        acpSessionConfig: { ...f.message.acpSessionConfig, ...queued.config },
-      });
-      expect(received).toHaveLength(2);
-      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, queued.inputId)).toBe(
-        true
-      );
-      f.add('later-child-result');
-      expect(f.store.inbox.pending('workspace-1')).toHaveLength(1);
-      await f.wake();
-      await automaticFinished.promise;
-      expect(received).toHaveLength(3);
-      expect(
-        f.store.inbox.historyReceipts('workspace-1').every((batch) => batch.state === 'settled')
-      ).toBe(true);
+      await f.accept();
+      running = f.service.continueSession(f.message);
+      await started.promise;
+      const prior = f.store.inbox.activeExecution('workspace-1', f.message.sessionId);
+      expect(prior).toMatchObject({ executionId: 'assistant:human-input', inputId: 'human-input' });
+      // Retire only the facade registration; transport and the SQLite owner remain live.
+      const internals = f.service as unknown as { releaseTurnRuntime(sessionId: SessionId, turnId: string): void };
+      internals.releaseTurnRuntime(f.message.sessionId, 'assistant:human-input');
+      const config = { ...f.message.acpSessionConfig, prompt: 'WAITING_REQUEST' };
+      await f.doc.sessionData.commands.applyHistoryAction({ kind: 'upsert-turn', turn: {
+        id: 'waiting-input', role: 'user', userId: 'user-1', status: 'pending', inputConfig: config,
+        timestamp: '2026-10-29T00:00:00Z', items: [{ type: 'text', text: config.prompt }], fileDiff: [], finished: true,
+      } });
+      await f.service.acceptInboxHumanInput({ sessionId: f.message.sessionId, inputId: 'waiting-input', userId: 'user-1', config });
+      const attempt = await f.service.continueSession({ ...f.message, userTurnId: 'waiting-input', acpSessionConfig: config }).catch((cause: unknown) => cause);
+      expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toEqual(prior);
+      expect(received).toEqual([[{ type: 'text', text: 'CURRENT_REQUEST' }]]);
+      expect(attempt).toBeInstanceOf(InboxExecutionRejected);
+      finish.resolve();
+      await running;
+      await f.service.continueSession({ ...f.message, userTurnId: 'waiting-input', acpSessionConfig: config });
+      expect(received).toEqual([[{ type: 'text', text: 'CURRENT_REQUEST' }], [{ type: 'text', text: 'WAITING_REQUEST' }]]);
     } finally {
+      finish.resolve();
+      await running;
       await f.close();
     }
   });
 
-  it('does not release or retire an old active input when a rejected restart reuses its IDs', async () => {
+  it('retires a crashed input without replay and closes its leftover assistant entry', async () => {
     const received: ContentBlock[][] = [];
     const f = inboxExecutionFixture(async (blocks) => {
       received.push(blocks);
@@ -12579,11 +12388,9 @@ describe('Operation Inbox execution boundary', () => {
           fileDiff: [],
         },
       });
-      // Restart observation blocks the owner without manufacturing a release receipt.
+      // Restart retires the interrupted input and records its unknown outcome.
       f.store.inbox.activate('workspace-1', 'owner');
-      await expect(f.service.continueSession(f.message)).rejects.toBeInstanceOf(
-        InboxExecutionBlocked
-      );
+      await f.service.continueSession(f.message);
       // The rejected run settles its input, so nothing owns the leftover entry any more.
       const backend = await createSessionBackend(f.doc);
       expect((await backend.readTurn('human-input')).turn).toMatchObject({ status: 'failed' });
@@ -12591,10 +12398,7 @@ describe('Operation Inbox execution boundary', () => {
         finished: true,
         endedAt: expect.any(Number),
       });
-      expect(f.store.inbox.blockedExecutions('workspace-1', f.message.sessionId)).toMatchObject([
-        { executionId: 'assistant:human-input' },
-      ]);
-      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, old.inputId)).toBe(false);
+      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, old.inputId)).toBe(true);
       const db = new Database(f.storePath);
       try {
         expect(
@@ -12604,13 +12408,13 @@ describe('Operation Inbox execution boundary', () => {
             )
             .get(f.message.sessionId)
         ).toEqual({
-          active_execution: 'assistant:human-input',
-          active_input: old.inputId,
-          blocked: 1,
+          active_execution: null,
+          active_input: null,
+          blocked: 0,
         });
         expect(
-          db.prepare('SELECT * FROM inbox_releases WHERE session_id=?').all(f.message.sessionId)
-        ).toEqual([]);
+          db.prepare('SELECT outcome FROM inbox_releases WHERE session_id=?').all(f.message.sessionId)
+        ).toEqual([{ outcome: 'failed' }]);
       } finally {
         db.close();
       }
@@ -12619,51 +12423,6 @@ describe('Operation Inbox execution boundary', () => {
       await f.close();
     }
   });
-
-  it('quotes Windows recovery commands as PowerShell literals without adding recovery consent', () => {
-    const command = inboxRecoveryInspectionCommand(
-      { machineId: "host'$(evil)", workspaceId: 'work `space;$env:HOME', sessionId: '-session' },
-      'win32'
-    );
-    expect(command).toBe(
-      "lody session recover-inbox --machine 'host''$(evil)' --workspace 'work `space;$env:HOME' -- '-session'"
-    );
-    expect(quoteInboxRecoveryArgument('', 'win32')).toBe("''");
-    expect(quoteInboxRecoveryArgument('host\u2019; $(evil);\u2018end', 'win32')).toBe(
-      "'host\u2019\u2019; $(evil);\u2018\u2018end'"
-    );
-    expect(quoteInboxRecoveryArgument('host\u201a; $(evil);\u201bend', 'win32')).toBe(
-      "'host\u201a\u201a; $(evil);\u201b\u201bend'"
-    );
-  });
-
-  it.skipIf(process.platform === 'win32')(
-    'passes POSIX recovery identifiers literally, including quotes, substitutions and leading options',
-    () => {
-      const target = {
-        machineId: "host'$(printf injected)",
-        workspaceId: 'work space; "$HOME"\\newline\nnext',
-        sessionId: '--confirm-resources-released',
-      };
-      const command = inboxRecoveryInspectionCommand(target, 'linux');
-      const argumentsSeen = execFileSync(
-        '/bin/sh',
-        ['-c', `lody() { printf '%s\\0' "$@"; }; ${command}`],
-        { encoding: 'utf8' }
-      ).split('\0');
-      expect(argumentsSeen).toEqual([
-        'session',
-        'recover-inbox',
-        '--machine',
-        target.machineId,
-        '--workspace',
-        target.workspaceId,
-        '--',
-        target.sessionId,
-        '',
-      ]);
-    }
-  );
 
   it('notifies once after five children, partial summaries and a follow-up delegation finish', async () => {
     const summaries = [createDeferred<void>(), createDeferred<void>(), createDeferred<void>()];
@@ -13239,72 +12998,188 @@ describe('Operation Inbox execution boundary', () => {
     }
   });
 
-  it('retains incomplete acquisition after prompt completion and retries failed release persistence', async () => {
-    let persist!: (identity: { roots: readonly number[]; complete: boolean }) => void;
+  it.each(['cleanup-ok', 'cleanup-failed', 'admission-retry', 'persistent'] as const)(
+    'retires a rolled-back release without replaying old input (%s)',
+    async (mode) => {
+      const received: ContentBlock[][] = [];
+      const prompt = async (blocks: ContentBlock[]) => {
+        received.push(structuredClone(blocks));
+        return { stopReason: 'end_turn' };
+      };
+      const f = inboxExecutionFixture(prompt);
+      const db = new Database(f.storePath);
+      const backgroundCanRelease = mode.startsWith('cleanup');
+      if (mode === 'cleanup-failed') f.session.terminate = async () => { throw new Error('terminate failed'); };
+      const replacement = {
+        ...f.session,
+        acpSessionId: 'replacement-acp',
+        agentClient: { ...f.client, isCreated: () => true, prompt: async (_id: unknown, blocks: ContentBlock[]) => prompt(blocks) },
+        createAgent: async () => 'replacement-acp',
+        terminate: async () => {},
+      };
+      Object.assign(f.deps.sessionManager, { createSession: async () => replacement });
+      const send = async (inputId: string) => {
+        const config = { ...f.message.acpSessionConfig, prompt: 'FRESH_REQUEST' };
+        await f.doc.sessionData.commands.applyHistoryAction({ kind: 'upsert-turn', turn: {
+          id: inputId, role: 'user', userId: 'user-1', status: 'pending', inputConfig: config,
+          timestamp: '2026-10-29T00:00:00Z', items: [{ type: 'text', text: config.prompt }], fileDiff: [], finished: true,
+        } });
+        await f.service.acceptInboxHumanInput({ sessionId: f.message.sessionId, inputId, userId: 'user-1', config });
+        return f.service.continueSession({ ...f.message, userTurnId: inputId, acpSessionConfig: config });
+      };
+      try {
+        f.add('captured-before-outage');
+        await f.accept();
+        // ROLLBACK models SQLITE_FULL aborting the whole transaction, not just one statement.
+        db.exec(`CREATE TRIGGER release_outage BEFORE UPDATE ON inbox_sessions
+          WHEN OLD.active_execution='assistant:human-input' AND NEW.active_execution IS NULL
+          ${backgroundCanRelease ? "AND EXISTS(SELECT 1 FROM inbox_releases WHERE execution_id=OLD.active_execution AND outcome='normal')" : ''}
+          BEGIN SELECT RAISE(ROLLBACK,'SQLITE_FULL'); END;`);
+        await f.service.continueSession(f.message);
+        await f.service.drainInboxExecutions();
+        expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
+        const active = () => db.prepare('SELECT active_execution FROM inbox_sessions WHERE session_id=?').get(f.message.sessionId);
+        expect(active()).toEqual({ active_execution: backgroundCanRelease ? null : 'assistant:human-input' });
+        if (mode === 'persistent') {
+          await expect(send('rejected-input')).rejects.toBeInstanceOf(InboxExecutionRejected);
+          const notices = (await (await createSessionBackend(f.doc)).readHistory())
+            .flatMap((turn) => turn.items ?? []).filter((item) => item.type === 'system_notice' && item.name === 'chat_failed');
+          expect(notices).toMatchObject([{ meta: { message: expect.stringContaining('the disk may be full') } }]);
+          expect(received).toHaveLength(1);
+        }
+        db.exec('DROP TRIGGER release_outage');
+        await send('fresh-input');
+        expect(received).toHaveLength(2);
+        expect(received[1]).toEqual([{ type: 'text', text: 'FRESH_REQUEST' }]);
+        expect(active()).toEqual({ active_execution: null });
+        expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, f.message.userTurnId)).toBe(true);
+        expect((await (await createSessionBackend(f.doc)).readTurn('fresh-input')).turn).toMatchObject({ status: 'handled' });
+        expect(f.store.inbox.historyReceipts('workspace-1')).toMatchObject([{ state: 'settled', memberCount: 1 }]);
+      } finally {
+        db.exec('DROP TRIGGER IF EXISTS release_outage');
+        db.close();
+        await f.close();
+      }
+    }
+  );
+
+  it('retires a failed Inbox preparation even when its release transaction rolls back', async () => {
     const received: ContentBlock[][] = [];
     const f = inboxExecutionFixture(async (blocks) => {
       received.push(structuredClone(blocks));
-      persist({ roots: [123], complete: false });
-      f.add('arrived-while-acquiring');
       return { stopReason: 'end_turn' };
     });
-    Object.assign(f.session, {
-      watchInboxRecoveryResources: async (record: typeof persist) => {
-        persist = record;
-        record({ roots: [123], complete: true });
-        return () => {};
-      },
-    });
+    const db = new Database(f.storePath);
     try {
+      f.add('result-before-prepare-failure');
       await f.accept();
-      await f.service.continueSession(f.message);
-      expect(f.store.inbox.pending('workspace-1')).toEqual([]);
-      expect(f.service.getExecutionSnapshot(f.message.sessionId)).toMatchObject({
-        hasActiveTurn: true,
-        releaseBlocked: { reason: 'Inbox resource acquisition remains incomplete' },
+      // Fail only after begin committed, then roll back the compensating release too.
+      db.exec(`CREATE TRIGGER prepare_outage BEFORE INSERT ON inbox_batches
+        WHEN NEW.input_id='human-input' AND EXISTS(
+          SELECT 1 FROM inbox_sessions WHERE active_execution='assistant:human-input')
+        BEGIN SELECT RAISE(ROLLBACK,'prepare failed'); END;
+        CREATE TRIGGER release_outage BEFORE UPDATE ON inbox_sessions
+        WHEN OLD.active_execution='assistant:human-input' AND NEW.active_execution IS NULL
+        BEGIN SELECT RAISE(ROLLBACK,'SQLITE_FULL'); END;`);
+      await expect(f.service.continueSession(f.message)).rejects.toThrow('prepare failed');
+      expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toMatchObject({
+        executionId: 'assistant:human-input',
+        inputId: 'human-input',
       });
-      const next = {
-        workspaceId: 'workspace-1',
+      expect(received).toEqual([]);
+      expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
+
+      db.exec('DROP TRIGGER prepare_outage; DROP TRIGGER release_outage;');
+      const config = { ...f.message.acpSessionConfig, prompt: 'FRESH_REQUEST' };
+      await f.doc.sessionData.commands.applyHistoryAction({
+        kind: 'upsert-turn',
+        turn: {
+          id: 'fresh-input',
+          role: 'user',
+          userId: 'user-1',
+          status: 'pending',
+          inputConfig: config,
+          timestamp: '2026-10-30T00:00:00Z',
+          items: [{ type: 'text', text: config.prompt }],
+          fileDiff: [],
+          finished: true,
+        },
+      });
+      await f.service.acceptInboxHumanInput({
         sessionId: f.message.sessionId,
+        inputId: 'fresh-input',
         userId: 'user-1',
-        inputId: 'later-human',
-        kind: 'human' as const,
-        config: f.message.acpSessionConfig,
-      };
-      f.store.inbox.accept(next);
-      expect(f.store.inbox.begin(next, 'successor')).toBe(false);
-      const db = new Database(f.storePath);
-      try {
-        db.exec(
-          "CREATE TRIGGER release_outage BEFORE UPDATE ON inbox_sessions WHEN OLD.blocked=1 AND NEW.blocked=0 BEGIN SELECT RAISE(ABORT,'release outage'); END;"
-        );
-        await expect(f.service.recoverInboxExecution(f.message.sessionId)).rejects.toThrow(
-          'release outage'
-        );
-        expect(f.store.inbox.begin(next, 'successor')).toBe(false);
-        // A waiting input's recovery request reports the still-blocked slot.
-        await expect(f.service.requestReleaseRecovery(f.message.sessionId)).resolves.toBe(false);
-        expect(f.service.getExecutionSnapshot(f.message.sessionId).releaseBlocked).toBeDefined();
-        db.exec('DROP TRIGGER release_outage');
-        // Concurrent waiting inputs share one recovery, which succeeds once the fault clears.
-        const first = f.service.requestReleaseRecovery(f.message.sessionId);
-        const second = f.service.requestReleaseRecovery(f.message.sessionId);
-        expect(second).toBe(first);
-        await expect(first).resolves.toBe(true);
-        expect(f.service.getExecutionSnapshot(f.message.sessionId)).toMatchObject({
-          hasActiveTurn: false,
-        });
-        expect(f.service.getExecutionSnapshot(f.message.sessionId).releaseBlocked).toBeUndefined();
-        await expect(f.service.requestReleaseRecovery(f.message.sessionId)).resolves.toBe(false);
-        expect(f.store.inbox.begin(next, 'successor')).toBe(true);
-        expect(received).toHaveLength(1);
-        expect(received[0]).toEqual([{ type: 'text', text: 'CURRENT_REQUEST' }]);
-      } finally {
-        db.close();
-      }
+        config,
+      });
+      await f.service.continueSession({
+        ...f.message,
+        userTurnId: 'fresh-input',
+        acpSessionConfig: config,
+      });
+      expect(received).toHaveLength(1);
+      expect(received[0]?.[0]).toEqual({ type: 'text', text: 'FRESH_REQUEST' });
+      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(true);
+      const backend = await createSessionBackend(f.doc);
+      expect((await backend.readTurn('fresh-input')).turn).toMatchObject({ status: 'handled' });
+      expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toBeUndefined();
+      expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
+      await f.service.continueSession(f.message);
+      expect((await backend.readTurn('human-input')).turn).toMatchObject({ status: 'failed' });
+      expect(received).toHaveLength(1);
     } finally {
+      db.exec('DROP TRIGGER IF EXISTS prepare_outage; DROP TRIGGER IF EXISTS release_outage;');
+      db.close();
       await f.close();
     }
+  });
+
+  it('detaches a failed Agent, continues with a new ACP and reports cleanup without blocking drain', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const started = createDeferred<void>();
+    const raw = createDeferred<void>();
+    const received: string[] = [];
+    const f = inboxExecutionFixture(async () => {
+      received.push('old');
+      started.resolve();
+      await raw.promise;
+      return { stopReason: 'end_turn' };
+    });
+    const cleanupStarted = createDeferred<void>();
+    f.session.terminate = async () => { cleanupStarted.resolve(); throw new Error('Synthetic termination failure'); };
+    Object.defineProperty(f.client, 'pendingPromptCompletion', { get: () => raw.promise });
+    const notices: string[] = [];
+    f.deps.recordSessionStopFailure = async (_sid, _turnId, failure) => { notices.push(failure.message); };
+    const replacement = {
+      ...f.session,
+      acpSessionId: 'new-acp',
+      agentClient: { ...f.client, prompt: async () => { received.push('new'); return { stopReason: 'end_turn' }; } },
+      createAgent: async () => 'new-acp',
+      terminate: async () => {},
+    };
+    Object.assign(f.deps.sessionManager, { createSession: async () => replacement });
+    try {
+      await f.accept();
+      const running = f.service.continueSession(f.message);
+      await started.promise;
+      await f.service.cancelSession({ type: 'session/cancel', sessionId: f.message.sessionId, machineId: f.message.machineId, workspaceId: f.message.workspaceId, turnId: 'assistant:human-input' });
+      await vi.advanceTimersByTimeAsync(5_000);
+      await cleanupStarted.promise;
+      await running;
+      expect(f.deps.sessionManager.getSession(f.message.sessionId)).toBeUndefined();
+      expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
+      expect(notices).toContainEqual(expect.stringContaining('termination failure'));
+      await expect(f.service.drainInboxExecutions()).resolves.toBeUndefined();
+      const next = { ...f.message, userTurnId: 'fresh-human' };
+      await f.doc.sessionData.commands.applyHistoryAction({ kind: 'upsert-turn', turn: {
+        id: next.userTurnId, role: 'user', status: 'pending', userId: 'user-1',
+        timestamp: '2026-10-12T00:00:01Z', inputConfig: f.message.acpSessionConfig,
+        items: [{ type: 'text', text: 'FRESH' }], fileDiff: [], finished: true,
+      } });
+      await f.service.acceptInboxHumanInput({ sessionId: next.sessionId, inputId: next.userTurnId, userId: 'user-1', config: next.acpSessionConfig });
+      await f.service.continueSession(next);
+      expect(received).toEqual(['old', 'new']);
+      expect((await (await createSessionBackend(f.doc)).readTurn(next.userTurnId)).turn).toMatchObject({ status: 'handled' });
+    } finally { raw.resolve(); await f.close(); vi.useRealTimers(); }
   });
 
   it('releases an Inbox turn whose failure handling also fails, so the next input runs', async () => {

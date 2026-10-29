@@ -30,3 +30,12 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
 - RPC exposes the existing closed product methods and exact original retries,
   never private keys, credentials or generic signing to product callers. Real
   injected implementations are required; no empty handler substitutes for support.
+
+- Product/runtime assembly uses `makeOwnedPersonalDeviceHost` with resource-owning
+  port Layers. Its bounded close retains the actual drain and all dependencies;
+  the lower-level scoped constructor still joins actual native work. Keep the
+  complete incomplete-close failure and its recovery owner until confirmed close,
+  and refuse same-binding handoff meanwhile. Borrowed ports must outlive that owner.
+- Concurrent close callers share one ticket; serialize finite ticket creation,
+  never native settlement. Worker-to-consumer plaintext transfer owns cleanup
+  before and after publication, including cancellation of the waiting consumer.

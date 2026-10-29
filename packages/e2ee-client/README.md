@@ -10,9 +10,10 @@ storage and product assembly remain in place.
 
 ## Acquire and own
 
-Build `makePersonalDeviceHost()` in a Scope with `PersonalHostPlatform`,
-`PersonalHostRemote`, `ClientInstallationStore`, `ClientCustodyWriter` and
-`ClientPairingOriginalStore`. Capture one account/workspace/independently pinned
+Build `makeOwnedPersonalDeviceHost(ports)` in a consumer Scope. `ports` is a
+resource-owning Layer providing `PersonalHostPlatform`, `PersonalHostRemote`,
+`ClientInstallationStore`, `ClientCustodyWriter` and `ClientPairingOriginalStore`.
+It acquires those ports and the scoped host in an independently retained Scope. Capture one account/workspace/independently pinned
 genesis. A capability captures the same complete binding; another account's login
 or a response label never chooses it. Missing support fails explicitly.
 
@@ -39,6 +40,29 @@ signing capability.
 - `close()` fences admission, interrupts/joins operations, then releases key,
   credential and database owners. Close/logout/cache cleanup never delete identity.
   The composition creates no timer, document Repo or ordinary transport.
+
+## Bounded retirement
+
+Owned host and session `close()` fence new work immediately and share a five-second
+budget per actual drain. Timeout reports `PersonalCloseIncomplete` with a narrow
+`owner`; retain that complete failure until `owner.awaitSettled()` confirms actual
+cleanup. `owner.settled()` reports drain termination, including failure, rather
+than proving successful close. No timeout releases a Web Lock, wipes a buffer still
+borrowed by native work, deletes identity or permits a replacement handoff.
+
+The caller's Scope uses the same bounded close. The retained owner holds the full
+port Layer, native operations and resource Scopes past that caller's lifetime.
+Concurrent callers share one drain; metadata creation is serialized separately
+from native work. Replacement drains every matching owned reader before invoking
+the supplied external-owner drain and the existing atomic identity switch. A closed handle never revives. Successful late settlement lets
+a subsequent `close()` confirm cleanup. Keep a runtime entry for that binding
+until confirmed close; do not replace it merely because a waiter timed out.
+
+`makePersonalDeviceHost()` remains the lower-level scoped actual-drain constructor.
+Product/runtime and mobile-native composition must use the owned constructor;
+borrowed external ports must outlive confirmed retirement. Runtime bridge adoption
+is tracked by [#2075](https://github.com/LodyAI/Lody/issues/2075). This package entry
+does not activate a product transport or qualify a native mobile implementation.
 
 ## Approval, replacement and failures
 

@@ -50,6 +50,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 - Builtins use `setting.ts`'s `resolveACPProcessLaunchAsync()`. [Codex profiles](../../../../specs/codex-account-profiles.md)
   forbid upstream keys in shared/child env. Process records delay deletion, never
   restrict same-profile concurrency.
+  Catalog scans skip unreadable profiles with one warning per file; selected-account validation stays strict.
 - `deepseek-harness-runtime.ts` is not managed: no download/prefetch/override/auth.
   Keep npx argv for recovery. Windows uses npm JS without cmd.exe;
   npm, forwarder, DSH and Job children stay windowless, preserving stdio/env/containment.
@@ -67,6 +68,12 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   methods stay capability-gated. Inject the artifact base URL from
   `CloudPort.runtimeArtifacts`; never read deployment environment or derive the channel here.
   `LODY_RUNTIME_BASE_URL` is an explicit mirror override only.
+- Invalid caches remain unlaunchable; status reports absence with a warning. Repairs publish
+  verified generations without moving existing paths. Status, install and launch share selection:
+  filter base and completed generations by current pins and host compatibility, then rank them.
+  Cleanup preserves unreadable originals and generation trees while reader lifetimes are unknown.
+  Downloads stop after 60 seconds idle;
+  progressing transfers have no total deadline, and later calls resume retained partial bytes.
 - Install cancellation, here and in `acp-binary-manager.ts`: concurrent installs share one
   download but keep independent consumer leases; cancelling one caller must not stop others, and
   only the last aborts fetch, checksum, and extraction. An immediate retry waits for an aborted

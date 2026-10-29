@@ -251,6 +251,14 @@ The submodule owns the private-wire contract
 and minimum official version. Kimi is different: `packages/acp-extension-kimi` owns the
 Lody-maintained runtime source and implements the shared `acp-extension-core` contract.
 
+Corrupt caches are reported absent with a warning; launch never executes them. Installation
+publishes a verified successor in a sibling `<arch>.gen-<uuid>` directory and leaves existing
+paths untouched, including same-version replacements. Status, installation and launch share a
+selector: filter the base and all completed generations by current pins and host compatibility,
+then rank eligible candidates by installedAt and command. Best-effort cleanup conservatively retains corrupt originals and generation trees
+because the manager cannot prove their readers have exited. Downloads have a 60-second idle deadline;
+progressing transfers have no total deadline. Idle timeout retains partial bytes for Range resume. [Decision](../../../../.agents/notes/proposed/bug-fix/2026-09-21-acp-auth-runtime-download.md).
+
 Completed caches written before metadata schema v1 remain reusable through a separate strict
 legacy schema; their old `name`/`version`/`platform` fields are normalized in memory and only
 the trusted runtime definition's command and host requirement are inferred. Repacked Node
@@ -357,6 +365,10 @@ the isolated session selects `gpt-5.6-luna`, low reasoning, and full access. Uns
 requested options fail to the existing prompt-derived fallback. The bundled adapter
 has no automatic generator, so neither the main nor title session starts an extra
 naming turn. Main conversation settings and Provider authentication are preserved.
+When a Provider loses its account reference, session startup and isolated titles use
+`CodexProfileStore.isAccountBound`: the durable binding marker precedes the legacy
+profile scan. Bound titles skip with a debug message, preserving the draft without
+sending task text through native default credentials.
 
 Other isolated title sessions retain the Provider's current model unless a title model
 was explicitly saved. Catalog order does not define a model preference; inferred safe

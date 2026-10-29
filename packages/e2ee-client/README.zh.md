@@ -8,9 +8,10 @@
 
 ## 创建与所有权
 
-在 Scope 中提供 `PersonalHostPlatform`、`PersonalHostRemote`、
-`ClientInstallationStore`、`ClientCustodyWriter`、`ClientPairingOriginalStore`，
-然后创建 `makePersonalDeviceHost()`。固定账号、工作区和独立传入的 genesis；
+在消费方 Scope 中创建 `makeOwnedPersonalDeviceHost(ports)`。`ports` 是拥有资源的 Layer，
+提供 `PersonalHostPlatform`、`PersonalHostRemote`、`ClientInstallationStore`、
+`ClientCustodyWriter`、`ClientPairingOriginalStore`。它在独立保留的 Scope 中获取这些端口
+和底层 scoped host。固定账号、工作区和独立传入的 genesis；
 每项能力绑定同一完整身份。另一账号的登录或响应标签不能选择该绑定，缺能力明确失败。
 
 平台提供持久保管、账本端口、密钥存储/后端、公开审批证据和可选 RPC 原件存储。
@@ -30,6 +31,25 @@
   悄悄当作本次操作，也不会重签未知提交。
 - `close()` 停止接纳，取消并等待操作，再释放密钥、credential 和数据库所有者。
   close/logout/清缓存不删除身份。组合不创建定时器、文档 Repo 或普通传输。
+
+## 有界退休
+
+owned host 和 session 的 `close()` 立即停止新工作，每个实际 drain 共用五秒等待预算。
+超时返回 `PersonalCloseIncomplete`，附带窄 `owner`；保留完整失败，直到显式
+`owner.awaitSettled()` 确认实际清理。`owner.settled()` 只报告 drain 是否结束，包含失败，
+不证明关闭成功。超时不释放 Web Lock、不清理仍被原生借用的缓冲、不删除身份，也不
+放行替换交接。
+
+消费方 Scope 使用同一有界关闭。受控 owner 在消费方退出后继续持有整个端口 Layer、
+原生操作及资源 Scope。并发调用共用 drain；元数据创建与原生工作分别协调。替换先排空全部匹配的 owned
+reader，再调用已提供的外部 owner drain，之后才执行既有原子身份切换。已关闭句柄
+不会复活。晚到结算成功后，再次 `close()` 可确认完成。在确认关闭前，runtime 必须保留
+该绑定的条目，不能因一个等待者超时就换新 owner。
+
+`makePersonalDeviceHost()` 保留为底层 scoped 实际 drain 构造器。产品/runtime 和
+移动端原生组合必须使用 owned 构造器；借入的外部端口须活到确认退休之后。runtime
+bridge 的采用由 [#2075](https://github.com/LodyAI/Lody/issues/2075) 跟踪。此入口不激活
+产品传输，也不证明原生移动端实现通过验收。
 
 ## 审批、替换与失败
 

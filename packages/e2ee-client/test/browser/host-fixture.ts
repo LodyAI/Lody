@@ -1,4 +1,17 @@
-import { Clock, Context, Deferred, Effect, Exit, Fiber, Layer, Result, Scope } from 'effect';
+import {
+  Cause,
+  Clock,
+  Context,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Result,
+  Scope,
+  Scheduler,
+  Duration,
+} from 'effect';
 import { importBrowserDevice, type BrowserDevice } from '@lody/e2ee-core/adapters/browser-crypto';
 import {
   browserClientCustody,
@@ -46,7 +59,8 @@ import {
   EpochPublicationSource,
 } from '@lody/e2ee-core/services';
 import {
-  makePersonalDeviceHost,
+  makeOwnedPersonalDeviceHost,
+  PersonalCloseIncomplete,
   personalLedgerControl,
   PersonalHostPlatform,
   PersonalHostRemote,
@@ -59,7 +73,7 @@ import {
 import { toHex, fromHex } from '../../src/bytes';
 let baseContext: Context.Context<ClientInstallationStore | ClientPairingOriginalStore>;
 let scope: Scope.Closeable,
-  host: Effect.Success<ReturnType<typeof makePersonalDeviceHost>>,
+  host: Effect.Success<ReturnType<typeof makeOwnedPersonalDeviceHost>>,
   session: Effect.Success<ReturnType<typeof host.open>> | undefined;
 let offer: PersonalPairingOffer,
   owner: BrowserDevice,
@@ -70,10 +84,22 @@ let offer: PersonalPairingOffer,
   foreign = false;
 const FIXED_NOW = 1_800_000_000_000;
 let fixedClock: Clock.Clock;
+let controlledClock:
+  | {
+      advance(ms: number): Effect.Effect<void>;
+      expire(): Effect.Effect<void>;
+      entered: Deferred.Deferred<void>;
+    }
+  | undefined;
+let closeFibers: Fiber.Fiber<Exit.Exit<unknown, unknown>>[] = [];
+let pendingWork: Fiber.Fiber<unknown, unknown> | undefined;
 let failControl = false;
 let stagedGroup: EpochStagedGroup | null = null;
 let failStaging = false;
 let oldSession: typeof session;
+let otherSession: typeof session;
+let trackNextReader = false;
+let releasedReaders: { device: string; phase: string }[] = [];
 let loseBegin = false,
   holdBegin = false,
   entered: Deferred.Deferred<void>,
@@ -88,13 +114,57 @@ const view = () =>
     })
   );
 const retain = () => localStorage.setItem('remote-records', JSON.stringify(records.map(toHex)));
-export async function boot(input: typeof mode = 'create-or-open') {
+export async function boot(input: typeof mode = 'create-or-open', controlledClose = false) {
   mode = input;
   events = [];
   session = undefined;
   await Effect.runPromise(
     Effect.gen(function* () {
       scope = yield* Scope.make();
+      closeFibers = [];
+      releasedReaders = [];
+      pendingWork = undefined;
+      let controlledSleep: Clock.Clock['sleep'] | undefined;
+      if (controlledClose) {
+        let now = 0;
+        const waiting = new Set<{ deadline: number; finish: () => void }>();
+        const timerEntered = yield* Deferred.make<void>();
+        controlledSleep = (duration) =>
+          Effect.callback<void>((resume) => {
+            const entry = {
+              deadline: now + Duration.toMillis(duration),
+              finish: () => resume(Effect.void),
+            };
+            waiting.add(entry);
+            Deferred.doneUnsafe(timerEntered, Effect.void);
+            if (entry.deadline <= now) {
+              waiting.delete(entry);
+              entry.finish();
+            }
+            return Effect.sync(() => {
+              waiting.delete(entry);
+            });
+          });
+        controlledClock = {
+          entered: timerEntered,
+          expire: () =>
+            Effect.sync(() => {
+              for (const entry of waiting) {
+                waiting.delete(entry);
+                entry.finish();
+              }
+            }),
+          advance: (ms) =>
+            Effect.sync(() => {
+              now += ms;
+              for (const entry of waiting)
+                if (entry.deadline <= now) {
+                  waiting.delete(entry);
+                  entry.finish();
+                }
+            }),
+        };
+      } else controlledClock = undefined;
       fixedClock = yield* Clock.clockWith((clock) =>
         Effect.succeed({
           currentTimeMillisUnsafe: () => FIXED_NOW,
@@ -103,7 +173,7 @@ export async function boot(input: typeof mode = 'create-or-open') {
           currentTimeNanos: Effect.succeed(BigInt(FIXED_NOW) * 1_000_000n),
           monotonicTimeNanosUnsafe: () => 0n,
           monotonicTimeNanos: Effect.succeed(0n),
-          sleep: clock.sleep.bind(clock),
+          sleep: controlledSleep ?? clock.sleep.bind(clock),
         })
       );
       owner = yield* importBrowserDevice({
@@ -154,6 +224,22 @@ export async function boot(input: typeof mode = 'create-or-open') {
         control: (binding, _credential, approval) =>
           Layer.effectContext(
             Effect.gen(function* () {
+              if (trackNextReader) {
+                trackNextReader = false;
+                // Registered first, observed after the real control stores release.
+                yield* Effect.addFinalizer(() =>
+                  Effect.gen(function* () {
+                    const current = yield* Context.get(baseContext, ClientInstallationStore)
+                      .read()
+                      .pipe(Effect.orDie);
+                    if (current)
+                      releasedReaders.push({
+                        device: toHex(current.binding.device.toBytes()),
+                        phase: current.phase,
+                      });
+                  })
+                );
+              }
               if (failControl) {
                 failControl = false;
                 return yield* Effect.fail(new Error('synthetic ledger I/O'));
@@ -347,19 +433,25 @@ export async function boot(input: typeof mode = 'create-or-open') {
             } satisfies PersonalExchangeResponse;
           }),
       });
-      const ctx = yield* Layer.buildWithScope(base, scope);
-      baseContext = Context.pick(ClientInstallationStore, ClientPairingOriginalStore)(ctx);
-      host = yield* makePersonalDeviceHost().pipe(
-        Effect.provide(ctx),
-        Effect.provideService(PersonalHostPlatform, platform),
-        Effect.provideService(PersonalHostRemote, remote),
-        Scope.provide(scope)
+      const ownedPorts = Layer.effectContext(
+        Effect.gen(function* () {
+          const ctx = yield* Layer.build(base);
+          baseContext = Context.pick(ClientInstallationStore, ClientPairingOriginalStore)(ctx);
+          return ctx.pipe(
+            Context.add(PersonalHostPlatform, platform),
+            Context.add(PersonalHostRemote, remote)
+          );
+        })
+      );
+      host = yield* makeOwnedPersonalDeviceHost(ownedPorts).pipe(
+        Scope.provide(scope),
+        Effect.provideService(Clock.Clock, fixedClock)
       );
     })
   );
 }
 export async function invoke(action: string) {
-  const result = await Effect.runPromise(
+  const invocation = await Effect.runPromise(
     Effect.result(
       Effect.gen(function* () {
         switch (action) {
@@ -403,6 +495,84 @@ export async function invoke(action: string) {
               ? (JSON.parse(new TextDecoder().decode(row.original)).requestHex as string)
               : null;
           }
+          case 'openReader':
+            trackNextReader = true;
+            otherSession = yield* host.open(offer);
+            return true;
+          case 'releasedReaders':
+            return [...releasedReaders];
+          case 'otherLedger':
+            return { length: (yield* otherSession!.ledger()).length };
+          case 'closeOwners': {
+            const owners = closeFibers.flatMap((fiber) => {
+              const result = fiber.pollUnsafe();
+              if (!result || Exit.isFailure(result) || Exit.isSuccess(result.value)) return [];
+              const error = Cause.squash(result.value.cause);
+              return error instanceof PersonalCloseIncomplete ? [error.owner] : [];
+            });
+            return {
+              shared: owners.every((retained) => retained === owners[0]),
+              settled: yield* Effect.forEach(owners, (retained) => retained.settled()),
+            };
+          }
+          case 'currentPhase':
+            return (yield* Context.get(baseContext, ClientInstallationStore).read())?.phase;
+          case 'startPrepare':
+            pendingWork = yield* Effect.forkIn(host.prepare(offer), scope);
+            return true;
+          case 'startKeyRound':
+            pendingWork = yield* Effect.forkIn(session!.keyRound(), scope);
+            return true;
+          case 'startHostClose':
+          case 'startSessionClose': {
+            const close = action === 'startHostClose' ? host.close : session!.close;
+            for (let index = 0; index < 2; index++)
+              closeFibers.push(
+                yield* Effect.forkIn(
+                  Effect.exit(close()).pipe(Effect.provideService(Scheduler.MaxOpsBeforeYield, 32)),
+                  scope,
+                  { startImmediately: true }
+                )
+              );
+            return true;
+          }
+          case 'waitCloseBudget':
+            yield* Deferred.await(controlledClock!.entered);
+            return true;
+          case 'advanceCloseBudget':
+            yield* controlledClock!.advance(5000);
+            for (const fiber of closeFibers) yield* Fiber.join(fiber);
+            return true;
+          case 'expireCloseWaiters':
+            if (controlledClock) yield* controlledClock.expire();
+            return true;
+          case 'closeOutcomes':
+            return closeFibers.map((fiber) => {
+              const result = fiber.pollUnsafe();
+              if (!result) return { state: 'pending' };
+              if (Exit.isFailure(result)) return { state: 'interrupted' };
+              if (Exit.isSuccess(result.value)) return { state: 'closed' };
+              const error = Cause.squash(result.value.cause);
+              return {
+                state: 'failed',
+                code:
+                  typeof error === 'object' && error !== null && 'code' in error
+                    ? error.code
+                    : 'unknown',
+              };
+            });
+          case 'joinClose':
+            for (const fiber of closeFibers) {
+              const result = yield* Fiber.join(fiber);
+              if (Exit.isFailure(result)) {
+                const error = Cause.squash(result.cause);
+                if (error instanceof PersonalCloseIncomplete) yield* error.owner.awaitSettled();
+              }
+            }
+            return pendingWork ? Exit.isFailure(yield* Fiber.await(pendingWork)) : false;
+          case 'closeSession':
+            yield* session!.close();
+            return true;
           case 'prepare':
             return yield* host.prepare(offer);
           case 'lostBegin':
@@ -716,8 +886,8 @@ export async function invoke(action: string) {
       })
     ).pipe(Effect.provideService(Clock.Clock, fixedClock))
   );
-  if (Result.isSuccess(result)) return { ok: true as const, value: result.success };
-  const error = result.failure;
+  if (Result.isSuccess(invocation)) return { ok: true as const, value: invocation.success };
+  const error = invocation.failure;
   const reason =
     typeof error === 'object' && error !== null
       ? 'reason' in error
@@ -731,5 +901,28 @@ export async function invoke(action: string) {
   return { ok: false as const, reason };
 }
 export async function stop() {
-  await Effect.runPromise(Scope.close(scope, Exit.void));
+  await Effect.runPromise(
+    Scope.close(scope, Exit.void).pipe(
+      Effect.catchCause((cause) =>
+        Effect.gen(function* () {
+          const unowned = [];
+          for (const reason of cause.reasons) {
+            const error = Cause.isFailReason(reason)
+              ? reason.error
+              : Cause.isDieReason(reason)
+                ? reason.defect
+                : undefined;
+            if (error instanceof PersonalCloseIncomplete) yield* error.owner.awaitSettled();
+            else unowned.push(reason);
+          }
+          if (unowned.length) return yield* Effect.failCause(Cause.fromReasons(unowned));
+          return undefined;
+        })
+      )
+    )
+  );
+}
+
+export function startParentClose() {
+  closeFibers.push(Effect.runFork(Effect.exit(Scope.close(scope, Exit.void))));
 }

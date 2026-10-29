@@ -866,6 +866,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       const launchResolutionStartedAt = performance.now();
       let managedRuntimeReadyLogged = false;
       const launch = await resolveACPProcessLaunchAsync({
+        signal,
         agentConfigId: config.agentConfigId,
         magpieGatewayUrl: config.magpieGatewayUrl,
         cliType: config.agentCliType,
@@ -1054,9 +1055,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     if (!config.codexAuth) {
       if (
         config.agentConfigId &&
-        (await store.list(this.workspaceId)).some(
-          (item) => item.configId === config.agentConfigId && item.machineId === this.machineId
-        )
+        (await store.isAccountBound({
+          workspaceId: this.workspaceId,
+          machineId: this.machineId,
+          configId: config.agentConfigId,
+        }))
       ) {
         throw new Error(
           'This Codex provider account reference is missing; restore its configuration'
@@ -2058,16 +2061,18 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   /**
    * Stop publishing a Session instance's lifecycle events and drop it from the
    * live map. Only for an instance that was registered by `createSessionInner`
-   * but never reached a caller, or retired between prompts for reconfiguration.
+   * but never reached a caller, or retired between prompts for reconfiguration or failed release.
    * The owning execution path handles replacement and failures. Keyed by instance, not session id, because a
    * recovery path may already be creating the replacement under the same id.
    */
-  private detachSession(session: ISession): void {
+  detachSession(session: ISession): void {
     this.sessionEventDetachers.get(session)?.();
     this.sessionEventDetachers.delete(session);
     if (this.sessions.get(session.sessionId) === session) {
       this.sessions.delete(session.sessionId);
-      void this.rebalanceSessionSandboxes();
+      void this.rebalanceSessionSandboxes().catch((cause: unknown) =>
+        this.logger.warn(`Sandbox rebalance after detach failed: ${formatErrorMessage(cause)}`)
+      );
     }
   }
 

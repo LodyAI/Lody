@@ -66,20 +66,17 @@ Root/CLI rules apply; `specs/session-orchestration.md` owns behavior.
 - Fixed batch claims and submission fence precede synchronous transport start under the
   same gate, with no await between. Post-fence uncertainty never replays, including
   human-plus-batch stale-ACP recovery. Retry failed settlement only, never the request.
-- Physical request/resource release differs from waiter exit and Scope close. Keep immutable
-  execution IDs, shared close receipts, full Cause and retained recovery owners. Unknown
-  release blocks successors. Independent recovery proves release before clearing the slot.
-  Persist acquisition-incomplete before every sandbox spawn, then union spawned roots of every
-  Session the execution owns. Only explicitly complete identities can prove restart release;
-  legacy snapshots and interrupted journaling stay blocked. Coordinator recovery calls
-  `recoverClose`, not the cached failed `close`; never replay transport. Release finishes
+- Physical resource release differs from waiter exit. Keep immutable execution IDs,
+  shared close receipts, full Cause and resource registration. Unconfirmed release must
+  not block successors or shutdown: detach the failed Agent before returning the slot,
+  report it and attempt bounded background cleanup using only the old handles.
+  Startup retires interrupted input as unknown without replay and clears legacy blocks.
+  Coordinator recovery calls `recoverClose`, not cached failed `close`. Release finishes
   input; a still-pending turn `withdraw`s before submit/acquisition.
-- Inbox v2 removes Delivery APIs/data, not Operations/retired IDs. Missing journals stay
-  blocked. Offline recovery holds the Host lease, probes every known root, and requires
-  all-resource attestation plus snapshot CAS, including orphan blocks. Retire only uncertain
-  input, preserve queued input/results, and pause atomically; no replay/wake. Inspection is
-  read-only. Keep pause/unknown/resource evidence and monotonic sequences. Host v3 rejects old
-  workers before storage; end prior Workers before handoff. Passive results are not busy.
+- Inbox v2 removes Delivery APIs/data, not Operations/retired IDs. Preserve queued
+  input/results, pause, unknown/resource evidence and monotonic sequences. Host v3
+  rejects old workers before storage; end prior Workers before handoff. Passive
+  results are not busy. Resource identities are cleanup evidence, never admission gates.
 - Create Operations may also maintain one stable `role: system` `operation_progress`
   Turn in the requester Session, written only by the Host-lease Worker, never by MCP
   replicas. It is durable UI state, never agent input/dispatch. Merge duplicate rows through

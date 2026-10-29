@@ -1,6 +1,11 @@
 type HostGlobal = typeof globalThis & {
   HostFixture: typeof import('./browser/host-fixture');
   restorePut: () => void;
+  nativeBorrow: {
+    entered: Promise<void>;
+    release(): void;
+    inspect(): { length: number; allZero: boolean };
+  };
   nativePause: {
     enable(): void;
     entered: Promise<void>;
@@ -281,6 +286,7 @@ it.each(['chromium', 'webkit'] as const)(
       expect((await call(page, 'approve')).ok).toBe(true);
       expect((await call(page, 'claim')).ok).toBe(true);
       expect((await call(page, 'open')).ok).toBe(true);
+      expect((await call(page, 'openReader')).ok).toBe(true);
       const candidate = await call(page, 'candidate');
       expect(candidate.ok).toBe(true);
       expect(record(candidate).signingPublicKey).not.toBe(record(first).signingPublicKey);
@@ -293,6 +299,10 @@ it.each(['chromium', 'webkit'] as const)(
       const opened = await call(page, 'openCandidate');
       expect(opened.ok, JSON.stringify(opened)).toBe(true);
       expect((await call(page, 'oldOwner')).reason).toBe('closed');
+      expect((await call(page, 'otherLedger')).reason).toBe('closed');
+      expect((await call(page, 'releasedReaders')).value).toEqual([
+        { device: record(first).signingPublicKey, phase: 'ready' },
+      ]);
       expect(record(await call(page, 'ledger')).length).toBe(3);
       expect((await call(page, 'keyRound')).ok).toBe(true);
       expect((await call(page, 'seal')).ok).toBe(true);
@@ -514,6 +524,150 @@ it.each(['chromium', 'webkit'] as const)(
         });
         expect((await call(page, 'close')).ok).toBe(true);
         await page.evaluate(() => (globalThis as HostGlobal).HostFixture.stop());
+        await context.close();
+        context = undefined;
+      }
+    } finally {
+      await context?.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+);
+
+it.each(['chromium', 'webkit'] as const)(
+  'bounded host and session close retain actual native borrows and locks in %s',
+  async (engine) => {
+    const dir = await mkdtemp(join(tmpdir(), 'lody-bounded-close-'));
+    let context: BrowserContext | undefined;
+    try {
+      const output = await build({
+        entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+        platform: 'browser',
+        bundle: true,
+        format: 'iife',
+        globalName: 'HostFixture',
+        target: 'safari16.4',
+        write: false,
+        logLevel: 'silent',
+      });
+      const file = join(dir, 'index.html');
+      await writeFile(
+        file,
+        '<!doctype html><script>' +
+          output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+          '</script>'
+      );
+      for (const kind of ['host', 'session', 'parent']) {
+        const browser = engine === 'chromium' ? chromium : webkit;
+        context = await browser.launchPersistentContext(join(dir, kind), { headless: true });
+        const page = await context.newPage();
+        await page.goto(pathToFileURL(file).href);
+        await page.evaluate((ownerKind) => {
+          const native = SubtleCrypto.prototype.encrypt;
+          let release!: () => void, enter!: () => void, held: Uint8Array | undefined;
+          const entered = new Promise<void>((resolve) => {
+            enter = resolve;
+          });
+          const released = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          SubtleCrypto.prototype.encrypt = async function (algorithm, key, data) {
+            const aad = (algorithm as AesGcmParams).additionalData;
+            const purpose = ownerKind === 'session' ? 'installed-epoch-key' : 'signing-private-key';
+            if (!held && aad && new TextDecoder().decode(aad).includes(purpose)) {
+              held =
+                data instanceof ArrayBuffer
+                  ? new Uint8Array(data)
+                  : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+              enter();
+              await released;
+            }
+            return native.call(this, algorithm, key, data);
+          };
+          (globalThis as HostGlobal).nativeBorrow = {
+            entered,
+            release,
+            inspect() {
+              if (!held) throw new Error('no native input');
+              return { length: held.byteLength, allZero: held.every((byte) => byte === 0) };
+            },
+          };
+        }, kind);
+        await page.evaluate(() =>
+          (globalThis as HostGlobal).HostFixture.boot('create-or-open', true)
+        );
+        try {
+          if (kind === 'session') {
+            for (const action of ['prepare', 'approve', 'claim', 'open', 'openReader'])
+              expect((await call(page, action)).ok).toBe(true);
+          }
+          expect((await call(page, kind === 'session' ? 'startKeyRound' : 'startPrepare')).ok).toBe(
+            true
+          );
+          await page.evaluate(() => (globalThis as HostGlobal).nativeBorrow.entered);
+          const close = kind === 'host' ? 'startHostClose' : 'startSessionClose';
+          if (kind === 'parent')
+            await page.evaluate(() => (globalThis as HostGlobal).HostFixture.startParentClose());
+          else {
+            expect((await call(page, close)).ok).toBe(true);
+          }
+          expect((await call(page, 'waitCloseBudget')).ok).toBe(true);
+          expect((await call(page, 'advanceCloseBudget')).ok).toBe(true);
+          expect((await call(page, 'closeOutcomes')).value).toEqual(
+            Array.from({ length: kind === 'parent' ? 1 : 2 }, () => ({
+              state: 'failed',
+              code: 'close-incomplete',
+            }))
+          );
+          expect((await call(page, 'closeOwners')).value).toEqual({
+            shared: true,
+            settled: Array.from({ length: kind === 'parent' ? 1 : 2 }, () => false),
+          });
+          if (kind === 'session') {
+            expect(record(await call(page, 'otherLedger')).length).toBe(2);
+            expect((await call(page, 'status')).reason).toBe('closed');
+            expect((await call(page, 'candidate')).reason).toBe('conflict');
+          } else expect((await call(page, 'prepare')).reason).toBe('closed');
+          const held = await page.evaluate(() => (globalThis as HostGlobal).nativeBorrow.inspect());
+          expect(held.length).toBeGreaterThanOrEqual(32);
+          expect(held.allZero).toBe(false);
+          expect(
+            await page.evaluate(async () => (await navigator.locks.query()).held!.length)
+          ).toBeGreaterThan(0);
+          expect((await call(page, 'requestOriginal')).ok).toBe(true);
+          expect((await call(page, 'currentPhase')).value).toBe(
+            kind === 'session' ? 'ready' : 'prepared'
+          );
+          expect(
+            await page.evaluate(async () => {
+              const name = (await navigator.locks.query()).held![0]!.name!;
+              return navigator.locks.request(name, { ifAvailable: true }, (lock) => lock === null);
+            })
+          ).toBe(true);
+          await page.evaluate(() => (globalThis as HostGlobal).nativeBorrow.release());
+          await call(page, 'joinClose');
+          expect((await call(page, kind === 'session' ? 'closeSession' : 'close')).ok).toBe(true);
+          expect((await call(page, 'closeOwners')).value).toEqual({
+            shared: true,
+            settled: Array.from({ length: kind === 'parent' ? 1 : 2 }, () => true),
+          });
+          if (kind === 'session') {
+            expect((await call(page, 'open')).ok).toBe(true);
+            expect(record(await call(page, 'ledger')).length).toBe(2);
+          } else expect((await call(page, 'open')).reason).toBe('closed');
+        } finally {
+          await page.evaluate(() => (globalThis as HostGlobal).nativeBorrow.release());
+          await call(page, 'expireCloseWaiters');
+          await call(page, 'joinClose');
+          await call(page, kind === 'session' ? 'closeSession' : 'close');
+          await page.evaluate(() => (globalThis as HostGlobal).HostFixture.stop());
+        }
+        expect(
+          await page.evaluate(() => (globalThis as HostGlobal).nativeBorrow.inspect())
+        ).toMatchObject({ allZero: true });
+        expect(await page.evaluate(async () => (await navigator.locks.query()).held!.length)).toBe(
+          0
+        );
         await context.close();
         context = undefined;
       }

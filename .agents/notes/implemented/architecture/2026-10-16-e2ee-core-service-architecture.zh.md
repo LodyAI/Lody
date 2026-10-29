@@ -124,9 +124,20 @@ hex、installation ID、原 genesis record hex、endorser、membership。排除 
 原生插件和断电耐久仍需独立验收。
 
 
-A4 当前的 `host.close()` 和 `session.close()` 在注入的原生调用永不结算时没有等待上限。
-此项已接受的 A4 限制须在启用移动端原生 custody 前补齐
-（[跟踪 Issue #2075](https://github.com/LodyAI/Lody/issues/2075)）。后续限制调用方的等待，
-超时明确报告关闭未完成；受控 owner 持有未结算操作、物理锁与借用缓冲，直至实际结算或
-确认原生终止。超时不得提前释放这些资源、报告关闭成功或放行重叠的新 owner。
-共享 runtime bridge 负责此项后续要求，或先采用其前置修复。
+scoped host 构造器保留为实际 drain 原语。产品组合使用
+`makeOwnedPersonalDeviceHost(ports)`，在独立于消费方的保留 Scope 中获取整个拥有资源的
+端口 Layer。host、session 和父 Scope 关闭共用每次 drain 的五秒等待预算；超时返回
+`PersonalCloseIncomplete` 及窄恢复 owner。保留完整失败与 owner，连同物理锁、借用缓冲
+和未决原件，直到实际结算或确认原生终止。超时不证明关闭成功，也不允许同绑定 runtime
+交接。
+
+只串行化有限的 ticket 创建；原生 drain 在临界区外运行。并发调用观察同一 ticket，
+某个 session 等待时，独立 reader 仍可读取账本。替换先排空匹配的 owned reader，再调用已提供的外部 owner drain，之后才原子切换
+身份。父级退休等待每个子 ticket 后才释放整个端口 Layer，不能依赖第二次 `Scope.close` 等待已关闭中的子项。晚到结算成功后可以显式
+确认关闭，已关闭句柄不会复活。明文交接还记录等待消费者是否退出，确保发布前、发布到
+接收之间取消时，worker 返回值的清零责任都不丢失。
+
+[#2075](https://github.com/LodyAI/Lody/issues/2075) 跟踪启用移动端原生 custody 前必须完成
+的 runtime bridge 采用。owned-host 前置本身不接入产品 runtime 或移动端消费者。
+暂停真实原生加密、显式推进时钟的浏览器测试证明锁/缓冲保留和实际清理，不证明移动端
+真机或原生进程终止已通过验收。
