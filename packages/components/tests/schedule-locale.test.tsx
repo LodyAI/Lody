@@ -92,18 +92,12 @@ describe('Chinese is a product language, not an Intl locale', () => {
   });
 
   it('shows a scheduled message on the viewer clock and other schedules on the machine clock', () => {
-    const original = process.env.TZ;
-    process.env.TZ = 'Asia/Shanghai';
-    try {
-      const once = { kind: 'once' as const, at: '2026-09-07T09:00:00.000Z' };
-      expect(scheduleRowTimeZone({ ...row, scheduledMessage: true, trigger: once }, 'UTC')).toBe(
-        'Asia/Shanghai'
-      );
-      expect(scheduleRowTimeZone({ ...row, trigger: once }, 'UTC')).toBe('UTC');
-      expect(scheduleRowTimeZone(row, 'UTC')).toBe('Asia/Shanghai');
-    } finally {
-      process.env.TZ = original;
-    }
+    const once = { kind: 'once' as const, at: '2026-09-07T09:00:00.000Z' };
+    expect(
+      scheduleRowTimeZone({ ...row, scheduledMessage: true, trigger: once }, 'UTC', 'Asia/Shanghai')
+    ).toBe('Asia/Shanghai');
+    expect(scheduleRowTimeZone({ ...row, trigger: once }, 'UTC')).toBe('UTC');
+    expect(scheduleRowTimeZone(row, 'UTC')).toBe('Asia/Shanghai');
   });
 
   it('renders a persisted scheduled queue row under zh_CN', () => {

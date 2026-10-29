@@ -656,12 +656,19 @@ function ScheduleListRow({
   selected,
   compact,
   name,
+  viewerTimeZone,
   ...handlers
-}: RowHandlers & { entry: Entry; selected?: boolean; compact: boolean; name: string }) {
+}: RowHandlers & {
+  entry: Entry;
+  selected?: boolean;
+  compact: boolean;
+  name: string;
+  viewerTimeZone?: string;
+}) {
   const { t, i18n } = useTranslation();
   const { row, context, status } = entry;
   const actions = useRowActions(entry, handlers);
-  const zone = scheduleRowTimeZone(row, context?.timeZone);
+  const zone = scheduleRowTimeZone(row, context?.timeZone, viewerTimeZone);
   const offline = context ? context.presence === 'offline' : false;
   const frequency = describeTrigger(row.trigger, t, i18n.language, zone);
   // The one action worth a button: delete a finished message, run a manual
@@ -883,6 +890,7 @@ export function ScheduleListView({
   query: controlledQuery,
   initialFilters,
   now = getServerNow(),
+  viewerTimeZone,
 }: {
   rows: ScheduleRegistryRow[];
   runtimes: ScheduleRuntimeRow[];
@@ -917,6 +925,8 @@ export function ScheduleListView({
   selectedId?: string;
   /** Injected so stories and tests render fixed times. */
   now?: number;
+  /** Injected so tests can fix the viewer clock independently of the host zone. */
+  viewerTimeZone?: string;
 }) {
   const { t, i18n } = useTranslation();
   const isMobile = useIsMobile();
@@ -958,7 +968,7 @@ export function ScheduleListView({
       runtime,
       context,
       status: describeScheduleState(t, row, runtime, {
-        timeZone: scheduleRowTimeZone(row, context?.timeZone),
+        timeZone: scheduleRowTimeZone(row, context?.timeZone, viewerTimeZone),
         now,
         locale: i18n.language,
       }),
@@ -1287,6 +1297,7 @@ export function ScheduleListView({
                                 key={entry.row.scheduleId}
                                 entry={entry}
                                 name={nameOf(entry.row)}
+                                viewerTimeZone={viewerTimeZone}
                                 selected={entry.row.scheduleId === selectedId}
                                 compact={hideHeader}
                                 onOpen={() => onOpen(entry.row.scheduleId)}

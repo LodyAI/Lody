@@ -353,22 +353,17 @@ describe('schedule list rows', () => {
   });
 
   it('shows a scheduled message at the viewer’s clock, not the machine clock', () => {
-    const original = process.env.TZ;
-    process.env.TZ = 'Asia/Shanghai';
-    try {
-      renderList({
-        contextForRow: (row) => ({
-          ...context(),
-          project: row.projectKey ?? null,
-          timeZone: 'UTC',
-          chat: row.scheduledMessage ? { title: 'CI triage', sessionId: 'chat-1' } : undefined,
-        }),
-      });
-      expect(rowOf('Remind me to ship').textContent).toContain('6:00 PM');
-      expect(rowOf('Nightly review').textContent).toContain('Runs ');
-    } finally {
-      process.env.TZ = original;
-    }
+    renderList({
+      viewerTimeZone: 'Asia/Shanghai',
+      contextForRow: (row) => ({
+        ...context(),
+        project: row.projectKey ?? null,
+        timeZone: 'UTC',
+        chat: row.scheduledMessage ? { title: 'CI triage', sessionId: 'chat-1' } : undefined,
+      }),
+    });
+    expect(rowOf('Remind me to ship').textContent).toContain('6:00 PM');
+    expect(rowOf('Nightly review').textContent).toContain('Runs ');
   });
 
   it('clears the status bar on the edge-to-edge list and stays flush when embedded', () => {

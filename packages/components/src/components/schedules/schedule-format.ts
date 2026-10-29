@@ -174,10 +174,11 @@ export function triggerTimeZone(
  */
 export function scheduleRowTimeZone(
   row: Pick<ScheduleRegistryRow, 'scheduledMessage' | 'trigger'>,
-  machineTimeZone = getDeviceTimeZone()
+  machineTimeZone = getDeviceTimeZone(),
+  viewerTimeZone?: string
 ): string {
   return row.scheduledMessage
-    ? getDeviceTimeZone(machineTimeZone)
+    ? (viewerTimeZone ?? getDeviceTimeZone(machineTimeZone))
     : triggerTimeZone(row.trigger, machineTimeZone);
 }
 
