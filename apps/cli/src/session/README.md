@@ -220,7 +220,7 @@ Raw prompt/steer requests and configuration work remain in the owner's five-seco
 termination failure keeps ownership. Steer configuration checks the local signal before each
 subsequent mutation. Already-applied handoff commits before queued completion can run.
 
-Workspace-reading diff/gap-fill, Git flags, branch/PR statistics and Code Collab scans finish before release under one 20-second budget. Timeout or shutdown cancels the attempt and skips remaining steps; late results cannot publish into a successor.
+Workspace-reading diff/gap-fill, Git flags, branch/PR statistics and Code Collab scans finish before release under one 20-second budget shared by normal, error, cancellation and yielded finalization; Stop cannot restart it. Shutdown also skips error-path diff/usage instead of starting a replacement flush. Timeout or shutdown cancels the attempt and skips remaining steps; late results cannot publish into a successor.
 Only presentation, batch-history projection and completion analytics follow release; yielded bookkeeping retains its 30-second upper wait. Failed release detaches the old Agent and admits fresh input without replay.
 The [availability decision](../../../../.agents/notes/implemented/bug-fix/2026-10-29-inbox-no-durable-block.md) owns the current policy; the [original release fix](../../../../.agents/notes/implemented/bug-fix/2026-10-17-turn-release-survives-failure-handling.md) explains unconditional release after failure classification.
 

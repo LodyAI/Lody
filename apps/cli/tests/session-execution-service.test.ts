@@ -13290,6 +13290,44 @@ describe('Operation Inbox execution boundary', () => {
     } finally { finishOld.resolve(); await f.close(); if (expires) vi.useRealTimers(); }
   });
 
+  it.each([
+    { stage: 'diff', action: 'shutdown' },
+    { stage: 'usage', action: 'shutdown' },
+    { stage: 'diff', action: 'Stop' },
+    { stage: 'usage', action: 'Stop' },
+  ] as const)('releases interrupted $stage persistence after $action within the original deadline', async ({ stage, action }) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const shutdown = action === 'shutdown';
+    const entered = createDeferred<void>(), raw = createDeferred<void>();
+    const signals: Array<AbortSignal | undefined> = [];
+    const f = inboxExecutionFixture(async () => ({ stopReason: 'end_turn' }));
+    if (stage === 'diff') f.deps.turnFinalization.persistCodeCollabTurnDiffs = async (_id, _turn, signal) => {
+      signals.push(signal); entered.resolve(); await raw.promise; return true;
+    };
+    else f.deps.turnFinalization.flushSessionUsage = async () => { entered.resolve(); await raw.promise; };
+    let run: Promise<unknown> | undefined;
+    try {
+      await f.accept();
+      run = f.service.continueSession(f.message);
+      await entered.promise;
+      if (shutdown) f.service.quiesceInboxExecutions();
+      else {
+        await vi.advanceTimersByTimeAsync(19_000);
+        await f.service.cancelSession({ ...f.message, type: 'session/cancel', turnId: 'assistant:human-input' });
+      }
+      const released = f.service.waitForInboxReleases();
+      await vi.advanceTimersByTimeAsync(shutdown ? 7_000 : 1_000);
+      expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toBeUndefined();
+      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(true);
+      const db = new Database(f.storePath, { readonly: true });
+      try {
+        expect(db.prepare('SELECT outcome FROM inbox_releases WHERE session_id=?').all(f.message.sessionId)).toEqual([{ outcome: 'user_stop' }]);
+      } finally { db.close(); }
+      if (stage === 'diff') expect(signals.every((signal) => signal?.aborted)).toBe(true);
+      await released;
+    } finally { raw.resolve(); await run; await f.close(); vi.useRealTimers(); }
+  });
+
   it('writes both active release receipts inside the shutdown budget despite one stuck finalization', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const started = [createDeferred<void>(), createDeferred<void>()];

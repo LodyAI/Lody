@@ -151,7 +151,7 @@ import {
   localProjectsLegacy,
 } from '@lody/shared/node/local-project';
 import { findProgressMessageId } from '@lody/shared/session-data';
-import { Cause, Clock, Data, Effect, Exit, Fiber, Option, Random, Scope } from 'effect';
+import { Cause, Clock, Data, Effect, Exit, Fiber, Random, Scope } from 'effect';
 import { createHash, randomUUID } from 'node:crypto';
 import { getCodexProfileStore, type ResolvedCodexProfile } from '../agent/codex-profile-store';
 import {
@@ -3924,11 +3924,10 @@ export class SessionExecutionService {
   ): Promise<void> {
     const acpError = error ? parseACPError(error) : null;
     const providerDisconnected = error ? isAgentDisconnectedError(error) : false;
+    const turnId =
+      this.turnRuntimeBySession.get(sessionId)?.turnId ?? this.currentTurnBySession.get(sessionId);
     try {
-      await this.deps.turnFinalization.finalizeACPState(
-        sessionId,
-        this.currentTurnBySession.get(sessionId)
-      );
+      await this.deps.turnFinalization.finalizeACPState(sessionId, turnId);
     } catch (finalizationError) {
       // The normal path fails on unfinished history. Error settlement must still
       // run independent status, failure attention and release bookkeeping.
@@ -3936,11 +3935,9 @@ export class SessionExecutionService {
         `[${sessionId}] Failed to finalize error history: ${formatErrorMessage(finalizationError)}`
       );
     }
-    await this.persistCodeCollabTurnDiffsAfterACPFinalization(
-      sessionId,
-      this.currentTurnBySession.get(sessionId)
+    await this.runWorkspaceFinalization(sessionId, turnId ?? '', (signal) =>
+      this.persistTurnDiffsAndFlushUsage(sessionId, turnId, signal)
     );
-    await this.deps.turnFinalization.flushSessionUsage(sessionId);
 
     if (error) {
       if (acpError) {
@@ -4044,14 +4041,14 @@ export class SessionExecutionService {
   private async persistCodeCollabTurnDiffsAfterACPFinalization(
     sessionId: SessionId,
     turnId: string | undefined,
-    signal?: AbortSignal
+    signal: AbortSignal
   ): Promise<boolean> {
     const persist = this.deps.turnFinalization.persistCodeCollabTurnDiffs;
     if (!persist || !turnId) {
       return false;
     }
     try {
-      signal?.throwIfAborted();
+      signal.throwIfAborted();
       return await persist(sessionId, turnId, signal);
     } catch (error) {
       this.deps.logger.warn(
@@ -4132,19 +4129,19 @@ export class SessionExecutionService {
 
   private async persistTurnDiffsAndFlushUsage(
     sessionId: SessionId,
-    turnId: string,
-    signal?: AbortSignal
+    turnId: string | undefined,
+    signal: AbortSignal
   ): Promise<boolean> {
-    signal?.throwIfAborted();
+    signal.throwIfAborted();
     const codeCollabHistoryFileDiffPersisted = await this.runTurnFinalizationStage(
       sessionId,
-      turnId,
+      turnId ?? '',
       'persistCodeCollabTurnDiffs',
       async () =>
         await this.persistCodeCollabTurnDiffsAfterACPFinalization(sessionId, turnId, signal)
     );
-    signal?.throwIfAborted();
-    await this.runTurnFinalizationStage(sessionId, turnId, 'flushSessionUsage', async () => {
+    signal.throwIfAborted();
+    await this.runTurnFinalizationStage(sessionId, turnId ?? '', 'flushSessionUsage', async () => {
       await this.deps.turnFinalization.flushSessionUsage(sessionId);
     });
     return codeCollabHistoryFileDiffPersisted;
