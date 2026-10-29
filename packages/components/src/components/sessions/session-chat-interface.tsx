@@ -3180,7 +3180,11 @@ export const SessionChatInterface = memo(
       scopeKey: session.id,
       defaultsTarget: { project: session.project, machineId: session.machineId },
     });
-    const { send: sendWithMcpSelection, retryDefaults: retryMcpDefaults } = mcpSelection;
+    const {
+      send: sendWithMcpSelection,
+      retryDefaults: retryMcpDefaults,
+      recoveryGeneration,
+    } = mcpSelection;
     const executionTurnConfigOverrides = useMemo(
       () =>
         buildExecutionTurnConfigOverrides({
@@ -4908,7 +4912,7 @@ export const SessionChatInterface = memo(
         inputBlocks: SessionInputBlock[],
         options?: DispatchInputBlocksOptions
       ): Promise<boolean> {
-        return await sendWithMcpSelection(
+        const accepted = await sendWithMcpSelection(
           session.id,
           options,
           (ids) => dispatchInputBlocksUnchecked(inputBlocks, { ...options, mcpServerIds: ids }),
@@ -4924,11 +4928,21 @@ export const SessionChatInterface = memo(
                   skipMcpOnce: true,
                 });
               },
-              session.id
+              session.id,
+              recoveryGeneration
             )
         );
+        if (accepted) toast.dismiss(`mcp-defaults:${session.id}`);
+        return accepted;
       },
-      [dispatchInputBlocksUnchecked, retryMcpDefaults, sendWithMcpSelection, session.id, t]
+      [
+        dispatchInputBlocksUnchecked,
+        recoveryGeneration,
+        retryMcpDefaults,
+        sendWithMcpSelection,
+        session.id,
+        t,
+      ]
     );
 
     useEffect(() => () => toast.dismiss(`mcp-defaults:${session.id}`), [session.id]);

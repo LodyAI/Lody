@@ -143,6 +143,7 @@ beforeEach(async () => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.restoreAllMocks();
 });
 
 const catalogRows = (): Array<[readonly string[], unknown]> => [
@@ -316,9 +317,10 @@ describe('composer MCP selection', () => {
     error.mockRestore();
   });
 
-  it.each([false, true])(
-    'guards plan execution during default recovery and consumes recovery after acceptance (failed=%s)',
-    async (failed) => {
+  it.each(['loading', 'stale-toast', 'double-click'] as const)(
+    'guards plan execution and recovery toast actions (%s)',
+    async (scenario) => {
+      const failed = scenario !== 'loading';
       const workspace = createWorkspace('shortcut-workspace', catalogRows());
       store.set(runtimeAtom, workspace.runtime);
       const view = renderSelection({});
@@ -328,32 +330,38 @@ describe('composer MCP selection', () => {
       const log = vi.spyOn(console, 'error').mockImplementation(() => {});
       if (failed) workspace.fail(new Error('storage unavailable'));
       await settle();
+      const writePlan = async (ids: readonly McpServerId[]) => {
+        const blocks = [{ type: 'text' as const, text: 'Implement the plan' }];
+        appendMcpTurn(
+          writer,
+          `plan-turn-${writer.readStored().length}`,
+          buildSessionTurnInputConfig({
+            inputBlocks: blocks,
+            cliType: 'builtin',
+            agentType: 'codex',
+            mcpServerIds: ids,
+          })
+        );
+        return true;
+      };
+      const published = vi.spyOn(toastManager, 'add');
       const executePlan = async (selection: SessionMcpSelection) => {
-        await selection.send(
-          'shortcut-session',
-          undefined,
-          async (ids) => {
-            const blocks = [{ type: 'text' as const, text: 'Implement the plan' }];
-            appendMcpTurn(
-              writer,
-              'plan-turn',
-              buildSessionTurnInputConfig({
-                inputBlocks: blocks,
-                cliType: 'builtin',
-                agentType: 'codex',
-                mcpServerIds: ids,
-              })
-            );
-            return true;
-          },
-          (blockedFailed) =>
-            reportMcpDefaultsBlocked(
-              i18next.t,
-              blockedFailed,
-              selection.retryDefaults,
-              () => {},
-              'shortcut-session'
-            )
+        await selection.send('shortcut-session', undefined, writePlan, (blockedFailed) =>
+          reportMcpDefaultsBlocked(
+            i18next.t,
+            blockedFailed,
+            selection.retryDefaults,
+            () => {
+              void selection.send(
+                'shortcut-session',
+                { mcpServerIds: [], skipMcpOnce: true },
+                writePlan,
+                () => {}
+              );
+            },
+            'shortcut-session',
+            selection.recoveryGeneration
+          )
         );
       };
       const props = {
@@ -373,6 +381,22 @@ describe('composer MCP selection', () => {
           : 'Loading this project’s default MCP servers…'
       );
       if (failed) expect(document.body.textContent).toContain('Send without MCP');
+      // Keep the published handler to model a click already queued by the UI,
+      // even after the toast starts closing.
+      const action = published.mock.calls[0]![0].actionProps?.onClick;
+      const residualClick = () => action?.({} as never);
+      if (scenario === 'double-click') {
+        await act(async () => {
+          residualClick();
+          residualClick();
+        });
+        expect(writer.readStored()).toHaveLength(1);
+        expect(writer.readStored()[0].inputConfig?.mcpServerIds).toEqual([]);
+        published.mockRestore();
+        log.mockRestore();
+        return;
+      }
+
       let explicitIds: readonly McpServerId[] | undefined;
       await act(async () => {
         await view.current().send(
@@ -396,11 +420,20 @@ describe('composer MCP selection', () => {
       await act(async () => button('Execute plan').click());
       expect(writer.readStored()).toHaveLength(1);
       expect(writer.readStored()[0].inputConfig?.mcpServerIds).toEqual(['db', 'files']);
+      if (scenario === 'stale-toast') {
+        await act(async () => {
+          residualClick();
+          residualClick();
+        });
+        expect(writer.readStored()).toHaveLength(1);
+      }
+
       // The accepted shortcut consumes recovery: subsequent catalog edits cannot
       // replace the accepted baseline with newly changed project/workspace defaults.
       view.render({ ...props, persistedIds: ['search' as McpServerId] });
       expect(view.current().selectedIds).toEqual(['search']);
       act(() => toast.dismiss('mcp-defaults:shortcut-session'));
+      published.mockRestore();
       log.mockRestore();
     }
   );

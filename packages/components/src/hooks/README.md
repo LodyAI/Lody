@@ -37,7 +37,9 @@ Successful one-send opt-out keeps a renderer-local recovery entry scoped to runt
 and session, so a promoted composer ignores that turn's `[]` and resumes its project
 defaults once readable. The common new-turn sender gates implicit selections while defaults are unread,
 reports loading/read failure with recovery actions, and consumes recovery after
-acceptance for both shortcuts and the composer. Explicit ids, including `[]`,
+acceptance for both shortcuts and the composer. Every acceptance invalidates older
+recovery toast actions; each opt-out action can run only once, including before
+its send settles. Explicit ids, including `[]`,
 bypass default resolution. Explicit menu `[]` remains a normal durable selection. No extra history field, schema version or
 daemon capability is introduced. Recovery does not cross renderer reload, runtime
 replacement or devices; those readers retain the historical `[]` behavior.

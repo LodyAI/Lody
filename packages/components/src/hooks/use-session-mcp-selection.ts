@@ -1,6 +1,6 @@
 import { createStore, createStaticStore, type MutableStore } from '@lody/platform';
 import { useStoreValue } from '@lody/platform/react';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import {
   getEffectiveDefaultMcpIds,
@@ -31,6 +31,7 @@ export type SessionMcpSelection = {
   retryDefaults: () => void;
   /** Renderer-local recovery, recorded only after a send is accepted. */
   acceptSend: (sessionId: string, skipMcpOnce?: boolean) => void;
+  recoveryGeneration: { readonly current: number };
   send: (
     sessionId: string,
     options: { mcpServerIds?: readonly McpServerId[]; skipMcpOnce?: boolean } | undefined,
@@ -88,6 +89,13 @@ export function useSessionMcpSelection(
 ): SessionMcpSelection {
   const { existingSession, disabled, scopeKey, defaultsTarget } = options;
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const recoveryGeneration = useRef(0);
+  useEffect(
+    () => () => {
+      recoveryGeneration.current += 1;
+    },
+    [runtime, scopeKey]
+  );
   const recovery = useStoreValue(runtime ? recoveryStore(runtime) : NO_RECOVERY);
   const resumeDefaults = !!scopeKey && recovery.has(scopeKey);
   const inheritDefaults = !existingSession || resumeDefaults;
@@ -159,6 +167,7 @@ export function useSessionMcpSelection(
 
   const acceptSend = useCallback(
     (sessionId: string, skipMcpOnce = false) => {
+      recoveryGeneration.current += 1;
       if (!runtime) return;
       const store = recoveryStore(runtime);
       if (store.get().has(sessionId) === skipMcpOnce) return;
@@ -192,6 +201,7 @@ export function useSessionMcpSelection(
     defaultsFailed: dependsOnDefaults && failed,
     retryDefaults,
     acceptSend,
+    recoveryGeneration,
     send,
   };
 }

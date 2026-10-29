@@ -43,9 +43,12 @@ export function reportMcpDefaultsBlocked(
   failed: boolean,
   retry: () => void,
   sendWithoutMcp: () => void,
-  sessionId: string
+  sessionId: string,
+  recoveryGeneration: { readonly current: number }
 ): void {
   const id = `mcp-defaults:${sessionId}`;
+  const generation = recoveryGeneration.current;
+  let used = false;
   toast.error(
     t(failed ? 'chat.validation.mcpDefaultsFailed' : 'chat.validation.mcpDefaultsLoading'),
     {
@@ -61,7 +64,10 @@ export function reportMcpDefaultsBlocked(
             action: {
               label: t('chat.sendWithoutMcp'),
               onClick: () => {
+                if (used) return;
+                used = true;
                 toast.dismiss(id);
+                if (generation !== recoveryGeneration.current) return;
                 sendWithoutMcp();
               },
             },
