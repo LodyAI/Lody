@@ -24,6 +24,7 @@ import {
   rm,
   writeFile,
   readFile,
+  lstat,
   symlink,
   mkdir,
   unlink,
@@ -817,13 +818,30 @@ describe('WorkspaceGitService', () => {
           await rm(source, { recursive: true, force: true });
           if (layout === 'shallow') await git(web, ['clone', '--depth', '1', url, source]);
           if (layout === 'linked') await git(api, ['worktree', 'add', '--detach', source]);
-          if (layout === 'symlink') await symlink(api, source, 'dir');
+          if (layout === 'symlink') {
+            await symlink(api, source, 'dir');
+            // Git status rejects symlinked gitlinks before reference selection. Ignore
+            // only this source's status so preparation can exercise the fallback;
+            // git submodule update and reference validation still inspect the path.
+            await git(web, ['config', 'submodule.deps/api.ignore', 'all']);
+          }
         }
-        expect(await worktreeGitLegacy.findProjectSubmoduleReference(source, url)).toBeUndefined();
+        // The symlink target has a GitHub origin; match it so URL mismatch cannot
+        // accidentally satisfy the symlink rejection assertion.
+        const expectedUrl = layout === 'symlink' ? 'git@github.com:example/api.git' : url;
+        expect(
+          await worktreeGitLegacy.findProjectSubmoduleReference(source, expectedUrl)
+        ).toBeUndefined();
         const prepared = await materializeProjectGroup(options);
         const checkout = join(prepared.workdir, 'web/deps/api');
         expect(await readFile(join(checkout, 'readme'), 'utf8')).toBe('original');
         await git(checkout, ['fsck', '--full']);
+        if (layout === 'symlink') {
+          expect((await lstat(source)).isSymbolicLink()).toBe(true);
+          expect(await realpath(source)).toBe(api);
+          expect((await lstat(checkout)).isDirectory()).toBe(true);
+          expect((await git(api, ['status', '--porcelain'])).trim()).toBe('');
+        }
       });
     },
     180_000
