@@ -1219,12 +1219,13 @@ export class MessageHandler {
     }
   }
 
-  private async flushCodexGeneratedImageUploads(sessionId: SessionId): Promise<void> {
-    for (;;) {
-      const state = this.store.get(sessionId);
-      if (state.imageGenerationUploads.size === 0) break;
-      await Promise.all([...state.imageGenerationUploads.values()]);
-    }
+  private async flushCodexGeneratedImageUploads(
+    sessionId: SessionId,
+    turnId?: string
+  ): Promise<void> {
+    const uploads = [...this.store.get(sessionId).imageGenerationUploads.values()];
+    if (uploads.length === 0) return;
+    await this.executionService.waitForImageUploads(sessionId, turnId, Promise.all(uploads));
   }
 
   private handleImageGenerationBegin(sessionId: SessionId, event: ImageGenerationBeginEvent): void {
@@ -1424,6 +1425,8 @@ export class MessageHandler {
       if (appended) {
         historyEntryId = initialTarget.turnId;
       } else {
+        if (args.attachTarget)
+          throw new Error('Generated image owning turn is unavailable; dropping history write');
         const latestTarget = await this.resolveSessionImageUploadAttachTarget(
           args.sessionId,
           sessionDoc
@@ -5919,7 +5922,7 @@ export class MessageHandler {
       await this.flushSessionContextWindowUsage(sessionId);
       await this.flushACPUpdatesNow(sessionId);
       await this.flushThreadGoalHistoryPersists(sessionId);
-      await this.flushCodexGeneratedImageUploads(sessionId);
+      await this.flushCodexGeneratedImageUploads(sessionId, turnId);
 
       // Mark the owning assistant entry as finished and record timing.
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
@@ -8086,6 +8089,8 @@ export class MessageHandler {
         historyEntryId = initialAttachTarget.turnId;
         attachedTo = 'active_turn';
       } else {
+        if (options.attachTarget)
+          throw new Error('Generated image owning turn is unavailable; dropping history write');
         const latestAttachTarget = await this.resolveSessionImageUploadAttachTarget(
           sessionId,
           sessionDoc
@@ -10828,7 +10833,8 @@ export class MessageHandler {
     const state = this.store.get(sessionId);
     const turn = state.turn;
     if (turn.phase === 'idle' || turn.turnId !== turnId) return undefined;
-    await this.flushCodexGeneratedImageUploads(sessionId);
+    await this.flushCodexGeneratedImageUploads(sessionId, turnId);
+    if (state.imageGenerationUploads.size > 0 && !turn.hasVisibleOutput) return undefined;
     return state.turn.phase !== 'idle' && state.turn.turnEpoch === turn.turnEpoch
       ? state.turn.hasVisibleOutput
       : undefined;

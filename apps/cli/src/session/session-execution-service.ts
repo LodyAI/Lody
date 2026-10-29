@@ -959,6 +959,11 @@ export class SessionExecutionService {
       controller.abort();
     }
   }
+  waitForImageUploads(id: SessionId, turnId: string | undefined, uploads: Promise<unknown>) {
+    const owned = this.ownBookkeeping(id, uploads);
+    const turn = turnId ?? this.turnRuntimeBySession.get(id)?.turnId ?? '';
+    return this.runWorkspaceFinalization(id, turn, () => owned);
+  }
   async waitForInboxReleases(): Promise<void> {
     const releases = this.getActiveTurnIds().map(({ sessionId, turnId }) =>
       this.waitForTurnRelease(sessionId, turnId)
@@ -967,7 +972,31 @@ export class SessionExecutionService {
       Promise.all(releases),
       6_000,
       'Active execution releases exceeded shutdown budget'
-    ).catch((error: unknown) => this.deps.logger.warn(formatErrorMessage(error)));
+    ).catch(async (error: unknown) => {
+      this.deps.logger.warn(formatErrorMessage(error));
+      if (!this.shutdownAbort.signal.aborted) return;
+      const receipts = [...this.turnRuntimeBySession.values()].map(async (runtime) => {
+        const owner = runtime.inboxOwner;
+        if (!owner || !this.liveInboxExecutionIds.has(owner.id)) return;
+        this.deps.logger.warn(
+          `[${runtime.sessionId}] Shutdown forced release ${owner.id}; result unknown`
+        );
+        await this.operationInbox?.release({
+          ...owner.input,
+          executionId: owner.id,
+          outcome: 'failed',
+        });
+        this.liveInboxExecutionIds.delete(owner.id);
+        if (owner.batch) await this.operationInbox?.settleUnknown(owner.batch);
+      });
+      const results = await withTimeout(
+        Promise.allSettled(receipts),
+        1_000,
+        'Shutdown release write timed out'
+      ).catch((cause: unknown) => this.deps.logger.warn(formatErrorMessage(cause)));
+      for (const result of results ?? [])
+        if (result.status === 'rejected') this.deps.logger.warn(formatErrorMessage(result.reason));
+    });
   }
   async drainInboxExecutions(): Promise<void> {
     // Completed executions can enqueue delivery while the first snapshot drains.

@@ -76,6 +76,7 @@ import {
 import { pendingEventFromAgentEditEvidence } from '../src/lib/code-collab/code-collab-v2-diff-evidence';
 import { TurnPostProcessingService } from '../src/session/turn-post-processing-service';
 import Database from 'better-sqlite3';
+import { MessageHandler } from '../src/lib/message-handler';
 import { Data, Effect, Fiber, Result } from 'effect';
 import type { LoroRepo } from 'loro-repo';
 import { execFileSync } from 'node:child_process';
@@ -13328,6 +13329,56 @@ describe('Operation Inbox execution boundary', () => {
     } finally { raw.resolve(); await run; await f.close(); vi.useRealTimers(); }
   });
 
+  it.each(['normal', 'shutdown', 'observation'])('bounds pending generated-image uploads (%s)', async (mode) => {
+    const shutdown = mode === 'shutdown';
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const entered = createDeferred<void>(), raw = createDeferred<void>(), nextStarted = createDeferred<void>();
+    const uploads = new Map<string, Promise<void>>(); let prompts = 0;
+    const f = inboxExecutionFixture(async () => { if (++prompts === 1) uploads.set('image', raw.promise); else nextStarted.resolve(); return { stopReason: 'end_turn' }; });
+    const handler = Object.create(MessageHandler.prototype) as any;
+    handler.store = { has: () => true, get: () => ({ permissionWaitMs: 0, acpUpdateBuffer: [], imageGenerationUploads: uploads, turn: { phase: 'active', turnId: 'assistant:human-input', turnEpoch: 1, hasVisibleOutput: false } }), getTurnId: () => undefined, getCurrentACPUpdateTarget: () => undefined };
+    Object.assign(handler, { executionService: f.service, workspaceDocument: f.deps.workspaceDocument, logger: f.deps.logger,
+      getSessionBackend: async (doc: typeof f.doc) => createSessionBackend(doc), flushSessionContextWindowUsage: async () => {}, flushACPUpdatesNow: async () => {}, flushThreadGoalHistoryPersists: async () => {} });
+    const drain = handler.flushCodexGeneratedImageUploads.bind(handler);
+    handler.flushCodexGeneratedImageUploads = async (...args: unknown[]) => { entered.resolve(); await drain(...args); };
+    f.deps.turnFinalization.finalizeACPState = (id, turn) => handler.finalizeACPState(id, turn);
+    if (mode === 'observation') f.deps.observePromptContentForTurn = (id, turn) => handler.observePromptContentForTurn(id, turn);
+    let run: Promise<unknown> | undefined, next: Promise<unknown> | undefined, drainWork: Promise<void> | undefined;
+    try {
+      await f.accept(); run = f.service.continueSession(f.message); await entered.promise;
+      if (shutdown) {
+        f.service.quiesceInboxExecutions(); const released = f.service.waitForInboxReleases();
+        await vi.advanceTimersByTimeAsync(7_000); await released;
+      } else { await vi.advanceTimersByTimeAsync(19_999); expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toBeDefined(); await vi.advanceTimersByTimeAsync(1); }
+      expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toBeUndefined();
+      expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, 'human-input')).toBe(true);
+      const db = new Database(f.storePath, { readonly: true }); try { expect(db.prepare('SELECT outcome FROM inbox_releases').all()).toHaveLength(1); } finally { db.close(); }
+      let drained = false; drainWork = f.service.drainInboxExecutions().then(() => { drained = true; });
+      await vi.advanceTimersByTimeAsync(0); expect(drained).toBe(false);
+      if (!shutdown) {
+        await run;
+        await f.service.acceptInboxHumanInput({ sessionId: f.message.sessionId, inputId: 'next', userId: 'user-1', config: f.message.acpSessionConfig });
+        next = f.service.continueSession({ ...f.message, userTurnId: 'next' }); await nextStarted.promise;
+      }
+    } finally { uploads.clear(); raw.resolve(); await run; await next; await drainWork; await f.close(); vi.useRealTimers(); }
+  });
+  it('forces a failed receipt only during shutdown when the finalization chain never settles', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const entered = createDeferred<void>(), raw = createDeferred<void>();
+    const f = inboxExecutionFixture(async () => ({ stopReason: 'end_turn' }));
+    f.deps.turnFinalization.finalizeACPState = async () => { entered.resolve(); await raw.promise; };
+    let run: Promise<unknown> | undefined;
+    try {
+      f.add('shutdown-result'); await f.accept(); run = f.service.continueSession(f.message); await entered.promise;
+      const ordinary = f.service.waitForInboxReleases(); await vi.advanceTimersByTimeAsync(7_000); await ordinary;
+      expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toBeDefined();
+      f.service.quiesceInboxExecutions(); const released = f.service.waitForInboxReleases();
+      await vi.advanceTimersByTimeAsync(7_000); await released;
+      expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toBeUndefined();
+      expect((f.service as any).liveInboxExecutionIds.size).toBe(0);
+      const db = new Database(f.storePath, { readonly: true }); try { expect(db.prepare('SELECT outcome FROM inbox_releases').all()).toEqual([{ outcome: 'failed' }]); expect(db.prepare('SELECT state FROM inbox_batches').all()).toEqual([{ state: 'unknown' }]); } finally { db.close(); }
+    } finally { raw.resolve(); await run; await f.close(); vi.useRealTimers(); }
+  });
   it('writes both active release receipts inside the shutdown budget despite one stuck finalization', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const started = [createDeferred<void>(), createDeferred<void>()];

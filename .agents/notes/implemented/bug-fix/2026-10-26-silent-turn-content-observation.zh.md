@@ -60,7 +60,7 @@ assistant ID 不能授权旧图片写入后继 epoch。迟到结果仍可写回�
 Prompt 返回后，内容观测先等待 `flushCodexGeneratedImageUploads`，再在回合状态仍归当前
 owner 时读取。这是 finalization 已有的 drain 前移到判定之前，并非第二套恢复机制。两条
 执行路径均通过已有 Effect Promise 边界等待。Stop 中断等待者；finalization 仍保留上传
-owner，待其 drain 后释放 execution 与 presence。失败/被拒上传保留原有捕获错误行为，
+owner，但仅在本轮共享截止时间内等待；超时或 shutdown 后释放 execution，上传可在后台完成并只写原 turn。失败/被拒上传保留原有捕获错误行为，
 不登记成功。现有上传全部 drain 后才到达的事件仍使用捕获目标，不追溯修改已结算结果。
 
 已知静默回合 finalize 后记录 `agent_no_output`，仅推进已送达输入的终态指针。正常返回的
@@ -72,7 +72,7 @@ Session、history 编排会扩大本 issue。不改变 native 边界或 unit led
 
 ## 验证与简化
 
-四套 owning suite 的 454 项通过，覆盖 ACP batching、execution、图片上传与 AgentClient 路由，使用
+ACP batching、execution、图片上传与 AgentClient 路由套件使用
 synthetic provider/upload/Git 输入、真实本地历史及 native presence。显式信号覆盖上传尾部、
 失败/被拒、仅开始/失败状态、上传中 Stop、迟到 end，以及不同 ID 和同 ID 新 epoch 下的
 延迟写入。断言历史、终态、提交输入及保留/释放的所有权。独立 reviewer 原仅图片夹具也通过。

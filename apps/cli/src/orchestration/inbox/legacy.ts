@@ -135,6 +135,8 @@ export const operationInboxLegacy = (options: {
       runtime.runPromise(Effect.flatMap(OperationInbox, (i) => i.pause(scope, id, ids, cancelId))),
     release: (event: InboxRelease) =>
       runtime.runPromise(Effect.flatMap(OperationInbox, (i) => i.release(event))),
+    settleUnknown: (batch: InboxBatch) =>
+      runtime.runPromise(Effect.flatMap(OperationInbox, (i) => i.settle(batch, 'unknown'))),
     recoverClose: () => {
       if (recoveredClose) return recoveredClose;
       const attempt = runClose(closeOwner.recover, 'Inbox Scope recovery failed');

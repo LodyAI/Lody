@@ -68,8 +68,7 @@ The former `_meta.claudeCode.toolName` carrier is read only by the centralized
 one-release compatibility path; new provider output must use the Core contract.
 
 Replay and content settlement use separate per-epoch facts. Stamp ACP content at
-enqueue; generated images count after a matched nonempty history write. Await the
-existing image upload drain before observing content. Image lifecycle events block
+enqueue; generated images count after a matched nonempty history write. Bound the existing image upload wait by the runtime deadline and shutdown signal before observing content; keep raw uploads owned, and write late images only to their captured turn. Image lifecycle events block
 replay but are not replies. Late/suppressed events cannot mark a new epoch; unknown
 state refuses replay and lets settlement fail open. Cases: [decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-26-silent-turn-content-observation.md).
 
