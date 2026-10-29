@@ -30,8 +30,11 @@ fingerprint of the definition, so a stale or orphaned document never runs. The
 owning CLI advances its cursor and records the run intent in one SQLite
 transaction, then writes a `prepared` user turn and commits `latestUserMsgId` —
 after that pointer the normal watcher owns execution and nothing is retried in
-another session. Misfire is `skip` or `run_once`; overlap keeps at most one queued
-run; execution slots are shared per Agent. A disconnected Registry blocks new
+another session. Misfire is `skip` or `run_once`; planning retains at most one unprepared pending
+run. Due runs are admitted independently, including successive rounds of one
+schedule: sharing an Agent configuration does not imply shared mutable work.
+Session dispatch owns conversation ordering, and complete messages still wait
+for their destination chat to become idle. A disconnected Registry blocks new
 handoffs rather than risking a run the person already paused elsewhere.
 
 **Where runs go.** A destination is a new chat per run, one chat the schedule

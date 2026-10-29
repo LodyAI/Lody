@@ -17,6 +17,7 @@ import {
   buildOpenedBySessionTree,
   countOpenedByTreeRoots,
   pinnedFirstRootRank,
+  placeOpenedSessionsWithOpeners,
 } from '@/lib/session-opened-by-tree';
 import {
   sidebarCollapsedOpenedBySessionsAtom,
@@ -703,7 +704,10 @@ function MobileChatPreviewToggle({
  * top group (when any exist), regardless of `groupBy`. Unpinned rows
  * then follow:
  * - `none`: one unlabeled flat tail
- * - `project` / `date`: normal buckets
+ * - `project` / `date`: normal buckets. An opened Session joins the bucket
+ *   of its topmost unpinned ancestor, so the tree there indents it, matching
+ *   the desktop Workspace groups. In `date` mode that bucket is the tree's
+ *   freshest update, the same time that ranks the opener.
  *
  * Item order inside each bucket matches the input order.
  * `nowMs` is injectable for tests.
@@ -732,9 +736,19 @@ export function groupChats(
     return ordered;
   }
 
+  const naturalBucketById = new Map(
+    unpinned.map((chat) => [chat.id, bucketIdFor(chat, groupBy, nowMs)])
+  );
+  const openerById = new Map(
+    unpinned.map((chat) => [chat.id, CHAT_OPENED_BY_TREE_ACCESSORS.getOpenedBySessionId(chat)])
+  );
+  const moved =
+    groupBy === 'project'
+      ? placeOpenedSessionsWithOpeners(naturalBucketById, (id) => openerById.get(id))
+      : placeTreesByFreshestUpdate(unpinned, openerById, nowMs);
   const buckets = new Map<string, MobileConversationItem[]>();
   for (const chat of unpinned) {
-    const id = bucketIdFor(chat, groupBy, nowMs);
+    const id = moved.get(chat.id) ?? naturalBucketById.get(chat.id) ?? NO_PROJECT_BUCKET_ID;
     const list = buckets.get(id) ?? [];
     list.push(chat);
     buckets.set(id, list);
@@ -769,6 +783,34 @@ export function groupChats(
     if (items && items.length > 0) ordered.push({ id, items });
   }
   return ordered;
+}
+
+/** Date bucket of every row in an opened-by tree: the day of its freshest member. */
+function placeTreesByFreshestUpdate(
+  chats: MobileConversationItem[],
+  openerById: ReadonlyMap<string, string | null | undefined>,
+  nowMs: number
+): Map<string, string> {
+  // Each row is its own group, so every nested row "moves" to its tree root.
+  const rootById = placeOpenedSessionsWithOpeners(
+    new Map(chats.map((chat) => [chat.id, chat.id])),
+    (id) => openerById.get(id)
+  );
+  const chatById = new Map(chats.map((chat) => [chat.id, chat]));
+  const latestOf = (id: string) => {
+    const latest = chatById.get(id)?.latestMessageAt;
+    return typeof latest === 'number' ? latest : 0;
+  };
+  const treeLatest = new Map<string, number>();
+  for (const [id, root] of rootById) {
+    treeLatest.set(root, Math.max(treeLatest.get(root) ?? latestOf(root), latestOf(id)));
+  }
+  const bucketById = new Map<string, string>();
+  for (const chat of chats) {
+    const latest = treeLatest.get(rootById.get(chat.id) ?? chat.id);
+    if (latest !== undefined) bucketById.set(chat.id, dateBucketIdFor(latest, nowMs));
+  }
+  return bucketById;
 }
 
 function bucketIdFor(
@@ -1241,7 +1283,8 @@ export function MobileChatList({
            Project buckets: identity mark (folder / avatar / chat). */
     const labeledItem =
       groupBy === 'project' && id !== PINNED_BUCKET_ID
-        ? items.find((it) => it.projectLabel != null)
+        ? // A row nested here under its opener describes another project.
+          items.find((it) => it.projectKey === id && it.projectLabel != null)
         : undefined;
     const projectLabel = labeledItem?.projectLabel ?? null;
     const heading =

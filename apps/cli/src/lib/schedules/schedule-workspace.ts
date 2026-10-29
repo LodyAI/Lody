@@ -38,7 +38,6 @@ import {
   scheduleDestinationSessionId,
   scheduleRequiredLocalProjectId,
 } from './schedule-run-preparation';
-import { AgentExecutionSlots } from '../agent-execution-slots';
 import { readMergedAgentConfigById } from '../agent-config-machine-flock';
 import {
   commitPreparedSessionDispatch,
@@ -65,11 +64,10 @@ export async function createScheduleWorkspace(args: {
   auth: AuthContext;
   localOnly: boolean;
   authorize?: (request: ScheduleAuthorizationRequest) => Promise<boolean>;
-  slots: AgentExecutionSlots;
   logger: Logger;
   hasSessionWork: (sessionId: SessionId) => boolean;
 }): Promise<ScheduleWorkspaceHandle> {
-  const { manager, workspace, auth, slots } = args;
+  const { manager, workspace, auth } = args;
   const workspaceId = workspace.id as WorkspaceId;
   const repository = new ScheduleRepository(manager.repo, workspaceId);
   const store = new ScheduleStore<PreparedSessionInput>();
@@ -148,7 +146,6 @@ export async function createScheduleWorkspace(args: {
     machineId: auth.machineId,
     userId: auth.userId,
     store,
-    slots,
     now: getServerNow,
     disabled: () => disabled || disposed,
     ready: isReady,
@@ -309,7 +306,6 @@ export async function createScheduleWorkspace(args: {
         `[schedules] evaluation failed workspaceId=${workspaceId}; see Schedule runtime state`
       ),
   });
-  engine.restoreOccupancy();
 
   const pass = async (): Promise<void> => {
     if (disposed) return;
@@ -381,7 +377,7 @@ export async function createScheduleWorkspace(args: {
   const wake = (): void => {
     void evaluate().catch(() => args.logger.warn('[schedules] wake failed'));
   };
-  cleanups.push(registry.flock.subscribe(wake), slots.subscribe(wake));
+  cleanups.push(registry.flock.subscribe(wake));
 
   // One short timer is also the wake-from-sleep clock check. No per-Schedule
   // timer survives a definition edit, and evaluation coalesces in the engine.

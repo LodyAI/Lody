@@ -13,7 +13,6 @@ import {
 } from '@lody/shared';
 import { ScheduleEngine } from '../src/lib/schedules/schedule-engine';
 import { ScheduleStore } from '../src/lib/schedules/schedule-store';
-import { AgentExecutionSlots } from '../src/lib/agent-execution-slots';
 import { LoroRepo } from 'loro-repo';
 import { SessionDocument, type LoroDocumentManager } from '../src/lib/loro/doc';
 import { prepareSessionInput, resolveTurnDispatchConfig } from '../src/commands/session';
@@ -5046,7 +5045,6 @@ describe('machine execution authorization freshness', () => {
             userId: 'display-owner',
             encrypted: true,
             store: scheduleStore,
-            slots: new AgentExecutionSlots(),
             now: () => 60000,
             disabled: () => false,
             ready: () => true,

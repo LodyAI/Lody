@@ -32,7 +32,8 @@ Parent instructions apply. Background: [README.md](README.md).
   Before accepting an Operation, freeze the Role target, Prompt prefix, revision and run
   config. Recovery uses the frozen canonical Prompt and dispatch config, never rereading
   the Role. Roles may target any reachable Machine; Local
-  Projects default to child Sessions only for same-Machine Roles. `readDelegatedMachineAccess`
+  Projects default to child Sessions only for same-Machine Roles; a remote Role
+  defaults to the Local Project's linked GitHub repository only when the workspace enables it. `readDelegatedMachineAccess`
   requires access for both executing Machine owner and driving human (owned, or shared with
   shared project), never trusting synced `MachineMeta.ownerUserId`.
 - Operation identity comes only from active Host dispatch; reject absent runtime/userId.
@@ -51,6 +52,11 @@ Parent instructions apply. Background: [README.md](README.md).
 - Align chain caps and MCP guidance; create/chat forbid courtesy, duplicate callbacks
   and depth-limit evasion. Reject new chats to the active input's Agent sender; isolate
   rejected batch items.
+
+- Single and batch chats pass `steerActiveTurn`, steering a turn running on the calling
+  daemon; recovery replay never steers. Never activate a steered or existing `pending_apply`
+  turn. Uncertain delivery fails the item with `STEER_DELIVERY_UNKNOWN`, never a replay.
+  [Contract](../../../../specs/session-orchestration.md#agent-chat-to-a-busy-session).
 
 - Catalog uncertainty is not `INVALID_ITEM`; only retryable failures abort batches.
   Agent capability defaults require fresh catalogs. Internal inferred defaults

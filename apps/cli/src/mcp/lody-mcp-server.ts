@@ -1304,7 +1304,12 @@ const resolveMcpSessionCreate = (
   input: SessionCreateCommandInput,
   invoking: InvokingTurnContext | undefined,
   requester: Pick<SessionMeta, 'machineId' | 'project'>,
-  catalogRole: AgentRole | undefined
+  catalogRole: AgentRole | undefined,
+  /**
+   * The requester Local Project's linked GitHub repository, present only when
+   * it is enabled in this workspace (`resolveRoleCloneableRepo`).
+   */
+  cloneableRepo?: string
 ): ResolvedMcpSessionCreate => {
   if (!input.agentRoleId) {
     return {
@@ -1345,7 +1350,9 @@ const resolveMcpSessionCreate = (
   }
   // A Role may run on any Machine the requester can access; the shared create
   // path enforces that access. Only a Local Project child is filesystem-bound,
-  // so a Role on another Machine starts as an independent Session there.
+  // so a Role on another Machine starts as an independent Session there — in
+  // the Local Project's linked GitHub repository when the workspace enables
+  // it, since that Machine can clone it; otherwise as a plain chat.
   const project = requester.project;
   let useCurrentSessionAsParent = input.useCurrentSessionAsParent;
   let workContext = input.workContext;
@@ -1366,6 +1373,17 @@ const resolveMcpSessionCreate = (
     workContext === undefined
   ) {
     useCurrentSessionAsParent = true;
+  } else if (
+    project?.kind === 'local' &&
+    cloneableRepo &&
+    role.machineId !== requester.machineId &&
+    useCurrentSessionAsParent !== true &&
+    workContext === undefined
+  ) {
+    // A local branch may exist only on the requester's Machine, so the remote
+    // checkout starts from the repository's default branch; the caller names
+    // any pushed branch in the prompt or an explicit workContext.
+    workContext = { kind: 'github', repo: cloneableRepo };
   }
 
   const { agentRoleMachineId: _agentRoleMachineId, ...withoutTarget } =
@@ -1389,6 +1407,34 @@ const resolveMcpSessionCreate = (
     },
     role,
   };
+};
+
+/**
+ * The requester Local Project's linked GitHub repository, when a Role create
+ * may need it and the workspace enables it. Remote identity is not
+ * authorization, so an unlisted repository keeps the plain-chat placement.
+ */
+const roleRunsElsewhere = (role: AgentRole | undefined, machineId: string): boolean =>
+  role !== undefined && getAgentRoleTargets(role).some((target) => target.machineId !== machineId);
+
+const resolveRoleCloneableRepo = async (
+  auth: AuthContext,
+  workspaceId: WorkspaceId,
+  requester: Pick<SessionMeta, 'project'>,
+  requesterUserId: string,
+  needed: boolean
+): Promise<string | undefined> => {
+  const linked = resolveProjectGitHubRepo(requester.project);
+  if (!needed || requester.project?.kind !== 'local' || !linked || getSessionCommandEnvironment())
+    return undefined;
+  const repos = await listWorkspaceGitHubRepositoriesForCliToken({
+    token: auth.token,
+    workspaceId,
+    requesterUserId,
+    enabledOnly: true,
+  });
+  const normalized = linked.toLowerCase();
+  return repos.find((repo) => repo.fullName.toLowerCase() === normalized)?.fullName;
 };
 
 const buildResolvedMcpCreateCanonicalCommand = (
@@ -2715,11 +2761,19 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
     const roleCatalog = args.agentRoleId
       ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId)
       : undefined;
+    const catalogRole = args.agentRoleId ? roleCatalog?.get(args.agentRoleId) : undefined;
     const resolved = resolveMcpSessionCreate(
       args,
       invoking,
       currentSession,
-      args.agentRoleId ? roleCatalog?.get(args.agentRoleId) : undefined
+      catalogRole,
+      await resolveRoleCloneableRepo(
+        auth,
+        workspace.id as WorkspaceId,
+        currentSession,
+        invoking.identity.userId,
+        roleRunsElsewhere(catalogRole, currentSession.machineId)
+      )
     );
     const canonicalCommand = buildResolvedMcpCreateCanonicalCommand(resolved, args.deadlineSeconds);
     const retry = await withOperationStore((store) =>
@@ -3069,6 +3123,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
           {
             userTurnId: pendingItem.target.userTurnId,
             chainDepth: invoking.chainDepth + 1,
+            steerActiveTurn: true,
           },
           toDelegatedSessionRequester(invoking.identity),
           { attachments: accepted.operation.targetInputAttachments?.[0] }
@@ -3261,6 +3316,18 @@ const startSessionCreateManyOperation = async (
     const roleCatalog = expanded.some((item) => Boolean(item.agentRoleId))
       ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId)
       : undefined;
+    const cloneableRepo = await resolveRoleCloneableRepo(
+      auth,
+      workspace.id as WorkspaceId,
+      requester,
+      invoking.identity.userId,
+      expanded.some((item) =>
+        roleRunsElsewhere(
+          item.agentRoleId ? roleCatalog?.get(item.agentRoleId) : undefined,
+          requester.machineId
+        )
+      )
+    );
     const resolvedItems = expanded.map((item) => {
       if (!item.prompt) return { resolved: undefined, error: undefined };
       try {
@@ -3283,7 +3350,8 @@ const startSessionCreateManyOperation = async (
             single,
             invoking,
             requester,
-            item.agentRoleId ? roleCatalog?.get(item.agentRoleId) : undefined
+            item.agentRoleId ? roleCatalog?.get(item.agentRoleId) : undefined,
+            cloneableRepo
           ),
           error: undefined,
         };
@@ -3733,6 +3801,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
               userTurnId: storedItem.target.userTurnId,
               chainDepth: invoking.chainDepth + 1,
               bypassSessionQuota: shouldBypassSessionQuota('session_chat_many'),
+              steerActiveTurn: true,
             },
             toDelegatedSessionRequester(invoking.identity)
           );
@@ -4252,7 +4321,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     {
       title: 'Create a Lody session',
       description:
-        'Start durable asynchronous work that creates a Lody session. By default, explicitly set useCurrentSessionAsParent=false to create a sub-conversation shown in the sidebar. Set true only when the user explicitly requests a Tab in the current conversation. Supply operationId; results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get. To use an Agent Role, pass agentRoleId; the current workspace catalog row supplies the exact Machine, Agent config, model, reasoning, and permission mode. A Role that runs on several machines also needs agentRoleMachineId naming the target machine. If manual machine or run-config fields are also present, the Role takes precedence and those fields are ignored. A Role may run on any Machine the owner of this Machine can use; to work in a project there, pass workContext for a local project on that Machine (find it with lody_session_create_options machineId + localProjectQuery). Without workContext a Role on another Machine starts as a plain chat there. To recover an already accepted create without resending its prompt, send only operationId with resume=true. If a call times out or fails, retry with the same operationId; a fresh id for the same work risks a duplicate Session. useCurrentSessionAsParent=true and workContext are mutually exclusive schema branches. Machine/config ids and runConfig values for non-Role creates come from lody_session_create_options. The wait field is temporary legacy compatibility only. ' +
+        'Start durable asynchronous work that creates a Lody session. By default, explicitly set useCurrentSessionAsParent=false to create a sub-conversation shown in the sidebar. Set true only when the user explicitly requests a Tab in the current conversation. Supply operationId; results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get. To use an Agent Role, pass agentRoleId; the current workspace catalog row supplies the exact Machine, Agent config, model, reasoning, and permission mode. A Role that runs on several machines also needs agentRoleMachineId naming the target machine. If manual machine or run-config fields are also present, the Role takes precedence and those fields are ignored. A Role may run on any Machine the owner of this Machine can use; to work in a project there, pass workContext for a local project on that Machine (find it with lody_session_create_options machineId + localProjectQuery). Without workContext a Role on another Machine starts in the current local project linked GitHub repository (default branch) when the workspace enables that repository, else as a plain chat there; name any pushed branch in the prompt or pass workContext. To recover an already accepted create without resending its prompt, send only operationId with resume=true. If a call times out or fails, retry with the same operationId; a fresh id for the same work risks a duplicate Session. useCurrentSessionAsParent=true and workContext are mutually exclusive schema branches. Machine/config ids and runConfig values for non-Role creates come from lody_session_create_options. The wait field is temporary legacy compatibility only. ' +
         SESSION_COLLABORATION_GUIDANCE +
         ' For retryable Machine catalog SYNC_UNAVAILABLE errors:' +
         MACHINE_CATALOG_RETRY_GUIDANCE,
@@ -4283,11 +4352,19 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
           const roleCatalog = args.agentRoleId
             ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId)
             : undefined;
+          const catalogRole = args.agentRoleId ? roleCatalog?.get(args.agentRoleId) : undefined;
           const resolved = resolveMcpSessionCreate(
             args,
             invoking,
             currentSession,
-            args.agentRoleId ? roleCatalog?.get(args.agentRoleId) : undefined
+            catalogRole,
+            await resolveRoleCloneableRepo(
+              auth,
+              workspace.id as WorkspaceId,
+              currentSession,
+              invoking.identity.userId,
+              roleRunsElsewhere(catalogRole, currentSession.machineId)
+            )
           );
           await freezeInvokingAuthor(manager, currentSession, invoking);
           const options = buildMcpCreateOptions(resolved.input, ctx);
@@ -4350,7 +4427,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     {
       title: 'Send a prompt to a Lody session',
       description:
-        'Start durable asynchronous work by appending a prompt to another authorized online Lody session. Supply operationId; the tool returns immediately and results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get in a loop. The wait field is temporary legacy compatibility only. ' +
+        'Start durable asynchronous work by appending a prompt to another authorized online Lody session. Supply operationId; the tool returns immediately and results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get in a loop. A target already running a turn on this Machine receives the prompt as a steer into that turn when its agent supports steering, otherwise as the next turn; a failed STEER_DELIVERY_UNKNOWN item means the steer may or may not have been applied, so resend only if duplicate work is acceptable. The wait field is temporary legacy compatibility only. ' +
         SESSION_COLLABORATION_GUIDANCE +
         ' For retryable Machine catalog SYNC_UNAVAILABLE errors:' +
         MACHINE_CATALOG_RETRY_GUIDANCE,
@@ -4443,7 +4520,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     {
       title: 'Chat multiple Lody sessions',
       description:
-        'Start one durable batch Operation for 1-20 Session chats. defaults and items shallow-merge; nested objects replace wholesale. Ordered item failures are isolated. Results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get in a loop. ' +
+        'Start one durable batch Operation for 1-20 Session chats. defaults and items shallow-merge; nested objects replace wholesale. Ordered item failures are isolated. A target already running a turn on this Machine receives the prompt as a steer into that turn when its agent supports steering, otherwise as the next turn; a failed STEER_DELIVERY_UNKNOWN item means the steer may or may not have been applied, so resend only if duplicate work is acceptable. Results are queued and batched after a normal turn release, or with your next user input, so do not poll operation_get in a loop. ' +
         SESSION_COLLABORATION_GUIDANCE +
         ' For retryable Machine catalog SYNC_UNAVAILABLE errors:' +
         MACHINE_CATALOG_RETRY_GUIDANCE,

@@ -21,6 +21,7 @@ import {
   type MachineFlockRowMap,
   type MachineMeta,
   type MachineViewMeta,
+  type SessionMeta,
   type WorkspaceId,
 } from '@lody/shared';
 
@@ -33,6 +34,7 @@ import {
   useMachineFlockRows,
   useMachineFlockRowsByMachineIdsState,
 } from '../src/hooks/use-machine-flock-rows';
+import { useSessionForkCapabilities } from '../src/hooks/use-session-fork-capabilities';
 import { useSessionAcpSelectorContext } from '../src/hooks/use-session-acp-selector-context';
 import { useResolvedMachineMeta } from '../src/hooks/use-resolved-machine-meta';
 
@@ -2026,6 +2028,8 @@ describe('session ACP catalogs from Machine Flock', () => {
       models: [{ modelId: 'fixture/model', name: 'Fixture' }],
       sourceVersion: `builtin-pi:test${getBuiltinRuntimeOverrideSourceVersionSuffix(config.runtimeOverrides)}`,
       availableCommands: [{ name: 'fixture', description: 'Fixture command' }],
+      sessionFork: true,
+      sessionForkWorktree: true,
       fetchedAt: 1,
     };
     const rows = (): MachineFlockRowMap =>
@@ -2063,18 +2067,32 @@ describe('session ACP catalogs from Machine Flock', () => {
       },
     } as unknown as Record<string, MachineMeta>);
     function Composer() {
-      const { modelOptions, availableCommands } = useSessionAcpSelectorContext({
+      const { modelOptions, availableCommands, sessionMachine } = useSessionAcpSelectorContext({
         machineId,
         configId,
         cliType: 'builtin',
         agentType: 'pi',
       });
+      const { canForkSession, canForkSessionToWorktree } = useSessionForkCapabilities(
+        machineId,
+        sessionMachine?.acpCapabilities
+      );
+      const target = {
+        machineId,
+        agentConfigId: configId,
+        cliType: 'builtin',
+        agentType: 'pi',
+        acpSessionId: '/fixture/session.jsonl',
+        project: { kind: 'github' },
+      } as SessionMeta;
       return createElement(
         'output',
         null,
         JSON.stringify({
           models: modelOptions.map((option) => option.value),
           commands: availableCommands.map((command) => command.name),
+          fork: canForkSession(target),
+          worktreeFork: canForkSessionToWorktree(target),
         })
       );
     }
@@ -2084,6 +2102,8 @@ describe('session ACP catalogs from Machine Flock', () => {
       expect(JSON.parse(container?.textContent ?? '{}')).toEqual({
         models: visible ? ['fixture/model'] : [],
         commands: visible ? ['fixture'] : [],
+        fork: visible,
+        worktreeFork: visible,
       });
     const publish = async () => {
       await act(async () => {

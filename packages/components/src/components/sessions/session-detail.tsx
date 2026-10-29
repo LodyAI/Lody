@@ -1,3 +1,4 @@
+import { useSessionForkCapabilities } from '@/hooks/use-session-fork-capabilities';
 import { requireWorkspaceFeature } from '@/lib/workspace-feature';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { FileLinkCandidateDialog } from './file-link-candidate-dialog';
@@ -40,13 +41,10 @@ import { useRouter } from '@tanstack/react-router';
 import { useComposerNavigationFocus } from '../chat/submission/use-composer-navigation-focus';
 import { usePostHog } from '@posthog/react';
 import {
-  getAcpCapabilityCacheKey,
-  resolveSessionAcpTargetId,
   getProjectRefBranch,
   getServerNow,
   getSessionPullRequestLegacyFields,
   getSessionRoomId,
-  getAcpCapabilityCacheEntryAuthority,
   isLoroRepoDocDeleted,
   resolveProjectGitHubRepo,
   SessionForkOperationSchema,
@@ -1694,37 +1692,9 @@ const SessionDetail = ({
     MACHINE_PROTOCOL_CAPABILITIES.codeCollabAllChangesScope
   );
   const effectiveAllChangesDiffScope = allChangesScopeSupported ? allChangesDiffScope : 'branch';
-  const canForkSession = useCallback(
-    (target: SessionMeta): boolean => {
-      if (target.isArchived || !target.agentConfigId || !resolveSessionAcpTargetId(target))
-        return false;
-      const capability =
-        sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(target.agentConfigId)];
-      return (
-        getAcpCapabilityCacheEntryAuthority(capability, undefined) === 'authoritative' &&
-        capability?.sessionFork === true
-      );
-    },
-    [sessionMachine?.acpCapabilities]
-  );
-  const canForkSessionToWorktree = useCallback(
-    (target: SessionMeta): boolean => {
-      if (
-        !target.agentConfigId ||
-        !resolveSessionAcpTargetId(target) ||
-        !target.project ||
-        (target.project.kind !== 'local' && target.project.kind !== 'github')
-      ) {
-        return false;
-      }
-      const capability =
-        sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(target.agentConfigId)];
-      return (
-        getAcpCapabilityCacheEntryAuthority(capability, undefined) === 'authoritative' &&
-        capability?.sessionForkWorktree === true
-      );
-    },
-    [sessionMachine?.acpCapabilities]
+  const { canForkSession, canForkSessionToWorktree } = useSessionForkCapabilities(
+    activeSessionMachineId,
+    sessionMachine?.acpCapabilities
   );
   const handleForkAssistant = useCallback(
     async (
