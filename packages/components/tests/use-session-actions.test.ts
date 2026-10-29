@@ -607,6 +607,39 @@ describe('useSessionActions', () => {
     expect(metaRepo.getSession(sessionId)?.lastCanceledTurn).toBe('assistant-legacy');
   });
 
+  it('interrupts without a Stop identity so queued input keeps its eligibility', async () => {
+    const sessionId = 'session-interrupt' as SessionId;
+    const metaRepo = createSessionMetaRepo([
+      { id: sessionId, machineId: 'machine-1', userId: 'user-1' } as SessionMeta,
+    ]);
+    metaRepo.setMeta(getMachineRoomId('machine-1'), {
+      protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+    });
+    const doc = new LoroDoc();
+    const control = createSessionControlPlaneMirror({
+      doc,
+      initialState: { session: { id: sessionId } },
+    });
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    runtime.withSessionStore = async (_id, fn) =>
+      fn({ ...control, sessionData: sessionDataOver([]) } as never);
+    const rpcOptions: unknown[] = [];
+    runtime.requestSessionCancel = async (_machine, _session, _turnId, options) => {
+      rpcOptions.push(options);
+      return { success: true } as never;
+    };
+    try {
+      const actions = await renderActions(runtime);
+      await actions.requestSessionCancel(sessionId, 'assistant-running', { interrupt: true });
+
+      expect(rpcOptions).toEqual([{ timeoutMs: 2_000, pauseInbox: false }]);
+      expect(control.getState().cancelRequest?.id).toBeUndefined();
+      expect(metaRepo.getSession(sessionId)?.lastCanceledTurn).toBe('assistant-running');
+    } finally {
+      control.dispose();
+    }
+  });
+
   it('persists Stop details before publishing only its marker, and reuses the request on RPC', async () => {
     const sessionId = 'session-stop-control' as SessionId;
     const metaRepo = createSessionMetaRepo([

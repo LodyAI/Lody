@@ -13462,6 +13462,118 @@ describe('Operation Inbox execution boundary', () => {
     }
   });
 
+  // #2050: interrupt-and-send ends the running turn so the queued guidance runs
+  // next. It must not use the Stop identity, which pauses the Inbox and cancels
+  // the eligibility of every input queued before it.
+  it.each([
+    ['interrupt', 'running', { pauseInbox: false }, ['CURRENT_REQUEST', 'GUIDANCE'], 'handled'],
+    [
+      'interrupt',
+      'already finished',
+      { pauseInbox: false },
+      ['CURRENT_REQUEST', 'GUIDANCE'],
+      'handled',
+    ],
+    // RPC lost: the daemon reads the durable turn-id marker, which carries no Stop identity.
+    ['interrupt marker', 'running', {}, ['CURRENT_REQUEST', 'GUIDANCE'], 'handled'],
+    ['Stop', 'running', { cancelId: 'user-stop' }, ['CURRENT_REQUEST'], 'seen'],
+  ] as const)(
+    '%s of a %s turn decides whether queued guidance runs',
+    async (kind, turnState, request, expectedPrompts, guidanceStatus) => {
+      const release = createDeferred();
+      const prompting = createDeferred();
+      const received: string[] = [];
+      const f = inboxExecutionFixture(async (blocks) => {
+        const text = blocks.map((block) => (block.type === 'text' ? block.text : '')).join('');
+        received.push(text);
+        if (text === 'CURRENT_REQUEST') {
+          prompting.resolve();
+          await release.promise;
+        }
+        return {};
+      });
+      try {
+        await f.accept();
+        const running = f.service.continueSession(f.message);
+        await prompting.promise;
+        const turnId = f.service.getExecutionSnapshot(f.message.sessionId).activeTurnId!;
+        const guidanceConfig = {
+          ...f.message.acpSessionConfig,
+          prompt: 'GUIDANCE',
+          inputBlocks: [{ type: 'text' as const, text: 'GUIDANCE' }],
+        };
+        // The composer queues the guidance, then cancels the running turn.
+        await f.doc.pushMessageQueue({
+          task: 'GUIDANCE',
+          userId: 'user-1',
+          userTurnId: 'guidance',
+          timestamp: '2026-10-12T00:00:01Z',
+          project: undefined,
+          acpSessionConfig: guidanceConfig,
+        });
+        if (turnState === 'already finished') {
+          release.resolve();
+          await running;
+        }
+        await f.service.cancelSession({
+          ...request,
+          type: 'session/cancel',
+          sessionId: f.message.sessionId,
+          turnId,
+          machineId: 'machine-1',
+          workspaceId: 'workspace-1' as WorkspaceId,
+        });
+        release.resolve();
+        await running;
+        // The dispatch watcher's queue-promotion gate: a canceled head is retired, not run.
+        expect(f.service.isInboxInputCanceled(f.message.sessionId, 'guidance')).toBe(
+          kind === 'Stop'
+        );
+
+        // Queue promotion after release: history row, human receipt, dispatch.
+        await f.doc.sessionData.commands.applyHistoryAction({
+          kind: 'upsert-turn',
+          turn: {
+            id: 'guidance',
+            role: 'user',
+            userId: 'user-1',
+            timestamp: '2026-10-12T00:00:01Z',
+            status: 'pending',
+            read: false,
+            items: [{ type: 'text', text: 'GUIDANCE' }],
+            inputConfig: guidanceConfig,
+            finished: true,
+            fileDiff: [],
+          },
+        });
+        const [queued] = await f.doc.getMessageQueue();
+        if (queued) await f.doc.removeMessageQueueItem(queued.$cid);
+        await f.service.acceptInboxHumanInput({
+          sessionId: f.message.sessionId,
+          inputId: 'guidance',
+          userId: 'user-1',
+          config: guidanceConfig,
+        });
+        await f.service.continueSession({
+          ...f.message,
+          userTurnId: 'guidance',
+          acpSessionConfig: guidanceConfig,
+        });
+
+        expect(received).toEqual(expectedPrompts);
+        // Even a Stop keeps the typed guidance in history instead of deleting it.
+        expect(
+          (await (await createSessionBackend(f.doc)).readHistory()).find(
+            (entry) => entry.id === 'guidance'
+          )?.status
+        ).toBe(guidanceStatus);
+      } finally {
+        release.resolve();
+        await f.close();
+      }
+    }
+  );
+
   it('runs an Agent chat sent after an Inbox-aware Stop and clears the pause', async () => {
     const building = createDeferred();
     const release = createDeferred();

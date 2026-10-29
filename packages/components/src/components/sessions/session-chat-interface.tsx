@@ -6226,7 +6226,8 @@ export const SessionChatInterface = memo(
         setInputActionState('ready');
         pendingUserInterruptRef.current = true;
         try {
-          await requestSessionCancel(session.id, activeAssistantTurnId);
+          // Not a Stop: the queued item must stay eligible to run next.
+          await requestSessionCancel(session.id, activeAssistantTurnId, { interrupt: true });
           captureSessionEvent('session/queue_interrupt_succeeded', {
             queue_item_id: item.$cid,
             active_assistant_turn_id: activeAssistantTurnId,

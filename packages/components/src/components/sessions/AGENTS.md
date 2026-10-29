@@ -90,6 +90,8 @@ Read parent rules and linked context.
 - Only derived activity: dispatched-but-not-started; use durable turn time, stop at 30s.
 - No presence: queue behind unfinished turns; never relight Working.
 - Busy composer without authoritative steer uses Queue.
+- Interrupt-and-send cancels with `{ interrupt: true }`, never the Stop identity:
+  an Inbox-aware Stop pauses and cancels every queued input, losing the guidance (#2050).
 - Uploads: [contract](../../../../../specs/composer-send-during-upload.md).
 
 ## [Composer info bar](../../../../../.agents/docs/sessions-info-bar.md)

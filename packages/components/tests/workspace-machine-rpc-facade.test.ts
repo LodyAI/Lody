@@ -818,19 +818,21 @@ describe('createWorkspaceMachineRpcFacade', () => {
       getMachineRpcClient,
     });
 
-    await expect(facade.requestSessionCancel(localMachineId, sessionId, 'turn-1')).resolves.toEqual(
-      {
-        type: 'session/cancel_response',
-        sessionId,
-        success: true,
-      }
-    );
+    await expect(
+      facade.requestSessionCancel(localMachineId, sessionId, 'turn-1', { pauseInbox: false })
+    ).resolves.toEqual({
+      type: 'session/cancel_response',
+      sessionId,
+      success: true,
+    });
     expect(invoke).toHaveBeenCalledWith(
       'machineRpc.send',
       expect.objectContaining({
         machineId: localMachineId,
         workspaceId,
         method: 'session/cancel',
+        // Interrupt-and-send must reach the daemon as a non-pausing cancel.
+        params: expect.objectContaining({ turnId: 'turn-1', pauseInbox: false }),
       })
     );
     expect(getMachineRpcClient).not.toHaveBeenCalled();
