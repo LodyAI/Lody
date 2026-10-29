@@ -535,6 +535,8 @@ export type SessionSendMessageOptions = {
    * later dispatches this, not whatever the selection became in between.
    */
   mcpServerIds?: readonly McpServerId[];
+  /** Local UI intent; never part of the durable input config. */
+  skipMcpOnce?: boolean;
 };
 
 export type SessionChatInputAreaHandle = {
@@ -2409,7 +2411,9 @@ export const SessionChatInputArea = memo(
         statusMessage={
           submissionPending && scheduled.progress !== null
             ? t('scheduledMessage.preparing', { progress: scheduled.progress })
-            : undefined
+            : mcpSelectionReady === false && !mcpDefaultsFailed
+              ? t('chat.validation.mcpDefaultsLoading')
+              : undefined
         }
         onFileRemove={submissionPending || isArchived ? undefined : handleRemoveFile}
         onFileRetry={submissionPending || isArchived ? undefined : handleRetryFile}
@@ -2478,7 +2482,7 @@ export const SessionChatInputArea = memo(
           {mcpDefaultsFailed && onRetryMcpDefaults ? (
             <McpDefaultsRecovery
               onRetry={onRetryMcpDefaults}
-              onSendWithoutMcp={() => void sendMessage({ mcpServerIds: [] })}
+              onSendWithoutMcp={() => void sendMessage({ mcpServerIds: [], skipMcpOnce: true })}
               disabled={submissionPending || isArchived || isMachineRemoved}
             />
           ) : null}

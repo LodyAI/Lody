@@ -3356,6 +3356,7 @@ function WorkspaceChatLanding({
         pendingHistoryEntry,
         attachments
       );
+      mcpSelection.acceptSend(sessionId, withoutMcp);
       if (mobileNewChatOpen) {
         setMobileCreatedSessionId(sessionId);
         setRestoreMobileProject(false);

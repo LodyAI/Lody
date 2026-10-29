@@ -3176,7 +3176,9 @@ export const SessionChatInterface = memo(
       existingSession: true,
       disabled: isArchivedSession,
       scopeKey: session.id,
+      defaultsTarget: { project: session.project, machineId: session.machineId },
     });
+    const acceptMcpSend = mcpSelection.acceptSend;
     const executionTurnConfigOverrides = useMemo(
       () =>
         buildExecutionTurnConfigOverrides({
@@ -4934,11 +4936,13 @@ export const SessionChatInterface = memo(
       async (
         inputBlocks: SessionInputBlock[],
         agentRole?: SessionTurnAgentRoleSelection,
-        options?: Omit<DispatchInputBlocksOptions, 'agentRole'>
+        options?: Omit<DispatchInputBlocksOptions, 'agentRole'> & { skipMcpOnce?: boolean }
       ): Promise<boolean> => {
-        return await dispatchInputBlocks(inputBlocks, { ...options, agentRole });
+        const accepted = await dispatchInputBlocks(inputBlocks, { ...options, agentRole });
+        if (accepted) acceptMcpSend(session.id, options?.skipMcpOnce);
+        return accepted;
       },
-      [dispatchInputBlocks]
+      [dispatchInputBlocks, acceptMcpSend, session.id]
     );
 
     const capacityRetry = useCapacityAutoRetry({
@@ -7523,6 +7527,9 @@ export const SessionChatInterface = memo(
                             commandsEnabled={isVisible}
                             freeTurnLimitNotice={freeSessionTurnNotice}
                             mcp={mcpSelection.menu}
+                            mcpSelectionReady={mcpSelection.ready}
+                            mcpDefaultsFailed={mcpSelection.defaultsFailed}
+                            onRetryMcpDefaults={mcpSelection.retryDefaults}
                             // The info bar above owns this gap (and seats the queue).
                             hideTopSpacer
                             onModeChange={handleModeChange}

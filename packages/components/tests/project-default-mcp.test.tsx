@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 import { act } from 'react';
+import { createLoroSessionData } from '@lody/shared/session-data';
+import { buildSessionDoc, reimport, FIXTURE_SESSION_ID } from './conversation-view-fixtures';
 import { PlatformContext } from '@lody/platform/react';
 import { createLocalPlatformProvider, type PlatformSyncMode } from '@lody/platform';
 import { TEST_CLOUD_PLATFORM } from './test-platform';
@@ -8,6 +10,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore, Provider } from 'jotai';
 import {
   getProjectMcpKey,
+  createHistoryWriter,
+  buildPendingUserHistoryEntry,
+  buildSessionTurnInputConfig,
+  resolveSessionConversationConfig,
   workspaceFlockKeys,
   type LocalProjectId,
   type McpServerId,
@@ -278,6 +284,100 @@ describe('composer MCP selection', () => {
     expect(workspace.rowOf(workspaceFlockKeys.projectMcpDefault(keyOf(projectA)))).toBeUndefined();
     error.mockRestore();
   });
+
+  it.each([true, false])(
+    'restores defaults after an accepted temporary opt-out, but preserves menu [] (temporary=%s)',
+    async (temporary) => {
+      const workspace = createWorkspace('workspace-1', [
+        ...catalogRows(),
+        [workspaceFlockKeys.projectMcpDefault(keyOf(projectA)), { ids: ['search'] }],
+      ]);
+      store.set(runtimeAtom, workspace.runtime);
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const target = { project: projectA, machineId: 'machine-1' };
+      const view = renderSelection({ defaultsTarget: target });
+      if (temporary) workspace.fail(new Error('storage unavailable'));
+      else workspace.open();
+      await settle();
+      if (!temporary) act(() => view.current().setSelectedIds([]));
+      const blocks = [{ type: 'text' as const, text: 'first message' }];
+      const first = buildSessionTurnInputConfig({
+        inputBlocks: blocks,
+        cliType: 'builtin',
+        agentType: 'codex',
+        mcpServerIds: [],
+      });
+      const doc = buildSessionDoc([]);
+      createHistoryWriter(doc).append({
+        id: 'first',
+        ...buildPendingUserHistoryEntry({
+          userId: 'user-1',
+          inputBlocks: blocks,
+          inputConfig: first,
+          timestamp: '2026-10-30T00:00:00.000Z',
+        })!,
+      });
+      const accepted = reimport(doc);
+      const writer = createHistoryWriter(accepted);
+      const data = createLoroSessionData({ sessionId: FIXTURE_SESSION_ID, doc: accepted });
+      try {
+        expect(writer.readStored()[0].inputConfig).toMatchObject({ mcpServerIds: [] });
+        act(() => view.current().acceptSend('accepted-session', temporary));
+        const rows = await data.history.readDirectory(0, 1);
+        const baseline = resolveSessionConversationConfig(
+          rows.map((row) => ({
+            id: row.turnId!,
+            role: row.scalars?.role,
+            inputConfig: row.inputConfig,
+          }))
+        );
+        view.render({
+          existingSession: true,
+          scopeKey: 'accepted-session',
+          persistedIds: baseline.mcpServerIds,
+          defaultsTarget: target,
+        });
+        expect(view.current().ready).toBe(!temporary);
+        workspace.recover();
+        act(() => view.current().retryDefaults());
+        await settle();
+        expect(view.current()).toMatchObject({
+          ready: true,
+          selectedIds: temporary ? ['search'] : [],
+        });
+        const second = buildSessionTurnInputConfig({
+          inputBlocks: blocks,
+          cliType: 'builtin',
+          agentType: 'codex',
+          mcpServerIds: view.current().selectedIds,
+        });
+        writer.append({
+          id: 'second',
+          ...buildPendingUserHistoryEntry({
+            userId: 'user-1',
+            inputBlocks: blocks,
+            inputConfig: second,
+            timestamp: '2026-10-30T00:00:01.000Z',
+          })!,
+        });
+        expect(writer.readStored()[1].inputConfig?.mcpServerIds).toEqual(
+          temporary ? ['search'] : []
+        );
+        expect(writer.readStored()[1].inputConfig?.skipMcpOnce).toBeUndefined();
+        act(() => view.current().acceptSend('accepted-session'));
+        view.render({
+          existingSession: true,
+          scopeKey: 'accepted-session',
+          persistedIds: second.mcpServerIds,
+          defaultsTarget: target,
+        });
+        expect(view.current().selectedIds).toEqual(temporary ? ['search'] : []);
+      } finally {
+        data.dispose();
+        log.mockRestore();
+      }
+    }
+  );
 
   it('replaces the workspace defaults with a project row, including [] for none', async () => {
     const workspace = createWorkspace('workspace-1', [

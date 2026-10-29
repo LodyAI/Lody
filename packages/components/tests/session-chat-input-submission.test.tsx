@@ -993,6 +993,7 @@ describe('SessionChatInputArea submission feedback', () => {
       expect(
         container!.querySelector<HTMLButtonElement>('button[aria-label="Send"]')?.disabled
       ).toBe(true);
+      expect(container!.textContent).toContain('Loading this project’s default MCP servers…');
       await submit('keyboard');
       expect(onSendMessage).not.toHaveBeenCalled();
     });
@@ -1018,6 +1019,7 @@ describe('SessionChatInputArea submission feedback', () => {
       await act(async () => optOut.click());
       expect(submissions).toHaveLength(1);
       expect(submissions[0][2]?.mcpServerIds).toEqual([]);
+      expect(submissions[0][2]?.skipMcpOnce).toBe(true);
       expect(container!.querySelector('textarea')!.value).toBe('focus regression draft');
       await renderComposer({
         sessionId,
