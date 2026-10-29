@@ -110,6 +110,7 @@ import { RuntimeProvider } from '../src/providers/runtime-provider';
 import { createWorkspaceRuntime } from '../src/providers/create-workspace-runtime';
 import { currentWorkspaceSlugAtom, currentWorkspaceIdAtom, userAtom } from '../src/atoms';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
+import { resolveLegacyWorkspaceQueryStatus } from '../src/lib/legacy-workspace-admission';
 import {
   readWorkspaceModeProof,
   repairUnreadableE2eeCaches,
@@ -1075,6 +1076,147 @@ describe('RuntimeProvider warm workspace preparation', () => {
       expect(store.get(workspaceContentModeAtom)?.descriptor).toMatchObject({
         contentMode: 'plaintext',
       });
+    }
+  );
+
+  // Temporary targeted reproduction at eee7db758f1b211cc0d71df93c0f99a70b014f60.
+  // Visibility hooks are mocked in this suite; their real loading projections
+  // are checked separately in workspace-legacy-queries.test.tsx.
+  function legacyQueryStatus() {
+    return resolveLegacyWorkspaceQueryStatus({
+      workspaceId: 'local:workspace',
+      platformKind: 'cloud',
+      mode: store.get(workspaceContentModeAtom),
+      runtime: store.get(runtimeAtom),
+      accountId: 'local:user',
+      currentWorkspaceId: store.get(currentWorkspaceIdAtom),
+      routeSlug: store.get(currentWorkspaceSlugAtom),
+      workspacesState: environment.workspaces.get(),
+    });
+  }
+
+  it('targeted reproduction: access denied stays pending in a stable window, then recovers on online', async () => {
+    ordinaryCloud();
+    vi.useFakeTimers();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const first = Promise.withResolvers<Awaited<ReturnType<PlatformE2eeWorkspaces['describe']>>>();
+    const failure = new ConvexError({ code: 'workspace_access_denied' });
+    const remote = environment.e2eeWorkspaces!.describe;
+    let reads = 0;
+    environment.e2eeWorkspaces!.describe = (request) => {
+      reads++;
+      return reads === 1 ? first.promise : remote(request);
+    };
+    try {
+      expect(
+        readWorkspaceModeProof(localStorage, 'local:user', 'local:workspace', 'local')
+      ).toBeNull();
+      await render();
+      const original = store.get(runtimeAtom);
+      expect(original).toBe(prepared);
+      const gate = vi.mocked(createWorkspaceRuntime).mock.calls[0]![0].waitForContentAdmission!;
+      // Observe the in-flight admission before explicitly rejecting describe.
+      const rejected = expect(gate(new AbortController().signal)).rejects.toBe(failure);
+      await act(async () => {
+        first.reject(failure);
+        await rejected;
+      });
+      expect(store.get(workspaceContentModeAtom)?.descriptor).toBeNull();
+      expect(legacyQueryStatus()).toBe('pending');
+      expect(store.get(workspaceRuntimeInitFailureAtom)).toBeNull();
+      expect(reads).toBe(1);
+
+      // The remote is now healthy. Token and route stay unchanged; there is no
+      // send, online event, new proof, remount or page reload in this window.
+      await act(async () => vi.advanceTimersByTimeAsync(60_000));
+      expect(reads).toBe(1);
+      expect(store.get(workspaceContentModeAtom)?.descriptor).toBeNull();
+      expect(legacyQueryStatus()).toBe('pending');
+      expect(store.get(workspaceRuntimeInitFailureAtom)).toBeNull();
+      expect(
+        readWorkspaceModeProof(localStorage, 'local:user', 'local:workspace', 'local')
+      ).toBeNull();
+      expect(store.get(runtimeAtom)).toBe(original);
+
+      // Online itself drives recovery: do not call the send/content gate first.
+      await act(async () => window.dispatchEvent(new Event('online')));
+      expect(reads).toBe(2);
+      expect(legacyQueryStatus()).toBe('allowed');
+      expect(store.get(workspaceContentModeAtom)?.descriptor).toMatchObject({
+        contentMode: 'plaintext',
+      });
+      expect(store.get(workspaceRuntimeInitFailureAtom)).toBeNull();
+      expect(store.get(runtimeAtom)).toBe(original);
+      expect(prepared.disposed).toBe(false);
+      expect(prepared.metadata.get('session')).toBe('already prepared');
+      expect(createWorkspaceRuntime).toHaveBeenCalledTimes(1);
+      await expect(gate(new AbortController().signal)).resolves.toBeUndefined();
+    } finally {
+      logged.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ['network TypeError', () => new TypeError('Failed to fetch')],
+    [
+      'opaque CONVEX Server Error',
+      () =>
+        new Error(
+          '[CONVEX Q(e2eeWorkspaces:describe)] [Request ID: synthetic] Server Error\nUnexpected server failure'
+        ),
+    ],
+  ] as const)(
+    'targeted reproduction: %s recovers through backoff without an external edge',
+    async (_kind, makeError) => {
+      ordinaryCloud();
+      vi.useFakeTimers();
+      const remote = environment.e2eeWorkspaces!.describe;
+      const started = Date.now();
+      const attempts: number[] = [];
+      environment.e2eeWorkspaces!.describe = async (request) => {
+        attempts.push(Date.now() - started);
+        if (attempts.length <= 2) throw makeError();
+        return remote(request);
+      };
+      try {
+        await render();
+        const original = store.get(runtimeAtom);
+        expect(original).toBe(prepared);
+        const gate = vi.mocked(createWorkspaceRuntime).mock.calls[0]![0].waitForContentAdmission!;
+        let admitted = false;
+        const admission = gate(new AbortController().signal).then(() => {
+          admitted = true;
+        });
+        expect(attempts).toEqual([0]);
+        expect(legacyQueryStatus()).toBe('pending');
+        await act(async () => vi.advanceTimersByTimeAsync(249));
+        expect(attempts).toEqual([0]);
+        await act(async () => vi.advanceTimersByTimeAsync(1));
+        expect(attempts).toEqual([0, 250]);
+        await act(async () => vi.advanceTimersByTimeAsync(499));
+        expect(attempts).toEqual([0, 250]);
+        expect(admitted).toBe(false);
+        expect(store.get(workspaceContentModeAtom)?.descriptor).toBeNull();
+        expect(legacyQueryStatus()).toBe('pending');
+        expect(store.get(workspaceRuntimeInitFailureAtom)).toBeNull();
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(1);
+          await admission;
+        });
+        expect(attempts).toEqual([0, 250, 750]);
+        expect(admitted).toBe(true);
+        expect(legacyQueryStatus()).toBe('allowed');
+        expect(store.get(workspaceContentModeAtom)?.descriptor).toMatchObject({
+          contentMode: 'plaintext',
+        });
+        expect(store.get(workspaceRuntimeInitFailureAtom)).toBeNull();
+        expect(store.get(runtimeAtom)).toBe(original);
+        expect(prepared.disposed).toBe(false);
+        expect(createWorkspaceRuntime).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
     }
   );
 

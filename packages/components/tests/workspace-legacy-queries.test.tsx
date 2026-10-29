@@ -59,7 +59,7 @@ function VisibleResources() {
   const machines = useVisibleMachineMetas({ includeMachineFlock: false });
   const projects = useVisibleLocalProjectsFromMachineIndex(machines);
   return (
-    <output>
+    <output data-machines-loading={machines.isLoading} data-projects-loading={projects.isLoading}>
       {JSON.stringify({
         machines: [...machines.machines.keys()],
         projects: [...projects.projects.values()].map((p) => p.project.name),
@@ -346,6 +346,8 @@ it('keeps unknown-mode catalogs pending while the real local composer stays usab
     machines: expect.any(Array),
     projects: expect.any(Array),
   });
+  expect(container.querySelector('output')!.dataset.machinesLoading).toBe('true');
+  expect(container.querySelector('output')!.dataset.projectsLoading).toBe('true');
   expect(JSON.parse(container.querySelector('output')!.textContent!).machines).toHaveLength(1);
   expect(JSON.parse(container.querySelector('output')!.textContent!).projects).toHaveLength(1);
   await act(async () => composer.current!.setInputText('keep this local draft'));
@@ -366,6 +368,8 @@ it('keeps unknown-mode catalogs pending while the real local composer stays usab
   expect(observed).toContain('machines:listVisibleMachines');
   expect(observed).toContain('localProjects:listVisibleLocalProjects');
   expect(JSON.parse(container.querySelector('output')!.textContent!).loading).toBe(false);
+  expect(container.querySelector('output')!.dataset.machinesLoading).toBe('false');
+  expect(container.querySelector('output')!.dataset.projectsLoading).toBe('false');
   expect(store.get(runtimeAtom)).toBe(runtime);
   expect(container.querySelector('textarea')!.value).toBe('keep this local draft');
 });
