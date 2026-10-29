@@ -1055,6 +1055,8 @@ export class SessionExecutionService {
   private readonly canceledTurnBySession = new Map<SessionId, string>();
   private readonly currentTurnBySession = new Map<SessionId, string>();
   private readonly turnRuntimeBySession = new Map<SessionId, TurnRuntimeState>();
+  /** Admission ownership outlives replaceable turn runtime registrations. */
+  private readonly liveInboxExecutionIds = new Set<string>();
   /** Start times of recent start retries, shared by every Session this service runs. */
   private readonly startRetryStartedAt: number[] = [];
   private readonly rewriteBarrierSessions = new Set<SessionId>();
@@ -4296,12 +4298,7 @@ export class SessionExecutionService {
         } catch (cause) {
           if (!(cause instanceof InboxExecutionRejected)) throw cause;
           const prior = inbox!.activeExecution(this.deps.workspaceId, sessionId);
-          const live = this.turnRuntimeBySession.get(sessionId);
-          if (
-            !prior ||
-            (live?.inboxOwner?.id === prior.executionId && live.releaseFailure === undefined)
-          )
-            throw cause;
+          if (!prior || this.liveInboxExecutionIds.has(prior.executionId)) throw cause;
           // Only retry retirement and admission once; never replay the old input.
           releaseRetryFailed = true;
           try {
@@ -4315,6 +4312,7 @@ export class SessionExecutionService {
             throw cause;
           }
         }
+        this.liveInboxExecutionIds.add(runtime.inboxOwner.id);
         inboxBatch = runtime.inboxOwner.batch;
         if (inboxBatch) {
           try {
@@ -4377,7 +4375,8 @@ export class SessionExecutionService {
           sessionDoc,
           userTurnId,
           reason: 'turn_pre_prompt_failed',
-          message: '上一轮的运行状态无法写入本地数据库（可能磁盘已满），请释放空间后重试。',
+          message:
+            "Lody couldn't record the previous turn in its local database (the disk may be full). Free up space and send again.",
         });
         await inbox!
           .abandonInput(this.deps.workspaceId, sessionId, inboxInput!.inputId, true)
@@ -5115,6 +5114,8 @@ export class SessionExecutionService {
         );
         if (runtime.inboxOwner!.failure) runtime.releaseFailure = runtime.inboxOwner!.failure;
       }
+      if (inboxInput && !runtime.releaseFailure)
+        this.liveInboxExecutionIds.delete(runtime.inboxOwner!.id);
     } catch (cause) {
       runtime.releaseFailure ??= cause;
       this.deps.logger.warn(
@@ -5129,6 +5130,7 @@ export class SessionExecutionService {
           if (runtime.session) this.deps.sessionManager.detachSession(runtime.session);
           else if (runtime.pendingSession)
             this.deps.sessionManager.abandonPendingSessionCreate(sessionId, 'unconfirmed-release');
+          if (runtime.inboxOwner) this.liveInboxExecutionIds.delete(runtime.inboxOwner.id);
           this.reportSessionStopFailure(
             sessionId,
             runtime.turnId,

@@ -69,8 +69,9 @@ Unconfirmed release returns the slot, preserves its diagnostic journal and detac
 Agent before waking a successor. Cleanup gets one background attempt with a five-second
 budget; cleanup failure is logged and cannot gate input or shutdown. Cleanup completion
 always retries the old execution's release write. Admission retries retirement once for a
-slot with no live owner; a persistent write failure emits a disk-space chat notice instead
-of leaving the session dependent on restart. Cleanup addresses only the
+slot absent from the service's live execution ID set; a persistent write failure emits a disk-space chat notice instead
+of leaving the session dependent on restart. IDs stay live until successful release or
+detached retirement, independently of the replaceable turn runtime index. Cleanup addresses only the
 retired execution, so it cannot clear a successor's slot. Failed exits grant no automatic
 intent, but later wakeable receipts can proceed. Resource registration remains unchanged;
 restart orphan-process cleanup is deferred. The offline recovery command and startup PID

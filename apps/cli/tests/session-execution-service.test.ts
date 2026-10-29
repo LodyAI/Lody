@@ -12197,6 +12197,49 @@ describe('Operation Inbox execution boundary', () => {
     }
   });
 
+  it('does not retire a live Inbox execution when admission registers a replacement runtime', async () => {
+    const started = createDeferred<void>();
+    const finish = createDeferred<void>();
+    const received: ContentBlock[][] = [];
+    const f = inboxExecutionFixture(async (blocks) => {
+      received.push(structuredClone(blocks));
+      if (received.length === 1) {
+        started.resolve();
+        await finish.promise;
+      }
+      return { stopReason: 'end_turn' };
+    });
+    let running: Promise<unknown> | undefined;
+    try {
+      await f.accept();
+      running = f.service.continueSession(f.message);
+      await started.promise;
+      const prior = f.store.inbox.activeExecution('workspace-1', f.message.sessionId);
+      expect(prior).toMatchObject({ executionId: 'assistant:human-input', inputId: 'human-input' });
+      // Retire only the facade registration; transport and the SQLite owner remain live.
+      const internals = f.service as unknown as { releaseTurnRuntime(sessionId: SessionId, turnId: string): void };
+      internals.releaseTurnRuntime(f.message.sessionId, 'assistant:human-input');
+      const config = { ...f.message.acpSessionConfig, prompt: 'WAITING_REQUEST' };
+      await f.doc.sessionData.commands.applyHistoryAction({ kind: 'upsert-turn', turn: {
+        id: 'waiting-input', role: 'user', userId: 'user-1', status: 'pending', inputConfig: config,
+        timestamp: '2026-10-29T00:00:00Z', items: [{ type: 'text', text: config.prompt }], fileDiff: [], finished: true,
+      } });
+      await f.service.acceptInboxHumanInput({ sessionId: f.message.sessionId, inputId: 'waiting-input', userId: 'user-1', config });
+      const attempt = await f.service.continueSession({ ...f.message, userTurnId: 'waiting-input', acpSessionConfig: config }).catch((cause: unknown) => cause);
+      expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toEqual(prior);
+      expect(received).toEqual([[{ type: 'text', text: 'CURRENT_REQUEST' }]]);
+      expect(attempt).toBeInstanceOf(InboxExecutionRejected);
+      finish.resolve();
+      await running;
+      await f.service.continueSession({ ...f.message, userTurnId: 'waiting-input', acpSessionConfig: config });
+      expect(received).toEqual([[{ type: 'text', text: 'CURRENT_REQUEST' }], [{ type: 'text', text: 'WAITING_REQUEST' }]]);
+    } finally {
+      finish.resolve();
+      await running;
+      await f.close();
+    }
+  });
+
   it('retires a crashed input without replay and closes its leftover assistant entry', async () => {
     const received: ContentBlock[][] = [];
     const f = inboxExecutionFixture(async (blocks) => {
@@ -12882,7 +12925,7 @@ describe('Operation Inbox execution boundary', () => {
           await expect(send('rejected-input')).rejects.toBeInstanceOf(InboxExecutionRejected);
           const notices = (await (await createSessionBackend(f.doc)).readHistory())
             .flatMap((turn) => turn.items ?? []).filter((item) => item.type === 'system_notice' && item.name === 'chat_failed');
-          expect(notices).toMatchObject([{ meta: { message: expect.stringContaining('磁盘已满') } }]);
+          expect(notices).toMatchObject([{ meta: { message: expect.stringContaining('the disk may be full') } }]);
           expect(received).toHaveLength(1);
         }
         db.exec('DROP TRIGGER release_outage');
