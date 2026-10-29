@@ -53,6 +53,11 @@ Parent instructions apply. Background: [README.md](README.md).
   and depth-limit evasion. Reject new chats to the active input's Agent sender; isolate
   rejected batch items.
 
+- Single and batch chats pass `steerActiveTurn`, steering a turn running on the calling
+  daemon; recovery replay never steers. Never activate a steered or existing `pending_apply`
+  turn. Uncertain delivery fails the item with `STEER_DELIVERY_UNKNOWN`, never a replay.
+  [Contract](../../../../specs/session-orchestration.md#agent-chat-to-a-busy-session).
+
 - Catalog uncertainty is not `INVALID_ITEM`; only retryable failures abort batches.
   Agent capability defaults require fresh catalogs. Internal inferred defaults
   rederive until authored. Explicit choices/access stay strict.

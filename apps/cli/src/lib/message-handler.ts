@@ -6912,6 +6912,9 @@ export class MessageHandler {
               { pendingInput: 'preserve', prePromptSession: 'discard', pauseInbox: false }
             );
           },
+          readActiveTurnId: (sessionId) =>
+            this.executionService.getExecutionSnapshot(sessionId).activeTurnId,
+          steerSession: async (input) => await this.steerSessionWithAccessCheck(input),
           dispatchSession: async (sessionId, input) => {
             if (input?.inputOrigin === 'human')
               await this.executionService.acceptInboxHumanInput({

@@ -99,7 +99,6 @@ import {
 } from '@lody/shared';
 import type { LocalLoroDataPlaneServerLegacy } from '@lody/shared/local-loro-data-plane-server';
 import { Effect } from 'effect';
-import { AgentExecutionSlots } from './agent-execution-slots';
 import {
   createScheduleWorkspace,
   type ScheduleWorkspaceHandle,
@@ -978,7 +977,6 @@ export class LodyFleet {
               }));
         // Scheduled automation: this machine runs the schedules it owns, so
         // entrusted work continues while nobody is looking.
-        const executionSlots = new AgentExecutionSlots();
         const schedules: ScheduleWorkspaceHandle = !workspaceSupports(
           { mode: workspace.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
           'schedules'
@@ -996,7 +994,6 @@ export class LodyFleet {
                 machineName: this.machineName,
               },
               localOnly: this.localPlatform,
-              slots: executionSlots,
               authorize: (request) => startedLody.authorizeScheduleExecution(request),
               logger: workspaceLogger,
               hasSessionWork: (sessionId) => startedLody.hasAutomationSessionWork(sessionId),
