@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#2066](https://github.com/LodyAI/Lody/pull/2066)
 
 [中文](2026-10-29-session-command-catalogs.zh.md)
 
