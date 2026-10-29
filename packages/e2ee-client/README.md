@@ -60,9 +60,61 @@ until confirmed close; do not replace it merely because a waiter timed out.
 
 `makePersonalDeviceHost()` remains the lower-level scoped actual-drain constructor.
 Product/runtime and mobile-native composition must use the owned constructor;
-borrowed external ports must outlive confirmed retirement. Runtime bridge adoption
-is tracked by [#2075](https://github.com/LodyAI/Lody/issues/2075). This package entry
-does not activate a product transport or qualify a native mobile implementation.
+borrowed external ports must outlive confirmed retirement. The shared runtime below consumes this owner. This package does not select a product
+composition or qualify a native mobile implementation.
+
+## Shared platform runtime
+
+`makePersonalWorkspaceRuntime(options)` returns the existing platform
+`E2eeWorkspaceRuntime` for one pinned account/workspace/genesis. Construct it inside
+an application Scope with the complete resource-owning host Layer, a live account
+reader, locally retained offer/original-row readers and the application's Effect
+executor. It contains no internal `Effect.run*`, default backend or product selector.
+The host checks the same scope independently. The optional creation callback must
+be a real creation host; pairing-only composition reports it unsupported.
+
+Runtime open is a control reader lease: it only reopens a ready retained identity,
+replays approval and reports verified key availability. It cannot prepare a missing
+identity. Shared `RuntimeProvider` opens protected content only when `hasCurrentKey`
+or an admitted `writeEpoch` exists; a later retained key can wake that same admission
+path. Tokens and content/RPC operations retain their actual core permission/epoch
+checks. Ledger status/export stays usable under independent key failure. Exported
+local original hashes and absolute positions must occur in the genuine view;
+relay pages can only confirm the existing verified feed, never replace its cursor.
+
+`PersonalHostPlatform.contentToken` runs inside the approved session with its
+captured device credential and full binding. Product callers receive only dedicated
+short-lived content/attachment grants. Rejected tokens, snapshot repair hints and
+RPC-only requests are forwarded exactly. RPC methods exist only with the real RPC
+original store. Optional `machineSharing` builds a `PersonalMachineSharing` policy
+Layer with the fixed identity/scope, verified ledger source and installed-key history;
+its real policy owner remains responsible for canonical crypto, durable originals,
+generation pins and freshness. Absence omits both sharing methods. No empty handler
+advertises personal/member/machine approval or other unsupported product channels.
+Ordinary ledger management uses the existing submit/refresh/ACK workflows; member
+removal uses atomic remove-and-publish, and rotation resumes retained candidates.
+
+Each open returns an ephemeral `readerOwner`; releasing it spares other readers.
+The optional `readerLeases: 'preallocated-v1'` contract accepts a unique caller label
+as open's fourth argument, so the provider can fence its pending cold open before
+native acquisition returns. A closed queued label cannot publish; closing it cannot
+retire another opener or an existing reader. Older desktop hosts keep their current
+open/close API and do not advertise this optional contract.
+The last reader fences its session immediately. Concurrent close calls share the
+owned drain; incomplete close keeps the entry and complete recovery failure, and
+reopen confirms actual retirement first. Closing during initial acquisition retires
+the whole bound host. Observing a different live account also permanently retires
+that assembly; restoring the account cannot revive its handles. The application
+creates a fresh assembly only after confirmed retirement of its old owner.
+Scope close retains unfinished work through the owned host's bounded close.
+
+The shared content bridge has one implementation (`createE2eeContent`, with the
+existing desktop import retained). Provider retirement starts renderer cleanup and
+native fencing together, preserves failed leases for explicit retry, and cannot
+hide a native close timeout by first waiting on the same content operation. Six
+security boundaries and browser/React evidence are recorded in the PR; no Web or
+mobile product entry is enabled here. [#2075](https://github.com/LodyAI/Lody/issues/2075)
+tracks the owned close and bridge adoption together.
 
 ## Approval, replacement and failures
 
@@ -109,5 +161,4 @@ The portable bundle targets Safari 16.4 with no Node dependency; this does not
 establish iOS 16.4 device, native plugin, hardware or power-loss acceptance.
 IndexedDB `strict` is a durability hint. Web trusts the code served to the page
 with private-key use, as the [approved custody Spec](../../specs/e2ee/client-custody.md)
-requires. This package does not enable a product runtime; application bridging is
-separate. [Ownership rationale](../../.agents/notes/implemented/architecture/2026-10-16-e2ee-core-service-architecture.md#personal-device-product-composition).
+requires. The runtime factory is opt-in; no product composition is enabled by its export. [Ownership rationale](../../.agents/notes/implemented/architecture/2026-10-16-e2ee-core-service-architecture.md#personal-device-product-composition).

@@ -26,7 +26,9 @@ import {
   getCommittedEpochStagingKey,
   requireLedgerContinuation,
   decodeRecord,
+  prepareLedgerCommand,
   type LedgerCommand,
+  Bytes,
 } from '@lody/e2ee-core/protocol';
 import {
   makeStreamsUpdateBinding,
@@ -63,7 +65,7 @@ import {
   sameBinding,
   type PreparedPersonalIdentity,
 } from './installation';
-import { PersonalHostPlatform, type PersonalApproval } from './platform';
+import { PersonalHostPlatform, PersonalMachineSharing, type PersonalApproval } from './platform';
 import { assertPersonalAdmission } from './admission';
 import { fail } from './errors';
 import { toHex } from './bytes';
@@ -209,7 +211,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       EpochPublisher.layer,
       InstalledEpochHistory.layer
     ).pipe(Layer.provideMerge(KeyReceiver.layer), Layer.provideMerge(InstalledEpochKeys.layer));
-    type Keys = Layer.Success<typeof keyLayer> | EpochStagingStore;
+    type Keys = Layer.Success<typeof keyLayer> | EpochStagingStore | EpochCandidateStore;
     let keyServices: Context.Context<Keys> | undefined;
     let maintenance: Effect.Success<ReturnType<typeof makePersonalKeyMaintenance>> | undefined;
     const keySerial = yield* Semaphore.make(1);
@@ -434,9 +436,134 @@ export const openPersonalSession = Effect.fnUntraced(function* (
           return yield* control.execute(command);
         })
       );
+    let sharing: PersonalMachineSharing['Service'] | undefined;
+    const sharingSerial = yield* Semaphore.make(1);
+    const sharingOwner = () =>
+      sharingSerial.withPermit(
+        Effect.gen(function* () {
+          yield* admitted();
+          if (sharing) return sharing;
+          if (!platform.machineSharing) return yield* fail('unsupported');
+          const ctx = yield* keys();
+          const built = yield* Scope.provide(
+            Layer.build(
+              platform.machineSharing(prepared.binding, credential).pipe(
+                Layer.provide(
+                  Layer.mergeAll(
+                    identity,
+                    Layer.succeed(LedgerViewSource, {
+                      current: () =>
+                        admitted().pipe(
+                          Effect.mapError((cause) => new LedgerViewSourceError({ cause }))
+                        ),
+                    }),
+                    Layer.succeed(InstalledEpochHistory, Context.get(ctx, InstalledEpochHistory))
+                  )
+                )
+              )
+            ),
+            owner
+          );
+          sharing = Context.get(built, PersonalMachineSharing);
+          return sharing;
+        })
+      );
+    const managementState = () =>
+      Effect.gen(function* () {
+        const view = yield* ledger(),
+          state = view.inspectState(),
+          self = state.devices.get(toHex(device.publicKey.toBytes()));
+        const member = self && state.members.get(toHex(self.membershipId.toBytes()));
+        const pending = yield* Effect.result(
+          Effect.gen(function* () {
+            const ctx = yield* keys();
+            return (
+              !!(yield* Context.get(ctx, EpochCandidateStore).active()) ||
+              !!(yield* submission.pending()).record
+            );
+          })
+        );
+        return {
+          epoch: state.epoch.number,
+          rotationRequired: state.epoch.rotationRequired,
+          mayRotate:
+            self?.kind === 'personal' && (member?.role === 'owner' || member?.role === 'admin'),
+          updatePending: Result.isFailure(pending) || pending.success,
+          ...(Result.isFailure(pending) ? { recoveryIssue: 'candidate-unavailable' as const } : {}),
+          devices: [...state.devices].map(([key, entry]) => ({
+            key,
+            kind: entry.kind,
+            machineId: entry.machineId ?? null,
+            self: key === toHex(device.publicKey.toBytes()),
+            mayRevoke: Result.isSuccess(
+              prepareLedgerCommand(view, device.publicKey, {
+                _tag: 'RevokeDevice',
+                target: Result.getOrThrow(
+                  Bytes.signingPublicKey(Uint8Array.from(key.match(/../g)!, (b) => parseInt(b, 16)))
+                ),
+              })
+            ),
+          })),
+        };
+      });
     return Object.freeze({
       binding: Object.freeze({ ...prepared.binding }),
       close: () => close,
+      ledgerState: () =>
+        run(
+          Effect.gen(function* () {
+            yield* ledger();
+            const current = yield* sync.current();
+            yield* Effect.fromResult(requireLedgerContinuation(approval.view, current.view));
+            return current;
+          })
+        ),
+      contentToken: (
+        grantRequest: Omit<
+          import('@lody/cloud-api').E2eeContentTokenRequest,
+          'workspaceId' | 'credential' | 'cliToken'
+        >
+      ) =>
+        run(
+          Effect.gen(function* () {
+            yield* admitted();
+            if (!platform.contentToken) return yield* fail('unsupported');
+            const result = yield* platform.contentToken(prepared.binding, credential, grantRequest);
+            yield* admitted();
+            return result;
+          })
+        ),
+      managementState: () => run(managementState()),
+      readMachineSharing: (machineId: string) =>
+        run(
+          Effect.gen(function* () {
+            yield* control.refresh();
+            yield* admitted();
+            const result = yield* (yield* sharingOwner()).read(machineId);
+            yield* admitted();
+            return result;
+          })
+        ),
+      updateMachineSharing: (
+        machineId: string,
+        generation: string,
+        requestId: string,
+        change: import('@lody/platform').E2eeMachineSharingChange
+      ) =>
+        run(
+          Effect.gen(function* () {
+            yield* control.refresh();
+            yield* admitted();
+            const result = yield* (yield* sharingOwner()).update(
+              machineId,
+              generation,
+              requestId,
+              change
+            );
+            yield* admitted();
+            return result;
+          })
+        ),
       ledger: () => run(ledger()),
       refresh: () => run(serial.withPermit(control.refresh().pipe(Effect.andThen(ledger())))),
       keyRound: () => run(keyRound()),
@@ -459,6 +586,16 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             ownRecord(result.record).pipe(Effect.andThen(control.acknowledge(result)))
           )
         ),
+      removeMember: (membership: import('@lody/e2ee-core/protocol').Bytes.MembershipId) =>
+        run(
+          serial.withPermit(
+            ownSubmission.pipe(
+              Effect.andThen(
+                withKeys((ctx) => Context.get(ctx, EpochPublisher).publishRemoving(membership))
+              )
+            )
+          )
+        ),
       rotate: () =>
         run(
           serial.withPermit(
@@ -467,6 +604,8 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             )
           )
         ),
+      recoverHistory: () =>
+        run(withKeys((ctx) => Context.get(ctx, InstalledEpochHistory).recover())),
       resumeRotation: () =>
         run(
           serial.withPermit(

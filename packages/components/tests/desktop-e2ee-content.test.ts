@@ -312,3 +312,86 @@ it.each(['token', 'snapshot'] as const)(
     }
   }
 );
+
+describe('shared portable content lifetime', () => {
+  it.each(['attachment', 'dispatch'] as const)(
+    'rejects a late %s result after the content bridge retires',
+    async (channel) => {
+      let enter!: () => void, finish!: () => void;
+      const entered = new Promise<void>((resolve) => {
+          enter = resolve;
+        }),
+        released = new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+      const runtime = {
+        contentStreamsToken: async () => {
+          enter();
+          await released;
+          return { attachmentToken: 'synthetic-attachment' };
+        },
+        prepareDispatch: async () => {
+          enter();
+          await released;
+          return { requestId: 'synthetic-request', frameHex: 'ciphertext-original' };
+        },
+      } as unknown as E2eeWorkspaceRuntime;
+      const access = createDesktopE2eeContent({
+        runtime,
+        workspaceId: 'workspace',
+        genesisHash: '11'.repeat(32),
+        epoch: 0,
+        authToken: () => 'account-token',
+      });
+      const work =
+        channel === 'attachment'
+          ? access.e2ee.attachmentToken()
+          : access.e2ee.prepareDispatch('machine', {
+              sessionId: 'session',
+              userTurnId: 'turn',
+              userId: 'user',
+              timestamp: '2026-10-29T00:00:00.000Z',
+              inputConfig: {},
+            });
+      try {
+        await entered;
+        await access.close();
+        finish();
+        await expect(work).rejects.toThrow('e2ee_closed');
+      } finally {
+        finish();
+        await work.catch(() => {});
+        await access.close();
+      }
+    }
+  );
+
+  it('gets a protected token when AbortSignal.any is unavailable', async () => {
+    const any = Object.getOwnPropertyDescriptor(AbortSignal, 'any')!;
+    Object.defineProperty(AbortSignal, 'any', { configurable: true, value: undefined });
+    const runtime = {
+      contentStreamsToken: async () => ({
+        token: 'portable-token',
+        bucketId: 'protected-content',
+        gatewayBaseUrl: 'https://streams.example.test',
+        expiresIn: 900,
+        expiresAt: 1_900_000_000_000,
+      }),
+    } as unknown as E2eeWorkspaceRuntime;
+    const access = createDesktopE2eeContent({
+      runtime,
+      workspaceId: 'portable-token-workspace',
+      genesisHash: '11'.repeat(32),
+      epoch: 0,
+      authToken: () => 'account-token',
+    });
+    const provider = access.e2ee.createTokenProvider(new AbortController().signal);
+    try {
+      expect(await provider.getToken()).toBe('portable-token');
+    } finally {
+      await provider.close();
+      await access.close();
+      Object.defineProperty(AbortSignal, 'any', any);
+    }
+  });
+});

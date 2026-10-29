@@ -9,7 +9,7 @@ export {
   type PersonalExchange,
   type PersonalExchangeResponse,
 } from './platform';
-export { PersonalHostError } from './errors';
+export { PersonalHostError, PersonalRuntimeFailure } from './errors';
 export {
   PersonalPairingOfferSchema,
   decodePersonalRequest,
@@ -31,3 +31,6 @@ export {
   type PersonalCloseOwner,
   type PersonalHostPorts,
 } from './owned-host';
+
+export { makePersonalWorkspaceRuntime, type PersonalRuntimeOptions } from './runtime';
+export { PersonalMachineSharing } from './platform';

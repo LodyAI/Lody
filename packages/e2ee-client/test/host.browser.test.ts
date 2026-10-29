@@ -69,6 +69,8 @@ it.each(['chromium', 'webkit'] as const)(
       let page = await context.newPage();
       await page.goto(pathToFileURL(file).href);
       await page.evaluate(() => (globalThis as HostGlobal).HostFixture.boot());
+      expect((await call(page, 'openExisting')).reason).toBe('identity-lost');
+      expect((await call(page, 'currentPhase')).value).toBeUndefined();
       const prepared = await call(page, 'prepare');
       expect(prepared.ok, JSON.stringify(prepared)).toBe(true);
       expect(await call(page, 'prepare')).toEqual(prepared);

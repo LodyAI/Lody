@@ -848,6 +848,216 @@ describe('RuntimeProvider warm workspace preparation', () => {
     expect(prepared.disposed).toBe(false);
   });
 
+  it('binds the protected reader to its authenticated account and releases only that lease', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    const readers = new Set(['other-window']);
+    const status = {
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+      epoch: 0,
+      hasCurrentKey: true,
+      rotationRequired: false,
+      readerOwner: 'this-window',
+    };
+    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+    environment.e2eeWorkspaces!.runtime = {
+      open: async (_id: string, _observed: unknown, account: string) => {
+        if (account !== 'local:user') throw new Error('account not bound');
+        readers.add('this-window');
+        return status;
+      },
+      status: async () => status,
+      refresh: async () => status,
+      close: async (_id: string, account: string, reader: string) => {
+        if (account !== 'local:user' || reader !== 'this-window')
+          throw new Error('reader not bound');
+        readers.delete(reader);
+      },
+    } as unknown as E2eeWorkspaceRuntime;
+    await render();
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    expect(readers).toEqual(new Set(['other-window', 'this-window']));
+    await act(async () => root.render(null));
+    expect(prepared.disposed).toBe(true);
+    expect(readers).toEqual(new Set(['other-window']));
+  });
+
+  it('retains an incomplete protected close and retries it before publishing a successor', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    let allowClose = false,
+      open = false;
+    const status = {
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+      epoch: 0,
+      hasCurrentKey: true,
+      rotationRequired: false,
+      readerOwner: 'owned-reader',
+    };
+    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+    environment.e2eeWorkspaces!.runtime = {
+      open: async () => {
+        if (open) throw new Error('overlapping reader');
+        open = true;
+        return status;
+      },
+      status: async () => status,
+      refresh: async () => status,
+      close: async () => {
+        if (!allowClose) throw new Error('close incomplete');
+        open = false;
+      },
+    } as unknown as E2eeWorkspaceRuntime;
+    await render();
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    const successor = runtimeFixture();
+    vi.mocked(createWorkspaceRuntime).mockResolvedValue(successor as never);
+    await act(async () => store.set(workspaceModeAdmissionRetryAtom, 1));
+    expect(store.get(runtimeAtom)).toBeNull();
+    expect(prepared.disposed).toBe(true);
+    expect(successor.disposed).toBe(false);
+    expect(open).toBe(true);
+    allowClose = true;
+    await act(async () => store.set(workspaceModeAdmissionRetryAtom, 2));
+    expect(store.get(runtimeAtom)).toBe(successor);
+    expect(open).toBe(true);
+  });
+
+  it('reaches bounded native close while the content bridge is still waiting on that native operation', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    let entered!: () => void, release!: (bytes: Uint8Array) => void, closed!: () => void;
+    const nativeEntered = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const nativeBody = new Promise<Uint8Array>((resolve) => {
+      release = resolve;
+    });
+    const nativeClosed = new Promise<void>((resolve) => {
+      closed = resolve;
+    });
+    let bodySettled = false;
+    const status = {
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+      epoch: 0,
+      hasCurrentKey: true,
+      rotationRequired: false,
+      readerOwner: 'owned-reader',
+    };
+    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+    environment.e2eeWorkspaces!.runtime = {
+      open: async () => status,
+      status: async () => status,
+      refresh: async () => status,
+      openContent: () => {
+        entered();
+        return nativeBody;
+      },
+      close: async () => {
+        closed();
+        throw new Error('close incomplete');
+      },
+    } as unknown as E2eeWorkspaceRuntime;
+    await render();
+    const content = vi.mocked(createWorkspaceRuntime).mock.calls.at(-1)![0].content;
+    if (content.mode !== 'protected') throw new Error('expected protected content');
+    const room = content.resolve({ kind: 'meta' });
+    if (room.mode !== 'protected') throw new Error('expected protected room');
+    const body = room.config.provider
+      .open({
+        context: {
+          protocol: 'loro-streams-crdt-payload-protection',
+          version: 2,
+          kind: 'update_batch',
+        },
+        header: Uint8Array.of(3),
+        sealed: Uint8Array.of(1),
+        additionalData: new Uint8Array(),
+      })
+      .then(
+        (bytes) => {
+          bodySettled = true;
+          bytes.fill(0);
+        },
+        () => {
+          bodySettled = true;
+        }
+      );
+    try {
+      await nativeEntered;
+      await act(async () => root.render(null));
+      await nativeClosed;
+      expect(bodySettled).toBe(false);
+      expect(store.get(runtimeAtom)).toBeNull();
+      expect(prepared.disposed).toBe(true);
+    } finally {
+      release(Uint8Array.of(7));
+      await body;
+    }
+  });
+
+  it('fences its preallocated reader while cold open is pending and ignores the late identity', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    let entered!: () => void, closeEntered!: () => void, settle!: () => void;
+    const openEntered = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const closing = new Promise<void>((resolve) => {
+      closeEntered = resolve;
+    });
+    let label: string | undefined,
+      settled = false;
+    const status = {
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+      epoch: 0,
+      hasCurrentKey: true,
+      rotationRequired: false,
+    };
+    const pending = new Promise<typeof status & { readerOwner: string }>((resolve) => {
+      settle = () => {
+        settled = true;
+        resolve({ ...status, readerOwner: label! });
+      };
+    });
+    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+    environment.e2eeWorkspaces!.runtime = {
+      readerLeases: 'preallocated-v1',
+      open: async (_id: string, _observed: unknown, account: string, reader: string) => {
+        if (account !== 'local:user' || !reader) throw new Error('unbound pending reader');
+        label = reader;
+        entered();
+        return pending;
+      },
+      close: async (_id: string, account: string, reader: string) => {
+        if (account !== 'local:user' || reader !== label) throw new Error('wrong pending reader');
+        closeEntered();
+        if (!settled) throw new Error('close incomplete');
+      },
+    } as unknown as E2eeWorkspaceRuntime;
+    try {
+      await render();
+      await openEntered;
+      await act(async () => root.render(null));
+      await closing;
+      expect(store.get(runtimeAtom)).toBeNull();
+      expect(prepared.disposed).toBe(false);
+      expect(readEncryptedLocalIdentity('local:user', 'local:workspace')).toBeNull();
+    } finally {
+      await act(async () => {
+        settle();
+        await pending;
+      });
+    }
+    expect(store.get(runtimeAtom)).toBeNull();
+    expect(readEncryptedLocalIdentity('local:user', 'local:workspace')).toBeNull();
+    await environment.e2eeWorkspaces!.runtime!.close('local:workspace', 'local:user', label);
+  });
+
   it('installs a missing current key at cold open before any content sessions exist', async () => {
     ordinaryCloud();
     listEncrypted();
@@ -871,6 +1081,33 @@ describe('RuntimeProvider warm workspace preparation', () => {
     } as unknown as E2eeWorkspaceRuntime;
     await render();
     expect(installed).toBe(true);
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    expect(prepared.disposed).toBe(false);
+  });
+
+  it('opens when a retained epoch arrives after the initial no-key lease, without requiring the current epoch', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    let retained: number | null = null;
+    const status = () => ({
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+      epoch: 1,
+      hasCurrentKey: false,
+      writeEpoch: retained,
+      rotationRequired: true,
+    });
+    environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+    environment.e2eeWorkspaces!.runtime = {
+      open: async () => status(),
+      status: async () => status(),
+      refresh: async () => status(),
+      close: async () => {},
+    } as unknown as E2eeWorkspaceRuntime;
+    await render();
+    expect(store.get(runtimeAtom)).toBeNull();
+    retained = 0;
+    await act(async () => notifyE2eeLedgerChanged('local:user', 'local:workspace'));
     expect(store.get(runtimeAtom)).toBe(prepared);
     expect(prepared.disposed).toBe(false);
   });

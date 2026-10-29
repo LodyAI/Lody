@@ -21,6 +21,12 @@ import {
   type ClientCustodyScope,
   type ClientPairingKey,
 } from '@lody/e2ee-core/services';
+import type { E2eeContentToken, E2eeContentTokenRequest } from '@lody/cloud-api';
+import type {
+  E2eeMachineSharingView,
+  E2eeMachineSharingWriteResult,
+  E2eeMachineSharingChange,
+} from '@lody/platform';
 import type { PersonalPairingOffer } from './pairing';
 import type { PersonalHistoryPages } from './admission';
 
@@ -81,6 +87,24 @@ export class PersonalHostPlatform extends Context.Service<
     rpc?(
       binding: ClientCustodyBinding
     ): Layer.Layer<ClientRpcOriginalStore, unknown, DeviceIdentity | WorkspaceScope>;
+    /** Device-authenticated dedicated content/attachment grants. Captured inside the session; credentials never reach product callers. */
+    contentToken?(
+      binding: ClientCustodyBinding,
+      credential: Uint8Array,
+      request: Omit<E2eeContentTokenRequest, 'workspaceId' | 'credential' | 'cliToken'>
+    ): Effect.Effect<E2eeContentToken, unknown>;
+    /** Real optional policy host. Uses existing core policy verification/pins; absence does not advertise sharing. */
+    machineSharing?(
+      binding: ClientCustodyBinding,
+      credential: Uint8Array
+    ): Layer.Layer<
+      PersonalMachineSharing,
+      unknown,
+      | DeviceIdentity
+      | WorkspaceScope
+      | LedgerViewSource
+      | import('@lody/e2ee-core').InstalledEpochHistory
+    >;
     /** Replacement requires actual quiescence of every owner of the old incarnation before its atomic switch. */
     drainOld?(binding: ClientCustodyBinding): Effect.Effect<void, unknown>;
   }
@@ -110,3 +134,17 @@ export class PersonalHostRemote extends Context.Service<
     exchange(request: PersonalExchange): Effect.Effect<PersonalExchangeResponse, unknown>;
   }
 >()('@lody/e2ee-client/Remote') {}
+
+/** Purpose-bound policy capability built within the approved session. Never expose generic signing or epoch keys to product code. */
+export class PersonalMachineSharing extends Context.Service<
+  PersonalMachineSharing,
+  {
+    read(machineId: string): Effect.Effect<E2eeMachineSharingView, unknown>;
+    update(
+      machineId: string,
+      generation: string,
+      requestId: string,
+      change: E2eeMachineSharingChange
+    ): Effect.Effect<E2eeMachineSharingWriteResult, unknown>;
+  }
+>()('@lody/e2ee-client/MachineSharing') {}

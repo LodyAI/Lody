@@ -218,7 +218,8 @@ const signRequest = Effect.fnUntraced(function* (
 /** Explicit installation only. Allocation through native settlement is one same-fiber writer operation; no network runs here. */
 export const preparePersonalIdentity = Effect.fnUntraced(function* (
   source: PersonalPairingOffer,
-  replacement = false
+  replacement = false,
+  existingOnly = false
 ) {
   const platform = yield* PersonalHostPlatform,
     store = yield* ClientInstallationStore,
@@ -242,6 +243,8 @@ export const preparePersonalIdentity = Effect.fnUntraced(function* (
     Effect.uninterruptible(
       Effect.gen(function* () {
         const current = yield* store.read();
+        if (existingOnly && (!current || current.phase !== 'ready'))
+          return yield* fail('identity-lost');
         // The retained slot is the only discovery root, including replacement candidates.
         let retained: PreparedPersonalIdentity | undefined;
         if (current) {
@@ -312,6 +315,7 @@ export const preparePersonalIdentity = Effect.fnUntraced(function* (
             if (!retained.replacing) yield* advanceReady(store, current, retained);
             return retained;
           }
+          if (existingOnly) return yield* fail('identity-lost');
           // Never fork a second candidate while an earlier request has an unknown result.
           let previous: PreparedPersonalIdentity | undefined;
           let guardCursor: string | null = null;

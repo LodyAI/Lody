@@ -88,3 +88,12 @@ verified history pins. The separate
 `E2eeMachineSharingDisplayReader.latestForMember` port accepts account membership
 only and returns ciphertext/untrusted metadata, with no execution freshness.
 See the [pending sharing contract](../../specs/e2ee-foundations.md#machine-sharing-policy-pending-approval-increment).
+
+## Portable personal-device runtime
+
+The existing `E2eeWorkspaceRuntime` contract is also implemented by the opt-in
+[`@lody/e2ee-client`](../e2ee-client/README.md) factory. Its application Scope owns
+pinned identity, real capability Layers and bounded retirement. Reader open never
+creates an identity; the shared provider requires an eligible usable epoch before
+content opens. Preserve the returned readerOwner and expected account on release.
+No public local-only selector or authenticated product-cloud entry is changed.

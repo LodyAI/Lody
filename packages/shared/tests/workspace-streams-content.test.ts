@@ -175,3 +175,31 @@ describe('availability-first epoch selection', () => {
     await gate.close();
   });
 });
+
+it('wipes plaintext returned to a retired content reader before rejecting its late result', async () => {
+  const gate = createWorkspaceEpochTransitionLegacy({ epoch: 0 });
+  const entered = Promise.withResolvers<void>(),
+    release = Promise.withResolvers<void>();
+  const plaintext = Uint8Array.of(17, 23, 29);
+  const provider = gate.provider(() => ({
+    maxSealOverheadBytes: 4096,
+    seal: async () => ({ header: Uint8Array.of(3), sealed: Uint8Array.of(1) }),
+    open: async () => {
+      entered.resolve();
+      await release.promise;
+      return plaintext;
+    },
+  }));
+  const reading = provider.open({
+    context: { protocol: 'loro-streams-crdt-payload-protection', version: 2, kind: 'update_batch' },
+    header: Uint8Array.of(3),
+    sealed: Uint8Array.of(1),
+    additionalData: new Uint8Array(),
+  });
+  await entered.promise;
+  const closing = gate.close();
+  release.resolve();
+  await expect(reading).rejects.toThrow('e2ee_closed');
+  await closing;
+  expect([...plaintext]).toEqual([0, 0, 0]);
+});

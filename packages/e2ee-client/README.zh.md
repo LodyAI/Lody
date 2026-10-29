@@ -51,6 +51,42 @@ reader，再调用已提供的外部 owner drain，之后才执行既有原子�
 bridge 的采用由 [#2075](https://github.com/LodyAI/Lody/issues/2075) 跟踪。此入口不激活
 产品传输，也不证明原生移动端实现通过验收。
 
+## 共享 platform runtime
+
+`makePersonalWorkspaceRuntime(options)` 在应用 Scope 中，为固定账号/工作区/genesis
+创建既有 `E2eeWorkspaceRuntime`。应用提供拥有完整资源的 host Layer、当前账号、
+本地保留的 offer/原件行读取端口和 Effect 执行入口；包内不启动 Effect runtime，
+也没有默认后端或产品选择器。host 独立核对同一 scope。可选创建回调必须是真实的
+创建 host；仅配对的组合明确返回 unsupported。
+
+runtime open 仅取得控制 reader：只重开 ready 的既有身份，重验审批并报告真实密钥
+可用性，不准备缺失身份。共享 RuntimeProvider 只有在 hasCurrentKey 或获准 writeEpoch
+存在时才开受保护正文；晚到的保留 epoch 也能唤醒同一路径。正文、RPC 和 token 保留
+各自的权限/epoch 核对。独立密钥故障不封闭账本；导出的原件摘要和绝对位置必须出现于
+真实 view。远端分页只能确认既有已验签 feed，不能另建信任缓存或直接推进游标。
+
+`PersonalHostPlatform.contentToken` 在已批准的 session 内接收完整绑定和设备 credential，
+产品只取得专用短期正文/附件 grant；拒绝 token、快照修复提示和 RPC-only 参数原样传递。
+RPC 方法只在真实原件 store 存在时出现。可选 machineSharing 在固定身份/scope、已验证
+账本源和 installed-key history 上构建 PersonalMachineSharing Layer；真实策略 owner 负责
+既有密码、持久原件、generation pin 和 freshness。缺失时不暴露两个共享方法，不用空
+handler 宣称其他审批/产品通道已支持。管理沿用原件提交、refresh 和 ACK；移除成员使用
+原子 remove-and-publish，换代先恢复原有候选。
+
+每次 open 返回 readerOwner，关闭该租约不影响其他 reader。可选
+readerLeases: preallocated-v1 接受 open 第四个参数中的唯一调用标签，provider 可在首次
+原生获取返回前关闭自己的请求。已关闭的排队标签不能发布，也不能退休其他 opener 或
+既有 reader；旧桌面 host 保留原 API，不宣称支持该可选能力。最后一个 reader 立即停止
+接纳；并发关闭共享 owned drain。未完成关闭保留 entry 和完整恢复失败，重开先确认实际
+结束。首次获取过程中关闭会退休整个绑定 host；观察到账号改变也永久退休该组合，恢复
+账号不会复活旧句柄。应用只能在旧 owner 确认结束后新建组合。父 Scope 使用 owned host
+的有界关闭并保留未结算工作。
+
+共享内容桥只有一个实现 createE2eeContent，保留原桌面导入名。provider 同时启动 renderer
+清理和 native fencing，不在等待同一正文操作后才调用有界 native close；失败租约保留以供
+明确重试。这里只提供可选工厂，不启用 Web/移动端产品入口，也不代表真机验收。
+[#2075](https://github.com/LodyAI/Lody/issues/2075) 同时跟踪 owned close 与 bridge 采用。
+
 ## 审批、替换与失败
 
 快照审批使用独立传入的 endorser 和固定 core 验证器；完整历史从独立 genesis
@@ -83,5 +119,5 @@ receive/report/distribution 原件；共享有限维护流程只确认已观察�
 故障。可移植 bundle 以 Safari 16.4 为编译目标且无 Node 依赖，不代表 iOS 16.4 真机、
 原生插件、硬件或断电验收。IndexedDB `strict` 只是耐久提示。Web 按
 [已批准 custody Spec](../../specs/e2ee/client-custody.zh.md) 信任页面下发代码使用私钥。
-包本身不启用产品 runtime，应用桥接另行完成。
+runtime 工厂是可选能力，其导出不启用任何产品组合。
 [所有权理由](../../.agents/notes/implemented/architecture/2026-10-16-e2ee-core-service-architecture.zh.md#个人设备产品组合)。

@@ -68,7 +68,7 @@ export interface E2eeRuntimeStatus {
   readonly position: string | null;
   readonly epoch: number;
   readonly rotationRequired: boolean;
-  /** Ephemeral main-process reader owner; never persisted or an authorization credential. */
+  /** Ephemeral host reader owner; never persisted or an authorization credential. */
   readonly readerOwner?: string;
   /** Current self membership, derived only from the host's verified ledger. */
   readonly signingPublicKey?: string;
@@ -83,7 +83,7 @@ export interface E2eeRuntimeStatus {
   readonly continuityPending: boolean;
   readonly upgradeRequiredAt?: number;
 }
-/** The main process's own public export, for ledger display without another replay. */
+/** The host's own public export, for ledger display without another replay. */
 export interface E2eeRuntimeLedgerView {
   readonly status: E2eeRuntimeStatus;
   readonly stateHex: string;
@@ -106,8 +106,10 @@ export interface E2eeManagementState {
     mayRevoke: boolean;
   }[];
 }
-/** Desktop-only purpose-limited IPC; opening an existing workspace never creates an identity. */
+/** Purpose-limited host contract for desktop IPC and portable personal-device assembly. Opening existing content never creates an identity. */
 export interface E2eeWorkspaceRuntime {
+  /** Supports caller-assigned lease labels before open settles. Closing one pending label fences that request without releasing other readers. */
+  readonly readerLeases?: 'preallocated-v1';
   readMachineSharing?(
     workspaceId: string,
     machineId: string
@@ -272,7 +274,8 @@ export interface E2eeWorkspaceRuntime {
   open(
     workspaceId: string,
     observed?: { genesisHash: string; headHash: string; length: number },
-    expectedAccountId?: string
+    expectedAccountId?: string,
+    readerOwner?: string
   ): Promise<E2eeRuntimeStatus>;
   close(workspaceId: string, expectedAccountId?: string, readerOwner?: string): Promise<void>;
   /** Read retained verified identity without granting this window a reader.

@@ -10,8 +10,8 @@ import {
   type WorkspaceStreamsContent,
 } from '@lody/shared/workspace-streams-content';
 
-/** Native purpose-bound providers: keys and signatures always remain in main. */
-export function createDesktopE2eeContent(input: {
+/** Shared purpose-bound providers. Keys and credentials stay inside the injected host runtime. */
+export function createE2eeContent(input: {
   runtime: E2eeWorkspaceRuntime;
   workspaceId: string;
   genesisHash: string;
@@ -25,7 +25,17 @@ export function createDesktopE2eeContent(input: {
 }) {
   if (!/^[0-9a-f]{64}$/.test(input.genesisHash)) throw new Error('e2ee_invalid_genesis');
   let bucketId: string | null = null;
-  let memberRemoved = false;
+  let memberRemoved = false,
+    closed = false;
+  const assertOpen = () => {
+    if (closed || memberRemoved) throw new Error('e2ee_closed');
+  };
+  const withinContent = async <A>(work: () => Promise<A>): Promise<A> => {
+    assertOpen();
+    const value = await work();
+    assertOpen();
+    return value;
+  };
   const observeRemoval = (error: unknown) => {
     if (!isE2eeMemberRemoved(error)) return false;
     if (!memberRemoved) {
@@ -50,6 +60,7 @@ export function createDesktopE2eeContent(input: {
     }
   };
   const snapshotRecovery = (stream: string, pending: boolean) => {
+    if (closed) return;
     recovery(stream, pending);
     if (!pending) return;
     const now = Date.now();
@@ -76,6 +87,7 @@ export function createDesktopE2eeContent(input: {
     rotationRequired: boolean;
     hasCurrentKey?: boolean;
   }) => {
+    if (closed) return;
     transition.observe({ ...status, hasCurrentKey: status.hasCurrentKey ?? false });
     if (transition.needsUpdate()) input.onKeyUpdateRequired?.();
   };
@@ -91,7 +103,7 @@ export function createDesktopE2eeContent(input: {
         ),
       // SDK schedules only after local writes, suppresses a competing writer,
       // and checks the remote snapshot before exporting a new one.
-      canUpload: () => !memberRemoved && transition.phase() !== 'closed',
+      canUpload: () => !closed && !memberRemoved && transition.phase() !== 'closed',
       debounceMs: 30_000,
       minBytesSinceRemoteSnapshot: 1024 * 1024,
     },
@@ -118,6 +130,7 @@ export function createDesktopE2eeContent(input: {
     ),
   };
   const makeTokenProvider = (signal: AbortSignal, rpcOnly = false) => {
+    assertOpen();
     const token = createLoroStreamsTokenProviderLegacy({
       // All requests terminate in the native capability below. This URL is
       // just the existing token kernel's local route identity.
@@ -125,8 +138,14 @@ export function createDesktopE2eeContent(input: {
       workspaceId: input.workspaceId,
       authToken: input.authToken,
       fetchImpl: async (_url, init) => {
-        const requestSignal = init?.signal ? AbortSignal.any([signal, init.signal]) : signal;
-        requestSignal.throwIfAborted();
+        // No native combined-signal API is needed: this adapter only checks
+        // cancellation before/after the owned host call, rather than passing it on.
+        const assertActive = () => {
+          assertOpen();
+          signal.throwIfAborted();
+          init?.signal?.throwIfAborted();
+        };
+        assertActive();
         const request = LoroStreamsTokenRequestSchema.parse(JSON.parse(String(init?.body)));
         if (request.workspaceId !== input.workspaceId)
           throw new Error('e2ee_content_configuration');
@@ -143,7 +162,7 @@ export function createDesktopE2eeContent(input: {
           observeRemoval(error);
           throw error;
         });
-        requestSignal.throwIfAborted();
+        assertActive();
         if (
           !response.bucketId ||
           response.bucketId === 'lody' ||
@@ -163,6 +182,16 @@ export function createDesktopE2eeContent(input: {
     tokens.add(token);
     return {
       ...token,
+      invalidate: (reason?: Parameters<typeof token.invalidate>[0]) => {
+        if (!closed) token.invalidate(reason);
+      },
+      getToken: (...args: Parameters<typeof token.getToken>) =>
+        withinContent(() => token.getToken(...args)),
+      createAuthCallback: () => {
+        const authenticate = token.createAuthCallback();
+        return (...args: Parameters<typeof authenticate>) =>
+          withinContent(() => authenticate(...args));
+      },
       close: async () => {
         await token.close();
         tokens.delete(token);
@@ -175,21 +204,27 @@ export function createDesktopE2eeContent(input: {
     transition: transition.transition,
     phase: transition.phase,
     needsUpdate: transition.needsUpdate,
-    close: transition.close,
+    close: () => {
+      closed = true;
+      return transition.close();
+    },
     e2ee: {
-      attachmentToken: async () => {
-        if (memberRemoved || transition.phase() === 'closed') throw new Error('e2ee_closed');
-        const result = await input.runtime.contentStreamsToken(input.workspaceId).catch((error) => {
-          observeRemoval(error);
-          throw error;
-        });
-        if (!result.attachmentToken) throw new Error('e2ee_attachment_unavailable');
-        return result.attachmentToken;
-      },
+      attachmentToken: () =>
+        withinContent(async () => {
+          if (memberRemoved || transition.phase() === 'closed') throw new Error('e2ee_closed');
+          const result = await input.runtime
+            .contentStreamsToken(input.workspaceId)
+            .catch((error) => {
+              observeRemoval(error);
+              throw error;
+            });
+          if (!result.attachmentToken) throw new Error('e2ee_attachment_unavailable');
+          return result.attachmentToken;
+        }),
       prepareFeatureRpc: (args: import('@lody/shared/e2ee-rpc').E2eeFeatureInput) => {
         if (!input.runtime.prepareFeatureRpc)
           return Promise.reject(new Error('e2ee_rpc_unavailable'));
-        return input.runtime.prepareFeatureRpc(input.workspaceId, args);
+        return withinContent(() => input.runtime.prepareFeatureRpc!(input.workspaceId, args));
       },
       acceptFeatureRpcResponse: (
         args: import('@lody/shared/e2ee-rpc').E2eeFeatureInput,
@@ -197,7 +232,9 @@ export function createDesktopE2eeContent(input: {
       ) => {
         if (!input.runtime.acceptFeatureRpcResponse)
           return Promise.reject(new Error('e2ee_rpc_unavailable'));
-        return input.runtime.acceptFeatureRpcResponse(input.workspaceId, args, frame);
+        return withinContent(() =>
+          input.runtime.acceptFeatureRpcResponse!(input.workspaceId, args, frame)
+        );
       },
       prepareDispatch: (
         machineId: string,
@@ -205,7 +242,9 @@ export function createDesktopE2eeContent(input: {
       ) => {
         if (!input.runtime.prepareDispatch)
           return Promise.reject(new Error('e2ee_rpc_unavailable'));
-        return input.runtime.prepareDispatch(input.workspaceId, machineId, args);
+        return withinContent(() =>
+          input.runtime.prepareDispatch!(input.workspaceId, machineId, args)
+        );
       },
       acceptDispatchResponse: (
         machineId: string,
@@ -214,7 +253,9 @@ export function createDesktopE2eeContent(input: {
       ) => {
         if (!input.runtime.acceptDispatchResponse)
           return Promise.reject(new Error('e2ee_rpc_unavailable'));
-        return input.runtime.acceptDispatchResponse(input.workspaceId, machineId, args, frame);
+        return withinContent(() =>
+          input.runtime.acceptDispatchResponse!(input.workspaceId, machineId, args, frame)
+        );
       },
       bucketId: () => bucketId,
       createTokenProvider: (signal: AbortSignal) => makeTokenProvider(signal),
@@ -222,3 +263,6 @@ export function createDesktopE2eeContent(input: {
     },
   };
 }
+
+/** Existing desktop import; both platforms use the same content/epoch/token bridge. */
+export const createDesktopE2eeContent = createE2eeContent;

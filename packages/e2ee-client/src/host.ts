@@ -69,6 +69,8 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
     keys: sourcePlatform.keys.bind(sourcePlatform),
     evidence: sourcePlatform.evidence.bind(sourcePlatform),
     rpc: sourcePlatform.rpc?.bind(sourcePlatform),
+    contentToken: sourcePlatform.contentToken?.bind(sourcePlatform),
+    machineSharing: sourcePlatform.machineSharing?.bind(sourcePlatform),
     drainOld: sourcePlatform.drainOld?.bind(sourcePlatform),
   });
   const remote = yield* PersonalHostRemote,
@@ -127,8 +129,10 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
     Context.add(ClientCustodyWriter, writer),
     Context.add(ClientPairingOriginalStore, pairings)
   );
-  const prepare = (offer: PersonalPairingOffer, replacement = false) =>
-    Effect.scoped(preparePersonalIdentity(offer, replacement).pipe(Effect.provide(base)));
+  const prepare = (offer: PersonalPairingOffer, replacement = false, existingOnly = false) =>
+    Effect.scoped(
+      preparePersonalIdentity(offer, replacement, existingOnly).pipe(Effect.provide(base))
+    );
   const publicPrepared = (p: PreparedPersonalIdentity) =>
     Object.freeze({
       workspaceId: p.binding.workspaceId,
@@ -464,10 +468,16 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
       ),
     cancel: (offer: PersonalPairingOffer, replacement = false) =>
       run(Effect.flatMap(prepare(offer, replacement), (p) => exchangeOriginal(p, 'cancel'))),
-    open: (offer: PersonalPairingOffer, replacement = false) =>
+    scope: platform.scope,
+    capabilities: Object.freeze({
+      rpc: !!platform.rpc,
+      contentToken: !!platform.contentToken,
+      machineSharing: !!platform.machineSharing,
+    }),
+    open: (offer: PersonalPairingOffer, replacement = false, existingOnly = false) =>
       run(
         Effect.gen(function* () {
-          const p = yield* prepare(offer, replacement),
+          const p = yield* prepare(offer, replacement, existingOnly),
             approval = yield* loadApproval(p);
           yield* activateReplacement(p, approval);
           yield* guard;

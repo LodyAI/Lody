@@ -175,13 +175,19 @@ export function createWorkspaceEpochTransitionLegacy(input: {
     provider(
       make: (writeEpoch: number) => import('@loro-dev/streams-crdt').PayloadProtectionProvider
     ) {
-      const track = async <A>(work: () => A | Promise<A>): Promise<A> => {
+      const track = async <A>(
+        work: () => A | Promise<A>,
+        dispose?: (value: A) => void
+      ): Promise<A> => {
         if (isClosed()) throw new Error('e2ee_closed');
         const pending = Promise.resolve(work());
         admitted.add(pending);
         try {
           const result = await pending;
-          if (isClosed()) throw new Error('e2ee_closed');
+          if (isClosed()) {
+            dispose?.(result);
+            throw new Error('e2ee_closed');
+          }
           return result;
         } finally {
           admitted.delete(pending);
@@ -195,7 +201,10 @@ export function createWorkspaceEpochTransitionLegacy(input: {
         },
         open: (request) => {
           const selected = make(epoch);
-          return track(() => selected.open(request));
+          return track(
+            () => selected.open(request),
+            (plaintext) => plaintext.fill(0)
+          );
         },
       } satisfies import('@loro-dev/streams-crdt').PayloadProtectionProvider;
     },

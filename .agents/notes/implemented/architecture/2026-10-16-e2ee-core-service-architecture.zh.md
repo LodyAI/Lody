@@ -137,7 +137,36 @@ scoped host 构造器保留为实际 drain 原语。产品组合使用
 确认关闭，已关闭句柄不会复活。明文交接还记录等待消费者是否退出，确保发布前、发布到
 接收之间取消时，worker 返回值的清零责任都不丢失。
 
-[#2075](https://github.com/LodyAI/Lody/issues/2075) 跟踪启用移动端原生 custody 前必须完成
-的 runtime bridge 采用。owned-host 前置本身不接入产品 runtime 或移动端消费者。
-暂停真实原生加密、显式推进时钟的浏览器测试证明锁/缓冲保留和实际清理，不证明移动端
-真机或原生进程终止已通过验收。
+共享 makePersonalWorkspaceRuntime 消费该 owned 构造器和既有 E2eeWorkspaceRuntime/内容桥，
+不增加第二套传输或模式缓存。应用独立固定账号/工作区/genesis，提供本地原件及执行入口。
+只读打开拒绝缺失的 ready 身份；创建只由明确配对准备触发。没有当前 key 时仍允许已获准
+的保留 epoch，包括 no-key lease 之后才到达的保留 key。每项操作仍由 core 核对精确设备
+和当前选定的已验证账本。
+
+兼容的可选预分配 reader 合同使 provider 在冷打开前保留自己的标签，解包未返回时也能
+调用有界 native close；晚到 open 不能记录身份或发布正文。关闭一个排队标签不退休另一个
+持有 custody 的 opener。旧桌面 host 不宣称该可选能力。标签仅为临时所有权，不是持久
+pin 或权限。未完成关闭保留 owner 以供重试，空的失败初始化不累积恢复 owner 链。
+
+reader 生命周期不同于整个 host：关闭一个 reader 不影响其他 reader；最后一个 reader
+停止接纳该 session，未完成 ticket 保留待确认。账号改变、首次获取时关闭会退休整个绑定
+组合；重新观察到原账号不能复活它。provider 并行启动 native fencing 和独立 renderer
+清理，保留完整失败及精确账号/reader 租约；后继获取先重试确认旧关闭。先等待整个原生
+操作才调用 close 会掩盖期限；吞掉 close 错误会允许重叠；永久缓存 timeout 会阻塞安全复用，
+因此均未采用。
+
+设备 grant 留在已批准的 session 中，产品只取得专用短期正文/附件 token。RPC/策略工厂
+只有真实装配才暴露能力，不用空成功 handler。机器共享 Layer 是可信 host 组合，须保留既有
+密码、原件、generation 与 freshness 策略；bridge 提供固定服务和所有权，不另写策略验证器。
+普通管理使用 core 原件提交/ACK、原子成员移除和换代恢复。远端历史分页仅确认同一已验证
+feed，本地展示行按真实 view 中的绝对位置摘要核对。
+
+共享内容桥即使面对仍有其他 reader 的底层 runtime，也拒绝晚到 grant/RPC/token 结果。
+epoch tracker 在拒绝已关闭 reader 的晚到结果前清零明文；取消检查不要求原生组合 signal API，
+测试模拟缺失该 API 后走既有 token 入口。这些是本地所有权/兼容性规则，不改变签名字节或权限。
+
+这里只提供公开可选组合，不启用 Web/移动端产品。浏览器测试使用真实 custody、IDB、邮箱
+密码、签名 RPC 和暂停原生工作；策略 Layer 用例证明组合/scope，不代表新策略存储实现。
+renderer 回归覆盖精确租约、未完成关闭重试、普通准入及保留 key 唤醒；均不证明移动端
+真机、原生插件、断电或原生进程终止已验收。[#2075](https://github.com/LodyAI/Lody/issues/2075)
+跟踪 owned close 与 bridge 采用；启用移动端 custody 前，产品组合仍必须保留未结算的原生 owner。

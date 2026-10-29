@@ -250,8 +250,52 @@ confirmation; a closed handle never revives. Plaintext transfer also tracks whet
 the waiting consumer has disappeared, so a worker result cannot lose wipe ownership
 before publication or between publication and receipt.
 
-[#2075](https://github.com/LodyAI/Lody/issues/2075) tracks mandatory runtime-bridge
-adoption before mobile native custody is enabled. The owned-host prerequisite does
-not itself wire product runtime or mobile consumers. Browser tests with paused
-native encryption and explicit clock signals establish lock/buffer retention and
-actual cleanup, not mobile-device or native-process termination qualification.
+The shared `makePersonalWorkspaceRuntime` consumes that owned constructor and the
+existing `E2eeWorkspaceRuntime`/content bridge rather than creating another transport
+or mode cache. Application ports pin account/workspace/genesis independently and
+provide local originals plus the execution entry. Read-open refuses missing ready
+identity; only explicit preparation can create it. Current-key absence does not
+block admitted retained epochs, including one that arrives after a no-key lease.
+Per-operation core admission still checks the exact device and current ledger.
+
+A compatible optional preallocated-reader contract lets the provider reserve its
+own label before cold open. Shutdown can call bounded native close while unwrap
+is pending; a late open cannot record identity or publish content. Closing a queued
+label does not retire the distinct opener holding custody. Legacy desktop hosts do
+not advertise this optional contract. Labels are ephemeral ownership, not persisted
+pins or authority. An incomplete renderer/host close retains its owner for retry;
+empty failed initializations do not build an ever-growing chain of recovery owners.
+
+Reader lifetime and underlying host lifetime differ: one reader may close while
+another remains. Last-reader close fences that session and retains an incomplete
+ticket for confirmation; account change or close during initial acquisition retires
+the bound assembly. A new account observation cannot revive it. Provider cleanup
+starts native fencing alongside independent renderer cleanup, retaining full failures
+and the precise account/reader lease. A later acquisition retries unresolved close
+before publishing a successor. Serializing a new open behind the entire native
+operation, swallowing a close failure, or memoizing a timeout as permanent failure
+would respectively hide the close deadline, permit overlap, or block safe reuse.
+
+Device grants remain inside the captured approved session; only dedicated short-lived
+content/attachment tokens leave it. Optional RPC/policy factories advertise real
+capabilities, not empty successful handlers. A machine-sharing Layer is trusted host
+composition and must retain the existing crypto/original/generation/freshness policy;
+the bridge supplies fixed services and ownership, not a substitute policy verifier.
+Ordinary management uses core original submission/ACK, atomic member removal and
+resumed rotation. Relay history pages confirm the one verified feed and local display
+rows are checked against its genuine absolute-position hashes.
+
+The shared content bridge fences late grant/RPC/token results even when a distinct
+reader keeps the underlying runtime alive. Its epoch tracker wipes plaintext before
+rejecting a late closed-reader result. Cancellation checks do not require the native
+combined-signal API; a simulated absent API exercises the existing token entry.
+These are local ownership/compatibility rules, not new signed bytes or authority.
+
+This is opt-in public assembly, not Web/mobile activation. Browser tests use real
+custody, IDB, mailbox crypto, signed RPC and paused native work; policy-Layer tests
+establish composition and scope, not a new policy-storage implementation. Renderer
+regressions exercise precise leases, incomplete-close retry, ordinary admission and
+retained-key wakeup. These checks do not establish mobile-device, native-plugin,
+power-loss or native-process termination qualification. [#2075](https://github.com/LodyAI/Lody/issues/2075)
+tracks owned close plus bridge adoption; product composition must retain any
+unfinished native owner before enabling mobile custody.

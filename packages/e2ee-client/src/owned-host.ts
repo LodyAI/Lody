@@ -198,8 +198,19 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
         resume: () => call(raw.resume()),
         acknowledge: (...args: Parameters<RawSession['acknowledge']>) =>
           call(raw.acknowledge(...args)),
+        removeMember: (...args: Parameters<RawSession['removeMember']>) =>
+          call(raw.removeMember(...args)),
         rotate: () => call(raw.rotate()),
+        recoverHistory: () => call(raw.recoverHistory()),
         resumeRotation: () => call(raw.resumeRotation()),
+        contentToken: (...args: Parameters<RawSession['contentToken']>) =>
+          call(raw.contentToken(...args)),
+        managementState: () => call(raw.managementState()),
+        readMachineSharing: (...args: Parameters<RawSession['readMachineSharing']>) =>
+          call(raw.readMachineSharing(...args)),
+        updateMachineSharing: (...args: Parameters<RawSession['updateMachineSharing']>) =>
+          call(raw.updateMachineSharing(...args)),
+        ledgerState: () => call(raw.ledgerState()),
         acknowledgeRotation: (...args: Parameters<RawSession['acknowledgeRotation']>) =>
           call(raw.acknowledgeRotation(...args)),
         prepareDispatch: (...args: Parameters<RawSession['prepareDispatch']>) =>
@@ -248,6 +259,8 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
             keys: platform.keys.bind(platform),
             evidence: platform.evidence.bind(platform),
             rpc: platform.rpc?.bind(platform),
+            contentToken: platform.contentToken?.bind(platform),
+            machineSharing: platform.machineSharing?.bind(platform),
             drainOld: Effect.fnUntraced(function* (binding: Parameters<typeof externalDrain>[0]) {
               const matching = [...sessions].filter((session) =>
                 sameBinding(session.raw.binding, binding)
@@ -269,6 +282,8 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
   );
   return Object.freeze({
     close,
+    scope: host!.scope,
+    capabilities: host!.capabilities,
     prepare: (...args: Parameters<RawHost['prepare']>) => run(host!.prepare(...args)),
     begin: (...args: Parameters<RawHost['begin']>) => run(host!.begin(...args)),
     claim: (...args: Parameters<RawHost['claim']>) => run(host!.claim(...args)),

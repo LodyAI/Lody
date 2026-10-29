@@ -39,3 +39,9 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
 - Concurrent close callers share one ticket; serialize finite ticket creation,
   never native settlement. Worker-to-consumer plaintext transfer owns cleanup
   before and after publication, including cancellation of the waiting consumer.
+
+- Shared runtime assembly uses the existing platform DTOs and one content bridge.
+  Opening a reader never starts pairing. Bind reader retirement to its captured
+  account and owner; retain incomplete failures until actual close confirmation.
+  Account change retires the assembly permanently. Only real optional port Layers
+  advertise RPC or machine sharing; no unsupported channel becomes plaintext.

@@ -36,14 +36,19 @@ import {
   prepareEpochEnvelope,
   authenticateInstallationReport,
   decodeInstallationReport,
+  decodeRecord,
   prepareLedgerRecord,
   encodeCbor,
   commitEpochKey,
+  updateMachineSharingState,
+  verifyMachineSharingGeneration,
   sealHistoryPacket,
   getCommittedEpochStagingKey,
   type EpochStagedGroup,
 } from '@lody/e2ee-core/protocol';
 import {
+  DeviceIdentity,
+  LedgerViewSource,
   ClientInstallationStore,
   ClientPairingOriginalStore,
   LedgerFeedStore,
@@ -60,7 +65,11 @@ import {
 } from '@lody/e2ee-core/services';
 import {
   makeOwnedPersonalDeviceHost,
+  makePersonalWorkspaceRuntime,
+  type PersonalHostPorts,
+  PersonalMachineSharing,
   PersonalCloseIncomplete,
+  PersonalRuntimeFailure,
   personalLedgerControl,
   PersonalHostPlatform,
   PersonalHostRemote,
@@ -70,7 +79,26 @@ import {
   type PersonalExchange,
   type PersonalExchangeResponse,
 } from '../../src';
+import type { E2eeWorkspaceRuntime } from '@lody/platform';
+import { sha256 } from '@noble/hashes/sha2.js';
 import { toHex, fromHex } from '../../src/bytes';
+let runtimePorts: Layer.Layer<PersonalHostPorts, unknown>;
+let runtime: E2eeWorkspaceRuntime;
+let runtimeAccount = 'account';
+let accountFailure: Cause.Cause<unknown> | undefined;
+let tokenEntered: Deferred.Deferred<void>,
+  tokenRelease: Deferred.Deferred<void>,
+  holdToken = false;
+let badToken = false,
+  failMailbox = false;
+let tokenResult: Promise<unknown> | undefined;
+let runtimeLease: string | undefined;
+type RuntimeCloseResult =
+  | { state: 'closed' }
+  | { state: 'failed'; code: string; owner?: import('../../src').PersonalCloseOwner };
+let runtimeCloseResults: Promise<RuntimeCloseResult>[] = [];
+let runtimeWork: Promise<unknown> | undefined;
+let runtimeOpening: Promise<unknown>, runtimeOtherOpen: Promise<unknown> | undefined;
 let baseContext: Context.Context<ClientInstallationStore | ClientPairingOriginalStore>;
 let scope: Scope.Closeable,
   host: Effect.Success<ReturnType<typeof makeOwnedPersonalDeviceHost>>,
@@ -214,6 +242,28 @@ export async function boot(input: typeof mode = 'create-or-open', controlledClos
       const platform = PersonalHostPlatform.of({
         scope: { accountId: 'account', workspaceId: offer.workspaceId, genesis: genesis.genesis },
         protection: 'web-crypto',
+        contentToken: (binding, credential, request) =>
+          Effect.gen(function* () {
+            const current = view();
+            if (!current.inspectState().devices.has(toHex(binding.device.toBytes())))
+              return yield* Effect.fail(new Error('not admitted'));
+            const claim = decodePersonalRequest(localStorage.getItem('last-request')!);
+            if (toHex(sha256(credential)) !== claim.credentialHash)
+              return yield* Effect.fail(new Error('wrong device credential'));
+            events.push('content-grant:' + JSON.stringify(request));
+            if (holdToken) {
+              yield* Deferred.succeed(tokenEntered, undefined);
+              yield* Deferred.await(tokenRelease);
+            }
+            return {
+              token: 'synthetic-short-lived-content',
+              attachmentToken: 'synthetic-attachment-only',
+              bucketId: badToken ? 'lody' : 'protected-fixture',
+              gatewayBaseUrl: 'https://streams.example.test',
+              expiresIn: 900,
+              expiresAt: FIXED_NOW + 900000,
+            };
+          }),
         custody: (binding, candidateRequest) =>
           browserClientCustody({
             databaseName: 'personal-custody',
@@ -305,6 +355,14 @@ export async function boot(input: typeof mode = 'create-or-open', controlledClos
                 Effect.succeed({ ...slot, revision: 0, status: 'InstallationReported' }),
               fetch: (epoch) =>
                 Effect.gen(function* () {
+                  if (failMailbox) {
+                    failMailbox = false;
+                    return yield* new BackendError({
+                      service: 'mailbox',
+                      reason: 'unavailable',
+                      cause: new Error('synthetic temporary mailbox I/O'),
+                    });
+                  }
                   events.push('fetch');
                   const current = view(),
                     target = current.inspectState().devices.get(toHex(binding.device.toBytes()));
@@ -386,6 +444,7 @@ export async function boot(input: typeof mode = 'create-or-open', controlledClos
             const prior = localStorage.getItem('request:' + request.pairingSessionId);
             if (prior && prior !== request.requestHex) throw new Error('changed request');
             localStorage.setItem('request:' + request.pairingSessionId, request.requestHex);
+            localStorage.setItem('last-request', request.requestHex);
             if (loseBegin) {
               loseBegin = false;
               return yield* Effect.fail(new Error('synthetic unknown relay result'));
@@ -443,6 +502,7 @@ export async function boot(input: typeof mode = 'create-or-open', controlledClos
           );
         })
       );
+      runtimePorts = ownedPorts;
       host = yield* makeOwnedPersonalDeviceHost(ownedPorts).pipe(
         Scope.provide(scope),
         Effect.provideService(Clock.Clock, fixedClock)
@@ -633,6 +693,13 @@ export async function invoke(action: string) {
               localStorage.setItem('initial-invitation', invitation);
             return true;
           }
+          case 'currentRequestForToken': {
+            const p = yield* host.prepare(offer);
+            localStorage.setItem('last-request', p.requestHex);
+            return true;
+          }
+          case 'openExisting':
+            return yield* host.open(offer, false, true);
           case 'open':
             if (session) yield* session.close();
             session = yield* host.open(offer);
@@ -925,4 +992,384 @@ export async function stop() {
 
 export function startParentClose() {
   closeFibers.push(Effect.runFork(Effect.exit(Scope.close(scope, Exit.void))));
+}
+
+export async function bootRuntime(withSharing = false) {
+  runtimeAccount = 'account';
+  runtimeCloseResults = [];
+  runtimeLease = undefined;
+  runtime = await Effect.runPromise(
+    makePersonalWorkspaceRuntime({
+      accountId: 'account',
+      workspaceId: offer.workspaceId,
+      genesisHash: offer.genesisHash,
+      ports: withSharing
+        ? Layer.effectContext(
+            Effect.gen(function* () {
+              const context = yield* Layer.build(runtimePorts),
+                platform = Context.get(context, PersonalHostPlatform);
+              return context.pipe(
+                Context.add(PersonalHostPlatform, {
+                  ...platform,
+                  machineSharing: (binding, credential) =>
+                    Layer.effect(
+                      PersonalMachineSharing,
+                      Effect.gen(function* () {
+                        const device = yield* DeviceIdentity,
+                          ledger = yield* LedgerViewSource;
+                        if (
+                          !device.signer.publicKey.equals(binding.device) ||
+                          binding.accountId !== 'account' ||
+                          binding.workspaceId !== offer.workspaceId ||
+                          !binding.genesis.equals(platform.scope.genesis) ||
+                          toHex(sha256(credential)) !==
+                            decodePersonalRequest(localStorage.getItem('last-request')!)
+                              .credentialHash
+                        )
+                          return yield* Effect.fail(new Error('wrong sharing assembly binding'));
+                        let state = { sharedWithTeam: false, projects: [] as readonly string[] };
+                        const read = Effect.fnUntraced(function* (machineId: string) {
+                          const policyLedger = yield* ledger.current(),
+                            machines = [...policyLedger.inspectState().devices].filter(
+                              ([, d]) => d.kind === 'machine' && d.machineId === machineId
+                            );
+                          if (machines.length !== 1)
+                            return yield* Effect.fail(new Error('wrong machine'));
+                          const [machineKey, machine] = machines[0];
+                          const generation = yield* Effect.fromResult(
+                            verifyMachineSharingGeneration({
+                              ledger: policyLedger,
+                              machineId,
+                              device: Result.getOrThrow(
+                                Bytes.signingPublicKey(fromHex(machineKey))
+                              ),
+                              admissionChain: records
+                                .map((record, index) => ({ record, length: index + 1 }))
+                                .filter((row) => {
+                                  const parsed = Result.getOrThrow(decodeRecord(row.record));
+                                  return (
+                                    parsed.body.type === 'ordinary' &&
+                                    parsed.body.operation.type === 'admitDevice' &&
+                                    parsed.body.operation.kind === 'machine' &&
+                                    parsed.body.operation.machineId === machineId
+                                  );
+                                }),
+                            })
+                          );
+                          return {
+                            machineId,
+                            generation: generation.generation,
+                            ownerMembershipId: toHex(machine.membershipId.toBytes()),
+                            head: null,
+                            ...state,
+                            canManage: true,
+                            signer: toHex(binding.device.toBytes()),
+                            needsResign: false,
+                          };
+                        });
+                        return PersonalMachineSharing.of({
+                          read,
+                          update: (machine, generation, requestId, change) =>
+                            Effect.gen(function* () {
+                              if ((yield* read(machine)).generation !== generation)
+                                return yield* Effect.fail(new Error('wrong generation'));
+                              state = yield* Effect.fromResult(
+                                updateMachineSharingState(state, change)
+                              );
+                              return { status: 'saved' as const, requestId };
+                            }),
+                        });
+                      })
+                    ),
+                })
+              );
+            })
+          )
+        : runtimePorts,
+      retainedOffer: () => Effect.succeed(offer),
+      account: () =>
+        accountFailure
+          ? Effect.failCause(accountFailure)
+          : Effect.succeed({ userId: runtimeAccount, source: 'offline' as const }),
+      ledgerRecords: (checked) =>
+        Effect.succeed(
+          records
+            .slice(checked.historyStart, checked.length)
+            .map((record, index) => ({ position: checked.historyStart + index, record }))
+        ),
+      run: async (program) => {
+        const exit = await Effect.runPromiseExit(
+          program.pipe(Effect.provideService(Clock.Clock, fixedClock))
+        );
+        if (Exit.isFailure(exit)) throw Cause.squash(exit.cause);
+        return exit.value;
+      },
+    }).pipe(Scope.provide(scope), Effect.provideService(Clock.Clock, fixedClock))
+  );
+}
+const runtimeContext = {
+  protocol: 'loro-streams-crdt-payload-protection',
+  version: 2,
+  kind: 'update_batch',
+} as const;
+export async function runtimeInvoke(action: string) {
+  try {
+    let value: unknown;
+    switch (action) {
+      case 'prepare':
+        value = await runtime.preparePersonalJoin!(offer);
+        break;
+      case 'claim':
+        value = await runtime.claimPersonalJoin!(offer.workspaceId, offer.pairingSessionId);
+        break;
+      case 'open': {
+        const status = await runtime.open(offer.workspaceId, undefined, 'account');
+        runtimeLease = status.readerOwner;
+        value = status;
+        break;
+      }
+      case 'wrongAccount':
+        value = await runtime.open(offer.workspaceId, undefined, 'foreign');
+        break;
+      case 'wrongWorkspace':
+        value = await runtime.open('foreign', undefined, 'account');
+        break;
+      case 'wrongCheckpoint':
+        value = await runtime.open(
+          offer.workspaceId,
+          { genesisHash: offer.genesisHash, length: 2, headHash: 'cc'.repeat(32) },
+          'account'
+        );
+        break;
+      case 'status':
+        value = await runtime.status(offer.workspaceId);
+        break;
+      case 'refresh':
+        value = await runtime.refresh(offer.workspaceId);
+        break;
+      case 'receive':
+        value = await runtime.refresh(offer.workspaceId, { installKeys: true });
+        break;
+      case 'keyFailure':
+        failMailbox = true;
+        value = await runtime.refresh(offer.workspaceId, { installKeys: true });
+        break;
+      case 'ledger':
+        value = await runtime.ledgerView(offer.workspaceId);
+        break;
+      case 'capabilities':
+        value = {
+          rpc: !!runtime.prepareDispatch,
+          sharing: !!runtime.readMachineSharing,
+          manager: !!runtime.managementState,
+          personalManager: !!runtime.approvePersonalJoin,
+        };
+        break;
+      case 'grant':
+        value = await runtime.contentStreamsToken(offer.workspaceId, 'rejected-exact', 'doc:1');
+        break;
+      case 'rpcGrant':
+        value = await runtime.contentStreamsToken(offer.workspaceId, undefined, undefined, true);
+        break;
+      case 'badGrant':
+        badToken = true;
+        try {
+          value = await runtime.contentStreamsToken(offer.workspaceId);
+        } finally {
+          badToken = false;
+        }
+        break;
+      case 'startGrant':
+        holdToken = true;
+        tokenEntered = await Effect.runPromise(Deferred.make<void>());
+        tokenRelease = await Effect.runPromise(Deferred.make<void>());
+        tokenResult = runtime.contentStreamsToken(offer.workspaceId).then(
+          (v) => ({ ok: true, value: v }),
+          (error) => ({ ok: false, reason: error.code ?? error.reason })
+        );
+        await Effect.runPromise(Deferred.await(tokenEntered));
+        value = true;
+        break;
+      case 'releaseGrant':
+        holdToken = false;
+        await Effect.runPromise(Deferred.succeed(tokenRelease, undefined));
+        value = await tokenResult;
+        break;
+      case 'switchAccount':
+        runtimeAccount = 'foreign';
+        value = true;
+        break;
+      case 'restoreAccount':
+        runtimeAccount = 'account';
+        value = true;
+        break;
+      case 'seal':
+      case 'sealMutable': {
+        const status = await runtime.status(offer.workspaceId);
+        const input = {
+          epoch: status.writeEpoch ?? status.epoch,
+          room: { kind: 'doc' as const, docId: '1' },
+          context: runtimeContext,
+          plaintext: Uint8Array.of(72, 105),
+          additionalData: Uint8Array.of(9),
+        };
+        const sealing = runtime.seal(offer.workspaceId, input);
+        if (action === 'sealMutable') {
+          input.plaintext.fill(0);
+          input.additionalData.fill(0);
+          input.room.docId = 'foreign';
+        }
+        const sealed = await sealing;
+        localStorage.setItem(
+          'runtime-sealed',
+          JSON.stringify({ header: toHex(sealed.header), sealed: toHex(sealed.sealed) })
+        );
+        value = true;
+        break;
+      }
+      case 'openBody': {
+        const saved = JSON.parse(localStorage.getItem('runtime-sealed')!);
+        const bytes = await runtime.openContent(offer.workspaceId, {
+          room: { kind: 'doc', docId: '1' },
+          context: runtimeContext,
+          sealed: fromHex(saved.sealed),
+          header: fromHex(saved.header),
+          additionalData: Uint8Array.of(9),
+        });
+        try {
+          value = [...bytes];
+        } finally {
+          bytes.fill(0);
+        }
+        break;
+      }
+      case 'sharingRead':
+        value = await runtime.readMachineSharing!(offer.workspaceId, 'fixture-machine');
+        break;
+      case 'sharingWrite': {
+        const current = await runtime.readMachineSharing!(offer.workspaceId, 'fixture-machine');
+        value = await runtime.updateMachineSharing!(
+          offer.workspaceId,
+          'fixture-machine',
+          current.generation,
+          'ab'.repeat(16),
+          { kind: 'project', localProjectId: 'fixture-project', sharedWithTeam: true }
+        );
+        break;
+      }
+      case 'management':
+        value = await runtime.managementState!(offer.workspaceId);
+        break;
+      case 'forbiddenRole':
+        value = await runtime.setMemberRole!(offer.workspaceId, '0a'.repeat(16), 'admin');
+        break;
+      case 'rpc':
+        value = await runtime.prepareDispatch!(offer.workspaceId, 'fixture-machine', {
+          sessionId: 'synthetic-session',
+          userTurnId: 'runtime-turn',
+          userId: 'synthetic-user',
+          timestamp: new Date(FIXED_NOW).toISOString(),
+          inputConfig: {},
+        });
+        break;
+      case 'startOpen':
+        runtimeLease = 'fixture-pending-a';
+        runtimeOtherOpen = undefined;
+        runtimeOpening = runtime.open(offer.workspaceId, undefined, 'account', runtimeLease).then(
+          (opened) => ({ ok: true, value: opened }),
+          (error) => ({ ok: false, reason: error.code ?? error.reason })
+        );
+        value = true;
+        break;
+      case 'startOtherOpen':
+        runtimeOtherOpen = runtime
+          .open(offer.workspaceId, undefined, 'account', 'fixture-pending-b')
+          .then(
+            (opened) => ({ ok: true, value: opened }),
+            (error) => ({ ok: false, reason: error.code ?? error.reason })
+          );
+        value = true;
+        break;
+      case 'closeOtherPending':
+        value = await runtime.close(offer.workspaceId, 'account', 'fixture-pending-b');
+        break;
+      case 'openResults':
+        value = {
+          primary: await runtimeOpening,
+          other: runtimeOtherOpen ? await runtimeOtherOpen : undefined,
+        };
+        break;
+      case 'startReceive':
+        runtimeWork = runtime.refresh(offer.workspaceId, { installKeys: true }).then(
+          (v) => ({ ok: true, value: v }),
+          (error) => ({ ok: false, reason: error.code ?? error.reason })
+        );
+        value = true;
+        break;
+      case 'startClose':
+        runtimeCloseResults.push(
+          runtime.close(offer.workspaceId, 'account', runtimeLease).then(
+            () => ({ state: 'closed' }),
+            (error) => ({
+              state: 'failed',
+              code: error.code,
+              owner: error instanceof PersonalCloseIncomplete ? error.owner : undefined,
+            })
+          )
+        );
+        value = true;
+        break;
+      case 'compoundCloseFailure': {
+        const failed = (await Promise.all(runtimeCloseResults)).find((r) => r.state === 'failed');
+        if (!failed || failed.state !== 'failed' || !failed.owner)
+          throw new Error('missing actual incomplete close');
+        accountFailure = Cause.fromReasons([
+          ...Cause.fail(
+            new PersonalCloseIncomplete({ code: 'close-incomplete', owner: failed.owner })
+          ).reasons,
+          ...Cause.die(new Error('synthetic auxiliary failure')).reasons,
+        ]);
+        try {
+          await runtime.account();
+          throw new Error('compound failure lost');
+        } catch (error) {
+          value =
+            error instanceof PersonalRuntimeFailure &&
+            error.cause.reasons.some(
+              (reason) =>
+                Cause.isFailReason(reason) &&
+                reason.error instanceof PersonalCloseIncomplete &&
+                reason.error.owner === failed.owner
+            );
+        } finally {
+          accountFailure = undefined;
+        }
+        break;
+      }
+      case 'closeResults': {
+        const all = await Promise.all(runtimeCloseResults);
+        const owners = all.flatMap((r) => (r.state === 'failed' && r.owner ? [r.owner] : []));
+        value = {
+          outcomes: all.map((r) => (r.state === 'failed' ? { state: r.state, code: r.code } : r)),
+          shared: owners.length === all.length && owners.every((o) => o === owners[0]),
+        };
+        break;
+      }
+      case 'workResult':
+        value = await runtimeWork;
+        break;
+      case 'close':
+        value = await runtime.close(offer.workspaceId, 'account', runtimeLease);
+        break;
+      case 'closeWrongOwner':
+        value = await runtime.close(offer.workspaceId, 'account', 'wrong-reader');
+        break;
+      default:
+        throw new Error('unknown runtime action');
+    }
+    return { ok: true, value };
+  } catch (error) {
+    const e = error as { code?: unknown; reason?: unknown; message?: unknown };
+    return { ok: false, reason: e.code ?? e.reason ?? e.message };
+  }
 }

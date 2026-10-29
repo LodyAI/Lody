@@ -20,6 +20,8 @@
   "dependencies": {
     "@lody/e2ee-core": "workspace:*",
     "@lody/cloud-api": "workspace:*",
+    "@lody/platform": "workspace:*",
+    "@lody/shared": "workspace:*",
     "@lody/loro-streams-rpc": "workspace:*",
     "@noble/hashes": "2.2.0",
     "effect": "catalog:",
