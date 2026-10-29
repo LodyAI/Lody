@@ -1,6 +1,6 @@
 import { Input as BaseInput } from '@base-ui/react/input';
 import * as stylex from '@stylexjs/stylex';
-import { forwardRef, type ComponentProps, type ReactNode } from 'react';
+import { forwardRef, type ComponentProps, type CSSProperties, type ReactNode } from 'react';
 import { appendClassName } from '../internal/class-name';
 import { space } from '../tokens/scales.stylex';
 import { field } from './field.tokens.stylex';
@@ -14,6 +14,8 @@ type BaseProps = ComponentProps<typeof BaseInput>;
 export interface InputProps extends Omit<BaseProps, 'className' | 'size' | 'render'> {
   /** Control height and density. `size` is the token step, not the HTML attribute. */
   size?: InputSize;
+  /** Height of the well; density and the leading slot still follow `size`. */
+  controlHeight?: CSSProperties['height'];
   /**
    * What the value belongs with, inside the same well at its start: a Role's
    * emoji beside its name. It is part of the control, not a second one beside
@@ -50,8 +52,8 @@ const styles = stylex.create({
 });
 
 /**
- * A well holding something before the value. The slot is a square as tall as
- * the well less the inset a nested part keeps from its container, so a pressable
+ * A well holding something before the value. The slot follows the named size's
+ * height less the inset a nested part keeps from its container, so a pressable
  * thing in it sits as far from the well's edge as a tab sits from its track, and
  * a character in it — a `/` — is centred where the value's padding would be.
  */
@@ -93,8 +95,12 @@ const sizeStyles = {
   large: styles.large,
 };
 
+const dimensions = stylex.create({
+  height: (height: string | number) => ({ height }),
+});
+
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
-  { size = 'medium', leading, className, inputClassName, ...rest },
+  { size = 'medium', controlHeight, leading, className, inputClassName, style, ...rest },
   ref
 ) {
   const ariaInvalid = rest['aria-invalid'];
@@ -106,13 +112,15 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
       <BaseInput
         ref={ref}
         {...rest}
+        style={style}
         render={(props, state) => {
           const shell = stylex.props(
             well.shell,
             sizeStyles[size],
             shellStyles.shell,
             isInvalid(state.valid, ariaInvalid) && well.shellInvalid,
-            state.disabled && well.dimmed
+            state.disabled && well.dimmed,
+            controlHeight != null && dimensions.height(controlHeight)
           );
           return (
             <div
@@ -131,18 +139,28 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
       />
     );
   }
+  const heightStyle = stylex.props(controlHeight != null && dimensions.height(controlHeight)).style;
   return (
     <BaseInput
       ref={ref}
       data-size={size}
       {...rest}
+      style={
+        heightStyle
+          ? (state) => ({
+              ...heightStyle,
+              ...(typeof style === 'function' ? style(state) : style),
+            })
+          : style
+      }
       className={(state) =>
         appendClassName(
           stylex.props(
             well.base,
             styles.input,
             sizeStyles[size],
-            isInvalid(state.valid, ariaInvalid) && well.invalid
+            isInvalid(state.valid, ariaInvalid) && well.invalid,
+            controlHeight != null && dimensions.height(controlHeight)
           ).className,
           className
         )

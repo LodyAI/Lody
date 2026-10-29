@@ -162,11 +162,19 @@ me the password". `className` lands on the shell, which is the control, and
 `Input` takes the same shell when something belongs with the value: a Role's
 emoji before its name, the `/` before a command. `leading` puts it inside the
 well at its start rather than beside it as a second control with a second edge.
-The slot is a square as tall as the well less its 4px inset, so a pressable
+The slot is a square based on the named height, with a 4px inset at each edge, so a pressable
 glyph fills it and a character is centred where the value's padding would be.
 Whatever goes there states no edge of its own, because the well rings on
 `:focus-within`. As with `PasswordInput`, `className` then lands on the shell and
 `inputClassName` on the value.
+
+`Input` and `PasswordInput` accept `controlHeight` when a surface needs a well
+outside the named 28 / 32 / 36 ladder. A CSS length or number overrides only the
+outer well's height; `size` still sets density and the leading slot, and the
+password reveal keeps its 16px box. Zero is explicit; omission restores the
+named height. The native `height` attribute and `style` object or state callback
+still reach the actual input, including inside a shell. For a plain Input,
+caller inline styles keep priority over `controlHeight`.
 
 ```tsx
 <Input

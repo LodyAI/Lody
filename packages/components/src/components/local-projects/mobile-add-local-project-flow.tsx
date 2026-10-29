@@ -226,7 +226,8 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
                 else if (e.key === 'Escape') c.cancelEditPath();
               }}
               placeholder={t('localProjects.add.pathPlaceholder', 'Type an absolute path')}
-              className="h-10 flex-1 text-[0.95rem]"
+              controlHeight="calc(var(--spacing) * 10)"
+              className="flex-1 text-[0.95rem]"
               autoFocus
             />
             <button

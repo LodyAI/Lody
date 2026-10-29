@@ -1,0 +1,190 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "ids": [
+    "components-ownedloginmigration--email-pending",
+    "components-ownedloginmigration--scoped-email-pending",
+    "localprojects-addlocalprojectdialog--mobile"
+  ],
+  "ready": {
+    "components-ownedloginmigration--email-pending": [
+      {
+        "action": "visible",
+        "selector": "#email-auth-email"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {\n  const stage = document.querySelector('[data-login-stage]');\n  const rows = [...document.querySelectorAll('[data-login-row]')];\n  const panel = stage?.querySelector('[data-login-panel=\"' + stage.dataset.loginActive + '\"]');\n  return (!stage || (panel && stage.dataset.loginPhase === 'visible' && Math.abs(stage.getBoundingClientRect().height - panel.getBoundingClientRect().height) < 0.1)) && rows.every(row => row.dataset.loginRow === 'visible' && Math.abs(row.getBoundingClientRect().height - (row.inert ? 0 : row.firstElementChild.getBoundingClientRect().height)) < 0.1);\n}"
+      },
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Create account",
+        "exact": true
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {\n  const stage = document.querySelector('[data-login-stage]');\n  const rows = [...document.querySelectorAll('[data-login-row]')];\n  const panel = stage?.querySelector('[data-login-panel=\"' + stage.dataset.loginActive + '\"]');\n  return (!stage || (panel && stage.dataset.loginPhase === 'visible' && Math.abs(stage.getBoundingClientRect().height - panel.getBoundingClientRect().height) < 0.1)) && rows.every(row => row.dataset.loginRow === 'visible' && Math.abs(row.getBoundingClientRect().height - (row.inert ? 0 : row.firstElementChild.getBoundingClientRect().height)) < 0.1);\n}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const name=document.querySelector('#email-auth-name'),email=document.querySelector('#email-auth-email'),password=document.querySelector('#email-auth-password');return name&&!name.disabled&&getComputedStyle(name).height==='40px'&&getComputedStyle(email).height==='40px'&&getComputedStyle(password.parentElement).height==='40px'&&getComputedStyle(password.nextElementSibling).width==='16px'&&document.fonts.status==='loaded';}"
+      }
+    ],
+    "components-ownedloginmigration--scoped-email-pending": [
+      {
+        "action": "visible",
+        "selector": "#email-auth-email"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {\n  const stage = document.querySelector('[data-login-stage]');\n  const rows = [...document.querySelectorAll('[data-login-row]')];\n  const panel = stage?.querySelector('[data-login-panel=\"' + stage.dataset.loginActive + '\"]');\n  return (!stage || (panel && stage.dataset.loginPhase === 'visible' && Math.abs(stage.getBoundingClientRect().height - panel.getBoundingClientRect().height) < 0.1)) && rows.every(row => row.dataset.loginRow === 'visible' && Math.abs(row.getBoundingClientRect().height - (row.inert ? 0 : row.firstElementChild.getBoundingClientRect().height)) < 0.1);\n}"
+      },
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Create account",
+        "exact": true
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {\n  const stage = document.querySelector('[data-login-stage]');\n  const rows = [...document.querySelectorAll('[data-login-row]')];\n  const panel = stage?.querySelector('[data-login-panel=\"' + stage.dataset.loginActive + '\"]');\n  return (!stage || (panel && stage.dataset.loginPhase === 'visible' && Math.abs(stage.getBoundingClientRect().height - panel.getBoundingClientRect().height) < 0.1)) && rows.every(row => row.dataset.loginRow === 'visible' && Math.abs(row.getBoundingClientRect().height - (row.inert ? 0 : row.firstElementChild.getBoundingClientRect().height)) < 0.1);\n}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const name=document.querySelector('#email-auth-name'),email=document.querySelector('#email-auth-email'),password=document.querySelector('#email-auth-password');return name&&!name.disabled&&getComputedStyle(name).height==='50px'&&getComputedStyle(email).height==='50px'&&getComputedStyle(password.parentElement).height==='50px'&&getComputedStyle(password.nextElementSibling).width==='16px'&&document.fonts.status==='loaded';}"
+      }
+    ],
+    "localprojects-addlocalprojectdialog--mobile": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "MacBook Pro",
+        "exact": false
+      },
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Documents"
+      },
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Edit path",
+        "exact": true
+      },
+      {
+        "action": "visible",
+        "selector": "input[placeholder=\"Type an absolute path\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('input[placeholder=\"Type an absolute path\"]');return e&&getComputedStyle(e).height==='40px'&&e===document.activeElement&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {
+    "components-ownedloginmigration--email-pending": [
+      {
+        "name": "typed-revealed",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#email-auth-name",
+            "value": "Synthetic 48"
+          },
+          {
+            "action": "fill",
+            "selector": "#email-auth-email",
+            "value": "fixture48@example.com"
+          },
+          {
+            "action": "fill",
+            "selector": "#email-auth-password",
+            "value": "Secret48value"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Show password",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const name=document.querySelector('#email-auth-name'),email=document.querySelector('#email-auth-email'),password=document.querySelector('#email-auth-password');return name&&!name.disabled&&getComputedStyle(name).height==='40px'&&getComputedStyle(email).height==='40px'&&getComputedStyle(password.parentElement).height==='40px'&&getComputedStyle(password.nextElementSibling).width==='16px'&&document.fonts.status==='loaded';}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('#email-auth-password')?.type==='text'&&document.querySelector('#email-auth-name')?.value==='Synthetic 48'"
+          }
+        ]
+      }
+    ],
+    "components-ownedloginmigration--scoped-email-pending": [
+      {
+        "name": "typed-revealed",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#email-auth-name",
+            "value": "Synthetic 48"
+          },
+          {
+            "action": "fill",
+            "selector": "#email-auth-email",
+            "value": "fixture48@example.com"
+          },
+          {
+            "action": "fill",
+            "selector": "#email-auth-password",
+            "value": "Secret48value"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Show password",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const name=document.querySelector('#email-auth-name'),email=document.querySelector('#email-auth-email'),password=document.querySelector('#email-auth-password');return name&&!name.disabled&&getComputedStyle(name).height==='50px'&&getComputedStyle(email).height==='50px'&&getComputedStyle(password.parentElement).height==='50px'&&getComputedStyle(password.nextElementSibling).width==='16px'&&document.fonts.status==='loaded';}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('#email-auth-password')?.type==='text'&&document.querySelector('#email-auth-name')?.value==='Synthetic 48'"
+          }
+        ]
+      }
+    ],
+    "localprojects-addlocalprojectdialog--mobile": [
+      {
+        "name": "path-typed",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "input[placeholder=\"Type an absolute path\"]",
+            "value": "/Users/zoe/Code"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('input[placeholder=\"Type an absolute path\"]')?.value==='/Users/zoe/Code'"
+          }
+        ]
+      }
+    ]
+  }
+}

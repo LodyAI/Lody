@@ -133,13 +133,14 @@ const CommandDialog = ({
           overlay AND content above it via --z-command-palette (registry value 85, with an
           inline fallback so it works even though the var isn't globally defined).
           See packages/components/src/lib/editor-overlay-z-index.ts for the layer scale. */}
-      {/* Fixed, screen-relative height (flex column overrides the dialog's default grid)
-          so the panel never resizes or shifts as the result list grows / shrinks / filters —
-          the list scrolls inside instead. */}
+      {/* A fixed, screen-relative height keeps the panel in place as results filter;
+          the list scrolls inside the dialog's column. */}
       <Dialog.Content
         closeButton={false}
         noAnimation
-        className="z-[var(--z-command-palette,85)] flex h-[min(640px,72vh)] max-w-2xl flex-col gap-0 overflow-hidden border-0 bg-transparent p-0 shadow-none sm:p-0"
+        padding="none"
+        gap="none"
+        className="z-[var(--z-command-palette,85)] h-[min(640px,72vh)] max-w-2xl overflow-hidden border-0 bg-transparent shadow-none"
         backdropClassName="z-[var(--z-command-palette,85)] bg-black/40 backdrop-blur-[2px]"
       >
         <Command

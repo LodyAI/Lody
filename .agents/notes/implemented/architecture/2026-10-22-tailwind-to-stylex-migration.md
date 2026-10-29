@@ -1758,6 +1758,30 @@ The two owning groups pass 13/14 tests, types and formatting; lint retains 17/38
 warnings with zero errors. Earlier full-suite evidence keeps its original source
 boundary, and no earlier OPEN is closed.
 
+The input-height/CommandDialog continuation removes another nine utilities.
+`Input` and `PasswordInput` expose `controlHeight` for the well while preserving
+the existing native `height` attribute on the input. Named density and leading/reveal
+slots stay fixed. Plain inputs merge dynamic StyleX variables before the original
+style object/state callback; wrapped controls keep that callback on their inner
+input. Zero, omission reset, mounted refs/focus/value and password reveal are
+verified. The owning UI README records the public API. No token group is added.
+
+`leaves48-49-acceptance.html` records 96 formal pairs/5,296 equal standard records:
+93 PNGs match and three Input revealed-state frames retain one green-channel-unit
+pixel difference each. Their exact raster cause remains unproved; a single unchanged
+Before control matches the original Before rather than After. The 28 CSS snapshots
+compare 296 selected records and 425,352 ordinary/pseudo values without differences;
+84 expected new private height-variable values and 90 attribute changes stay separate.
+Four real Gallery images are After-only. Full UI passes 25 files/307 tests and
+source-locked components passes 620/6,207 with all 1,264 product/style hashes unchanged.
+
+CommandDialog's 40 pairs preserve its existing 512px panel overflow in a 390px
+viewport. Two original phone errors and eight originally unexecuted states remain;
+the accepted source list explicitly combines 30 healthy originals with ten real
+known-overflow captures rather than fabricating a capture manifest. The matching
+result does not assert viewport fit, native/backend execution or closure of earlier
+OPENs. Current implementation and visual limits remain distinct.
+
 ## Remaining work
 
 The compiler-backed [inventory](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -1765,16 +1789,17 @@ validates AST-discovered candidates with the locked Tailwind compiler. Counts
 are source-occurrence lower bounds, not runtime coverage, emitted CSS size or a
 completion percentage. Unresolved expressions remain a separate work list.
 
-| Source boundary                                              | Scanner method | Occurrences | Files | Unresolved |
-| ------------------------------------------------------------ | -------------- | ----------: | ----: | ---------: |
-| Frozen 29–30                                                 | v1             |       1,736 |   175 |        721 |
-| Frozen 31–33                                                 | v1             |       1,715 |   175 |        717 |
-| Same pre31 source snapshot                                   | v2             |       1,741 |   176 |        725 |
-| Frozen source through 35                                     | v2             |       1,705 |   175 |        721 |
-| Frozen source through 40                                     | v2             |       1,676 |   175 |        721 |
-| Frozen source through 43                                     | v2             |       1,664 |   173 |        721 |
-| Frozen source through 45                                     | v2             |       1,656 |   171 |        721 |
-| Current source through 47, visual limits recorded separately | v2             |       1,646 |   169 |        721 |
+| Source boundary                                            | Scanner method | Occurrences | Files | Unresolved |
+| ---------------------------------------------------------- | -------------- | ----------: | ----: | ---------: |
+| Frozen 29–30                                               | v1             |       1,736 |   175 |        721 |
+| Frozen 31–33                                               | v1             |       1,715 |   175 |        717 |
+| Same pre31 source snapshot                                 | v2             |       1,741 |   176 |        725 |
+| Frozen source through 35                                   | v2             |       1,705 |   175 |        721 |
+| Frozen source through 40                                   | v2             |       1,676 |   175 |        721 |
+| Frozen source through 43                                   | v2             |       1,664 |   173 |        721 |
+| Frozen source through 45                                   | v2             |       1,656 |   171 |        721 |
+| Frozen source through 47                                   | v2             |       1,646 |   169 |        721 |
+| Exact source through 49, visual limits recorded separately | v2             |       1,637 |   169 |        721 |
 
 Earlier method changes recognized single utilities, `withClassName`'s second
 argument and supported static class arrays. Historical per-batch counts remain
@@ -1794,8 +1819,10 @@ utility-looking strings in comparisons or unrelated properties. Ambiguous writes
 remain unresolved. Two adapter `className` writes expose four additional unresolved expressions,
 explaining the corresponding increase in that count.
 
-The current v2 source split is components 1,191 occurrences/153 files/628 unresolved,
-legacy UI 450/14/93 and routes 5/two/zero. Batch34–39 visual differences and rejected
+The current v2 source split is components 1,187 occurrences/153 files/628 unresolved,
+legacy UI 445/14/93 and routes 5/two/zero. The through49 component scan uses an
+exact source copy checked against the pre-test lock while later batches proceed;
+all 688 JS/TS files match that boundary. Batch34–39 visual differences and rejected
 calibrations retain their own status; this source inventory does not accept them.
 
 WebWorkspaceLayout remains deferred until its actual sidebar/runtime/router

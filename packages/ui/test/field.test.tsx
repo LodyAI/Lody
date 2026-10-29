@@ -1,11 +1,13 @@
 import * as stylex from '@stylexjs/stylex';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { act, createRef } from 'react';
 import { describe, expect, test } from 'vitest';
 import { Field } from '../src/field/field';
 import { field, fieldPaletteTheme } from '../src/field/field.tokens.stylex';
 import { Input } from '../src/field/input';
 import { Textarea } from '../src/field/textarea';
 import { forcedThemeClassNames } from '../src/theme/theme';
+import { mount } from './dom';
 
 function classesOf(html: string, tag: string): string[] {
   const open = new RegExp(`<${tag}\\b[^>]*>`).exec(html)?.[0] ?? '';
@@ -115,6 +117,58 @@ describe('Field', () => {
 });
 
 describe('Input and Textarea', () => {
+  test.each([undefined, '/'])(
+    'a resized input retains its native attributes, ref and caller style (leading %s)',
+    async (leading) => {
+      const ref = createRef<HTMLInputElement>();
+      const view = await mount(
+        <Input
+          ref={ref}
+          leading={leading}
+          controlHeight={40}
+          height={17}
+          defaultValue="Retained input"
+          style={(state) => ({ height: state.disabled ? 19 : 44, letterSpacing: '1px' })}
+        />
+      );
+      const input = ref.current!;
+      input.focus();
+      expect(input.getAttribute('height')).toBe('17');
+      expect(input.style.height).toBe('44px');
+      expect(input.style.letterSpacing).toBe('1px');
+      await act(async () => {
+        view.root.render(
+          <Input
+            ref={ref}
+            leading={leading}
+            controlHeight={0}
+            height={18}
+            defaultValue="Retained input"
+            disabled
+            style={(state) => ({ height: state.disabled ? 19 : 44 })}
+          />
+        );
+      });
+      expect(ref.current).toBe(input);
+      expect(input.value).toBe('Retained input');
+      expect(input.disabled).toBe(true);
+      expect(input.getAttribute('height')).toBe('18');
+      expect(input.style.height).toBe('19px');
+      expect(input.style.letterSpacing).toBe('');
+      await act(async () => {
+        view.root.render(
+          <Input ref={ref} leading={leading} defaultValue="Retained input" style={{ height: 46 }} />
+        );
+      });
+      expect(ref.current).toBe(input);
+      expect(input.getAttribute('height')).toBeNull();
+      expect(input.disabled).toBe(false);
+      expect(input.value).toBe('Retained input');
+      expect(input.style.height).toBe('46px');
+      await view.unmount();
+    }
+  );
+
   test('Input renders a native input carrying its size step', () => {
     const html = renderToStaticMarkup(<Input size="small" placeholder="Search" />);
     expect(html).toMatch(/^<input/);

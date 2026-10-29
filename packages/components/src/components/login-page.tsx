@@ -1568,7 +1568,7 @@ export function LoginPage({
                   setError('');
                 }}
                 placeholder={t('login.namePlaceholder', 'Jane Doe')}
-                className="h-10"
+                controlHeight="calc(var(--spacing) * 10)"
               />
             </div>
           </LoginExpandingRow>
@@ -1591,7 +1591,7 @@ export function LoginPage({
                 setEmailAuthStatus('idle');
               }}
               placeholder={t('login.emailPlaceholder', 'you@example.com')}
-              className="h-10"
+              controlHeight="calc(var(--spacing) * 10)"
             />
           </div>
 
@@ -1617,7 +1617,7 @@ export function LoginPage({
                     ? t('login.passwordSignUpPlaceholder', 'Letters and numbers, 8+ characters')
                     : t('login.passwordPlaceholder', 'At least 8 characters')
                 }
-                className="h-10"
+                controlHeight="calc(var(--spacing) * 10)"
                 labels={{
                   show: t('login.showPassword', 'Show password'),
                   hide: t('login.hidePassword', 'Hide password'),

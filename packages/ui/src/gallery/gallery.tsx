@@ -1274,6 +1274,48 @@ function FieldSizeRow({ name, size }: { name: string; size: 'small' | 'medium' |
   );
 }
 
+function FieldHeightRow({ password = false }: { password?: boolean }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [custom, setCustom] = useState(true);
+  const [height, setHeight] = useState('');
+  useEffect(() => {
+    const shell = ref.current?.parentElement;
+    if (shell) setHeight(getComputedStyle(shell).height);
+  }, [custom]);
+  return (
+    <FieldRow
+      legend={password ? 'password · controlHeight' : 'input · controlHeight'}
+      readout={height}
+    >
+      <div
+        data-gallery-field-height={password ? 'password' : 'leading'}
+        {...stylex.props(styles.textSample)}
+      >
+        <Field.Root>
+          <Field.Label>{password ? 'Secret' : 'Command'}</Field.Label>
+          {password ? (
+            <PasswordInput
+              ref={ref}
+              controlHeight={custom ? 40 : undefined}
+              defaultValue="Retained secret"
+            />
+          ) : (
+            <Input
+              ref={ref}
+              controlHeight={custom ? 40 : undefined}
+              leading="/"
+              defaultValue="Retained command"
+            />
+          )}
+        </Field.Root>
+        <Button variant="secondary" size="small" onClick={() => setCustom((value) => !value)}>
+          {custom ? 'Use named height' : 'Use 40px height'}
+        </Button>
+      </div>
+    </FieldRow>
+  );
+}
+
 function InvalidFieldRow() {
   const { ref, value } = useMeasured<HTMLInputElement>('box-shadow');
   return (
@@ -4291,13 +4333,14 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
 
       <Section
         title="Field · sizes and Textarea"
-        rule="28 / 32 / 36, the same ladder as Button, with radius small at 28 and medium at 32 and 36. Textarea is the same well at the medium radius and grows downward. What a value belongs with — an emoji before a name, the / before a command — goes in the leading slot inside the same well, a square the well’s height less its inset, rather than beside it as a second control with a second edge."
+        rule="28 / 32 / 36, the same ladder as Button, with radius small at 28 and medium at 32 and 36. Textarea is the same well at the medium radius and grows downward. What a value belongs with — an emoji before a name, the / before a command — goes in the leading slot inside the same well. Its square follows the named height and inset, including when controlHeight changes the outer well."
       >
         <PaletteSplit palettes={palettes}>
           <Rows>
             {FIELD_SIZES.map((entry) => (
               <FieldSizeRow key={entry.size} {...entry} />
             ))}
+            <FieldHeightRow />
             <FieldRow legend="input · leading">
               <Field.Root name="role">
                 <Field.Label>Role</Field.Label>
@@ -4469,6 +4512,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
             {PASSWORD_SIZES.map((entry) => (
               <PasswordSizeRow key={entry.size} {...entry} />
             ))}
+            <FieldHeightRow password />
             <FieldRow legend={'password \u00b7 invalid'}>
               <Field.Root invalid>
                 <Field.Label>Password</Field.Label>

@@ -1,0 +1,126 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "ids": [
+    "migration-ownedinputheight--matrix",
+    "migration-ownedinputheight--scoped-spacing",
+    "migration-ownedinputheight--caller-styles",
+    "migration-ownedinputheight--mounted-updates"
+  ],
+  "ready": {
+    "migration-ownedinputheight--matrix": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const input=n=>document.querySelector('[data-height-input=\"'+n+'\"]');const well=n=>{const e=input(n);return e?.closest('[data-height-case]')?.dataset.kind==='plain'?e:e?.parentElement;};const height=(n,h)=>well(n)&&getComputedStyle(well(n)).height===h+'px';const slot=n=>input(n)?.previousElementSibling;if(!height('small',28)||!height('medium',32)||!height('large',36)||!['plain','leading','password','disabled','invalid'].every(n=>height(n,40)))return false;if(!input('disabled')?.disabled||!input('disabled')?.nextElementSibling.disabled||input('invalid')?.getAttribute('aria-invalid')!=='true'||getComputedStyle(slot('leading')).width!=='24px'||getComputedStyle(input('password')?.nextElementSibling).width!=='16px')return false;return document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===(new URL(location.href).searchParams.get('globals')?.includes('theme:dark')??false)&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedinputheight--scoped-spacing": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const input=n=>document.querySelector('[data-height-input=\"'+n+'\"]');const well=n=>{const e=input(n);return e?.closest('[data-height-case]')?.dataset.kind==='plain'?e:e?.parentElement;};const height=(n,h)=>well(n)&&getComputedStyle(well(n)).height===h+'px';const slot=n=>input(n)?.previousElementSibling;if(!height('root',60)||!height('element',50)||!height('subtree',30)||!height('subtree-password',30)||getComputedStyle(slot('subtree')).width!=='24px'||getComputedStyle(input('subtree-password')?.nextElementSibling).width!=='16px')return false;return document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===(new URL(location.href).searchParams.get('globals')?.includes('theme:dark')??false)&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedinputheight--caller-styles": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const input=n=>document.querySelector('[data-height-input=\"'+n+'\"]');const well=n=>{const e=input(n);return e?.closest('[data-height-case]')?.dataset.kind==='plain'?e:e?.parentElement;};const height=(n,h)=>well(n)&&getComputedStyle(well(n)).height===h+'px';const slot=n=>input(n)?.previousElementSibling;if(!height('object',46)||!height('callback',44)||!height('leading-callback',40)||!height('password-callback',40)||!height('disabled-callback',19)||getComputedStyle(input('leading-callback')).height!=='22px'||getComputedStyle(input('password-callback')).height!=='23px')return false;if(!['object','callback','leading-callback','password-callback','disabled-callback'].every((n,i)=>input(n)?.getAttribute('height')===String(17+i)))return false;return document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===(new URL(location.href).searchParams.get('globals')?.includes('theme:dark')??false)&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedinputheight--mounted-updates": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const input=n=>document.querySelector('[data-height-input=\"'+n+'\"]');const well=n=>{const e=input(n);return e?.closest('[data-height-case]')?.dataset.kind==='plain'?e:e?.parentElement;};const height=(n,h)=>well(n)&&getComputedStyle(well(n)).height===h+'px';const slot=n=>input(n)?.previousElementSibling;if(!['update-plain','update-leading','update-password'].every(n=>height(n,40)))return false;window.__inputHeightNodes=['update-plain','update-leading','update-password'].map(input);return document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===(new URL(location.href).searchParams.get('globals')?.includes('theme:dark')??false)&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedinputheight--matrix": [
+      {
+        "name": "revealed",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "[data-height-input=password]",
+            "value": "Visible secret 48"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Show password",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const input=n=>document.querySelector('[data-height-input=\"'+n+'\"]');const well=n=>{const e=input(n);return e?.closest('[data-height-case]')?.dataset.kind==='plain'?e:e?.parentElement;};const height=(n,h)=>well(n)&&getComputedStyle(well(n)).height===h+'px';const slot=n=>input(n)?.previousElementSibling;if(input('password')?.type!=='text'||input('password')?.value!=='Visible secret 48'||!height('password',40))return false;return document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===(new URL(location.href).searchParams.get('globals')?.includes('theme:dark')??false)&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedinputheight--mounted-updates": [
+      {
+        "name": "zero",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "[data-height-input=update-plain]",
+            "value": "Typed while resizing"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zero well height",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const input=n=>document.querySelector('[data-height-input=\"'+n+'\"]');const well=n=>{const e=input(n);return e?.closest('[data-height-case]')?.dataset.kind==='plain'?e:e?.parentElement;};const height=(n,h)=>well(n)&&getComputedStyle(well(n)).height===h+'px';const slot=n=>input(n)?.previousElementSibling;const names=['update-plain','update-leading','update-password'];if(!names.every((n,i)=>height(n,0)&&input(n)===window.__inputHeightNodes[i])||input('update-plain')?.value!=='Typed while resizing'||document.activeElement!==input('update-plain'))return false;return document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===(new URL(location.href).searchParams.get('globals')?.includes('theme:dark')??false)&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "omitted",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Omit well height",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const input=n=>document.querySelector('[data-height-input=\"'+n+'\"]');const well=n=>{const e=input(n);return e?.closest('[data-height-case]')?.dataset.kind==='plain'?e:e?.parentElement;};const height=(n,h)=>well(n)&&getComputedStyle(well(n)).height===h+'px';const slot=n=>input(n)?.previousElementSibling;const names=['update-plain','update-leading','update-password'];if(!names.every((n,i)=>height(n,32)&&input(n)===window.__inputHeightNodes[i])||input('update-plain')?.value!=='Typed while resizing'||document.activeElement!==input('update-plain'))return false;return document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===(new URL(location.href).searchParams.get('globals')?.includes('theme:dark')??false)&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "restored",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Restore custom height",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const input=n=>document.querySelector('[data-height-input=\"'+n+'\"]');const well=n=>{const e=input(n);return e?.closest('[data-height-case]')?.dataset.kind==='plain'?e:e?.parentElement;};const height=(n,h)=>well(n)&&getComputedStyle(well(n)).height===h+'px';const slot=n=>input(n)?.previousElementSibling;const names=['update-plain','update-leading','update-password'];if(!names.every((n,i)=>height(n,40)&&input(n)===window.__inputHeightNodes[i])||input('update-plain')?.value!=='Typed while resizing'||document.activeElement!==input('update-plain'))return false;return document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===(new URL(location.href).searchParams.get('globals')?.includes('theme:dark')??false)&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ]
+  }
+}
