@@ -324,6 +324,16 @@ pointer/focus/animation records constrain a diagnosis without proving its raster
 cause. The solo share-title continuation separately records 28 exact pairs and
 4,102 records, including scoped dimensions and actual long-title clipping.
 
+The 41 continuation uses 60 real pairs/1,900 standard records; each side is an
+explicit 52+8 capture-origin assembly. Keep the original eight timeout screenshots,
+wrong square-size assumption and bounded diagnostic follow-up separate. A body
+portal subtree can shrink a 17.5px share glyph to 16px wide: preserve that actual
+flex contract. The mobile-account/encrypted-mark continuation contributes another
+64 exact pairs/4,536 records and eight normal-motion closing pairs; pausing a real
+closing animation at its start does not validate its whole timeline. An empty or
+opaque caller class still replaces the encrypted mark's default rather than
+merging with it. CSS-only samples never add screenshot pairs.
+
 The existing Browser Preview sweep inherits its configured base URL in every
 fresh context. Static builds use production React, so story input helpers must
 not call `React.act`; dispatch the native input boundary, allow the controlled

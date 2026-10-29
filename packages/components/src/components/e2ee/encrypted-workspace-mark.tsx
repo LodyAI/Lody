@@ -1,5 +1,13 @@
 import { Lock } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
+
+const styles = stylex.create({
+  defaultMark: {
+    flexShrink: 0,
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
 
 /** Server-listed display metadata only. Runtime admission always resolves the
  * persisted descriptor; a missing or forged listing never opens or blocks data. */
@@ -21,7 +29,7 @@ export function EncryptedWorkspaceMark({ className }: { className?: string }) {
       role="img"
       aria-label={label}
       size={14}
-      className={className ?? 'shrink-0 text-muted-foreground'}
+      className={className ?? stylex.props(styles.defaultMark).className}
     >
       <title>{label}</title>
     </Lock>

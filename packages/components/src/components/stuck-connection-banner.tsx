@@ -10,7 +10,6 @@ import * as stylex from '@stylexjs/stylex';
 import { useStuckConnectionHint } from '@/hooks/use-stuck-connection';
 import { useWorkspaceDataScopeState } from '@/hooks/use-workspace-data-scope-state';
 import { RecoveryPage, reportRecoveryShown } from './blocking-wait-placeholder';
-import { withClassName } from '@/lib/stylex';
 import { themeColors } from '../style/theme-colors.stylex';
 import {
   themeFontSize,
@@ -149,7 +148,8 @@ export function StuckConnectionBanner({
       >
         <div {...stylex.props(styles.row)}>
           <Spinner
-            {...withClassName(stylex.props(styles.connectionSpinner), 'h-4 w-4')}
+            {...stylex.props(styles.connectionSpinner)}
+            diameter="calc(var(--spacing) * 4)"
             aria-hidden="true"
           />
           <p {...stylex.props(styles.title)}>{labels.title}</p>

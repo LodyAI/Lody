@@ -597,7 +597,7 @@ export function MobileAccountSettings({
                   maxLength={120}
                   placeholder={t('settings.profile.namePlaceholder')}
                   disabled={isSavingUserName}
-                  className="h-9 w-full"
+                  className="h-9"
                   aria-label={t('settings.profile.name')}
                 />
               ) : (
@@ -704,7 +704,7 @@ export function MobileAccountSettings({
                   maxLength={120}
                   placeholder={t('settings.account.workspaceNamePlaceholder')}
                   disabled={isRenamingOrganization}
-                  className="h-9 w-full"
+                  className="h-9"
                   aria-label={t('settings.account.workspaceName')}
                 />
               ) : (
@@ -1197,7 +1197,10 @@ export function MobileAccountSettings({
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               >
                 {revokingCliApiKeyId ? (
-                  <Spinner diameter="calc(var(--spacing) * 3.5)" className="mr-1.5" />
+                  <Spinner
+                    diameter="calc(var(--spacing) * 3.5)"
+                    className={stylex.props(styles.pendingActionSpacing).className}
+                  />
                 ) : (
                   <Trash2 {...stylex.props(styles.buttonIcon)} />
                 )}
@@ -1281,7 +1284,10 @@ export function MobileAccountSettings({
             >
               {isLeaving ? (
                 <>
-                  <Spinner diameter="calc(var(--spacing) * 4)" className="mr-2" />
+                  <Spinner
+                    diameter="calc(var(--spacing) * 4)"
+                    className={stylex.props(styles.pendingAccountDeletionSpacing).className}
+                  />
                   {t('common.processing')}
                 </>
               ) : (

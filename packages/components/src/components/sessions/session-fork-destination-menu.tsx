@@ -1,10 +1,19 @@
 import { type ComponentProps, type ReactElement, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import { Copy, Folder } from 'lucide-react';
 
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
 import { Menu } from '@/ui/menu';
 import { Tooltip } from '@/ui/armed-overlays';
+
+const styles = stylex.create({
+  pendingStatus: {
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--tw-leading, var(--text-xs--line-height))',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
 
 export type SessionForkDestination = 'shared' | 'new-worktree';
 
@@ -102,7 +111,7 @@ function DestinationRow({
       icon={icon}
       disabled={disabled}
       endContent={
-        status ? <span className="text-xs text-muted-foreground">{status}</span> : undefined
+        status ? <span {...stylex.props(styles.pendingStatus)}>{status}</span> : undefined
       }
       onClick={onSelect}
     >

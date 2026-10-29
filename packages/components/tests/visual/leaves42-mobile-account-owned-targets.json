@@ -1,0 +1,151 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone SE",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "mobile-ownedmobileaccountsettingsmigration--account",
+    "mobile-ownedmobileaccountsettingsmigration--account-subtree-variables",
+    "mobile-ownedmobileaccountsettingsmigration--workspace",
+    "mobile-ownedmobileaccountsettingsmigration--workspace-subtree-variables"
+  ],
+  "ready": {
+    "mobile-ownedmobileaccountsettingsmigration--account": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Edit name"
+      },
+      {
+        "action": "visible",
+        "selector": "#profile-name-mobile"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const el=document.getElementById('profile-name-mobile');if(!el||document.activeElement!==el)return false;const c=getComputedStyle(el),rect=el.getBoundingClientRect(),parent=el.parentElement,pc=getComputedStyle(parent),pr=parent.getBoundingClientRect(),unit=c.getPropertyValue('--spacing').trim(),step=parseFloat(unit)*(unit.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);return c.width!=='auto'&&Math.abs(rect.width-(pr.width-parseFloat(pc.paddingLeft)-parseFloat(pc.paddingRight)-parseFloat(pc.borderLeftWidth)-parseFloat(pc.borderRightWidth)))<.1&&Math.abs(rect.height-step*9)<.1&&rect.width>100&&rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight&&el.maxLength===120&&!el.disabled&&Number(c.opacity)>0&&document.fonts.status==='loaded'&&document.documentElement.classList.contains(window.__lodyVisualTheme??(document.documentElement.classList.contains('dark')?'dark':'light'));}"
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--account-subtree-variables": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Edit name"
+      },
+      {
+        "action": "visible",
+        "selector": "#profile-name-mobile"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const el=document.getElementById('profile-name-mobile');if(!el||document.activeElement!==el)return false;const c=getComputedStyle(el),rect=el.getBoundingClientRect(),parent=el.parentElement,pc=getComputedStyle(parent),pr=parent.getBoundingClientRect(),unit=c.getPropertyValue('--spacing').trim(),step=parseFloat(unit)*(unit.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);return c.width!=='auto'&&Math.abs(rect.width-(pr.width-parseFloat(pc.paddingLeft)-parseFloat(pc.paddingRight)-parseFloat(pc.borderLeftWidth)-parseFloat(pc.borderRightWidth)))<.1&&Math.abs(rect.height-step*9)<.1&&rect.width>100&&rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight&&el.maxLength===120&&!el.disabled&&Number(c.opacity)>0&&document.fonts.status==='loaded'&&document.documentElement.classList.contains(window.__lodyVisualTheme??(document.documentElement.classList.contains('dark')?'dark':'light'));}"
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--workspace": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Rename workspace"
+      },
+      {
+        "action": "visible",
+        "selector": "#workspace-name-mobile"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const el=document.getElementById('workspace-name-mobile');if(!el||document.activeElement!==el)return false;const c=getComputedStyle(el),rect=el.getBoundingClientRect(),parent=el.parentElement,pc=getComputedStyle(parent),pr=parent.getBoundingClientRect(),unit=c.getPropertyValue('--spacing').trim(),step=parseFloat(unit)*(unit.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);return c.width!=='auto'&&Math.abs(rect.width-(pr.width-parseFloat(pc.paddingLeft)-parseFloat(pc.paddingRight)-parseFloat(pc.borderLeftWidth)-parseFloat(pc.borderRightWidth)))<.1&&Math.abs(rect.height-step*9)<.1&&rect.width>100&&rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight&&el.maxLength===120&&!el.disabled&&Number(c.opacity)>0&&document.fonts.status==='loaded'&&document.documentElement.classList.contains(window.__lodyVisualTheme??(document.documentElement.classList.contains('dark')?'dark':'light'));}"
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--workspace-subtree-variables": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Rename workspace"
+      },
+      {
+        "action": "visible",
+        "selector": "#workspace-name-mobile"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const el=document.getElementById('workspace-name-mobile');if(!el||document.activeElement!==el)return false;const c=getComputedStyle(el),rect=el.getBoundingClientRect(),parent=el.parentElement,pc=getComputedStyle(parent),pr=parent.getBoundingClientRect(),unit=c.getPropertyValue('--spacing').trim(),step=parseFloat(unit)*(unit.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);return c.width!=='auto'&&Math.abs(rect.width-(pr.width-parseFloat(pc.paddingLeft)-parseFloat(pc.paddingRight)-parseFloat(pc.borderLeftWidth)-parseFloat(pc.borderRightWidth)))<.1&&Math.abs(rect.height-step*9)<.1&&rect.width>100&&rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight&&el.maxLength===120&&!el.disabled&&Number(c.opacity)>0&&document.fonts.status==='loaded'&&document.documentElement.classList.contains(window.__lodyVisualTheme??(document.documentElement.classList.contains('dark')?'dark':'light'));}"
+      }
+    ]
+  },
+  "states": {
+    "mobile-ownedmobileaccountsettingsmigration--account": [
+      {
+        "name": "long-value",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#profile-name-mobile, #workspace-name-mobile",
+            "value": "Migration name \u4e2d\u6587 boundary Wide name 0123456789 Wide name 0123456789 Wide name 0123456789 Wide name 0123456789 Wide name"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const el=document.querySelector('#profile-name-mobile, #workspace-name-mobile');return el&&el.value.length===120&&el.scrollWidth>el.clientWidth&&document.activeElement===el;}"
+          }
+        ]
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--account-subtree-variables": [
+      {
+        "name": "long-value",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#profile-name-mobile, #workspace-name-mobile",
+            "value": "Migration name \u4e2d\u6587 boundary Wide name 0123456789 Wide name 0123456789 Wide name 0123456789 Wide name 0123456789 Wide name"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const el=document.querySelector('#profile-name-mobile, #workspace-name-mobile');return el&&el.value.length===120&&el.scrollWidth>el.clientWidth&&document.activeElement===el;}"
+          }
+        ]
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--workspace": [
+      {
+        "name": "long-value",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#profile-name-mobile, #workspace-name-mobile",
+            "value": "Migration name \u4e2d\u6587 boundary Wide name 0123456789 Wide name 0123456789 Wide name 0123456789 Wide name 0123456789 Wide name"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const el=document.querySelector('#profile-name-mobile, #workspace-name-mobile');return el&&el.value.length===120&&el.scrollWidth>el.clientWidth&&document.activeElement===el;}"
+          }
+        ]
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--workspace-subtree-variables": [
+      {
+        "name": "long-value",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#profile-name-mobile, #workspace-name-mobile",
+            "value": "Migration name \u4e2d\u6587 boundary Wide name 0123456789 Wide name 0123456789 Wide name 0123456789 Wide name 0123456789 Wide name"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const el=document.querySelector('#profile-name-mobile, #workspace-name-mobile');return el&&el.value.length===120&&el.scrollWidth>el.clientWidth&&document.activeElement===el;}"
+          }
+        ]
+      }
+    ]
+  }
+}

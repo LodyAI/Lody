@@ -106,3 +106,22 @@ function ObservedBanner({ scope }: { scope?: 'root' | 'subtree' }) {
 export const ObservedActions: Story = { render: () => <ObservedBanner /> };
 export const RootInk: Story = { render: () => <ObservedBanner scope="root" /> };
 export const SubtreeInk: Story = { render: () => <ObservedBanner scope="subtree" /> };
+
+function SpacedObservedBanner({ scope }: { scope: 'root' | 'subtree' }) {
+  useLayoutEffect(() => {
+    const target = scope === 'root' ? document.documentElement : document.body;
+    const previous = target.style.getPropertyValue('--spacing');
+    target.style.setProperty('--spacing', '5px');
+    return () => {
+      if (previous) target.style.setProperty('--spacing', previous);
+      else target.style.removeProperty('--spacing');
+    };
+  }, [scope]);
+  return (
+    <div data-spacing-scope={scope}>
+      <ObservedBanner />
+    </div>
+  );
+}
+export const RootSpacing: Story = { render: () => <SpacedObservedBanner scope="root" /> };
+export const SubtreeSpacing: Story = { render: () => <SpacedObservedBanner scope="subtree" /> };

@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import { createStore, Provider } from 'jotai';
 import {
   createLocalPlatformProvider,
@@ -13,7 +13,23 @@ import { SessionShareMobileMenu } from '@/components/sharing/session-share-mobil
 
 // This story verifies the separate mobile entry and modal handoff. The ready
 // management states are rendered by Sharing/SessionShareManager stories.
-function MenuStory({ local = false }: { local?: boolean }) {
+function MenuStory({
+  local = false,
+  spacingScope,
+}: {
+  local?: boolean;
+  spacingScope?: 'root' | 'subtree';
+}) {
+  useLayoutEffect(() => {
+    if (!spacingScope) return undefined;
+    const target = spacingScope === 'root' ? document.documentElement : document.body;
+    const previous = target.style.getPropertyValue('--spacing');
+    target.style.setProperty('--spacing', '5px');
+    return () => {
+      if (previous) target.style.setProperty('--spacing', previous);
+      else target.style.removeProperty('--spacing');
+    };
+  }, [spacingScope]);
   const [open, setOpen] = useState(true);
   const [store] = useState(() => {
     const value = createStore();
@@ -34,7 +50,9 @@ function MenuStory({ local = false }: { local?: boolean }) {
           capabilities: local ? platform.capabilities : CLOUD_PLATFORM_CAPABILITIES,
         }}
       >
-        <button onClick={() => setOpen(true)}>Open menu</button>
+        <button data-spacing-scope={spacingScope} onClick={() => setOpen(true)}>
+          Open menu
+        </button>
         <SessionShareMobileMenu
           workspaceId={'story-workspace' as WorkspaceId}
           session={{
@@ -65,3 +83,6 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 export const Cloud: Story = {};
 export const Local: Story = { args: { local: true } };
+
+export const CloudRootSpacing: Story = { args: { spacingScope: 'root' } };
+export const CloudSubtreeSpacing: Story = { args: { spacingScope: 'subtree' } };

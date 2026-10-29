@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { GitFork } from 'lucide-react';
 
@@ -11,14 +11,29 @@ import { Button } from '@lody/ui/button';
 function ForkTrigger({
   worktreeAvailability,
   nativeForkAvailable = true,
+  spacingScope,
 }: {
+  spacingScope?: 'root' | 'subtree';
   nativeForkAvailable?: boolean;
   worktreeAvailability: SessionForkWorktreeAvailability;
 }) {
+  useLayoutEffect(() => {
+    if (!spacingScope) return undefined;
+    const target = spacingScope === 'root' ? document.documentElement : document.body;
+    const previous = target.style.getPropertyValue('--spacing');
+    target.style.setProperty('--spacing', '5px');
+    return () => {
+      if (previous) target.style.setProperty('--spacing', previous);
+      else target.style.removeProperty('--spacing');
+    };
+  }, [spacingScope]);
   const [open, setOpen] = useState(true);
   const [lastChoice, setLastChoice] = useState<string>('none');
   return (
-    <div className="flex min-h-[220px] flex-col items-start justify-end gap-3 bg-background p-6 text-foreground">
+    <div
+      data-spacing-scope={spacingScope}
+      className="flex min-h-[220px] flex-col items-start justify-end gap-3 bg-background p-6 text-foreground"
+    >
       <div className="text-xs text-muted-foreground">Last choice: {lastChoice}</div>
       <SessionForkDestinationMenu
         open={open}
@@ -57,4 +72,11 @@ export const CheckingGit: Story = {
 
 export const CopyOnly: Story = {
   args: { nativeForkAvailable: false, worktreeAvailability: 'hidden' },
+};
+
+export const CheckingGitRootSpacing: Story = {
+  args: { worktreeAvailability: 'checking', spacingScope: 'root' },
+};
+export const CheckingGitSubtreeSpacing: Story = {
+  args: { worktreeAvailability: 'checking', spacingScope: 'subtree' },
 };

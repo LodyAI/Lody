@@ -1674,6 +1674,33 @@ and 25 UI files/302 tests. Its 1,264 product/style files were hashed before test
 launch and remained unchanged; independently prepared next-batch stories were
 outside that product freeze. This is UI-suite evidence, not a root/Electron pass.
 
+The spacing/avatar-default continuation removes twelve more utilities: six from
+Banner/Fork/Share glyphs, four from mobile account controls and two encrypted
+workspace-mark defaults. The typography retains the original size/leading variable
+readers; the body-scoped share glyph keeps its actual 16×17.5px flex shrink rather
+than being forced square. Two account inputs already inherit the primitive's
+100% width, and pending-spinner margins remain local spacing reads. The encrypted
+mark's nullish fallback still lets an empty or opaque caller class replace the
+entire default; its SVG size14 attributes and actual Menu/Sheet ancestors remain.
+
+`leaves41-acceptance.html` records 60 exact PNG pairs/1,900 equal standard records.
+Each side references 52 original successful frames plus eight explicitly sourced
+missing frames; neither is described as a single clean capture. Four subtree-gate
+timeouts per side, original candidate frames and the wrong square-glyph gate stay
+diagnostic. Eighteen CSS scenes compare 66 samples/310,275 values; twelve newly
+introduced private width/height variables and expected attributes differ. The
+initial Banner timeout trigger remains unknown, with an executable bounded
+follow-up rather than an asserted clock cause.
+
+The 42–43 continuation records another 64 exact PNG pairs/4,536 standard records.
+Eight real normal-motion closing pairs hold the actual finite exit at its start
+and advancing Spinner timelines at 400ms; they do not prove the entire closing
+animation. The mark compares twelve CSS scenes/36 glyphs/169,302 values, including
+actual caller replacement and body palette overrides. Scoped checks pass (19, two
+and eight owning tests respectively); lint retains one/twelve/zero warnings with
+zero errors. Existing source-profile mistakes and label-case calibration failures
+remain separate from the matching final matrices; no prior OPEN is closed.
+
 ## Remaining work
 
 The compiler-backed [inventory](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -1687,7 +1714,8 @@ completion percentage. Unresolved expressions remain a separate work list.
 | Frozen 31–33                                                 | v1             |       1,715 |   175 |        717 |
 | Same pre31 source snapshot                                   | v2             |       1,741 |   176 |        725 |
 | Frozen source through 35                                     | v2             |       1,705 |   175 |        721 |
-| Current source through 40, visual limits recorded separately | v2             |       1,676 |   175 |        721 |
+| Frozen source through 40                                     | v2             |       1,676 |   175 |        721 |
+| Current source through 43, visual limits recorded separately | v2             |       1,664 |   173 |        721 |
 
 Earlier method changes recognized single utilities, `withClassName`'s second
 argument and supported static class arrays. Historical per-batch counts remain
@@ -1707,7 +1735,7 @@ utility-looking strings in comparisons or unrelated properties. Ambiguous writes
 remain unresolved. Two adapter `className` writes expose four additional unresolved expressions,
 explaining the corresponding increase in that count.
 
-The current v2 source split is components 1,221 occurrences/159 files/628 unresolved,
+The current v2 source split is components 1,209 occurrences/157 files/628 unresolved,
 legacy UI 450/14/93 and routes 5/two/zero. Batch34–39 visual differences and rejected
 calibrations retain their own status; this source inventory does not accept them.
 

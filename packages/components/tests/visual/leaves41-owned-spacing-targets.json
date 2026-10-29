@@ -1,0 +1,192 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "ids": [
+    "workspace-stuckconnectionbanner--observed-actions",
+    "workspace-stuckconnectionbanner--root-spacing",
+    "workspace-stuckconnectionbanner--subtree-spacing",
+    "sessions-sessionforkdestinationmenu--checking-git",
+    "sessions-sessionforkdestinationmenu--checking-git-root-spacing",
+    "sessions-sessionforkdestinationmenu--checking-git-subtree-spacing",
+    "sharing-sessionsharemobilemenu--cloud",
+    "sharing-sessionsharemobilemenu--cloud-root-spacing",
+    "sharing-sessionsharemobilemenu--cloud-subtree-spacing"
+  ],
+  "ready": {
+    "workspace-stuckconnectionbanner--observed-actions": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.documentElement,rs=getComputedStyle(root),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||root.classList.contains('dark')!==(theme==='dark')||document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running'))return false;const status=document.querySelector('[role=status]'),card=status?.firstElementChild,target=status?.querySelector('[aria-hidden=true]');if(!target||!card||getComputedStyle(card).opacity!=='1'||!['none','matrix(1, 0, 0, 1, 0, 0)'].includes(getComputedStyle(card).transform)||!document.querySelector('[data-stuck-banner-ready=true]'))return false;const c=getComputedStyle(target);const rawS=c.getPropertyValue('--spacing').trim(),s=parseFloat(rawS)*(rawS.endsWith('rem')?parseFloat(rs.fontSize):1);if(Math.abs(parseFloat(c.width)-s*4)>.01||Math.abs(parseFloat(c.height)-s*4)>.01||!status.textContent.includes('Still connecting'))return false;const raw=c.getPropertyValue('--spacing').trim(),step=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(rs.fontSize):1);if(!Number.isFinite(step))return false;const r=target.getBoundingClientRect();if(r.width<=0||r.height<=0||r.top<0||r.left<0||r.right>innerWidth||r.bottom>innerHeight)return false;const signature=JSON.stringify([r.x,r.y,r.width,r.height,c.opacity,c.transform]);const state=window.__leaves41Ready??={last:'',count:0};state.count=state.last===signature?state.count+1:0;state.last=signature;window.__leaves41Ready=state;return state.count>=3;}"
+      }
+    ],
+    "workspace-stuckconnectionbanner--root-spacing": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.documentElement,rs=getComputedStyle(root),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||root.classList.contains('dark')!==(theme==='dark')||document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running'))return false;const writer=root;if(writer.style.getPropertyValue('--spacing')!=='5px')return false;const status=document.querySelector('[role=status]'),card=status?.firstElementChild,target=status?.querySelector('[aria-hidden=true]');if(!target||!card||getComputedStyle(card).opacity!=='1'||!['none','matrix(1, 0, 0, 1, 0, 0)'].includes(getComputedStyle(card).transform)||!document.querySelector('[data-stuck-banner-ready=true]'))return false;const c=getComputedStyle(target);const rawS=c.getPropertyValue('--spacing').trim(),s=parseFloat(rawS)*(rawS.endsWith('rem')?parseFloat(rs.fontSize):1);if(Math.abs(parseFloat(c.width)-s*4)>.01||Math.abs(parseFloat(c.height)-s*4)>.01||!status.textContent.includes('Still connecting'))return false;const raw=c.getPropertyValue('--spacing').trim(),step=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(rs.fontSize):1);if(!Number.isFinite(step)||step!==5)return false;const r=target.getBoundingClientRect();if(r.width<=0||r.height<=0||r.top<0||r.left<0||r.right>innerWidth||r.bottom>innerHeight)return false;const signature=JSON.stringify([r.x,r.y,r.width,r.height,c.opacity,c.transform]);const state=window.__leaves41Ready??={last:'',count:0};state.count=state.last===signature?state.count+1:0;state.last=signature;window.__leaves41Ready=state;return state.count>=3;}"
+      }
+    ],
+    "workspace-stuckconnectionbanner--subtree-spacing": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.documentElement,rs=getComputedStyle(root),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||root.classList.contains('dark')!==(theme==='dark')||document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running'))return false;const writer=document.body;if(writer.style.getPropertyValue('--spacing')!=='5px')return false;if(root.style.getPropertyValue('--spacing')==='5px')return false;const status=document.querySelector('[role=status]'),card=status?.firstElementChild,target=status?.querySelector('[aria-hidden=true]');if(!target||!card||getComputedStyle(card).opacity!=='1'||!['none','matrix(1, 0, 0, 1, 0, 0)'].includes(getComputedStyle(card).transform)||!document.querySelector('[data-stuck-banner-ready=true]'))return false;const c=getComputedStyle(target);const rawS=c.getPropertyValue('--spacing').trim(),s=parseFloat(rawS)*(rawS.endsWith('rem')?parseFloat(rs.fontSize):1);if(Math.abs(parseFloat(c.width)-s*4)>.01||Math.abs(parseFloat(c.height)-s*4)>.01||!status.textContent.includes('Still connecting'))return false;const raw=c.getPropertyValue('--spacing').trim(),step=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(rs.fontSize):1);if(!Number.isFinite(step)||step!==5)return false;const r=target.getBoundingClientRect();if(r.width<=0||r.height<=0||r.top<0||r.left<0||r.right>innerWidth||r.bottom>innerHeight)return false;const signature=JSON.stringify([r.x,r.y,r.width,r.height,c.opacity,c.transform]);const state=window.__leaves41Ready??={last:'',count:0};state.count=state.last===signature?state.count+1:0;state.last=signature;window.__leaves41Ready=state;return state.count>=3;}"
+      }
+    ],
+    "sessions-sessionforkdestinationmenu--checking-git": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.documentElement,rs=getComputedStyle(root),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||root.classList.contains('dark')!==(theme==='dark')||document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running'))return false;const menu=document.querySelector('[role=menu]'),row=menu?.querySelector('[role=menuitem][aria-disabled=true]'),target=[...(row?.querySelectorAll('span')??[])].find(e=>e.childElementCount===0&&e.textContent==='Checking Git status\u2026');if(!target||!row||!row.textContent.includes('Fork to new worktree')||!document.body.textContent.includes('Last choice: none'))return false;const c=getComputedStyle(target),mc=getComputedStyle(menu);if(mc.opacity!=='1'||!['none','matrix(1, 0, 0, 1, 0, 0)'].includes(mc.transform)||parseFloat(c.fontSize)<=0||parseFloat(c.lineHeight)<=0||c.color==='rgba(0, 0, 0, 0)')return false;const raw=c.getPropertyValue('--spacing').trim(),step=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(rs.fontSize):1);if(!Number.isFinite(step))return false;const r=target.getBoundingClientRect();if(r.width<=0||r.height<=0||r.top<0||r.left<0||r.right>innerWidth||r.bottom>innerHeight)return false;const signature=JSON.stringify([r.x,r.y,r.width,r.height,c.opacity,c.transform]);const state=window.__leaves41Ready??={last:'',count:0};state.count=state.last===signature?state.count+1:0;state.last=signature;window.__leaves41Ready=state;return state.count>=3;}"
+      }
+    ],
+    "sessions-sessionforkdestinationmenu--checking-git-root-spacing": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.documentElement,rs=getComputedStyle(root),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||root.classList.contains('dark')!==(theme==='dark')||document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running'))return false;const writer=root;if(writer.style.getPropertyValue('--spacing')!=='5px')return false;const menu=document.querySelector('[role=menu]'),row=menu?.querySelector('[role=menuitem][aria-disabled=true]'),target=[...(row?.querySelectorAll('span')??[])].find(e=>e.childElementCount===0&&e.textContent==='Checking Git status\u2026');if(!target||!row||!row.textContent.includes('Fork to new worktree')||!document.body.textContent.includes('Last choice: none'))return false;const c=getComputedStyle(target),mc=getComputedStyle(menu);if(mc.opacity!=='1'||!['none','matrix(1, 0, 0, 1, 0, 0)'].includes(mc.transform)||parseFloat(c.fontSize)<=0||parseFloat(c.lineHeight)<=0||c.color==='rgba(0, 0, 0, 0)')return false;const raw=c.getPropertyValue('--spacing').trim(),step=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(rs.fontSize):1);if(!Number.isFinite(step)||step!==5)return false;const r=target.getBoundingClientRect();if(r.width<=0||r.height<=0||r.top<0||r.left<0||r.right>innerWidth||r.bottom>innerHeight)return false;const signature=JSON.stringify([r.x,r.y,r.width,r.height,c.opacity,c.transform]);const state=window.__leaves41Ready??={last:'',count:0};state.count=state.last===signature?state.count+1:0;state.last=signature;window.__leaves41Ready=state;return state.count>=3;}"
+      }
+    ],
+    "sessions-sessionforkdestinationmenu--checking-git-subtree-spacing": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.documentElement,rs=getComputedStyle(root),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||root.classList.contains('dark')!==(theme==='dark')||document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running'))return false;const writer=document.body;if(writer.style.getPropertyValue('--spacing')!=='5px')return false;if(root.style.getPropertyValue('--spacing')==='5px')return false;const menu=document.querySelector('[role=menu]'),row=menu?.querySelector('[role=menuitem][aria-disabled=true]'),target=[...(row?.querySelectorAll('span')??[])].find(e=>e.childElementCount===0&&e.textContent==='Checking Git status\u2026');if(!target||!row||!row.textContent.includes('Fork to new worktree')||!document.body.textContent.includes('Last choice: none'))return false;const c=getComputedStyle(target),mc=getComputedStyle(menu);if(mc.opacity!=='1'||!['none','matrix(1, 0, 0, 1, 0, 0)'].includes(mc.transform)||parseFloat(c.fontSize)<=0||parseFloat(c.lineHeight)<=0||c.color==='rgba(0, 0, 0, 0)')return false;const raw=c.getPropertyValue('--spacing').trim(),step=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(rs.fontSize):1);if(!Number.isFinite(step)||step!==5)return false;const r=target.getBoundingClientRect();if(r.width<=0||r.height<=0||r.top<0||r.left<0||r.right>innerWidth||r.bottom>innerHeight)return false;const signature=JSON.stringify([r.x,r.y,r.width,r.height,c.opacity,c.transform]);const state=window.__leaves41Ready??={last:'',count:0};state.count=state.last===signature?state.count+1:0;state.last=signature;window.__leaves41Ready=state;return state.count>=3;}"
+      }
+    ],
+    "sharing-sessionsharemobilemenu--cloud": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.documentElement,rs=getComputedStyle(root),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||root.classList.contains('dark')!==(theme==='dark')||document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running'))return false;const dialog=document.querySelector('[data-slot=drawer-content][data-state=open]'),icons=dialog?.querySelectorAll('svg.lucide-share-2');const target=icons?.[0];if(!dialog||icons.length!==1||!target||target.closest('button')?.textContent!=='Share')return false;const c=getComputedStyle(target),dc=getComputedStyle(dialog);if(dc.opacity!=='1'||!['none','matrix(1, 0, 0, 1, 0, 0)'].includes(dc.transform))return false;const rawS=c.getPropertyValue('--spacing').trim(),s=parseFloat(rawS)*(rawS.endsWith('rem')?parseFloat(rs.fontSize):1);const slotWidth=target.parentElement.getBoundingClientRect().width;if(c.flexShrink!=='1'||Math.abs(parseFloat(c.width)-Math.min(s*3.5,slotWidth))>.01||Math.abs(parseFloat(c.height)-s*3.5)>.01)return false;const raw=c.getPropertyValue('--spacing').trim(),step=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(rs.fontSize):1);if(!Number.isFinite(step))return false;const r=target.getBoundingClientRect();if(r.width<=0||r.height<=0||r.top<0||r.left<0||r.right>innerWidth||r.bottom>innerHeight)return false;const signature=JSON.stringify([r.x,r.y,r.width,r.height,c.opacity,c.transform]);const state=window.__leaves41Ready??={last:'',count:0};state.count=state.last===signature?state.count+1:0;state.last=signature;window.__leaves41Ready=state;return state.count>=3;}"
+      }
+    ],
+    "sharing-sessionsharemobilemenu--cloud-root-spacing": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.documentElement,rs=getComputedStyle(root),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||root.classList.contains('dark')!==(theme==='dark')||document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running'))return false;const writer=root;if(writer.style.getPropertyValue('--spacing')!=='5px')return false;const dialog=document.querySelector('[data-slot=drawer-content][data-state=open]'),icons=dialog?.querySelectorAll('svg.lucide-share-2');const target=icons?.[0];if(!dialog||icons.length!==1||!target||target.closest('button')?.textContent!=='Share')return false;const c=getComputedStyle(target),dc=getComputedStyle(dialog);if(dc.opacity!=='1'||!['none','matrix(1, 0, 0, 1, 0, 0)'].includes(dc.transform))return false;const rawS=c.getPropertyValue('--spacing').trim(),s=parseFloat(rawS)*(rawS.endsWith('rem')?parseFloat(rs.fontSize):1);const slotWidth=target.parentElement.getBoundingClientRect().width;if(c.flexShrink!=='1'||Math.abs(parseFloat(c.width)-Math.min(s*3.5,slotWidth))>.01||Math.abs(parseFloat(c.height)-s*3.5)>.01)return false;const raw=c.getPropertyValue('--spacing').trim(),step=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(rs.fontSize):1);if(!Number.isFinite(step)||step!==5)return false;const r=target.getBoundingClientRect();if(r.width<=0||r.height<=0||r.top<0||r.left<0||r.right>innerWidth||r.bottom>innerHeight)return false;const signature=JSON.stringify([r.x,r.y,r.width,r.height,c.opacity,c.transform]);const state=window.__leaves41Ready??={last:'',count:0};state.count=state.last===signature?state.count+1:0;state.last=signature;window.__leaves41Ready=state;return state.count>=3;}"
+      }
+    ],
+    "sharing-sessionsharemobilemenu--cloud-subtree-spacing": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.documentElement,rs=getComputedStyle(root),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||root.classList.contains('dark')!==(theme==='dark')||document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running'))return false;const writer=document.body;if(writer.style.getPropertyValue('--spacing')!=='5px')return false;if(root.style.getPropertyValue('--spacing')==='5px')return false;const dialog=document.querySelector('[data-slot=drawer-content][data-state=open]'),icons=dialog?.querySelectorAll('svg.lucide-share-2');const target=icons?.[0];if(!dialog||icons.length!==1||!target||target.closest('button')?.textContent!=='Share')return false;const c=getComputedStyle(target),dc=getComputedStyle(dialog);if(dc.opacity!=='1'||!['none','matrix(1, 0, 0, 1, 0, 0)'].includes(dc.transform))return false;const rawS=c.getPropertyValue('--spacing').trim(),s=parseFloat(rawS)*(rawS.endsWith('rem')?parseFloat(rs.fontSize):1);const slotWidth=target.parentElement.getBoundingClientRect().width;if(c.flexShrink!=='1'||Math.abs(parseFloat(c.width)-Math.min(s*3.5,slotWidth))>.01||Math.abs(parseFloat(c.height)-s*3.5)>.01)return false;const raw=c.getPropertyValue('--spacing').trim(),step=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(rs.fontSize):1);if(!Number.isFinite(step)||step!==5)return false;const r=target.getBoundingClientRect();if(r.width<=0||r.height<=0||r.top<0||r.left<0||r.right>innerWidth||r.bottom>innerHeight)return false;const signature=JSON.stringify([r.x,r.y,r.width,r.height,c.opacity,c.transform]);const state=window.__leaves41Ready??={last:'',count:0};state.count=state.last===signature?state.count+1:0;state.last=signature;window.__leaves41Ready=state;return state.count>=3;}"
+      }
+    ]
+  },
+  "states": {
+    "workspace-stuckconnectionbanner--observed-actions": [
+      {
+        "name": "recover-callback",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Recover\u2026"
+          },
+          {
+            "action": "visible",
+            "text": "Recovery callback requested"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const root=document.documentElement,rs=getComputedStyle(root),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||root.classList.contains('dark')!==(theme==='dark')||document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running'))return false;const status=document.querySelector('[role=status]'),card=status?.firstElementChild,target=status?.querySelector('[aria-hidden=true]');if(!target||!card||getComputedStyle(card).opacity!=='1'||!['none','matrix(1, 0, 0, 1, 0, 0)'].includes(getComputedStyle(card).transform)||!document.querySelector('[data-stuck-banner-ready=true]'))return false;const c=getComputedStyle(target);const rawS=c.getPropertyValue('--spacing').trim(),s=parseFloat(rawS)*(rawS.endsWith('rem')?parseFloat(rs.fontSize):1);if(Math.abs(parseFloat(c.width)-s*4)>.01||Math.abs(parseFloat(c.height)-s*4)>.01||!status.textContent.includes('Still connecting'))return false;const raw=c.getPropertyValue('--spacing').trim(),step=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(rs.fontSize):1);if(!Number.isFinite(step))return false;const r=target.getBoundingClientRect();if(r.width<=0||r.height<=0||r.top<0||r.left<0||r.right>innerWidth||r.bottom>innerHeight)return false;const signature=JSON.stringify([r.x,r.y,r.width,r.height,c.opacity,c.transform]);const state=window.__leaves41Ready??={last:'',count:0};state.count=state.last===signature?state.count+1:0;state.last=signature;window.__leaves41Ready=state;return state.count>=3;}"
+          }
+        ]
+      }
+    ],
+    "workspace-stuckconnectionbanner--root-spacing": [
+      {
+        "name": "recover-callback",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Recover\u2026"
+          },
+          {
+            "action": "visible",
+            "text": "Recovery callback requested"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const root=document.documentElement,rs=getComputedStyle(root),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||root.classList.contains('dark')!==(theme==='dark')||document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running'))return false;const writer=root;if(writer.style.getPropertyValue('--spacing')!=='5px')return false;const status=document.querySelector('[role=status]'),card=status?.firstElementChild,target=status?.querySelector('[aria-hidden=true]');if(!target||!card||getComputedStyle(card).opacity!=='1'||!['none','matrix(1, 0, 0, 1, 0, 0)'].includes(getComputedStyle(card).transform)||!document.querySelector('[data-stuck-banner-ready=true]'))return false;const c=getComputedStyle(target);const rawS=c.getPropertyValue('--spacing').trim(),s=parseFloat(rawS)*(rawS.endsWith('rem')?parseFloat(rs.fontSize):1);if(Math.abs(parseFloat(c.width)-s*4)>.01||Math.abs(parseFloat(c.height)-s*4)>.01||!status.textContent.includes('Still connecting'))return false;const raw=c.getPropertyValue('--spacing').trim(),step=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(rs.fontSize):1);if(!Number.isFinite(step)||step!==5)return false;const r=target.getBoundingClientRect();if(r.width<=0||r.height<=0||r.top<0||r.left<0||r.right>innerWidth||r.bottom>innerHeight)return false;const signature=JSON.stringify([r.x,r.y,r.width,r.height,c.opacity,c.transform]);const state=window.__leaves41Ready??={last:'',count:0};state.count=state.last===signature?state.count+1:0;state.last=signature;window.__leaves41Ready=state;return state.count>=3;}"
+          }
+        ]
+      }
+    ],
+    "workspace-stuckconnectionbanner--subtree-spacing": [
+      {
+        "name": "recover-callback",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Recover\u2026"
+          },
+          {
+            "action": "visible",
+            "text": "Recovery callback requested"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const root=document.documentElement,rs=getComputedStyle(root),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||root.classList.contains('dark')!==(theme==='dark')||document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running'))return false;const writer=document.body;if(writer.style.getPropertyValue('--spacing')!=='5px')return false;if(root.style.getPropertyValue('--spacing')==='5px')return false;const status=document.querySelector('[role=status]'),card=status?.firstElementChild,target=status?.querySelector('[aria-hidden=true]');if(!target||!card||getComputedStyle(card).opacity!=='1'||!['none','matrix(1, 0, 0, 1, 0, 0)'].includes(getComputedStyle(card).transform)||!document.querySelector('[data-stuck-banner-ready=true]'))return false;const c=getComputedStyle(target);const rawS=c.getPropertyValue('--spacing').trim(),s=parseFloat(rawS)*(rawS.endsWith('rem')?parseFloat(rs.fontSize):1);if(Math.abs(parseFloat(c.width)-s*4)>.01||Math.abs(parseFloat(c.height)-s*4)>.01||!status.textContent.includes('Still connecting'))return false;const raw=c.getPropertyValue('--spacing').trim(),step=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(rs.fontSize):1);if(!Number.isFinite(step)||step!==5)return false;const r=target.getBoundingClientRect();if(r.width<=0||r.height<=0||r.top<0||r.left<0||r.right>innerWidth||r.bottom>innerHeight)return false;const signature=JSON.stringify([r.x,r.y,r.width,r.height,c.opacity,c.transform]);const state=window.__leaves41Ready??={last:'',count:0};state.count=state.last===signature?state.count+1:0;state.last=signature;window.__leaves41Ready=state;return state.count>=3;}"
+          }
+        ]
+      }
+    ],
+    "sharing-sessionsharemobilemenu--cloud": [
+      {
+        "name": "share-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-slot=drawer-content] button:has(svg.lucide-share-2)"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const root=document.documentElement,rs=getComputedStyle(root),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||root.classList.contains('dark')!==(theme==='dark')||document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running'))return false;const dialog=document.querySelector('[data-slot=drawer-content][data-state=open]'),icons=dialog?.querySelectorAll('svg.lucide-share-2');const target=icons?.[0];if(!dialog||icons.length!==1||!target||target.closest('button')?.textContent!=='Share')return false;const c=getComputedStyle(target),dc=getComputedStyle(dialog);if(dc.opacity!=='1'||!['none','matrix(1, 0, 0, 1, 0, 0)'].includes(dc.transform))return false;const rawS=c.getPropertyValue('--spacing').trim(),s=parseFloat(rawS)*(rawS.endsWith('rem')?parseFloat(rs.fontSize):1);const slotWidth=target.parentElement.getBoundingClientRect().width;if(c.flexShrink!=='1'||Math.abs(parseFloat(c.width)-Math.min(s*3.5,slotWidth))>.01||Math.abs(parseFloat(c.height)-s*3.5)>.01)return false;const raw=c.getPropertyValue('--spacing').trim(),step=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(rs.fontSize):1);if(!Number.isFinite(step))return false;const r=target.getBoundingClientRect();if(r.width<=0||r.height<=0||r.top<0||r.left<0||r.right>innerWidth||r.bottom>innerHeight)return false;const signature=JSON.stringify([r.x,r.y,r.width,r.height,c.opacity,c.transform]);const state=window.__leaves41Ready??={last:'',count:0};state.count=state.last===signature?state.count+1:0;state.last=signature;window.__leaves41Ready=state;return state.count>=3;}"
+          }
+        ]
+      }
+    ],
+    "sharing-sessionsharemobilemenu--cloud-root-spacing": [
+      {
+        "name": "share-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-slot=drawer-content] button:has(svg.lucide-share-2)"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const root=document.documentElement,rs=getComputedStyle(root),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||root.classList.contains('dark')!==(theme==='dark')||document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running'))return false;const writer=root;if(writer.style.getPropertyValue('--spacing')!=='5px')return false;const dialog=document.querySelector('[data-slot=drawer-content][data-state=open]'),icons=dialog?.querySelectorAll('svg.lucide-share-2');const target=icons?.[0];if(!dialog||icons.length!==1||!target||target.closest('button')?.textContent!=='Share')return false;const c=getComputedStyle(target),dc=getComputedStyle(dialog);if(dc.opacity!=='1'||!['none','matrix(1, 0, 0, 1, 0, 0)'].includes(dc.transform))return false;const rawS=c.getPropertyValue('--spacing').trim(),s=parseFloat(rawS)*(rawS.endsWith('rem')?parseFloat(rs.fontSize):1);const slotWidth=target.parentElement.getBoundingClientRect().width;if(c.flexShrink!=='1'||Math.abs(parseFloat(c.width)-Math.min(s*3.5,slotWidth))>.01||Math.abs(parseFloat(c.height)-s*3.5)>.01)return false;const raw=c.getPropertyValue('--spacing').trim(),step=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(rs.fontSize):1);if(!Number.isFinite(step)||step!==5)return false;const r=target.getBoundingClientRect();if(r.width<=0||r.height<=0||r.top<0||r.left<0||r.right>innerWidth||r.bottom>innerHeight)return false;const signature=JSON.stringify([r.x,r.y,r.width,r.height,c.opacity,c.transform]);const state=window.__leaves41Ready??={last:'',count:0};state.count=state.last===signature?state.count+1:0;state.last=signature;window.__leaves41Ready=state;return state.count>=3;}"
+          }
+        ]
+      }
+    ],
+    "sharing-sessionsharemobilemenu--cloud-subtree-spacing": [
+      {
+        "name": "share-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-slot=drawer-content] button:has(svg.lucide-share-2)"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const root=document.documentElement,rs=getComputedStyle(root),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||root.classList.contains('dark')!==(theme==='dark')||document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running'))return false;const writer=document.body;if(writer.style.getPropertyValue('--spacing')!=='5px')return false;if(root.style.getPropertyValue('--spacing')==='5px')return false;const dialog=document.querySelector('[data-slot=drawer-content][data-state=open]'),icons=dialog?.querySelectorAll('svg.lucide-share-2');const target=icons?.[0];if(!dialog||icons.length!==1||!target||target.closest('button')?.textContent!=='Share')return false;const c=getComputedStyle(target),dc=getComputedStyle(dialog);if(dc.opacity!=='1'||!['none','matrix(1, 0, 0, 1, 0, 0)'].includes(dc.transform))return false;const rawS=c.getPropertyValue('--spacing').trim(),s=parseFloat(rawS)*(rawS.endsWith('rem')?parseFloat(rs.fontSize):1);const slotWidth=target.parentElement.getBoundingClientRect().width;if(c.flexShrink!=='1'||Math.abs(parseFloat(c.width)-Math.min(s*3.5,slotWidth))>.01||Math.abs(parseFloat(c.height)-s*3.5)>.01)return false;const raw=c.getPropertyValue('--spacing').trim(),step=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(rs.fontSize):1);if(!Number.isFinite(step)||step!==5)return false;const r=target.getBoundingClientRect();if(r.width<=0||r.height<=0||r.top<0||r.left<0||r.right>innerWidth||r.bottom>innerHeight)return false;const signature=JSON.stringify([r.x,r.y,r.width,r.height,c.opacity,c.transform]);const state=window.__leaves41Ready??={last:'',count:0};state.count=state.last===signature?state.count+1:0;state.last=signature;window.__leaves41Ready=state;return state.count>=3;}"
+          }
+        ]
+      }
+    ]
+  }
+}
