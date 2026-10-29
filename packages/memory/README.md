@@ -7,15 +7,22 @@ remains draft.
 
 ## Ownership and integration
 
-The logical identity is `(workspace, authenticated user, stable Role ID)`. Workspaces
-stay separate; Role/model names and machines do not identify the memory. A copied
-Role gets a new ID and independent memory. A Role binding `{providerId: "lody",
-memoryId: "role"}` means the current user's current Role, not an arbitrary memory.
-Nowledge's machine-scoped identities and environment mapping remain unchanged.
-Built-in memory needs no machine/memory inventory or imported identity association.
+Lody Memory is a provider beside external ones such as Nowledge. A person creates any
+number of named memories (at most 64) in Settings → Memory; a Role links one through
+the binding `{providerId: "lody", memoryId}`. The logical identity is `(workspace,
+authenticated user, memoryId)`: machines, models and Roles do not identify a memory,
+and several Roles may share one. Nowledge's machine-scoped identities and environment
+mapping remain unchanged; Lody Memory needs no machine inventory or imported association.
 
-The daemon resolves the active frozen turn and current local Role catalog on access;
-unlinking or deleting the Role revokes subsequent tool access but retains content.
+Each memory's name and description are the leading front matter of its own `MEMORY.md`
+(`---\nname: …\ndescription: …\n---`), so Agents read them with the entry and there
+is no second copy. A per-owner catalog Doc lists the memory IDs; creation writes the
+profile before listing the memory, and deletion unlists it and then removes all of its
+documents. Only a listed memory can be opened for an Agent.
+
+The daemon resolves the active frozen turn, current local Role catalog and the owner's
+memory catalog on access. Unlinking or deleting the Role, or switching it to another
+memory, revokes subsequent tool access to the old one but retains its content.
 Ordinary sessions without a Role do not get memory. The current host admits only its
 own authenticated user, including on a shared machine; collaborators cannot borrow
 the machine owner's memory. Previously disclosed conversation/model context is not erased.
@@ -35,11 +42,13 @@ inputs, not principal/Role IDs. Agent sources record the causal session and turn
 A write receipt follows `repo.flush()`; commit alone is not saved. Disk failure returns
 no success and retains the edit for retry. Remote synchronization does not gate a local save.
 
-The Role editor selects the built-in Provider and opens local content/source management.
-Renderer edits are authored in its own Loro replica, not delegated to CLI RPC. The UI
-requires a local target advertising `builtinMemory: 1`; remote devices and cloud-only
-surfaces cannot manage these local replicas. Ordinary cache clearing preserves them;
-explicit full local reset remains destructive. Content may also be retained when unlinked.
+Settings → Memory shows Lody Memory above the machine tabs because it belongs to the
+person, and groups Nowledge and other machine-bound providers under "Integrated
+providers". The Role editor lists Lody memories before provider associations and binds
+them only on the local machine tab whose daemon advertises `builtinMemory: 1`: the
+Renderer replica replicates only to this device's daemon. Renderer edits are authored
+in its own Loro replica, not delegated to CLI RPC. Ordinary cache clearing preserves
+them; explicit full local reset remains destructive.
 
 No cloud memory sync is attached, even in a cloud workspace. Future integration must
 reuse the existing E2EE core/device authorization with a personal resource scope,
@@ -48,11 +57,14 @@ plaintext remains visible to authorized execution endpoints and model services.
 
 ## Loro layout (format 1)
 
+Rooms are `personal-memory/<owner>` for the catalog and `personal-memory/<owner>/<memoryId>`
+for each memory. The catalog Doc is `memories: LoroMap<memoryId, createdAt>`.
+
 ```text
 meta: LoroMap
   formatVersion: 1
   identity: LoroMap
-    memoryId, roleId, ownerId: string
+    memoryId, ownerId: string
     ownership: "personal"
 documents: LoroMap
   "MEMORY.md": mergeable LoroMap

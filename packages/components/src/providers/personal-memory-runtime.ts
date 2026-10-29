@@ -2,6 +2,7 @@ import { Context, Effect, Layer, ManagedRuntime } from 'effect';
 import { createPersonalMemoryRepository, type PersonalMemoryRepository } from '@lody/memory/repo';
 import { LocalLoroTransportAdapter } from '@lody/shared/local-loro-transport';
 import type { WorkspaceId } from '@lody/shared';
+import type { MemoryProfileInput } from '@lody/memory';
 import { createWorkspaceRepoStorage } from './workspace-repo-storage';
 import { createLocalLoroDataPlaneConnection } from './local-loro-data-plane-connection';
 
@@ -47,20 +48,24 @@ export function createPersonalMemoryRuntime(
       )
     )
   );
+  const run = <A>(use: (repo: PersonalMemoryRepository) => Promise<A>) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* PersonalMemory;
+        return yield* Effect.promise(() => use(repo));
+      })
+    );
+  const userContext = () => ({
+    changeId: crypto.randomUUID(),
+    recordedAt: Date.now(),
+    source: { actor: 'user' as const },
+  });
   return {
-    open: (roleId: string) =>
-      runtime.runPromise(
-        Effect.gen(function* () {
-          const repo = yield* PersonalMemory;
-          return yield* Effect.promise(() =>
-            repo.open(roleId, {
-              changeId: crypto.randomUUID(),
-              recordedAt: Date.now(),
-              source: { actor: 'user' },
-            })
-          );
-        })
-      ),
+    openCatalog: () => run((repo) => repo.openCatalog()),
+    open: (memoryId: string) => run((repo) => repo.open(memoryId, userContext())),
+    create: (profile: MemoryProfileInput) =>
+      run((repo) => repo.create(crypto.randomUUID(), profile, userContext())),
+    remove: (memoryId: string) => run((repo) => repo.remove(memoryId)),
     close: () => runtime.dispose(),
   };
 }

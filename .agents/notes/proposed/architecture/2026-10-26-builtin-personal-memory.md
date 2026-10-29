@@ -23,8 +23,14 @@ layout, API, limits and pending integrations. The [memory Spec](../../../../spec
 remains draft. The [Nowledge decision](../../implemented/feature/2026-10-04-agent-role-memory.md)
 and external provider data are unchanged.
 
-One trusted person and stable Role identify one memory across machines. Role/model
-names, machine IDs and working directories do not partition it. Only personal
+One trusted person and a memory ID identify one memory across machines; a Role links
+a memory through its `lody` binding, so several Roles can share one. Role/model
+names, machine IDs and working directories do not partition it. This replaces an
+earlier per-Role identity (`lody/role`, one implicit memory per Role) so that people
+can name, describe and reuse memories as a provider beside Nowledge. The cost is that
+a copied Role now shares its linked memory instead of starting an empty one. Names
+and descriptions live in each `MEMORY.md` front matter; a per-owner catalog Doc lists
+only IDs, avoiding a second writable copy of the profile. Only personal
 ownership is implemented; workspace partitions remain distinct. Personal device
 authorization for cloud synchronization remains future work. Role switching, transcript disclosure and host filesystem
 isolation are outside the narrowed package scope.
@@ -38,10 +44,10 @@ In-memory commit is not a durable-save receipt. Production sync remains disabled
 ## Local host boundary
 
 The package README owns the implemented host behavior. The daemon's active frozen
-turn supplies principal and Role; a live local Role read enforces subsequent unlink
-or deletion without changing accepted configuration. The current host refuses other
+turn supplies principal and Role; live local Role and memory-catalog reads enforce
+subsequent unlink, relink or memory deletion without changing accepted configuration. The current host refuses other
 users' personal access, even on a shared machine. Rename/model changes preserve the
-Role ID; copied Roles resolve independently. No transcript erasure is claimed.
+binding; copied Roles keep the same linked memory. No transcript erasure is claimed.
 
 Personal SQLite and Renderer IndexedDB repositories never join workspace metadata
 or Streams. Renderer writes use existing local Loro replication, not proxy commands.
@@ -120,9 +126,9 @@ characters of repeated mixed Chinese/English text. Every sixteenth document had
 After ten warmups, median milliseconds over 80 queries were:
 
 | Documents | JSONPath contains | JS container reads | Full toJSON then scan | Cached JS strings |
-| --- | --- | --- | --- | --- |
-| 32 | 0.552 | 4.093 | 4.107 | 0.925 |
-| 256 | 4.866 | 29.759 | 32.887 | 7.964 |
+| --------- | ----------------- | ------------------ | --------------------- | ----------------- |
+| 32        | 0.552             | 4.093              | 4.107                 | 0.925             |
+| 256       | 4.866             | 29.759             | 32.887                | 7.964             |
 
 The query was `$.documents[?(@.body contains "needle测试")].path`.
 Building the JS string cache separately took approximately 8 and 49 ms.
@@ -148,13 +154,13 @@ five independent Node processes; reported values are medians. All assertions for
 content length and expected search results passed. Environment: Loro 1.17.0,
 Node 24.22.1, Linux x64, Intel Xeon CPU at 2.20 GHz.
 
-| Operation, milliseconds | One Doc | Ten Docs |
-| --- | --- | --- |
-| Cold-process import of all snapshot bytes | 19.57 | 23.83 |
-| First full search, after reading one topic | 12.13 | 12.54 |
-| Warm full search | 0.126 | 0.410 |
-| Replace four characters in one topic and commit | 0.042 | 0.040 |
-| Replace four characters in each of ten topics and commit each Doc | 0.296 | 0.324 |
+| Operation, milliseconds                                           | One Doc | Ten Docs |
+| ----------------------------------------------------------------- | ------- | -------- |
+| Cold-process import of all snapshot bytes                         | 19.57   | 23.83    |
+| First full search, after reading one topic                        | 12.13   | 12.54    |
+| Warm full search                                                  | 0.126   | 0.410    |
+| Replace four characters in one topic and commit                   | 0.042   | 0.040    |
+| Replace four characters in each of ten topics and commit each Doc | 0.296   | 0.324    |
 
 Warm search has ten warmups and 100 samples per process. Updates have 100 samples;
 text length remains constant. Cold operations include first-use WASM/JIT effects,

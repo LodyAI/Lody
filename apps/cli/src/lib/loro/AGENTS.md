@@ -144,5 +144,6 @@ history. Regression: `tests/reconnect-storm-repro.test.ts`.
 
 `personal-memory.ts` owns user/workspace SQLite storage. Never put personal Docs
 or metadata in the workspace Repo or Streams. Resolve local rooms only for the
-manager's user. Agent access uses frozen turns and live Role bindings; Renderer
-edits arrive through local Loro replication.
+manager's user. Agent access uses frozen turns, live Role bindings and the owner's
+memory catalog; Renderer edits arrive through local Loro replication. Local room
+resolution replicates catalog and memory Docs as they are and never initializes one.

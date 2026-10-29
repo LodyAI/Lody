@@ -8,7 +8,7 @@ import {
 
 describe('Nowledge memory provider', () => {
   it('keeps built-in memory independent from external CLI environments', () => {
-    expect(memoryEnvironment({ providerId: 'lody', memoryId: 'role' })).toEqual({});
+    expect(memoryEnvironment({ providerId: 'lody', memoryId: 'memory-a' })).toEqual({});
     expect(memoryEnvironment({ providerId: 'nowledge-mem', memoryId: 'reviewer' })).toEqual({
       NMEM_AGENT_ID: 'reviewer',
     });

@@ -8,14 +8,26 @@ import {
   MemoryReadInputSchema,
   resolveMemoryPath,
   buildMemorySearchQuery,
+  formatMemoryProfile,
+  readMemoryProfile,
+  replaceMemoryProfile,
+  MemoryProfileSchema,
   type MemoryIdentity,
   type MemoryResult,
 } from '../src/index';
-import { initializeMemoryDoc, inspectMemoryIdentity, openMemoryDocument } from '../src/loro';
+import {
+  MEMORY_CATALOG_LIMIT,
+  addMemoryCatalogEntry,
+  hasMemoryCatalogEntry,
+  initializeMemoryDoc,
+  inspectMemoryIdentity,
+  listMemoryCatalog,
+  openMemoryDocument,
+  removeMemoryCatalogEntry,
+} from '../src/loro';
 
 const identity: MemoryIdentity = {
   memoryId: 'memory-a',
-  roleId: 'role-a',
   ownership: 'personal',
   ownerId: 'user-a',
 };
@@ -144,7 +156,7 @@ describe('path-addressed memory', () => {
       const before = doc.opCount();
       expect(inspectMemoryIdentity(doc, identity)).toEqual({ ok: true, value: identity });
       expect(doc.opCount()).toBe(before);
-      for (const key of ['ownerId', 'roleId', 'memoryId'] as const) {
+      for (const key of ['ownerId', 'memoryId'] as const) {
         expect(openMemoryDocument(doc, { ...identity, [key]: 'other' })).toEqual({
           ok: false,
           error: { code: 'scope_mismatch' },
@@ -163,9 +175,9 @@ describe('path-addressed memory', () => {
     }
   });
 
-  it('isolates roles and users even for the same path and forged tool fields', () => {
+  it('isolates memories and users even for the same path and forged tool fields', () => {
     const a = fresh();
-    const ownerB = { ...identity, memoryId: 'memory-b', roleId: 'role-b', ownerId: 'user-b' };
+    const ownerB = { ...identity, memoryId: 'memory-b', ownerId: 'user-b' };
     const b = fresh(ownerB);
     try {
       const left = open(a),
@@ -520,4 +532,52 @@ describe('path-addressed memory', () => {
       doc.free();
     }
   }, 20000);
+});
+
+describe('Lody memory profile and catalog', () => {
+  it('keeps name and description in MEMORY.md front matter without touching the entry body', () => {
+    const body = formatMemoryProfile(
+      { name: '  Work\nnotes ', description: 'Team\nconventions' },
+      '# Index\n\n- [[style]]'
+    );
+    expect(body).toBe(
+      '---\nname: Work notes\ndescription: Team conventions\n---\n\n# Index\n\n- [[style]]'
+    );
+    expect(readMemoryProfile(body)).toEqual({
+      name: 'Work notes',
+      description: 'Team conventions',
+      rest: '# Index\n\n- [[style]]',
+    });
+    expect(replaceMemoryProfile(body, { name: 'Home' })).toBe(
+      '---\nname: Home\n---\n\n# Index\n\n- [[style]]'
+    );
+    expect(readMemoryProfile('No front matter')).toEqual({ rest: 'No front matter' });
+    expect(MemoryProfileSchema.safeParse({ name: '   ' }).success).toBe(false);
+    expect(MemoryProfileSchema.safeParse({ name: 'x'.repeat(81) }).success).toBe(false);
+  });
+
+  it('lists catalog entries in creation order and merges independent additions', () => {
+    const left = new LoroDoc();
+    const right = new LoroDoc();
+    try {
+      expect(addMemoryCatalogEntry(left, { memoryId: 'memory-b', createdAt: 2 })).toBe(true);
+      expect(addMemoryCatalogEntry(right, { memoryId: 'memory-a', createdAt: 1 })).toBe(true);
+      left.import(right.export({ mode: 'update' }));
+      right.import(left.export({ mode: 'update' }));
+      expect(listMemoryCatalog(right).map((item) => item.memoryId)).toEqual([
+        'memory-a',
+        'memory-b',
+      ]);
+      removeMemoryCatalogEntry(right, 'memory-a');
+      left.import(right.export({ mode: 'update' }));
+      expect(hasMemoryCatalogEntry(left, 'memory-a')).toBe(false);
+      expect(hasMemoryCatalogEntry(left, 'memory-b')).toBe(true);
+      for (let index = 1; index < MEMORY_CATALOG_LIMIT; index += 1)
+        addMemoryCatalogEntry(left, { memoryId: `m-${index}`, createdAt: 10 + index });
+      expect(addMemoryCatalogEntry(left, { memoryId: 'overflow', createdAt: 999 })).toBe(false);
+    } finally {
+      left.free();
+      right.free();
+    }
+  });
 });

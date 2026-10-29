@@ -43,20 +43,24 @@ export function createCliPersonalMemoryRuntime(ownerId: string, workspaceId: str
     )
   );
   const runtime = ManagedRuntime.make(layer);
+  const run = <A>(use: (repo: PersonalMemoryRepository) => Promise<A>) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const repo = yield* PersonalMemory;
+        return yield* Effect.promise(() => use(repo));
+      })
+    );
   return {
-    open: (roleId: string) =>
-      runtime.runPromise(
-        Effect.gen(function* () {
-          const repo = yield* PersonalMemory;
-          return yield* Effect.promise(() =>
-            repo.open(roleId, {
-              changeId: randomUUID(),
-              recordedAt: Date.now(),
-              source: { actor: 'user' },
-            })
-          );
+    open: (memoryId: string) =>
+      run((repo) =>
+        repo.open(memoryId, {
+          changeId: randomUUID(),
+          recordedAt: Date.now(),
+          source: { actor: 'user' },
         })
       ),
+    openCatalog: () => run((repo) => repo.openCatalog()),
+    acquireRoom: (roomId: string) => run((repo) => repo.acquireRoom(roomId)),
     close: () => runtime.dispose(),
   };
 }

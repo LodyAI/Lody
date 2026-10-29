@@ -17,9 +17,10 @@ import { SqliteRepoStore } from 'loro-repo/storage/sqlite';
 import { McpServer } from '@modelcontextprotocol/server';
 import { createPersonalMemoryRepository } from '@lody/memory/repo';
 import {
-  authorizePersonalMemoryRole,
-  BUILTIN_MEMORY_BINDING,
-  personalMemoryRoleFromRoom,
+  authorizePersonalMemory,
+  lodyMemoryBinding,
+  parsePersonalMemoryRoom,
+  personalMemoryCatalogRoomId,
   personalMemoryRoomId,
 } from '@lody/memory';
 import {
@@ -79,10 +80,10 @@ async function fixture() {
 }
 
 describe('personal memory host', () => {
-  it('saves offline, restores after closing SQLite, and isolates people, Roles and workspaces', async () => {
+  it('saves offline, restores after closing SQLite, and isolates people, memories and workspaces', async () => {
     const { open } = await fixture();
     const first = await open();
-    const a = await first.repo.open('role-a', context);
+    const a = await first.repo.open('memory-a', context);
     const saved = await a.save(
       a.memory.create(
         { path: 'preferences.md', body: 'Prefer quiet rooms', description: 'Travel' },
@@ -94,13 +95,12 @@ describe('personal memory host', () => {
       value: { local: 'saved', sync: { state: 'unavailable' } },
     });
     // Check the SQLite copy before shutdown can perform its own final flush.
-    const disk = await first.storage.loadDoc(personalMemoryRoomId('alice', 'role-a'));
+    const disk = await first.storage.loadDoc(personalMemoryRoomId('alice', 'memory-a'));
     expect(disk).toBeTruthy();
     const persisted = openMemoryDocument(disk!, {
       ownership: 'personal',
       ownerId: 'alice',
-      roleId: 'role-a',
-      memoryId: 'role-a',
+      memoryId: 'memory-a',
     });
     expect(persisted.ok && persisted.value.read({ path: 'preferences.md' })).toMatchObject({
       ok: true,
@@ -110,7 +110,7 @@ describe('personal memory host', () => {
     await a.release();
     await first.close();
     const restarted = await open();
-    const restored = await restarted.repo.open('role-a', context);
+    const restored = await restarted.repo.open('memory-a', context);
     expect(restored.memory.read({ path: 'preferences.md' })).toMatchObject({
       ok: true,
       value: { body: 'Prefer quiet rooms' },
@@ -119,10 +119,10 @@ describe('personal memory host', () => {
       ok: true,
       value: { items: [{ changeId: 'write', source: { actor: 'user' } }] },
     });
-    const otherRole = await restarted.repo.open('role-b', context);
-    const otherPerson = await (await open('bob')).repo.open('role-a', context);
-    const otherWorkspace = await (await open('alice', 'other')).repo.open('role-a', context);
-    for (const memory of [otherRole, otherPerson, otherWorkspace]) {
+    const otherMemory = await restarted.repo.open('memory-b', context);
+    const otherPerson = await (await open('bob')).repo.open('memory-a', context);
+    const otherWorkspace = await (await open('alice', 'other')).repo.open('memory-a', context);
+    for (const memory of [otherMemory, otherPerson, otherWorkspace]) {
       expect(memory.memory.search({ query: 'quiet' })).toMatchObject({
         ok: true,
         value: { items: [] },
@@ -139,9 +139,14 @@ describe('personal memory host', () => {
   it('uses active invocation scope, refuses forged arguments, and applies live revocation', async () => {
     const { open } = await fixture();
     const { repo } = await open();
+    expect(
+      await repo.create('memory-a', { name: 'Work', description: 'Team notes' }, context)
+    ).toEqual({ ok: true, value: { memoryId: 'memory-a' } });
+    expect(await repo.create('memory-b', { name: 'Home' }, context)).toMatchObject({ ok: true });
     let roleId: string | null = 'role-a';
     let requesterUserId = 'alice';
-    let liveBinding: typeof BUILTIN_MEMORY_BINDING | undefined = BUILTIN_MEMORY_BINDING;
+    let binding = lodyMemoryBinding('memory-a');
+    let liveBinding: typeof binding | undefined = binding;
     const handlers: SessionToolHandlers = new Map();
     const server = new McpServer({ name: 'memory-test', version: '1' });
     cleanups.push(() => server.close());
@@ -150,39 +155,50 @@ describe('personal memory host', () => {
       async () => ({
         sessionId: 'session-one',
         turnId: 'turn-one',
-        open: () =>
-          repo.open(
-            authorizePersonalMemoryRole({
+        open: async () => {
+          const catalog = await repo.openCatalog();
+          let memoryId: string;
+          try {
+            memoryId = authorizePersonalMemory({
               ownerId: 'alice',
               requesterUserId,
               roleId,
-              binding: BUILTIN_MEMORY_BINDING,
+              binding,
               liveBinding,
-            }),
-            context
-          ),
+              listed: catalog.has,
+            });
+          } finally {
+            await catalog.release();
+          }
+          return repo.open(memoryId, context);
+        },
       })
     );
     const call = async (name: string, input: unknown) => {
       const result = await handlers.get(`lody_memory_${name}`)!(input);
       return JSON.parse((result.content[0] as { text: string }).text);
     };
+    expect(await call('read', { path: 'MEMORY.md' })).toMatchObject({
+      ok: true,
+      value: { body: '---\nname: Work\ndescription: Team notes\n---\n' },
+    });
     expect(await call('create', { path: 'facts.md', body: 'private fact' })).toMatchObject({
       ok: true,
       value: { local: 'saved' },
     });
-    for (const forged of [{ roleId: 'role-a' }, { userId: 'alice' }, { memoryId: 'role-a' }])
+    for (const forged of [{ roleId: 'role-a' }, { userId: 'alice' }, { memoryId: 'memory-b' }])
       await expect(call('search', { query: 'private', ...forged })).rejects.toThrow();
-    roleId = 'role-b';
+    binding = liveBinding = lodyMemoryBinding('memory-b');
     expect(await call('search', { query: 'private' })).toMatchObject({
       ok: true,
       value: { items: [] },
     });
+    binding = lodyMemoryBinding('memory-a');
     expect(await call('read', { path: 'facts.md' })).toMatchObject({
       ok: false,
-      error: { code: 'not_found' },
+      error: { code: 'memory_access_revoked' },
     });
-    roleId = 'role-a';
+    liveBinding = binding;
     requesterUserId = 'bob';
     expect(await call('read', { path: 'facts.md' })).toMatchObject({
       ok: false,
@@ -194,7 +210,7 @@ describe('personal memory host', () => {
       ok: false,
       error: { code: 'memory_access_revoked' },
     });
-    liveBinding = BUILTIN_MEMORY_BINDING;
+    liveBinding = binding;
     expect(await call('read', { path: 'facts.md' })).toMatchObject({
       ok: true,
       value: { body: 'private fact' },
@@ -212,12 +228,33 @@ describe('personal memory host', () => {
       ok: false,
       error: { code: 'memory_not_bound' },
     });
+    roleId = 'role-a';
+    await repo.remove('memory-a');
+    expect(await call('read', { path: 'facts.md' })).toMatchObject({
+      ok: false,
+      error: { code: 'memory_not_found' },
+    });
+    const removed = await repo.open('memory-a', context);
+    expect(removed.memory.search({ query: 'private' })).toMatchObject({
+      ok: true,
+      value: { items: [] },
+    });
+    await removed.release();
   });
 
   it('does not accept another owner through the local room route', () => {
-    const room = personalMemoryRoomId('local:alice', 'role-a');
-    expect(personalMemoryRoleFromRoom(room, 'local:alice')).toBe('role-a');
-    expect(() => personalMemoryRoleFromRoom(room, 'local:bob')).toThrow('memory_access_denied');
+    const room = personalMemoryRoomId('local:alice', 'memory-a');
+    expect(parsePersonalMemoryRoom(room, 'local:alice')).toEqual({
+      kind: 'memory',
+      memoryId: 'memory-a',
+    });
+    expect(
+      parsePersonalMemoryRoom(personalMemoryCatalogRoomId('local:alice'), 'local:alice')
+    ).toEqual({ kind: 'catalog' });
+    expect(() => parsePersonalMemoryRoom(room, 'local:bob')).toThrow('memory_access_denied');
+    expect(() =>
+      parsePersonalMemoryRoom(personalMemoryCatalogRoomId('local:bob'), 'local:alice')
+    ).toThrow('memory_access_denied');
   });
   it('never reports an unsuccessful disk flush as saved, and retains the edit for retry', async () => {
     let failWrites = false;
@@ -236,7 +273,7 @@ describe('personal memory host', () => {
           },
         }),
     });
-    const handle = await repo.open('role-a', context);
+    const handle = await repo.open('memory-a', context);
     const edit = handle.memory.create(
       { path: 'offline.md', body: 'Keep this edit' },
       { ...context, changeId: 'edit' }
@@ -255,7 +292,7 @@ describe('personal memory host', () => {
   it('replicates over the existing local data plane without joining a workspace/cloud room', async () => {
     const { open } = await fixture();
     const cli = await open();
-    const cliHandle = await cli.repo.open('role-a', context);
+    const cliHandle = await cli.repo.open('memory-a', context);
     const writer = makeLocalLoroWriterLegacy(
       Layer.succeed(LocalLoroWriterTurn, { next: Effect.void })
     );
@@ -264,7 +301,10 @@ describe('personal memory host', () => {
       workspaceId: 'test-workspace',
       writerLegacy: writer,
       resolveDoc: async (id) => {
-        expect(personalMemoryRoleFromRoom(id, 'alice')).toBe('role-a');
+        expect(parsePersonalMemoryRoom(id, 'alice')).toEqual({
+          kind: 'memory',
+          memoryId: 'memory-a',
+        });
         return cliHandle.doc;
       },
       resolveFlockDoc: async () => {
@@ -306,7 +346,7 @@ describe('personal memory host', () => {
       },
     });
     const renderer = await open('alice', 'renderer', { localTransport: transport });
-    const rendererHandle = await renderer.repo.open('role-a', context);
+    const rendererHandle = await renderer.repo.open('memory-a', context);
     const observed = new Promise<void>((resolve) => {
       const unsubscribe = cliHandle.doc.subscribe(() => {
         const read = cliHandle.memory.read({ path: 'from-ui.md' });

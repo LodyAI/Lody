@@ -41,7 +41,6 @@ export const MemoryDescriptionSchema = boundedText(MEMORY_LIMITS.descriptionChar
 export const MemoryIdentitySchema = z
   .object({
     memoryId: MemoryIdSchema,
-    roleId: MemoryIdSchema,
     ownership: z.literal('personal'),
     ownerId: MemoryIdSchema,
   })

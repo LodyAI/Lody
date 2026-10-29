@@ -302,7 +302,6 @@ export function AgentRoleEditorDialog({
                 <RoleMemoryPicker
                   key={editorTarget.machineId}
                   machineId={editorTarget.machineId}
-                  roleId={editor.mode === 'edit' ? editor.role.id : editor.roleId}
                   value={editorTarget.memory}
                   onChange={(memory) => {
                     if (openEditor)

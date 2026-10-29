@@ -87,12 +87,14 @@ Provider 侧栏使用与 Agent Config 一致的平面选中列表行，只有一
 角色名称，移动端点击显示名称浮层。关联按 Role 任一机器配置的机器、Provider 和记忆 ID 精确匹配，并随
 角色目录更新。
 
-## 内置个人记忆提案
+## 内置个人记忆提案（Lody Memory）
 
-上面的机器作用域关联和环境映射继续描述 Nowledge 等外部 Provider。
-拟新增的内置 Provider 使用 `@lody/memory`：同一工作区内的可信用户和稳定 Role 对应一份逻辑记忆，
-不受机器、模型或 Role 名称影响；复制 Role 获得独立记忆。
-首版仅支持个人模式，不把 Role 共享作为隐式回退，也不自动转换个人内容。
+上面的机器作用域关联和环境映射继续描述 Nowledge 等外部 Provider，现归入“集成 Provider”。
+拟新增的 Lody Memory Provider 使用 `@lody/memory`，位于机器标签页之上，因为它属于个人而非机器。
+同一工作区内的可信用户创建具名记忆体，名称和描述写入该记忆体 `MEMORY.md` 的 front matter。
+Role 通过 `{providerId: "lody", memoryId}` 关联一个记忆体，多个 Role 可共用；
+机器、模型和 Role 名称不参与分区。
+首版仅支持个人模式，不把共享归属作为隐式回退，也不自动转换个人内容。
 
 Loro 是唯一权威来源。记忆使用根级 `meta` 和 `documents` Map：`meta` 保存格式版本及身份；
 相对 Markdown 路径直接作为文档 Map 的 key，文档、正文及来源采用 mergeable Map/Text 容器。
@@ -103,14 +105,15 @@ Loro 是唯一权威来源。记忆使用根级 `meta` 和 `documents` Map：`me
 删除移除父键；读取和编辑不恢复缺失路径，显式创建允许复用已删除路径及其保留历史。
 不维护额外业务墓碑。
 
-宿主授权当前执行并传入已绑定 Doc，模型输入不能选择其他个人主体、Role 或记忆。
+宿主授权当前执行并传入已绑定 Doc，模型输入不能选择其他个人主体、Role 或记忆，且只打开所有者目录中列出的记忆体。
 Renderer/CLI 保留现有写入所有权，本地持久化仍由宿主负责，内存 commit 不等于保存回执。
 个人资源授权和现有 E2EE 适配器保护完整数据边界前，生产同步保持不可用，
 不得回退到明文或另建密码方案。新增 Provider 不迁移或修改 Nowledge 数据。
 
 目前已实现[包内文档服务](../packages/memory/README.md)，包含增删改查、分页读取、搜索、来源及启动上下文组装；
-已接入本地 Agent 提示注入、MCP 工具、Role 编辑器管理及独立 SQLite/IndexedDB 持久化。
+已接入本地 Agent 提示注入、MCP 工具、设置页管理、Role 选择器及独立 SQLite/IndexedDB 持久化。
 Renderer 自行编辑，通过现有本地数据通道传给 CLI，不使用代写 RPC；生产跨设备同步仍关闭。
-停用或删除 Role 会撤销后续 Agent 访问，但不销毁内容，也不抹除已披露的对话上下文。
-本地管理要求 daemon 声明 `builtinMemory: 1`。普通清理缓存保留个人记忆，显式完整重置可删除本地副本。
+停用或删除 Role 会撤销后续 Agent 访问，但不销毁内容；删除记忆体会将其移出目录并移除其文档。
+不抹除已披露的对话上下文。关联要求本设备 daemon 声明 `builtinMemory: 1`；
+生产同步落地前，“不绑定机器”指不按机器分区，而非在机器间复制。普通清理缓存保留个人记忆，显式完整重置可删除本地副本。
 归属与存储合同继续保持 draft，测试结果不代表人工批准。

@@ -8,11 +8,13 @@ implemented interfaces and the distinction between in-memory mutation and durabi
   No filesystem, cloud client, Git, credentials or cryptography belongs here.
   Hosts retain renderer/CLI authorship and persistence/transport ownership.
 - Personal repositories never use workspace storage, metadata or Streams transports.
-  Workspace + current user + stable Role form the logical identity. `lody/role`
-  selects the current Role; it is not a model-selectable memory ID. Renderer databases
-  use `PERSONAL_MEMORY_DATABASE_PREFIX` and survive ordinary cache clearing.
-- One personal memory binds a trusted principal and stable Role ID. Tool inputs
-  never select a user, Role or memory. Stored identity is data, never authority.
+  Workspace + current user + memory ID form the logical identity; a Role selects a
+  memory only through its `lody` binding, and only memories listed in the owner's
+  catalog are opened for Agents. Renderer databases use
+  `PERSONAL_MEMORY_DATABASE_PREFIX` and survive ordinary cache clearing.
+- A memory's name and description live only in its MEMORY.md front matter; the
+  catalog lists IDs, never a copy of the profile. Tool inputs never select a user,
+  Role or memory. Stored identity is data, never authority.
   Check identity at open; the host preserves that binding, admits imports and
   generates unique change IDs. Do not repeat identity or change-ID checks per edit.
 - Loro is the only memory state. Root containers are `meta` and `documents`;

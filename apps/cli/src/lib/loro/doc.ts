@@ -1,12 +1,11 @@
 import { createCliPersonalMemoryRuntime } from './personal-memory';
 import {
-  authorizePersonalMemoryRole,
+  authorizePersonalMemory,
   PERSONAL_MEMORY_ROOM_PREFIX,
-  personalMemoryRoleFromRoom,
+  parsePersonalMemoryRoom,
 } from '@lody/memory';
 import {
   getAgentRoleTarget,
-  getWorkspaceFlockDocId,
   listWorkspaceAgentRoles,
   readWorkspaceFlockRowsFromFlock,
   type SessionTurnInputConfig,
@@ -562,12 +561,12 @@ export class LoroDocumentManager {
         machineMonitorRuntime,
         async (docId) => {
           if (!manager) throw new Error('memory_unavailable');
-          const handle = await manager.personalMemory.open(
-            personalMemoryRoleFromRoom(docId, userId)
-          );
+          parsePersonalMemoryRoom(docId, userId);
+          // Replicate as-is: the Renderer creates memories and the catalog; the CLI never seeds them.
           // This repository never evicts; the server borrows its cached Doc until shutdown.
-          await handle.release();
-          return handle.doc;
+          const room = await manager.personalMemory.acquireRoom(docId);
+          await room.release();
+          return room.doc;
         },
         promptSuggestions
       );
@@ -763,14 +762,21 @@ export class LoroDocumentManager {
     const role = listWorkspaceAgentRoles(readWorkspaceFlockRowsFromFlock(handle.flock)).find(
       (entry) => entry.id === inputConfig.agentRoleId
     );
-    const roleId = authorizePersonalMemoryRole({
-      ownerId: this.userId,
-      requesterUserId,
-      roleId: inputConfig.agentRoleId,
-      binding: inputConfig.memory,
-      liveBinding: role ? getAgentRoleTarget(role, machineId)?.runConfig.memory : undefined,
-    });
-    return this.personalMemory.open(roleId);
+    const catalog = await this.personalMemory.openCatalog();
+    let memoryId: string;
+    try {
+      memoryId = authorizePersonalMemory({
+        ownerId: this.userId,
+        requesterUserId,
+        roleId: inputConfig.agentRoleId,
+        binding: inputConfig.memory,
+        liveBinding: role ? getAgentRoleTarget(role, machineId)?.runConfig.memory : undefined,
+        listed: catalog.has,
+      });
+    } finally {
+      await catalog.release();
+    }
+    return this.personalMemory.open(memoryId);
   }
 
   private setTransportStatus(status: TransportConnectionStatus): void {

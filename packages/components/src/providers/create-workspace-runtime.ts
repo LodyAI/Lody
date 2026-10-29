@@ -5595,7 +5595,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       requestSessionDispatchTurn,
       requestSessionSteer,
       contentMode: protectedContent ? 'e2ee' : 'plaintext',
-    attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
+      attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
       ...(prepareEncryptedDispatch ? { prepareEncryptedDispatch } : {}),
       isMachineRpcUnreachable,
     },
@@ -5625,7 +5625,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           requestSessionDispatchTurn,
           requestSessionSteer,
           contentMode: protectedContent ? 'e2ee' : 'plaintext',
-    attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
+          attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
         },
       }).catch((error: unknown) => {
         console.warn('Legacy pending messages could not be migrated', error);
@@ -5669,17 +5669,26 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     ...(prepareEncryptedDispatch ? { prepareEncryptedDispatch } : {}),
     repo,
     accountId: deps.accountId ?? null,
-    openPersonalMemory: async (roleId, machineId) => {
-      if (
-        disposePromise ||
-        !personalMemory ||
-        targetRouter.getPlaneForMachine(machineId) !== 'local'
-      )
-        throw new Error('memory_local_only');
-      if (((await getMachineProtocolCapabilities(machineId))?.builtinMemory ?? 0) < 1)
-        throw new Error('memory_unsupported');
-      return personalMemory.open(roleId);
-    },
+    personalMemory: personalMemory
+      ? {
+          openCatalog: async () => {
+            if (disposePromise) throw new Error('memory_unavailable');
+            return personalMemory.openCatalog();
+          },
+          open: async (memoryId) => {
+            if (disposePromise) throw new Error('memory_unavailable');
+            return personalMemory.open(memoryId);
+          },
+          create: async (profile) => {
+            if (disposePromise) throw new Error('memory_unavailable');
+            return personalMemory.create(profile);
+          },
+          remove: async (memoryId) => {
+            if (disposePromise) throw new Error('memory_unavailable');
+            return personalMemory.remove(memoryId);
+          },
+        }
+      : undefined,
     pendingSends,
     isMachineRpcUnreachable,
     codeCollabFileIndexCache,

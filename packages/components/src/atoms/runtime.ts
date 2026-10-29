@@ -1,4 +1,5 @@
-import type { PersonalMemoryHandle } from '@lody/memory/repo';
+import type { PersonalMemoryCatalogHandle, PersonalMemoryHandle } from '@lody/memory/repo';
+import type { MemoryProfileInput, MemoryResult } from '@lody/memory';
 import type { FileDownloadRequest, FileDownloadResponse } from '@lody/shared';
 import type {
   MemoryProviderRequest,
@@ -188,7 +189,16 @@ export type ScheduleDocStore = {
 };
 
 export type WorkspaceRuntime = {
-  openPersonalMemory?: (roleId: string, machineId: MachineId) => Promise<PersonalMemoryHandle>;
+  /**
+   * The signed-in user's Lody Memory in this workspace: a Renderer replica that
+   * replicates to the local daemon. Absent where no local data plane exists.
+   */
+  personalMemory?: {
+    openCatalog: () => Promise<PersonalMemoryCatalogHandle>;
+    open: (memoryId: string) => Promise<PersonalMemoryHandle>;
+    create: (profile: MemoryProfileInput) => Promise<MemoryResult<{ memoryId: string }>>;
+    remove: (memoryId: string) => Promise<void>;
+  };
   /**
    * The workspace slug used for caching the (slug, id) mapping.
    */

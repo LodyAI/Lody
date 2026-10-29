@@ -293,12 +293,13 @@ mention-compatible and at most 60 characters after trimming; descriptions allow 
 Machine/config IDs must be nonempty and at most 128 characters after trimming.
 Unsupported fields are rejected.
 
-### Built-in personal memory
+### Lody Memory
 
 `lody_memory_search`, `read`, `list`, `sources`, `create`, `update` and `forget`
 (the latter names also carry the `lody_memory_` prefix) use the existing
-`session/call-tool` route. Active frozen turn identity and a current Role binding
-authorize access; tool inputs cannot select a principal, Role or memory ID.
+`session/call-tool` route. Active frozen turn identity, the Role's current `lody`
+binding and the owner's memory catalog authorize access; tool inputs cannot select a
+principal, Role or memory ID.
 Successful mutations await local persistence and report encrypted sync unavailable.
 Entry content is injected as reference data by session execution. No install or
 external memory CLI is needed. See [memory](../../../../packages/memory/README.md)
