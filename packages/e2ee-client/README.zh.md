@@ -81,10 +81,13 @@ readerLeases: preallocated-v1 接受 open 第四个参数中的唯一调用标�
 结束。首次获取过程中关闭会退休整个绑定 host；观察到账号改变也永久退休该组合，恢复
 账号不会复活旧句柄。应用只能在旧 owner 确认结束后新建组合。父 Scope 使用 owned host
 的有界关闭并保留未结算工作。
+正文副本在交给执行器前就拥有清理责任，覆盖已退役执行器和失败的应用 Layer。程序进入后
+接管清理；调用者被拒绝不提前清零原生工作仍借用的缓冲。已由入口清理的副本拒绝延迟执行。
 
 共享内容桥只有一个实现 createE2eeContent，保留原桌面导入名。provider 同时启动 renderer
 清理和 native fencing，不在等待同一正文操作后才调用有界 native close；失败租约保留以供
-明确重试。这里只提供可选工厂，不启用 Web/移动端产品入口，也不代表真机验收。
+明确重试。只有重叠的 custody 绑定或 Repo 命名空间等待旧 owner，独立普通工作区保持
+可用。设备身份替换仍须等待同一账号/工作区/genesis 的物理 writer。这里只提供可选工厂，不启用 Web/移动端产品入口，也不代表真机验收。
 [#2075](https://github.com/LodyAI/Lody/issues/2075) 同时跟踪 owned close 与 bridge 采用。
 
 ## 审批、替换与失败

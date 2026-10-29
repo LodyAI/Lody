@@ -412,3 +412,300 @@ it.each(['chromium', 'webkit'] as const)(
     }
   }
 );
+
+type ExecutorSurface = typeof globalThis & {
+  HostFixture: typeof import('./browser/host-fixture');
+  unwrapPause: { enable(): void; entered: Promise<void>; release(): void; zero(): boolean };
+};
+it.each(['chromium', 'webkit'] as const)(
+  'owns input capture before executor entry and through actual native settlement in %s',
+  async (engine) => {
+    const directory = await mkdtemp(join(tmpdir(), 'lody-executor-ownership-'));
+    let context: BrowserContext | undefined;
+    try {
+      const output = await build({
+        entryPoints: [fileURLToPath(new URL('./browser/host-fixture.ts', import.meta.url))],
+        bundle: true,
+        platform: 'browser',
+        format: 'iife',
+        globalName: 'HostFixture',
+        target: 'safari16.4',
+        write: false,
+        logLevel: 'silent',
+      });
+      const file = join(directory, 'index.html');
+      await writeFile(
+        file,
+        '<!doctype html><script>' +
+          output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+          '</script>'
+      );
+      context = await (engine === 'chromium' ? chromium : webkit).launchPersistentContext(
+        join(directory, 'profile'),
+        { headless: true }
+      );
+      const page = await context.newPage();
+      await page.goto(pathToFileURL(file).href);
+      await page.evaluate(() => {
+        const native = SubtleCrypto.prototype.decrypt;
+        let enabled = false,
+          held: Uint8Array | undefined,
+          enter!: () => void,
+          release!: () => void;
+        const entered = new Promise<void>((resolve) => {
+            enter = resolve;
+          }),
+          released = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        SubtleCrypto.prototype.decrypt = async function (algorithm, key, data) {
+          const result = await native.call(this, algorithm, key, data),
+            aad = (algorithm as AesGcmParams).additionalData;
+          if (
+            enabled &&
+            !held &&
+            aad &&
+            new TextDecoder().decode(aad).includes('installed-epoch-key')
+          ) {
+            held = new Uint8Array(result);
+            enter();
+            await released;
+          }
+          return result;
+        };
+        (globalThis as ExecutorSurface).unwrapPause = {
+          enable() {
+            enabled = true;
+          },
+          entered,
+          release,
+          zero() {
+            if (!held) throw Error('no native buffer');
+            return held.every((byte) => byte === 0);
+          },
+        };
+      });
+      await page.evaluate(async () => {
+        await (globalThis as ExecutorSurface).HostFixture.boot();
+        await (globalThis as ExecutorSurface).HostFixture.bootRuntime();
+      });
+      try {
+        for (const action of ['prepare', 'claim', 'open', 'receive']) {
+          if (action === 'claim')
+            expect(
+              (
+                await page.evaluate(() =>
+                  (globalThis as ExecutorSurface).HostFixture.invoke('approve')
+                )
+              ).ok
+            ).toBe(true);
+          expect(
+            (
+              await page.evaluate(
+                (command) => (globalThis as ExecutorSurface).HostFixture.runtimeInvoke(command),
+                action
+              )
+            ).ok,
+            action
+          ).toBe(true);
+        }
+        for (const mode of ['disposed', 'layer-failed', 'reject', 'late'] as const) {
+          const result = await page.evaluate(
+            (executorCase) =>
+              (globalThis as ExecutorSurface).HostFixture.rejectedExecutorCopy(executorCase),
+            mode
+          );
+          expect(result, mode).toMatchObject({
+            rejected: true,
+            copies: 1,
+            zero: true,
+            callerIntact: true,
+          });
+          if (mode === 'late') expect(result.lateRejected).toBe(true);
+        }
+        await page.evaluate(() => (globalThis as ExecutorSurface).unwrapPause.enable());
+        await page.evaluate(() =>
+          (globalThis as ExecutorSurface).HostFixture.startExecutorOwnedSeal()
+        );
+        await page.evaluate(() => (globalThis as ExecutorSurface).unwrapPause.entered);
+        expect(
+          await page.evaluate(() =>
+            (globalThis as ExecutorSurface).HostFixture.inspectExecutorOwnedSeal()
+          )
+        ).toMatchObject({ copies: 1, zero: false, callerIntact: true });
+        expect(await page.evaluate(() => (globalThis as ExecutorSurface).unwrapPause.zero())).toBe(
+          false
+        );
+        await page.evaluate(() => (globalThis as ExecutorSurface).unwrapPause.release());
+        expect(
+          await page.evaluate(() =>
+            (globalThis as ExecutorSurface).HostFixture.settleExecutorOwnedSeal()
+          )
+        ).toMatchObject({ copies: 1, zero: true, callerIntact: true });
+        expect(await page.evaluate(() => (globalThis as ExecutorSurface).unwrapPause.zero())).toBe(
+          true
+        );
+      } finally {
+        await page.evaluate(() => (globalThis as ExecutorSurface).unwrapPause.release());
+        await page.evaluate(() => (globalThis as ExecutorSurface).HostFixture.stop());
+      }
+    } finally {
+      await context?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+);
+
+type RetirementSurface = typeof globalThis & {
+  RetirementFixture: typeof import('../../components/tests/browser/workspace-retirement-fixture');
+  nativeBorrow: { entered: Promise<void>; release(): void; zero(): boolean };
+};
+it.each(['chromium', 'webkit'] as const)(
+  'isolates independent ordinary storage from retained personal retirement in %s',
+  async (engine) => {
+    const directory = await mkdtemp(join(tmpdir(), 'lody-scoped-retirement-'));
+    let context: BrowserContext | undefined;
+    try {
+      const output = await build({
+        entryPoints: [
+          fileURLToPath(
+            new URL(
+              '../../components/tests/browser/workspace-retirement-fixture.ts',
+              import.meta.url
+            )
+          ),
+        ],
+        bundle: true,
+        platform: 'browser',
+        format: 'iife',
+        globalName: 'RetirementFixture',
+        target: 'safari16.4',
+        write: false,
+        logLevel: 'silent',
+      });
+      const file = join(directory, 'index.html');
+      await writeFile(
+        file,
+        '<!doctype html><script>' +
+          output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+          '</script>'
+      );
+      context = await (engine === 'chromium' ? chromium : webkit).launchPersistentContext(
+        join(directory, 'profile'),
+        { headless: true }
+      );
+      const page = await context.newPage();
+      await page.goto(pathToFileURL(file).href);
+      await page.evaluate(() => {
+        const native = SubtleCrypto.prototype.encrypt;
+        let held: Uint8Array | undefined, enter!: () => void, release!: () => void;
+        const entered = new Promise<void>((resolve) => {
+            enter = resolve;
+          }),
+          released = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        SubtleCrypto.prototype.encrypt = async function (algorithm, key, data) {
+          const aad = (algorithm as AesGcmParams).additionalData;
+          if (!held && aad && new TextDecoder().decode(aad).includes('installed-epoch-key')) {
+            held =
+              data instanceof ArrayBuffer
+                ? new Uint8Array(data)
+                : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+            enter();
+            await released;
+          }
+          return native.call(this, algorithm, key, data);
+        };
+        (globalThis as RetirementSurface).nativeBorrow = {
+          entered,
+          release,
+          zero() {
+            if (!held) throw Error('no native borrow');
+            return held.every((byte) => byte === 0);
+          },
+        };
+      });
+      await page.evaluate(async () => {
+        const p = (globalThis as RetirementSurface).RetirementFixture.personal;
+        await p.boot('create-or-open', true);
+        await p.bootRuntime();
+      });
+      const action = (a: string) =>
+        page.evaluate(
+          (command) =>
+            (globalThis as RetirementSurface).RetirementFixture.personal.runtimeInvoke(command),
+          a
+        );
+      try {
+        expect((await action('prepare')).ok).toBe(true);
+        expect(
+          (
+            await page.evaluate(() =>
+              (globalThis as RetirementSurface).RetirementFixture.personal.invoke('approve')
+            )
+          ).ok
+        ).toBe(true);
+        for (const a of ['claim', 'open', 'startReceive'])
+          expect((await action(a)).ok, a).toBe(true);
+        await page.evaluate(() => (globalThis as RetirementSurface).nativeBorrow.entered);
+        await page.evaluate(() =>
+          (globalThis as RetirementSurface).RetirementFixture.retirePersonal()
+        );
+        await page.evaluate(() =>
+          (globalThis as RetirementSurface).RetirementFixture.personal.invoke('waitCloseBudget')
+        );
+        await page.evaluate(() =>
+          (globalThis as RetirementSurface).RetirementFixture.personal.invoke('advanceCloseBudget')
+        );
+        expect(
+          await page.evaluate(() =>
+            (globalThis as RetirementSurface).RetirementFixture.closeOutcome()
+          )
+        ).toBe('close-incomplete');
+        expect(
+          await page.evaluate(() =>
+            (globalThis as RetirementSurface).RetirementFixture.ordinaryDraft()
+          )
+        ).toEqual({ opened: true, body: 'ordinary draft remains writable' });
+        expect(
+          await page.evaluate(() =>
+            (globalThis as RetirementSurface).RetirementFixture.samePhysicalIdentity()
+          )
+        ).toEqual({ blocked: true, sameOwner: true });
+        expect(
+          await page.evaluate(() => (globalThis as RetirementSurface).nativeBorrow.zero())
+        ).toBe(false);
+        expect(
+          await page.evaluate(async () => {
+            const name = (await navigator.locks.query()).held![0]!.name!;
+            return navigator.locks.request(name, { ifAvailable: true }, (lock) => lock === null);
+          })
+        ).toBe(true);
+        await page.evaluate(() => (globalThis as RetirementSurface).nativeBorrow.release());
+        await action('workResult');
+        await page.evaluate(() =>
+          (globalThis as RetirementSurface).RetirementFixture.finishRetirement()
+        );
+        expect(
+          await page.evaluate(() => (globalThis as RetirementSurface).nativeBorrow.zero())
+        ).toBe(true);
+        expect((await action('open')).ok).toBe(true);
+        await action('close');
+      } finally {
+        await page.evaluate(() => (globalThis as RetirementSurface).nativeBorrow.release());
+        await page.evaluate(() =>
+          (globalThis as RetirementSurface).RetirementFixture.personal.invoke('expireCloseWaiters')
+        );
+        await action('workResult');
+        await action('close');
+        await page.evaluate(() =>
+          (globalThis as RetirementSurface).RetirementFixture.personal.stop()
+        );
+      }
+    } finally {
+      await context?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+);

@@ -883,6 +883,72 @@ describe('RuntimeProvider warm workspace preparation', () => {
     expect(readers).toEqual(new Set(['other-window']));
   });
 
+  it('opens an independent ordinary workspace while an encrypted workspace retains incomplete native close', async () => {
+    ordinaryCloud();
+    listEncrypted();
+    let allowOldClose = false,
+      oldOpen = false;
+    const status = {
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+      epoch: 0,
+      hasCurrentKey: true,
+      rotationRequired: false,
+      readerOwner: 'old-encrypted-reader',
+    };
+    environment.e2eeWorkspaces!.describe = async ({ workspaceId }) =>
+      workspaceId === 'local:workspace'
+        ? encryptedDescriptor(workspaceId)
+        : { workspaceId, contentMode: 'plaintext', contentModeVersion: 1 };
+    environment.e2eeWorkspaces!.runtime = {
+      open: async () => {
+        if (oldOpen) throw new Error('overlapping reader');
+        oldOpen = true;
+        return status;
+      },
+      status: async () => status,
+      refresh: async () => status,
+      close: async () => {
+        if (!allowOldClose) throw new Error('close-incomplete: old native work retained');
+        oldOpen = false;
+      },
+    } as unknown as E2eeWorkspaceRuntime;
+    await render();
+    expect(store.get(runtimeAtom)).toBe(prepared);
+    vi.mocked(createWorkspaceRuntime).mockImplementation(
+      async ({ workspaceId }) => ({ ...runtimeFixture(), workspaceId }) as never
+    );
+    environment.cachedWorkspaceId = 'independent-workspace';
+    await act(async () => {
+      environment.workspaces.set({
+        status: 'ready',
+        activeWorkspaceId: 'independent-workspace',
+        workspaces: [
+          { id: 'independent-workspace', slug: 'independent', name: 'independent', role: 'owner' },
+        ],
+      });
+      store.set(currentWorkspaceSlugAtom, 'independent');
+      store.set(currentWorkspaceIdAtom, 'independent-workspace');
+    });
+    expect(store.get(runtimeAtom)?.workspaceId).toBe('independent-workspace');
+    await act(async () => store.set(workspaceModeAdmissionRetryAtom, 1));
+    expect(store.get(runtimeAtom)?.workspaceId).toBe('independent-workspace');
+    expect(oldOpen).toBe(true);
+    // Returning to A must still join its retained owner, even after B opened and retried.
+    environment.cachedWorkspaceId = 'local:workspace';
+    await act(async () => {
+      listEncrypted();
+      store.set(currentWorkspaceSlugAtom, 'local');
+      store.set(currentWorkspaceIdAtom, 'local:workspace');
+    });
+    expect(store.get(runtimeAtom)).toBeNull();
+    expect(oldOpen).toBe(true);
+    allowOldClose = true;
+    await act(async () => store.set(workspaceModeAdmissionRetryAtom, 2));
+    expect(store.get(runtimeAtom)?.workspaceId).toBe('local:workspace');
+    expect(oldOpen).toBe(true);
+  });
+
   it('retains an incomplete protected close and retries it before publishing a successor', async () => {
     ordinaryCloud();
     listEncrypted();

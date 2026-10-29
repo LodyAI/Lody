@@ -230,7 +230,6 @@ Browser engines and desktop regressions exercise
 these contracts; minimum-OS devices, native plugins and power-loss durability
 remain separate acceptance.
 
-
 The scoped host constructor remains the actual drain primitive. Product assembly
 uses `makeOwnedPersonalDeviceHost(ports)`, which acquires the whole resource-owning
 port Layer in a retained Scope independent of its consumer. Host, session and
@@ -271,8 +270,12 @@ another remains. Last-reader close fences that session and retains an incomplete
 ticket for confirmation; account change or close during initial acquisition retires
 the bound assembly. A new account observation cannot revive it. Provider cleanup
 starts native fencing alongside independent renderer cleanup, retaining full failures
-and the precise account/reader lease. A later acquisition retries unresolved close
-before publishing a successor. Serializing a new open behind the entire native
+and the precise account/reader lease. Retained owners are selected by actual resource
+overlap, not a global predecessor: native custody uses account/workspace/genesis
+across device replacements; a protected Repo adds signing identity, while an ordinary
+Repo uses its renderer/workspace namespace. Matching acquisition confirms unresolved
+close before publishing a successor; independent workspaces do not retry or wait
+on that owner. Serializing a new open behind the entire native
 operation, swallowing a close failure, or memoizing a timeout as permanent failure
 would respectively hide the close deadline, permit overlap, or block safe reuse.
 
@@ -289,6 +292,12 @@ The shared content bridge fences late grant/RPC/token results even when a distin
 reader keeps the underlying runtime alive. Its epoch tracker wipes plaintext before
 rejecting a late closed-reader result. Cancellation checks do not require the native
 combined-signal API; a simulated absent API exercises the existing token entry.
+Plaintext input captures own cleanup before executor dispatch. A disposed executor
+or failed application Layer may never enter the Effect bracket, so the caller wipes
+only an unclaimed capture. Program entry atomically claims it with bracket cleanup;
+a waiter failure cannot wipe an active native borrow. A delayed execution after
+caller cleanup is refused. Other pre-dispatch copies contain ciphertext or public
+metadata; returned secrets are still acquired with cleanup registration.
 These are local ownership/compatibility rules, not new signed bytes or authority.
 
 This is opt-in public assembly, not Web/mobile activation. Browser tests use real

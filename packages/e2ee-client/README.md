@@ -107,11 +107,18 @@ the whole bound host. Observing a different live account also permanently retire
 that assembly; restoring the account cannot revive its handles. The application
 creates a fresh assembly only after confirmed retirement of its old owner.
 Scope close retains unfinished work through the owned host's bounded close.
+Plaintext capture owns cleanup before executor entry, including disposed executors
+and failed application Layers. Entry transfers cleanup to the program; rejecting
+its caller does not wipe a buffer still borrowed by actual native work. Delayed
+execution of a capture already released by its caller is refused.
 
 The shared content bridge has one implementation (`createE2eeContent`, with the
 existing desktop import retained). Provider retirement starts renderer cleanup and
 native fencing together, preserves failed leases for explicit retry, and cannot
-hide a native close timeout by first waiting on the same content operation. Six
+hide a native close timeout by first waiting on the same content operation.
+Retirement waits apply only to overlapping custody bindings or Repo namespaces;
+an independent ordinary workspace remains usable. Changing device identity still
+waits on the same account/workspace/genesis physical writer. Six
 security boundaries and browser/React evidence are recorded in the PR; no Web or
 mobile product entry is enabled here. [#2075](https://github.com/LodyAI/Lody/issues/2075)
 tracks the owned close and bridge adoption together.

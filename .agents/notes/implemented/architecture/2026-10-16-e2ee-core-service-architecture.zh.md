@@ -123,7 +123,6 @@ hex、installation ID、原 genesis record hex、endorser、membership。排除 
 浏览器引擎与桌面回归验证这些合同；最低 OS 真机、
 原生插件和断电耐久仍需独立验收。
 
-
 scoped host 构造器保留为实际 drain 原语。产品组合使用
 `makeOwnedPersonalDeviceHost(ports)`，在独立于消费方的保留 Scope 中获取整个拥有资源的
 端口 Layer。host、session 和父 Scope 关闭共用每次 drain 的五秒等待预算；超时返回
@@ -151,7 +150,10 @@ pin 或权限。未完成关闭保留 owner 以供重试，空的失败初始化
 reader 生命周期不同于整个 host：关闭一个 reader 不影响其他 reader；最后一个 reader
 停止接纳该 session，未完成 ticket 保留待确认。账号改变、首次获取时关闭会退休整个绑定
 组合；重新观察到原账号不能复活它。provider 并行启动 native fencing 和独立 renderer
-清理，保留完整失败及精确账号/reader 租约；后继获取先重试确认旧关闭。先等待整个原生
+清理，保留完整失败及精确账号/reader 租约。旧 owner 按实际资源重叠选择，不是全局前置：
+native custody 使用跨设备替换保持不变的账号/工作区/genesis；受保护 Repo 另含签名身份，
+普通 Repo 使用窗口/工作区命名空间。匹配获取先确认旧关闭，独立工作区不重试或等待该
+owner。先等待整个原生
 操作才调用 close 会掩盖期限；吞掉 close 错误会允许重叠；永久缓存 timeout 会阻塞安全复用，
 因此均未采用。
 
@@ -163,7 +165,12 @@ feed，本地展示行按真实 view 中的绝对位置摘要核对。
 
 共享内容桥即使面对仍有其他 reader 的底层 runtime，也拒绝晚到 grant/RPC/token 结果。
 epoch tracker 在拒绝已关闭 reader 的晚到结果前清零明文；取消检查不要求原生组合 signal API，
-测试模拟缺失该 API 后走既有 token 入口。这些是本地所有权/兼容性规则，不改变签名字节或权限。
+测试模拟缺失该 API 后走既有 token 入口。
+正文输入副本在执行器派发前拥有清理责任。已退役的执行器或失败的应用 Layer 可能根本
+不进入 Effect bracket，因此入口只清零未被程序接管的副本。程序进入时原子接管并登记
+bracket 清理，等待者失败不能提前清零原生借用。入口已经清理的副本拒绝延迟执行。
+其他派发前副本只含密文或公开元数据；返回秘密仍与清理登记一起获取。
+这些是本地所有权/兼容性规则，不改变签名字节或权限。
 
 这里只提供公开可选组合，不启用 Web/移动端产品。浏览器测试使用真实 custody、IDB、邮箱
 密码、签名 RPC 和暂停原生工作；策略 Layer 用例证明组合/scope，不代表新策略存储实现。

@@ -419,29 +419,45 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
           })
         )
       ),
-    seal: (id, source) => {
+    seal: async (id, source) => {
       const captured = captureSeal(source);
-      return run(
-        Effect.acquireUseRelease(
-          Effect.fromResult(captured),
-          (input) =>
-            withSession(id, (session) =>
-              Effect.gen(function* () {
-                const descriptor = yield* room(input.room),
-                  document = yield* session.document(
-                    descriptor.resource,
-                    descriptor.model,
-                    input.epoch
-                  );
-                return yield* document.seal({
-                  ...input,
-                  additionalData: () => input.additionalData,
-                });
-              })
-            ),
-          (input) => Effect.sync(() => input.plaintext.fill(0))
-        )
-      );
+      // Capture owns cleanup before invoking an executor that may never enter
+      // the program. After acquisition, only the running program may release it.
+      let claimed = false,
+        released = false;
+      const release = () => {
+        released = true;
+        if (Result.isSuccess(captured)) captured.success.plaintext.fill(0);
+      };
+      try {
+        return await run(
+          Effect.acquireUseRelease(
+            Effect.suspend(() => {
+              if (claimed || released) return Effect.fail(fail('closed'));
+              claimed = true;
+              return Effect.fromResult(captured);
+            }),
+            (input) =>
+              withSession(id, (session) =>
+                Effect.gen(function* () {
+                  const descriptor = yield* room(input.room),
+                    document = yield* session.document(
+                      descriptor.resource,
+                      descriptor.model,
+                      input.epoch
+                    );
+                  return yield* document.seal({
+                    ...input,
+                    additionalData: () => input.additionalData,
+                  });
+                })
+              ),
+            () => Effect.sync(release)
+          )
+        );
+      } finally {
+        if (!claimed) release();
+      }
     },
     openContent: (id, source) => {
       const captured = captureOpen(source);

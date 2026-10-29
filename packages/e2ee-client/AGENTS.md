@@ -24,6 +24,9 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
   late completion cannot revive closed or replaced owners. Acquire returned
   secret buffers together with wipe registration through acquireRelease or
   acquireUseRelease; native settlement alone does not establish cleanup ownership.
+  Plaintext copies made before executor entry require immediate cleanup ownership:
+  release on rejection before entry, then transfer exclusively to the entered program
+  until actual native settlement. Reject delayed execution of a released copy.
 - Replacement verifies new desktop approval, drains the old incarnation and uses
   the approved atomic archive/current switch. Preserve old pins, wrappers and
   journals. Logout, close and ordinary cache cleanup never delete identity.

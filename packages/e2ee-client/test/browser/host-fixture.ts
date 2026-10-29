@@ -1,4 +1,5 @@
 import {
+  ManagedRuntime,
   Cause,
   Clock,
   Context,
@@ -85,6 +86,9 @@ import { toHex, fromHex } from '../../src/bytes';
 let runtimePorts: Layer.Layer<PersonalHostPorts, unknown>;
 let runtime: E2eeWorkspaceRuntime;
 let runtimeAccount = 'account';
+let executorOverride: import('../../src').PersonalRuntimeOptions<unknown>['run'] | undefined;
+let executorWork: Promise<unknown> | undefined;
+let capturedSeal: { original: Uint8Array; copies: Uint8Array[] } | undefined;
 let accountFailure: Cause.Cause<unknown> | undefined;
 let tokenEntered: Deferred.Deferred<void>,
   tokenRelease: Deferred.Deferred<void>,
@@ -1098,6 +1102,7 @@ export async function bootRuntime(withSharing = false) {
             .map((record, index) => ({ position: checked.historyStart + index, record }))
         ),
       run: async (program) => {
+        if (executorOverride) return await executorOverride(program);
         const exit = await Effect.runPromiseExit(
           program.pipe(Effect.provideService(Clock.Clock, fixedClock))
         );
@@ -1373,3 +1378,104 @@ export async function runtimeInvoke(action: string) {
     return { ok: false, reason: e.code ?? e.reason ?? e.message };
   }
 }
+
+/** Observe only directly allocated copies of a public synthetic input, never production keys. */
+function observeSealCopy() {
+  const Native = Uint8Array,
+    original = new Native([61, 62, 63, 64]),
+    copies: Uint8Array[] = [];
+  capturedSeal = { original, copies };
+  globalThis.Uint8Array = new Proxy(Native, {
+    construct(target, args, newTarget) {
+      const value = Reflect.construct(target, args, newTarget) as Uint8Array;
+      if (args[0] === original) copies.push(value);
+      return value;
+    },
+  });
+  return () => {
+    globalThis.Uint8Array = Native;
+  };
+}
+const capturedSealState = () => ({
+  copies: capturedSeal!.copies.length,
+  zero: capturedSeal!.copies.every((copy) => copy.every((byte) => byte === 0)),
+  callerIntact: capturedSeal!.original.every((byte, index) => byte === 61 + index),
+});
+const sealObserved = () =>
+  runtime.seal(offer.workspaceId, {
+    epoch: 0,
+    room: { kind: 'doc', docId: '1' },
+    context: runtimeContext,
+    plaintext: capturedSeal!.original,
+    additionalData: new Uint8Array(),
+  });
+export async function rejectedExecutorCopy(
+  executorCase: 'disposed' | 'layer-failed' | 'reject' | 'late'
+) {
+  const restore = observeSealCopy();
+  const managed = ManagedRuntime.make(
+    executorCase === 'layer-failed'
+      ? Layer.effectDiscard(Effect.fail(new Error('synthetic app Layer failure')))
+      : Layer.empty
+  );
+  let late: Effect.Effect<unknown, unknown> | undefined;
+  if (executorCase === 'disposed') await managed.dispose();
+  executorOverride =
+    executorCase === 'reject' || executorCase === 'late'
+      ? (program) => {
+          late = program;
+          return Promise.reject(new Error('synthetic executor rejection'));
+        }
+      : (program) => managed.runPromise(program);
+  try {
+    let rejected = false;
+    try {
+      await sealObserved();
+    } catch {
+      rejected = true;
+    }
+    const beforeLate = capturedSealState();
+    let lateRejected = false;
+    if (executorCase === 'late') {
+      const result = (await Effect.runPromise(late!)) as Exit.Exit<unknown, unknown>;
+      lateRejected = Exit.isFailure(result);
+    }
+    return { rejected, ...beforeLate, lateRejected };
+  } finally {
+    executorOverride = undefined;
+    restore();
+    for (const copy of capturedSeal!.copies) copy.fill(0);
+    await managed.dispose();
+  }
+}
+export async function startExecutorOwnedSeal() {
+  const restore = observeSealCopy();
+  executorOverride = (program) => {
+    executorWork = Effect.runPromiseExit(
+      program.pipe(Effect.provideService(Clock.Clock, fixedClock))
+    );
+    return Promise.reject(new Error('synthetic waiter rejected after starting owned work'));
+  };
+  try {
+    try {
+      await sealObserved();
+    } catch {
+      /* The entry rejects while its started program retains ownership. */
+    }
+  } finally {
+    executorOverride = undefined;
+    restore();
+  }
+}
+export function inspectExecutorOwnedSeal() {
+  return capturedSealState();
+}
+export async function settleExecutorOwnedSeal() {
+  await executorWork;
+  return capturedSealState();
+}
+
+export const runtimeReader = {
+  status: () => runtime.status(offer.workspaceId),
+  close: () => runtime.close(offer.workspaceId, 'account', runtimeLease),
+};

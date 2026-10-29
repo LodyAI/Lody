@@ -130,7 +130,8 @@ Guide handoff still needs an owner receipt. Archive/delete cancel durable work b
 snapshots and join leases. Unready Blobs stay in memory; uncertain steers never replay.
 [Decision](../../../../.agents/notes/proposed/architecture/2026-10-13-backend-independent-send-acceptance.md).
 
-- Protected runtime leases retain the captured account and readerOwner through
-  confirmed close. Preallocated leases fence cold opening. Start native fencing with renderer cleanup; preserve incomplete
-  failures for retry before successor publication. A later usable retained epoch
-  wakes the existing admission path without requiring the current key.
+- Protected leases retain captured account/reader until confirmed close. Preallocated
+  leases fence cold opens. Begin native fencing with renderer cleanup. Retain full
+  incomplete owners; only overlapping custody bindings or Repo namespaces wait.
+  Independent workspaces remain usable. Device replacement shares its
+  account/workspace/genesis writer. Usable retained epochs wake existing admission.
