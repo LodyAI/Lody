@@ -36,3 +36,5 @@ On 2026-10-29, owner Zixuan Chen (zxch3n) explicitly approved the client custody
 5. Ledger v1 and its bytes stay unchanged. Spec approval is not implementation, deployment or real-device acceptance, and does not approve the recovery vault.
 
 The approval metadata and links added after this revision do not change its technical text. The [current Spec](../../../../specs/e2ee/client-custody.md) records this approval; actual native keychain/keystore, first-unlock, minimum-OS and device acceptance remain separate evidence.
+
+On 2026-10-29, owner Zixuan Chen, through the E2EE coordinator, approved shortening E2EE content-token validity to 480 seconds as the launch mitigation: 480 seconds plus 60 seconds of JWT leeway plus one 300-second SSE lifetime gives a nominal 840-second budget. The remaining 60 seconds is headroom, not a bound on buffering, upstream waits/retries, clock error or storage commit. Strict gateway expiry is deferred and does not block launch. This documentation records the decision, not private-backend deployment or real-gateway acceptance. Independent removal and later manual rotation retain the approved tag 10 semantics.
