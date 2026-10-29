@@ -1,0 +1,452 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "blockedHosts": ["avatars.githubusercontent.com"],
+  "ids": [
+    "components-legacy-task-list-migration--toggle-only",
+    "components-legacy-task-list-migration--external-generic-group",
+    "components-legacy-task-list-migration--state-caller-overrides",
+    "components-legacy-task-list-migration--subtree-variables",
+    "components-owned-session-list-migration--project-groups",
+    "components-owned-session-list-migration--navigable-chats",
+    "components-legacyupdatedtasklistmigration--interactions",
+    "components-legacyupdatedtasklistmigration--scoped-variables"
+  ],
+  "ready": {
+    "components-legacy-task-list-migration--toggle-only": [
+      {
+        "action": "visible",
+        "selector": "[data-legacy-task-fixture]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "components-legacy-task-list-migration--external-generic-group": [
+      {
+        "action": "visible",
+        "selector": "[data-legacy-task-fixture]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "components-legacy-task-list-migration--state-caller-overrides": [
+      {
+        "action": "visible",
+        "selector": "[data-legacy-task-fixture]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "components-legacy-task-list-migration--subtree-variables": [
+      {
+        "action": "visible",
+        "selector": "[data-legacy-task-fixture]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "components-owned-session-list-migration--project-groups": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-session-fixture]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "components-owned-session-list-migration--navigable-chats": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-session-fixture]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "components-legacyupdatedtasklistmigration--interactions": [
+      {
+        "action": "visible",
+        "selector": "[data-legacy-updated-fixture]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "components-legacyupdatedtasklistmigration--scoped-variables": [
+      {
+        "action": "visible",
+        "selector": "[data-legacy-updated-fixture]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ]
+  },
+  "states": {
+    "components-legacy-task-list-migration--toggle-only": [
+      {
+        "name": "repo-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-group-key=\"migration-fixture/alpha-project\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "chats-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-group-key=\"__only_chats__\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "chats-collapse",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-group-key=\"__only_chats__\"]"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-session-id=\"chat-rest\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "components-legacy-task-list-migration--subtree-variables": [
+      {
+        "name": "repo-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-group-key=\"migration-fixture/alpha-project\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "components-legacy-task-list-migration--external-generic-group": [
+      {
+        "name": "outer-generic-hover",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 20,
+            "y": 20
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-legacy-external-group]')?.matches(':hover')&&!document.querySelector('[data-sidebar-group-key=\"migration-fixture/alpha-project\"]')?.parentElement.matches(':hover')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "inner-group-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-group-key=\"migration-fixture/alpha-project\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "components-legacy-task-list-migration--state-caller-overrides": [
+      {
+        "name": "outer-generic-hover",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 20,
+            "y": 20
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-legacy-external-group]')?.matches(':hover')&&!document.querySelector('[data-sidebar-group-key=\"migration-fixture/alpha-project\"]')?.parentElement.matches(':hover')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "inner-group-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-group-key=\"migration-fixture/alpha-project\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "components-owned-session-list-migration--project-groups": [
+      {
+        "name": "project-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-group-key=\"projectGroup:alpha\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "project-collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-group-key=\"projectGroup:alpha\"] > button[aria-label=\"Toggle\"]"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-sidebar-session-id=\"opener\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "project-expanded",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-group-key=\"projectGroup:alpha\"] > button[aria-label=\"Toggle\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-session-id=\"opener\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "components-owned-session-list-migration--navigable-chats": [
+      {
+        "name": "chats-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-group-key=\"__only_chats__\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "chats-navigate",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-group-key=\"__only_chats__\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-owned-session-event]:has-text(\"Navigate chat\")"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "components-legacyupdatedtasklistmigration--interactions": [
+      {
+        "name": "row-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"long\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "menu-open-pointer-out",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-updated-id=\"long\"]",
+            "button": "right"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "movePointer",
+            "x": 385,
+            "y": 950
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-updated-id=\"long\"]')?.hasAttribute('data-menu-open')&&[...document.querySelectorAll('[role=menu]')].some(m=>getComputedStyle(m).opacity==='1')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "menu-closed",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-sidebar-updated-id=\"long\"]')?.hasAttribute('data-menu-open')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "components-legacyupdatedtasklistmigration--scoped-variables": [
+      {
+        "name": "row-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-sidebar-updated-id=\"long\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "menu-open-pointer-out",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-updated-id=\"long\"]",
+            "button": "right"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "movePointer",
+            "x": 385,
+            "y": 950
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-sidebar-updated-id=\"long\"]')?.hasAttribute('data-menu-open')&&[...document.querySelectorAll('[role=menu]')].some(m=>getComputedStyle(m).opacity==='1')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "menu-closed",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "menuitem",
+            "name": "Rename"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-sidebar-updated-id=\"long\"]')?.hasAttribute('data-menu-open')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ]
+  }
+}

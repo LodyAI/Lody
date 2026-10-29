@@ -146,6 +146,8 @@ function Demo({
   naturalDevice = false,
   initialCollapsed = false,
   activeGroup = false,
+  toggleOnly = false,
+  stateCaller = false,
 }: {
   initialTasks?: TaskListTask[];
   anchors?: boolean;
@@ -156,6 +158,8 @@ function Demo({
   naturalDevice?: boolean;
   initialCollapsed?: boolean;
   activeGroup?: boolean;
+  toggleOnly?: boolean;
+  stateCaller?: boolean;
 }) {
   const store = useMemo(() => {
     const value = createStore();
@@ -200,7 +204,11 @@ function Demo({
           selectedTaskId={selected}
           activeGroupKey={activeGroup ? ALPHA : undefined}
           className={
-            caller ? 'gap-5 p-3 border border-sidebar-ring w-[280px] max-w-full' : undefined
+            stateCaller
+              ? '[&_svg]:opacity-50 [&_button]:pointer-events-none'
+              : caller
+                ? 'gap-5 p-3 border border-sidebar-ring w-[280px] max-w-full'
+                : undefined
           }
           headerAction={
             <Button size="small" variant="ghost" onClick={() => setEvent('Header action')}>
@@ -269,7 +277,7 @@ function Demo({
             readOnly ? undefined : ({ taskId }) => setEvent(`Pull request ${taskId}`)
           }
           onNavigateToNewSession={
-            readOnly ? undefined : (name) => setEvent(`Navigate ${name ?? 'chat'}`)
+            readOnly || toggleOnly ? undefined : (name) => setEvent(`Navigate ${name ?? 'chat'}`)
           }
           getTaskHref={anchors ? (id) => `#synthetic-session-${id}` : undefined}
         />
@@ -313,6 +321,21 @@ export const RootVariableOverrides: Story = {
   ),
 };
 export const NaturalDevice: Story = { render: () => <Demo naturalDevice /> };
+export const ToggleOnly: Story = { render: () => <Demo toggleOnly /> };
+export const ExternalGenericGroup: Story = {
+  render: () => (
+    <div className="group" data-legacy-external-group style={{ padding: 48 }}>
+      <Demo toggleOnly />
+    </div>
+  ),
+};
+export const StateCallerOverrides: Story = {
+  render: () => (
+    <div className="group" data-legacy-external-group style={{ padding: 48 }}>
+      <Demo toggleOnly stateCaller />
+    </div>
+  ),
+};
 
 export const LoadingAndEmpty: Story = {
   render: () => (

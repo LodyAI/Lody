@@ -117,11 +117,13 @@ function Demo({
   subtree = false,
   caller = false,
   narrow = false,
+  navigateChats = false,
 }: {
   selectedGroup?: boolean;
   subtree?: boolean;
   caller?: boolean;
   narrow?: boolean;
+  navigateChats?: boolean;
 }) {
   const store = useMemo(() => {
     const value = createStore();
@@ -175,6 +177,9 @@ function Demo({
               )
             }
             onNewInProjectGroup={(id) => setEvent(`New project ${id}`)}
+            onNavigateToNewSession={
+              navigateChats ? (repo) => setEvent(`Navigate ${repo ?? 'chat'}`) : undefined
+            }
             onOpenProjectGroupSettings={(id) => setEvent(`Settings ${id}`)}
             onArchiveProjectGroupChats={(ids) => setEvent(`Archive group ${ids.join(',')}`)}
             onMoveProjectGroup={(ids) => {
@@ -224,6 +229,7 @@ function Demo({
   );
 }
 export const ProjectGroups: Story = { render: () => <Demo /> };
+export const NavigableChats: Story = { render: () => <Demo navigateChats /> };
 export const SelectedProjectGroup: Story = { render: () => <Demo selectedGroup /> };
 export const SubtreeVariables: Story = { render: () => <Demo subtree /> };
 export const RootVariableOverrides: Story = {

@@ -101,9 +101,7 @@ export function SessionFilePreviewPanel({
           >
             {file.fileName}
           </Title>
-          <span {...stylex.props(styles.fileMeta)}>
-            {formatFileSize(file.sizeBytes)}
-          </span>
+          <span {...stylex.props(styles.fileMeta)}>{formatFileSize(file.sizeBytes)}</span>
         </div>
         <div {...stylex.props(styles.actions)}>
           {canPreviewHtml ? (
@@ -188,11 +186,7 @@ export function SessionFilePreviewPanel({
       </div>
 
       {status.kind === 'loaded' && status.truncated ? (
-        <div
-          // The dark half of a hard-coded palette colour has no StyleX
-          // equivalent, so it stays a Tailwind class on this element.
-          className={clsx('dark:text-amber-300', stylex.props(styles.notice).className)}
-        >
+        <div {...stylex.props(styles.notice)}>
           <span {...stylex.props(styles.noticeText)}>
             <FileWarning {...stylex.props(styles.glyph)} aria-hidden="true" />
             {t(
@@ -287,6 +281,9 @@ export function SessionFilePreviewDialog({
   );
 }
 
+const DARK_SCOPE =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+
 const styles = stylex.create({
   panel: { display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0 },
   sheetPanel: {
@@ -363,7 +360,10 @@ const styles = stylex.create({
     paddingBlock: themeSpace[2],
     fontSize: themeFontSize.xs,
     lineHeight: themeLineHeight.xs,
-    color: 'var(--color-amber-700)',
+    color: {
+      default: 'var(--color-amber-700)',
+      [DARK_SCOPE]: 'var(--color-amber-300)',
+    },
   },
   noticeText: {
     display: 'flex',

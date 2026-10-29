@@ -765,7 +765,6 @@ export function DesktopRunConfigMenu({
                 <Menu.Content
                   {...submenuPlacement}
                   maxWidth="min(29.5rem, var(--radix-popper-available-width,29.5rem))"
-                  className="overflow-x-hidden"
                 >
                   <ComposerAgentRolePanel
                     items={agentRoles.items}

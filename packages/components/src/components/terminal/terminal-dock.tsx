@@ -47,6 +47,9 @@ type RememberedTerminalSessionState = {
   activeTerminalId: string | null;
 };
 
+const DARK_SCOPE =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+
 const styles = stylex.create({
   root: { flex: 'none', overflow: 'hidden' },
   heightTransition: {
@@ -113,7 +116,10 @@ const styles = stylex.create({
   },
   // The tab's canvas is already the sidebar; the selected fill stays flat.
   tabActive: {
-    backgroundColor: themeColors.background,
+    backgroundColor: {
+      default: themeColors.background,
+      [DARK_SCOPE]: 'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 16%, transparent)',
+    },
     color: themeColors.tabActiveForeground,
   },
   tabInactive: {
@@ -643,13 +649,10 @@ export function TerminalDock({
                         role="tab"
                         aria-selected={isActive}
                         data-terminal-tab=""
-                        className={cn(
-                          stylex.props(
-                            stylex.defaultMarker(),
-                            styles.tab,
-                            isActive ? styles.tabActive : styles.tabInactive
-                          ).className,
-                          isActive && 'dark:bg-muted-foreground/[0.16]'
+                        {...stylex.props(
+                          stylex.defaultMarker(),
+                          styles.tab,
+                          isActive ? styles.tabActive : styles.tabInactive
                         )}
                       >
                         <button

@@ -1,6 +1,10 @@
 import * as stylex from '@stylexjs/stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
+  messageActionLabelTheme,
+  messageActionInkTheme,
+} from '../../style/message-action-button.stylex';
+import {
   themeDuration,
   themeFontSize,
   themeFontWeight,
@@ -176,7 +180,7 @@ export function NotificationPermissionPrompt({
               variant="ghost"
               size="small"
               onClick={handleDismiss}
-              className="text-muted-foreground hover:text-foreground"
+              {...stylex.props(messageActionLabelTheme, messageActionInkTheme)}
             >
               {t('notifications.prompt.dontRemind', "Don't remind me")}
             </Button>

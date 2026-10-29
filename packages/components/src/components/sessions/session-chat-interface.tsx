@@ -1443,12 +1443,7 @@ export function SessionHeaderMenu({
             <Menu.SubmenuTrigger icon={GitBranchPlus}>
               {t('sessions.openedBy.openedSessions', 'Opened sessions')} ({openedSessions.length})
             </Menu.SubmenuTrigger>
-            <Menu.Content
-              maxHeight="calc(var(--spacing) * 72)"
-              minWidth={200}
-              maxWidth={280}
-              className="overflow-y-auto"
-            >
+            <Menu.Content maxHeight="calc(var(--spacing) * 72)" minWidth={200} maxWidth={280}>
               {openedSessions.map((opened) => (
                 <Menu.Item
                   key={opened.sessionId}
@@ -1842,12 +1837,7 @@ export function SessionHeaderMenu({
               <Menu.SubmenuTrigger icon={UserRoundCog}>
                 {t('sessions.owner.change', 'Change owner')}
               </Menu.SubmenuTrigger>
-              <Menu.Content
-                maxHeight="calc(var(--spacing) * 72)"
-                minWidth={200}
-                maxWidth={280}
-                className="overflow-y-auto"
-              >
+              <Menu.Content maxHeight="calc(var(--spacing) * 72)" minWidth={200} maxWidth={280}>
                 <Menu.RadioGroup
                   value={owner.ownerUserId}
                   onValueChange={(userId) => {

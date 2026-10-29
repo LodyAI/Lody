@@ -1,0 +1,233 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "ids": [
+    "ai-sessionfilepreviewpanel--truncated",
+    "terminal-migration--row-states",
+    "terminal-terminaldock--in-local-session"
+  ],
+  "ready": {
+    "ai-sessionfilepreviewpanel--truncated": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Download full file"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const b=[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='Download full file'),modal=b?.closest('[role=dialog]'),notice=b?.parentElement;if(!b||!modal||!notice)return false;const r=notice.getBoundingClientRect();return r.width>0&&r.height>0&&getComputedStyle(modal).opacity==='1'&&!modal.hasAttribute('data-starting-style')&&!modal.hasAttribute('data-ending-style')&&modal.textContent.includes('Preview shows only the start of this file.');}"
+      }
+    ],
+    "terminal-migration--row-states": [
+      {
+        "action": "visible",
+        "selector": "[data-terminal-tab][aria-selected=\"true\"]"
+      },
+      {
+        "action": "visible",
+        "selector": ".xterm-rows"
+      },
+      {
+        "action": "focus",
+        "role": "button",
+        "name": "Toggle terminal dock"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "terminal-terminaldock--in-local-session": [
+      {
+        "action": "visible",
+        "selector": "[data-terminal-tab][aria-selected=\"true\"]"
+      },
+      {
+        "action": "visible",
+        "selector": ".xterm-rows"
+      },
+      {
+        "action": "focus",
+        "role": "button",
+        "name": "Toggle terminal dock"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ]
+  },
+  "states": {
+    "ai-sessionfilepreviewpanel--truncated": [
+      {
+        "name": "download-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Download full file"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "download-keyboard-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Download full file"
+          },
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Download full file",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "terminal-migration--row-states": [
+      {
+        "name": "second-tab-selected",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[role=\"tab\"]:nth-child(2) > button:first-child"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"tab\"]:nth-child(2)[aria-selected=\"true\"]"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "active-tab-closed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[role=\"tab\"][aria-selected=\"true\"] button[aria-label=\"Close terminal\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll('[data-terminal-tab]').length===3&&document.querySelectorAll('[data-terminal-tab][aria-selected=true]').length===1"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "new-tab-created",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "New terminal"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll('[data-terminal-tab]').length===4&&document.querySelector('[data-terminal-tab]:last-of-type')?.getAttribute('aria-selected')==='true'"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "terminal-terminaldock--in-local-session": [
+      {
+        "name": "second-terminal-created",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "New terminal"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll('[data-terminal-tab]').length===2&&document.querySelectorAll('[data-terminal-tab][aria-selected=true]').length===1"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "first-terminal-selected",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-terminal-tab]:first-child > button:first-child"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-terminal-tab]:first-child[aria-selected=\"true\"]"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Toggle terminal dock"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ]
+  },
+  "allowBlankIds": ["ai-sessionfilepreviewpanel--truncated"]
+}

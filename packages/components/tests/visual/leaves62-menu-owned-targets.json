@@ -1,0 +1,110 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 844,
+      "deviceScaleFactor": 1
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "migration-ownedsidebarfooterdimensions--default",
+    "migration-ownedsidebarfooterdimensions--scoped",
+    "sessions-sessionheadermenu--opened-sessions"
+  ],
+  "ready": {
+    "migration-ownedsidebarfooterdimensions--default": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Help"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],root=document.documentElement;if(!expected||root.classList.contains('dark')!==(expected==='dark'))return false;const menus=[...document.querySelectorAll('[role=menu]')].filter(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0});if(menus.length!==1)return false;for(const m of menus){const c=getComputedStyle(m),r=m.getBoundingClientRect();if(c.opacity!=='1'||m.hasAttribute('data-starting-style')||m.hasAttribute('data-ending-style')||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight||m.getAnimations({subtree:true}).some(a=>a.effect.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;}const p=menus.at(-1),c=getComputedStyle(p);return document.fonts.status==='loaded'&&c.overflowX==='hidden'&&c.overflowY==='auto'&&c.minWidth==='160px'&&p.textContent.includes('Docs')&&p.textContent.includes('Report bug');}"
+      }
+    ],
+    "migration-ownedsidebarfooterdimensions--scoped": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Help"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],root=document.documentElement;if(!expected||root.classList.contains('dark')!==(expected==='dark'))return false;const menus=[...document.querySelectorAll('[role=menu]')].filter(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0});if(menus.length!==1)return false;for(const m of menus){const c=getComputedStyle(m),r=m.getBoundingClientRect();if(c.opacity!=='1'||m.hasAttribute('data-starting-style')||m.hasAttribute('data-ending-style')||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight||m.getAnimations({subtree:true}).some(a=>a.effect.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;}const p=menus.at(-1),c=getComputedStyle(p);return document.fonts.status==='loaded'&&c.overflowX==='hidden'&&c.overflowY==='auto'&&c.minWidth==='160px'&&p.textContent.includes('Docs')&&p.textContent.includes('Report bug');}"
+      }
+    ],
+    "sessions-sessionheadermenu--opened-sessions": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "More actions"
+      },
+      {
+        "action": "hover",
+        "role": "menuitem",
+        "name": "Opened sessions",
+        "exact": false
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],root=document.documentElement;if(!expected||root.classList.contains('dark')!==(expected==='dark'))return false;const menus=[...document.querySelectorAll('[role=menu]')].filter(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0});if(menus.length!==2)return false;for(const m of menus){const c=getComputedStyle(m),r=m.getBoundingClientRect();if(c.opacity!=='1'||m.hasAttribute('data-starting-style')||m.hasAttribute('data-ending-style')||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight||m.getAnimations({subtree:true}).some(a=>a.effect.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;}const p=menus.at(-1),c=getComputedStyle(p);return document.fonts.status==='loaded'&&c.overflowX==='hidden'&&c.overflowY==='auto'&&c.minWidth==='200px'&&c.maxWidth==='280px'&&Math.abs(parseFloat(c.maxHeight)-288)<.01&&p.textContent.includes('Review the proposed changes');}"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedsidebarfooterdimensions--default": [
+      {
+        "name": "docs-keyboard-selected",
+        "steps": [
+          {
+            "action": "press",
+            "role": "menuitem",
+            "name": "Docs",
+            "key": "Enter"
+          },
+          {
+            "action": "hidden",
+            "role": "menuitem",
+            "name": "Docs"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-footer-fixture-state]')?.dataset.footerFixtureState==='home:docs'"
+          }
+        ]
+      }
+    ],
+    "migration-ownedsidebarfooterdimensions--scoped": [
+      {
+        "name": "docs-keyboard-selected",
+        "steps": [
+          {
+            "action": "press",
+            "role": "menuitem",
+            "name": "Docs",
+            "key": "Enter"
+          },
+          {
+            "action": "hidden",
+            "role": "menuitem",
+            "name": "Docs"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-footer-fixture-state]')?.dataset.footerFixtureState==='home:docs'"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1853,14 +1853,38 @@ trigger remains unproved, with no missing screenshots invented.
 Owning checks pass (55: 22 tests; 56: 5; 59: 27 related aggregation/export-adapter
 tests). Batch 57 has no direct owning suite, so actual callbacks, keyboard/unpin/wide-toggle
 and CSS evidence retain that boundary. Types/explicit format pass; typed lint
-reports 32/0/1/2 warnings respectively and zero errors. A later source-locked
-through 63 run passes components (620 files / 6,207 tests) and UI (25 / 307), with 1,486 product
-files unchanged; it is not relabelled as an exact-through59 run or pixel gate.
+reports 32/0/1/2 warnings respectively and zero errors. The complete source-locked
+regression belongs to the later through 63 boundary below, not exact-through59
+visual proof.
 Original batch 59 portal-root errors remain beside the corrected strict dialog capture.
 Component Header stories do not establish a current production menu flow; Calendar
 phone bottom content and usage-share phone initial preview visibility stay
 limited. Synthetic public data does not prove backend/publication/export/native
 workflows, every animation frame or physical iOS behavior.
+
+The notification, menu and native-dark continuation removes eight utilities in
+six files. Private notification text reuses the existing action themes; their
+four same-element token negative controls still expose a real ink difference.
+Help uses the existing `minWidth={160}` API, and three popup overflow declarations
+are redundant with the unchanged primitive. File-notice ink and active-terminal
+fill keep the complete dark/light-scope predicate and element-local variables.
+
+`leaves60-63-acceptance.html` retains **134 formal pairs: 132 byte-exact and two
+OPEN**, totalling 43 raw differing pixels. Of 9,284 paired standard records,
+9,270 agree; fourteen original height changes belong to an empty, hidden xterm
+helper identified on both sources. Original records remain intact. Bounded
+controls do not establish the historical pixel causes. The six original phone
+Role viewport failures remain outside acceptance. Notification Before provenance
+explicitly combines 48 healthy original frames with 16 corrected root-palette
+frames; rejected calibration and distinct harness identities stay available.
+Supplementary wheel captures, CSS probes and two terminal After-only inspections
+are counted separately. This source boundary remains partially accepted.
+
+The complete regression run freezes 1,486 product files through this boundary:
+components pass 620 files / 6,207 tests and shared UI passes 25 / 307. Owning
+subsets overlap those totals. Root checks retain the existing ACP prerequisite
+failure; this UI work changes no ACP dependency or backend behavior. The report
+also preserves the withdrawn batch 60 candidate and every earlier OPEN.
 
 ## Remaining work
 
@@ -1882,6 +1906,7 @@ completion percentage. Unresolved expressions remain a separate work list.
 | Exact source through 49                                    | v2             |       1,637 |   169 |        721 |
 | Exact source through 54, visual limits recorded separately | v2             |       1,620 |   168 |        721 |
 | Exact source through 59, excluding later candidates        | v2             |       1,602 |   168 |        722 |
+| Exact source through 63, with partial visual acceptance    | v2             |       1,594 |   167 |        722 |
 
 Earlier method changes recognized single utilities, `withClassName`'s second
 argument and supported static class arrays. Historical per-batch counts remain
@@ -1901,12 +1926,13 @@ utility-looking strings in comparisons or unrelated properties. Ambiguous writes
 remain unresolved. Two adapter `className` writes expose four additional unresolved expressions,
 explaining the corresponding increase in that count.
 
-The published through 59 v2 split is components: 1,153 occurrences/152 files/629
+The published through 63 v2 split is components: 1,145 occurrences/151 files/629
 unresolved, legacy UI: 444/14/93 and routes: 5/2/0. These totals cover only those
 three source roots. Normalized paths retain the raw scanner output and all 688
-component JS/TS byte hashes in the exact through 59 snapshot; later 61–63 edits are
-excluded. Calendar's className template adds one unresolved expression while 18
-utilities disappear. A separate through 63 helper audit identifies another nine
+component JS/TS byte hashes. The through 63 snapshot adds six audited source
+updates to the frozen through 59 snapshot and excludes later candidates.
+Calendar's template accounts for the earlier unresolved-expression increase;
+the eight subsequent removals do not change that count. A separate helper audit identifies another nine
 occurrences across two lib/hooks files, outside these three roots; it is neither
 folded into the same-boundary through59 total nor called a new product regression.
 Expand the inventory scope explicitly before comparing that additional work. Batch34–39 visual differences and rejected

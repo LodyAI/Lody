@@ -1,0 +1,23 @@
+{
+  "viewports": [
+    { "name": "desktop-fine", "width": 1280, "height": 900, "hover": true },
+    { "name": "phone-coarse", "device": "Pixel 7", "width": 393, "height": 851, "hover": false }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "migration-ownednotificationink--native-default",
+    "migration-ownednotificationink--root-palette",
+    "migration-ownednotificationink--subtree-palette",
+    "migration-ownednotificationink--parent-tokens"
+  ],
+  "states": ["rest", "hover", "keyboard-focus", "dismissed"],
+  "expectedPermission": "default",
+  "nativePermissionSetting": "prompt",
+  "delayMs": 1000,
+  "negativeStoryId": "migration-ownednotificationink--native-default",
+  "negativeStates": ["rest", "hover"],
+  "negativeScreenshotState": "rest",
+  "targetText": "Don't remind me",
+  "storageKey": "lody-notification-prompt-dismissed"
+}
