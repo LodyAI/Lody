@@ -983,7 +983,6 @@ function MarkdownPre({ node, ...props }: ComponentPropsWithoutRef<'pre'> & Extra
 
 const AgentFileLink = ({
   href,
-  openHref = href,
   copyPath = getMarkdownAgentFileCopyPath(href),
   children,
   onFilePathClick,
@@ -993,7 +992,6 @@ const AgentFileLink = ({
   fileCard = false,
 }: {
   href: string;
-  openHref?: string;
   copyPath?: string;
   fileCard?: boolean;
   children: ReactNode;
@@ -1013,12 +1011,12 @@ const AgentFileLink = ({
   }, [didCopy]);
   const hasOpenAction = Boolean(onFilePathClick);
   const iconPath = parseMarkdownAgentFileHref(href)?.filePath ?? href;
-  const contextMenuItems = getContextMenuItems?.(openHref, copyPath) ?? [];
+  const contextMenuItems = getContextMenuItems?.(href, copyPath) ?? [];
   const { t } = useTranslation();
 
   const handleClick = useCallback(async () => {
     if (onFilePathClick) {
-      onFilePathClick(openHref);
+      onFilePathClick(href);
       return;
     }
 
@@ -1027,7 +1025,7 @@ const AgentFileLink = ({
 
     setDidCopy(true);
     toast.success(t('sessions.fileViewer.pathCopied', 'File path copied'));
-  }, [copyPath, openHref, onFilePathClick, t]);
+  }, [copyPath, href, onFilePathClick, t]);
 
   const link = fileCard ? (
     <SessionFileCardLayout
@@ -1171,30 +1169,18 @@ function AgentFileLinkCandidate({
   inlineCode?: string;
   sourcePath?: string;
 } & Omit<ComponentPropsWithoutRef<typeof AgentFileLink>, 'fileCard' | 'href' | 'children'>) {
-  const { matched: liveMatched, path, scoped, valid } = useAgentFileLinkMatch(href);
+  const { matched: liveMatched, valid } = useAgentFileLinkMatch(href);
   const matched = useSelectionStableValue(liveMatched);
   if (!matched) {
     if (inlineCode !== undefined)
       return <code {...stylex.props(markdownStyles.inlineCode)}>{inlineCode}</code>;
     return <>{fileCard ? (sourcePath ?? href) : children}</>;
   }
-  const target = parseMarkdownAgentFileHref(href);
-  const suffix = target ? href.trim().replace(/\\/gu, '/').slice(target.filePath.length) : '';
-  const openHref =
-    scoped && path !== null
-      ? path
-          .split('/')
-          .map((segment, i) =>
-            i === 0 && /^[a-z]:$/iu.test(segment) ? segment : encodeURIComponent(segment)
-          )
-          .join('/') + suffix
-      : href;
   const link = (
     <AgentFileLink
       {...props}
       onFilePathClick={valid ? props.onFilePathClick : undefined}
       href={href}
-      openHref={openHref}
       copyPath={sourcePath ?? getMarkdownAgentFileCopyPath(href)}
       fileCard={fileCard}
     >

@@ -33,8 +33,6 @@ export function useAgentFileLinkMatch(href: string) {
   }, [index, relativePath]);
   return {
     matched,
-    path: absolute ? path : relativePath,
-    scoped: index !== null,
     valid: path !== null,
   };
 }

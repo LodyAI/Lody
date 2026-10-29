@@ -1,3 +1,4 @@
+import { CodeCollabSessionFileProvider } from '../src/lib/code-collab-session-file-provider';
 // @vitest-environment jsdom
 
 import { act, createElement } from 'react';
@@ -261,14 +262,19 @@ describe('SessionAgentFileLinkMenuProvider', () => {
     expect(toast.error).not.toHaveBeenCalled();
   });
 
-  it('ignores a late initial list after a newer index notification and releases its subscription', async () => {
-    let finish!: (files: readonly SessionFileProviderEntry[]) => void;
-    const pending = new Promise<readonly SessionFileProviderEntry[]>((resolve) => {
-      finish = resolve;
+  it('confirms paths from the real provider initial subscription snapshot', async () => {
+    fileSources.set(SIDE_SESSION.id, {
+      provider: new CodeCollabSessionFileProvider({ files: [file('src/a.ts')] }),
+      status: 'ready',
     });
+    await renderSession(SIDE_SESSION, '`src/a.ts` and `missing/a.ts`');
+    expect(container?.querySelector('button[title]')?.getAttribute('title')).toBe('src/a.ts');
+    expect(container?.querySelector('code')?.textContent).toBe('missing/a.ts');
+  });
+
+  it('updates links from the provider subscription and releases it on session change', async () => {
     const listeners = new Set<(files: readonly SessionFileProviderEntry[]) => void>();
     const provider = createFakeSessionFileProvider();
-    provider.listFiles = () => pending;
     provider.subscribeFiles = (listener) => {
       listeners.add(listener);
       return () => {
@@ -282,8 +288,11 @@ describe('SessionAgentFileLinkMenuProvider', () => {
       for (const listener of listeners) listener([file('src/a.ts')]);
     });
     expect(container?.querySelector('button[title]')).not.toBeNull();
-    await act(async () => finish([]));
-    expect(container?.querySelector('button[title]')).not.toBeNull();
+    await act(async () => {
+      for (const listener of listeners) listener([]);
+    });
+    expect(container?.querySelector('button[title]')).toBeNull();
+    expect(container?.querySelector('code')?.textContent).toBe('src/a.ts');
     await renderSession(ROOT_SESSION, '`src/a.ts`');
     expect(container?.querySelector('button[title]')).toBeNull();
     expect(container?.querySelector('code')?.textContent).toBe('src/a.ts');

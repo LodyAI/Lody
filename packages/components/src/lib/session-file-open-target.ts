@@ -67,8 +67,9 @@ export function resolveDirectMarkdownFileOpenTarget(href: string): SessionFileOp
     Array.from(path).some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)
   )
     return null;
+  path = path.replace(/\\/gu, '/');
   return {
-    filePath: path.replace(/\\/gu, '/'),
+    filePath: normalizeIndexedRelativePath(path) ?? path,
     fromMarkdownLink: true,
     ...(target.startLine === undefined ? {} : { startLine: target.startLine }),
     ...(target.endLine === undefined ? {} : { endLine: target.endLine }),

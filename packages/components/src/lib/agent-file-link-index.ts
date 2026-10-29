@@ -2,11 +2,9 @@ import { resolveCodeCollabSymlinkTarget } from '@lody/shared';
 import type { FileWorkspaceProviderEntry } from './file-workspace-provider';
 
 /** A conversation-local projection; the workspace cache still owns the index. */
-export function createAgentFileLinkIndex() {
+export function createAgentFileLinkIndex(request: () => void = () => undefined) {
   let paths = new Set<string>();
   const listeners = new Set<() => void>();
-  const demandListeners = new Set<() => void>();
-  let requested = false;
   const notify = () => {
     for (const listener of listeners) listener();
   };
@@ -17,18 +15,7 @@ export function createAgentFileLinkIndex() {
         listeners.delete(listener);
       };
     },
-    subscribeDemand(listener: () => void) {
-      demandListeners.add(listener);
-      return () => {
-        demandListeners.delete(listener);
-      };
-    },
-    isRequested: () => requested,
-    request() {
-      if (requested) return;
-      requested = true;
-      for (const listener of demandListeners) listener();
-    },
+    request,
     has(path: string) {
       return paths.has(path);
     },

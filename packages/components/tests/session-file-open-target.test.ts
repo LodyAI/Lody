@@ -229,7 +229,7 @@ describe('direct Markdown file opens', () => {
       '/tmp/worktrees/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/report.md',
       12,
     ],
-    ['./src/app.ts#L8-L10', './src/app.ts', 8],
+    ['./src/app.ts#L8-L10', 'src/app.ts', 8],
     ['docs/report%2520v2.md', 'docs/report%20v2.md', undefined],
     ['docs/draft%23v2.md', 'docs/draft#v2.md', undefined],
     ['C:/repo/file.ts:L42', 'C:/repo/file.ts', 42],

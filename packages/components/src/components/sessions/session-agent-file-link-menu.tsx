@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { SessionMeta } from '@lody/shared';
 import { useSessionFileActions } from '@/hooks/use-session-file-actions';
 import { useCodeCollabRequestedRole } from '@/hooks/use-code-collab-requested-role';
 import { useCodeCollabSessionFileProvider } from '@/hooks/use-code-collab-session-file-provider';
 import { createAgentFileLinkIndex, type AgentFileLinkIndex } from '@/lib/agent-file-link-index';
+import type { SessionFileProviderEntry } from '@/lib/session-file-provider';
 import { AgentFileLinkContextMenuItemsContext } from '../ai-gui/markdown-renderer';
 import { AgentFileLinkIndexContext } from '../ai-gui/agent-file-link-context';
 
@@ -30,41 +31,17 @@ function FileLinkIndexSource({
       return undefined;
     }
     let active = true;
-    let revision = 0;
-    const unsubscribe = provider.subscribeFiles?.((files) => {
-      revision += 1;
+    const update = (files: readonly SessionFileProviderEntry[]) => {
       if (active) index.setFiles(files);
-    });
-    const initialRevision = revision;
-    void provider.listFiles().then(
-      (files) => {
-        if (active && revision === initialRevision) index.setFiles(files);
-      },
-      () => {
-        if (active && revision === initialRevision) index.setFiles([]);
-      }
-    );
+    };
+    const unsubscribe = provider.subscribeFiles?.(update);
+    if (!provider.subscribeFiles) void provider.listFiles().then(update, () => update([]));
     return () => {
       active = false;
       unsubscribe?.();
     };
   }, [index, provider, status]);
   return null;
-}
-
-function FileLinkIndexLoader(props: {
-  session: SessionMeta;
-  workspaceId?: string | null;
-  index: AgentFileLinkIndex;
-  isVisible: boolean;
-}) {
-  const { index, isVisible } = props;
-  const requested = useSyncExternalStore(
-    index.subscribeDemand,
-    index.isRequested,
-    index.isRequested
-  );
-  return requested && isVisible ? <FileLinkIndexSource {...props} /> : null;
 }
 
 /**
@@ -84,23 +61,22 @@ export function SessionAgentFileLinkMenuProvider({
   readonly children: ReactNode;
 }) {
   const { buildMarkdownLinkMenuItems } = useSessionFileActions({ session });
-  const index = useMemo(createAgentFileLinkIndex, [
+  const scope = JSON.stringify([
     workspaceId,
     session.id,
     session.machineId,
     session.parentSessionId,
   ]);
+  const [requestedScope, setRequestedScope] = useState<string>();
+  const index = useMemo(() => createAgentFileLinkIndex(() => setRequestedScope(scope)), [scope]);
 
   return (
     <AgentFileLinkContextMenuItemsContext.Provider value={buildMarkdownLinkMenuItems}>
       <AgentFileLinkIndexContext.Provider value={index}>
         {children}
-        <FileLinkIndexLoader
-          session={session}
-          workspaceId={workspaceId}
-          index={index}
-          isVisible={isVisible}
-        />
+        {isVisible && requestedScope === scope ? (
+          <FileLinkIndexSource session={session} workspaceId={workspaceId} index={index} />
+        ) : null}
       </AgentFileLinkIndexContext.Provider>
     </AgentFileLinkContextMenuItemsContext.Provider>
   );

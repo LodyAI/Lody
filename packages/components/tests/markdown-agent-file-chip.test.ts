@@ -1,3 +1,4 @@
+import { resolveDirectMarkdownFileOpenTarget } from '../src/lib/session-file-open-target';
 import { NativeTextSelectionHoldContext } from '../src/hooks/use-conversation-text-selection';
 // @vitest-environment jsdom
 
@@ -145,7 +146,8 @@ describe('agent file links in finished turns', () => {
   );
 
   it('opens absolute paths without an index and preserves the exact file and anchor', async () => {
-    const index = createAgentFileLinkIndex();
+    const requestIndex = vi.fn();
+    const index = createAgentFileLinkIndex(requestIndex);
     const open = vi.fn();
     await act(async () =>
       root?.render(
@@ -166,8 +168,11 @@ describe('agent file links in finished turns', () => {
       '/tmp/worktrees/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/report%2520v2.md#L12'
     );
     await act(async () => links[1]!.click());
-    expect(open).toHaveBeenLastCalledWith('C:/repo/file.ts:8');
-    expect(index.isRequested()).toBe(false);
+    expect(resolveDirectMarkdownFileOpenTarget(open.mock.lastCall![0])).toMatchObject({
+      filePath: 'C:/repo/file.ts',
+      startLine: 8,
+    });
+    expect(requestIndex).not.toHaveBeenCalled();
   });
 
   it('matches whole paths and excludes deleted files, directories and unresolved symlinks', async () => {
