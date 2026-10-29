@@ -7,9 +7,11 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildScheduleRegistryRow,
+  canonicalScheduleJson,
   ScheduleDefinitionSchema,
   zonedLocalInputToInstant,
   type ScheduleDocument,
+  type ScheduleRuntimeRow,
 } from '@lody/shared';
 import { findNextDispatchableUserTurn } from '@/session/session-dispatch-logic';
 import { ScheduleStore } from './schedule-store';
@@ -211,18 +213,46 @@ describe('Schedule worker handoff', () => {
     );
   });
 
-  it('does not reopen future definitions on every timer tick', async () => {
+  it('caches future definitions and dispatches each interval slot once while earlier runs are unfinished', async () => {
     const h = harness();
+    // Carry the real ledger identity through the handoff, so a second dispatch
+    // of the same slot cannot hide behind an unchanged ledger or prompt.
+    const sent: string[] = [];
+    h.ports.prepare = async (run) => ({ prompt: run.runKey });
+    h.ports.dispatch = async ({ prompt }) => {
+      sent.push(prompt);
+    };
+    h.ports.isDispatched = async ({ prompt }) => sent.includes(prompt);
     h.time(1);
     h.ports.read = vi.fn(async () => h.d);
     await h.engine.evaluate();
+    // activeFrom and the interval anchor are both zero: this catches up slot 0.
+    const first = h.store.history('workspace', 'schedule')[0]!;
+    expect(first).toMatchObject({ scheduledFor: 0, state: 'dispatched', attempts: 1 });
+    expect(sent).toEqual([first.runKey]);
     h.ports.read = vi.fn(async () => h.d);
     h.time(15_000);
     await h.engine.evaluate();
     expect(h.ports.read).not.toHaveBeenCalled();
+    expect(sent).toEqual([first.runKey]);
     h.time(60_000);
     await h.engine.evaluate();
-    expect(h.ports.dispatch).toHaveBeenCalledTimes(1);
+    const second = h.store.history('workspace', 'schedule')[0]!;
+    expect(second).toMatchObject({ scheduledFor: 60_000, state: 'dispatched', attempts: 1 });
+    expect(second.runKey).not.toBe(first.runKey);
+    expect(second.sessionId).not.toBe(first.sessionId);
+    expect(second.userTurnId).not.toBe(first.userTurnId);
+    expect(h.store.unfinished('workspace')).toHaveLength(2);
+    expect(sent).toEqual([first.runKey, second.runKey]);
+
+    await Promise.all([h.engine.evaluate(), h.engine.evaluate()]);
+    await h.engine.stop();
+    const restarted = new ScheduleEngine(h.ports);
+    await restarted.evaluate();
+    await restarted.evaluate();
+    expect(sent).toEqual([first.runKey, second.runKey]);
+    expect(h.store.history('workspace', 'schedule')).toEqual([second, first]);
+    await restarted.stop();
   });
   it('waits for target permission recovery without spending attempts or losing the slot', async () => {
     const h = harness();
@@ -258,19 +288,30 @@ describe('Schedule worker handoff', () => {
   it('publishes one complete projection and settles its own subscription wake', async () => {
     const h = harness();
     let last = '';
+    const writes: ScheduleRuntimeRow[] = [];
     h.ports.publish = vi.fn(async (runtime) => {
-      const value = JSON.stringify(runtime);
+      // Match schedule-workspace's write suppression: property insertion order
+      // and the observation timestamp do not constitute a Registry change.
+      const value = canonicalScheduleJson({ ...runtime, updatedAt: 0 });
       if (last !== value) {
         last = value;
+        writes.push(runtime);
         void h.engine.evaluate();
       }
     });
     await h.engine.evaluate();
     expect(h.ports.publish).toHaveBeenCalledTimes(2);
-    expect(JSON.parse(last)).toMatchObject({
-      lastDispatch: { scheduledFor: 60_000 },
-      nextScheduledAt: 120_000,
-    });
+    expect(writes).toEqual([
+      expect.objectContaining({
+        lastDispatch: expect.objectContaining({ scheduledFor: 60_000 }),
+        nextScheduledAt: 120_000,
+      }),
+    ]);
+    expect(h.ports.publish).toHaveBeenNthCalledWith(1, writes[0]);
+    expect(h.ports.dispatch).toHaveBeenCalledTimes(1);
+    expect(h.store.history('workspace', 'schedule')).toMatchObject([
+      { scheduledFor: 60_000, state: 'dispatched', attempts: 1 },
+    ]);
   });
 });
 
