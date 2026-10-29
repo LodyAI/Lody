@@ -296,6 +296,7 @@ const createRecoveryHarness = async (
     let promptPending = false;
     session.agentClient = {
       isCreated: () => true,
+      getAvailableCommands: () => [],
       getConfigOptions: () => [],
       currentModel: undefined,
       get pendingPromptCompletion() {
@@ -797,6 +798,7 @@ describe('MessageHandler ACP batching', () => {
         expect(h.service.getExecutionSnapshot(h.sessionId).hasActiveTurn).toBe(false);
         expect(h.host.sessionActivePresence.has(h.sessionId)).toBe(false);
         expect(h.host.store.get(h.sessionId).acpUpdateBuffer).toEqual([]);
+        expect(h.doc.mirror?.getState().acpRuntimeConfig?.availableCommands).toEqual([]);
       } finally {
         await h.close();
       }

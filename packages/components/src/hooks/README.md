@@ -39,10 +39,15 @@ No extra transport or cloud request is created by the hook.
 
 `use-session-acp-selector-context.ts` owns the Provider subscription for persisted
 and draft composers. It resolves the exact bound id through the shared Provider
-atom and passes its current runtime overrides to both models and slash commands.
-Missing or mismatched Providers expose no catalog; extension changes invalidate
-old capabilities until a matching probe arrives. A matching extension catalog
-must not be read as though no extensions were selected.
+atom and passes its current runtime overrides to models and the initial command
+preview. Missing or mismatched Providers expose no Provider catalog; extension
+changes invalidate old capabilities until a matching probe arrives.
+
+Before an Agent starts, `use-available-commands.ts` displays the Provider probe's
+commands. Once the Session reports `acpRuntimeConfig.availableCommands`, its own
+list wins, including an empty list. Provider refreshes cannot replace that list.
+Commands remain scoped to the same ACP runtime across turns; a replacement runtime
+reports its own list. See the [command ownership decision](../../../../.agents/notes/implemented/bug-fix/2026-10-29-session-command-catalogs.md).
 
 ## Avatar sources
 

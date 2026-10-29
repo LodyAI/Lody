@@ -2733,6 +2733,7 @@ export const SessionChatInterface = memo(
       selectedModeId: sessionConfigCandidates.modeId,
       selectedModelId: sessionConfigCandidates.modelId,
       configOptionValues: sessionConfigCandidates.configOptionValues,
+      sessionCommands: sessionDoc?.acpRuntimeConfig?.availableCommands,
     });
     const steerCapability = session.agentConfigId
       ? sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)]

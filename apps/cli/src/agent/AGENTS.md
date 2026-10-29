@@ -101,9 +101,10 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 
 ## Capabilities and titles
 
-- Static capabilities: builtins without overrides only. Refresh probes the runtime,
-  cached by `agentConfigId` + launched version; requests/responses carry that id. Aborted
-  probes never update cache. Updates never hot-swap ACP; Flock ignores `fetchedAt`.
+- Static builtins exclude overrides. Probe cache: `agentConfigId` + launched version;
+  requests/responses carry that id. Only probes replace Provider command previews;
+  actual lists stay in Session control. Aborted probes never write. Never hot-swap
+  ACP; Flock ignores `fetchedAt`.
 - Capability probes own unique temporary workdirs, never inherited cwd/projects. Remove
   after shutdown even on failure/cancellation; removal errors never replace probe
   outcomes. Keep provider homes unchanged.

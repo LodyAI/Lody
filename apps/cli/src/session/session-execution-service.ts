@@ -7757,16 +7757,6 @@ export class SessionExecutionService {
           magpieGatewayUrl: config.magpieGatewayUrl,
           env: config.env,
         });
-      const existing = await this.deps.workspaceDocument.getAcpCapabilities(
-        this.deps.machineId,
-        agentConfigId
-      );
-      const availableCommands =
-        capabilities.availableCommands !== undefined
-          ? capabilities.availableCommands
-          : existing?.sourceVersion === sourceVersion
-            ? existing.availableCommands
-            : undefined;
       await this.deps.workspaceDocument.updateAcpCapabilities(
         this.deps.machineId,
         agentConfigId,
@@ -7775,7 +7765,7 @@ export class SessionExecutionService {
         capabilities.modes,
         capabilities.models,
         capabilities.configOptions,
-        availableCommands,
+        undefined,
         capabilities.sessionFork,
         sourceVersion,
         capabilities.modelReasoningEfforts,
@@ -7786,18 +7776,6 @@ export class SessionExecutionService {
           rateLimits: capabilities.rateLimits,
           modelCapabilities: capabilities.modelCapabilities,
         }
-      );
-      this.acpCapabilityLaunchInputFingerprints.set(
-        agentConfigId,
-        fingerprintAcpLaunchInputs({
-          configId: agentConfigId,
-          cliType: config.agentCliType,
-          agentType: config.agentType,
-          env: config.env,
-          customAcp: config.customAcp,
-          runtimeOverrides: config.runtimeOverrides,
-          magpieGatewayUrl: config.magpieGatewayUrl,
-        })
       );
     })().catch((error: unknown) => {
       this.deps.logger.debug(
@@ -8214,11 +8192,14 @@ export class SessionExecutionService {
       env: message.env,
     });
     const recordedFingerprint = this.acpCapabilityLaunchInputFingerprints.get(message.configId);
+    const entry = await this.deps.workspaceDocument.getAcpCapabilities(
+      this.deps.machineId,
+      message.configId
+    );
+    // Session-confirmed models do not prove the project-independent command preview.
+    if (entry?.availableCommands === undefined) return undefined;
     const decision = decideAcpCapabilityRefreshCache({
-      entry: await this.deps.workspaceDocument.getAcpCapabilities(
-        this.deps.machineId,
-        message.configId
-      ),
+      entry,
       expectedSourceVersion,
       launchInputs:
         recordedFingerprint === undefined
@@ -8264,7 +8245,7 @@ export class SessionExecutionService {
         modes,
         models,
         configOptions,
-        availableCommands,
+        availableCommands = [],
         sessionFork,
         acknowledgedSteer,
         sessionTitle,

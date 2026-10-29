@@ -225,6 +225,7 @@ describe('MessageHandler turn history gate (RPC fast path ordering)', () => {
             acpSessionId: 'acp-model-rejection' as ACPSessionId,
             agentClient: {
               isCreated: () => true,
+              getAvailableCommands: () => [],
               getConfigOptions: () => [
                 { id: 'model', category: 'model', type: 'select', currentValue: 'active-model' },
               ],

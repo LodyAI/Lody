@@ -70,10 +70,9 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
 
 - Daemon workflows gate on `MachineMeta.protocolCapabilities`, never CLI version.
   Missing means unsupported. Full-message schedules require v3 and `messageVersion: 1`.
-- ACP capability `cacheVersion` controls refresh freshness, never readability. Consumers
-  preserve understood fields from parsed older or newer entries during mixed-version
-  operation, adapting only fields with known incompatible semantics; runtime-override source
-  matching remains a separate applicability gate.
+- ACP `cacheVersion` gates freshness, not readability. Preserve understood fields across
+  versions and runtime-override matching; omit known-incompatible fields. Pre-v11 commands
+  can contain project data: Machine Flock owns probe previews, Sessions own actual lists.
 - Quota: share `src/subscription-quota.ts`; key `agentConfigId + limitId`.
   Bound Providers ignore legacy; delete scoped rows.
 

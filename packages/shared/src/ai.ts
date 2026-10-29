@@ -376,7 +376,8 @@ export type AcpCommandSummary = {
 // Codex-only carry a bogus ladder for every agent that spells other variants
 // with the same brackets — a Claude probe stored `{ opus: ['1m'] }` — and the
 // per-model effort picker would rebuild that model's ladder from it.
-export const ACP_CAPABILITY_CACHE_VERSION = 10;
+// 11: provider command previews come only from probes, never project sessions.
+export const ACP_CAPABILITY_CACHE_VERSION = 11;
 
 export type AcpCapabilityAuthority = 'unavailable' | 'provisional' | 'authoritative';
 
@@ -410,7 +411,7 @@ export type AcpCapabilityCacheEntry = {
    * stored in the capability row itself; see `acp-model-capabilities.ts`.
    */
   declaredModelControls?: Record<string, AcpModelControls>;
-  /** Available slash commands advertised by the agent. */
+  /** Probe commands shown before a session reports its own list; [] confirms an empty probe. */
   availableCommands?: AcpCommandSummary[];
   /** True only when the runtime initialize response advertised `sessionCapabilities.fork`. */
   sessionFork?: boolean;
@@ -446,6 +447,10 @@ export const getReadableAcpCapabilityCacheEntry = (
 ): AcpCapabilityCacheEntry | undefined => {
   if (!entry) {
     return undefined;
+  }
+  if ((entry.cacheVersion ?? 0) < 11 && entry.availableCommands !== undefined) {
+    const { availableCommands: _projectCommands, ...compatible } = entry;
+    entry = compatible;
   }
   // Cache v7 stopped deriving bracketed model suffixes as reasoning efforts for
   // non-Codex agents. Preserve every other understood field from older entries,

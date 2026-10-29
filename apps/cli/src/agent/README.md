@@ -315,10 +315,19 @@ per-model reasoning-effort ladders on that session response as
 Codex only — other agents use the same brackets for unrelated variants (Claude's `opus[1m]`
 is a context window). Vendor model `_meta` never enters the CLI.
 
+Commands have separate ownership: only independent probes replace the Provider's
+startup command preview. Real sessions retain their commands in `AgentClient` and
+publish them through the existing Session runtime-config path; an explicit empty
+list clears that Session's menu. Session capability writes preserve the latest
+same-runtime preview without copying project commands into it. A capability entry
+without a confirmed probe list is re-probed; an empty probed list is confirmed.
+
 Capability cache versions are freshness markers, not read barriers. A newer client continues
 to render understood fields from an older daemon's parsed entry while scheduling a replacement
 probe; likewise, an older client may use the understood portion of a newer entry. Runtime
 override entries still apply only when their source-version suffix matches the selected override.
+Pre-v11 command lists are omitted because they can contain another project's
+commands; understood models and other capability fields remain readable.
 
 ### Session titles
 

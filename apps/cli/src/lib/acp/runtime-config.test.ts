@@ -7,6 +7,25 @@ import {
 } from './runtime-config';
 
 describe('ACP runtime config projection', () => {
+  it('replaces commands in wire order, including an explicit empty list', () => {
+    const commands = (names: string[]) =>
+      parseSessionNotification({
+        sessionId: 'acp-1',
+        update: {
+          sessionUpdate: 'available_commands_update',
+          availableCommands: names.map((name) => ({ name, description: name })),
+        },
+      });
+    expect(mergeAcpRuntimeConfigUpdates([commands(['review-a']), commands(['review-b'])])).toEqual({
+      acpSessionId: 'acp-1',
+      availableCommands: [{ name: 'review-b', description: 'review-b' }],
+    });
+    expect(mergeAcpRuntimeConfigUpdates([commands(['review-a']), commands([])])).toEqual({
+      acpSessionId: 'acp-1',
+      availableCommands: [],
+    });
+  });
+
   it('projects supported current values and derives model and mode fields', () => {
     const notification = parseSessionNotification({
       sessionId: 'acp-1',

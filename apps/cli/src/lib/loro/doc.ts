@@ -49,6 +49,7 @@ import {
   MessageQueueItem,
   SessionTitleSource,
   getAcpCapabilityCacheKey,
+  getReadableAcpCapabilityCacheEntry,
   getServerNow,
   shouldRenewAcpCapabilityFetchTime,
   isLoroRepoDocDeleted,
@@ -2092,6 +2093,12 @@ const acpRuntimeConfigEqual = (
   left.basedOnUserTurnId === right.basedOnUserTurnId &&
   left.modeId === right.modeId &&
   left.modelId === right.modelId &&
+  JSON.stringify(
+    left.availableCommands?.map(({ name, description }) => ({ name, description }))
+  ) ===
+    JSON.stringify(
+      right.availableCommands?.map(({ name, description }) => ({ name, description }))
+    ) &&
   configOptionValuesEqual(left.configOptionValues, right.configOptionValues);
 
 /**
@@ -2888,6 +2895,10 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
         current?.acpSessionId === durablePatch.acpSessionId &&
         current.basedOnUserTurnId === basedOnUserTurnId;
       const nextWithoutRevision: Omit<SessionAcpRuntimeConfigSnapshot, 'revision'> = {
+        ...(current?.acpSessionId === durablePatch.acpSessionId &&
+        current.availableCommands !== undefined
+          ? { availableCommands: current.availableCommands }
+          : {}),
         ...(continuesCurrentSnapshot
           ? {
               ...(current.modeId !== undefined ? { modeId: current.modeId } : {}),
@@ -3738,7 +3749,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       modes: normalizedModes,
       models: normalizedModels,
       configOptions: configOptions?.length ? configOptions : undefined,
-      availableCommands: availableCommands?.length ? availableCommands : undefined,
+      availableCommands,
       sessionFork,
       acknowledgedSteer,
       goalActions: goalActions?.length ? goalActions : undefined,
@@ -3759,6 +3770,11 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     const existing = getMachineFlockAcpCapabilities(
       readMachineFlockRowsFromFlock(handle.flock, { families: ['acpCapability'] })
     )[capabilityKey];
+    // Only probes replace the preview. Omission preserves the latest same-runtime
+    // probe, read beside the write so concurrent session starts cannot roll it back.
+    if (availableCommands === undefined && existing?.sourceVersion === sourceVersion) {
+      entry.availableCommands = getReadableAcpCapabilityCacheEntry(existing)?.availableCommands;
+    }
     // The per-model row holds no timestamp, so an unchanged declaration is
     // skipped by the row comparison and costs no write or sync.
     const modelCapabilitiesChanged =

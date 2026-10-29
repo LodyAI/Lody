@@ -10,6 +10,7 @@ import {
   AgentRoleId,
   AgentType,
   AcpCapabilityCacheEntry,
+  AcpCommandSummary,
   BuiltinRuntimeOverrides,
   CustomAcpLaunchSpec,
   LocalProjectHistoryProvider,
@@ -1323,6 +1324,8 @@ export type SessionAcpRuntimeConfigSnapshot = {
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, AcpConfigOptionValue>;
+  /** Actual commands for this ACP session; an empty list clears the menu. */
+  availableCommands?: AcpCommandSummary[];
 };
 
 export type SessionAcpRuntimeConfigPatch = Omit<
@@ -1338,6 +1341,14 @@ const sessionAcpRuntimeConfigDocSchema = schema.LoroMap(
     modeId: schema.String({ required: false }),
     modelId: schema.String({ required: false }),
     configOptionValues: schema.Any({ required: false }),
+    availableCommands: schema.LoroList(
+      schema.LoroMap({
+        name: schema.String(),
+        description: schema.String({ required: false }),
+      }),
+      undefined,
+      { required: false }
+    ),
   },
   { required: false }
 );

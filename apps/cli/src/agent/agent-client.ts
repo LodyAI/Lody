@@ -29,6 +29,7 @@ import {
   MODEL_THOUGHT_LEVEL_META_KEY,
   type MachineId,
   type AcpConfigOptionValue,
+  type AcpCommandSummary,
   type AcpSessionNotification,
   type AgentConfigCliType,
   type SessionGoalAction,
@@ -75,6 +76,7 @@ import { filterAcpConfigOptions } from './acp-config-option-filter';
 import { summarizeNewSessionResponse } from './acp-session-response-summary';
 import {
   readLegacySessionModelState,
+  readSessionAvailableCommands,
   type LegacySessionModelState,
 } from './acp-capability-normalization';
 import { convertClaudeTaskLifecycleNotification } from './claude-task-lifecycle';
@@ -654,6 +656,7 @@ export class AgentClient implements acp.Client {
   private agentMcpCapabilities: acp.McpCapabilities | undefined;
   /** Session config options returned by the agent; the source of model/mode choices and names. */
   private configOptions: acp.SessionConfigOption[] = [];
+  private availableCommands: AcpCommandSummary[] | undefined;
   private readonly configOptionsListeners = new Set<() => void>();
   /** Desired config retained across same-client replacement sessions. */
   private readonly configOptionValues: NonNullable<SessionTurnInputConfig['configOptionValues']>;
@@ -968,6 +971,15 @@ export class AgentClient implements acp.Client {
     }
 
     const notification = parseSessionNotification(params);
+
+    if (notification.update.sessionUpdate === 'available_commands_update') {
+      this.availableCommands = notification.update.availableCommands.map(
+        ({ name, description }) => ({
+          name,
+          description: description ?? undefined,
+        })
+      );
+    }
 
     if (notification.update.sessionUpdate === 'config_option_update') {
       this.applyConfigOptionsState(notification.update.configOptions, true);
@@ -1838,6 +1850,8 @@ export class AgentClient implements acp.Client {
   }
 
   private applySessionResponseState(sessionResponse: acp.NewSessionResponse): void {
+    this.availableCommands =
+      readSessionAvailableCommands(sessionResponse) ?? this.availableCommands;
     // Drop config options the current version intentionally skips (e.g. the
     // `agent` option from acp-extension-claude). See backward-compatibility doc
     // entry BC-2026-06-24-ACP-CONFIG-OPTION-AGENT-FILTERED.
@@ -1909,6 +1923,7 @@ export class AgentClient implements acp.Client {
     forkSessionId?: ACPSessionId,
     forkSessionTurnId?: string
   ): Promise<acp.NewSessionResponse> {
+    this.availableCommands = undefined;
     this.markSubagentsDisconnected();
     this.subagentSnapshots.clear();
     const connection = new acp.ClientSideConnection(() => this, stream);
@@ -2468,6 +2483,7 @@ export class AgentClient implements acp.Client {
   }
 
   adoptPreparedSession(sessionResponse: acp.NewSessionResponse): void {
+    this.availableCommands = undefined;
     this.applySessionResponseState(sessionResponse);
     this.acpSessionId = sessionResponse.sessionId;
     this.devinSubagentTaskIds.clear();
@@ -2887,6 +2903,10 @@ export class AgentClient implements acp.Client {
       `[${this.options.sessionId}] ACP session config option set: ${configId}=${value}`
     );
     return result?.configOptions;
+  }
+
+  getAvailableCommands(): AcpCommandSummary[] | undefined {
+    return this.availableCommands;
   }
 
   /** Returns the config options currently known for this session. */

@@ -4908,7 +4908,7 @@ describe('SessionExecutionService', () => {
               options: [{ value: 'high', name: 'High' }],
             },
           ],
-          [{ name: 'review', description: 'Review changes' }],
+          undefined,
           false,
           expect.any(String),
           // Per-model reasoning efforts: absent for this agent, which publishes no
@@ -8548,6 +8548,7 @@ describe('SessionExecutionService', () => {
         session.agentClient = {
           isCreated: () => child.exitCode === null,
           currentModel: undefined,
+          getAvailableCommands: () => [],
           getConfigOptions: () => [],
           setSessionConfigOption: async (id: string, _configId: string, value: unknown) => {
             assertLive(id);
@@ -10781,6 +10782,8 @@ describe('SessionExecutionService', () => {
         env: options.env ?? { OPENCODE_API_KEY: secretToken },
       });
       let probes = 0;
+      let probeCommands: Array<{ name: string }> | undefined = [{ name: 'review' }];
+      let onWrite: (() => void) | undefined;
       const deps = createBaseDeps({
         workspaceDocument: {
           repo: {
@@ -10792,10 +10795,15 @@ describe('SessionExecutionService', () => {
             options.getAcpCapabilities ??
             ((_machineId: MachineId, configId: AgentConfigId) =>
               machine.getAcpCapabilities(configId)),
-          updateAcpCapabilities: (
+          updateAcpCapabilities: async (
             _machineId: MachineId,
             ...rest: Parameters<MachineDocument['updateAcpCapabilities']>
-          ) => machine.updateAcpCapabilities(...rest),
+          ) => {
+            const entry = await machine.updateAcpCapabilities(...rest);
+            onWrite?.();
+            onWrite = undefined;
+            return entry;
+          },
           getAgentConfigForMachineLaunch: vi.fn(async () => launchConfig),
         } as unknown as LoroDocumentManager,
         fetchAcpCapabilities: async () => {
@@ -10803,7 +10811,7 @@ describe('SessionExecutionService', () => {
           return {
             modes: [{ id: 'default', name: 'Default' }],
             models: [{ modelId: 'model-a', name: 'Model A' }],
-            availableCommands: [{ name: 'review' }],
+            availableCommands: probeCommands,
             sessionFork: false,
             acknowledgedSteer: true,
             capabilitySourceVersion: sourceVersion,
@@ -10812,8 +10820,36 @@ describe('SessionExecutionService', () => {
         resolveAcpCapabilitySourceVersion: async () =>
           options.expectedSourceVersion ? options.expectedSourceVersion() : sourceVersion,
       });
+      const service = new SessionExecutionService(deps);
       return {
-        service: new SessionExecutionService(deps),
+        service,
+        setProbeCommands: (commands: typeof probeCommands) => {
+          probeCommands = commands;
+        },
+        publishSessionCommands: (names: string[]) =>
+          new Promise<void>((resolve) => {
+            onWrite = resolve;
+            service['scheduleCreatedSessionCapabilityUpdate'](
+              {
+                sessionId: 'project-session' as SessionId,
+                getAcpCapabilities: () => ({
+                  modes: [],
+                  models: [],
+                  availableCommands: names.map((name) => ({ name })),
+                  sessionFork: false,
+                }),
+                getAcpCapabilitySourceVersion: () => sourceVersion,
+              } as unknown as Parameters<
+                SessionExecutionService['scheduleCreatedSessionCapabilityUpdate']
+              >[0],
+              {
+                agentConfigId: capabilityConfigId,
+                agentCliType: 'registry',
+                agentType: 'opencode',
+                env: launchConfig.env,
+              } as SessionConfig
+            );
+          }),
         flock,
         probes: () => probes,
         editEnv: (env: Record<string, string>) => {
@@ -10825,6 +10861,34 @@ describe('SessionExecutionService', () => {
             | undefined,
       };
     };
+
+    it('keeps project commands out of the probe preview and refreshes that preview independently', async () => {
+      const harness = createHarness();
+      await harness.publishSessionCommands(['review-a']);
+      expect(harness.storedEntry()?.availableCommands).toBeUndefined();
+      await harness.service.refreshMachineAcpCapabilities(request);
+      expect(harness.storedEntry()?.availableCommands).toEqual([{ name: 'review' }]);
+      await harness.publishSessionCommands(['review-a']);
+      await harness.publishSessionCommands(['review-b']);
+      expect(harness.storedEntry()?.availableCommands).toEqual([{ name: 'review' }]);
+      harness.setProbeCommands([{ name: 'refreshed-help' }]);
+      await harness.service.refreshMachineAcpCapabilities({ ...request, force: true });
+      expect(harness.storedEntry()?.availableCommands).toEqual([{ name: 'refreshed-help' }]);
+      await harness.publishSessionCommands([]);
+      expect(harness.storedEntry()?.availableCommands).toEqual([{ name: 'refreshed-help' }]);
+    });
+
+    it('persists an empty probe as confirmed and serves it without another probe', async () => {
+      const harness = createHarness();
+      harness.setProbeCommands(undefined);
+      const probed = await harness.service.refreshMachineAcpCapabilities(request);
+      expect(probed.availableCommands).toEqual([]);
+      expect(harness.storedEntry()?.availableCommands).toEqual([]);
+      harness.setProbeCommands([{ name: 'must-not-be-probed' }]);
+      const cached = await harness.service.refreshMachineAcpCapabilities(request);
+      expect(cached.availableCommands).toEqual([]);
+      expect(harness.storedEntry()?.availableCommands).toEqual([]);
+    });
 
     const start = new Date('2026-09-20T00:00:00.000Z').getTime();
     const withClock = async (run: () => Promise<void>) => {
