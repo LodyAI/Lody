@@ -47,7 +47,10 @@ WorktreeGitExecutionFailed 区分启动、文件系统分类、超时、输出�
 重新抛出基础设施及未释放资源失败，不再把它们视为缺失 ref、默认 identity、尽力 fetch
 成功或强制删除目录的依据。普通 helper 诊断失败可以记录，但原始 Git 操作仍失败；
 诊断中的未释放进程不能吞掉。Git 退出的具体回退策略留给管理器迁移进一步分类。
-Git 的 10 分钟期限和 64 MiB 输出上限保持不变。Helper 探测新增 5 秒期限，保留共享
+Git 默认期限 10 分钟，输出上限 64 MiB。尽力 fetch 缩为 30 秒：只有 Scope 清理完成后的
+单一 CommandTimedOut 才允许管理器记 warn 并继续本地恢复；混合清理/释放失败仍保留
+恢复 owner 并报错，required fetch 也仍失败。此前一律拒绝超时保护了写入，却在 fetch
+已确认退出后仍阻塞本地 ref；下一次恢复重新尝试，不缓存失败。Helper 探测期限 5 秒，保留共享
 1 MiB 输出上限。[Worktree 生命周期 Spec](../../../../specs/session-worktree-lifecycle.zh.md)
 保持 draft，记录这项失败保证。
 

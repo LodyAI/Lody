@@ -94,6 +94,7 @@ export class ProviderSetupManager {
   private drainPromise: Promise<void> | null = null;
   private drainRequested = false;
   private stopped = false;
+  private readonly runtimeCancellation = new AbortController();
   private cleanupRetry: ReturnType<typeof setTimeout> | undefined;
 
   constructor(options: ProviderSetupManagerOptions) {
@@ -125,6 +126,7 @@ export class ProviderSetupManager {
 
   stop(): void {
     this.stopped = true;
+    this.runtimeCancellation.abort();
     this.drainRequested = false;
     clearTimeout(this.cleanupRetry);
     this.cleanupRetry = undefined;
@@ -214,12 +216,15 @@ export class ProviderSetupManager {
         }
         if (binaryStatus.status !== 'installed' && binaryStatus.status !== 'not-applicable') {
           unexpectedFailureCode = 'runtime-install-failed';
-          const install = await this.execution.installMachineAcpBinary({
-            type: 'machine/acp-binary-install',
-            machineId: this.machineId,
-            workspaceId: this.workspaceId,
-            agentType: preparing.config.agentType,
-          });
+          const install = await this.execution.installMachineAcpBinary(
+            {
+              type: 'machine/acp-binary-install',
+              machineId: this.machineId,
+              workspaceId: this.workspaceId,
+              agentType: preparing.config.agentType,
+            },
+            { signal: this.runtimeCancellation.signal }
+          );
           if (!install.success) {
             await this.fail(setup.id, attempt, 'runtime-install-failed');
             return;

@@ -39,8 +39,8 @@ which downloads the runtime on the spot when it is not installed.
   status, launch, and retry until the cache directory was deleted by hand.
   Upstream #906 fixed this half first: pin-mismatched entries are treated as
   absent and reinstalled, startup cache maintenance tolerates per-runtime
-  failures, and unparseable metadata deliberately still hard-errors on
-  launch/install. This PR keeps that design and does not re-litigate it.
+  failures, and unparseable metadata still rejects launch. The owner-approved cache repair below
+  replaces the former permanent install/status rejection.
 
 ## Decision
 
@@ -65,10 +65,16 @@ Alternatives considered:
 - Refusing to download on the login path (require a Settings download first):
   safer, but changes first-run UX; download-on-login is now visible and
   cancellable instead.
-- Extending cache degradation to unparseable metadata and the reuse scan:
-  dropped after #906; torn writes are already invisible (the `.lody-complete`
-  marker is written after the metadata), and upstream deliberately keeps
-  launch/install loud about corrupt caches.
+- Corrupt metadata remains unlaunchable, but status reports not-installed with a
+  warning and the shared installer renames it to a sibling `.corrupt-<time>-<uuid>`
+  before verified download/publication. Bad older entries are skipped during reuse.
+  The former complete-marker argument cannot repair corruption after publication;
+  preserving the bytes and verifying a replacement avoids permanent blockage.
+  Downloads have 60-second idle and ten-minute attempt limits; later calls retry.
+  Consumer cancellation retains the existing independent leases and cleanup join.
+  Session/provider orchestration stays Promise-based; migrating those owners would
+  exceed this local fix. Provider setup passes its stop signal, but forwarding it
+  inside session-execution-service remains follow-up work outside this PR.
 
 ## Evidence
 

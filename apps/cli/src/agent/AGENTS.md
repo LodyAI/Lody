@@ -67,6 +67,9 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   methods stay capability-gated. Inject the artifact base URL from
   `CloudPort.runtimeArtifacts`; never read deployment environment or derive the channel here.
   `LODY_RUNTIME_BASE_URL` is an explicit mirror override only.
+- Invalid caches remain unlaunchable; status reports absence with a warning and installation
+  quarantines the original before verified replacement. Downloads stop after 60 seconds idle
+  or ten minutes per attempt; later calls can retry.
 - Install cancellation, here and in `acp-binary-manager.ts`: concurrent installs share one
   download but keep independent consumer leases; cancelling one caller must not stop others, and
   only the last aborts fetch, checksum, and extraction. An immediate retry waits for an aborted

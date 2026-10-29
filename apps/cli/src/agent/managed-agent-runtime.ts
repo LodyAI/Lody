@@ -12,7 +12,7 @@ import {
   symlink,
   writeFile,
 } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { finished as waitForStreamFinished, pipeline } from 'node:stream/promises';
@@ -50,6 +50,8 @@ import { resolveProxyUrl } from '@/utils/proxy';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 
 const COMPLETE_MARKER = '.lody-complete';
+const DOWNLOAD_IDLE_TIMEOUT_MS = 60_000;
+const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
 
 /**
  * Floor between managed-runtime progress emissions. A listener republishes these as
@@ -94,7 +96,7 @@ export type ManagedRuntimeStatus =
       current: string;
       required: string;
     }
-  | { kind: 'not-installed'; platformArch: string; version: string }
+  | { kind: 'not-installed'; platformArch: string; version: string; warning?: string }
   | {
       kind: 'installed';
       platformArch: string;
@@ -224,6 +226,8 @@ export class ManagedRuntimeError extends Error {
     this.name = 'ManagedRuntimeError';
   }
 }
+
+class CorruptRuntimeCacheError extends ManagedRuntimeError {}
 
 export class ManagedRuntimeUnsupportedPlatformError extends ManagedRuntimeError {
   readonly platformArch: string;
@@ -750,7 +754,7 @@ export class ManagedAgentRuntimeManager {
         const legacyDefinition = RUNTIMES[legacyMetadata.name];
         const legacyArchive = legacyDefinition.platforms[legacyMetadata.platform];
         if (!legacyArchive) {
-          throw new ManagedRuntimeError(
+          throw new CorruptRuntimeCacheError(
             `Managed runtime legacy cache platform is unsupported for ${legacyMetadata.name}/${legacyMetadata.version}/${legacyMetadata.platform}`
           );
         }
@@ -767,7 +771,7 @@ export class ManagedAgentRuntimeManager {
         };
       }
     } catch (error) {
-      throw new ManagedRuntimeError(
+      throw new CorruptRuntimeCacheError(
         `Managed runtime cache metadata is invalid for ${name}/${version}/${platformArch}`,
         { cause: error }
       );
@@ -777,7 +781,7 @@ export class ManagedAgentRuntimeManager {
       metadata.runtimeVersion !== version ||
       metadata.platformArch !== platformArch
     ) {
-      throw new ManagedRuntimeError(
+      throw new CorruptRuntimeCacheError(
         `Managed runtime cache metadata does not match its directory for ${name}/${version}/${platformArch}`
       );
     }
@@ -789,7 +793,7 @@ export class ManagedAgentRuntimeManager {
       relativeCommand.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) ||
       !existsSync(command)
     ) {
-      throw new ManagedRuntimeError(
+      throw new CorruptRuntimeCacheError(
         `Managed runtime command is invalid for ${name}/${version}/${platformArch}: ${metadata.command}`
       );
     }
@@ -848,7 +852,13 @@ export class ManagedAgentRuntimeManager {
     > = [];
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name === sanitizeSegment(definition.version)) continue;
-      const installation = await this.readInstallation(name, entry.name, platformArch);
+      const installation = await this.readInstallation(name, entry.name, platformArch).catch(
+        (error: unknown) => {
+          if (!(error instanceof CorruptRuntimeCacheError)) throw error;
+          this.warnCacheMaintenanceFailure(name, 'cache reuse', error);
+          return null;
+        }
+      );
       if (installation && this.isHostCompatible(installation)) {
         installations.push(installation);
       }
@@ -877,7 +887,19 @@ export class ManagedAgentRuntimeManager {
       return { kind: 'unsupported-platform', platformArch: resolvedArchive.platformArch };
     }
     const { definition, platformArch, archive } = resolvedArchive;
-    const current = await this.readCurrentInstallation(name, definition, platformArch, archive);
+    let current;
+    try {
+      current = await this.readCurrentInstallation(name, definition, platformArch, archive);
+    } catch (error) {
+      if (!(error instanceof CorruptRuntimeCacheError)) throw error;
+      this.warnCacheMaintenanceFailure(name, 'cache status', error);
+      return {
+        kind: 'not-installed',
+        platformArch,
+        version: definition.version,
+        warning: error.message,
+      };
+    }
     if (current && this.isHostCompatible(current)) {
       return {
         kind: 'installed',
@@ -1014,7 +1036,15 @@ export class ManagedAgentRuntimeManager {
         definition.minNodeVersion
       );
     }
-    const current = await this.readCurrentInstallation(name, definition, platformArch, archive);
+    const current = await this.readCurrentInstallation(
+      name,
+      definition,
+      platformArch,
+      archive
+    ).catch((error: unknown) => {
+      if (!(error instanceof CorruptRuntimeCacheError)) throw error;
+      return null;
+    });
     if (current) {
       options.onProgress?.({
         runtimeName: name,
@@ -1191,6 +1221,15 @@ export class ManagedAgentRuntimeManager {
     signal: AbortSignal
   ): Promise<ManagedRuntimeInstallation> {
     signal.throwIfAborted();
+    // Only the shared install generation moves the cache, before any download.
+    try {
+      await this.readCurrentInstallation(name, definition, platformArch, archive);
+    } catch (error) {
+      if (!(error instanceof CorruptRuntimeCacheError)) throw error;
+      signal.throwIfAborted();
+      await rename(dir, `${dir}.corrupt-${Date.now()}-${randomUUID()}`);
+      this.warnCacheMaintenanceFailure(name, 'corrupt cache quarantined; reinstalling', error);
+    }
     await mkdir(this.rootDir, { recursive: true });
     const scratch = await mkdtemp(join(this.rootDir, 'tmp-'));
     const artifactPath = join(scratch, basename(archive.fileName));
@@ -1478,6 +1517,47 @@ export class ManagedAgentRuntimeManager {
     offset: number,
     signal: AbortSignal
   ): Promise<'downloaded' | 'retry-from-start'> {
+    const controller = new AbortController();
+    const downloadSignal = AbortSignal.any([signal, controller.signal]);
+    const abort = () =>
+      controller.abort(new ManagedRuntimeError('Managed runtime download timed out'));
+    let idle = setTimeout(abort, DOWNLOAD_IDLE_TIMEOUT_MS);
+    const total = setTimeout(abort, DOWNLOAD_TIMEOUT_MS);
+    const onData = () => {
+      clearTimeout(idle);
+      idle = setTimeout(abort, DOWNLOAD_IDLE_TIMEOUT_MS);
+    };
+    try {
+      return await this.streamDownload(
+        progressKey,
+        name,
+        version,
+        platformArch,
+        url,
+        partialPath,
+        archive,
+        offset,
+        downloadSignal,
+        onData
+      );
+    } finally {
+      clearTimeout(idle);
+      clearTimeout(total);
+    }
+  }
+
+  private async streamDownload(
+    progressKey: string,
+    name: ManagedRuntimeName,
+    version: string,
+    platformArch: string,
+    url: string,
+    partialPath: string,
+    archive: RuntimeArchive,
+    offset: number,
+    signal: AbortSignal,
+    onData: () => void
+  ): Promise<'downloaded' | 'retry-from-start'> {
     const headers = new Headers();
     if (offset > 0) {
       headers.set('Range', `bytes=${offset}-`);
@@ -1540,6 +1620,7 @@ export class ManagedAgentRuntimeManager {
     };
     const progressStream = new Transform({
       transform(chunk: Buffer, _encoding, callback) {
+        onData();
         downloadedBytes += chunk.byteLength;
         emitDownloadProgress();
         callback(null, chunk);

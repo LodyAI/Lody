@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { createReadStream } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -341,40 +341,101 @@ describe('ManagedAgentRuntimeManager', () => {
     }
   });
 
-  it('skips malformed metadata during startup but still rejects it for launch and install', async () => {
-    const command = await installCachedCodex({
-      version: CODEX_RUNTIME_VERSION,
-      installedAt: '2026-08-01T00:00:00.000Z',
-      metadataFormat: 'legacy',
-    });
-    const metadataPath = join(
-      rootDir,
-      'codex',
-      CODEX_RUNTIME_VERSION,
-      'linux-x64',
-      'metadata.json'
-    );
-    const metadata = JSON.parse(await readFile(metadataPath, 'utf8')) as Record<string, unknown>;
-    await writeFile(metadataPath, JSON.stringify({ ...metadata, unexpected: true }));
-    const manager = new ManagedAgentRuntimeManager({
-      rootDir,
-      platform: 'linux',
-      arch: 'x64',
-    });
-
-    await expect(manager.prepareCache()).resolves.toBeUndefined();
-    await expect(manager.listAvailableUpdates()).resolves.toEqual([]);
-    for (const operation of [
-      () => manager.getRuntimeStatus('codex'),
-      () => manager.resolveRuntimeForLaunch('codex'),
-      () => manager.ensureCurrentRuntime('codex'),
-    ]) {
-      await expect(operation()).rejects.toThrow(
-        `Managed runtime cache metadata is invalid for codex/${CODEX_RUNTIME_VERSION}/linux-x64`
+  it('rejects corrupt launch, reports absence, and shares a verified reinstall after quarantine', async () => {
+    const { archiveBytes, definition, originalArchive } =
+      await installTinyCodexArchiveDefinition('repair.tar.zst');
+    try {
+      const command = await installCachedCodex({
+        version: CODEX_RUNTIME_VERSION,
+        installedAt: '2026-08-01T00:00:00.000Z',
+      });
+      const dir = dirname(dirname(command));
+      await writeFile(join(dir, 'metadata.json'), '{broken');
+      const manager = new ManagedAgentRuntimeManager({
+        rootDir,
+        platform: 'linux',
+        arch: 'x64',
+        runtimeBaseUrl: 'https://runtime.example.test',
+        fetchImpl: async () => new Response(archiveBytes),
+      });
+      await expect(manager.resolveRuntimeForLaunch('codex')).rejects.toThrow(
+        'cache metadata is invalid'
       );
+      await expect(manager.getRuntimeStatus('codex')).resolves.toMatchObject({
+        kind: 'not-installed',
+        warning: expect.stringContaining('invalid'),
+      });
+      const installations = await Promise.all([
+        manager.ensureCurrentRuntime('codex'),
+        manager.ensureCurrentRuntime('codex'),
+      ]);
+      expect(installations[0]).toEqual(installations[1]);
+      expect(await readFile(command, 'utf8')).toBe('tiny-codex');
+      const quarantined = (await readdir(dirname(dir))).filter((name) =>
+        name.startsWith('linux-x64.corrupt-')
+      );
+      expect(quarantined).toHaveLength(1);
+      expect(
+        await readFile(
+          join(dirname(dir), quarantined[0] ?? 'missing-quarantine', 'metadata.json'),
+          'utf8'
+        )
+      ).toBe('{broken');
+      await expect(manager.resolveRuntimeForLaunch('codex')).resolves.toMatchObject({ command });
+    } finally {
+      definition.platforms['linux-x64'] = originalArchive;
     }
-    expect(existsSync(command)).toBe(true);
   });
+
+  it.each(['headers', 'body'] as const)(
+    'ends a stalled download at %s and retries without restarting',
+    async (stage) => {
+      const { archiveBytes, definition, originalArchive } =
+        await installTinyCodexArchiveDefinition('idle.tar.zst');
+      const started = Promise.withResolvers<AbortSignal>();
+      let healthy = false;
+      let bodyClosed = false;
+      const manager = new ManagedAgentRuntimeManager({
+        rootDir,
+        platform: 'linux',
+        arch: 'x64',
+        runtimeBaseUrl: 'https://runtime.example.test',
+        fetchImpl: async (_url, init) => {
+          if (healthy) return new Response(archiveBytes);
+          const signal = init?.signal;
+          if (!signal) throw new Error('missing download cancellation');
+          started.resolve(signal);
+          if (stage === 'headers')
+            return await new Promise<never>((_resolve, reject) =>
+              signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+            );
+          return new Response(
+            new ReadableStream({
+              cancel() {
+                bodyClosed = true;
+              },
+            })
+          );
+        },
+      });
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        const failed = expect(manager.ensureCurrentRuntime('codex')).rejects.toThrow('timed out');
+        const signal = await started.promise;
+        await vi.advanceTimersByTimeAsync(60_000);
+        await failed;
+        expect(signal.aborted).toBe(true);
+        if (stage === 'body') expect(bodyClosed).toBe(true);
+        vi.useRealTimers();
+        healthy = true;
+        const installed = await manager.ensureCurrentRuntime('codex');
+        expect(await readFile(installed.command, 'utf8')).toBe('tiny-codex');
+      } finally {
+        vi.useRealTimers();
+        definition.platforms['linux-x64'] = originalArchive;
+      }
+    }
+  );
 
   it('still finds updates for other runtimes when one cache cannot be read', async () => {
     await installCachedCodex({
