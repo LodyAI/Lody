@@ -234,6 +234,10 @@ export class LodyOperationCoordinator {
     return this.store?.hasPendingWorkForRequester(this.options.workspaceId, sessionId) ?? true;
   }
 
+  hasTurnWorkForRequester(sessionId: SessionId): boolean {
+    return this.store?.hasTurnWorkForRequester(this.options.workspaceId, sessionId) ?? true;
+  }
+
   stop(): Promise<void> {
     if (this.shutdown) return this.shutdown;
     this.started = false;

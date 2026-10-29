@@ -29,7 +29,9 @@
   this cloud gate, never ownership/config validation.
 - Due runs do not wait for other runs of the same Schedule or Agent configuration.
   Session dispatch owns conversation ordering; complete messages still defer while
-  their destination chat is busy. Preserve ledger completion and recovery tracking.
+  their destination chat's own Turns are busy. Delegated Operations the chat still
+  awaits block run completion, never message admission, so a manager chat waiting on
+  its children still receives the message. Preserve ledger completion and recovery tracking.
 - Configuration unavailability is recoverable without consuming an attempt.
   Infrastructure failures use bounded backoff; all prehandoff work expires after
   its fixed dispatch age. Only unprepared pending automatic runs may be superseded.

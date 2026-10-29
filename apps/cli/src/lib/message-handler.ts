@@ -10905,12 +10905,20 @@ export class MessageHandler {
 
   /** Host-local admission snapshot; durable pending input is checked by its caller. */
   hasAutomationSessionWork(sessionId: SessionId): boolean {
+    return (
+      this.hasAutomationTurnWork(sessionId) ||
+      this.operationCoordinator.hasPendingWorkForRequester(sessionId)
+    );
+  }
+
+  /** Work that occupies this chat's own Turns; delegated Operations still running elsewhere do not. */
+  hasAutomationTurnWork(sessionId: SessionId): boolean {
     const execution = this.executionService.getExecutionSnapshot(sessionId);
     return (
       execution.hasActiveTurn ||
       execution.hasBlockingPendingCreate ||
       execution.hasRewriteBarrier ||
-      this.operationCoordinator.hasPendingWorkForRequester(sessionId) ||
+      this.operationCoordinator.hasTurnWorkForRequester(sessionId) ||
       this.hasSessionActivePresence(sessionId) ||
       this.sessionDispatchWatcher.hasPendingDispatch(sessionId)
     );

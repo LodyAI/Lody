@@ -546,6 +546,10 @@ export class Lody {
     return this.runtime.getMessageHandler()?.hasAutomationSessionWork(sessionId) ?? true;
   }
 
+  hasAutomationTurnWork(sessionId: SessionId): boolean {
+    return this.runtime.getMessageHandler()?.hasAutomationTurnWork(sessionId) ?? true;
+  }
+
   /** Local pairing completion wakes ledger verification and key installation, never trusts a remote admission hint. */
   async confirmEncryptedWorkspacePairing(intent: {
     pairingSessionId: string;

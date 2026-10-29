@@ -997,6 +997,7 @@ export class LodyFleet {
               authorize: (request) => startedLody.authorizeScheduleExecution(request),
               logger: workspaceLogger,
               hasSessionWork: (sessionId) => startedLody.hasAutomationSessionWork(sessionId),
+              hasSessionTurnWork: (sessionId) => startedLody.hasAutomationTurnWork(sessionId),
             });
         stopSchedules = schedules.dispose;
         const runtime: WorkspaceRuntimeState = {
