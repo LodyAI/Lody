@@ -25,6 +25,4 @@ Translation: current
 
 行为测试覆盖启动响应、仅通过通知上报命令的启动、当前与已脱离的 ACP Session、明确空列表、同运行时继续执行、更换运行时、过期轮次拒绝及重复写入幂等性。真实 MachineDocument 写入器验证探测归属、独立强制刷新及空探测结果的缓存。真实 Loro 文档与生产菜单 hook 验证两个项目、客户端同步及刷新隔离。既有的纯元数据轮次测试也验证命令状态发布不会伪造可见 Agent 输出。
 
-最后一轮相关 Vitest 套件通过 812 项测试：CLI 638 项、组件 113 项、共享包 61 项。共享包类型检查、常规局部 lint、格式、文档和公共边界检查通过。临时移除 Session 菜单优先级、恢复项目命令写入，两次都使行为回归测试失败；还原生产实现后再次通过。
-
-本地依赖环境在 CLI 和界面中存在既有的 `SnapshotUploadOptions.onSnapshotRecovery` 类型错误，未修改的工作区也能复现。该环境因缺少 SDK 导出而无法构建内置 Codex 适配器，专用 Effect lint 也缺少 `@effect/tsgo` 而无法启动。本地 Node 26.11.1 低于仓库要求的最低版本。因此不能宣称完整仓库检查通过。验证不包含真实桌面交互或重新打包的 Pi 托管运行时。
+对应测试为 `agent-client-authentication.test.ts`、`acp-session-config-applier.test.ts`、`runtime-config.test.ts`、`doc-runtime-config.test.ts`、`session-execution-service.test.ts` 和 `acp-session-runtime-two-client.test.ts`。临时移除 Session 菜单优先级、恢复项目命令写入，两次都使行为回归测试失败。真实桌面交互或重新打包的 Pi 托管运行时仍未验证，当前检查结果记录在 PR 中。
