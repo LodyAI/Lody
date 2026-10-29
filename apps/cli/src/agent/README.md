@@ -251,8 +251,11 @@ The submodule owns the private-wire contract
 and minimum official version. Kimi is different: `packages/acp-extension-kimi` owns the
 Lody-maintained runtime source and implements the shared `acp-extension-core` contract.
 
-Corrupt caches are reported absent with a warning and quarantined by installation before
-verified replacement; launch never executes them. Downloads have a 60-second idle deadline;
+Corrupt caches are reported absent with a warning; launch never executes them. Installation
+publishes a verified successor in a sibling `<arch>.gen-<uuid>` directory and leaves existing
+paths untouched, including same-version replacements. Resolution prefers the newest validated
+generation. Best-effort cleanup conservatively retains corrupt originals and generation trees
+because the manager cannot prove their readers have exited. Downloads have a 60-second idle deadline;
 progressing transfers have no total deadline. Idle timeout retains partial bytes for Range resume. [Decision](../../../../.agents/notes/proposed/bug-fix/2026-09-21-acp-auth-runtime-download.md).
 
 Completed caches written before metadata schema v1 remain reusable through a separate strict

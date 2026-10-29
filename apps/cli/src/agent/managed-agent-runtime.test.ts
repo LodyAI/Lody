@@ -1,3 +1,6 @@
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { createInterface } from 'node:readline';
 import { existsSync } from 'node:fs';
 import { createReadStream } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
@@ -300,13 +303,19 @@ describe('ManagedAgentRuntimeManager', () => {
           kind: 'not-installed',
         });
         await expect(manager.prepareCache()).resolves.toBeUndefined();
-        await expect(manager.resolveRuntimeForLaunch('codex')).resolves.toMatchObject({
-          command,
-          version: definition.version,
-          updateAvailable: false,
-        });
-        expect(await readFile(command, 'utf8')).toBe('tiny-codex');
+        const launch = await manager.resolveRuntimeForLaunch('codex');
+        expect(launch).toMatchObject({ version: definition.version, updateAvailable: false });
+        expect(launch.command).not.toBe(command);
+        expect(await readFile(command, 'utf8')).toBe(`codex-${definition.version}`);
         expect(JSON.parse(await readFile(metadataPath, 'utf8'))).toMatchObject({
+          [field]: staleValues[field],
+        });
+        expect(await readFile(launch.command, 'utf8')).toBe('tiny-codex');
+        expect(
+          JSON.parse(
+            await readFile(join(dirname(dirname(launch.command)), 'metadata.json'), 'utf8')
+          )
+        ).toMatchObject({
           archiveSha256: archive.sha256,
           archiveSize: archive.size,
           command: archive.cmd,
@@ -341,7 +350,7 @@ describe('ManagedAgentRuntimeManager', () => {
     }
   });
 
-  it('rejects corrupt launch, reports absence, and shares a verified reinstall after quarantine', async () => {
+  it('rejects corrupt launch, reports absence, and shares a verified generation without moving the original', async () => {
     const { archiveBytes, definition, originalArchive } =
       await installTinyCodexArchiveDefinition('repair.tar.zst');
     try {
@@ -370,22 +379,114 @@ describe('ManagedAgentRuntimeManager', () => {
         manager.ensureCurrentRuntime('codex'),
       ]);
       expect(installations[0]).toEqual(installations[1]);
-      expect(await readFile(command, 'utf8')).toBe('tiny-codex');
-      const quarantined = (await readdir(dirname(dir))).filter((name) =>
-        name.startsWith('linux-x64.corrupt-')
-      );
-      expect(quarantined).toHaveLength(1);
+      const repaired = installations[0];
+      if (!repaired) throw new Error('Missing repaired installation');
+      expect(await readFile(repaired.command, 'utf8')).toBe('tiny-codex');
+      expect(await readFile(command, 'utf8')).toBe(`codex-${CODEX_RUNTIME_VERSION}`);
+      expect(await readFile(join(dir, 'metadata.json'), 'utf8')).toBe('{broken');
       expect(
-        await readFile(
-          join(dirname(dir), quarantined[0] ?? 'missing-quarantine', 'metadata.json'),
-          'utf8'
-        )
-      ).toBe('{broken');
-      await expect(manager.resolveRuntimeForLaunch('codex')).resolves.toMatchObject({ command });
+        (await readdir(dirname(dir))).filter((name) => name.startsWith('linux-x64.gen-'))
+      ).toHaveLength(1);
+      await expect(manager.resolveRuntimeForLaunch('codex')).resolves.toMatchObject({
+        command: repaired.command,
+      });
     } finally {
       definition.platforms['linux-x64'] = originalArchive;
     }
   });
+
+  it.each([true, false])(
+    'keeps a resident resource reader alive through repair, download succeeds=%s',
+    async (succeeds) => {
+      const { archiveBytes, definition, originalArchive } =
+        await installTinyCodexArchiveDefinition('resident.tar.zst');
+      const originalVersion = definition.version;
+      const command = await installCachedCodex({
+        version: originalVersion,
+        installedAt: '2026-08-01T00:00:00.000Z',
+      });
+      const dir = dirname(dirname(command));
+      const resource = join(dir, 'resource.txt');
+      await writeFile(resource, 'resident-resource');
+      // Explicit read requests keep a real child resident across each install phase.
+      const child = spawn(
+        process.execPath,
+        [
+          '-e',
+          `
+      const fs = require('node:fs');
+      const lines = require('node:readline').createInterface({ input: process.stdin });
+      lines.on('line', () => {
+        try { console.log(JSON.stringify({ value: fs.readFileSync(process.argv[1], 'utf8') })); }
+        catch (error) { console.log(JSON.stringify({ error: error.code })); }
+      });
+    `,
+          resource,
+        ],
+        { stdio: ['pipe', 'pipe', 'pipe'] }
+      );
+      const exited = once(child, 'exit');
+      const lines = createInterface({ input: child.stdout });
+      const read = async () => {
+        const answer = once(lines, 'line');
+        child.stdin.write('read\n');
+        return JSON.parse((await answer)[0] as string) as unknown;
+      };
+      const started = Promise.withResolvers<void>();
+      const response = Promise.withResolvers<Response>();
+      const options = {
+        rootDir,
+        platform: 'linux' as const,
+        arch: 'x64',
+        runtimeBaseUrl: 'https://runtime.example.test',
+        fetchImpl: async () => {
+          started.resolve();
+          return response.promise;
+        },
+      };
+      const manager = new ManagedAgentRuntimeManager(options);
+      let pendingInstall: Promise<unknown> | undefined;
+      try {
+        expect(await read()).toEqual({ value: 'resident-resource' });
+        await writeFile(join(dir, 'metadata.json'), '{broken');
+        const install = manager.ensureCurrentRuntime('codex').then(
+          (value) => ({ value }),
+          (error: unknown) => ({ error })
+        );
+        pendingInstall = install;
+        await started.promise;
+        expect(await read()).toEqual({ value: 'resident-resource' });
+        response.resolve(
+          succeeds ? new Response(archiveBytes) : new Response(null, { status: 503 })
+        );
+        const result = await install;
+        if (succeeds) {
+          if (!('value' in result)) throw result.error;
+          expect(result.value.command).not.toBe(command);
+          expect(await readFile(result.value.command, 'utf8')).toBe('tiny-codex');
+          await expect(
+            new ManagedAgentRuntimeManager(options).resolveRuntimeForLaunch('codex')
+          ).resolves.toMatchObject({ command: result.value.command });
+          // A later update must not prune a repair tree whose readers are unknown.
+          definition.version = '99.0.0';
+          await installCachedCodex({ version: '98.0.0', installedAt: '2099-01-01T00:00:00.000Z' });
+        } else {
+          expect(result).toMatchObject({ error: expect.any(ManagedRuntimeError) });
+        }
+        await manager.prepareCache();
+        expect(await read()).toEqual({ value: 'resident-resource' });
+        expect(await readFile(join(dir, 'metadata.json'), 'utf8')).toBe('{broken');
+      } finally {
+        response.resolve(new Response(null, { status: 503 }));
+        await pendingInstall;
+        child.stdin.end();
+        await exited;
+        lines.close();
+        definition.version = originalVersion;
+        definition.platforms['linux-x64'] = originalArchive;
+      }
+    }
+  );
 
   it.each(['headers', 'body'] as const)(
     'retains partial bytes after idle timeout at %s and resumes with Range',

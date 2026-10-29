@@ -738,6 +738,38 @@ export class ManagedAgentRuntimeManager {
     platformArch: string
   ): Promise<(ManagedRuntimeInstallation & { metadata: ManagedRuntimeInstallMetadata }) | null> {
     const dir = this.targetDir(name, version, platformArch);
+    const entries = await readdir(dirname(dir), { withFileTypes: true }).catch(() => []);
+    const generations = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !entry.name.startsWith(`${sanitizeSegment(platformArch)}.gen-`))
+        continue;
+      try {
+        const installation = await this.readInstallationDirectory(
+          name,
+          version,
+          platformArch,
+          join(dirname(dir), entry.name)
+        );
+        if (installation) generations.push(installation);
+      } catch (error) {
+        if (!(error instanceof CorruptRuntimeCacheError)) throw error;
+        this.warnCacheMaintenanceFailure(name, 'cache generation', error);
+      }
+    }
+    generations.sort(
+      (a, b) =>
+        b.metadata.installedAt.localeCompare(a.metadata.installedAt) ||
+        b.command.localeCompare(a.command)
+    );
+    return generations[0] ?? this.readInstallationDirectory(name, version, platformArch, dir);
+  }
+
+  private async readInstallationDirectory(
+    name: ManagedRuntimeName,
+    version: string,
+    platformArch: string,
+    dir: string
+  ): Promise<(ManagedRuntimeInstallation & { metadata: ManagedRuntimeInstallMetadata }) | null> {
     if (!existsSync(join(dir, COMPLETE_MARKER))) {
       return null;
     }
@@ -977,13 +1009,27 @@ export class ManagedAgentRuntimeManager {
     const current = await this.readCurrentInstallation(name, definition, platformArch, archive);
     const fallback = await this.findReusableInstallation(name, definition, platformArch);
     const retainedVersions = new Set(
-      [current?.version, fallback?.version].filter((version): version is string => Boolean(version))
+      [definition.version, current?.version, fallback?.version].filter(
+        (version): version is string => Boolean(version)
+      )
     );
     const runtimeRoot = join(this.rootDir, sanitizeSegment(name));
     const entries = await readdir(runtimeRoot, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
       if (entry.isDirectory() && !retainedVersions.has(entry.name)) {
-        await rm(join(runtimeRoot, entry.name), { recursive: true, force: true });
+        const versionDir = join(runtimeRoot, entry.name);
+        const children = await readdir(versionDir, { withFileTypes: true });
+        // The manager has no reader leases: never collect a repair tree or an
+        // unreadable original merely because another version became current.
+        if (children.some((child) => child.isDirectory() && child.name.includes('.gen-'))) continue;
+        try {
+          await this.readInstallation(name, entry.name, platformArch);
+        } catch (error) {
+          if (!(error instanceof CorruptRuntimeCacheError)) throw error;
+          this.warnCacheMaintenanceFailure(name, 'cache cleanup', error);
+          continue;
+        }
+        await rm(versionDir, { recursive: true, force: true });
       }
     }
   }
@@ -1220,15 +1266,20 @@ export class ManagedAgentRuntimeManager {
     signal: AbortSignal
   ): Promise<ManagedRuntimeInstallation> {
     signal.throwIfAborted();
-    // Only the shared install generation moves the cache, before any download.
+    // Existing readers may still need this path even when its metadata is bad.
+    // Publish a verified successor independently; never move their directory.
     try {
       await this.readCurrentInstallation(name, definition, platformArch, archive);
     } catch (error) {
       if (!(error instanceof CorruptRuntimeCacheError)) throw error;
       signal.throwIfAborted();
-      await rename(dir, `${dir}.corrupt-${Date.now()}-${randomUUID()}`);
-      this.warnCacheMaintenanceFailure(name, 'corrupt cache quarantined; reinstalling', error);
+      this.warnCacheMaintenanceFailure(
+        name,
+        'corrupt cache retained; installing a new generation',
+        error
+      );
     }
+    if (existsSync(dir)) dir = `${dir}.gen-${randomUUID()}`;
     await mkdir(this.rootDir, { recursive: true });
     const scratch = await mkdtemp(join(this.rootDir, 'tmp-'));
     const artifactPath = join(scratch, basename(archive.fileName));
@@ -1676,15 +1727,9 @@ export class ManagedAgentRuntimeManager {
 
   private async publish(unpackDir: string, dir: string): Promise<void> {
     await mkdir(dirname(dir), { recursive: true });
-    if (existsSync(dir)) {
-      await rm(dir, { recursive: true, force: true });
-    }
-    try {
-      await rename(unpackDir, dir);
-    } catch (error) {
-      if (existsSync(join(dir, COMPLETE_MARKER))) return;
-      throw error;
-    }
+    // A concurrent installer may have published since acquisition. A conflict
+    // rejects this attempt instead of deleting or writing into its installation.
+    await rename(unpackDir, dir);
   }
 }
 

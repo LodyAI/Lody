@@ -65,11 +65,18 @@ Alternatives considered:
 - Refusing to download on the login path (require a Settings download first):
   safer, but changes first-run UX; download-on-login is now visible and
   cancellable instead.
-- Corrupt metadata remains unlaunchable, but status reports not-installed with a
-  warning and the shared installer renames it to a sibling `.corrupt-<time>-<uuid>`
-  before verified download/publication. Bad older entries are skipped during reuse.
-  The former complete-marker argument cannot repair corruption after publication;
-  preserving the bytes and verifying a replacement avoids permanent blockage.
+- Corrupt metadata remains unlaunchable; status reports not-installed with a warning.
+  Repairs publish a verified sibling `<arch>.gen-<uuid>` and preserve the original
+  path and bytes, including on failed downloads. Same-version replacements also use
+  a generation; publication never deletes an existing installation. Resolution picks
+  the newest structurally valid completed generation and still checks current pins.
+  Bad older entries are skipped during reuse. Moving a directory before download,
+  or even after verification, breaks active readers: the manager owns installs but
+  has no process-lifetime leases to prove those readers absent. Independent generations
+  avoid that dependency and keep repair available. The existing best-effort scan
+  retains unreadable originals and generation trees conservatively; reclaiming those
+  trees requires future reader-lifetime evidence and may retain extra disk space.
+  The complete marker alone cannot repair corruption after publication.
   Downloads stop after 60 seconds without data, with no total deadline: a fixed
   ten-minute cap interrupts healthy slow transfers. Streaming writes directly to
   `.downloads/*.part`, retained after idle timeout for the next Range request.
@@ -77,8 +84,9 @@ Alternatives considered:
   scratch; partial streaming recovery does not depend on that outer signal.
   Consumer cancellation retains the existing independent leases and cleanup join.
   Session/provider orchestration stays Promise-based; migrating those owners would
-  exceed this local fix. Provider setup passes its stop signal, but forwarding it
-  inside session-execution-service remains follow-up work outside this PR.
+  exceed this local fix. Provider setup download cancellation is not implemented:
+  its stop signal is not forwarded inside session-execution-service. That wiring
+  remains follow-up work outside this PR.
 
 ## Evidence
 
