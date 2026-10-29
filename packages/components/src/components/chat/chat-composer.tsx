@@ -1819,10 +1819,9 @@ export function ChatComposer({
             <Dialog.Content
               closeButton={false}
               width="48rem"
-              className={cn(
-                stylex.props(styles.pastedDialogContent).className,
-                'max-h-[85vh] gap-0 p-0'
-              )}
+              padding="none"
+              gap="none"
+              className={cn(stylex.props(styles.pastedDialogContent).className, 'max-h-[85vh]')}
             >
               {previewPastedTextDraft ? (
                 <>

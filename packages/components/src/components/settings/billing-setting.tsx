@@ -108,6 +108,7 @@ const CHECKOUT_CONFIRMATION_INTERVAL_MS = 3_000;
  * theme's own inks rather than the palette a product surface would use.
  */
 const styles = stylex.create({
+  pendingSpinnerSpacing: { marginRight: 'calc(var(--spacing) * 2)' },
   /** The preview's loading line. */
   loading: {
     display: 'flex',
@@ -977,7 +978,10 @@ function CloudBillingSettings() {
               }}
             >
               {switchIntervalPending ? (
-                <Spinner diameter="calc(var(--spacing) * 4)" className="mr-2" />
+                <Spinner
+                  diameter="calc(var(--spacing) * 4)"
+                  className={stylex.props(styles.pendingSpinnerSpacing).className}
+                />
               ) : null}
               {t('billing.switchIntervalConfirm')}
             </Button>

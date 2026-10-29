@@ -242,12 +242,7 @@ export function OperationReplyCard(props: OperationReplyCardProps) {
 
       {reply ? (
         <Dialog.Root open={open} onOpenChange={setOpen}>
-          <Dialog.Content
-            width="42rem"
-            padding="none"
-            gap="none"
-            className="flex max-h-[80vh] flex-col"
-          >
+          <Dialog.Content width="42rem" padding="none" gap="none" className="max-h-[80vh]">
             <div {...stylex.props(styles.dialogHeader)}>
               <div {...stylex.props(styles.body)}>
                 <Dialog.Description className="text-xs">

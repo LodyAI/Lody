@@ -1736,6 +1736,28 @@ tests; a later source-locked components run passes 620 files/6,207 tests, with a
 check still stops at the existing ACP SDK export build failure. Earlier pixel
 OPENs and negative contracts retain their status.
 
+The Dialog-consumer/Spinner-spacing continuation removes ten utilities across
+seven product files. Pasted-text editing and Quick Open use the modal spacing API;
+Operation reply removes two declarations already owned by that primitive. Five
+private Spinner margins retain physical `margin-right` and element-local spacing.
+`leaves46-47-acceptance.html` records 128 exact formal pairs/7,484 equal standard
+records. Both sides of the pasted-text interaction use a real coordinate click
+through its pointer-transparent mirror to the textarea, with the same runner.
+The Spinner matrix retains its earlier frozen runner independently.
+
+The normal-motion supplement has eight exact pairs and two Billing OPENs
+(137/123 raw pixels, 18/20 above the summed-RGB threshold). All 470,114 target
+CSS/pseudo values and recorded geometry/400ms animation fields match; the original
+background paint phase is unproved. Four original whole-app RTL offscreen-popup
+failures and rejected animation-target calibration remain. Eight local pending-button
+RTL states establish physical margin behavior, not whole-app positioning. In a
+forced UI-dark/global-light fixture, the paragraph remains rgb(30,30,30) on a
+rgb(22,22,22) panel in both sources; its inherited alias chain was not independently
+resolved. No palette patch or full-theme integration claim hides that limitation.
+The two owning groups pass 13/14 tests, types and formatting; lint retains 17/38
+warnings with zero errors. Earlier full-suite evidence keeps its original source
+boundary, and no earlier OPEN is closed.
+
 ## Remaining work
 
 The compiler-backed [inventory](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -1751,7 +1773,8 @@ completion percentage. Unresolved expressions remain a separate work list.
 | Frozen source through 35                                     | v2             |       1,705 |   175 |        721 |
 | Frozen source through 40                                     | v2             |       1,676 |   175 |        721 |
 | Frozen source through 43                                     | v2             |       1,664 |   173 |        721 |
-| Current source through 45, visual limits recorded separately | v2             |       1,656 |   171 |        721 |
+| Frozen source through 45                                     | v2             |       1,656 |   171 |        721 |
+| Current source through 47, visual limits recorded separately | v2             |       1,646 |   169 |        721 |
 
 Earlier method changes recognized single utilities, `withClassName`'s second
 argument and supported static class arrays. Historical per-batch counts remain
@@ -1771,7 +1794,7 @@ utility-looking strings in comparisons or unrelated properties. Ambiguous writes
 remain unresolved. Two adapter `className` writes expose four additional unresolved expressions,
 explaining the corresponding increase in that count.
 
-The current v2 source split is components 1,201 occurrences/155 files/628 unresolved,
+The current v2 source split is components 1,191 occurrences/153 files/628 unresolved,
 legacy UI 450/14/93 and routes 5/two/zero. Batch34–39 visual differences and rejected
 calibrations retain their own status; this source inventory does not accept them.
 

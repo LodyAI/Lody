@@ -1,0 +1,383 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone SE",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "migration-owneddialogconsumerlayout--composer-default",
+    "migration-owneddialogconsumerlayout--composer-hosted",
+    "migration-owneddialogconsumerlayout--quick-open-default",
+    "migration-owneddialogconsumerlayout--quick-open-hosted",
+    "migration-owneddialogconsumerlayout--operation-default",
+    "migration-owneddialogconsumerlayout--operation-hosted"
+  ],
+  "ready": {
+    "migration-owneddialogconsumerlayout--composer-default": [
+      {
+        "action": "clickPoint",
+        "selector": "[data-mention-layer=chip] [data-mention-kind=pasted_text]"
+      },
+      {
+        "action": "visible",
+        "role": "textbox",
+        "name": "Edit pasted text"
+      },
+      {
+        "action": "focus",
+        "role": "textbox",
+        "name": "Edit pasted text"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[role=dialog]');if(!p)return false;const c=getComputedStyle(p),r=p.getBoundingClientRect(),dark=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark)return false;if(c.opacity!=='1'||p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style')||c.display!=='flex'||c.flexDirection!=='column'||c.paddingTop!=='0px'||c.paddingRight!=='0px'||c.paddingBottom!=='0px'||c.paddingLeft!=='0px'||r.left<-.1||r.right>innerWidth+.1||r.top<-.1||r.bottom>innerHeight+.1||!p.contains(document.activeElement)||document.fonts.status!=='loaded')return false;if(document.getAnimations().some(a=>a.effect?.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;return c.gap==='0px'&&!!p.querySelector('textarea[aria-label=\"Edit pasted text\"]');}"
+      }
+    ],
+    "migration-owneddialogconsumerlayout--composer-hosted": [
+      {
+        "action": "clickPoint",
+        "selector": "[data-mention-layer=chip] [data-mention-kind=pasted_text]"
+      },
+      {
+        "action": "visible",
+        "role": "textbox",
+        "name": "Edit pasted text"
+      },
+      {
+        "action": "focus",
+        "role": "textbox",
+        "name": "Edit pasted text"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[role=dialog]');if(!p)return false;const c=getComputedStyle(p),r=p.getBoundingClientRect(),dark=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark)return false;if(c.opacity!=='1'||p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style')||c.display!=='flex'||c.flexDirection!=='column'||c.paddingTop!=='0px'||c.paddingRight!=='0px'||c.paddingBottom!=='0px'||c.paddingLeft!=='0px'||r.left<-.1||r.right>innerWidth+.1||r.top<-.1||r.bottom>innerHeight+.1||!p.contains(document.activeElement)||document.fonts.status!=='loaded')return false;if(document.getAnimations().some(a=>a.effect?.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;if(!p.closest('[data-dialog-layout-fixture=hosted-dark]')||c.getPropertyValue('--spacing').trim()!=='6px')return false;return c.gap==='0px'&&!!p.querySelector('textarea[aria-label=\"Edit pasted text\"]');}"
+      }
+    ],
+    "migration-owneddialogconsumerlayout--quick-open-default": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[role=dialog]');if(!p)return false;const c=getComputedStyle(p),r=p.getBoundingClientRect(),dark=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark)return false;if(c.opacity!=='1'||p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style')||c.display!=='flex'||c.flexDirection!=='column'||c.paddingTop!=='0px'||c.paddingRight!=='0px'||c.paddingBottom!=='0px'||c.paddingLeft!=='0px'||r.left<-.1||r.right>innerWidth+.1||r.top<-.1||r.bottom>innerHeight+.1||!p.contains(document.activeElement)||document.fonts.status!=='loaded')return false;if(document.getAnimations().some(a=>a.effect?.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;return !!p.querySelector('input');}"
+      }
+    ],
+    "migration-owneddialogconsumerlayout--quick-open-hosted": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[role=dialog]');if(!p)return false;const c=getComputedStyle(p),r=p.getBoundingClientRect(),dark=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark)return false;if(c.opacity!=='1'||p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style')||c.display!=='flex'||c.flexDirection!=='column'||c.paddingTop!=='0px'||c.paddingRight!=='0px'||c.paddingBottom!=='0px'||c.paddingLeft!=='0px'||r.left<-.1||r.right>innerWidth+.1||r.top<-.1||r.bottom>innerHeight+.1||!p.contains(document.activeElement)||document.fonts.status!=='loaded')return false;if(document.getAnimations().some(a=>a.effect?.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;if(!p.closest('[data-dialog-layout-fixture=hosted-dark]')||c.getPropertyValue('--spacing').trim()!=='6px')return false;return !!p.querySelector('input');}"
+      }
+    ],
+    "migration-owneddialogconsumerlayout--operation-default": [
+      {
+        "action": "click",
+        "selector": "[data-dialog-consumer=operation] button[title=\"View full reply\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[role=dialog]');if(!p)return false;const c=getComputedStyle(p),r=p.getBoundingClientRect(),dark=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark)return false;if(c.opacity!=='1'||p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style')||c.display!=='flex'||c.flexDirection!=='column'||c.paddingTop!=='0px'||c.paddingRight!=='0px'||c.paddingBottom!=='0px'||c.paddingLeft!=='0px'||r.left<-.1||r.right>innerWidth+.1||r.top<-.1||r.bottom>innerHeight+.1||!p.contains(document.activeElement)||document.fonts.status!=='loaded')return false;if(document.getAnimations().some(a=>a.effect?.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;return c.gap==='0px'&&p.textContent.includes('Synthetic line 80');}"
+      }
+    ],
+    "migration-owneddialogconsumerlayout--operation-hosted": [
+      {
+        "action": "click",
+        "selector": "[data-dialog-consumer=operation] button[title=\"View full reply\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[role=dialog]');if(!p)return false;const c=getComputedStyle(p),r=p.getBoundingClientRect(),dark=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark)return false;if(c.opacity!=='1'||p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style')||c.display!=='flex'||c.flexDirection!=='column'||c.paddingTop!=='0px'||c.paddingRight!=='0px'||c.paddingBottom!=='0px'||c.paddingLeft!=='0px'||r.left<-.1||r.right>innerWidth+.1||r.top<-.1||r.bottom>innerHeight+.1||!p.contains(document.activeElement)||document.fonts.status!=='loaded')return false;if(document.getAnimations().some(a=>a.effect?.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;if(!p.closest('[data-dialog-layout-fixture=hosted-dark]')||c.getPropertyValue('--spacing').trim()!=='6px')return false;return c.gap==='0px'&&p.textContent.includes('Synthetic line 80');}"
+      }
+    ]
+  },
+  "states": {
+    "migration-owneddialogconsumerlayout--composer-default": [
+      {
+        "name": "interacted",
+        "steps": [
+          {
+            "action": "fill",
+            "role": "textbox",
+            "name": "Edit pasted text",
+            "value": "Edited synthetic line 1: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 2: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 3: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 4: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 5: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 6: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 7: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 8: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 9: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 10: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 11: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 12: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 13: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 14: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 15: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 16: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 17: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 18: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 19: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 20: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 21: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 22: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 23: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 24: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 25: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 26: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 27: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 28: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 29: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 30: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 31: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 32: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 33: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 34: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 35: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 36: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 37: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 38: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 39: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 40: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 41: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 42: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 43: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 44: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 45: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 46: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 47: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 48: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 49: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 50: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 51: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 52: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 53: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 54: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 55: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 56: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 57: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 58: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 59: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 60: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 61: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 62: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 63: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 64: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 65: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 66: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 67: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 68: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 69: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 70: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 71: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 72: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 73: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 74: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 75: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 76: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 77: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 78: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 79: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 80: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 81: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 82: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 83: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 84: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 85: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 86: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 87: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 88: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 89: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 90: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 91: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 92: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 93: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 94: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 95: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 96: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 97: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 98: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 99: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 100: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 101: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 102: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 103: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 104: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 105: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 106: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 107: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 108: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 109: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 110: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 111: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 112: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 113: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 114: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 115: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 116: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 117: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 118: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 119: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 120: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 121: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 122: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 123: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 124: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 125: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 126: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 127: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 128: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 129: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 130: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 131: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 132: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 133: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 134: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 135: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 136: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 137: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 138: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 139: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 140: persistent content \u4e2d\u6587 and retained scrolling."
+          },
+          {
+            "action": "press",
+            "role": "textbox",
+            "name": "Edit pasted text",
+            "key": "ControlOrMeta+End"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('textarea[aria-label=\"Edit pasted text\"]');return e&&e.value.startsWith('Edited synthetic line 1:')&&e.scrollHeight>e.clientHeight&&e.scrollTop>0&&document.activeElement===e;}"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "press",
+            "role": "textbox",
+            "name": "Edit pasted text",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "textbox",
+            "name": "Edit pasted text"
+          },
+          {
+            "action": "clickPoint",
+            "selector": "[data-mention-layer=chip] [data-mention-kind=pasted_text]"
+          },
+          {
+            "action": "focus",
+            "role": "textbox",
+            "name": "Edit pasted text"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[role=dialog]');if(!p)return false;const c=getComputedStyle(p),r=p.getBoundingClientRect(),dark=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark)return false;if(c.opacity!=='1'||p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style')||c.display!=='flex'||c.flexDirection!=='column'||c.paddingTop!=='0px'||c.paddingRight!=='0px'||c.paddingBottom!=='0px'||c.paddingLeft!=='0px'||r.left<-.1||r.right>innerWidth+.1||r.top<-.1||r.bottom>innerHeight+.1||!p.contains(document.activeElement)||document.fonts.status!=='loaded')return false;if(document.getAnimations().some(a=>a.effect?.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;return c.gap==='0px'&&!!p.querySelector('textarea[aria-label=\"Edit pasted text\"]');}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('textarea[aria-label=\"Edit pasted text\"]')?.value.startsWith('Edited synthetic line 1:')"
+          }
+        ]
+      }
+    ],
+    "migration-owneddialogconsumerlayout--composer-hosted": [
+      {
+        "name": "interacted",
+        "steps": [
+          {
+            "action": "fill",
+            "role": "textbox",
+            "name": "Edit pasted text",
+            "value": "Edited synthetic line 1: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 2: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 3: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 4: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 5: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 6: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 7: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 8: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 9: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 10: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 11: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 12: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 13: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 14: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 15: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 16: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 17: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 18: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 19: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 20: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 21: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 22: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 23: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 24: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 25: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 26: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 27: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 28: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 29: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 30: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 31: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 32: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 33: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 34: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 35: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 36: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 37: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 38: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 39: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 40: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 41: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 42: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 43: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 44: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 45: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 46: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 47: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 48: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 49: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 50: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 51: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 52: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 53: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 54: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 55: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 56: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 57: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 58: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 59: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 60: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 61: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 62: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 63: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 64: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 65: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 66: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 67: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 68: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 69: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 70: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 71: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 72: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 73: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 74: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 75: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 76: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 77: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 78: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 79: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 80: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 81: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 82: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 83: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 84: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 85: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 86: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 87: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 88: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 89: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 90: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 91: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 92: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 93: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 94: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 95: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 96: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 97: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 98: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 99: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 100: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 101: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 102: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 103: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 104: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 105: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 106: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 107: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 108: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 109: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 110: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 111: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 112: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 113: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 114: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 115: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 116: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 117: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 118: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 119: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 120: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 121: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 122: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 123: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 124: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 125: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 126: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 127: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 128: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 129: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 130: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 131: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 132: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 133: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 134: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 135: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 136: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 137: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 138: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 139: persistent content \u4e2d\u6587 and retained scrolling.\nEdited synthetic line 140: persistent content \u4e2d\u6587 and retained scrolling."
+          },
+          {
+            "action": "press",
+            "role": "textbox",
+            "name": "Edit pasted text",
+            "key": "ControlOrMeta+End"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('textarea[aria-label=\"Edit pasted text\"]');return e&&e.value.startsWith('Edited synthetic line 1:')&&e.scrollHeight>e.clientHeight&&e.scrollTop>0&&document.activeElement===e;}"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "press",
+            "role": "textbox",
+            "name": "Edit pasted text",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "textbox",
+            "name": "Edit pasted text"
+          },
+          {
+            "action": "clickPoint",
+            "selector": "[data-mention-layer=chip] [data-mention-kind=pasted_text]"
+          },
+          {
+            "action": "focus",
+            "role": "textbox",
+            "name": "Edit pasted text"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[role=dialog]');if(!p)return false;const c=getComputedStyle(p),r=p.getBoundingClientRect(),dark=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark)return false;if(c.opacity!=='1'||p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style')||c.display!=='flex'||c.flexDirection!=='column'||c.paddingTop!=='0px'||c.paddingRight!=='0px'||c.paddingBottom!=='0px'||c.paddingLeft!=='0px'||r.left<-.1||r.right>innerWidth+.1||r.top<-.1||r.bottom>innerHeight+.1||!p.contains(document.activeElement)||document.fonts.status!=='loaded')return false;if(document.getAnimations().some(a=>a.effect?.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;if(!p.closest('[data-dialog-layout-fixture=hosted-dark]')||c.getPropertyValue('--spacing').trim()!=='6px')return false;return c.gap==='0px'&&!!p.querySelector('textarea[aria-label=\"Edit pasted text\"]');}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('textarea[aria-label=\"Edit pasted text\"]')?.value.startsWith('Edited synthetic line 1:')"
+          }
+        ]
+      }
+    ],
+    "migration-owneddialogconsumerlayout--quick-open-default": [
+      {
+        "name": "interacted",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "[role=dialog] input",
+            "value": "file-077"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[role=dialog]');return p&&p.querySelector('input')?.value==='file-077'&&p.querySelectorAll('[cmdk-item]').length===1&&p.textContent.includes('file-077.tsx');}"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[role=dialog] input",
+            "key": "Enter"
+          },
+          {
+            "action": "hidden",
+            "role": "dialog"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('output[aria-label=\"Opened file\"]')?.textContent.endsWith('file-077.tsx')"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open file picker"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[role=dialog]');if(!p)return false;const c=getComputedStyle(p),r=p.getBoundingClientRect(),dark=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark)return false;if(c.opacity!=='1'||p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style')||c.display!=='flex'||c.flexDirection!=='column'||c.paddingTop!=='0px'||c.paddingRight!=='0px'||c.paddingBottom!=='0px'||c.paddingLeft!=='0px'||r.left<-.1||r.right>innerWidth+.1||r.top<-.1||r.bottom>innerHeight+.1||!p.contains(document.activeElement)||document.fonts.status!=='loaded')return false;if(document.getAnimations().some(a=>a.effect?.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;return !!p.querySelector('input');}"
+          }
+        ]
+      }
+    ],
+    "migration-owneddialogconsumerlayout--quick-open-hosted": [
+      {
+        "name": "interacted",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "[role=dialog] input",
+            "value": "file-077"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[role=dialog]');return p&&p.querySelector('input')?.value==='file-077'&&p.querySelectorAll('[cmdk-item]').length===1&&p.textContent.includes('file-077.tsx');}"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[role=dialog] input",
+            "key": "Enter"
+          },
+          {
+            "action": "hidden",
+            "role": "dialog"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('output[aria-label=\"Opened file\"]')?.textContent.endsWith('file-077.tsx')"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open file picker"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[role=dialog]');if(!p)return false;const c=getComputedStyle(p),r=p.getBoundingClientRect(),dark=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark)return false;if(c.opacity!=='1'||p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style')||c.display!=='flex'||c.flexDirection!=='column'||c.paddingTop!=='0px'||c.paddingRight!=='0px'||c.paddingBottom!=='0px'||c.paddingLeft!=='0px'||r.left<-.1||r.right>innerWidth+.1||r.top<-.1||r.bottom>innerHeight+.1||!p.contains(document.activeElement)||document.fonts.status!=='loaded')return false;if(document.getAnimations().some(a=>a.effect?.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;if(!p.closest('[data-dialog-layout-fixture=hosted-dark]')||c.getPropertyValue('--spacing').trim()!=='6px')return false;return !!p.querySelector('input');}"
+          }
+        ]
+      }
+    ],
+    "migration-owneddialogconsumerlayout--operation-default": [
+      {
+        "name": "interacted",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[role=dialog] > div:last-of-type"
+          },
+          {
+            "action": "press",
+            "selector": "[role=dialog] > div:last-of-type",
+            "key": "End"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[role=dialog] > div:last-of-type');return e&&e.scrollHeight>e.clientHeight&&e.scrollTop>0;}"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[role=dialog] > div:last-of-type",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "dialog"
+          },
+          {
+            "action": "click",
+            "selector": "[data-dialog-consumer=operation] button[title=\"View full reply\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[role=dialog]');if(!p)return false;const c=getComputedStyle(p),r=p.getBoundingClientRect(),dark=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark)return false;if(c.opacity!=='1'||p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style')||c.display!=='flex'||c.flexDirection!=='column'||c.paddingTop!=='0px'||c.paddingRight!=='0px'||c.paddingBottom!=='0px'||c.paddingLeft!=='0px'||r.left<-.1||r.right>innerWidth+.1||r.top<-.1||r.bottom>innerHeight+.1||!p.contains(document.activeElement)||document.fonts.status!=='loaded')return false;if(document.getAnimations().some(a=>a.effect?.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;return c.gap==='0px'&&p.textContent.includes('Synthetic line 80');}"
+          }
+        ]
+      }
+    ],
+    "migration-owneddialogconsumerlayout--operation-hosted": [
+      {
+        "name": "interacted",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[role=dialog] > div:last-of-type"
+          },
+          {
+            "action": "press",
+            "selector": "[role=dialog] > div:last-of-type",
+            "key": "End"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[role=dialog] > div:last-of-type');return e&&e.scrollHeight>e.clientHeight&&e.scrollTop>0;}"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[role=dialog] > div:last-of-type",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "dialog"
+          },
+          {
+            "action": "click",
+            "selector": "[data-dialog-consumer=operation] button[title=\"View full reply\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[role=dialog]');if(!p)return false;const c=getComputedStyle(p),r=p.getBoundingClientRect(),dark=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark)return false;if(c.opacity!=='1'||p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style')||c.display!=='flex'||c.flexDirection!=='column'||c.paddingTop!=='0px'||c.paddingRight!=='0px'||c.paddingBottom!=='0px'||c.paddingLeft!=='0px'||r.left<-.1||r.right>innerWidth+.1||r.top<-.1||r.bottom>innerHeight+.1||!p.contains(document.activeElement)||document.fonts.status!=='loaded')return false;if(document.getAnimations().some(a=>a.effect?.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;if(!p.closest('[data-dialog-layout-fixture=hosted-dark]')||c.getPropertyValue('--spacing').trim()!=='6px')return false;return c.gap==='0px'&&p.textContent.includes('Synthetic line 80');}"
+          }
+        ]
+      }
+    ]
+  }
+}

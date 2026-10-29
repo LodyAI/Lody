@@ -297,6 +297,17 @@ async function applySteps(page, steps = []) {
       await page.waitForFunction(expression, undefined, { timeout: step.timeout ?? 15_000 });
       continue;
     }
+    if (step.action === 'clickPoint') {
+      const target = page.locator(step.selector);
+      await target.scrollIntoViewIfNeeded();
+      const box = await target.boundingBox();
+      if (!box || box.width <= 0 || box.height <= 0)
+        throw new Error(`clickPoint requires a visible target: ${step.selector}`);
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, {
+        button: step.button ?? 'left',
+      });
+      continue;
+    }
     if (step.action === 'movePointer') {
       await page.mouse.move(step.x ?? 0, step.y ?? 0);
       continue;

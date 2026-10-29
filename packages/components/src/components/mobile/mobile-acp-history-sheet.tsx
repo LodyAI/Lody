@@ -66,6 +66,7 @@ const TRANSITION_COLORS = {
 } as const;
 
 const styles = stylex.create({
+  pendingSpinnerSpacing: { marginRight: 'calc(var(--spacing) * 1.5)' },
   /** The title, with the provider's mark in front of it. */
   titleRow: {
     display: 'inline-flex',
@@ -684,7 +685,7 @@ export function MobileAcpHistorySheet({
                                 {resolving ? (
                                   <Spinner
                                     diameter="calc(var(--spacing) * 3.5)"
-                                    className="mr-1.5"
+                                    className={stylex.props(styles.pendingSpinnerSpacing).className}
                                     aria-hidden="true"
                                   />
                                 ) : (

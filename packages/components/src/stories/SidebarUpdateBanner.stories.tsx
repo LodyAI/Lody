@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
+import { useLayoutEffect, type ReactNode } from 'react';
 import { SidebarUpdateBanner } from '@/components/sidebar-update-banner';
 
 const meta: Meta<typeof SidebarUpdateBanner> = {
@@ -38,4 +39,37 @@ export const Downloaded: Story = {
 
 export const Restarting: Story = {
   args: { stage: 'downloaded', percent: null, isRestarting: true },
+};
+
+function SpacingScope({ children, scope }: { children: ReactNode; scope: 'root' | 'subtree' }) {
+  useLayoutEffect(() => {
+    const target = scope === 'root' ? document.documentElement : document.body;
+    const previous = target.style.getPropertyValue('--spacing');
+    target.style.setProperty('--spacing', '5px');
+    return () => {
+      if (previous) target.style.setProperty('--spacing', previous);
+      else target.style.removeProperty('--spacing');
+    };
+  }, [scope]);
+  return <div data-update-spacing={scope}>{children}</div>;
+}
+export const RestartingRootSpacing: Story = {
+  args: Restarting.args,
+  decorators: [
+    (Story) => (
+      <SpacingScope scope="root">
+        <Story />
+      </SpacingScope>
+    ),
+  ],
+};
+export const RestartingSubtreeSpacing: Story = {
+  args: Restarting.args,
+  decorators: [
+    (Story) => (
+      <SpacingScope scope="subtree">
+        <Story />
+      </SpacingScope>
+    ),
+  ],
 };

@@ -30,6 +30,7 @@ import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontSize, themeLineHeight, themeSpace } from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  pendingSpinnerSpacing: { marginRight: 'calc(var(--spacing) * 1)' },
   /** The updater's answer: a mark and one line of copy. */
   status: {
     display: 'flex',
@@ -274,7 +275,10 @@ export function MobileAboutSettings() {
                 disabled={isInstalling}
               >
                 {isInstalling ? (
-                  <Spinner diameter="calc(var(--spacing) * 3.5)" className="mr-1" />
+                  <Spinner
+                    diameter="calc(var(--spacing) * 3.5)"
+                    className={stylex.props(styles.pendingSpinnerSpacing).className}
+                  />
                 ) : (
                   <Download {...stylex.props(styles.buttonIcon)} />
                 )}
@@ -290,7 +294,10 @@ export function MobileAboutSettings() {
                 disabled={isChecking || phase === 'downloading'}
               >
                 {isChecking ? (
-                  <Spinner diameter="calc(var(--spacing) * 3.5)" className="mr-1" />
+                  <Spinner
+                    diameter="calc(var(--spacing) * 3.5)"
+                    className={stylex.props(styles.pendingSpinnerSpacing).className}
+                  />
                 ) : null}
                 {t('settings.about.checkForUpdates')}
               </Button>

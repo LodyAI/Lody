@@ -15,6 +15,7 @@ import {
 } from '../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  pendingSpinnerSpacing: { marginRight: 'calc(var(--spacing) * 1.5)' },
   banner: {
     borderRadius: themeRadius.lg,
     borderWidth: '1px',
@@ -142,7 +143,10 @@ export function SidebarUpdateBanner({
             onClick={onRestart}
           >
             {isRestarting ? (
-              <Spinner diameter="calc(var(--spacing) * 3.5)" className="mr-1.5" />
+              <Spinner
+                diameter="calc(var(--spacing) * 3.5)"
+                className={stylex.props(styles.pendingSpinnerSpacing).className}
+              />
             ) : null}
             {t('sidebar.updateReady.restart', 'Update & Restart')}
           </Button>

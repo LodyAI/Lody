@@ -201,6 +201,8 @@ It applies the same predicate after view changes on both immutable builds.
 | `leaves35-project-group-menu-painted-targets.json`, `leaves35-project-group-natural-menu-painted-targets.json`                                                                           | Genuine painted-menu readiness; final48closed+12painted source rows retain three current raster OPENs and exact source provenance.                                                                                           |
 | `leaves44-modal-spacing-targets.json`, `leaves44-modal-spacing-consumers-targets.json`                                                                                                   | Actual Dialog/Alert default-none combinations, omission reset, retained value/focus, inline style callbacks and real modal host; Rename/Operation portals use actual-popup readiness.                                        |
 | `leaves45-avatar-glyph-targets.json`                                                                                                                                                     | Actual User/Workspace fallback glyphs across five rungs, inherited glyph-token theme, mounted theme swap/restore and initials controls; DPR3 CSS adds no PNGs.                                                               |
+| `leaves46-dialog-consumers-targets.json`                                                                                                                                                 | Actual pasted-text editing, Quick Open filtering and Operation reply reopen; real coordinate clicks pass through the mirror. Forced UI-dark/global-light retains its original Markdown contrast limitation.                  |
+| `leaves47-spinner-margin-targets.json`, `leaves47-spinner-margin-rtl-targets.json`                                                                                                       | Five pending Spinner margins with root/subtree spacing and local-button RTL. Whole-app RTL failures and two normal-motion Billing pixel OPENs remain separate.                                                               |
 | `legacy-task-targets.json`                                                                                                                                                               | Actual legacy TaskList rows, caller/root/subtree variable overrides, loading/empty/overflow and desktop pointer states.                                                                                                      |
 | `legacy-updated-task-targets.json`                                                                                                                                                       | Actual legacy flat Updated list, status/anchor rows, rename, archive, show all/less and scoped variables.                                                                                                                    |
 | `owned-session-list-targets.json`                                                                                                                                                        | Active SessionList project groups, selection, caller/root/subtree overrides, menus, folding and empty/loading states.                                                                                                        |
@@ -558,7 +560,10 @@ When another surface such as an error toast also uses `role="dialog"`, locate
 the intended dialog by its accessible name. Portal-only fixtures still require
 visible actual content even when their unpainted story root is allowed blank.
 Steps use roles, text or owned selectors and can click, tap, hover, focus, fill, press,
-move the pointer, or assert visible/hidden/enabled/disabled state. States execute
+move the pointer, or assert visible/hidden/enabled/disabled state. `clickPoint` reads
+the actual target box and sends a real pointer click at its centre. It covers a
+pointer-transparent mirror over a textarea without dispatching a synthetic event
+or forcing the mirror to accept input. States execute
 in sequence after a fresh story load. Move the pointer away before a keyboard
 peek so a hovering pointer cannot satisfy the intended keyboard condition.
 
@@ -568,8 +573,10 @@ original-component frames. Before-source copies and per-frame origins stay in
 the local evidence; no recreated or generated image serves as a baseline.
 
 To combine independent profiles, give each its own capture phase and assemble
-them. Later successful captures of the same key supersede earlier frames or
-failures, while source manifests retain their origins and failure history:
+them. A later capture may become part of the accepted matrix after its actual
+source, readiness and interaction are verified. It does not automatically close
+the original failure or difference; source manifests retain both origins and
+the remaining uncertainty:
 
 ```sh
 node tests/visual/visual-regression.mjs assemble \
