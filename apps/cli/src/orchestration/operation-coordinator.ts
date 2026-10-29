@@ -79,6 +79,7 @@ export class LodyOperationCoordinator {
   private store: LodyOperationStore | null = null;
   private storeWatch: Pick<FSWatcher, 'close'> | null = null;
   private started = false;
+  private startupComplete = false;
   private startupFailure: unknown;
   private startupRetry?: ReturnType<typeof setTimeout>;
   private startupRetryDelay = 30_000;
@@ -110,6 +111,15 @@ export class LodyOperationCoordinator {
   start(): void {
     if (this.started) return;
     if (!this.stoppedComplete) throw new Error('Coordinator shutdown is not complete');
+    try {
+      this.startAttempt();
+    } catch (cause) {
+      this.degradeStartup(cause);
+    }
+  }
+
+  private startAttempt(): void {
+    this.startupComplete = false;
     this.shutdown = undefined;
     this.shutdownFailure = undefined;
     this.shutdownRecovery = undefined;
@@ -118,41 +128,9 @@ export class LodyOperationCoordinator {
 
     if (this.startupRetry) clearTimeout(this.startupRetry);
     this.startupRetry = undefined;
-    try {
-      this.store = this.storeFactory();
-      this.store.inbox.activate(this.options.workspaceId, this.workerBootId);
-    } catch (cause) {
-      this.store?.close();
-      this.store = null;
-      this.startupFailure = cause;
-      this.options.executionService.setOperationInbox?.(undefined);
-      this.options.logger.error(`[inbox] Startup degraded: ${String(cause)}`);
-      const reason =
-        cause instanceof Error && /^INBOX_[A-Z_]+$/.test(cause.message)
-          ? cause.message
-          : cause instanceof Error &&
-              'code' in cause &&
-              typeof cause.code === 'string' &&
-              /^[A-Z_]+$/.test(cause.code)
-            ? cause.code
-            : 'storage unavailable';
-      this.reportAvailability(
-        `Task orchestration database cannot open (${reason}). Agent tasks and automatic continuation are temporarily unavailable; ordinary chat is unaffected.`
-      );
-      if (reason !== 'INBOX_SCHEMA_UNSUPPORTED' && reason !== 'INBOX_PROTOCOL_REQUIRED') {
-        this.startupRetry = setTimeout(() => {
-          this.startupRetry = undefined;
-          this.start();
-        }, this.startupRetryDelay);
-        this.startupRetry.unref();
-        this.startupRetryDelay = Math.min(this.startupRetryDelay * 2, 600_000);
-      }
-      return;
-    }
-    this.startupFailure = undefined;
-    this.startupRetryDelay = 30_000;
-    this.reportAvailability(undefined);
     this.stoppedComplete = false;
+    this.store = this.storeFactory();
+    this.store.inbox.activate(this.options.workspaceId, this.workerBootId);
     this.started = true;
     this.metaWatch = this.options.workspaceDocument.repo.watch(
       (event) => {
@@ -180,7 +158,9 @@ export class LodyOperationCoordinator {
         const store = this.storeFactory();
         return { sql: store.inbox, close: () => store.close() };
       },
-      quiesce: () => this.options.executionService.quiesceInboxExecutions?.(),
+      quiesce: () => {
+        if (this.startupComplete) this.options.executionService.quiesceInboxExecutions?.();
+      },
       ready: (batch) => {
         if (!this.started) return false;
         const sessionId = batch.sessionId as SessionId;
@@ -269,7 +249,59 @@ export class LodyOperationCoordinator {
         })
         .catch((cause) => this.options.logger.warn(String(cause)));
     });
+    this.startupComplete = true;
+    this.startupFailure = undefined;
+    this.startupRetryDelay = 30_000;
+    this.reportAvailability(undefined);
     void this.wake('startup');
+  }
+
+  private degradeStartup(cause: unknown): void {
+    this.options.executionService.setOperationInbox?.(undefined);
+    const retryDelay = this.startupRetryDelay;
+    try {
+      void this.stop().catch((failure) =>
+        this.options.logger.error(`[inbox] Startup cleanup failed: ${String(failure)}`)
+      );
+    } catch (failure) {
+      this.options.logger.error(`[inbox] Startup cleanup failed: ${String(failure)}`);
+    }
+    this.startupRetryDelay = retryDelay;
+    this.startupFailure = cause;
+    this.options.logger.error(`[inbox] Startup degraded: ${String(cause)}`);
+    const reason =
+      cause instanceof Error && /^INBOX_[A-Z_]+$/.test(cause.message)
+        ? cause.message
+        : cause instanceof Error &&
+            'code' in cause &&
+            typeof cause.code === 'string' &&
+            /^[A-Z_]+$/.test(cause.code)
+          ? cause.code
+          : 'storage unavailable';
+    this.reportAvailability(
+      `Task orchestration database cannot open (${reason}). Agent tasks and automatic continuation are temporarily unavailable; ordinary chat is unaffected.`
+    );
+    if (reason !== 'INBOX_SCHEMA_UNSUPPORTED' && reason !== 'INBOX_PROTOCOL_REQUIRED') {
+      this.startupRetry = setTimeout(() => {
+        this.startupRetry = undefined;
+        const failure = this.startupFailure;
+        void Promise.resolve()
+          .then(() => (this.shutdownFailure ? this.recoverStopResources() : this.shutdown))
+          .then(() => {
+            if (this.startupFailure !== failure) return;
+            try {
+              this.start();
+            } catch (cause) {
+              this.degradeStartup(cause);
+            }
+          })
+          .catch((cause) => {
+            if (this.startupFailure === failure) this.degradeStartup(cause);
+          });
+      }, this.startupRetryDelay);
+      this.startupRetry.unref();
+      this.startupRetryDelay = Math.min(this.startupRetryDelay * 2, 600_000);
+    }
   }
 
   private reportAvailability(message: string | undefined): void {
@@ -290,16 +322,19 @@ export class LodyOperationCoordinator {
   }
 
   hasPendingWorkForRequester(sessionId: SessionId): boolean {
-    return this.store?.hasPendingWorkForRequester(this.options.workspaceId, sessionId) ?? false;
+    return (
+      this.started &&
+      (this.store?.hasPendingWorkForRequester(this.options.workspaceId, sessionId) ?? false)
+    );
   }
 
   stop(): Promise<void> {
-    if (this.shutdown) return this.shutdown;
     if (this.startupRetry) clearTimeout(this.startupRetry);
     this.startupRetry = undefined;
     this.startupRetryDelay = 30_000;
     this.startupFailure = undefined;
     this.reportAvailability(undefined);
+    if (this.shutdown) return this.shutdown;
     if (this.stoppedComplete) return Promise.resolve();
     this.started = false;
     this.metaWatch?.unsubscribe();
@@ -324,8 +359,8 @@ export class LodyOperationCoordinator {
     // Keep the native runtime/connection alive for the final release and settlement receipts.
     await withTimeout(
       (async () => {
-        await this.idle();
-        await this.options.executionService.drainInboxExecutions?.();
+        await this.drainActivity();
+        if (this.startupComplete) await this.options.executionService.drainInboxExecutions?.();
         await Promise.allSettled([...this.inboxExecutions, ...this.nativeRawWork]);
       })(),
       15_000,
@@ -334,8 +369,8 @@ export class LodyOperationCoordinator {
     await this.inbox?.close();
     if (this.nativeCloseFailed) {
       if (this.nativeCore) await Effect.runPromise(this.nativeCore.recoverSubscriptions());
-    } else {
-      this.nativeClose ??= Effect.runPromiseExit(this.nativeRuntime!.disposeEffect)
+    } else if (this.nativeRuntime) {
+      this.nativeClose ??= Effect.runPromiseExit(this.nativeRuntime.disposeEffect)
         .then((exit) => {
           if (Exit.isFailure(exit))
             throw new Error('Coordinator Scope release failed', { cause: exit.cause });
@@ -349,9 +384,21 @@ export class LodyOperationCoordinator {
     this.options.executionService.setOperationInbox?.(undefined);
     this.store?.close();
     this.store = null;
+    this.inbox = undefined;
+    this.nativeRuntime = undefined;
+    this.nativeReady = undefined;
+    this.nativeCore = undefined;
+    this.nativeClose = undefined;
+    this.nativeCloseFailed = false;
     this.stoppedComplete = true;
   }
   recoverStop(): Promise<void> {
+    if (this.startupRetry) clearTimeout(this.startupRetry);
+    this.startupRetry = undefined;
+    this.startupFailure = undefined;
+    return this.recoverStopResources();
+  }
+  private recoverStopResources(): Promise<void> {
     if (this.stoppedComplete) return this.stop();
     if (!this.shutdownFailure) return this.stop();
     if (this.shutdownRecovery) return this.shutdownRecovery;
@@ -395,6 +442,10 @@ export class LodyOperationCoordinator {
     }).catch((cause) => this.options.logger.warn(String(cause)));
   }
   async idle(): Promise<void> {
+    if (!this.started && this.shutdown) return this.shutdown;
+    await this.drainActivity();
+  }
+  private async drainActivity(): Promise<void> {
     if (!this.nativeReady) return;
     if (this.nativeClose) return;
     const { activity } = await this.nativeReady;

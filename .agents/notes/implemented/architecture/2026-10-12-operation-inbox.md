@@ -48,7 +48,8 @@ startup. Ordinary human dispatch uses the existing no-Inbox path; dependent tool
 check the daemon's current availability before touching storage, including cached
 connections. This avoids accepting delegated work whose receipt cannot run.
 The facade owns one startup timer, doubles from 30 seconds to a 10-minute cap,
-closes a failed activation connection, and cancels retry on stop/recoverStop.
+detaches Inbox on any synchronous startup failure, drains partial resources through
+the stop owner before retry without canceling or waiting for ordinary turns, and cancels retry on stop/recoverStop.
 Incompatible schema/protocol needs a compatible binary, so it does not auto-retry.
 The local runtime warning clears on recovery. Existing unknown-submission and
 resource-release rules remain authoritative; degradation cannot prove release.

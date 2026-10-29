@@ -287,10 +287,13 @@ const makeHarness = async (options?: {
     if (synced?.meta) metas.set(targetSessionId, synced.meta);
   });
   const storeLifecycle = { opened: 0, closed: 0 };
+  const openedStores: LodyOperationStore[] = [];
+  let attachedInbox: unknown;
   const storeFactory = () => {
     options?.beforeStoreOpen?.();
     storeLifecycle.opened += 1;
     const factoryStore = new LodyOperationStore(storePath, options?.now ?? (() => TEST_NOW_MS));
+    openedStores.push(factoryStore);
     const activate = factoryStore.inbox.activate.bind(factoryStore.inbox);
     factoryStore.inbox.activate = (workspaceId, owner) => {
       options?.beforeActivate?.();
@@ -358,6 +361,12 @@ const makeHarness = async (options?: {
       syncMachineFlockDoc,
     } as never,
     executionService: {
+      quiesceInboxExecutions: () => {
+        busy = false;
+      },
+      setOperationInbox: (inbox: unknown) => {
+        attachedInbox = inbox;
+      },
       getExecutionSnapshot: () => ({
         hasActiveTurn: busy,
         ...(busy && options?.activeTurnId ? { activeTurnId: options.activeTurnId } : {}),
@@ -417,6 +426,9 @@ const makeHarness = async (options?: {
     targetSessionId,
     storePath,
     storeLifecycle,
+    openedStores,
+    getAttachedInbox: () => attachedInbox,
+    isBusy: () => busy,
     syncMachineFlockDoc,
     syncRemoteDocOrThrow,
     flockScan,
@@ -449,7 +461,7 @@ afterEach(async () => {
 });
 
 describe('LodyOperationCoordinator', () => {
-  it.each(['open', 'activate'])(
+  it.each(['open', 'activate', 'watch'])(
     'degrades after %s failure and recovers without restarting',
     async (boundary) => {
       vi.useFakeTimers({
@@ -462,17 +474,34 @@ describe('LodyOperationCoordinator', () => {
       };
       const h = await makeHarness({
         targetInputDurable: false,
-        ...(boundary === 'open' ? { beforeStoreOpen: fault } : { beforeActivate: fault }),
+        ...(boundary === 'open'
+          ? { beforeStoreOpen: fault }
+          : boundary === 'activate'
+            ? { beforeActivate: fault }
+            : {}),
         onAvailabilityChange: (message) => warnings.push(message),
       });
+      if (boundary === 'watch') {
+        h.setBusy(true);
+        const watch = h.coordinatorOptions.operationStoreWatchFactory;
+        h.coordinatorOptions.operationStoreWatchFactory = (directory, onChange) => {
+          fault();
+          return watch(directory, onChange);
+        };
+      }
       try {
         expect(() => h.coordinator.start()).not.toThrow();
         expect(warnings.at(-1)).toContain('SQLITE_FULL');
         expect(() => h.coordinator.assertInboxAvailable()).toThrow('INBOX_UNAVAILABLE');
         await expect(h.coordinator.wake('dependent-call')).rejects.toThrow('INBOX_UNAVAILABLE');
+        await h.coordinator.idle();
         expect(h.coordinator.hasPendingWorkForRequester(h.requesterSessionId)).toBe(false);
         expect(h.histories.get(h.targetSessionId)).toEqual([]);
         expect(h.storeLifecycle.closed).toBe(h.storeLifecycle.opened);
+        expect(h.getAttachedInbox()).toBeUndefined();
+        if (boundary === 'watch') expect(h.isBusy()).toBe(true);
+        for (const store of h.openedStores)
+          expect(() => store.get(h.requesterSessionId, 'review-round-1')).toThrow();
         await vi.advanceTimersByTimeAsync(30_000);
         failed = false;
         await vi.advanceTimersByTimeAsync(59_999);
@@ -481,6 +510,7 @@ describe('LodyOperationCoordinator', () => {
         await h.coordinator.idle();
         expect(() => h.coordinator.assertInboxAvailable()).not.toThrow();
         expect(warnings.at(-1)).toBeUndefined();
+        expect(h.getAttachedInbox()).toBeDefined();
         expect(h.histories.get(h.targetSessionId)?.[0]?.id).toBe('turn-1');
       } finally {
         await h.coordinator.stop();
