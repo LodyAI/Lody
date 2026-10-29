@@ -1,4 +1,4 @@
-import { ledgerStateDigest } from '@lody/e2ee-core/protocol';
+import { Bytes, hasVerifiedCheckpoint, ledgerStateDigest } from '@lody/e2ee-core/protocol';
 import { Result } from 'effect';
 import { bytesToHex, type VerifiedLedgerHistory } from './e2ee-ledger-history';
 
@@ -25,7 +25,7 @@ const VERSION = /(?:版本|version)\s*(\d{1,9})/;
 
 export function ledgerVerificationCode(history: VerifiedLedgerHistory): LedgerVerificationCode {
   const version = history.view.length;
-  const headHash = history.records[version - 1].hash;
+  const headHash = bytesToHex(history.view.head.toBytes());
   const stateDigest = bytesToHex(Result.getOrThrow(ledgerStateDigest(history.view)).toBytes());
   return {
     version,
@@ -108,7 +108,18 @@ export function compareVerificationCode(
       : { kind: 'mismatch' };
   if (scanned.headHash === undefined)
     return { kind: 'theirs-older', version, prefixConfirmed: false };
-  return history.records[version - 1]?.hash === scanned.headHash
+  const known = history.records.find((record) => record.index === version - 1);
+  if (known)
+    return known.hash === scanned.headHash
+      ? { kind: 'theirs-older', version, prefixConfirmed: true }
+      : { kind: 'mismatch' };
+  if (version - 1 < history.view.historyStart)
+    return { kind: 'theirs-older', version, prefixConfirmed: false };
+  const head = Bytes.recordHash(
+    Uint8Array.from(scanned.headHash.match(/../g) ?? [], (byte) => Number.parseInt(byte, 16))
+  );
+  return Result.isSuccess(head) &&
+    Result.getOrThrow(hasVerifiedCheckpoint(history.view, { head: head.success, length: version }))
     ? { kind: 'theirs-older', version, prefixConfirmed: true }
     : { kind: 'mismatch' };
 }

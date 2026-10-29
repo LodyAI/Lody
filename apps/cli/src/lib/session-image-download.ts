@@ -1,3 +1,10 @@
+import { assertEncryptedImageReference } from '@lody/shared';
+import {
+  readEncryptedAttachment,
+  encryptedAttachmentPath,
+  getSessionFileDownloadApiPath,
+  type EncryptedAttachment,
+} from '@lody/shared';
 import {
   buildSessionImageApiUrl,
   getSessionImageDownloadApiPath,
@@ -16,6 +23,8 @@ type DownloadSessionImageAsPromptBlockArgs = {
   workspaceId: WorkspaceId;
   sessionId: SessionId;
   imageId: string;
+  encryption?: EncryptedAttachment;
+  attachmentToken?: () => Promise<string>;
   expectedMimeType: string;
   serverBaseUrl: string;
   token: string;
@@ -125,6 +134,36 @@ export async function downloadSessionImageForPrompt(
     throw new Error('Session image download requires fetch');
   }
 
+  if (args.encryption) {
+    assertEncryptedImageReference(args.imageId, args.encryption);
+    if (!args.attachmentToken) throw new Error('e2ee_attachment_unavailable');
+    const token = await args.attachmentToken();
+    const parts: Uint8Array[] = [];
+    for await (const bytes of readEncryptedAttachment({
+      ...args,
+      encryption: args.encryption,
+      fetchPart: (fileId) =>
+        fetchImpl(
+          buildSessionImageApiUrl(
+            args.serverBaseUrl,
+            encryptedAttachmentPath(
+              getSessionFileDownloadApiPath(args.workspaceId, args.sessionId, fileId),
+              'image'
+            )
+          ),
+          { headers: { Authorization: `Bearer ${token}` } }
+        ),
+    }))
+      parts.push(bytes);
+    const bytes = Buffer.concat(parts);
+    const mimeType = args.encryption.mimeType;
+    return {
+      block: { type: 'image', mimeType, data: bytes.toString('base64') },
+      bytes,
+      mimeType,
+      sizeBytes: bytes.length,
+    };
+  }
   const sleep = args.sleep ?? defaultSleep;
   const imageUrl = buildSessionImageApiUrl(
     args.serverBaseUrl,

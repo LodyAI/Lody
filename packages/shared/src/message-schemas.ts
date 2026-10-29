@@ -1,4 +1,5 @@
-import { SessionProjectRunSchema } from './workspace-project';
+import { EncryptedAttachmentSchema } from './encrypted-attachment';
+import { ProjectLocalMemberProbeSchema, SessionProjectRunSchema } from './workspace-project';
 import { AgentRoleProposalMetaSchema } from './agent-role-proposal';
 import { isMagpieGatewayUrl } from './magpie-import';
 import { MemoryBindingSchema } from './memory-provider';
@@ -131,6 +132,7 @@ const OptionalStringSchema = z.preprocess(
 export const SessionImagePayloadSchema = z
   .object({
     imageId: z.string(),
+    encryption: EncryptedAttachmentSchema.optional(),
     mimeType: z.enum(SESSION_IMAGE_ALLOWED_MIME_TYPES),
     fileName: OptionalStringSchema,
     sizeBytes: z.number().int().positive().max(SESSION_IMAGE_MAX_SIZE_BYTES),
@@ -138,9 +140,16 @@ export const SessionImagePayloadSchema = z
     height: OptionalPositiveIntegerSchema,
     storageSessionId: SessionIdSchema.optional(),
   })
-  .strict();
+  .strict().superRefine((image, ctx) => {
+    const manifest = image.encryption;
+    if (manifest && (manifest.kind !== 'image' || manifest.parts[0] !== image.imageId ||
+      manifest.sizeBytes !== image.sizeBytes || manifest.mimeType !== image.mimeType ||
+      manifest.fileName !== (image.fileName ?? ''))) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Encrypted image reference mismatch' });
+    }
+  });
 
-const SessionImageInputBlockSchema = SessionImagePayloadSchema.extend({
+const SessionImageInputBlockSchema = SessionImagePayloadSchema.safeExtend({
   type: z.literal('image'),
 }).strict();
 
@@ -159,6 +168,7 @@ const SessionFileBlockObjectSchema = z
   .object({
     type: z.literal('file'),
     fileId: z.string(),
+    encryption: EncryptedAttachmentSchema.optional(),
     fileName: z.string(),
     mimeType: z.string(),
     sizeBytes: z.number().int().nonnegative().max(SESSION_FILE_MAX_SIZE_BYTES),
@@ -177,6 +187,11 @@ const refineSessionFileBlock = (
   ctx: z.RefinementCtx,
   basePath: PropertyKey[] = []
 ): void => {
+  if (block.encryption && (block.encryption.kind !== 'file' || block.fileId !== block.encryption.parts[0] ||
+    block.sizeBytes !== block.encryption.sizeBytes || block.fileName !== block.encryption.fileName ||
+    block.mimeType !== block.encryption.mimeType || block.transport !== 'r2')) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: basePath, message: 'Encrypted attachment reference mismatch' });
+  }
   // transport='local' means the bytes only exist on a specific machine pending
   // backfill; without machineId other devices can't render the honest
   // "uploading from <machine>" pending state.
@@ -1767,7 +1782,7 @@ export const SessionImageUploadResponseSchema = z
     content: SessionImageGroupContentSchema.optional(),
     images: z
       .array(
-        SessionImagePayloadSchema.extend({
+        SessionImagePayloadSchema.safeExtend({
           downloadUrl: z.string().url(),
         }).strict()
       )
@@ -2316,6 +2331,7 @@ export const SessionHistoryWriteResponseSchema = z
   });
 
 export const LocalSessionControlRequestSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('machine/dsh-providers'), machineId: MachineIdSchema }).strict(),
   SessionCreateRequestSchema,
   SessionChatRequestSchema,
   SessionCancelRequestSchema,
@@ -2342,6 +2358,12 @@ export const LocalSessionControlRequestSchema = z.discriminatedUnion('type', [
 ]);
 
 export const LocalSessionControlResponseSchema = z.discriminatedUnion('type', [
+  z
+    .object({
+      type: z.literal('machine/dsh-providers_response'),
+      providers: z.array(z.object({ id: z.string().min(1), name: z.string() }).strict()),
+    })
+    .strict(),
   SessionCreateAckSchema,
   SessionCreateResponseSchema,
   SessionChatAckSchema,
@@ -2388,6 +2410,7 @@ export const LocalProjectPrepareAddRequestSchema = z
     machineId: MachineIdSchema,
     workspaceId: WorkspaceIdSchema,
     rootPath: z.string().trim().min(1),
+    inspect: z.boolean().optional(),
   })
   .strict();
 
@@ -2942,6 +2965,7 @@ export const LocalProjectControlResponseSchema = z.union([
           name: z.string(),
           rootPath: z.string(),
           alreadyRegistered: z.boolean(),
+          inspection: ProjectLocalMemberProbeSchema.optional(),
         })
         .strict(),
     })

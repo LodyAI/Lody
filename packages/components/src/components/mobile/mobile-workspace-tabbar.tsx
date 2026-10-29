@@ -23,6 +23,7 @@ import { radius, space } from '@lody/ui/tokens/scales.stylex';
 import { PencilLine } from 'lucide-react';
 import { isIOSRuntimeEnvironment } from '@/lib/native-platform';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
+import { useNativeSideRail } from './native-side-rail';
 
 export type MobileBottomTabBarTabSpec<TabKey extends string = string> = {
   key: TabKey;
@@ -272,6 +273,38 @@ export function MobileWorkspaceTabBar<TabKey extends string = string>({
   scrollSignal,
   expandAriaLabel,
 }: MobileWorkspaceTabBarProps<TabKey>) {
+  const symbols: Record<string, string> = {
+    inbox: 'bell',
+    chat: 'bubble.left',
+    schedules: 'clock',
+    projects: 'folder',
+    local: 'folder',
+    github: 'folder',
+    files: 'doc',
+    settings: 'gearshape',
+  };
+  const sideRailVisible = useNativeSideRail(
+    [
+      ...tabs.map((tab) => ({
+        id: `tab:${tab.key}`,
+        label: tab.label,
+        symbol: symbols[tab.key] ?? 'folder',
+        selected: tab.key === selectedTab,
+        onPress: () => onTabSelect(tab.key),
+      })),
+      ...(onNewChat
+        ? [
+            {
+              id: 'new',
+              label: newChatAriaLabel ?? '新建对话',
+              symbol: 'square.and.pencil',
+              onPress: onNewChat,
+            },
+          ]
+        : []),
+    ],
+    1
+  );
   const resolvedTheme = theme ?? (isIOSRuntimeEnvironment() ? 'ios' : 'material');
   const [minimized, setMinimized] = useState(false);
   // A page outside this tab set must never collapse into an empty, unreachable pill.
@@ -298,7 +331,7 @@ export function MobileWorkspaceTabBar<TabKey extends string = string>({
     if (!element) return undefined;
     width.set(element.getBoundingClientRect().width);
     return observeResizeOnAnimationFrame(element, ([entry]) => width.set(entry.contentRect.width));
-  }, [width]);
+  }, [width, sideRailVisible]);
 
   useLayoutEffect(() => {
     progress[reduce ? 'jump' : 'set'](collapsed ? 1 : 0);
@@ -352,6 +385,7 @@ export function MobileWorkspaceTabBar<TabKey extends string = string>({
     setMinimized(false);
   };
 
+  if (sideRailVisible) return null;
   return (
     <div {...stylex.props(styles.dock)}>
       <div ref={slot} {...stylex.props(styles.slot)}>

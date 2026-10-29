@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { acceptSessionUserTurn } from '../src/lib/session-send-admission';
+import i18next from 'i18next';
 
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -112,6 +114,7 @@ const WORKSPACE_A_KEY = buildChatLandingDraftKey('user-1', 'workspace-a');
 const WORKSPACE_B_KEY = buildChatLandingDraftKey('user-1', 'workspace-b');
 
 type Harness = {
+  attachments: import('../src/lib/session-attachment-draft').SessionAttachmentDraft[];
   imageItems: ChatLandingImageDraftItem[];
   fileItems: ChatLandingFileDraftItem[];
   sessionId: SessionId | null;
@@ -146,6 +149,7 @@ function DraftHarness({ draftKey }: { draftKey: string }) {
     ensureSessionId,
   });
   harness = {
+    attachments: [...imageDraft.attachments, ...fileDraft.attachments],
     imageItems: imageDraft.imageItems,
     fileItems: fileDraft.fileItems,
     sessionId,
@@ -380,4 +384,50 @@ describe('chat landing draft persistence', () => {
     expect(readHarness().imageItems).toEqual(workspaceAItems);
     expect(readHarness().sessionId).toBe(workspaceASessionId);
   });
+});
+
+it('retains encrypted attachment drafts and the reserved identity after storage admission fails', async () => {
+  await i18next.init({ lng: 'en', resources: {} });
+  mountLanding(WORKSPACE_A_KEY);
+  const file = textFile('private.txt');
+  act(() => {
+    readHarness().setPrompt('keep this encrypted draft');
+    readHarness().addFiles([file]);
+    readHarness().addImages([pngFile('private.png')]);
+  });
+  const bytes = (blob: Blob) =>
+    new Promise<number[]>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error);
+      reader.onload = () => resolve([...new Uint8Array(reader.result as ArrayBuffer)]);
+      reader.readAsArrayBuffer(blob);
+    });
+  const before = readHarness();
+  const sourceBytes = await Promise.all(before.attachments.map((item) => bytes(item.source!)));
+  const reserved = before.sessionId!;
+  await expect(
+    acceptSessionUserTurn(
+      { contentMode: 'e2ee', repo: { getDocMeta: async () => { throw new Error('Workspace storage unavailable'); } } } as unknown as WorkspaceRuntime,
+      reserved,
+      {} as never,
+      { kind: 'dispatch' },
+      undefined,
+      undefined,
+      before.attachments,
+      before.clearDraft
+    )
+  ).rejects.toThrow('Workspace storage unavailable');
+  unmountLanding();
+  mountLanding(WORKSPACE_A_KEY);
+  const restored = readHarness();
+  expect(restored.prompt).toBe('keep this encrypted draft');
+  expect(restored.sessionId).toBe(reserved);
+  expect(restored.fileItems.map((item) => item.name)).toEqual(['private.txt']);
+  expect(restored.imageItems.map((item) => item.name)).toEqual(['private.png']);
+  expect(restored.attachments).toHaveLength(before.attachments.length);
+  for (const [index, attachment] of restored.attachments.entries()) {
+    expect(await bytes(attachment.source!)).toEqual(sourceBytes[index]);
+  }
+  expect(restored.imageItems[0]?.previewUrl).toBe(before.imageItems[0]?.previewUrl);
+  expect(revokedUrls).toEqual([]);
 });

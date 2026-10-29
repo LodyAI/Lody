@@ -87,11 +87,20 @@ function org() {
     ] as const;
   };
   const device = (target: Keys, kind: number, membership = id(10), proofAnchor = anchor) => {
+    const machineId = new TextEncoder().encode(`machine:${Buffer.from(target.pk).toString('hex')}`);
+    const extra = kind === 1 ? [machineId] : [];
     const message = domain(
       'possess/v2',
-      ok(encodeCbor([proofAnchor.toBytes(), membership, target.pk, target.enc, kind]))
+      ok(encodeCbor([proofAnchor.toBytes(), membership, target.pk, target.enc, kind, ...extra]))
     );
-    return [4, kind, target.pk, target.enc, target.sign(message)] as const;
+    return [
+      4,
+      kind,
+      target.pk,
+      target.enc,
+      target.sign(message),
+      ...(kind === 1 ? [machineId, null] : []),
+    ] as const;
   };
   return { anchor, records, verify, append, join, device };
 }
@@ -313,7 +322,7 @@ describe('strict records and caller-pinned chain', () => {
       if (attack === 'possession-kind') {
         const d = [...p.device(phone, 0)];
         d[1] = 1;
-        p.append(owner, d);
+        p.append(owner, [...d, new TextEncoder().encode('machine'), null]);
       }
       if (attack === 'join-key') {
         const j = p.join(bob, 11);
@@ -782,14 +791,15 @@ describe('verified historical facts and current content permissions', () => {
       'unauthorized'
     );
   });
-  it('distinguishes host admission from the honest seal rotation gate', () => {
+  it('keeps active writers available while manual rotation is pending', () => {
     const o = org();
     o.append(owner, o.device(phone, 0));
     o.append(owner, [5, phone.pk]);
     const pending = ok(o.verify());
+    expect(pending.inspectState().epoch.rotationRequired).toBe(true);
     expect(permissions(pending, owner)).toEqual({
       mayWriteDocument: true,
-      maySealNewContent: false,
+      maySealNewContent: true,
     });
     o.append(owner, [7, 1, filled(21), filled(30, 72)]);
     const rotated = ok(
@@ -799,7 +809,7 @@ describe('verified historical facts and current content permissions', () => {
       mayWriteDocument: true,
       maySealNewContent: true,
     });
-    expect(permissions(pending, owner).maySealNewContent).toBe(false);
+    expect(permissions(pending, owner).maySealNewContent).toBe(true);
     expect(permissions(rotated, phone).mayWriteDocument).toBe(false);
   });
   it('uses current role/kind for permission and admission history for attribution', () => {
@@ -1116,7 +1126,7 @@ function editedSnapshot(view: Ledger.LedgerView, signer: Keys, edit: (body: Cbor
 }
 // The authorization state's fixed-width tables (memberships, devices, joins,
 // commitments, packets) as editable rows, for tampering tests.
-const STATE_ROWS = [49, 69, 20, 32, 72] as const;
+const STATE_ROWS = [49, 70, 20, 32, 72] as const;
 function stateRows(state: CborValue[]): Uint8Array[][] {
   return STATE_ROWS.map((width, field) => {
     const bytes = state[field] as Uint8Array;
@@ -1153,7 +1163,7 @@ describe('authenticated snapshot migration reproduction', () => {
     const forged = editedSnapshot(view, bob, (body) => {
       const state = body[5] as CborValue[];
       const rows = stateRows(state);
-      deviceRow(rows, owner)[68] = 0; // the Owner's only device, retired
+      deviceRow(rows, owner)[69] = 0; // the Owner's only device, retired
       setStateRows(state, rows);
     });
     expect(code(Snapshots.verifyLedgerSnapshot(forged))).toBe('unauthorized');
@@ -1255,8 +1265,8 @@ describe('authenticated snapshot migration reproduction', () => {
       code(Snapshots.verifyLedgerSnapshot({ ...data, snapshot: ok(encodeSnapshotCbor(root)) }))
     ).toBe('bad-signature');
     // Validly signed bodies of another version (1 was the pre-compact layout) are rejected.
-    expect((ok(decodeSnapshotCbor(data.proposal.bodyBytes)) as CborValue[])[0]).toBe(2);
-    for (const version of [1, 3])
+    expect((ok(decodeSnapshotCbor(data.proposal.bodyBytes)) as CborValue[])[0]).toBe(4);
+    for (const version of [1, 2, 3, 5])
       expect(
         code(
           Snapshots.verifyLedgerSnapshot(
@@ -1938,7 +1948,7 @@ describe('public admission consent and ordinary intent', () => {
       Commands.signLedgerRecord(ok(prepare(command)), signerFor(owner))
     );
     expect(record).toEqual(signed([view.head.toBytes(), owner.pk, o.device(phone, 0)], owner));
-    expect(code(prepare({ ...command, kind: 'machine' }))).toBe('bad-proof');
+    expect(code(prepare({ ...command, kind: 'machine', machineId: 'machine' }))).toBe('bad-proof');
     const wrong = await Effect.runPromise(
       Admission.prepareDeviceAdmission({
         genesis: o.anchor,
@@ -2046,7 +2056,7 @@ describe('public admission consent and ordinary intent', () => {
           membershipId: member,
         } as unknown as Admission.LedgerCommand)
       )
-    ).toBe('unknown-operation');
+    ).toBe('invalid-operation');
     const transfer = ok(
       Admission.prepareLedgerCommand(view, ownerKey, {
         _tag: 'TransferOwner',
@@ -2090,6 +2100,9 @@ describe('public admission consent and ordinary intent', () => {
           membershipId: ok(Bytes.membershipId(id(10))),
           encryptionPublicKey: ok(Bytes.encryptionPublicKey(target.enc)),
           kind,
+          ...(kind === 'machine'
+            ? { machineId: `machine:${Buffer.from(target.pk).toString('hex')}` }
+            : {}),
           signer: signerFor(target),
         })
       );
@@ -2264,9 +2277,9 @@ describe('retained verified state', () => {
       code(Ledger.restoreVerifiedState({ ...saved, bytes: saved.bytes.subarray(0, 40) }))
     ).not.toBe('accepted');
     // Current-only: a row written before version 2 (or by a newer client) is rebuilt by full replay.
-    for (const version of [1, 3]) {
+    for (const version of [1, 2, 3, 5]) {
       const stale = new Uint8Array(saved.bytes);
-      expect(stale[1]).toBe(2);
+      expect(stale[1]).toBe(4);
       stale[1] = version;
       expect(code(Ledger.restoreVerifiedState({ ...saved, bytes: stale }))).toBe('unknown-version');
     }
@@ -2342,6 +2355,13 @@ describe('frozen ledger v1 compatibility', () => {
         state.devices.map(([key, membershipId, kind]) => [key, { membershipId, kind }])
       )
     ).toEqual(expected.devices);
+    expect(
+      Object.fromEntries(
+        [...view.inspectState().devices]
+          .filter(([, device]) => device.kind === 'machine')
+          .map(([key, device]) => [key, device.machineId])
+      )
+    ).toEqual(expected.machineBindings);
   });
 
   it('stops at a genuine capability declaration as an upgrade, with its position', () => {
@@ -2448,7 +2468,7 @@ describe('compact authorization state', () => {
     // 4 memberships, 8 devices, 3 joins, epochs 0..4.
     expect((state.slice(0, 5) as Uint8Array[]).map((table) => table.length)).toEqual([
       4 * 49,
-      8 * 69,
+      8 * 70,
       3 * 20,
       5 * 32,
       4 * 72,
@@ -2569,5 +2589,194 @@ describe('compact authorization state', () => {
     expect(hex(ok(Snapshots.ledgerStateDigest(swapped)))).not.toBe(hex(stateDigest));
     // With the stored digest, restore itself detects the rewrite.
     expect(code(Ledger.restoreVerifiedState({ ...saved, bytes }))).toBe('state-digest-mismatch');
+  });
+});
+
+describe('independent member removal', () => {
+  function removable() {
+    const o = org();
+    o.append(owner, o.join(bob, 11));
+    o.append(bob, o.device(phone, 0, id(11)));
+    o.append(bob, o.device(machine, 1, id(11)));
+    o.append(bob, o.device(recovery, 2, id(11)));
+    o.append(owner, [9, [1]]);
+    return o;
+  }
+  const publicKey = (key: Keys) => ok(Bytes.signingPublicKey(key.pk));
+  const restored = (view: Ledger.LedgerView) =>
+    ok(Ledger.restoreVerifiedState(ok(Ledger.exportVerifiedState(view))));
+
+  it('removes every device without changing the epoch and keeps historical authors through restore', () => {
+    const o = removable();
+    const before = ok(o.verify());
+    const original = o.append(owner, [10, id(11)]);
+    const removed = ok(o.verify());
+    const incremental = ok(Ledger.extendLedger(before, [original], checkpoint(o.records)));
+    expect(comparable(incremental)).toEqual(comparable(removed));
+    expect(removed.inspectState().epoch).toEqual({
+      ...before.inspectState().epoch,
+      rotationRequired: true,
+    });
+    expect([...removed.inspectState().members.keys()]).toEqual([keyId(id(10))]);
+    expect([...removed.inspectState().devices.keys()]).toEqual([keyId(owner.pk)]);
+    for (const view of [removed, restored(removed)]) {
+      for (const key of [bob, phone, machine, recovery]) {
+        expect(
+          ok(Snapshots.historicalContentIdentity(view, publicKey(key))).memberInstance.toBytes()
+        ).toEqual(id(11));
+        expect(ok(Ledger.contentPermissions(view, publicKey(key))).mayWriteDocument).toBe(false);
+      }
+      expect(ok(Ledger.contentPermissions(view, publicKey(owner))).maySealNewContent).toBe(true);
+      expect(view.inspectState().capabilities).toEqual([1]);
+    }
+    expect(comparable(before)).not.toEqual(comparable(removed));
+    // Rotation remains a separate management action and clears only the reminder.
+    o.append(owner, [7, 1, filled(21), filled(31, 72)]);
+    expect(ok(o.verify()).inspectState().epoch).toMatchObject({
+      number: 1,
+      rotationRequired: false,
+    });
+  });
+
+  it.each(['owner', 'admin'] as const)(
+    '%s removes Member/Guest while only Owner removes Admin',
+    (role) => {
+      for (const targetRole of [1, 2, 3]) {
+        const o = org();
+        o.append(owner, o.join(bob, 11));
+        o.append(owner, o.join(carol, 12));
+        if (role === 'admin') o.append(owner, [3, id(11), 1]);
+        if (targetRole !== 2) o.append(owner, [3, id(12), targetRole]);
+        o.append(owner, [9, [1]]);
+        o.append(role === 'owner' ? owner : bob, [10, id(12)]);
+        expect(code(o.verify())).toBe(
+          role === 'admin' && targetRole === 1 ? 'unauthorized' : 'accepted'
+        );
+      }
+    }
+  );
+
+  it('requires a prior capability, rejects Owner/missing targets and non-management devices', () => {
+    const undeclared = org();
+    undeclared.append(owner, undeclared.join(bob, 11));
+    undeclared.append(owner, [10, id(11)]);
+    expect(code(undeclared.verify())).toBe('invalid-operation');
+    for (const target of [id(10), id(99)]) {
+      const o = removable();
+      o.append(owner, [10, target]);
+      expect(code(o.verify())).toBe('unauthorized');
+    }
+    for (const signer of [bob, phone, machine, recovery]) {
+      const o = removable();
+      o.append(owner, o.join(carol, 12));
+      o.append(signer, [10, id(12)]);
+      expect(code(o.verify())).toBe('unauthorized');
+    }
+  });
+
+  it('preserves capability gating in retained state and endorsed snapshots', () => {
+    const o = removable();
+    const view = ok(o.verify());
+    const fromSnapshot = ok(Snapshots.verifyLedgerSnapshot(endorsed(view)));
+    const record = o.append(owner, [10, id(11)]);
+    for (const base of [view, restored(view), fromSnapshot]) {
+      const next = ok(Ledger.extendLedger(base, [record], checkpoint(o.records)));
+      expect(comparable(next)).toEqual(comparable(ok(o.verify())));
+    }
+  });
+
+  it('requires a new member instance, new join and new keys when rejoining', () => {
+    const o = removable();
+    o.append(owner, [10, id(11)]);
+    const removed = ok(o.verify());
+    const attempt = (op: readonly CborValue[]) => {
+      const record = signed([removed.head.toBytes(), owner.pk, op], owner);
+      return Ledger.extendLedger(removed, [record], {
+        head: Ledger.hashRecordBytes(record),
+        length: removed.length + 1,
+      });
+    };
+    expect(code(attempt(o.join(bob, 11)))).toBe('replay');
+    expect(code(attempt(o.join(bob, 12)))).toBe('replay');
+    const replacement = keys(50);
+    const freshJoin = o.join(replacement, 12);
+    // Account identity may return; its member instance and device keys cannot.
+    const request = freshJoin[2];
+    const body = [request[0], filled(11), request[2], request[3], null] as const;
+    const rejoin = [
+      1,
+      id(12),
+      [...body, replacement.sign(domain('join/v1', ok(encodeCbor([o.anchor.toBytes(), ...body]))))],
+    ] as const;
+    const next = ok(attempt(rejoin));
+    expect(
+      next
+        .inspectState()
+        .members.get(keyId(id(12)))
+        ?.userId.toBytes()
+    ).toEqual(filled(11));
+    expect(next.inspectState().devices.has(keyId(bob.pk))).toBe(false);
+    expect(next.inspectState().devices.has(keyId(replacement.pk))).toBe(true);
+  });
+});
+
+describe('independent removal command and state integrity', () => {
+  it('prepares and signs capability and removal commands against their real parent', async () => {
+    const o = org();
+    o.append(owner, o.join(bob, 11));
+    let view = ok(o.verify());
+    for (const command of [
+      { _tag: 'DeclareCapabilities' as const, capabilities: [1] },
+      { _tag: 'RemoveMember' as const, membershipId: ok(Bytes.membershipId(id(11))) },
+    ]) {
+      const proposal = ok(
+        Admission.prepareLedgerCommand(view, ok(Bytes.signingPublicKey(owner.pk)), command)
+      );
+      const original = await Effect.runPromise(
+        Commands.signLedgerRecord(proposal, {
+          publicKey: ok(Bytes.signingPublicKey(owner.pk)),
+          sign: (message: Uint8Array) => Effect.succeed(ok(Bytes.signature(owner.sign(message)))),
+        })
+      );
+      o.records.push(new Uint8Array(original));
+      view = ok(Ledger.extendLedger(view, [original], checkpoint(o.records)));
+    }
+    expect(view.inspectState().members.has(keyId(id(11)))).toBe(false);
+    expect(view.inspectState().epoch).toMatchObject({ number: 0, rotationRequired: true });
+    expect(comparable(view)).toEqual(comparable(ok(o.verify())));
+  });
+
+  it('rejects malformed removal fields, retired tag2 and unsupported or noncanonical capability state', () => {
+    for (const operation of [[10], [10, id(11), 0], [10, filled(11)], [2, id(11)]]) {
+      const o = org();
+      o.append(owner, operation);
+      expect(Result.isFailure(o.verify())).toBe(true);
+    }
+    const o = org();
+    o.append(owner, [9, [1]]);
+    const view = ok(o.verify());
+    for (const [caps, expected] of [
+      [[2], 'upgrade-required'],
+      [[1, 1], 'canonical'],
+      [[0], 'canonical'],
+      [[1, 0], 'canonical'],
+    ] as const) {
+      const saved = ok(Ledger.exportVerifiedState(view));
+      const root = ok(decodeRetainedCbor(saved.bytes)) as CborValue[];
+      (root[4] as CborValue[])[7] = [...caps];
+      expect(
+        code(
+          Ledger.restoreVerifiedState({
+            ...saved,
+            stateDigest: undefined,
+            bytes: ok(encodeRetainedCbor(root)),
+          })
+        )
+      ).toBe(expected);
+      const snapshot = editedSnapshot(view, owner, (body) => {
+        (body[5] as CborValue[])[7] = [...caps];
+      });
+      expect(code(Snapshots.verifyLedgerSnapshot(snapshot))).toBe(expected);
+    }
   });
 });

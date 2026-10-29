@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createLoroStreamsTokenProviderLegacy, getSessionRoomId, type MachineId, type SessionId, type WorkspaceId } from '@lody/shared';
+import {
+  createLoroStreamsTokenProviderLegacy,
+  getSessionRoomId,
+  type MachineId,
+  type SessionId,
+  type WorkspaceId,
+} from '@lody/shared';
 import type { LoroRepo, TransportAdapter, TransportSubscription } from 'loro-repo';
 
 const mocks = vi.hoisted(() => {
@@ -240,13 +246,26 @@ vi.mock('loro-repo/transport/streams', () => ({
   },
 }));
 
-vi.mock('@loro-dev/streams-crdt/loro', () => ({
-  StreamsCrdt: class StreamsCrdt {
-    createStream = vi.fn(async () => ({ ok: true }));
-    close = vi.fn(async () => {});
-  },
-  createLoroDocAdapter: vi.fn(() => ({})),
-}));
+vi.mock('@loro-dev/streams-crdt/loro', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@loro-dev/streams-crdt/loro')>();
+  return {
+    ...actual,
+    StreamsCrdt: class StreamsCrdt {
+      createStream = vi.fn(async () => ({ ok: true }));
+      close = vi.fn(async () => {});
+    },
+    // Keep the suggestion owner's real lifecycle and store, but never open a
+    // network stream in this Meta recovery fixture.
+    EphemeralStreamCrdt: class EphemeralStreamCrdt {
+      async join(options: Parameters<InstanceType<typeof actual.EphemeralStreamCrdt>['join']>[0]) {
+        options?.onStatusChange?.('joined');
+        return { ok: true, value: { unsubscribe() {} } };
+      }
+      async close() {}
+    },
+    createLoroDocAdapter: vi.fn(() => ({})),
+  };
+});
 
 vi.mock('../src/providers/resilient-remote-cursor-store', () => ({
   createResilientRemoteCursorStore: vi.fn(() => ({
@@ -501,7 +520,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     });
     await expect(
       createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+        content: { mode: 'plaintext' },
         workspaceSlug: 'workspace',
         workspaceId: 'workspace-1' as WorkspaceId,
         apiBaseUrl: 'https://api.example.test',
@@ -539,7 +558,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     );
     const controller = new AbortController();
     const creating = createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -564,7 +583,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       return token.promise;
     });
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -606,7 +625,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
         return createMetaSub(Promise.resolve());
       });
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -630,7 +649,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       return joined.promise;
     });
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -666,7 +685,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     });
     const controller = new AbortController();
     const creating = createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -702,7 +721,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     const repo = await open();
     mocks.repoOverride = repo;
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -740,7 +759,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     mocks.joinMetaRoom.mockRejectedValueOnce(new Error('bootstrap meta timed out'));
 
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -776,7 +795,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       new Error('The database connection is closing.')
     );
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -841,7 +860,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     const blockedDelete = Promise.withResolvers<void>();
     mocks.metaCheckpointDelete.mockImplementationOnce(async () => await blockedDelete.promise);
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -874,7 +893,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       const blockedDelete = Promise.withResolvers<void>();
       mocks.metaCheckpointDelete.mockImplementationOnce(async () => await blockedDelete.promise);
       const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+        content: { mode: 'plaintext' },
         workspaceSlug: 'workspace',
         workspaceId: 'workspace-1' as WorkspaceId,
         apiBaseUrl: 'https://api.example.test',
@@ -914,7 +933,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       const blockedAdd = Promise.withResolvers<void>();
       mocks.addTransport.mockImplementationOnce(async () => await blockedAdd.promise);
       const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+        content: { mode: 'plaintext' },
         workspaceSlug: 'workspace',
         workspaceId: 'workspace-1' as WorkspaceId,
         apiBaseUrl: 'https://api.example.test',
@@ -946,7 +965,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     const blockedAdd = Promise.withResolvers<void>();
     mocks.addTransport.mockImplementationOnce(async () => await blockedAdd.promise);
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -980,7 +999,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       .mockImplementationOnce(async () => await firstAdd.promise)
       .mockImplementationOnce(async () => await secondAdd.promise);
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1022,7 +1041,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
         mocks.addTransport.mockImplementationOnce(async () => await blocked.promise);
       }
       const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+        content: { mode: 'plaintext' },
         workspaceSlug: 'workspace',
         workspaceId: 'workspace-1' as WorkspaceId,
         apiBaseUrl: 'https://api.example.test',
@@ -1062,7 +1081,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       new Error('The database connection is closing.')
     );
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1122,7 +1141,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       new Error('The database connection is closing.')
     );
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1162,7 +1181,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     enableElectronLocalDataPlane();
     markSuspectMetaCheckpoint();
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1196,7 +1215,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     mocks.joinMetaRoom.mockRejectedValue(new Error('transport connection failed'));
 
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1247,7 +1266,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     mocks.joinMetaRoom.mockReturnValue(pendingMetaJoin);
 
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1286,7 +1305,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       .mockResolvedValueOnce(createMetaSub(recoverySync));
 
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1325,7 +1344,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
         { docId: getSessionRoomId(id), meta: { id }, exists: true },
       ]);
       const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+        content: { mode: 'plaintext' },
         workspaceSlug: 'workspace',
         workspaceId: 'workspace-1' as WorkspaceId,
         apiBaseUrl: 'https://api.example.test',
@@ -1357,7 +1376,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
   it('rejects a snapshot if its runtime is disposed while the query is pending', async () => {
     mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1378,7 +1397,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
 
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1426,7 +1445,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     });
 
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1466,7 +1485,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     });
 
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1492,7 +1511,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     });
 
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1518,7 +1537,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     enableElectronLocalDataPlane();
 
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1539,7 +1558,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     enableElectronLocalDataPlane();
 
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1587,7 +1606,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     );
 
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1611,7 +1630,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     Object.assign(navigator, { onLine: false });
 
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -1716,7 +1735,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       });
       body.commit();
       const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+        content: { mode: 'plaintext' },
         workspaceSlug: 'workspace',
         workspaceId: 'workspace-1' as WorkspaceId,
         apiBaseUrl: 'https://api.example.test',
@@ -1848,7 +1867,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       mocks.repoOverride = repo;
       enableElectronLocalDataPlane();
       const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+        content: { mode: 'plaintext' },
         workspaceSlug: 'workspace',
         workspaceId: 'workspace-1' as WorkspaceId,
         apiBaseUrl: 'https://api.example.test',
@@ -1919,7 +1938,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     Object.assign(navigator, { onLine: true });
 
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -2009,7 +2028,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     await repo.upsertDocMeta(roomId, { id: sessionId, machineId: 'local-machine' });
 
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -2083,7 +2102,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     await repo.upsertDocMeta(roomId, { id: sessionId, machineId: 'local-machine' });
 
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -2159,7 +2178,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     });
 
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -2241,7 +2260,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     await repo.upsertDocMeta(roomId, { id: sessionId, machineId: 'local-machine' });
 
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -2269,7 +2288,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       .mockResolvedValueOnce(createMetaSub(Promise.resolve()));
 
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -2299,7 +2318,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
 
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -2331,7 +2350,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     mocks.presenceShouldRestartOnExternalWake.mockReturnValue(true);
 
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -2365,7 +2384,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
   it('gives eager-sync one held auth callback per provider and forwards its context', async () => {
     mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -2397,7 +2416,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
   it('rebinds the eager-sync auth callback when the token provider is replaced', async () => {
     mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
     const runtime = await createWorkspaceRuntime({
-    content: { mode: 'plaintext' },
+      content: { mode: 'plaintext' },
       workspaceSlug: 'workspace',
       workspaceId: 'workspace-1' as WorkspaceId,
       apiBaseUrl: 'https://api.example.test',
@@ -2420,25 +2439,132 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
 
     await runtime.dispose();
   });
-it('opens protected local content without a token and refuses unencrypted side channels', async () => {
-  const provider = () => createLoroStreamsTokenProviderLegacy({ endpoint: 'https://encrypted.example.test/token', workspaceId: 'workspace-1', authToken: () => 'synthetic' });
-  const content = { mode: 'protected' as const, namespace: 'synthetic-genesis', resolve: () => { throw new Error('unused until protected transport attaches'); }, snapshotUpload: { canUpload: () => false } };
-  const runtime = await createWorkspaceRuntime({ content, e2ee: { bucketId: () => 'synthetic-encrypted-content', createTokenProvider: provider }, workspaceSlug: 'workspace', workspaceId: 'workspace-1' as WorkspaceId, apiBaseUrl: 'https://api.example.test', syncMode: 'dual' });
-  try {
-    expect(runtime.contentMode).toBe('e2ee');
-    await expect(runtime.ensureDocStream('encrypted-session')).resolves.toBeUndefined();
-    await expect(runtime.requestFilePreview('machine-1' as MachineId, {} as never)).resolves.toMatchObject({status:'error',message:'e2ee_rpc_unavailable'});
-    await expect(runtime.acquireScheduleStore('schedule-1')).rejects.toThrow('e2ee_feature_unavailable');
-    expect(cloudAttachCalls()).toEqual([]);
-    expect(mocks.authInvocations).toEqual([]);
-    mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
-    await runtime.setAuthToken('synthetic');
-    const adapter = mocks.streamsTransportConstructors.mock.calls.at(-1)?.[0] as { bucketId: string; payloadProtection: unknown };
-    expect(adapter.bucketId).toBe('synthetic-encrypted-content');
-    expect(adapter.payloadProtection).toBeDefined();
-    expect(mocks.presenceStart.mock.calls).toEqual([]);
-    expect(mocks.machineRpcConstructors.mock.calls).toEqual([]);
-  } finally { await runtime.dispose(); }
-});
+  it('opens the encrypted file index and preview comments through the production runtime repo', async () => {
+    vi.useRealTimers();
+    const { indexedDB, IDBKeyRange } = await import('fake-indexeddb');
+    vi.stubGlobal('indexedDB', indexedDB);
+    vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+    const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
+    const { IndexedDBStorageAdaptor } = await vi.importActual<
+      typeof import('loro-repo/storage/indexeddb')
+    >('loro-repo/storage/indexeddb');
+    const repo = await RealRepo.create({
+      storageAdapter: new IndexedDBStorageAdaptor({ dbName: 'encrypted-file-surfaces' }),
+      metaDebounceCommitMs: 0,
+    });
+    mocks.repoOverride = repo;
+    const { writeCodeCollabFileIndexToFlock } = await import('@lody/shared');
+    const flockId = 'workspace-1:fi:synthetic';
+    const handle = await repo.openFlockDoc(flockId);
+    writeCodeCollabFileIndexToFlock(handle.flock, { 'private.ts': { kind: 'text' } }, 1000);
+    const runtime = await createWorkspaceRuntime({
+      content: {
+        mode: 'protected',
+        namespace: 'synthetic',
+        resolve: () => {
+          throw new Error('offline');
+        },
+        snapshotUpload: { canUpload: () => false },
+      },
+      e2ee: {
+        bucketId: () => 'encrypted',
+        createTokenProvider: () => {
+          throw new Error('offline');
+        },
+      },
+      accountId: 'synthetic-account',
+      e2eeLocalIdentity: {
+        accountId: 'synthetic-account',
+        workspaceId: 'workspace-1',
+        genesisHash: '11'.repeat(32),
+        signingPublicKey: '22'.repeat(32),
+      },
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceSlug: 'workspace',
+      apiBaseUrl: 'https://api.example.test',
+    });
+    try {
+      const lease = await runtime.codeCollabFileIndexCache.acquire(flockId);
+      expect(lease.resource.getSnapshot()).toMatchObject({
+        status: 'ready',
+        snapshot: { fileIndex: { 'private.ts': { kind: 'text' } } },
+      });
+      await lease.release();
+      const comments = await runtime.acquirePreviewVisualCommentStore('synthetic' as SessionId);
+      comments.setState((draft) => {
+        draft.meta.sessionId = 'synthetic';
+      });
+      expect(comments.getState().meta.sessionId).toBe('synthetic');
+      runtime.releasePreviewVisualCommentStoreRef('synthetic' as SessionId);
+    } finally {
+      await runtime.dispose();
+    }
+  });
 
+  it('opens protected schedules offline through the production store cache and retains encrypted transport assembly', async () => {
+    const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
+    const repo = await RealRepo.create({});
+    mocks.repoOverride = repo;
+    vi.spyOn(repo, 'addTransport').mockImplementation(mocks.addTransport as never);
+    vi.spyOn(repo, 'joinMetaRoom').mockImplementation(mocks.joinMetaRoom as never);
+    const provider = () =>
+      createLoroStreamsTokenProviderLegacy({
+        endpoint: 'https://encrypted.example.test/token',
+        workspaceId: 'workspace-1',
+        authToken: () => 'synthetic',
+      });
+    const content = {
+      mode: 'protected' as const,
+      namespace: 'synthetic-genesis',
+      resolve: () => {
+        throw new Error('unused until protected transport attaches');
+      },
+      snapshotUpload: { canUpload: () => false },
+    };
+    const runtime = await createWorkspaceRuntime({
+      content,
+      e2ee: { bucketId: () => 'synthetic-encrypted-content', createTokenProvider: provider },
+      accountId: 'synthetic-account',
+      e2eeLocalIdentity: {
+        accountId: 'synthetic-account',
+        workspaceId: 'workspace-1',
+        genesisHash: '11'.repeat(32),
+        signingPublicKey: '22'.repeat(32),
+      },
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      syncMode: 'dual',
+    });
+    try {
+      expect(runtime.contentMode).toBe('e2ee');
+      await expect(runtime.ensureDocStream('encrypted-session')).resolves.toBeUndefined();
+      await expect(
+        runtime.requestFilePreview('machine-1' as MachineId, {} as never)
+      ).resolves.toMatchObject({
+        status: 'error',
+        message: 'e2ee_rpc_unavailable',
+      });
+      const schedule = await runtime.acquireScheduleStore('schedule-1');
+      expect(schedule.roomId).toBe('schedule-schedule-1');
+      expect(await repo.openPersistedDoc(schedule.roomId)).toBeDefined();
+      runtime.releaseScheduleStoreRef('schedule-1');
+      expect(cloudAttachCalls()).toEqual([]);
+      expect(mocks.authInvocations).toEqual([]);
+      mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
+      await runtime.setAuthToken('synthetic');
+      const adapter = mocks.streamsTransportConstructors.mock.calls.at(-1)?.[0] as {
+        bucketId: string;
+        payloadProtection: unknown;
+      };
+      expect(adapter.bucketId).toBe('synthetic-encrypted-content');
+      expect(adapter.payloadProtection).toBeDefined();
+      expect(mocks.presenceStart.mock.calls.at(-1)?.[0]).toMatchObject({
+        bucketId: 'synthetic-encrypted-content',
+      });
+      expect(mocks.machineRpcConstructors.mock.calls).toEqual([]);
+    } finally {
+      await runtime.dispose();
+    }
+  });
 });

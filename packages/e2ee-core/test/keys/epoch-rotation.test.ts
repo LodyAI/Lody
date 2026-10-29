@@ -32,6 +32,7 @@ import {
   ownEpochStagedGroup,
   type EpochStagedGroup,
 } from '../../src/internal/keys/staging';
+import { checkEpochStageRequest } from '../../src/host/staging';
 import { makeSqliteEpochRotation, type EpochStagingPort } from './harness';
 import {
   commitEpochKey,
@@ -282,6 +283,75 @@ const failureCode = (exit: Exit.Exit<unknown, unknown>, code: string) => {
   if (Exit.isFailure(exit)) expect(JSON.stringify(exit.cause)).toContain(code);
 };
 describe('durable local epoch rotation', () => {
+  it('checks real staging signatures and contexts without granting current-epoch permission', async () => {
+    const f = fixture();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { rotation } = yield* f.open();
+          const result = yield* rotation.publish();
+          const group = (yield* f.staging.readGroup(ok(getCommittedEpochStagingKey(f.view(), 1))))!;
+          const check = (
+            input: EpochStagedGroup,
+            principal = f.owner.publicKey,
+            genesis = f.context.genesis
+          ) => checkEpochStageRequest({ genesis, principal, group: input });
+          expect(Result.isSuccess(check(group))).toBe(true);
+          expect(Result.isFailure(check(group, f.phone.publicKey))).toBe(true);
+          expect(
+            Result.isFailure(
+              check(group, f.owner.publicKey, ok(Bytes.genesisHash(new Uint8Array(32).fill(99))))
+            )
+          ).toBe(true);
+          const record = new Uint8Array(group.record);
+          record[record.length - 1] = record[record.length - 1]! ^ 1;
+          expect(
+            Result.isFailure(
+              check({
+                ...group,
+                record,
+                recordHash: Buffer.from(hashRecordBytes(record).toBytes()).toString('hex'),
+              })
+            )
+          ).toBe(true);
+          expect(Result.isFailure(check({ ...group, recordHash: '00'.repeat(32) }))).toBe(true);
+          const frame = new Uint8Array(group.envelopes[0]!.frame);
+          frame[frame.length - 1] = frame[frame.length - 1]! ^ 1;
+          expect(
+            Result.isFailure(
+              check({
+                ...group,
+                envelopes: [{ ...group.envelopes[0]!, frame }, ...group.envelopes.slice(1)],
+              })
+            )
+          ).toBe(true);
+          expect(
+            Result.isFailure(
+              check({
+                ...group,
+                envelopes: [
+                  { ...group.envelopes[0]!, recipient: '00'.repeat(32) },
+                  ...group.envelopes.slice(1),
+                ],
+              })
+            )
+          ).toBe(true);
+          expect(
+            Result.isFailure(
+              check({ ...group, envelopes: [...group.envelopes, group.envelopes[0]!] })
+            )
+          ).toBe(true);
+          // A genuine historical outer signature remains valid after the current
+          // slot advances. The helper cannot replace device/epoch authorization.
+          yield* rotation.acknowledge(result!);
+          f.requestRotation();
+          expect((yield* rotation.publish())?.epoch).toBe(2);
+          expect(f.view().inspectState().epoch.number).toBe(2);
+          expect(Result.isSuccess(check(group))).toBe(true);
+        })
+      )
+    );
+  });
   it('refuses remote CAS until a complete staged group has exact readback and retries only persisted originals', async () => {
     const f = fixture();
     await Effect.runPromise(
@@ -598,6 +668,7 @@ describe('durable local epoch rotation', () => {
                 membershipId: target,
                 encryptionPublicKey: device.encryptionPublicKey,
                 kind: kind as 'machine' | 'recovery',
+                ...(kind === 'machine' ? { machineId: 'removed-member-machine' } : {}),
                 signer: device.signer,
               });
             f.append(
@@ -1008,6 +1079,86 @@ describe('durable local epoch rotation', () => {
             disposeEpochKey(key1);
             disposeEpochKey(key2);
           }
+        })
+      )
+    );
+  });
+  it.each(['missing', 'damaged'] as const)(
+    'releases a verified installed publication after candidate %s without re-signing',
+    async (damage) => {
+      const f = fixture();
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const { rotation, journal } = yield* f.open();
+            const done = yield* rotation.publish();
+            const db = new Database(f.files.candidate);
+            try {
+              if (damage === 'missing') db.exec('DELETE FROM epoch_rotation_candidates');
+              else db.exec("UPDATE epoch_rotation_candidates SET blob=x'00'");
+            } finally {
+              db.close();
+            }
+            const recovered = yield* rotation.resume();
+            expect(recovered).toEqual(done);
+            yield* rotation.acknowledge(recovered!);
+            expect((yield* journal.load(f.context.genesis)).record).toBeNull();
+            expect(f.signed()).toBe(1);
+            f.requestRotation();
+            expect((yield* rotation.publish()).epoch).toBe(2);
+            expect(f.signed()).toBe(2);
+          })
+        )
+      );
+    }
+  );
+  it('does not complete an unrelated removal intent from a missing candidate submission', async () => {
+    const f = fixture();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { rotation } = yield* f.open();
+          const done = yield* rotation.publish();
+          const db = new Database(f.files.candidate);
+          try {
+            db.exec('DELETE FROM epoch_rotation_candidates');
+          } finally {
+            db.close();
+          }
+          failureCode(
+            yield* Effect.exit(rotation.publishRemoving(f.view().inspectState().owner)),
+            'busy'
+          );
+          expect(yield* rotation.resume()).toEqual(done);
+          expect(f.signed()).toBe(1);
+        })
+      )
+    );
+  });
+  it('never appends an unconfirmed publication after its candidate disappears, and releases it after a genuine conflict', async () => {
+    const f = fixture();
+    f.mode('unavailable');
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { rotation } = yield* f.open();
+          failureCode(yield* Effect.exit(rotation.publish()), 'unconfirmed');
+          const db = new Database(f.files.candidate);
+          try {
+            db.exec('DELETE FROM epoch_rotation_candidates');
+          } finally {
+            db.close();
+          }
+          const length = f.records().length;
+          f.mode('ok');
+          failureCode(yield* Effect.exit(rotation.resume()), 'candidate-missing');
+          expect(f.records()).toHaveLength(length);
+          f.requestRotation();
+          const conflict = yield* rotation.resume();
+          expect(conflict?.outcome).toBe('Conflict');
+          yield* rotation.acknowledge(conflict!);
+          expect((yield* rotation.publish()).outcome).toBe('Committed');
+          expect(f.signed()).toBe(2);
         })
       )
     );

@@ -1,3 +1,4 @@
+import { E2eeIdentityRecovery } from './pages/e2ee-identity-recovery';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
@@ -22,7 +23,7 @@ const styles = stylex.create({
   message: { margin: 0 },
 });
 
-/** Approval stays explicit; an admitted machine can retry key delivery without reapproval. */
+/** Each new local pairing session requires consent, including an already admitted machine. */
 export function E2eeLocalAgentApproval({
   workspaceId,
   runtime,
@@ -30,7 +31,10 @@ export function E2eeLocalAgentApproval({
 }: {
   workspaceId: string;
   runtime:
-    | Pick<E2eeWorkspaceRuntime, 'prepareLocalAgent' | 'admitLocalAgent' | 'status'>
+    | Pick<
+        E2eeWorkspaceRuntime,
+        'prepareLocalAgent' | 'admitLocalAgent' | 'status' | 'resetLocalAgent' | 'resetIdentity'
+      >
     | undefined;
   enabled: boolean;
 }) {
@@ -38,6 +42,8 @@ export function E2eeLocalAgentApproval({
   const [phase, setPhase] = useState<
     'idle' | 'preparing' | 'confirm' | 'admitting' | 'waiting' | 'error' | 'ready'
   >('idle');
+  const [recoveryError, setRecoveryError] = useState('');
+  const [recoveryMachine, setRecoveryMachine] = useState(true);
   const [admitted, setAdmitted] = useState(false);
   const [pairing, setPairing] = useState<Pairing | null>(null);
   const approved = useRef(false);
@@ -50,8 +56,12 @@ export function E2eeLocalAgentApproval({
         (status) => {
           if (current) setAvailable(status.hasDeviceCredential === true);
         },
-        () => {
-          if (current) setPhase('error');
+        (error) => {
+          if (current) {
+            setRecoveryMachine(false);
+            setRecoveryError(error instanceof Error ? error.message : '');
+            setPhase('error');
+          }
         }
       );
     return () => {
@@ -87,6 +97,10 @@ export function E2eeLocalAgentApproval({
         setPhase(result.ready ? 'ready' : 'waiting');
       }
     } catch (error) {
+      if (active.current && error instanceof Error) {
+        setRecoveryError(error.message);
+        setRecoveryMachine(/\be2ee_machine_/.test(error.message));
+      }
       if (active.current)
         setPhase(
           error instanceof Error && error.message.includes('e2ee_local_agent_pending')
@@ -107,16 +121,17 @@ export function E2eeLocalAgentApproval({
       if (!active.current) return;
       setPairing(material);
       setAdmitted(material.admitted);
-      if (
-        material.admitted ||
-        (approved.current && pairing?.pairingSessionId === material.pairingSessionId)
-      )
+      if (approved.current && pairing?.pairingSessionId === material.pairingSessionId)
         await admit(material);
       else {
         approved.current = false;
         setPhase('confirm');
       }
     } catch (error) {
+      if (active.current && error instanceof Error) {
+        setRecoveryError(error.message);
+        setRecoveryMachine(/\be2ee_machine_/.test(error.message));
+      }
       if (active.current)
         setPhase(
           error instanceof Error && error.message.includes('e2ee_local_agent_pending')
@@ -153,6 +168,20 @@ export function E2eeLocalAgentApproval({
           )}
         </Button>
       </section>
+      {phase === 'error' && (
+        <E2eeIdentityRecovery
+          error={recoveryError}
+          runtime={runtime}
+          workspaceId={workspaceId}
+          machine={recoveryMachine}
+          onReset={() => {
+            approved.current = false;
+            setPairing(null);
+            setRecoveryError('');
+            setPhase('idle');
+          }}
+        />
+      )}
       <AlertDialog.Root
         open={phase === 'confirm'}
         onOpenChange={(open) => {

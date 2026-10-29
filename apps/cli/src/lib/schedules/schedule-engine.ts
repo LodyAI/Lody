@@ -1,6 +1,7 @@
 import {
   scheduleDefinitionFingerprint,
   type ScheduleDocument,
+  type ScheduleAuthorizationRequest,
   type ScheduleRegistryRow,
   type ScheduleRuntimeRow,
 } from '@lody/shared';
@@ -25,6 +26,8 @@ export type ScheduleEnginePorts<Prepared> = {
   now: () => number;
   disabled: () => boolean;
   ready: () => boolean;
+  encrypted?: boolean;
+  authorize?: (request: ScheduleAuthorizationRequest) => Promise<boolean>;
   list: () => Promise<ScheduleRegistryRow[]>;
   read: (scheduleId: string) => Promise<ScheduleDocument | null>;
   validateTarget: (run: ScheduleRun<Prepared>) => Promise<void>;
@@ -54,7 +57,10 @@ export class ScheduleEngine<Prepared> {
 
   restoreOccupancy(): void {
     for (const run of this.ports.store.unfinished(this.ports.workspaceId)) {
-      if (run.state === 'claimed' || run.state === 'session_prepared' || run.state === 'dispatched')
+      if (
+        !run.message &&
+        (run.state === 'claimed' || run.state === 'session_prepared' || run.state === 'dispatched')
+      )
         this.ports.slots.restore(run.agentConfigId, run.runKey);
     }
   }
@@ -95,7 +101,7 @@ export class ScheduleEngine<Prepared> {
         run.state !== 'dispatched' &&
         (await p.isDispatched(run.prepared))
       ) {
-        p.store.transition(run.runKey, [run.state], { state: 'dispatched' });
+        p.store.transition(run.runKey, [run.state], { state: 'dispatched', dispatchedAt: p.now() });
         p.onEvent?.({ type: 'recovered', scheduleId: run.scheduleId, runKey: run.runKey });
       }
       const current = p.store.get(run.runKey)!;
@@ -122,6 +128,10 @@ export class ScheduleEngine<Prepared> {
     }
     for (const row of rows) {
       if (!this.owned(row) || !row.enabled) continue;
+      if (row.scheduledMessage && p.store.messageDispatch(p.workspaceId, row.scheduleId)) {
+        await this.project(row, { nextScheduledAt: undefined });
+        continue;
+      }
       try {
         const last = p.store.history(p.workspaceId, row.scheduleId, 1)[0];
         if (last?.activationId === row.activationId && last.state === 'failed')
@@ -158,6 +168,10 @@ export class ScheduleEngine<Prepared> {
     }
     for (const run of p.store.unfinished(p.workspaceId)) {
       if (run.state === 'dispatched') continue;
+      if (run.message && p.store.messageDispatch(p.workspaceId, run.scheduleId)) {
+        this.skip(run, 'MESSAGE_ALREADY_SENT');
+        continue;
+      }
       // Never hold the last known enabled value across awaits in the create
       // path. Re-read the local authoritative gate at each handoff attempt.
       const row = (await p.list()).find((entry) => entry.scheduleId === run.scheduleId);
@@ -191,12 +205,18 @@ export class ScheduleEngine<Prepared> {
             !other.manual &&
             other.state !== 'pending'
         );
-      if (!run.manual && (others || !p.slots.reserve(run.agentConfigId, run.runKey))) {
+      // Full messages use the destination chat's busy gate. Agent-wide slots
+      // belong to generic tasks and must not serialize unrelated conversations.
+      if (
+        !run.manual &&
+        (others || (!run.message && !p.slots.reserve(run.agentConfigId, run.runKey)))
+      ) {
         await this.project(row, { queueState: 'waiting_for_agent' });
         continue;
       }
-      if (run.manual) p.slots.restore(run.agentConfigId, run.runKey);
+      if (run.manual && !run.message) p.slots.restore(run.agentConfigId, run.runKey);
       try {
+        await this.authorize(run);
         let current = p.store.transition(run.runKey, [run.state], {
           state: 'claimed',
           attempts: run.attempts + 1,
@@ -247,8 +267,12 @@ export class ScheduleEngine<Prepared> {
           this.skip(p.store.get(run.runKey)!, 'ACTIVATION_REVOKED');
           continue;
         }
+        await this.authorize(run);
         await p.dispatch(current.prepared!);
-        p.store.transition(run.runKey, ['session_prepared'], { state: 'dispatched' });
+        p.store.transition(run.runKey, ['session_prepared'], {
+          state: 'dispatched',
+          dispatchedAt: p.now(),
+        });
         p.onEvent?.({ type: 'dispatched', scheduleId: run.scheduleId, runKey: run.runKey });
         await this.project(row, {
           lastDispatch: {
@@ -263,7 +287,10 @@ export class ScheduleEngine<Prepared> {
         const current = p.store.get(run.runKey)!;
         if (current.prepared !== undefined && (await p.isDispatched(current.prepared))) {
           if (current.state !== 'dispatched')
-            p.store.transition(run.runKey, [current.state], { state: 'dispatched' });
+            p.store.transition(run.runKey, [current.state], {
+              state: 'dispatched',
+              dispatchedAt: p.now(),
+            });
         } else {
           const code =
             error instanceof ScheduleConfigurationError ? error.code : 'DISPATCH_UNAVAILABLE';
@@ -289,6 +316,21 @@ export class ScheduleEngine<Prepared> {
         p.onError(error);
       }
     }
+    for (const row of await p.list())
+      if (this.owned(row) && row.scheduledMessage) await this.project(row, {});
+  }
+
+  private async authorize(run: ScheduleRun<Prepared>): Promise<void> {
+    if (!this.ports.encrypted) return;
+    if (
+      !this.ports.authorize ||
+      !(await this.ports.authorize({
+        scheduleId: run.scheduleId,
+        definitionFingerprint: run.definitionFingerprint,
+        ...(run.manual ? { manualRunKey: run.runKey } : {}),
+      }))
+    )
+      throw new ScheduleConfigurationError('E2EE_SCHEDULE_NOT_AUTHORIZED');
   }
 
   private skip(run: ScheduleRun<Prepared>, code: string): void {
@@ -300,13 +342,39 @@ export class ScheduleEngine<Prepared> {
     row: ScheduleRegistryRow,
     projection: Partial<ScheduleRuntimeRow>
   ): Promise<void> {
+    const last = this.ports.store.history(this.ports.workspaceId, row.scheduleId, 1)[0];
+    const dispatched = row.scheduledMessage
+      ? this.ports.store.messageDispatch(this.ports.workspaceId, row.scheduleId)
+      : last;
+    const lastDispatch =
+      dispatched &&
+      (row.scheduledMessage || dispatched.activationId === row.activationId) &&
+      (dispatched.state === 'dispatched' || dispatched.state === 'finished')
+        ? {
+            scheduledFor: dispatched.scheduledFor,
+            dispatchedAt: dispatched.dispatchedAt ?? dispatched.plannedAt,
+            sessionId: dispatched.sessionId,
+          }
+        : undefined;
     this.projections.set(row.scheduleId, {
+      ...this.projections.get(row.scheduleId),
+      ...(lastDispatch ? { lastDispatch } : {}),
+      ...(row.scheduledMessage
+        ? {
+            messageState: lastDispatch
+              ? ('sent' as const)
+              : !row.enabled
+                ? ('cancelled' as const)
+                : last?.state === 'failed' || last?.state === 'skipped'
+                  ? ('failed' as const)
+                  : ('pending' as const),
+          }
+        : {}),
       scheduleId: row.scheduleId,
       machineId: this.ports.machineId,
       activationId: row.activationId,
       observedDefinitionFingerprint: row.definitionFingerprint,
       updatedAt: this.ports.now(),
-      ...this.projections.get(row.scheduleId),
       ...projection,
     });
   }

@@ -698,6 +698,8 @@ export const sessionHistorySchema = schema.LoroMap({
       scheduleId: schema.String(),
       turnId: schema.String(),
       title: schema.String(),
+      definitionFingerprint: schema.String({ required: false }),
+      manualRunKey: schema.String({ required: false }),
     },
     { required: false }
   ),
@@ -1156,7 +1158,12 @@ export type SessionMeta = SessionPullRequestLifecycleFields & {
   externalHistory?: ExternalAcpHistorySyncMeta;
   /** Monotonic-ish signal used to wake the owning CLI when the CRDT message queue changes. */
   messageQueueUpdatedAt?: number;
-  /** Last queue update signal the owning CLI checked when no dispatchable turn was found. */
+  /** Control-document causal frontier captured after the queue mutation named by updatedAt. */
+  messageQueueUpdateVersion?: {
+    updatedAt: number;
+    frontiers: { peer: `${number}`; counter: number }[];
+  };
+  /** Last queue signal whose control mutation was observed and whose queue was drained. */
   messageQueueCheckedAt?: number;
   /**
    * When the session started waiting on a human answer, cleared when the request
@@ -1351,6 +1358,8 @@ const sessionAcpRuntimeConfigDocSchema = schema.LoroMap(
 export const sessionDocSchema = schema({
   session: sessionSchema,
   history: schema.LoroList(sessionHistorySchema, (item) => item.id),
+  /** Exact purpose-8 originals keyed by business turn; encrypted durable fallback, never authority. */
+  rpcDispatchOriginals: schema.LoroMap({}, { required: false }).catchall(schema.String()),
   mq: schema.LoroMovableList(messageQueueItemSchema, (item) => item.$cid, { required: false }),
   /** Explicit human-send outbox. Never inferred from user role or Agent authors. */
   humanInputReceipts: schema
@@ -1455,7 +1464,9 @@ export const getMachineHostType = (meta: Pick<MachineMeta, 'hostType'>): Machine
   meta.hostType ?? 'user';
 
 export type SessionDoc = InferInputType<typeof sessionDocSchema>;
-export type SessionDocMeta = Omit<SessionDoc, '$cid' | 'history'> & {
+export type SessionDocMeta = Omit<SessionDoc, '$cid' | 'history' | 'rpcDispatchOriginals'> & {
+  /** Omitted by control-only readers; execution reads the selected original from the document. */
+  rpcDispatchOriginals?: Record<string, string>;
   session: { id: SessionId };
   history: SessionHistory[];
   mq?: MessageQueueItem[];

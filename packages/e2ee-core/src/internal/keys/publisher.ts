@@ -10,6 +10,7 @@ import {
   extendLedger,
   hashRecordBytes,
   hasVerifiedCheckpoint,
+  hasVerifiedRecordHash,
   type LedgerView,
   type Operation,
 } from '../ledger';
@@ -31,6 +32,7 @@ import { prepareEpochEnvelope } from './envelope';
 import { commitEpochKey, openHistoryPacket, sealHistoryPacket } from './history';
 import { InstalledEpochKeys, type InstalledKeyError } from './installed-keys';
 import {
+  getCommittedEpochStagingKey,
   authenticateEpochStagedGroup,
   obsoleteEpochStagedGroup,
   ownEpochStagedGroup,
@@ -46,7 +48,8 @@ import {
  * - `rotation-not-required`: the current epoch does not need a rotation.
  * - `context-changed`: the ledger moved while the rotation was being prepared.
  * - `candidate-missing`: a rotation record is in flight but its local
- *   candidate (and thus its key) is gone; it cannot be completed here.
+ *   candidate is gone and no independently verified installed key is available yet;
+ *   receive the committed key, then resume the same submission.
  * - `stage-readback`: the staging store did not return the exact group.
  * - `native-failed`: the {@link CandidateProtector} failed.
  *
@@ -451,8 +454,9 @@ export class EpochPublisher extends Context.Service<
             if (entry.record && !bytesEqual(entry.record, row.record)) return yield* fail('busy');
             if (row.outcome && !entry.record) return yield* confirm(row, row.outcome, key);
             // The immutable complete group is durable locally and remotely before the
-            // CAS may be attempted. An advanced verified prefix reconciles only.
-            if (!bound && view.length === row.parentCount) {
+            // first CAS may be attempted. A matching submission journal original
+            // has already passed staging/readback; resume it without staging I/O.
+            if (!entry.record && !bound && view.length === row.parentCount) {
               const proposed = yield* Effect.fromResult(
                 extendLedger(view, [row.record], {
                   head: hashRecordBytes(row.record),
@@ -475,20 +479,84 @@ export class EpochPublisher extends Context.Service<
               return yield* fail('corrupt');
             return yield* confirm(row, submitted.outcome, key);
           });
-        return row.outcome === 'Conflict' ? work() : withKey(row, work);
+        return Effect.gen(function* () {
+          const view = yield* current();
+          const bound = yield* bindingOf(view, row);
+          if (row.outcome === 'Conflict' || (!bound && view.length > row.parentCount))
+            return yield* work();
+          // An independently installed committed key outlives the unpublished candidate.
+          if (bound) {
+            const installedResult = yield* Effect.result(installed.check(row.epoch));
+            if (Result.isSuccess(installedResult))
+              return yield* Effect.acquireUseRelease(installed.read(row.epoch), work, (key) =>
+                Effect.sync(() => disposeEpochKey(key))
+              );
+            if (installedResult.failure.reason !== 'missing-key')
+              return yield* installedResult.failure;
+          }
+          return yield* withKey(row, work);
+        });
       };
+
+      // A missing candidate never authorizes a replacement signature. Reconcile the
+      // submission's exact bytes, then require genuine feed and installed-key proof.
+      const recoverMissing = Effect.fnUntraced(function* () {
+        const entry = yield* submit(submission.pending());
+        if (!entry.record) return null;
+        const parsed = yield* Effect.fromResult(decodeRecord(entry.record));
+        if (parsed.body.type !== 'ordinary' || !publication(parsed.body.operation)) return null;
+        if (!parsed.body.signer.equals(publicKey)) return yield* fail('corrupt');
+        const known = yield* current();
+        const locator = getCommittedEpochStagingKey(known, parsed.body.operation.epoch);
+        const published =
+          Result.isSuccess(locator) &&
+          locator.success.recordHash === keyId(hashRecordBytes(entry.record).toBytes());
+        const occupied = Result.isSuccess(locator) && !published;
+        const parentKnown = yield* Effect.fromResult(
+          hasVerifiedRecordHash(known, parsed.body.previousHash)
+        );
+        if (
+          !published &&
+          !occupied &&
+          (!parentKnown || known.head.equals(parsed.body.previousHash))
+        )
+          return yield* fail('candidate-missing');
+        const done = yield* submit(submission.resume());
+        if (!done) return yield* fail('candidate-missing');
+        const after = yield* submit(submission.pending());
+        const view = yield* current();
+        if (!after.checkpoint || !Result.getOrThrow(hasVerifiedCheckpoint(view, after.checkpoint)))
+          return yield* fail('context-changed');
+        const epoch = parsed.body.operation.epoch;
+        if (done.outcome === 'Committed') {
+          const located = yield* Effect.fromResult(getCommittedEpochStagingKey(view, epoch));
+          if (located.recordHash !== keyId(hashRecordBytes(done.record).toBytes()))
+            return yield* fail('corrupt');
+          yield* installed
+            .check(epoch)
+            .pipe(
+              Effect.mapError((error) =>
+                error.reason === 'missing-key' ? fail('candidate-missing') : error
+              )
+            );
+        }
+        return {
+          ...done,
+          epoch,
+          binding:
+            done.outcome === 'Conflict'
+              ? null
+              : view.inspectState().epoch.number === epoch
+                ? ('current' as const)
+                : ('historical' as const),
+        };
+      });
 
       const resume = Effect.fnUntraced(function* () {
         yield* current();
         const row = yield* loadActive();
         if (row) return yield* settle(row);
-        const entry = yield* submit(submission.pending());
-        if (entry.record) {
-          const decoded = yield* Effect.fromResult(decodeRecord(entry.record));
-          if (decoded.body.type === 'ordinary' && publication(decoded.body.operation))
-            return yield* fail('candidate-missing');
-        }
-        return null;
+        return yield* recoverMissing();
       });
 
       const generate = Effect.fnUntraced(function* (
@@ -618,11 +686,18 @@ export class EpochPublisher extends Context.Service<
         const pending = yield* submit(submission.pending());
         if (pending.record) {
           const decoded = yield* Effect.fromResult(decodeRecord(pending.record));
-          return yield* fail(
-            decoded.body.type === 'ordinary' && publication(decoded.body.operation)
-              ? 'candidate-missing'
-              : 'busy'
-          );
+          if (decoded.body.type !== 'ordinary' || !publication(decoded.body.operation))
+            return yield* fail('busy');
+          const operation = decoded.body.operation;
+          if (
+            target
+              ? operation.type !== 'removeMemberAndPublishEpoch' ||
+                !operation.membershipId.equals(target)
+              : operation.type !== 'publishEpoch'
+          )
+            return yield* fail('busy');
+          const recovered = yield* recoverMissing();
+          return recovered ?? (yield* fail('candidate-missing'));
         }
         yield* manager(view, target);
         if (!target && !view.inspectState().epoch.rotationRequired)
@@ -662,6 +737,21 @@ export class EpochPublisher extends Context.Service<
         const original = (yield* Effect.fromResult(decodeRecord(expected.record))).recordBytes;
         const id = keyId(hashRecordBytes(original).toBytes()),
           row = yield* load(id);
+        if (!row) {
+          const pendingEntry = yield* submit(submission.pending());
+          if (!pendingEntry.record || !bytesEqual(pendingEntry.record, original))
+            return yield* fail('busy');
+          const recovered = yield* recoverMissing();
+          if (
+            !recovered ||
+            recovered.outcome !== expected.outcome ||
+            recovered.epoch !== expected.epoch ||
+            !bytesEqual(recovered.record, original)
+          )
+            return yield* fail('candidate-missing');
+          yield* submit(submission.acknowledge(recovered));
+          return undefined;
+        }
         if (
           !row ||
           !row.outcome ||

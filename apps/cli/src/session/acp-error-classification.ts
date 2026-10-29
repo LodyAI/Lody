@@ -1,3 +1,7 @@
+import {
+  isAcpStartupProcessFailure,
+  isAcpTransportDisconnectMessage,
+} from '@/agent/acp-startup-monitor';
 import type { ChatFailedReason } from '@lody/shared';
 import { formatErrorMessage, formatErrorWithCauses } from '@/utils/format-error';
 
@@ -112,14 +116,10 @@ export const isAcpSessionStorageIncompatibleError = (error: unknown): boolean =>
 };
 
 export const isAgentDisconnectedError = (error: unknown): boolean => {
-  const errorMessage = getACPDiagnosticText(error).toLowerCase();
-  return (
-    errorMessage.includes('connection is disposed') ||
-    errorMessage.includes('acp connection closed') ||
-    errorMessage.includes('not ready for writing') ||
-    errorMessage.includes('processtransport') ||
-    (errorMessage.includes('process') && errorMessage.includes('not ready'))
-  );
+  // Startup diagnostics can quote transport text in stderr or their cause.
+  // They must reach the pre-prompt failure notice instead of generic disconnect copy.
+  if (isAcpStartupProcessFailure(error)) return false;
+  return isAcpTransportDisconnectMessage(getACPDiagnosticText(error));
 };
 
 export const isAcpSessionNotFoundError = (error: unknown): boolean => {

@@ -5,3 +5,4 @@ export { createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
 export { startDevServer } from '@loro-dev/sqlite-riverrun';
 export const sdkModule = import.meta.resolve('@loro-dev/streams-crdt');
 export const loroAdapterModule = import.meta.resolve('@loro-dev/streams-crdt/loro');
+export const zstdModule = import.meta.resolve('@loro-dev/streams-crdt/zstd');

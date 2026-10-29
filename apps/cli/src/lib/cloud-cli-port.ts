@@ -1,3 +1,6 @@
+import { sharingReplySchemas } from '@lody/e2ee-machine-sharing/schemas';
+import { StreamsClient } from '@loro-dev/streams-client';
+import { CloudE2eeMemberRemoved, CloudE2eeDeviceRevoked } from './cloud-e2ee-errors';
 import { Effect } from 'effect';
 import { SessionAttachmentTransfer } from './session-attachment-transfer';
 import { getCliPlatformKind } from './cli-platform';
@@ -5,10 +8,14 @@ import { LODY_SERVER_URL } from '@/utils/const';
 import { SimulatorIceServersSchema } from '@/ios-simulator/webrtc-protocol';
 import { ConvexClient, ConvexHttpClient } from 'convex/browser';
 import { z } from 'zod';
-import { api, type E2eeMailboxReplies } from '@lody/cloud-api';
+import { api } from '@lody/cloud-api';
+import { e2eeHistoryPageSchema, e2eeMailboxReplySchemas } from './cloud-e2ee-replies';
 import { ShareDeliveryEnvelopeSchema } from '@lody/shared/session-share-delivery';
 import {
   buildLoroStreamsTokenEndpoint,
+  getLoroStreamIdForDocId,
+  getLoroStreamsBaseUrl,
+  type WorkspaceId,
   PreviewControlVerificationSchema,
   createLoroStreamsTokenProviderLegacy,
   describeLoroStreamsTokenCause,
@@ -20,6 +27,7 @@ import {
 } from '@lody/shared';
 import {
   resolveRuntimeArtifactsBaseUrl,
+  createLocalCloudPort,
   type CloudE2eePort,
   type CloudAccessSnapshot,
   type CloudBillingPort,
@@ -178,7 +186,7 @@ export function createCloudStreamsTokenPort(options: {
 /** Device routes are lazy: constructing the ordinary cloud port never opens
  * custody, obtains a device token, or touches the operating system keyring. */
 export function createCloudE2eePort(
-  options: Pick<CloudCliPortOptions, 'token' | 'authBaseUrl' | 'logger'>
+  options: Pick<CloudCliPortOptions, 'authBaseUrl' | 'logger'> & { token?: string }
 ): CloudE2eePort {
   const authBaseUrl = normalizeBaseUrl(options.authBaseUrl);
   const fetchImpl = getCliHttpFetch({ logger: options.logger });
@@ -189,6 +197,10 @@ export function createCloudE2eePort(
     });
   const tokenSchema = z.object({
     token: z.string().min(1),
+    attachmentToken: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
     bucketId: z.string().min(1),
     gatewayBaseUrl: z.string().url(),
     expiresIn: z.number().int().positive().max(900),
@@ -197,20 +209,105 @@ export function createCloudE2eePort(
   const getContentToken = async (
     input: Parameters<CloudE2eePort['getContentToken']>[0],
     signal: AbortSignal
-  ) =>
-    tokenSchema.parse(
-      await client(signal).action(api.e2eeContent.contentStreamsToken, {
-        ...input,
-        cliToken: options.token,
-      })
-    );
+  ) => {
+    try {
+      return tokenSchema.parse(
+        await client(signal).action(api.e2eeContent.contentStreamsToken, {
+          ...input,
+          ...(options.token === undefined ? {} : { cliToken: options.token }),
+        })
+      );
+    } catch (cause) {
+      const rejected = z.object({ data: z.object({ code: z.string() }) }).safeParse(cause);
+      if (rejected.success && rejected.data.data.code === 'e2ee_member_removed')
+        throw new CloudE2eeMemberRemoved();
+      if (rejected.success && rejected.data.data.code === 'e2ee_device_revoked')
+        throw new CloudE2eeDeviceRevoked();
+      throw cause;
+    }
+  };
   return {
-    getHistory: (input) =>
-      client(AbortSignal.timeout(30_000)).action(api.e2eeWorkspaces.history, {
-        ...input,
-        cliToken: options.token,
-      }),
+    machineSharing: {
+      readHead: async (input) =>
+        sharingReplySchemas.readHead.parse(
+          await client(AbortSignal.timeout(30_000)).action(api.e2eeMachineSharing.readHead, {
+            ...input,
+            ...(options.token === undefined ? {} : { cliToken: options.token }),
+          })
+        ),
+      readVersion: async (input) =>
+        sharingReplySchemas.readVersion.parse(
+          await client(AbortSignal.timeout(30_000)).action(api.e2eeMachineSharing.readVersion, {
+            ...input,
+            ...(options.token === undefined ? {} : { cliToken: options.token }),
+          })
+        ),
+      readRequest: async (input) =>
+        sharingReplySchemas.readRequest.parse(
+          await client(AbortSignal.timeout(30_000)).action(api.e2eeMachineSharing.readRequest, {
+            ...input,
+            ...(options.token === undefined ? {} : { cliToken: options.token }),
+          })
+        ),
+      commit: async (input) =>
+        sharingReplySchemas.commit.parse(
+          await client(AbortSignal.timeout(30_000)).action(api.e2eeMachineSharing.commit, {
+            ...input,
+            ...(options.token === undefined ? {} : { cliToken: options.token }),
+          })
+        ),
+    },
+    ...(options.token === undefined
+      ? {
+          completeMachinePairing: async (input: {
+            workspaceId: string;
+            credential: string;
+            pairingSessionId: string;
+          }) => {
+            await client(AbortSignal.timeout(30_000)).mutation(
+              api.e2eeMachinePairing.complete,
+              input
+            );
+          },
+        }
+      : {}),
+    readExecutionOriginPage: async (input, signal) => {
+      const token = await getContentToken(
+        { workspaceId: input.workspaceId, credential: input.credential },
+        signal
+      );
+      const streamId = getLoroStreamIdForDocId(input.workspaceId as WorkspaceId, input.docId);
+      const streams = new StreamsClient({
+        url: `${getLoroStreamsBaseUrl(token.gatewayBaseUrl)}/ds/${encodeURIComponent(token.bucketId)}/${encodeURIComponent(streamId)}`,
+        fetch: fetchImpl,
+        auth: token.token,
+      });
+      const result = await streams.readBackwardMessages({
+        before: input.before,
+        pageBytes: 256 * 1024,
+        maxMessageBytes: 64 * 1024 * 1024,
+        signal,
+      });
+      if (!result.ok) throw result.result;
+      return {
+        messages: result.result.messages,
+        before: result.result.startOffset,
+        atStart: result.result.atRetainedStart,
+      };
+    },
+    getHistory: async (input) =>
+      e2eeHistoryPageSchema.parse(
+        await client(AbortSignal.timeout(30_000)).action(api.e2eeWorkspaces.history, {
+          ...input,
+          ...(options.token === undefined ? {} : { cliToken: options.token }),
+        })
+      ),
     getContentToken: (input) => getContentToken(input, AbortSignal.timeout(30_000)),
+    readEpochGroup: (input) =>
+      client(AbortSignal.timeout(30_000)).query(api.e2eeEpochStaging.readGroup, {
+        ...input,
+        ...(options.token === undefined ? {} : { cliToken: options.token }),
+      }),
     mailboxCall: async (method, input) => {
       const connection = client(AbortSignal.timeout(30_000));
       const common = z.object({ workspaceId: z.string(), credential: z.string() });
@@ -219,12 +316,12 @@ export function createCloudE2eePort(
         epoch: z.number().int().nonnegative(),
         recipient: z.string(),
       });
-      let reply: E2eeMailboxReplies[keyof E2eeMailboxReplies];
+      let reply: unknown;
       switch (method) {
         case 'put':
           reply = await connection.mutation(api.e2eeMailbox.put, {
             ...common.extend({ id: z.string(), frameHex: z.string() }).parse(input),
-            cliToken: options.token,
+            ...(options.token === undefined ? {} : { cliToken: options.token }),
           });
           break;
         case 'report':
@@ -232,7 +329,7 @@ export function createCloudE2eePort(
             ...common
               .extend({ reportHex: z.string(), publicationHex: z.string().optional() })
               .parse(input),
-            cliToken: options.token,
+            ...(options.token === undefined ? {} : { cliToken: options.token }),
           });
           break;
         case 'repair':
@@ -240,13 +337,13 @@ export function createCloudE2eePort(
             ...common
               .extend({ slot, id: z.string(), rejectedDigest: z.string().optional() })
               .parse(input),
-            cliToken: options.token,
+            ...(options.token === undefined ? {} : { cliToken: options.token }),
           });
           break;
         case 'read':
           reply = await connection.query(api.e2eeMailbox.read, {
             ...common.extend({ id: z.string() }).parse(input),
-            cliToken: options.token,
+            ...(options.token === undefined ? {} : { cliToken: options.token }),
           });
           break;
         case 'fetch':
@@ -258,19 +355,19 @@ export function createCloudE2eePort(
                 limit: z.number().int().min(1).max(100),
               })
               .parse(input),
-            cliToken: options.token,
+            ...(options.token === undefined ? {} : { cliToken: options.token }),
           });
           break;
         case 'status':
           reply = await connection.query(api.e2eeMailbox.status, {
             ...common.extend({ slot }).parse(input),
-            cliToken: options.token,
+            ...(options.token === undefined ? {} : { cliToken: options.token }),
           });
           break;
         default:
           throw new Error('e2ee_unknown_method');
       }
-      return reply as E2eeMailboxReplies[typeof method];
+      return e2eeMailboxReplySchemas[method].parse(reply);
     },
     createContentTokenProvider: (input) =>
       Effect.gen(function* () {
@@ -493,9 +590,173 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
 /** One-shot command composition; local builds never construct a cloud transfer. */
 export function createCommandAttachmentTransfer(
   token: string,
-  localWorkspace = false
+  localWorkspace = false,
+  encrypted?: { token(): Promise<string> }
 ): SessionAttachmentTransfer | undefined {
   if (localWorkspace || getCliPlatformKind() === 'local') return undefined;
   if (!LODY_SERVER_URL?.trim()) throw new Error('cloud_attachment_upload_unavailable');
-  return new SessionAttachmentTransfer(token, LODY_SERVER_URL);
+  return new SessionAttachmentTransfer(token, LODY_SERVER_URL, encrypted);
+}
+
+/** A cloud machine authenticated only to one admitted encrypted workspace. No account APIs. */
+export function createCloudE2eeMachinePort(options: {
+  accountId: string;
+  workspaceId: string;
+  genesisHash: string;
+  machineId: string;
+  credential: string;
+  authBaseUrl: string;
+  serverBaseUrl: string;
+  logger: Logger;
+  client?: Pick<ConvexClient, 'onUpdate' | 'query' | 'close'>;
+}): CloudPort {
+  if (getCliPlatformKind() !== 'cloud') throw new Error('e2ee_unavailable');
+  const serverBaseUrl = options.serverBaseUrl.trim();
+  if (!serverBaseUrl) throw new Error('cloud_attachment_upload_unavailable');
+  const base = createLocalCloudPort({ identity: { userId: options.accountId }, workspaces: [] });
+  const client = options.client ?? new ConvexClient(options.authBaseUrl, { logger: false });
+  const access = {
+    workspaceId: options.workspaceId,
+    credential: options.credential,
+    machineId: options.machineId,
+  };
+  const snapshot = z.union([
+    z.object({ status: z.literal('unauthorized'), reason: z.string() }),
+    z.object({
+      status: z.literal('authorized'),
+      userId: z.literal(options.accountId),
+      workspaces: z
+        .array(
+          z.object({
+            id: z.literal(options.workspaceId),
+            name: z.string(),
+            slug: z.string().nullable(),
+            role: z.string(),
+            contentMode: z.literal('e2ee'),
+            genesisHash: z.string().regex(/^[0-9a-f]{64}$/),
+          })
+        )
+        .length(1),
+    }),
+  ]);
+  const e2ee = createCloudE2eePort({ authBaseUrl: options.authBaseUrl, logger: options.logger });
+  const machineSharing = e2ee.machineSharing;
+  const readEpochGroup = e2ee.readEpochGroup;
+  const readExecutionOriginPage = e2ee.readExecutionOriginPage;
+  const completeMachinePairing = e2ee.completeMachinePairing;
+  const bound = (value: { workspaceId: string; credential: string }) => {
+    if (value.workspaceId !== options.workspaceId || value.credential !== options.credential)
+      throw new Error('e2ee_binding_conflict');
+  };
+  return {
+    ...base,
+    kind: 'cloud',
+    e2eeMachineScope: { workspaceId: options.workspaceId, genesisHash: options.genesisHash },
+    attachmentUpload: { serverBaseUrl },
+    e2ee: {
+      ...e2ee,
+      ...(machineSharing
+        ? {
+            machineSharing: {
+              readHead: (input) => {
+                bound(input);
+                return machineSharing.readHead(input);
+              },
+              readVersion: (input) => {
+                bound(input);
+                return machineSharing.readVersion(input);
+              },
+              readRequest: (input) => {
+                bound(input);
+                return machineSharing.readRequest(input);
+              },
+              commit: (input) => {
+                bound(input);
+                return machineSharing.commit(input);
+              },
+            },
+          }
+        : {}),
+      ...(readExecutionOriginPage
+        ? {
+            readExecutionOriginPage: (input, signal) => {
+              bound(input);
+              return readExecutionOriginPage(input, signal);
+            },
+          }
+        : {}),
+      getHistory: (input) => {
+        bound(input);
+        return e2ee.getHistory(input);
+      },
+      getContentToken: (input) => {
+        bound(input);
+        return e2ee.getContentToken(input);
+      },
+      ...(readEpochGroup
+        ? {
+            readEpochGroup: (input) => {
+              bound(input);
+              return readEpochGroup(input);
+            },
+          }
+        : {}),
+      ...(completeMachinePairing
+        ? {
+            completeMachinePairing: async (input) => {
+              bound(input);
+              await completeMachinePairing(input);
+            },
+          }
+        : {}),
+      mailboxCall: (method, input) => {
+        bound(input);
+        return e2ee.mailboxCall(method, input);
+      },
+    },
+    access: {
+      watchWorkspaceAccess: (listener, onError) =>
+        client.onUpdate(
+          api.e2eeMachinePairing.bootstrap,
+          access,
+          (value) => {
+            const parsed = snapshot.safeParse(value);
+            if (parsed.success) listener(parsed.data);
+            else onError(new Error('e2ee_machine_service_invalid_response'));
+          },
+          () => onError(new Error('e2ee_machine_service_unavailable_retry'))
+        ),
+      verifyMachineAccess: async () => ({ allowed: false, reason: 'not_visible' }),
+      registerMachineAccess: async (input) => {
+        if (input.workspaceId !== options.workspaceId || input.machineId !== options.machineId)
+          throw new Error('e2ee_binding_conflict');
+        const value = snapshot.parse(await client.query(api.e2eeMachinePairing.bootstrap, access));
+        if (value.status !== 'authorized')
+          throw new Error('e2ee_machine_service_revoked_pair_again');
+      },
+      resolveWorkspaceUser: async () => null,
+    },
+    dispose: () => client.close(),
+  };
+}
+
+/** Fixed pairing ingress only; command pins are validated before constructing this adapter. */
+export function createCloudRemoteMachinePairingClaim(options: {
+  ingressUrl: string;
+  logger: Logger;
+}) {
+  if (getCliPlatformKind() !== 'cloud') throw new Error('e2ee_unavailable');
+  const endpoint = new URL('/api/e2ee/machine-pairing/claim', options.ingressUrl);
+  const transport = getCliHttpFetch({ logger: options.logger });
+  return async (originalBody: string, signal: AbortSignal): Promise<unknown> => {
+    const response = await transport(endpoint, {
+      method: 'POST',
+      redirect: 'error',
+      headers: { 'Content-Type': 'application/json' },
+      body: originalBody,
+      signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
+    });
+    if (!response.ok) throw new Error('e2ee_pairing_unavailable_retry_same_command');
+    return response.json();
+  };
 }

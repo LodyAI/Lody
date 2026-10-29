@@ -1,4 +1,6 @@
-import { workspaceSupports, type WorkspaceStreamsMode } from '@lody/shared/workspace-streams-content';
+import { uploadProtectedAttachment } from './encrypted-session-attachment';
+import { requireWorkspaceFeature } from '@/lib/workspace-feature';
+import { type WorkspaceStreamsMode } from '@lody/shared/workspace-streams-content';
 import {
   buildSessionImageApiUrl,
   getSessionImageDownloadApiPath,
@@ -84,6 +86,7 @@ export const buildSessionImageThumbnailUrl = (
 
 type UploadSessionImageArgs = {
   content: WorkspaceStreamsMode;
+  attachmentToken?: () => Promise<string>;
   workspaceId: WorkspaceId;
   sessionId: SessionId;
   token: string;
@@ -94,6 +97,7 @@ type UploadSessionImageArgs = {
 
 export const uploadSessionImage = async ({
   content,
+  attachmentToken,
   workspaceId,
   sessionId,
   token,
@@ -101,12 +105,18 @@ export const uploadSessionImage = async ({
   onProgress,
   signal,
 }: UploadSessionImageArgs): Promise<SessionImagePayload> => {
-  if (!workspaceSupports(content, 'attachments')) throw new Error('e2ee_attachments_unavailable');
+  requireWorkspaceFeature(content, 'attachments');
   const validationError = validateSessionImageFile(file);
   if (validationError) {
     throw new Error(validationError);
   }
 
+  if (content.mode === 'protected') {
+    const { encryption } = await uploadProtectedAttachment({ workspaceId, sessionId, file, kind: 'image', attachmentToken, signal, onProgress });
+    const imageId = encryption.parts[0];
+    if (!imageId) throw new Error('Invalid encrypted attachment receipt');
+    return { imageId, mimeType: file.type, fileName: file.name, sizeBytes: file.size, encryption };
+  }
   const formData = new FormData();
   formData.set('sessionId', sessionId);
   formData.set('file', file, file.name);

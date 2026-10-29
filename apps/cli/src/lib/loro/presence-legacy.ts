@@ -43,7 +43,10 @@ export const bindWorkspacePresenceApplicationLegacy = (
 /** @deprecated One execution facade for doc/bridge and current session/relay consumers.
  * Delete after those owners compose WorkspacePresenceOwners directly.
  */
-export const createCliPresenceRuntimeLegacy = async (workspaceId: WorkspaceId) => {
+export const createCliPresenceRuntimeLegacy = async (
+  workspaceId: WorkspaceId,
+  replicaOptions: { minimal?: boolean } = {}
+) => {
   const root = application;
   if (!root || root.isClosing()) throw new Error('Presence application owner unavailable');
   const run = async <A, E>(effect: Effect.Effect<A, E>, signal?: AbortSignal): Promise<A> => {
@@ -52,7 +55,7 @@ export const createCliPresenceRuntimeLegacy = async (workspaceId: WorkspaceId) =
     return exit.value;
   };
   const acquired = await root.runtime.runPromiseExit(
-    Effect.flatMap(WorkspacePresenceOwners, (owners) => owners.create(workspaceId))
+    Effect.flatMap(WorkspacePresenceOwners, (owners) => owners.create(workspaceId, replicaOptions))
   );
   if (Exit.isFailure(acquired)) throw new WorkspacePresenceLegacyFailure(acquired.cause);
   const owner: WorkspacePresence = acquired.value;

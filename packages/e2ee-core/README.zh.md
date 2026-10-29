@@ -13,6 +13,13 @@
 适配器；其他运行时需要实现自己的存储和平台适配器。后端端口与 `/host` 规定其他
 后端需要实现什么，并不负责部署服务器。
 
+protocol 入口还提供机器所有者签名的完整共享策略 codec、资源绑定、版本验证与纯执行
+判断。`readMachineSharingHistoryStep` 可在原 personal 签名者撤销后读取历史完整状态，
+供新所有者意图保留项目设置，不授予执行权。host 入口验证不解密的所有者帧，
+platform/cloud-api 定义对应 CAS DTO。这些原语
+尚未接入网络、UI 或执行路径；[共享策略提案](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.zh.md)
+说明待批准 Spec 增量与后续宿主职责。
+
 ## 从这里开始
 
 | 你想要… | 阅读 |
@@ -26,6 +33,20 @@
 | 看完整系统在真实故障下运行 | E2EE Lab，`packages/e2ee-lab`（本 PR 栈的后续层） |
 
 ## 入口
+
+协议入口提供 `sealPresenceContent` / `openPresenceContent`、
+`sealRpcRequestContent` / `openRpcRequestContent` 和 `sealRpcResponseContent` /
+`openRpcResponseContent`，仅将现有 content v0 密码学按用途 7/8/9 组合到不透明正文。
+调用方提供可信资源上下文、已安装 epoch 钥与预期签名者；辅助函数拥有并释放派生叶钥。
+它们不验证 RPC 正文、请求／结果关联、presence TTL、机器绑定、账本权限或新鲜度。
+开放通道前须在可信宿主落实这些门槛。重试保留返回的原帧；再次运行 seal 会重新加密。
+本改动不启用产品传输。
+
+共享签名格式为 current-only v2；每份 scope 包含 generation，即连续原子替换链的
+首次机器签名公钥。`verifyMachineSharingGeneration` 通过真实账本位置验证准入原文链，
+其不透明 `machineGeneration` 证据必须传给签发、打开、历史读取、宿主准入和执行判断。
+移除后重新准入使用新资源，从私有默认值和第 1 版开始；原子替换保留原代次。压缩视图
+若缺少这些账本检查点，需用完整已验证终点核验，不能相信服务端提示或旧策略高水位。
 
 | 导入路径 | 内容 | 稳定性 |
 | --- | --- | --- |
@@ -142,3 +163,5 @@ pnpm --filter @lody/e2ee-core check:docs  # 公开导出、命名空间与 servi
 
 Streams 适配器与 Lab 使用当前 workspace catalog 版本。Node 宿主可共用
 [node-custody](docs/surface.zh.md) 保管实现，并分别提供经过核对的系统包装器。
+
+[冻结前格式审查](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-format-freeze-review.zh.md)记录账本格式的未决事项和仅支持当前版本的格式盘点。

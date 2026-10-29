@@ -22,6 +22,10 @@ Mobile controls remain in the same 32px row. With only machine information the b
 is a transparent row; existing items and actions retain the raised bar surface. The
 [draft Spec](../../specs/composer-machine-owner.md) owns the presentation intent.
 The parent passes already-resolved metadata and presence without new subscriptions.
+Scheduled-message drafts must not add an info-bar item. Their state is the
+composer's secondary action beside Send; the bar only carries machine, status,
+goal, schedule, and context. This is distinct from the pending Agent task countdown
+and the schedule that created the conversation.
 With the compact mobile control, a private-access label collapses to its lock icon
 at container widths up to 420px, leaving room for repository actions. Its full
 access description remains in the accessible name/title, and tap still opens

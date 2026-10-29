@@ -252,7 +252,22 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
           ? 'machine:acp-authenticate:start'
           : 'machine:acp-authenticate:control';
       case 'session/cancel':
-        return null;
+        return `session:${message.sessionId}:cancel`;
+      case 'machine/status':
+        return 'machine:status';
+      case 'machine/ping':
+        return 'machine:ping';
+      case 'machine/acp-capabilities-refresh':
+        return `machine:acp-capabilities-refresh:${message.configId}`;
+      case 'machine/provider-rate-limits-refresh':
+        return `machine:provider-rate-limits-refresh:${message.configId}`;
+      case 'machine/acp-binary-status':
+        return 'machine:acp-binary-status';
+      case 'machine/acp-binary-install':
+        return `machine:acp-binary-install:${message.agentType}`;
+      case 'machine/restart':
+      case 'machine/upgrade':
+        return 'machine:lifecycle';
       default:
         return null;
     }

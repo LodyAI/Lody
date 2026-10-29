@@ -350,6 +350,7 @@ describe('actual authenticated finite SDK read routes, not snapshot authority', 
               membershipId: f.membership,
               encryptionPublicKey: ok(Bytes.encryptionPublicKey(new Uint8Array(32).fill(122))),
               kind: 'machine',
+              machineId: 'synthetic-machine',
               signer: machine,
             });
             const admission = yield* signLedgerRecord(

@@ -140,6 +140,7 @@ const LOCAL_STORAGE_CACHE_KEYS = [
 ];
 
 const LOCAL_STORAGE_CACHE_KEY_PREFIXES = [
+  'lody:scheduledMessageDraft:',
   // Per-workspace Streams JWT + gateway URL (`@lody/shared` loro-streams-auth).
   `${LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX}:`,
   `${META_REMOTE_CURSOR_BYPASS_STORAGE_KEY_PREFIX}:`,

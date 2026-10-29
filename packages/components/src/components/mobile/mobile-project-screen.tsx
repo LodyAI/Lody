@@ -39,6 +39,8 @@ import {
   type MobileChatGroupBy,
   type MobileChatListSelectionLabels,
 } from './mobile-chat-list';
+import { useHorizontalFoldLayout } from './use-horizontal-fold-layout';
+import { MobileSettingsFoldContext } from './mobile-settings-fold-context';
 import { MobileInitialLetterAvatar } from './mobile-initial-letter-avatar';
 import {
   MobileWorkspaceTabBar,
@@ -674,6 +676,12 @@ export function MobileProjectScreen({
   /* Scroll container handed to `MobileWorkspaceTabBar` so the dock
      collapses while the user scrolls. */
   const listScrollRef = useRef<HTMLDivElement>(null);
+  const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
+  const setListRef = useCallback((element: HTMLDivElement | null) => {
+    listScrollRef.current = element;
+    setListElement(element);
+  }, []);
+  const settingsFold = useHorizontalFoldLayout(listElement, selectedProjectTab === 'settings');
   const [filesScrollSignal, setFilesScrollSignal] =
     useState<MobileWorkspaceTabBarScrollSignal | null>(null);
   const handleFilesScrollActivity = useCallback((scrollTop: number) => {
@@ -819,13 +827,15 @@ export function MobileProjectScreen({
         </AnimatePresence>
 
         <div
-          ref={listScrollRef}
+          ref={setListRef}
           className={cn(
-            'scrollbar-pro relative min-h-0 flex-1 overflow-y-auto pt-1 [scrollbar-gutter:auto]',
+            'scrollbar-pro relative min-h-0 flex-1 pt-1 [scrollbar-gutter:auto]',
+            settingsFold ? 'overflow-hidden' : 'overflow-y-auto',
             /* The bottom tabbar floats fixed at the viewport bottom,
                so the scrollable content needs padding to clear it
                (height + safe-area). Same trick the home screen uses. */
-            'pb-[calc(var(--mobile-tabbar-height)+var(--k-safe-area-bottom,0px)+1rem)]'
+            !settingsFold &&
+              'pb-[calc(var(--mobile-tabbar-height)+var(--k-safe-area-bottom,0px)+1rem)]'
           )}
         >
           {selectedProjectTab === 'chat' ? (
@@ -884,8 +894,9 @@ export function MobileProjectScreen({
             )
           ) : null}
           {selectedProjectTab === 'files' ? renderedFilesTabContent : null}
-          {selectedProjectTab === 'settings'
-            ? (settingsTabContent ?? (
+          {selectedProjectTab === 'settings' ? (
+            <MobileSettingsFoldContext.Provider value={settingsFold}>
+              {settingsTabContent ?? (
                 <ProjectTabPlaceholder
                   icon={
                     <SettingsIcon
@@ -897,8 +908,9 @@ export function MobileProjectScreen({
                   title={labels.settingsTabPlaceholderTitle ?? labels.settingsTab ?? '设置'}
                   body={labels.settingsTabPlaceholderBody ?? '即将上线'}
                 />
-              ))
-            : null}
+              )}
+            </MobileSettingsFoldContext.Provider>
+          ) : null}
         </div>
 
         {showProjectTabBar ? (

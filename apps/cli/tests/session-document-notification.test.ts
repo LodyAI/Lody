@@ -1,5 +1,6 @@
+import { publishTurnCompletionLegacy } from '../src/session/turn-completion-legacy';
 import { resolveNotificationPresentation } from '@lody/shared/notifications';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { LoroRepo } from 'loro-repo';
 import { v4 as uuid } from 'uuid';
 import { getSessionRoomId, type SessionId } from '@lody/shared';
@@ -45,6 +46,91 @@ describe('terminal notification projection', () => {
         scheduleName: undefined,
       });
     } finally {
+      await session.destroy({ preserveStatus: true });
+      await repo.destroy();
+    }
+  });
+
+  it('publishes local completion without a remote transport and keeps delayed activity monotonic', async () => {
+    const repo = await LoroRepo.create({});
+    const parentId = uuid() as SessionId;
+    const childId = uuid() as SessionId;
+    const parent = new SessionDocument(repo, parentId, (roomId) => repo.unloadDoc(roomId));
+    const child = new SessionDocument(repo, childId, (roomId) => repo.unloadDoc(roomId));
+    const notifications: string[] = [];
+    try {
+      await parent.initOffline();
+      await child.initOffline();
+      await repo.upsertDocMeta(getSessionRoomId(parentId), { type: 'session', lastMessageAt: 1 });
+      await repo.upsertDocMeta(getSessionRoomId(childId), {
+        type: 'session',
+        parentSessionId: parentId,
+        lastMessageAt: 1,
+      });
+      await publishTurnCompletionLegacy({
+        sessionDoc: child,
+        workspaceDocument: { getRemoteStreamsGeneration: () => undefined },
+        completedAt: 100,
+        signal: new AbortController().signal,
+        notify: async () => {
+          notifications.push('local');
+        },
+      });
+      expect(notifications).toEqual(['local']);
+      expect((await child.getMetaState())?.lastMessageAt).toBe(100);
+      expect((await parent.getMetaState())?.lastMessageAt).toBe(100);
+      await Promise.all([
+        child.setLastMessageAt(300),
+        parent.setLastMessageAt(400),
+        child.setLastMessageAt(200),
+      ]);
+      expect((await child.getMetaState())?.lastMessageAt).toBe(300);
+      expect((await parent.getMetaState())?.lastMessageAt).toBe(400);
+    } finally {
+      await parent.destroy({ preserveStatus: true });
+      await child.destroy({ preserveStatus: true });
+      await repo.destroy();
+    }
+  });
+
+  it('does not turn an old remote receipt into local success after transport replacement', async () => {
+    const repo = await LoroRepo.create({});
+    const id = uuid() as SessionId;
+    const session = new SessionDocument(repo, id, (roomId) => repo.unloadDoc(roomId));
+    const confirming = Promise.withResolvers<void>();
+    const receipt = Promise.withResolvers<boolean>();
+    let generation = 1;
+    const notifications: string[] = [];
+    try {
+      await session.initOffline();
+      await repo.upsertDocMeta(getSessionRoomId(id), { type: 'session', lastMessageAt: 1 });
+      vi.useFakeTimers();
+      session.waitUntilSynced = async () => {
+        confirming.resolve();
+        return receipt.promise;
+      };
+      const result = publishTurnCompletionLegacy({
+        sessionDoc: session,
+        workspaceDocument: { getRemoteStreamsGeneration: () => generation },
+        completedAt: 100,
+        signal: new AbortController().signal,
+        notify: async () => {
+          notifications.push('remote');
+        },
+      }).then(
+        () => 'published',
+        (error) => error
+      );
+      await confirming.promise;
+      generation = 2;
+      receipt.resolve(true);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(await result).toMatchObject({ _tag: 'TurnCompletionUnconfirmed' });
+      expect(notifications).toEqual([]);
+      expect((await session.getMetaState())?.lastMessageAt).toBe(1);
+    } finally {
+      receipt.resolve(true);
+      vi.useRealTimers();
       await session.destroy({ preserveStatus: true });
       await repo.destroy();
     }

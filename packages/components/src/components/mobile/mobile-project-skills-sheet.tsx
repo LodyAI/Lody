@@ -35,6 +35,7 @@ import {
   SkillVersionBadge,
 } from '@/components/settings/skill-badges';
 import { cn } from '@/lib/utils';
+import { useFoldAwareSheetHeight } from './use-vertical-division';
 
 type SelectedSkill = { skill: ProjectSkill; scope: ProjectSkillScope };
 
@@ -66,6 +67,7 @@ export function MobileProjectSkillsSheet({
      rows doesn't kick off a scan/fetch per project until the user asks. */
   const activeSource = open ? source : null;
   const { status, groups, error, stale, fetchedAt, refresh } = useProjectSkills(activeSource);
+  const maxHeight = useFoldAwareSheetHeight(88);
   const title = t('workspace.projects.skills.sheetTitle', 'Skills');
   /* The skill detail drills in as an in-sheet slide-over (not a stacked drawer)
      so the sheet's own close chip stays the single dismiss affordance; the
@@ -81,7 +83,7 @@ export function MobileProjectSkillsSheet({
 
   return (
     <Drawer open={open} onOpenChange={handleOpenChange}>
-      <DrawerContent className={cn('h-auto! max-h-[88dvh]! rounded-t-2xl border-border/60')}>
+      <DrawerContent style={{ maxHeight }} className={cn('h-auto! rounded-t-2xl border-border/60')}>
         <div className="flex max-h-full min-h-0 flex-col">
           <header className="relative flex shrink-0 items-center px-4 pb-2 pt-2">
             {detail ? (

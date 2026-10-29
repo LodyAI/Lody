@@ -1,3 +1,6 @@
+import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
+import { WorkspaceFeatureNotice } from '@/components/workspace-feature-notice';
+import { localMachineIdAtom } from '@/atoms/local-probe';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
@@ -249,7 +252,7 @@ export type MachineProvidersSectionProps = {
 
 /** "Agent Provider" list + add button — shared by the mobile detail pane and the
  *  desktop Agents tab. */
-export function MachineProvidersSection({
+function SupportedMachineProvidersSection({
   machine,
   configs,
   setups = [],
@@ -418,7 +421,7 @@ export type MachineDetailPaneProps = {
   };
 };
 
-export function MachineDetailPane(props: MachineDetailPaneProps) {
+function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
   const {
     machine,
     mode = 'agents',
@@ -454,6 +457,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
     accordion,
   } = props;
   const { t } = useTranslation();
+  const ordinarySharing = useWorkspaceFeature('sharing');
   const isMobile = useIsMobile();
   const monitoredOnline = useMachineOnlineStatus(machine.id) === 'online';
   // The accordion list already owns the workspace-wide presence snapshot. Reuse
@@ -499,7 +503,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
 
   const manageableOwnMachine = isOwn && !readOnly;
   const shareControlVisible =
-    !isMobile && !renaming && manageableOwnMachine && !!onSharedWithTeamChange;
+    !isMobile && !renaming && manageableOwnMachine && ordinarySharing && !!onSharedWithTeamChange;
   const restartVisible = !isMobile && !renaming && !readOnly && !!onRestartDaemon;
   const revokeVisible =
     !isMobile && !renaming && !readOnly && canRevokeCredentials && !!onRevokeCredentials;
@@ -796,28 +800,31 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                         {t('workspace.machines.editName', 'Edit machine name')}
                       </Menu.Item>
                     )}
-                    {isMobile && manageableOwnMachine && onSharedWithTeamChange && (
-                      <Menu.Item
-                        closeOnClick={false}
-                        onClick={() => {
-                          if (sharing) return;
-                          void handleSharedToggle(!effectiveShared);
-                        }}
-                        disabled={sharing}
-                        icon={Users}
-                        endContent={
-                          <Switch
-                            checked={effectiveShared}
-                            disabled={sharing}
-                            aria-hidden
-                            tabIndex={-1}
-                            className={stylex.props(styles.switchInMenu).className}
-                          />
-                        }
-                      >
-                        {t('workspace.machines.shareMachineLabel', 'Share machine')}
-                      </Menu.Item>
-                    )}
+                    {isMobile &&
+                      manageableOwnMachine &&
+                      ordinarySharing &&
+                      onSharedWithTeamChange && (
+                        <Menu.Item
+                          closeOnClick={false}
+                          onClick={() => {
+                            if (sharing) return;
+                            void handleSharedToggle(!effectiveShared);
+                          }}
+                          disabled={sharing}
+                          icon={Users}
+                          endContent={
+                            <Switch
+                              checked={effectiveShared}
+                              disabled={sharing}
+                              aria-hidden
+                              tabIndex={-1}
+                              className={stylex.props(styles.switchInMenu).className}
+                            />
+                          }
+                        >
+                          {t('workspace.machines.shareMachineLabel', 'Share machine')}
+                        </Menu.Item>
+                      )}
                     {isMobile &&
                       isOwn &&
                       (onPing || (updateVisible && daemonUpdate) || onRestartDaemon) && (
@@ -1165,5 +1172,24 @@ function AvailableProviders({
         ))}
       </div>
     </section>
+  );
+}
+
+export function MachineProvidersSection(props: MachineProvidersSectionProps) {
+  const allowed = useWorkspaceFeature('rpc');
+  const localMachineId = useAtomValue(localMachineIdAtom);
+  return allowed || props.machine.id === localMachineId ? (
+    <SupportedMachineProvidersSection {...props} />
+  ) : (
+    <WorkspaceFeatureNotice feature="rpc" />
+  );
+}
+
+export function MachineDetailPane(props: MachineDetailPaneProps) {
+  const allowed = useWorkspaceFeature('rpc');
+  return allowed || props.isLocal ? (
+    <SupportedMachineDetailPane {...props} />
+  ) : (
+    <WorkspaceFeatureNotice feature="rpc" />
   );
 }

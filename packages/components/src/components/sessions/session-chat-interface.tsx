@@ -1,3 +1,10 @@
+import { useHorizontalFoldLayout } from '../mobile/use-horizontal-fold-layout';
+import { WorkspaceFeatureReasonText } from '@/components/workspace-feature-notice';
+import {
+  useWorkspaceFeature,
+  useWorkspaceFeatureReason,
+  useMachineRpcFeatureReason,
+} from '@/hooks/use-workspace-feature';
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
 import type { DocumentSelection } from '@/lib/document-selection';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
@@ -8,6 +15,8 @@ import {
   type SessionAttachmentDraft,
 } from '@/lib/session-attachment-draft';
 import { useSchedules } from '@/hooks/use-schedules';
+import { ScheduledMessageTimeDialog } from '../schedules/scheduled-message-time';
+import { saveScheduledMessage } from '../schedules/scheduled-message-write';
 import { windowPreparationAtom } from '@/lib/window-preparation';
 import { conversationCopyRange } from '@/lib/conversation-copy-range';
 import { describeCopiedConversation } from '@/lib/describe-copied-conversation';
@@ -84,6 +93,7 @@ import {
 import { useSessionMcpSelection } from '@/hooks/use-session-mcp-selection';
 import {
   MessageQueueDisplay,
+  type ScheduledQueueItem,
   shouldRequestNativeQueueSteer,
   useHasPendingQueueRecords,
 } from './message-queue';
@@ -119,8 +129,8 @@ import {
   evaluateBillingQuota,
   FREE_SESSION_TURN_LIMIT,
   FREE_SESSION_TURN_WARNING_REMAINING,
-  getAcpCapabilityCacheEntryAuthority,
   getAcpCapabilityCacheKey,
+  getDeviceTimeZone,
   getMachineFlockLocalProjects,
   getProjectRefBranch,
   getSessionPullRequestLegacyFields,
@@ -141,7 +151,9 @@ import {
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
   decodeProjectPreparationProgress,
+  ScheduleRepository,
   type McpServerId,
+  type ScheduleDocument,
 } from '@lody/shared';
 import { useIsMobile } from '../../hooks/use-mobile';
 import { useStableCallback } from '@/hooks/use-stable-callback';
@@ -1319,7 +1331,7 @@ export function SessionHeaderMenu({
   onShareWithTeam,
   onShareAsImage,
   onOpenSearch,
-  onFork,
+  onFork: requestedFork,
   isForking = false,
   forkWorktreeAvailability = 'hidden',
   onForkMenuOpen,
@@ -1370,6 +1382,11 @@ export function SessionHeaderMenu({
   };
   t: SessionSharingTranslator;
 }) {
+  const rpcReason = useMachineRpcFeatureReason(session.machineId);
+  const onFork = rpcReason ? undefined : requestedFork;
+  const exportReason = useWorkspaceFeatureReason('export');
+  const sharingReason = useWorkspaceFeatureReason('sharing');
+  const previewReason = useWorkspaceFeatureReason('remote-preview');
   const isArchived = !!session.isArchived;
   const project = session.project as
     | { kind: 'github'; repoFullName?: string; branch?: string }
@@ -1706,7 +1723,7 @@ export function SessionHeaderMenu({
 
           {openInIdeMenu}
 
-          {onOpenPublicShare && (
+          {onOpenPublicShare && !sharingReason && (
             <Menu.Item icon={Share2} onClick={onOpenPublicShare}>
               {t('sharing.manager.title', 'Share')}
             </Menu.Item>
@@ -1723,7 +1740,7 @@ export function SessionHeaderMenu({
             </Menu.Item>
           )}
 
-          {onFork || onCopyConversationHistory ? (
+          {onFork || (onCopyConversationHistory && !exportReason) ? (
             <Menu.Submenu>
               <Menu.SubmenuTrigger
                 icon={isForking ? <Spinner size="small" label={null} /> : GitFork}
@@ -1774,7 +1791,7 @@ export function SessionHeaderMenu({
                       </SessionForkOptionTooltip>
                     );
                   })}
-                {onCopyConversationHistory && (
+                {onCopyConversationHistory && !exportReason && (
                   <Menu.Item
                     icon={Copy}
                     onClick={() => {
@@ -1845,7 +1862,7 @@ export function SessionHeaderMenu({
           {/* Copy URL stays in the Copy submenu even for private sessions (the
               link still works for the owner); sharing is a separate action that
               only appears while the conversation isn't team-visible. */}
-          {sharing && sharing.visibility !== 'team' ? (
+          {sharing && !sharingReason && sharing.visibility !== 'team' ? (
             <Menu.Item
               disabled={shareActionDisabled}
               onClick={() => {
@@ -1916,14 +1933,15 @@ export function SessionHeaderMenu({
                 onClick={() => {
                   void onCopyConversationHistory?.();
                 }}
-                disabled={!onCopyConversationHistory}
+                disabled={!!exportReason || !onCopyConversationHistory}
                 title={
-                  onCopyConversationHistory
+                  exportReason ??
+                  (onCopyConversationHistory
                     ? undefined
                     : t(
                         'sessions.copyConversationHistoryUnavailable',
                         'Conversation history is unavailable for this tab'
-                      )
+                      ))
                 }
                 icon={Copy}
               >
@@ -1941,14 +1959,35 @@ export function SessionHeaderMenu({
           </Menu.Submenu>
 
           <Menu.Item
-            disabled={!onShareAsImage}
+            disabled={!!exportReason || !onShareAsImage}
+            title={exportReason}
             onClick={() => {
               onShareAsImage?.();
             }}
             icon={Image}
           >
-            {t('sessions.shareAsImage', 'Share as image…')}
+            {exportReason ? (
+              <WorkspaceFeatureReasonText reason={exportReason} />
+            ) : (
+              t('sessions.shareAsImage', 'Share as image…')
+            )}
           </Menu.Item>
+
+          {rpcReason ? (
+            <Menu.Item disabled>
+              <WorkspaceFeatureReasonText reason={rpcReason} />
+            </Menu.Item>
+          ) : null}
+          {sharingReason ? (
+            <Menu.Item disabled icon={Share2}>
+              <WorkspaceFeatureReasonText reason={sharingReason} />
+            </Menu.Item>
+          ) : null}
+          {previewReason ? (
+            <Menu.Item disabled>
+              <WorkspaceFeatureReasonText reason={previewReason} />
+            </Menu.Item>
+          ) : null}
 
           {/* Archive / Restore + Delete */}
           {isArchived
@@ -2465,7 +2504,9 @@ export const SessionChatInterface = memo(
     const postHog = usePostHog();
     const localeObj = i18n.language?.startsWith('zh') ? zhCN : enUS;
     const workspaceId = useAtomValue(currentWorkspaceIdAtom);
-    const publicSharingAvailable = useAppCapability('teamSharing');
+    const rpcReason = useMachineRpcFeatureReason(session.machineId);
+    const sharingAllowed = useWorkspaceFeature('sharing');
+    const publicSharingAvailable = useAppCapability('teamSharing') && sharingAllowed;
     // One owner for the static-share editor, because both the header control
     // and the "…" menu open the same one.
     const publicShareWorkspaceId = publicSharingAvailable && workspaceId ? workspaceId : undefined;
@@ -2695,10 +2736,8 @@ export const SessionChatInterface = memo(
     const steerCapability = session.agentConfigId
       ? sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)]
       : undefined;
-    const nativeSteerAvailable = shouldRequestNativeQueueSteer(
-      capabilityAuthority,
-      steerCapability
-    );
+    const nativeSteerAvailable =
+      !rpcReason && shouldRequestNativeQueueSteer(capabilityAuthority, steerCapability);
     const { selectedModeId, selectedModelId, configOptionValues } =
       useResolvedAcpSessionConfigSelection(sessionConfigSelection, selectorOptions, {
         cliType: session.cliType,
@@ -2962,6 +3001,12 @@ export const SessionChatInterface = memo(
     const inputAreaRef = useRef<SessionChatInputAreaHandle>(null);
     const searchInputRef = useRef<HTMLInputElement>(null);
     const messageAreaRef = useRef<HTMLDivElement>(null);
+    const [foldMessageArea, setFoldMessageArea] = useState<HTMLDivElement | null>(null);
+    const setMessageArea = useCallback((node: HTMLDivElement | null) => {
+      messageAreaRef.current = node;
+      setFoldMessageArea(node);
+    }, []);
+    const horizontalFold = useHorizontalFoldLayout(foldMessageArea, isMobile);
     const [outlineOverlayRoot, setOutlineOverlayRoot] = useState<HTMLDivElement | null>(null);
     const suppressStickyAutoScrollRef = useRef(false);
     const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -3144,15 +3189,23 @@ export const SessionChatInterface = memo(
 
     // Session status strip above the composer: one priority-ordered slot for
     // "will my message run?" (self offline > machine removed > machine offline).
+    const presenceAvailable = useWorkspaceFeature('presence');
     const statusStripState = useMemo(
       () =>
         resolveSessionStatusStripState({
           browserOnline,
+          presenceAvailable,
           machineRemoved: isMachineRemoved,
           machineOnlineStatus: sessionMachineOnlineStatus,
           machineName: sessionMachine?.name ?? null,
         }),
-      [browserOnline, isMachineRemoved, sessionMachineOnlineStatus, sessionMachine?.name]
+      [
+        browserOnline,
+        presenceAvailable,
+        isMachineRemoved,
+        sessionMachineOnlineStatus,
+        sessionMachine?.name,
+      ]
     );
 
     // Keyboard cyclers (⇧Tab mode + rebindable model / thinking). The agent provider is
@@ -3354,7 +3407,10 @@ export const SessionChatInterface = memo(
     const goalCapability = session.agentConfigId
       ? sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)]
       : undefined;
-    const goalCommands = useMemo(() => getSessionGoalCommands(goalCapability), [goalCapability]);
+    const goalCommands = useMemo(
+      () => (rpcReason ? [] : getSessionGoalCommands(goalCapability)),
+      [rpcReason, goalCapability]
+    );
     const canPauseGoal = goalCommands.includes('pause');
 
     useEffect(() => {
@@ -3572,6 +3628,7 @@ export const SessionChatInterface = memo(
     ]);
     const editableLastUserMessageId = useMemo(() => {
       if (
+        rpcReason ||
         session.isArchived ||
         isGoalActive ||
         session.cliType !== 'builtin' ||
@@ -3605,8 +3662,7 @@ export const SessionChatInterface = memo(
         if (entry.finished !== true || !entry.acpTurnId || !session.agentConfigId) return null;
         const capability =
           sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)];
-        return getAcpCapabilityCacheEntryAuthority(capability, undefined) === 'authoritative' &&
-          capability?.sessionFork === true
+        return capabilityAuthority === 'authoritative' && capability?.sessionFork === true
           ? userMessage.id
           : null;
       }
@@ -3614,6 +3670,8 @@ export const SessionChatInterface = memo(
       // The first user message uses session/new and therefore has no fork boundary.
       return userMessage.id;
     }, [
+      capabilityAuthority,
+      rpcReason,
       isGoalActive,
       session.agentConfigId,
       session.agentType,
@@ -4165,8 +4223,6 @@ export const SessionChatInterface = memo(
       peekStore: peekSessionStore,
     });
     const canStopAgent = canStopAgentEnabled({
-      isContextCompacting,
-      isSessionActive,
       activeAssistantTurnId: activeAssistantTurnId ?? null,
       isGoalActive,
       canPauseGoal,
@@ -5439,6 +5495,136 @@ export const SessionChatInterface = memo(
     const router = useRouter();
     const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
     const scheduleRegistry = useSchedules();
+    const scheduledQueueItems = useMemo<ScheduledQueueItem[]>(() => {
+      const runtimeFor = (row: (typeof scheduleRegistry.rows)[number]) =>
+        scheduleRegistry.runtimes.find(
+          (candidate) =>
+            candidate.scheduleId === row.scheduleId &&
+            candidate.machineId === row.machineId &&
+            candidate.activationId === row.activationId &&
+            candidate.observedDefinitionFingerprint === row.definitionFingerprint
+        );
+      const timeZone = getDeviceTimeZone(sessionMachine?.timeZone);
+      return scheduleRegistry.rows
+        .filter(
+          (row) =>
+            row.scheduledMessage &&
+            row.enabled &&
+            row.ownerId === currentUser?.id &&
+            row.destination.kind === 'existing_session' &&
+            row.destination.sessionId === session.id &&
+            row.trigger.kind === 'once'
+        )
+        .map((row) => ({ row, scheduledRuntime: runtimeFor(row) }))
+        .filter(
+          ({ scheduledRuntime }) =>
+            !['sent', 'cancelled'].includes(scheduledRuntime?.messageState ?? '')
+        )
+        .map(({ row, scheduledRuntime }) => ({
+          scheduleId: row.scheduleId,
+          title: row.title,
+          at: Date.parse(row.trigger.kind === 'once' ? row.trigger.at : ''),
+          timeZone,
+          state:
+            scheduledRuntime?.messageState === 'failed'
+              ? ('failed' as const)
+              : ('pending' as const),
+        }))
+        .filter((item) => Number.isFinite(item.at))
+        .sort((a, b) => a.at - b.at);
+    }, [
+      currentUser?.id,
+      scheduleRegistry.rows,
+      scheduleRegistry.runtimes,
+      session.id,
+      sessionMachine?.timeZone,
+    ]);
+
+    const [scheduledTimeEdit, setScheduledTimeEdit] = useState<{
+      item: ScheduledQueueItem;
+      document: ScheduleDocument;
+    } | null>(null);
+
+    useEffect(() => {
+      setScheduledTimeEdit(null);
+    }, [session.id]);
+
+    const openScheduledTimeEditor = useCallback(
+      async (item: ScheduledQueueItem) => {
+        if (!runtime || !currentUser) return;
+        try {
+          const document = await new ScheduleRepository(runtime.repo, runtime.workspaceId, {
+            protectedContent: runtime.contentMode === 'e2ee',
+          }).read(item.scheduleId);
+          if (!document?.message) throw new Error('Scheduled message unavailable');
+          setScheduledTimeEdit({ item, document });
+        } catch {
+          if (!workspaceSlug) return;
+          void router.navigate({
+            to: '/$workspaceName/schedules/$scheduleId',
+            params: { workspaceName: workspaceSlug, scheduleId: item.scheduleId },
+          });
+        }
+      },
+      [currentUser, router, runtime, workspaceSlug]
+    );
+
+    const applyScheduledTime = useCallback(
+      async (at: string) => {
+        if (!scheduledTimeEdit || !runtime || !currentUser) return;
+        const { document, item } = scheduledTimeEdit;
+        setScheduledTimeEdit(null);
+        const definition = document.definition;
+        try {
+          await saveScheduledMessage({
+            runtime,
+            actorId: currentUser.id,
+            scheduleId: item.scheduleId,
+            activationId: uuidv4(),
+            activityId: uuidv4(),
+            create: false,
+            draft: {
+              title: definition.title,
+              machineId: definition.machineId,
+              agent: definition.agent,
+              destination: definition.destination,
+              misfirePolicy: definition.misfirePolicy,
+              overlapPolicy: definition.overlapPolicy,
+              retryPolicy: definition.retryPolicy,
+              prompt: document.prompt,
+              ...(document.message ? { message: document.message } : {}),
+              trigger: { kind: 'once', at },
+            },
+          });
+        } catch {
+          toast.error(t('scheduledMessage.saveError'));
+        }
+      },
+      [currentUser, runtime, scheduledTimeEdit, t]
+    );
+
+    const cancelScheduledMessage = useCallback(
+      async (item: ScheduledQueueItem) => {
+        if (!runtime || !currentUser) return;
+        try {
+          await runtime.withScheduleStore(item.scheduleId, () =>
+            new ScheduleRepository(runtime.repo, runtime.workspaceId, {
+              protectedContent: runtime.contentMode === 'e2ee',
+            }).setEnabled({
+              scheduleId: item.scheduleId,
+              actorId: currentUser.id,
+              enabled: false,
+              now: getServerNow(),
+              activationId: uuidv4(),
+              requestId: uuidv4(),
+            })
+          );
+        } catch {
+          toast.error(t('scheduledMessage.saveError'));
+        }
+      },
+      [currentUser, runtime, t]
+    );
 
     // Presentation-only "opened by" provenance (MCP `lody_session_create`).
     // Read from the already-loaded session meta cache, so it costs no extra
@@ -6957,7 +7143,13 @@ export const SessionChatInterface = memo(
                 <SessionSearchProvider value={searchContextValue}>
                   <SessionPinContext.Provider value={pinContextValue}>
                     {/* Message area */}
-                    <div ref={messageAreaRef} {...stylex.props(styles.messageArea)}>
+                    <div
+                      ref={setMessageArea}
+                      {...stylex.props(styles.messageArea)}
+                      style={
+                        horizontalFold ? { maxHeight: horizontalFold.messageHeight } : undefined
+                      }
+                    >
                       {isSearchOpen ? (
                         <SessionSearchBar
                           query={searchQuery}
@@ -7033,253 +7225,312 @@ export const SessionChatInterface = memo(
                       </ErrorBoundary>
                     </div>
 
-                    {/* Requests and their editor must survive virtual row eviction. */}
-                    {workspaceId && (
-                      <div {...stylex.props(styles.shareRequestsScroller)}>
-                        <ConversationColumn {...stylex.props(styles.shareRequestsColumn)}>
-                          <SessionShareRequestCards
-                            workspaceId={workspaceId}
-                            session={session}
-                            isVisible={isVisible}
-                          />
-                        </ConversationColumn>
-                      </div>
-                    )}
+                    <div
+                      data-horizontal-fold-lower
+                      style={
+                        horizontalFold
+                          ? {
+                              position: 'absolute',
+                              left: 0,
+                              right: 0,
+                              bottom: 0,
+                              top: horizontalFold.lowerTop,
+                              display: 'flex',
+                              flexDirection: 'column',
+                              justifyContent: 'flex-end',
+                              minHeight: 0,
+                            }
+                          : { display: 'contents' }
+                      }
+                    >
+                      {/* Requests and their editor must survive virtual row eviction. */}
+                      {workspaceId && (
+                        <div {...stylex.props(styles.shareRequestsScroller)}>
+                          <ConversationColumn {...stylex.props(styles.shareRequestsColumn)}>
+                            <SessionShareRequestCards
+                              workspaceId={workspaceId}
+                              session={session}
+                              isVisible={isVisible}
+                            />
+                          </ConversationColumn>
+                        </div>
+                      )}
 
-                    {/* The one place a pending permission request is answered; it stands in for the composer. */}
-                    <FloatingPermissionRequest
-                      sessionId={session.id}
-                      sessionStatus={liveSessionStatus ?? undefined}
-                      sessionHistory={permissionSessionHistory}
-                      onStop={() => {
-                        void handleStop();
-                      }}
-                    />
+                      {/* The one place a pending permission request is answered; it stands in for the composer. */}
+                      <FloatingPermissionRequest
+                        liftAboveKeyboard={isMobile}
+                        sessionId={session.id}
+                        sessionStatus={liveSessionStatus ?? undefined}
+                        sessionHistory={permissionSessionHistory}
+                        onStop={() => {
+                          void handleStop();
+                        }}
+                      />
 
-                    {/* Notification permission prompt - shown when session becomes idle (turn completed) */}
-                    {/* TODO(analytics): session/notification_prompt_shown|_permission_granted|_permission_denied.
+                      {/* Notification permission prompt - shown when session becomes idle (turn completed) */}
+                      {/* TODO(analytics): session/notification_prompt_shown|_permission_granted|_permission_denied.
                       Visibility + enable/dismiss live inside NotificationPermissionPrompt (owned elsewhere)
                       and the actual grant/deny resolves on the settings page, so these must be emitted from
                       that component via onShown/onEnableClicked/onDismissed callbacks (see crossFileNeeds). */}
-                    <NotificationPermissionPrompt
-                      sessionCompleted={session.status?.type === 'idle' && !isSessionWorking}
-                    />
+                      <NotificationPermissionPrompt
+                        sessionCompleted={session.status?.type === 'idle' && !isSessionWorking}
+                      />
 
-                    {/* Session info bar (desktop AND mobile): the canonical
+                      {/* Session info bar (desktop AND mobile): the canonical
                       cluster + fixed stage row merging status, goal, schedule,
                       and work context, glued to the composer shell. It
                       replaced the mobile status strip / goal banner /
                       in-composer scheduled panel. */}
-                    <SessionInfoBar
-                      status={statusStripState}
-                      machine={
-                        sessionMachine
-                          ? {
-                              machineId: session.machineId,
-                              name: sessionMachine.name,
-                              ownerName: workspaceMembers.find(
-                                (member) => member.userId === sessionMachine.ownerUserId
-                              )?.name,
-                              isOwn:
-                                !!currentUser?.id && sessionMachine.ownerUserId === currentUser.id,
-                              isCurrent: localMachineId ? isLocalSession : undefined,
-                              onlineStatus: sessionMachineOnlineStatus,
-                            }
-                          : null
-                      }
-                      compactMachineInfo={isMobile}
-                      goal={latestGoal}
-                      goalCommands={goalCommands}
-                      goalPendingCommand={
-                        pendingGoalCommand && pendingGoalCommand.threadId === latestGoal?.threadId
-                          ? pendingGoalCommand.command
-                          : null
-                      }
-                      onGoalCommand={handleGoalCardCommand}
-                      onGoalDismiss={handleDismissGoalBanner}
-                      scheduleSource={
-                        session.scheduleId
-                          ? {
-                              title:
-                                scheduleRegistry.rows.find(
-                                  (row) => row.scheduleId === session.scheduleId
-                                )?.title ?? t('schedules.source', 'Scheduled task'),
-                              onOpen: () => {
-                                if (workspaceSlug && session.scheduleId)
-                                  void router.navigate({
-                                    to: '/$workspaceName/schedules/$scheduleId',
-                                    params: {
-                                      workspaceName: workspaceSlug,
-                                      scheduleId: session.scheduleId,
-                                    },
-                                  });
-                              },
-                            }
-                          : null
-                      }
-                      scheduledTasks={pendingScheduledTasks}
-                      prCiRuns={infoBarPrCiRuns}
-                      onOpenPrCiRun={handleOpenPrCiRun}
-                      prCiState={latestPrState?.s}
-                      projectName={infoBarProjectName}
-                      branch={isMobile ? null : infoBarBranch}
-                      workspaceLocation={infoBarWorkspaceLocation}
-                      pr={canShowGitHubActions ? effectiveLatestPr : null}
-                      onOpenPr={prLinkHandler}
-                      contextActions={infoBarContextActions}
-                      onOpenAllChanges={onOpenAllChanges}
-                      // Opener + every Session/Tab created here: the in-stream
-                      // creation cards scroll away with the conversation.
-                      projectMembers={
-                        sessionProjectRun && projectMemberRows.length > 0 ? (
-                          <SessionProjectMembersChip
-                            groupName={sessionProjectRun.name}
-                            rows={projectMemberRows}
-                            selectedMemberId={selectedProjectMemberRow?.id}
-                            onSelectMember={setSelectedProjectMemberId}
-                            onOpenPullRequest={(url) => {
-                              void openExternalUrl(url);
-                            }}
-                          />
-                        ) : undefined
-                      }
-                      relations={
-                        hasSessionRelations ? (
-                          <CurrentSessionRelationsChip
-                            sessionId={session.id}
-                            onOpenSession={handleOpenRelatedSession}
-                          />
-                        ) : undefined
-                      }
-                      onOpenBrowser={browserActionAvailable ? handleOpenBrowser : undefined}
-                      onOpenIosSimulator={
-                        session.iosSimulatorPreviewRequestId ? onOpenIosSimulator : undefined
-                      }
-                      privateAccessStatus={
-                        isMobile && sharing?.visibility === 'private'
-                          ? {
-                              label: t('sharing.privateOnlyYou', 'Private · Only you'),
-                              description: getSessionSharingDescription(t, sharing),
-                              onAction:
-                                sharing.canManage && onShareWithTeam
-                                  ? () => {
-                                      void onShareWithTeam();
-                                    }
-                                  : undefined,
-                            }
-                          : undefined
-                      }
-                      diffStat={infoBarDiffStat}
-                      // Desktop only: mobile already shows catch-up in its header.
-                      syncStatus={
-                        isMobile
-                          ? null
-                          : contentSyncState === 'catching-up'
-                            ? 'updating'
-                            : effectiveTitleSyncing
-                              ? 'syncing'
-                              : null
-                      }
-                      // Mobile keeps the bar above the session drawer's z-30
-                      // edge-back strip so its leading chip stays tappable.
-                      protectFromEdgeBackZone={isMobile}
-                      // Queued turns stack on the bar (or on the composer when the
-                      // bar is empty). Hidden with the composer: a pending
-                      // permission bypasses the queue, as does share selection.
-                      queue={
-                        (messageQueue.length > 0 || hasPendingQueueRecords) &&
-                        !shouldReplaceComposerWithPermission &&
-                        !shareSelection.active ? (
-                          <MessageQueueDisplay
-                            sessionId={session.id}
-                            items={messageQueue}
-                            onRemove={handleRemoveQueueItem}
-                            onReorder={handleReorderQueueItem}
-                            onEditStart={handleStartQueueItemEdit}
-                            onEditCancel={handleCancelQueueItemEdit}
-                            onEditSave={handleSaveQueueItemEdit}
-                            onSteer={handleSteerQueuedMessage}
-                            showSteerAction={
-                              isSessionActive &&
-                              !!activeAssistantTurnId &&
-                              !isExternalHistoryRefreshing
-                            }
-                            nativeSteerAvailable={nativeSteerAvailable}
-                          />
-                        ) : undefined
-                      }
-                    />
+                      <SessionInfoBar
+                        status={statusStripState}
+                        machine={
+                          sessionMachine
+                            ? {
+                                machineId: session.machineId,
+                                name: sessionMachine.name,
+                                ownerName: workspaceMembers.find(
+                                  (member) => member.userId === sessionMachine.ownerUserId
+                                )?.name,
+                                isOwn:
+                                  !!currentUser?.id &&
+                                  sessionMachine.ownerUserId === currentUser.id,
+                                isCurrent: localMachineId ? isLocalSession : undefined,
+                                onlineStatus: sessionMachineOnlineStatus,
+                              }
+                            : null
+                        }
+                        compactMachineInfo={isMobile}
+                        goal={latestGoal}
+                        goalCommands={goalCommands}
+                        goalPendingCommand={
+                          pendingGoalCommand && pendingGoalCommand.threadId === latestGoal?.threadId
+                            ? pendingGoalCommand.command
+                            : null
+                        }
+                        onGoalCommand={handleGoalCardCommand}
+                        onGoalDismiss={handleDismissGoalBanner}
+                        scheduleSource={
+                          session.scheduleId
+                            ? {
+                                title:
+                                  scheduleRegistry.rows.find(
+                                    (row) => row.scheduleId === session.scheduleId
+                                  )?.title ?? t('schedules.source', 'Scheduled task'),
+                                onOpen: () => {
+                                  if (workspaceSlug && session.scheduleId)
+                                    void router.navigate({
+                                      to: '/$workspaceName/schedules/$scheduleId',
+                                      params: {
+                                        workspaceName: workspaceSlug,
+                                        scheduleId: session.scheduleId,
+                                      },
+                                    });
+                                },
+                              }
+                            : null
+                        }
+                        scheduledTasks={pendingScheduledTasks}
+                        prCiRuns={infoBarPrCiRuns}
+                        onOpenPrCiRun={handleOpenPrCiRun}
+                        prCiState={latestPrState?.s}
+                        projectName={infoBarProjectName}
+                        branch={isMobile ? null : infoBarBranch}
+                        workspaceLocation={infoBarWorkspaceLocation}
+                        pr={canShowGitHubActions ? effectiveLatestPr : null}
+                        onOpenPr={prLinkHandler}
+                        contextActions={infoBarContextActions}
+                        onOpenAllChanges={onOpenAllChanges}
+                        // Opener + every Session/Tab created here: the in-stream
+                        // creation cards scroll away with the conversation.
+                        projectMembers={
+                          sessionProjectRun && projectMemberRows.length > 0 ? (
+                            <SessionProjectMembersChip
+                              groupName={sessionProjectRun.name}
+                              rows={projectMemberRows}
+                              selectedMemberId={selectedProjectMemberRow?.id}
+                              onSelectMember={setSelectedProjectMemberId}
+                              onOpenPullRequest={(url) => {
+                                void openExternalUrl(url);
+                              }}
+                            />
+                          ) : undefined
+                        }
+                        relations={
+                          hasSessionRelations ? (
+                            <CurrentSessionRelationsChip
+                              sessionId={session.id}
+                              onOpenSession={handleOpenRelatedSession}
+                            />
+                          ) : undefined
+                        }
+                        onOpenBrowser={browserActionAvailable ? handleOpenBrowser : undefined}
+                        onOpenIosSimulator={
+                          session.iosSimulatorPreviewRequestId ? onOpenIosSimulator : undefined
+                        }
+                        privateAccessStatus={
+                          isMobile && sharing?.visibility === 'private'
+                            ? {
+                                label: t('sharing.privateOnlyYou', 'Private · Only you'),
+                                description: getSessionSharingDescription(t, sharing),
+                                onAction:
+                                  sharing.canManage && onShareWithTeam
+                                    ? () => {
+                                        void onShareWithTeam();
+                                      }
+                                    : undefined,
+                              }
+                            : undefined
+                        }
+                        diffStat={infoBarDiffStat}
+                        // Desktop only: mobile already shows catch-up in its header.
+                        syncStatus={
+                          isMobile
+                            ? null
+                            : contentSyncState === 'catching-up'
+                              ? 'updating'
+                              : effectiveTitleSyncing
+                                ? 'syncing'
+                                : null
+                        }
+                        // Mobile keeps the bar above the session drawer's z-30
+                        // edge-back strip so its leading chip stays tappable.
+                        protectFromEdgeBackZone={isMobile}
+                        // Queued turns stack on the bar (or on the composer when the
+                        // bar is empty). Hidden with the composer: a pending
+                        // permission bypasses the queue, as does share selection.
+                        queue={
+                          (messageQueue.length > 0 ||
+                            hasPendingQueueRecords ||
+                            scheduledQueueItems.length > 0) &&
+                          !shouldReplaceComposerWithPermission &&
+                          !shareSelection.active ? (
+                            <MessageQueueDisplay
+                              sessionId={session.id}
+                              items={messageQueue}
+                              scheduledItems={scheduledQueueItems}
+                              onOpenScheduled={(item) => {
+                                if (!workspaceSlug) return;
+                                void router.navigate({
+                                  to: '/$workspaceName/schedules/$scheduleId',
+                                  params: {
+                                    workspaceName: workspaceSlug,
+                                    scheduleId: item.scheduleId,
+                                  },
+                                });
+                              }}
+                              onEditScheduledTime={(item) => {
+                                void openScheduledTimeEditor(item);
+                              }}
+                              onCancelScheduled={(item) => {
+                                void cancelScheduledMessage(item);
+                              }}
+                              onRemove={handleRemoveQueueItem}
+                              onReorder={handleReorderQueueItem}
+                              onEditStart={handleStartQueueItemEdit}
+                              onEditCancel={handleCancelQueueItemEdit}
+                              onEditSave={handleSaveQueueItemEdit}
+                              onSteer={handleSteerQueuedMessage}
+                              showSteerAction={
+                                isSessionActive &&
+                                !!activeAssistantTurnId &&
+                                !isExternalHistoryRefreshing
+                              }
+                              nativeSteerAvailable={nativeSteerAvailable}
+                              roomy={isMobile}
+                              footerPosition={isMobile ? 'inline' : 'below'}
+                            />
+                          ) : undefined
+                        }
+                      />
 
-                    {/* Input area - isolated component to prevent full re-renders on typing.
+                      {/* Input area - isolated component to prevent full re-renders on typing.
                       Hidden while a permission is pending so the response buttons claim
                       the bottom surface; chat queue is bypassed for the same reason. */}
-                    <MessageSelectionToolbar selection={shareSelection} />
-                    <div
-                      {...stylex.props(
-                        styles.composerContents,
-                        shareSelection.active && styles.composerHidden
-                      )}
-                    >
-                      {shouldReplaceComposerWithPermission ? null : (
-                        <SessionChatInputArea
-                          isVisible={isVisible && !shareSelection.active}
-                          claimNavigationFocus={
-                            isVisible && !preparingWindow ? claimNavigationFocus : undefined
+                      {scheduledTimeEdit ? (
+                        <ScheduledMessageTimeDialog
+                          at={
+                            scheduledTimeEdit.document.definition.trigger.kind === 'once'
+                              ? scheduledTimeEdit.document.definition.trigger.at
+                              : null
                           }
-                          ref={inputAreaRef}
-                          session={session}
-                          sessionLocalProjectRootPath={resolvedLocalProjectMeta?.rootPath ?? null}
-                          isMachineRemoved={isMachineRemoved}
-                          isAgentBusy={isAgentBusy}
-                          canStopAgent={canStopAgent}
-                          isExternalHistoryRefreshing={isExternalHistoryRefreshing}
-                          externalHistorySyncLabel={externalHistorySyncLabel}
-                          isDark={isDark}
-                          isEmptyConversation={isEmptyConversation}
-                          selectedModeId={selectedModeId}
-                          selectedModelId={selectedModelId}
-                          durableAgentRoleId={sessionConversationConfig.agentRoleId}
-                          durableAgentRoleRevision={sessionConversationConfig.agentRoleRevision}
-                          durableAgentRoleSourceTurnKey={
-                            sessionConversationSourceFence.currentTurnKey
-                          }
-                          durableAgentRoleKnownTurnKeys={
-                            sessionConversationSourceFence.knownTurnKeys
-                          }
-                          durableAgentRoleReady={sessionDocReady || hasPendingConfig}
-                          runConfigHasUserEdits={sessionRunConfigHasUserEdits}
-                          modeOptions={modeOptions}
-                          modelOptions={modelOptions}
-                          rateLimits={sessionRateLimits}
-                          quotaConfig={sessionAgentConfig}
-                          showCodexResetForecast={showCodexResetForecast}
-                          isContextCompacting={isContextCompacting}
-                          configOptionSelectors={configOptionSelectors}
-                          configOptionValues={configOptionValues}
-                          isRepoPublic={isRepoPublic}
-                          availableCommands={availableCommands}
-                          commandsEnabled={isVisible}
-                          freeTurnLimitNotice={freeSessionTurnNotice}
-                          mcp={mcpSelection.menu}
-                          // The info bar above owns this gap (and seats the queue).
-                          hideTopSpacer
-                          onModeChange={handleModeChange}
-                          onModelChange={handleModelChange}
-                          onConfigOptionChange={handleConfigOptionChange}
-                          onSendMessage={handleSendMessage}
-                          onStop={() => {
-                            void handleStop();
+                          timeZone={getDeviceTimeZone(sessionMachine?.timeZone)}
+                          now={getServerNow()}
+                          onClose={() => setScheduledTimeEdit(null)}
+                          onApply={(at) => {
+                            void applyScheduledTime(at);
                           }}
-                          onRemoveQueueItem={handleRemoveQueueItem}
-                          onAgentConfigChange={isChildSession ? handleAgentConfigChange : undefined}
-                          onNavigateToComment={onNavigateToComment}
-                          onCommentReferencesChange={onCommentReferencesChange}
-                          onVisualAnnotationReferencesChange={onVisualAnnotationReferencesChange}
-                          onVisualAnnotationReferencesSubmitted={
-                            onVisualAnnotationReferencesSubmitted
-                          }
                         />
-                      )}
+                      ) : null}
+                      <MessageSelectionToolbar selection={shareSelection} />
+                      <div
+                        {...stylex.props(
+                          styles.composerContents,
+                          shareSelection.active && styles.composerHidden
+                        )}
+                      >
+                        {shouldReplaceComposerWithPermission ? null : (
+                          <SessionChatInputArea
+                            isVisible={isVisible && !shareSelection.active}
+                            claimNavigationFocus={
+                              isVisible && !preparingWindow ? claimNavigationFocus : undefined
+                            }
+                            ref={inputAreaRef}
+                            session={session}
+                            sessionLocalProjectRootPath={resolvedLocalProjectMeta?.rootPath ?? null}
+                            isMachineRemoved={isMachineRemoved}
+                            isAgentBusy={isAgentBusy}
+                            canStopAgent={canStopAgent}
+                            isExternalHistoryRefreshing={isExternalHistoryRefreshing}
+                            externalHistorySyncLabel={externalHistorySyncLabel}
+                            isDark={isDark}
+                            isEmptyConversation={isEmptyConversation}
+                            selectedModeId={selectedModeId}
+                            selectedModelId={selectedModelId}
+                            durableAgentRoleId={sessionConversationConfig.agentRoleId}
+                            durableAgentRoleRevision={sessionConversationConfig.agentRoleRevision}
+                            durableAgentRoleSourceTurnKey={
+                              sessionConversationSourceFence.currentTurnKey
+                            }
+                            durableAgentRoleKnownTurnKeys={
+                              sessionConversationSourceFence.knownTurnKeys
+                            }
+                            durableAgentRoleReady={sessionDocReady || hasPendingConfig}
+                            runConfigHasUserEdits={sessionRunConfigHasUserEdits}
+                            modeOptions={modeOptions}
+                            modelOptions={modelOptions}
+                            rateLimits={sessionRateLimits}
+                            quotaConfig={sessionAgentConfig}
+                            showCodexResetForecast={showCodexResetForecast}
+                            isContextCompacting={isContextCompacting}
+                            configOptionSelectors={configOptionSelectors}
+                            configOptionValues={configOptionValues}
+                            isRepoPublic={isRepoPublic}
+                            availableCommands={availableCommands}
+                            commandsEnabled={isVisible}
+                            freeTurnLimitNotice={freeSessionTurnNotice}
+                            mcp={mcpSelection.menu}
+                            // The info bar above owns this gap (and seats the queue).
+                            hideTopSpacer
+                            onModeChange={handleModeChange}
+                            onModelChange={handleModelChange}
+                            onConfigOptionChange={handleConfigOptionChange}
+                            onSendMessage={handleSendMessage}
+                            onStop={() => {
+                              void handleStop();
+                            }}
+                            onRemoveQueueItem={handleRemoveQueueItem}
+                            onAgentConfigChange={
+                              isChildSession ? handleAgentConfigChange : undefined
+                            }
+                            onNavigateToComment={onNavigateToComment}
+                            onCommentReferencesChange={onCommentReferencesChange}
+                            onVisualAnnotationReferencesChange={onVisualAnnotationReferencesChange}
+                            onVisualAnnotationReferencesSubmitted={
+                              onVisualAnnotationReferencesSubmitted
+                            }
+                          />
+                        )}
+                      </div>
                     </div>
                   </SessionPinContext.Provider>
                 </SessionSearchProvider>

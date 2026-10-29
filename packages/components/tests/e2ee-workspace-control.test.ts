@@ -93,7 +93,7 @@ function historyFixture(commitment = 6) {
     [7, 2, fill(32, 10), fill(72, 11)],
   ]);
   // A genuine Owner capability declaration that this client version cannot verify past.
-  const declaration = signed([hashRecordBytes(second).toBytes(), publicKey, [9, [1]]]);
+  const declaration = signed([hashRecordBytes(second).toBytes(), publicKey, [9, [2]]]);
   const checkpoint = { headHash: bytesToHex(hashRecordBytes(second).toBytes()), length: 2 };
   const firstPage: E2eeWorkspaceHistoryPage = {
     workspaceId: 'workspace-1',
@@ -437,6 +437,10 @@ describe('encrypted workspace recovery classification', () => {
 
   it('separates identity conflicts, rollbacks and invalid server history', () => {
     const fixture = historyFixture();
+    expect(classifyE2eeControlFailure(new Error('e2ee_conflict'))).toEqual({
+      kind: 'identity-conflict',
+      code: 'pin-mismatch',
+    });
     expect(
       failureOf(() =>
         appendLedgerHistory(null, fixture.firstPage, {
@@ -688,6 +692,7 @@ describe('saved creation requests after a server refusal', () => {
     'e2ee_creation_not_enabled',
     'e2ee_creation_deleted',
     'e2ee_genesis_already_bound',
+    'e2ee_account_identity_conflict',
     'workspace_slug_taken',
   ])(
     'removes a request the server proved unreserved (%s) and rethrows the refusal',
@@ -722,19 +727,55 @@ describe('saved creation requests after a server refusal', () => {
 });
 
 it('keeps the prepared credential hash immutable before invoking the cloud creation boundary', async () => {
-  const request = { accountId: 'account', requestId: 'credential-request', name: 'Synthetic', slug: 'synthetic' };
+  const request = {
+    accountId: 'account',
+    requestId: 'credential-request',
+    name: 'Synthetic',
+    slug: 'synthetic',
+  };
   const received: unknown[] = [];
   const port = createCloudE2eeWorkspaces({
-    session: () => ({status: 'authenticated', user: {id:'account',email:'a@example.invalid',name:'A',image:null}}),
-    prepareCreation: async input => ({...input, genesisRecordHex:'ab',genesisHashHex:'12'.repeat(32),deviceCredentialHash:'cc'.repeat(32)}),
-    remote: { create: async input => {received.push(input); throw new Error('synthetic temporary outage')}, describe: async () => {throw new Error('unused')}, history: async () => {throw new Error('unused')} },
+    session: () => ({
+      status: 'authenticated',
+      user: { id: 'account', email: 'a@example.invalid', name: 'A', image: null },
+    }),
+    prepareCreation: async (input) => ({
+      ...input,
+      genesisRecordHex: 'ab',
+      genesisHashHex: '12'.repeat(32),
+      deviceCredentialHash: 'cc'.repeat(32),
+    }),
+    remote: {
+      create: async (input) => {
+        received.push(input);
+        throw new Error('synthetic temporary outage');
+      },
+      describe: async () => {
+        throw new Error('unused');
+      },
+      history: async () => {
+        throw new Error('unused');
+      },
+    },
     refreshWorkspaces: async () => {},
   });
   const prepared = await port.prepareCreation!(request);
-  await expect(port.create({...request,genesisRecordHex:prepared.genesisRecordHex,deviceCredentialHash:'dd'.repeat(32),developerMode:true})).rejects.toThrow('e2ee_preparation_required');
+  await expect(
+    port.create({
+      ...request,
+      genesisRecordHex: prepared.genesisRecordHex,
+      deviceCredentialHash: 'dd'.repeat(32),
+      developerMode: true,
+    })
+  ).rejects.toThrow('e2ee_preparation_required');
   expect(received).toEqual([]);
-  const original = {...request,genesisRecordHex:prepared.genesisRecordHex,deviceCredentialHash:prepared.deviceCredentialHash,developerMode:true as const};
+  const original = {
+    ...request,
+    genesisRecordHex: prepared.genesisRecordHex,
+    deviceCredentialHash: prepared.deviceCredentialHash,
+    developerMode: true as const,
+  };
   await expect(port.create(original)).rejects.toThrow('synthetic temporary outage');
   await expect(port.create(original)).rejects.toThrow('synthetic temporary outage');
-  expect(received).toEqual([original,original]);
+  expect(received).toEqual([original, original]);
 });

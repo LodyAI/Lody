@@ -66,7 +66,8 @@
     "react": "catalog:",
     "react-dom": "catalog:",
     "zod": "catalog:",
-    "@lody/cloud-api": "workspace:*"
+    "@lody/cloud-api": "workspace:*",
+    "@lody/loro-streams-rpc": "workspace:*"
   },
   "devDependencies": {
     "@lody/e2ee-core": "workspace:*",
@@ -84,7 +85,7 @@
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "^5.2.0",
-    "electron": "44.7.0",
+    "electron": "44.9.3",
     "electron-builder": "^26.15.3",
     "electron-vite": "6.0.0-beta.5",
     "eslint": "^9.39.1",
@@ -98,6 +99,7 @@
     "typescript": "^5.9.3",
     "vite": "^7.2.6",
     "vite-plugin-wasm": "^3.6.0",
-    "tsx": "4.23.7"
+    "tsx": "4.23.7",
+    "@lody/e2ee-machine-sharing": "workspace:*"
   }
 }

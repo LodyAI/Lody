@@ -3,7 +3,14 @@ import * as stylex from '@stylexjs/stylex';
 import { KeyRound, Plus, Trash2 } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
-import type { McpConnectionSpec, McpTransport, WorkspaceMcpServerMeta } from '@lody/shared';
+import {
+  publicMcpServer,
+  splitMcpAuthentication,
+  type McpConnectionSpec,
+  type McpLocalAuthentication,
+  type McpTransport,
+  type WorkspaceMcpServerMeta,
+} from '@lody/shared';
 import {
   MCP_TRANSPORT_SHORT_LABELS,
   MCP_TRANSPORTS,
@@ -18,7 +25,7 @@ import { Tabs } from '@lody/ui/tabs';
 import { Switch } from '@lody/ui/switch';
 import { Textarea } from '@lody/ui/textarea';
 import { space } from '@lody/ui/tokens/scales.stylex';
-import { Field, FormMessage, Section } from './form-primitives';
+import { CollapsibleSection, Field, FormMessage, Section } from './form-primitives';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 
 const styles = stylex.create({
@@ -56,6 +63,7 @@ export type McpConnectionFormValue = {
   transport: McpTransport;
   enabledByDefault: boolean;
   connection?: McpConnectionSpec;
+  localAuthentication?: McpLocalAuthentication;
 };
 
 const emptyConnectionFields = (transport: McpTransport) => ({
@@ -70,7 +78,7 @@ const emptyConnectionFields = (transport: McpTransport) => ({
 
 const createMcpConnectionFormDraft = (entry?: WorkspaceMcpServerMeta): McpConnectionFormDraft => {
   const transport = entry?.transport ?? 'stdio';
-  const connection = entry?.connection;
+  const connection = entry ? publicMcpServer(entry).connection : undefined;
   return {
     name: entry?.name ?? '',
     description: entry?.description ?? '',
@@ -134,16 +142,35 @@ const buildHttpConnection = (draft: McpConnectionFormDraft): McpConnectionSpec |
   };
 };
 
-const buildMcpConnectionFormValue = (draft: McpConnectionFormDraft): McpConnectionFormValue => {
+const buildMcpConnectionFormValue = (
+  draft: McpConnectionFormDraft,
+  initialEntry?: WorkspaceMcpServerMeta
+): McpConnectionFormValue => {
   const description = draft.description.trim() || undefined;
   const connection =
     draft.transport === 'stdio' ? buildStdioConnection(draft) : buildHttpConnection(draft);
+  const split = connection ? splitMcpAuthentication(connection) : undefined;
+  const hasLocalValues = Boolean(split && Object.keys(split.authentication).length);
+  const shared = split?.connection;
+  const previous = initialEntry?.connection;
+  const sameDestination =
+    shared?.transport === 'http' && previous?.transport === 'http'
+      ? shared.url === previous.url
+      : shared?.transport === 'stdio' &&
+        previous?.transport === 'stdio' &&
+        shared.command === previous.command &&
+        JSON.stringify(shared.args ?? []) === JSON.stringify(previous.args ?? []);
+  if (shared && previous?.authentication === 'local' && sameDestination)
+    shared.authentication = 'local';
   return {
     name: draft.name.trim(),
     ...(description ? { description } : {}),
     transport: draft.transport,
     enabledByDefault: draft.enabledByDefault,
-    ...(connection ? { connection } : {}),
+    ...(shared ? { connection: shared } : {}),
+    ...(hasLocalValues && split
+      ? { localAuthentication: { mode: 'manual' as const, ...split.authentication } }
+      : {}),
   };
 };
 
@@ -157,6 +184,7 @@ export function McpConnectionForm({
   onSubmit,
   onCancel,
   className,
+  authentication,
 }: {
   initialEntry?: WorkspaceMcpServerMeta;
   submitting?: boolean;
@@ -164,6 +192,7 @@ export function McpConnectionForm({
   onSubmit: (value: McpConnectionFormValue) => void | Promise<void>;
   onCancel: () => void;
   className?: string;
+  authentication?: (dirty: boolean, transport: McpTransport) => ReactNode;
 }) {
   const { t } = useTranslation();
   const fieldId = useId();
@@ -179,9 +208,15 @@ export function McpConnectionForm({
   };
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    void onSubmit(buildMcpConnectionFormValue(draft));
+    void onSubmit(buildMcpConnectionFormValue(draft, initialEntry));
   };
   const isStdio = draft.transport === 'stdio';
+  const dirty =
+    !initialEntry ||
+    JSON.stringify(buildMcpConnectionFormValue(draft, initialEntry)) !==
+      JSON.stringify(
+        buildMcpConnectionFormValue(createMcpConnectionFormDraft(initialEntry), initialEntry)
+      );
 
   return (
     <form {...withClassName(stylex.props(catalog.editorForm), className)} onSubmit={submit}>
@@ -283,32 +318,37 @@ export function McpConnectionForm({
                   }
                 />
               </Field>
-              <Field
-                htmlFor={`${fieldId}-token`}
-                label={t('settings.mcp.form.bearerToken')}
-                icon={<KeyRound {...stylex.props(catalog.icon)} aria-hidden="true" />}
-              >
-                <Input
-                  id={`${fieldId}-token`}
-                  autoComplete="off"
-                  spellCheck={false}
-                  placeholder="${MCP_TOKEN}"
-                  value={draft.bearerToken}
-                  onChange={(event) =>
-                    setDraft((current) => ({ ...current, bearerToken: event.target.value }))
-                  }
+              <CollapsibleSection title={t('settings.mcp.authentication.manual')}>
+                <Field
+                  htmlFor={`${fieldId}-token`}
+                  label={t('settings.mcp.form.bearerToken')}
+                  icon={<KeyRound {...stylex.props(catalog.icon)} aria-hidden="true" />}
+                >
+                  <Input
+                    id={`${fieldId}-token`}
+                    type="password"
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder="${MCP_TOKEN}"
+                    value={draft.bearerToken}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, bearerToken: event.target.value }))
+                    }
+                  />
+                </Field>
+                <KeyValueEditor
+                  label={t('settings.mcp.form.headers')}
+                  addLabel={t('settings.mcp.form.addHeader')}
+                  rows={draft.headers}
+                  keyPlaceholder="X-Header"
+                  onChange={(headers) => setDraft((current) => ({ ...current, headers }))}
                 />
-              </Field>
-              <KeyValueEditor
-                label={t('settings.mcp.form.headers')}
-                addLabel={t('settings.mcp.form.addHeader')}
-                rows={draft.headers}
-                keyPlaceholder="X-Header"
-                onChange={(headers) => setDraft((current) => ({ ...current, headers }))}
-              />
+              </CollapsibleSection>
             </>
           )}
         </Section>
+
+        {authentication?.(dirty, draft.transport)}
 
         <div {...stylex.props(surface.formBlock, catalog.blockRow)}>
           <div {...stylex.props(catalog.blockText)}>
@@ -331,11 +371,13 @@ export function McpConnectionForm({
 
       <Dialog.Footer>
         <Button type="button" variant="secondary" disabled={submitting} onClick={onCancel}>
-          {t('common.cancel')}
+          {t('common.close')}
         </Button>
         <Button type="submit" disabled={submitting || draft.name.trim().length === 0}>
           {submitting ? <Spinner size="small" aria-hidden="true" /> : null}
-          {submitting ? t('settings.mcp.form.saving') : t('common.save')}
+          {submitting
+            ? t('settings.mcp.form.saving')
+            : t('settings.mcp.authentication.saveConfiguration')}
         </Button>
       </Dialog.Footer>
     </form>
@@ -495,6 +537,7 @@ function KeyValueEditor({
           />
           <Input
             aria-label={t('settings.mcp.form.value')}
+            type="password"
             placeholder={t('settings.mcp.form.value')}
             value={row.value}
             autoComplete="off"

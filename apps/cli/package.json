@@ -121,7 +121,8 @@
     "yauzl": "^3.4.0",
     "zod": "catalog:",
     "zstd-stream": "^1.1.0",
-    "@lody/memory": "workspace:*"
+    "@lody/memory": "workspace:*",
+    "@lody/e2ee-machine-sharing": "workspace:*"
   },
   "files": [
     "dist",

@@ -48,7 +48,7 @@ see [observe scopes](../../commands/session-observe-runtime.ts).
 
 ## Streams cursors are replica-bound
 
-Daemon/commands share `repo.sqlite3`, not replicas: Meta/Flock cursors use `createRepoStreamsPersistence`, LoroDoc cursors from
+Per identity, share `repo.sqlite3`, not replicas: Meta/Flock cursors use `createRepoStreamsPersistence`, LoroDoc cursors from
 `createDocumentRemoteCursorStore` (shared rows: daemon only). No shared
 `remoteCursorStore` or schedule-only `onPersist*`. Test:
 `tests/cli-streams-replica-checkpoints.test.ts`.
@@ -98,6 +98,10 @@ observer-lease driven; never start OS probes permanently or persist snapshots.
 
 Share Promise Repo; close readers first. Timeouts end waiters.
 Retry baseline errors in-place. Role writes confirm remote sync.
+Default MCP fallback requires an actual persisted remote cursor for that workspace
+Flock, not local rows or an empty checkpoint generation. Keep the pinned SQLite
+checkpoint reader read-only; cover receipt, restart and purge through real Streams
+persistence when changing this SDK-format compatibility boundary.
 
 ## Machine Flock writes for this machine are local-first
 

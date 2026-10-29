@@ -253,7 +253,7 @@ it('uploads the original HTTP batch during required rotation and after tag7/tag8
           expect(f.view().inspectState().epoch.rotationRequired).toBe(true);
           expect(yield* request(owner.identity.fetch, 'POST', original)).toBe(204);
           expect(originals()).toEqual([original]);
-          const blockedSeal = yield* Effect.result(
+          const availableSeal = yield* Effect.result(
             binding.seal({
               context: {
                 protocol: 'loro-streams-crdt-payload-protection',
@@ -264,10 +264,18 @@ it('uploads the original HTTP batch during required rotation and after tag7/tag8
               additionalData: () => aad,
             })
           );
-          expect(Result.isFailure(blockedSeal) && blockedSeal.failure).toMatchObject({
-            _tag: 'ContentError',
-            code: 'unauthorized',
-          });
+          const pendingSeal = ok(availableSeal);
+          expect(
+            yield* binding.open({
+              ...pendingSeal,
+              context: {
+                protocol: 'loro-streams-crdt-payload-protection',
+                version: 2,
+                kind: 'update_batch',
+              },
+              additionalData: aad,
+            })
+          ).toEqual(new Uint8Array([1]));
           for (const auth of forbidden) {
             // Empty PUT has no frame/signature mismatch to conceal the role check.
             expect(yield* request(auth.fetch, 'PUT')).toBe(403);

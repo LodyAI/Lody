@@ -75,12 +75,12 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 - Repo storage, LoroDoc cursors and eager-sync high-water state share a per-renderer
   cache namespace. Independently persisted replicas must not share checkpoints.
   Meta/Flock cursors stay repo-owned; delete Meta progress via `repo.getReplicaCheckpointStore`.
-- Open E2EE locally before background sync. Keep native-only keys, a dedicated
-  bucket, Loro history, waiting-key leases; no plaintext bypass.
-  Epoch/rotation changes stop sends and retain edits with a key-update notice;
-  M3 owns resumption. Reject missing protection/plaintext rooms. Forward rejected
-  tokens for exact eviction. See [M2 boundaries](../../../../.agents/notes/proposed/architecture/2026-10-22-e2ee-m2-product-integration.md)
-  and [transport contract](../../../../specs/workspace-streams-content.md).
+- Open E2EE locally; keep host keys, a dedicated bucket, Loro history and waiting-key
+  leases. No plaintext bypass. Keep retained-epoch sends; select confirmed keys per
+  operation. Forward rejected tokens for exact eviction. E2EE caches/inputs bind account/workspace/genesis/signing key.
+  Drain before deleting that instance; retain exact receipts.
+  [M2](../../../../.agents/notes/proposed/architecture/2026-10-22-e2ee-m2-product-integration.md),
+  [transport](../../../../specs/workspace-streams-content.md).
 - Select transport per room, never merge. Use `getReadinessTransportForRoom`;
   hooks without the router use `src/lib/room-readiness.ts`. Keep rules aligned.
 - The local renderer identity comes atomically from the Electron local-platform snapshot
@@ -100,9 +100,9 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   Returning no transport silently disables synchronization for those rooms.
 - Resource monitoring follows machine ownership: local or optional remote transport;
   unknown ownership remains pending.
-- Presence is merged by origin. For an origin represented by the local plane, the local
-  snapshot is authoritative, including absence; do not resurrect cleared presence from a
-  lagging replica. UI reads the transport's display sync state; raw state drives recovery.
+- Presence: local origin/absence wins over cloud; UI uses display state, recovery raw state.
+  Encrypted presence uses its authorized bucket and shared minimal plaintext allowlist
+  on publish/cloud/local read; unimplemented protected side channels stay disabled.
 - Doc-metadata bootstrap and the live repo watch overlap by design: merge per field with
   live winning (`mergeBootstrapMetaCache`), never letting the snapshot undo an archive
   already applied live.

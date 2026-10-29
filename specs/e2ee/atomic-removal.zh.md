@@ -1,22 +1,19 @@
-# 原子移除成员与先暂存后提交的换代
+# 移除成员与暂存换代发布
 
-Status: draft
+Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md)
 Translation: current
 
 [English](atomic-removal.md)
 
-## 账本状态转换
+## 账本转换
 
-看到 `rotationRequired = true` 的活跃 Owner/Admin 个人设备可生成 tag 7。
-tag 8 固定为 `[8, targetMembershipId, nextEpoch, commitment, previousEpochKey]`，
-使用现有普通记录、固定项数及原有 sig/v1、rec/v1 域。只有当前 Owner 的个人
-设备能生成；目标必须存在且不能是 Owner。新 epoch 恰好加一，拒绝溢出和重复
-commitment。tag 2 仍拒绝；没有旧版双读或迁移。
+MVP 移除使用现有普通签名记录中的 tag10 `[10, targetMembershipId]`，签名与 hash 域不变，且前面必须已有获授权的 tag9 capability 1 声明。Owner 的有效个人设备可移除非 Owner 成员；Admin 的有效个人设备只能移除 Member/Guest，不能移除 Owner 或其他 Admin。Owner 不能被移除；只有 Owner 可通过 tag3 升降 Admin。
 
-一条 tag 8 同时移除成员及其全部 personal、machine、Recovery 设备，保留历史
-作者与退役身份事实，写入新 commitment 和既有 72 字节历史包，清除
-rotationRequired。发布者打开历史包核对旧 commitment；回放检查签名、结构与
-前态权限，不能仅凭密文长度证明包内密钥正确。
+移除立即取消该成员及其全部个人设备、机器和恢复设备的当前资格，保留历史作者、成员实例、加入请求和退役公钥。保持 epoch 和 commitment，设置 `rotationRequired = true` 仅作提醒。其余成员继续用当前已发布代次工作；管理员在设置中明确完成密钥更新，换代失败仍可用旧代。被移除者若保留旧钥，仍能解密其取得的旧钥密文，因此服务端撤权必不可少。
+
+快照、保留状态与状态摘要一起升为 current-only v4，保存单调增加的 capability 集合。未知能力声明要求升级；拒绝旧状态格式，不提供迁移。账本 v1 尚未生产冻结；独立向量新增 capability 1、tag10 和未知能力停止点。继续拒绝 tag2。现有 tag8 `[8, targetMembershipId, nextEpoch, commitment, previousEpochKey]` 保持 Owner 个人设备原子移除并换代的语义，但不用于 MVP 移除界面。Owner/Admin 可另行发布 tag7；代次溢出与重复承诺拒绝，发布成功清除换代提醒。
+
+服务端接受移除时，在同一接纳事务中使该成员全部设备投影、凭据和续签权限失效。移除不等待换代或辅助清理。MVP 仅依赖现有内容 token 的 15 分钟过期，不主动断开已发 token 或长连接。诚实客户端下次打开得知移除后停止同步、远程执行并删除该加密工作区本地数据；这不能擦除恶意保留的副本。重新加入须新邀请、新成员实例和新设备密钥，不复活旧凭据。
 
 ## 先暂存，一次提交
 
@@ -62,7 +59,7 @@ core 仅定义暂存、读回、按条件删除 port；DTO 归 cloud-api；Conve
 
 ## 审批与证据
 
-以上方向来自用户明确要求；修订后的 Spec 仍为 **draft，待审批**，不代表生产
+用户于 2026-10-28 批准了本修订，不代表生产
 启用，也未决定 vault、原生保管、严格 B、账号恢复或 MLS 替换。
 参见[准入](../../packages/e2ee-core/src/internal/ledger/ADMISSION.md)、
 [暂存 port](../../packages/e2ee-core/src/internal/keys/staging.ts)、

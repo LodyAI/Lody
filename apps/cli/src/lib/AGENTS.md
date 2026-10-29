@@ -28,6 +28,9 @@
   require `LODY_LORO_STREAMS_BASE_URL` as a parallel hidden composition path.
 - `cloud-pr-association.ts`: use `authSiteUrl`, not `authBaseUrl` (internal proxy).
   Six failures/workspace/repo, no eviction; reset on client recreation. Log once.
+- Local control queue cancellation must bypass session main work. Health reads,
+  per-config refreshes and per-agent installs must use independent lanes; restart
+  and upgrade stay serialized together. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-20-acp-authenticate-queue-lane.md).
 - Local control negotiates NDJSON or legacy buffered JSON, preserving intermediate
   replies. `MachineRuntime` may collect responses but forwards each as sent. Cancel
   parked history watches before shutdown drain; preserve shared writers.
@@ -99,15 +102,14 @@ never pushed to renderers as local room health.
   lists its source; never replace a binding or merge another account's native ID.
   Refresh loads through the import's own binding. Every import write records the
   load-reported selection on the last imported user turn via `applyAcpRuntimeConfigPatch`.
-- Removing a local project archives every unarchived Session for that machine/project
-  before deleting the project row, found through the existence and metadata indexes
-  rather than by opening every Session document; a failed archive keeps the delete
-  command queued for a later scan. Worktree cleanup covers only Lody-created Session
-  worktrees of that project: inspect every worktree before submission and again
-  immediately before deletion, never force-delete or backup-commit a dirty worktree, and
-  record per-worktree deleted/kept/failed results. The original project directory is
-  never a deletion target, and cleanup failures must complete the command with a visible
-  result rather than leave removal pending.
+- Local-project deletion retains registrations referenced by Projects or group runs;
+  disable standalone display without archiving their Sessions. Catalog read/sync
+  failure keeps the command queued. Otherwise archive all unarchived machine/project
+  Sessions via existence/metadata indexes before removing the row; archive failure
+  retains the command. Explicit cleanup covers only Lody-created Session worktrees:
+  inspect before submission and deletion, never force-delete or backup-commit dirty
+  worktrees, record deleted/kept/failed results, and complete with visible results
+  even on cleanup failure. Never delete the original project directory.
 - Before changing `provider-setup-manager.ts`, read its
   [rules](../../../../.agents/docs/cli-lib-provider-setup.md): row ownership and the
   single publish commit, cancellation, when the queue may start in cloud versus OSS

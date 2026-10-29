@@ -19,11 +19,20 @@ vi.mock('@/lib/auth-bootstrap', () => ({
 
 const organizationMocks = vi.hoisted(() => ({
   authClient: null as unknown,
+  encryptedWorkspaces: [] as unknown[] | undefined,
+  directoryError: null as Error | null,
   refetchActiveOrganization: vi.fn(),
   refetchOrganizations: vi.fn(),
   setActive: vi.fn(),
   deleteOrganization: vi.fn(),
   leaveOrganization: vi.fn(),
+}));
+
+vi.mock('../src/providers/cloud-platform-api', () => ({
+  useOptionalCloudPlatformQuery: () => ({
+    data: organizationMocks.encryptedWorkspaces,
+    error: organizationMocks.directoryError,
+  }),
 }));
 
 vi.mock('../src/providers/convex-provider', () => ({
@@ -40,6 +49,11 @@ const { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } =
   await import('../src/atoms/workspace-context');
 type OrganizationState = ReturnType<typeof useOrganization>;
 let latestOrganizationState: OrganizationState | null = null;
+let latestGlobalState: OrganizationState | null = null;
+function GlobalOrganizationProbe() {
+  latestGlobalState = useOrganization();
+  return null;
+}
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -95,7 +109,11 @@ function TestApp({
   targetSlug,
   renderVersion,
   store,
+  includeGlobal = false,
+  remountTarget = false,
 }: {
+  remountTarget?: boolean;
+  includeGlobal?: boolean;
   targetSlug: string;
   renderVersion: number;
   store: Store;
@@ -121,8 +139,15 @@ function TestApp({
           confirmedUnauthenticated: false,
         },
       },
-      createElement(OrganizationProbe, { targetSlug }),
-      createElement(OrganizationProbe, { targetSlug })
+      createElement(OrganizationProbe, {
+        targetSlug,
+        key: remountTarget ? `first:${targetSlug}` : 'first',
+      }),
+      createElement(OrganizationProbe, {
+        targetSlug,
+        key: remountTarget ? `second:${targetSlug}` : 'second',
+      }),
+      includeGlobal ? createElement(GlobalOrganizationProbe) : null
     )
   );
 }
@@ -135,7 +160,10 @@ describe('useOrganization setActive dedupe', () => {
   let listVersion = 0;
 
   beforeEach(() => {
+    organizationMocks.encryptedWorkspaces = [];
+    organizationMocks.directoryError = null;
     latestOrganizationState = null;
+    latestGlobalState = null;
     listVersion = 0;
     activeOrganization = createOrganization('workspace-old', 'old-workspace', 'Old Workspace');
     store = createStore();
@@ -189,7 +217,12 @@ describe('useOrganization setActive dedupe', () => {
     vi.clearAllMocks();
   });
 
-  async function render(targetSlug: string, renderVersion: number): Promise<void> {
+  async function render(
+    targetSlug: string,
+    renderVersion: number,
+    includeGlobal = false,
+    remountTarget = false
+  ): Promise<void> {
     if (!container) {
       container = document.createElement('div');
       document.body.appendChild(container);
@@ -197,12 +230,91 @@ describe('useOrganization setActive dedupe', () => {
     }
 
     await act(async () => {
-      root?.render(createElement(TestApp, { targetSlug, renderVersion, store }));
+      root?.render(
+        createElement(TestApp, { targetSlug, renderVersion, store, includeGlobal, remountTarget })
+      );
     });
     await act(async () => {
       await Promise.resolve();
     });
   }
+
+  it('opens a ledger-bound workspace with a full projected roster without Better Auth setActive', async () => {
+    organizationMocks.encryptedWorkspaces = [
+      {
+        id: 'encrypted',
+        name: 'Cipher Team',
+        slug: 'cipher-team',
+        contentMode: 'e2ee',
+        contentModeVersion: 1,
+        cryptoOrgId: '11'.repeat(32),
+        genesisHash: '11'.repeat(32),
+        role: 'member',
+        members: [
+          {
+            id: 'member-key',
+            userId: 'user-1',
+            role: 'member',
+            user: { id: 'user-1', name: 'Synthetic Member', email: 'member@synthetic.test' },
+          },
+        ],
+      },
+    ];
+    await render('cipher-team', 0);
+    expect(latestOrganizationState!.activeOrganization).toMatchObject({
+      id: 'encrypted',
+      members: [{ userId: 'user-1', role: 'member' }],
+    });
+    expect(
+      latestOrganizationState!.organizations?.some((workspace) => workspace.id === 'encrypted')
+    ).toBe(true);
+    expect(latestOrganizationState!.role).toBe('member');
+    expect(store.get(currentWorkspaceIdAtom)).toBe('encrypted');
+    expect(organizationMocks.setActive).not.toHaveBeenCalled();
+  });
+  it('returns global selection to a remounted ordinary URL even if the optional directory fails', async () => {
+    organizationMocks.encryptedWorkspaces = [
+      {
+        id: 'encrypted',
+        name: 'Cipher Team',
+        slug: 'cipher-team',
+        contentMode: 'e2ee',
+        contentModeVersion: 1,
+        cryptoOrgId: '11'.repeat(32),
+        genesisHash: '11'.repeat(32),
+        role: 'member',
+        members: [
+          {
+            id: 'member-key',
+            userId: 'user-1',
+            role: 'member',
+            user: { id: 'user-1', name: 'Synthetic Member', email: 'member@synthetic.test' },
+          },
+        ],
+      },
+    ];
+    await render('cipher-team', 0, true, true);
+    expect(latestGlobalState!.activeOrganization?.id).toBe('encrypted');
+    organizationMocks.encryptedWorkspaces = undefined;
+    organizationMocks.directoryError = new Error('directory unavailable');
+    await render('old-workspace', 1, true, true);
+    expect(latestOrganizationState!.activeOrganization?.id).toBe('workspace-old');
+    expect(latestGlobalState!.activeOrganization?.id).toBe('workspace-old');
+    expect(latestOrganizationState!.error).toBeNull();
+    expect(store.get(currentWorkspaceIdAtom)).toBe('workspace-old');
+  });
+  it('isolates an unavailable encrypted directory from a healthy ordinary workspace and fails closed for an unknown encrypted target', async () => {
+    organizationMocks.encryptedWorkspaces = undefined;
+    organizationMocks.directoryError = new Error('directory unavailable');
+    await render('old-workspace', 0, true);
+    expect(latestOrganizationState!.activeOrganization?.id).toBe('workspace-old');
+    expect(latestOrganizationState!.error).toBeNull();
+    await render('unknown-encrypted', 1, true);
+    expect(latestOrganizationState!.activeOrganization).toBeNull();
+    expect(latestOrganizationState!.organizationsError?.message).toContain(
+      'Encrypted membership directory'
+    );
+  });
 
   it.each([undefined, null])(
     'gates incomplete membership (%s) and recovers after refetch',

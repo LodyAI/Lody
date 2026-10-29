@@ -20,6 +20,18 @@ save path's text reads.
 
 ## Invariants
 
+- Encrypted queries resolve existing paths from metadata and already-open project
+  catalogs. Never create a chat directory, join/sync a project Flock or repair
+  member links to satisfy a read. Refuse Markdown worktree discovery explicitly;
+  never start Git or silently return an incomplete candidate set. Ordinary resolution retains its existing policy.
+
+- `file/download-chunk` is a separate `fileDownload` v1 capability. Preserve
+  owner-envelope authorization, remote path containment, positive paid-workspace
+  entitlement on every request, the 100 MiB ceiling and 512 KiB response chunks.
+  Billing failures do not grant this larger transfer. Pin file identity/metadata
+  across ranges; reject mutation instead of returning a mixed file. No watchers,
+  history writes, preview-budget increases or plaintext cloud fallback.
+
 - `markdownFileLinks` resolution returns identities only and every realpath-distinct
   match; never pick one or widen authorization. Canonical previews never discover.
 

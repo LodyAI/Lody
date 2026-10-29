@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { SessionHistoryInput, SessionId } from '@lody/shared';
 import {
   SessionTurnWaitError,
+  sessionHistoryActivityAt,
   calculateTurnDurationMs,
   findAssistantEntryForUserTurn,
   waitForTurnCompletion,
@@ -451,5 +452,20 @@ describe('session output helpers', () => {
         endedAt: Date.parse('2026-03-27T00:00:03.000Z'),
       })
     ).toBe(3_000);
+  });
+});
+
+describe('history summary activity time', () => {
+  it('uses completion for finished assistant entries and retains creation for active/legacy/user entries', () => {
+    const timestamp = '2026-01-01T00:00:00.000Z';
+    const endedAt = Date.parse('2026-01-01T00:07:00.000Z');
+    const entry = { role: 'assistant' as const, timestamp, endedAt, finished: true };
+    expect(sessionHistoryActivityAt(entry)).toBe('2026-01-01T00:07:00.000Z');
+    expect(sessionHistoryActivityAt({ ...entry, finished: false })).toBe(timestamp);
+    expect(sessionHistoryActivityAt({ ...entry, role: 'user' })).toBe(timestamp);
+    expect(sessionHistoryActivityAt({ ...entry, endedAt: undefined })).toBe(timestamp);
+    expect(sessionHistoryActivityAt({ ...entry, endedAt: NaN })).toBe(timestamp);
+    expect(sessionHistoryActivityAt(undefined)).toBeUndefined();
+    expect(entry.timestamp).toBe(timestamp);
   });
 });

@@ -63,6 +63,8 @@ this page is the full text of the rules summarised there.
   would open a Loro session doc per side chat even for a user who never expands the panel: mount one
   when it is first selected (`mountedSideSessionIds`), plus any fork target still waiting to report
   durable history, and keep it mounted after that.
+  `useSessionForkCapabilities` resolves the bound Provider's runtime overrides for Tab,
+  Side Chat and worktree fork availability, so Pi extension selections use their matching cache.
   Show the launcher only when the active conversation's provider has authoritative native-fork
   support; keep it visible but disabled when that conversation's machine is explicitly offline. That
   offline rule lives ONLY in `getSideChatLauncherState` — the shared fork entry point stays

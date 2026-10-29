@@ -5,7 +5,7 @@
 Read the parent [sessions AGENTS.md](../AGENTS.md) first. This scope renders the
 queued-turn list (`message-queue-display.tsx`, `message-queue-row.tsx`,
 `queued-image-preview.tsx`, `use-message-queue-editing.ts`) that
-`session-chat-input-area.tsx` mounts. Submission routing into the queue lives in
+`session-chat-interface.tsx` mounts through the composer info bar's queue slot. Submission routing into the queue lives in
 `../session-message-submit-route.ts` and is described in
 [.agents/docs/sessions-live-status.md](../../../../../../.agents/docs/sessions-live-status.md).
 
@@ -22,8 +22,10 @@ It renders through the bar's `queue` slot as an inset sheet (composer fill, roun
 top, square bottom) sitting directly on the bar, or on the composer when the bar
 has nothing to show; never with a gap, and never inside the input area.
 
-Coarse-pointer and narrow-screen actions use real, non-overlapping 44 px boxes
-on the message line; fine-pointer desktop actions stay compact. Intent:
+Rows are inset tiles without hairline dividers; desktop rows share a 16 px index
+gutter, mobile rows drop it. Actions always end the row. Mobile rows, and any sheet
+narrower than 520 px, fold them into one More button (a real 40 × 36 px box on 36 px touch rows)
+whose menu preserves Steer, move-to-top, edit and delete when applicable. Prior intent:
 [queue touch actions](../../../../../../specs/message-queue-touch-actions.md).
 
 Queue-bound sends held in memory (`runtime.pendingSends`) while attachments
@@ -42,3 +44,10 @@ The queue disclosure is local display state, initially expanded. Keep its editin
 rows mounted while folded; focusing the disclosure must not commit or discard a
 row draft. Folded summaries retain pending/failed-send awareness. Intent:
 [queue presentation](../../../../../../specs/message-queue.md).
+
+Production passes a separate `scheduledItems` view model; never fake a
+`MessageQueueItem` for a reservation. Keep dedicated rows after ordinary and
+local-pending rows, ordered by send time, in a `Scheduled` section without index,
+drag, steer or move-to-top. They reuse the queued row layout: the send time leads
+the text inline and opens the time editor; details and cancel end the row.
+Never fake a scheduled row through a queue item or add a time field to durable `mq`.

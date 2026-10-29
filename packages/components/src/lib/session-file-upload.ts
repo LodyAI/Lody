@@ -1,4 +1,5 @@
-import { workspaceSupports, type WorkspaceStreamsMode } from '@lody/shared/workspace-streams-content';
+import { requireWorkspaceFeature } from '@/lib/workspace-feature';
+import { type WorkspaceStreamsMode } from '@lody/shared/workspace-streams-content';
 import {
   buildSessionFileApiUrl,
   buildSessionFileUploadMetadataHeaders,
@@ -624,7 +625,8 @@ const uploadMultipart = async (args: UploadSessionFileArgs): Promise<SessionFile
 export const uploadSessionFile = async (
   args: UploadSessionFileArgs
 ): Promise<SessionFilePayload> => {
-  if (!workspaceSupports(args.content, 'attachments')) throw new Error('e2ee_attachments_unavailable');
+  requireWorkspaceFeature(args.content, 'attachments');
+  if (args.content.mode === 'protected') throw new Error('e2ee_attachment_requires_preparation');
   // Defensive re-check; the composer validates (and translates) before upload.
   const validationError = validateSessionFile(args.file);
   if (validationError === 'empty') {

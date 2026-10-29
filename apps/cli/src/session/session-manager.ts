@@ -23,6 +23,8 @@ import {
 } from '@/lib/git-credential-helper-script';
 import { EventEmitter } from 'eventemitter3';
 import os from 'os';
+import { randomUUID } from 'node:crypto';
+import { McpAuthenticationLegacy } from '@/mcp/authentication/legacy';
 
 import {
   SessionId,
@@ -86,7 +88,7 @@ import {
 } from '@/lib/gh-shim-script';
 import { ensureLodyBashEnvForGhShim, shouldInjectBashEnvForGhShim } from '@/lib/lody-bashenv';
 import { ensureLodyZdotdirForGhShim, shouldInjectZdotdirForGhShim } from '@/lib/lody-zdotdir';
-import type { RateLimit, SessionUsageUpdate } from 'acp-extension-core';
+import type { LodyPromptSuggestion, RateLimit, SessionUsageUpdate } from 'acp-extension-core';
 import { getWorktreeManager } from './worktree/worktree-manager';
 import type {
   GitCredentialBrokerAuth,
@@ -121,6 +123,7 @@ import {
   readLocalProjectRootResolveSyncTimeoutMs,
 } from '@/lib/local-project-meta';
 import { loadSessionMcpCatalog } from '@/agent/session-mcp-resolver';
+import { waitForMcpCatalogBaseline } from '@/lib/workspace-mcp-store';
 import {
   claimLegacySpeculativeWorktree,
   completeLegacySpeculativeWorktreeSetup,
@@ -214,6 +217,8 @@ export interface ISession {
    * Returns null if the session has no host path mapping.
    */
   getHostWorkdir(): string | null;
+  /** Existing host path only; never creates a directory or prepares a runtime. */
+  peekHostWorkdir?(): string | null;
   getParentSessionId(): SessionId | undefined;
   applyExecutionPlaneLimits(limits: SessionSandboxLimits): Promise<void>;
   getMonitorRuntimeInfo(): Promise<SessionMonitorRuntimeInfo>;
@@ -247,6 +252,7 @@ export interface ISession {
    */
   updateEnv(env: Record<string, string | undefined>): void;
   getGitHubCredentials(): SessionCredentials;
+  validateMcpRequester?(userId: string): Promise<void>;
 }
 
 export type SessionMonitorRuntimeInfo = {
@@ -290,11 +296,13 @@ export interface CreateAgentConfig {
   onUsageUpdate: (usage: SessionUsageUpdate, accountingId?: string) => void;
   onContextWindowUsageUpdate: (usage: SessionContextWindowUsage) => void;
   onRateLimitUpdate: (limits: RateLimit) => void;
+  onPromptSuggestion?: (suggestion: LodyPromptSuggestion) => void;
   onThreadGoalUpdated: (goal: Extract<MessageContent, { type: 'goal' }>) => void;
   onThreadGoalCleared: (threadId: string) => void;
   onSessionTitleUpdate: (title: string) => void;
   onAgentWarning: (warning: AgentSessionWarning) => void;
   loadExternalMcpServers: NonNullable<AgentClientOptions['loadExternalMcpServers']>;
+  releaseExternalMcpServers?: () => Promise<void>;
   onImageGenerationBegin: (event: ImageGenerationBeginEvent) => void;
   onImageGenerationEnd: (event: ImageGenerationEndEvent) => void;
   onWriteTextFile: (event: AcpWriteTextFileEvidence) => void | Promise<void>;
@@ -334,6 +342,7 @@ interface SessionManagerEvents {
     accountingId?: string;
   }) => void;
   onContextWindowUsageUpdate: (sessionId: SessionId, usage: SessionContextWindowUsage) => void;
+  onPromptSuggestion: (sessionId: SessionId, suggestion: LodyPromptSuggestion) => void;
   onRateLimitUpdate: (
     machineId: MachineId,
     agentConfigId: AgentConfigId | undefined,
@@ -370,6 +379,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   private readonly cloudPort: CloudPort;
   private detachSpeculativeWorktreeRecovery: (() => void) | null = null;
   private speculativeWorktreeRecoveryChain: Promise<void> = Promise.resolve();
+  readonly mcpAuthentication: McpAuthenticationLegacy;
   /** Coalescing latch for {@link enqueueSpeculativeWorktreeRecovery}. */
   private speculativeWorktreeRecoveryQueued = false;
   private speculativeWorktreeRecoveryGeneration = 0;
@@ -404,6 +414,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       throw new Error('SessionManager requires an assembled CloudPort');
     }
     this.cloudPort = options.cloudPort;
+    this.mcpAuthentication = new McpAuthenticationLegacy({
+      machineId,
+      workspaceId,
+      userId: options.cloudPort.identity.userId,
+    });
     this.sessionSandboxFactory =
       options.sessionSandboxFactory ?? createSessionSandboxFactory({ logger: this.logger });
   }
@@ -652,6 +667,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     }
   ): CreateAgentConfig {
     const sessionId = config.sessionId!;
+    const mcpOwner = randomUUID();
+    const mcpRequesterUserId = config.requesterUserId;
     const localProjectId =
       config.project?.kind === 'local' ? config.project.localProjectId : undefined;
     return {
@@ -681,13 +698,14 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
                 if (member.access !== 'additional' && member.access !== 'link') continue;
                 const target = roots.find((root) => root.id === `member:${id}`)!;
                 if (member.placement.kind !== 'root') throw new Error('Invalid directory member');
-                await reconcileProjectMemberLink(
+                // A sibling tab's link stays; the snapshot says what exists.
+                const linked = await reconcileProjectMemberLink(
                   roots[0]!.absolutePath,
                   member.placement.dir,
                   target.absolutePath,
                   supported
                 );
-                member.access = supported ? 'additional' : 'link';
+                member.access = linked ? 'link' : 'additional';
               }
               config.projectRun = snapshot;
               directories = supported ? roots.slice(1).map((root) => root.absolutePath) : [];
@@ -743,6 +761,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       onContextWindowUsageUpdate: (usage: SessionContextWindowUsage) => {
         this.emit('onContextWindowUsageUpdate', sessionId, usage);
       },
+      onPromptSuggestion: (suggestion) => {
+        this.emit('onPromptSuggestion', sessionId, suggestion);
+      },
       onRateLimitUpdate: (limits: RateLimit) => {
         if (
           config.agentConfigId ||
@@ -764,16 +785,17 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       loadExternalMcpServers: () =>
         loadSessionMcpCatalog({
           repo: this.workspaceDocument.repo,
-          syncFlockDoc: (docId, { timeoutMs }) =>
-            this.workspaceDocument.syncFlockDocOrThrow(docId, {
-              timeoutMs,
-              reason: 'session-mcp-catalog-start',
-            }),
+          waitForCatalogBaseline: () =>
+            waitForMcpCatalogBaseline(this.workspaceDocument, this.workspaceId),
           workspaceId: this.workspaceId,
           sessionId,
           selectedIds: config.mcpServerIds,
           logger: this.logger,
+          env: mcpRequesterUserId === this.cloudPort.identity.userId ? process.env : {},
+          prepare: (entry, resolved) =>
+            this.mcpAuthentication.prepare(entry, resolved, mcpOwner, mcpRequesterUserId),
         }),
+      releaseExternalMcpServers: () => this.mcpAuthentication.release(mcpOwner),
       onImageGenerationBegin: (event) => this.emit('onImageGenerationBegin', sessionId, event),
       onImageGenerationEnd: (event) => this.emit('onImageGenerationEnd', sessionId, event),
       onWriteTextFile: (event) => {
@@ -1238,6 +1260,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   }
 
   async validateSessionCredentials(session: ISession, requesterUserId: string): Promise<void> {
+    await session.validateMcpRequester?.(requesterUserId);
     const credentials = session.getGitHubCredentials();
     if (credentials.mode === 'native') return;
     const { lease } = credentials;
@@ -1839,6 +1862,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     if (options.keepWorkspaceDocumentOpen) {
       return;
     }
+    await this.mcpAuthentication.close();
     await this.workspaceDocument.cleanUp();
     await this.gitCredentialBroker?.shutdown();
     this.gitCredentialBroker = null;

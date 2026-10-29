@@ -26,11 +26,11 @@ import {
   LoroStreamsTokenPorts,
 } from '@lody/shared';
 
-const SESSION_ID = 'session-presence-1' as SessionId;
-const MACHINE_ID = 'machine-presence-1' as MachineId;
-const REMOTE_SESSION_ID = 'session-presence-remote' as SessionId;
-const REMOTE_MACHINE_ID = 'machine-presence-remote' as MachineId;
-const REMOTE_INSTANCE_ID = 'remote-instance' as LodyPresenceInstanceId;
+const SESSION_ID = '01020304-1111-4222-8333-010203040501' as SessionId;
+const MACHINE_ID = '01020304-1111-4222-8333-010203040502' as MachineId;
+const REMOTE_SESSION_ID = '01020304-1111-4222-8333-010203040503' as SessionId;
+const REMOTE_MACHINE_ID = '01020304-1111-4222-8333-010203040504' as MachineId;
+const REMOTE_INSTANCE_ID = '01020304-1111-4222-8333-010203040505' as LodyPresenceInstanceId;
 /** Synthetic transport, real CRDT/adaptor/queue. Every pending request has an
  * explicit gate; no network, polling, sleeps or private transport fields. */
 const controlledTransport = (autoAck = false) => {
@@ -44,12 +44,13 @@ const controlledTransport = (autoAck = false) => {
   let endRead = () => {};
   const requests: Array<{
     bytes: Uint8Array;
+    url: string;
     signal: AbortSignal | null | undefined;
     response: ReturnType<typeof Promise.withResolvers<Response>>;
     finished: ReturnType<typeof Promise.withResolvers<void>>;
   }> = [];
   const arrivals = new Map<number, ReturnType<typeof Promise.withResolvers<void>>>();
-  const fetch = async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+  const fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     if (init?.method !== 'POST') {
       return new Response(
         new ReadableStream<Uint8Array>({
@@ -72,6 +73,7 @@ const controlledTransport = (autoAck = false) => {
     }
     const request = {
       bytes: new Uint8Array(init.body as Uint8Array),
+      url: String(input),
       signal: init.signal,
       response: Promise.withResolvers<Response>(),
       finished: Promise.withResolvers<void>(),
@@ -153,6 +155,122 @@ const diagnosticLogger = () => {
 };
 
 describe('presence replica and local-origin contracts', () => {
+  it('discards invalid IDs throughout publish, heartbeat and clear without wire bytes', () => {
+    for (const instance of [
+      REMOTE_INSTANCE_ID,
+      'private instance /path' as LodyPresenceInstanceId,
+    ]) {
+      const replica = new PresenceReplica(instance, { minimal: true });
+      const wire: Uint8Array[] = [];
+      const detach = replica.store.subscribeLocalUpdates((bytes) => wire.push(bytes));
+      try {
+        replica.setMachineOnline('private machine /path' as MachineId, 100);
+        for (const sessionId of [
+          'private session /path',
+          '1790000000000-privateroadmap',
+          '1790000000000-k5zmz7k',
+        ]) {
+          replica.setSessionPresence(
+            {
+              sessionId: sessionId as SessionId,
+              machineId: MACHINE_ID,
+              status: { type: 'running' },
+            },
+            100
+          );
+          replica.republish(150);
+          replica.clearSessionPresence(sessionId as SessionId);
+        }
+        replica.republish(200);
+        replica.clear();
+        expect(replica.getPresenceStates()).toEqual({});
+        expect([...replica.encodeLocalOriginPresence()]).toEqual([0]);
+        expect(wire).toEqual([]);
+      } finally {
+        detach();
+        replica.destroy();
+      }
+    }
+  });
+
+  it.each([false, true])(
+    'filters encrypted presence before both wire exports (minimal=%s)',
+    (minimal) => {
+      const replica = new PresenceReplica(
+        '01020304-1111-4222-8333-010203040506' as LodyPresenceInstanceId,
+        { minimal }
+      );
+      const decoded = new EphemeralStore(LODY_PRESENCE_TTL_MS);
+      try {
+        replica.setMachineOnline(MACHINE_ID, 100);
+        replica.setSessionPresence(
+          {
+            sessionId: SESSION_ID,
+            machineId: MACHINE_ID,
+            status: {
+              type: 'initializing',
+              stage: 'acp',
+              detail: 'synthetic private path',
+              futureText: 'future secret',
+            } as never,
+          },
+          100
+        );
+        replica.republish(200);
+        decoded.apply(replica.encodeLocalOriginPresence());
+        const session = Object.values(decoded.getAllStates()).find(
+          (state) =>
+            typeof state === 'object' &&
+            state !== null &&
+            'kind' in state &&
+            state.kind === 'session'
+        );
+        expect(session).toEqual({
+          kind: 'session',
+          sessionId: SESSION_ID,
+          machineId: MACHINE_ID,
+          instanceId: '01020304-1111-4222-8333-010203040506',
+          updatedAt: 200,
+          status: minimal
+            ? { type: 'initializing', stage: 'acp' }
+            : {
+                type: 'initializing',
+                stage: 'acp',
+                detail: 'synthetic private path',
+                futureText: 'future secret',
+              },
+        });
+        expect(replica.store.getAllStates()).toEqual(decoded.getAllStates());
+        const peer = new EphemeralStore(LODY_PRESENCE_TTL_MS);
+        try {
+          peer.set('remote', {
+            kind: 'session',
+            sessionId: REMOTE_SESSION_ID,
+            machineId: REMOTE_MACHINE_ID,
+            instanceId: REMOTE_INSTANCE_ID,
+            updatedAt: 200,
+            status: { type: 'initializing', stage: 'acp', detail: 'remote secret' },
+            extraText: 'ignored',
+          });
+          replica.store.apply(peer.encodeAll());
+          expect(replica.getPresenceStates().remote?.kind).toBe('session');
+          expect(replica.getPresenceStates().remote).toMatchObject({
+            status: minimal
+              ? { type: 'initializing', stage: 'acp' }
+              : { type: 'initializing', stage: 'acp', detail: 'remote secret' },
+          });
+          if (minimal)
+            expect(replica.getPresenceStates().remote).not.toHaveProperty('status.detail');
+        } finally {
+          peer.destroy();
+        }
+      } finally {
+        replica.destroy();
+        decoded.destroy();
+      }
+    }
+  );
+
   it('uses machine fallback, excludes remote origins and preserves final session clear', () => {
     const replica = new PresenceReplica('local-replica' as LodyPresenceInstanceId);
     const peer = new PresenceReplica(REMOTE_INSTANCE_ID);
@@ -1231,6 +1349,76 @@ effectIt.effect(
       ).toBe(true);
       return undefined;
     })
+);
+
+effectIt.effect('uses the existing SDK wire and authorized bucket for minimal presence', () =>
+  Effect.gen(function* () {
+    const wire = controlledTransport(true);
+    const owner = yield* makeWorkspacePresence('integration-workspace' as WorkspaceId, {
+      minimal: true,
+    }).pipe(Effect.provide(presencePlatformLayer(diagnosticLogger().logger, wire.fetch)));
+    yield* owner.attach({
+      streamsBaseUrl: 'https://synthetic.invalid',
+      bucketId: 'protected-bucket',
+      auth: () => Effect.succeed(undefined),
+    });
+    yield* owner.waitUntilJoined(1000);
+    owner.replica.setSessionPresence(
+      {
+        sessionId: SESSION_ID,
+        machineId: MACHINE_ID,
+        status: { type: 'initializing', stage: 'acp', detail: 'synthetic private detail' },
+      },
+      100
+    );
+    const post = yield* Effect.promise(() => wire.nextPost(0));
+    expect(post.url).toContain('/protected-bucket/');
+    expect(new URL(post.url).searchParams.get('ephemeral')).toBe('presence');
+    const server = new EphemeralStore(LODY_PRESENCE_TTL_MS);
+    const lateJoin = new EphemeralStore(LODY_PRESENCE_TTL_MS);
+    try {
+      server.apply(post.bytes);
+      lateJoin.apply(server.encodeAll());
+      expect(Object.values(lateJoin.getAllStates())).toEqual([
+        {
+          kind: 'session',
+          sessionId: SESSION_ID,
+          machineId: MACHINE_ID,
+          instanceId: expect.any(String),
+          updatedAt: 100,
+          status: { type: 'initializing', stage: 'acp' },
+        },
+      ]);
+      const received = Promise.withResolvers<void>();
+      const unsubscribe = owner.replica.subscribe((states) => {
+        if (states.remote) received.resolve();
+      });
+      server.set('remote', {
+        kind: 'session',
+        sessionId: REMOTE_SESSION_ID,
+        machineId: REMOTE_MACHINE_ID,
+        instanceId: REMOTE_INSTANCE_ID,
+        updatedAt: 100,
+        status: { type: 'initializing', stage: 'acp', detail: 'remote secret' },
+        unknownText: 'ignored',
+      });
+      wire.receive(server.encode('remote'));
+      yield* Effect.promise(() => received.promise);
+      unsubscribe();
+      expect(owner.replica.getPresenceStates().remote).toEqual({
+        kind: 'session',
+        sessionId: REMOTE_SESSION_ID,
+        machineId: REMOTE_MACHINE_ID,
+        instanceId: REMOTE_INSTANCE_ID,
+        updatedAt: 100,
+        status: { type: 'initializing', stage: 'acp' },
+      });
+    } finally {
+      server.destroy();
+      lateJoin.destroy();
+    }
+    yield* owner.stop;
+  })
 );
 
 effectIt.effect(

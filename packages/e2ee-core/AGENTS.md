@@ -61,13 +61,31 @@ whitepaper, Specs, decisions and this package's docs. Contract:
   for workflows; it remembers genuine views even when the pin write fails.
 - Historical attribution and epoch packets come only from verified views.
   Revocation keeps old author identity but grants no current write permission;
-  Recovery and Guest never write; a required rotation blocks new seals.
-- Documents: current write/rotation checks precede encryption and repeat after
+  Recovery and Guest never write; active devices may seal a retained published epoch.
+  rotationRequired only advises administrators and must not block new seals.
+- Documents: current write checks precede encryption and repeat after
   signing; historical signature evidence is neither permission nor AEAD validity.
+  Streams snapshot and update reads authenticate historically admitted authors;
+  revocation does not invalidate their signatures. Never-admitted keys fail closed.
   Host admission (header 3 batches, position-bound header 4 snapshots) checks the
   genuine current writer, submitting signer, resource/model/epoch and the complete
   original before forwarding. Snapshot publication keeps exact signer/offset/digest
   identities; uncertain native outcomes stay Pending; one owner serializes writes.
+- Realtime content primitives compose only existing v0 purposes 7/8/9. Their
+  resource and expected signer come from independently trusted caller context;
+  opaque payload authentication grants no membership, freshness or execution
+  authority. Keep application body codecs, target binding and send/rotation gates
+  in the authorized integration; never expand `sealDocument` for these purposes.
+- Machine-sharing policies remain independent of ledger records. Execution requires
+  the current machine owner's active personal-device policy signature; historical
+  chain verification grants no execution authority. Generation evidence must qualify
+  the current machine through ledger-included initial/replacement admissions; removal
+  starts a new signed resource, while atomic replacement preserves its root.
+  Hosts own latest-head freshness,
+  resource-bound durable pins and actual local-project resolution. See the
+  [sharing proposal](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).
+- Key rounds attempt receive and distribution independently; report each outcome
+  and retain the failed phase's retry cursor. Unknown senders request ledger refresh.
 - Durable workflows persist exact originals before any network step, retry
   those bytes, never re-sign, and keep results until explicit acknowledgement.
   Remote hints never end a task; only genuine ledger changes do.

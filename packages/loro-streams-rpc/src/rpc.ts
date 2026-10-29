@@ -1,4 +1,11 @@
-import { SessionFileRootIdSchema } from '@lody/shared';
+import { SessionLiveStatusResponseSchema as LoroSessionLiveStatusRpcResponseSchema } from '@lody/shared/local-machine-rpc';
+import { isE2eeReadQuery, type E2eeQueryResult } from '@lody/shared/e2ee-rpc';
+import {
+  SessionFileRootIdSchema,
+  FileDownloadResponseSchema,
+  type FileDownloadRequest,
+  type FileDownloadResponse,
+} from '@lody/shared';
 import {
   ProjectProbeLocalMemberResultSchema,
   type ProjectProbeLocalMemberResult,
@@ -265,6 +272,7 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   // File Preview v3. Deliberately outside the `code-collab/` namespace: it is a
   // plain read and must never activate Code Collab on the machine.
   'file/preview',
+  'file/download-chunk',
   'session/cancel',
   'session/live-status',
   'session/steer',
@@ -519,6 +527,11 @@ export const LoroCodeCollabV2LspReferencesRpcRequestSchema = BaseRpcRequestSchem
  * clear on the Streams plane, and the envelope's owner binding is what the
  * machine authorizes against. The envelope is transport, not Code Collab state.
  */
+export const LoroFileDownloadRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('file/download-chunk'),
+  params: CodeCollabV2RpcContentEnvelopeSchema,
+}).strict();
+
 export const LoroFilePreviewRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('file/preview'),
   params: CodeCollabV2RpcContentEnvelopeSchema,
@@ -533,6 +546,7 @@ export const LoroFilePreviewRpcRequestSchema = BaseRpcRequestSchema.extend({
 export const isOwnerScopedEncryptedRpcMethod = (method: string): boolean =>
   method.startsWith('code-collab/') ||
   method === 'file/preview' ||
+  method === 'file/download-chunk' ||
   method === 'session/history-read' ||
   method === 'session/history-watch' ||
   method === 'session/history-write';
@@ -775,6 +789,7 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroCodeCollabV2LspDefinitionRpcRequestSchema,
   LoroCodeCollabV2LspReferencesRpcRequestSchema,
   LoroFilePreviewRpcRequestSchema,
+  LoroFileDownloadRpcRequestSchema,
   LoroSessionCancelRpcRequestSchema,
   LoroSessionLiveStatusRpcRequestSchema,
   LoroSessionSteerRpcRequestSchema,
@@ -797,31 +812,7 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroLocalProjectControlRpcRequestSchema,
 ]);
 
-const SessionLiveStateSchema = z.enum(['idle', 'initializing', 'running', 'waiting', 'unknown']);
-
-export const LoroSessionLiveStatusRpcResponseSchema = z.discriminatedUnion('success', [
-  z
-    .object({
-      type: z.literal('session/live-status_response'),
-      machineId: z.string().trim().min(1),
-      sessionId: z.string().trim().min(1),
-      success: z.literal(true),
-      state: SessionLiveStateSchema,
-      observedAtMs: z.number().finite().nonnegative(),
-      reason: z.string().trim().min(1).optional(),
-    })
-    .strict(),
-  z
-    .object({
-      type: z.literal('session/live-status_response'),
-      machineId: z.string().trim().min(1),
-      sessionId: z.string().trim().min(1),
-      success: z.literal(false),
-      state: z.literal('unknown'),
-      error: z.string().trim().min(1),
-    })
-    .strict(),
-]);
+export { SessionLiveStatusResponseSchema as LoroSessionLiveStatusRpcResponseSchema } from '@lody/shared/local-machine-rpc';
 
 export const LoroLocalProjectGitStateRpcResponseSchema = z.discriminatedUnion('success', [
   z
@@ -1635,6 +1626,7 @@ export type LoroMachineRpcResult =
   | CodeCollabV2RpcResponse
   | CodeCollabV2Error
   | FilePreviewV3Response
+  | FileDownloadResponse
   | MachineProviderRateLimitsRefreshResponse
   | MachineAcpCapabilitiesRefreshResponse
   | MachineAcpAuthenticateResponse
@@ -1936,6 +1928,11 @@ const toLegacyRpcErrorResponse = (
     return historyRpcFailureResponse(method, historyContext, error, historyFailure);
   }
 
+  if (method === 'file/download-chunk') {
+    const parsed = FileDownloadResponseSchema.safeParse({ status: 'error', code: error.code });
+    return parsed.success ? parsed.data : { status: 'error', code: 'transient_io' };
+  }
+
   if (method === 'file/preview') {
     const parsedData = FilePreviewV3ErrorSchema.safeParse(error.data);
     if (parsedData.success) {
@@ -2156,6 +2153,10 @@ const parseRpcSuccessResult = async (
     if (response.method === 'session/history-write') {
       const parsed = SessionHistoryWriteResponseSchema.safeParse(decrypted);
       return parsed.success ? (parsed.data as SessionHistoryWriteResponse) : null;
+    }
+    if (response.method === 'file/download-chunk') {
+      const parsed = FileDownloadResponseSchema.safeParse(decrypted);
+      return parsed.success ? parsed.data : null;
     }
     if (response.method === 'file/preview') {
       const previewParsed = FilePreviewV3ResponseSchema.safeParse(decrypted);
@@ -2596,6 +2597,11 @@ export class LoroStreamsRpcResponseDispatcher {
     }
   }
 
+  /** Receive one already target-authenticated response from the encrypted channel. */
+  async acceptAuthenticatedResponse(raw: unknown): Promise<void> {
+    await this.handleRawResponse(raw);
+  }
+
   private async handleRawResponse(raw: unknown): Promise<void> {
     const parsed = LoroStreamsRpcResponseSchema.safeParse(raw);
     if (!parsed.success) {
@@ -2763,7 +2769,13 @@ export class LoroStreamsMachineRpcClient {
     private readonly options: {
       workspaceId: string;
       machineId: string;
-      streamClient: LoroStreamsJsonStreamClient;
+      streamClient?: LoroStreamsJsonStreamClient;
+      /** Native-authorized encrypted read transport; ordinary Streams are never opened. */
+      encryptedQuery?: (
+        method: string,
+        params: unknown,
+        timeoutMs: number
+      ) => Promise<E2eeQueryResult | null>;
       responseDispatcher?: LoroStreamsRpcResponseDispatcher;
       logger?: LoggerLike;
       now?: () => number;
@@ -2777,7 +2789,17 @@ export class LoroStreamsMachineRpcClient {
       options.responseDispatcher ??
       new LoroStreamsRpcResponseDispatcher({
         workspaceId: options.workspaceId,
-        streamClient: options.streamClient,
+        streamClient: options.streamClient ?? {
+          ensureJsonStream: async () => {
+            throw new Error('e2ee_rpc_unavailable');
+          },
+          appendJson: async () => {
+            throw new Error('e2ee_rpc_unavailable');
+          },
+          readJsonLive: async () => {
+            throw new Error('e2ee_rpc_unavailable');
+          },
+        },
         responseStreamId: `${getLoroMachineRpcResponseStreamId(
           options.workspaceId,
           options.machineId
@@ -2791,7 +2813,7 @@ export class LoroStreamsMachineRpcClient {
   }
 
   async start(): Promise<void> {
-    if (this.stopped) return;
+    if (this.stopped || this.options.encryptedQuery) return;
     await this.responseDispatcher.start();
   }
 
@@ -3314,6 +3336,18 @@ export class LoroStreamsMachineRpcClient {
    * File Preview v3. One call covers first read and revalidation, and never
    * activates Code Collab on the machine.
    */
+  async requestFileDownloadChunk(
+    options: FileDownloadRequest & { ownerSessionId?: string }
+  ): Promise<FileDownloadResponse | null> {
+    const { ownerSessionId, ...params } = options;
+    return (await this.sendRequest({
+      method: 'file/download-chunk',
+      timeoutMs: 30_000,
+      ownerSessionId: ownerSessionId ?? options.sessionId,
+      params,
+    })) as FileDownloadResponse | null;
+  }
+
   async requestFilePreview(
     options: Omit<FilePreviewV3Request, 'v'> & { ownerSessionId?: string; timeoutMs?: number }
   ): Promise<FilePreviewV3Response | null> {
@@ -3623,6 +3657,7 @@ export class LoroStreamsMachineRpcClient {
       expiresAt: now + 30_000,
       params: { requestId },
     };
+    if (!this.options.streamClient) throw new Error('RPC transport unavailable');
     await this.options.streamClient.appendJson(this.requestStreamId, request);
   }
 
@@ -3875,6 +3910,12 @@ export class LoroStreamsMachineRpcClient {
           };
         }
       | {
+          method: 'file/download-chunk';
+          timeoutMs: number;
+          ownerSessionId: string;
+          params: FileDownloadRequest;
+        }
+      | {
           method: 'file/preview';
           timeoutMs: number;
           ownerSessionId: string;
@@ -3937,6 +3978,8 @@ export class LoroStreamsMachineRpcClient {
         }
   ): Promise<LoroMachineRpcResult | null> {
     if (this.stopped) return null;
+    if (this.options.encryptedQuery && !isE2eeReadQuery(args.method, args.params))
+      throw new Error('e2ee_rpc_unavailable');
     await this.start();
     if (this.stopped) return null;
 
@@ -3960,6 +4003,7 @@ export class LoroStreamsMachineRpcClient {
       args.method === 'code-collab/lsp-definition' ||
       args.method === 'code-collab/lsp-references' ||
       args.method === 'file/preview' ||
+      args.method === 'file/download-chunk' ||
       args.method === 'session/history-read' ||
       args.method === 'session/history-watch' ||
       args.method === 'session/history-write'
@@ -4245,6 +4289,7 @@ export class LoroStreamsMachineRpcClient {
             params: await encryptCodeCollabV2RpcPayload(args.ownerSessionId, args.params),
           };
           break;
+        case 'file/download-chunk':
         case 'file/preview':
           request = {
             ...envelope,
@@ -4279,7 +4324,25 @@ export class LoroStreamsMachineRpcClient {
         responseStreamId: this.responseDispatcher.getResponseStreamId(),
       });
       const appendPromise = (async () => {
-        await this.options.streamClient.appendJson(this.requestStreamId, request);
+        if (this.options.encryptedQuery) {
+          const outcome = await this.options.encryptedQuery(
+            request.method,
+            request.params,
+            timeoutMs
+          );
+          if (outcome && !this.stopped)
+            await this.responseDispatcher.acceptAuthenticatedResponse({
+              jsonrpc: JSON_RPC_VERSION,
+              id: requestId,
+              rpcVersion: request.rpcVersion,
+              machineId: request.machineId,
+              method: request.method,
+              ...outcome,
+            });
+        } else {
+          if (!this.options.streamClient) throw new Error('RPC transport unavailable');
+          await this.options.streamClient?.appendJson(this.requestStreamId, request);
+        }
         requestAppended = true;
         this.responseDispatcher.markAppendFinished(requestId);
         if (cancellationRequested) {

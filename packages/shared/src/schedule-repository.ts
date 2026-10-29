@@ -1,3 +1,4 @@
+import { recordScheduleAuthorization } from './schedule-authorization';
 import type { LoroDoc } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
 
@@ -10,11 +11,17 @@ import {
   getScheduleRoomId,
   readScheduleRegistryRows,
   scheduleRegistryKeys,
+  manualScheduleRunKey,
 } from './schedule-registry';
 import {
   DEFAULT_SCHEDULE_DESTINATION,
+  SCHEDULED_MESSAGE_RETENTION_MS,
   ScheduleActivitySchema,
   ScheduleDefinitionSchema,
+  ScheduleRuntimeRowSchema,
+  ScheduleTriggerSchema,
+  ScheduledMessageSchema,
+  scheduledMessagePrompt,
   ScheduleTombstoneSchema,
   type ScheduleDefinition,
   type ScheduleDocument,
@@ -30,7 +37,11 @@ export type ScheduleDraft = Pick<
   | 'agent'
   | 'project'
   | 'retryPolicy'
-> & { prompt: string; destination?: ScheduleDefinition['destination'] };
+> & {
+  prompt: string;
+  message?: ScheduleDocument['message'];
+  destination?: ScheduleDefinition['destination'];
+};
 
 export type ScheduleRepositoryPort = {
   openPersistedDoc: (id: string) => Promise<{ doc: unknown }>;
@@ -39,9 +50,12 @@ export type ScheduleRepositoryPort = {
       scan: () => Iterable<{ key: readonly unknown[]; value?: unknown }>;
       get: (key: string[]) => unknown;
       set: (key: string[], value: never) => unknown;
+      delete?: (key: string[]) => unknown;
     };
   }>;
   flush: () => Promise<void>;
+  /** Permanent local document removal; available on the owning CLI repo. */
+  purgeDoc?: (id: string) => Promise<void>;
 };
 
 /**
@@ -57,15 +71,37 @@ export type ScheduleRepositoryPort = {
  * objects before parsing drops it; every Mirror read of a Schedule goes here.
  */
 export function scheduleDocumentFromMirrorState(
-  state: { definition?: unknown; prompt: string; timeline: ScheduleDocument['timeline'] },
+  state: {
+    definition?: unknown;
+    prompt: string;
+    message?: { payload?: unknown };
+    timeline: ScheduleDocument['timeline'];
+  },
   scheduleId: string
 ): ScheduleDocument | null {
   const parsed = ScheduleDefinitionSchema.safeParse(withoutContainerIds(state.definition));
   if (!parsed.success || parsed.data.scheduleId !== scheduleId) return null;
+  const message =
+    state.message?.payload === undefined
+      ? undefined
+      : ScheduledMessageSchema.safeParse(withoutContainerIds(state.message.payload));
+  if ((message && !message.success) || (parsed.data.messageVersion === 1 && !message?.success))
+    return null;
+  const timeline = withoutContainerIds(state.timeline) as ScheduleDocument['timeline'];
+  const activities = new Set<string>();
   return {
     definition: parsed.data,
-    prompt: state.prompt,
-    timeline: withoutContainerIds(state.timeline) as ScheduleDocument['timeline'],
+    // Complete messages are an atomic payload, not collaboratively appended text.
+    // Concurrent creation can concatenate the legacy LoroText projection.
+    prompt: message?.success ? scheduledMessagePrompt(message.data) : state.prompt,
+    ...(message?.success ? { message: message.data } : {}),
+    timeline: message?.success
+      ? timeline.filter((entry) => {
+          if (activities.has(entry.id)) return false;
+          activities.add(entry.id);
+          return true;
+        })
+      : timeline,
   };
 }
 
@@ -84,7 +120,8 @@ const CID_KEY = '$cid';
 export class ScheduleRepository {
   constructor(
     readonly repo: ScheduleRepositoryPort,
-    readonly workspaceId: WorkspaceId
+    readonly workspaceId: WorkspaceId,
+    private readonly options: { protectedContent?: boolean } = {}
   ) {}
 
   async list() {
@@ -119,14 +156,21 @@ export class ScheduleRepository {
     try {
       mirror.setState({
         ...document,
+        message: { payload: document.message },
         // Spread `project` explicitly: it is optional on the definition but a
         // present (possibly undefined) key in the mirrored map.
-        definition: { ...document.definition, project: document.definition.project },
+        definition: {
+          ...document.definition,
+          project: document.definition.project,
+          messageVersion: document.definition.messageVersion,
+        },
         timeline: document.timeline.map((entry) => ({
           ...entry,
           requesterSessionId: entry.requesterSessionId,
         })),
       });
+      if (this.options.protectedContent)
+        recordScheduleAuthorization(handle.doc as LoroDoc, document);
       await this.repo.flush();
       // This publication is the execution gate. An interrupted first flush
       // leaves an orphan definition; no discovery/repair may enable it.
@@ -172,8 +216,13 @@ export class ScheduleRepository {
     // idempotency comparison must see the same shape on both sides.
     const incoming: ScheduleDraft = {
       ...args.draft,
+      title: args.draft.title.trim(),
+      trigger: ScheduleTriggerSchema.parse(args.draft.trigger),
+      ...(args.draft.message ? { message: ScheduledMessageSchema.parse(args.draft.message) } : {}),
       destination: args.draft.destination ?? DEFAULT_SCHEDULE_DESTINATION,
     };
+    if (previous?.message && !incoming.message)
+      throw new Error('A scheduled message cannot lose its payload');
     const prior = previous?.timeline.find((entry) => entry.id === args.activityId);
     if (prior) {
       const {
@@ -198,6 +247,7 @@ export class ScheduleRepository {
         destination,
         retryPolicy,
         prompt: previous!.prompt,
+        ...(previous!.message ? { message: previous!.message } : {}),
       };
       if (
         prior.actorId !== args.actorId ||
@@ -211,14 +261,18 @@ export class ScheduleRepository {
       return previous!;
     }
     if (args.create && previous) throw new Error('Schedule id already exists');
-    const { prompt, ...draft } = incoming;
+    const { prompt, message, ...draft } = incoming;
     const definition = ScheduleDefinitionSchema.parse({
       ...draft,
+      ...(message ? { messageVersion: 1 } : {}),
       scheduleId: args.scheduleId,
       ownerId: args.actorId,
       enabled: previous?.definition.enabled ?? true,
       activationId: args.activationId,
-      activeFrom: args.now,
+      // The one-time slot is also its deterministic activation floor. Devices
+      // creating the same reservation must not fingerprint their local clocks.
+      activeFrom:
+        message && draft.trigger.kind === 'once' ? Date.parse(draft.trigger.at) : args.now,
       createdAt: previous?.definition.createdAt ?? args.now,
       createdBy: previous?.definition.createdBy ?? args.actorId,
       updatedAt: args.now,
@@ -229,7 +283,12 @@ export class ScheduleRepository {
       actorId: args.actorId,
       createdAt: args.now,
     });
-    const document = { definition, prompt, timeline: [...(previous?.timeline ?? []), activity] };
+    const document = {
+      definition,
+      prompt,
+      ...(message ? { message } : {}),
+      timeline: [...(previous?.timeline ?? []), activity],
+    };
     await this.write(document);
     return document;
   }
@@ -272,6 +331,68 @@ export class ScheduleRepository {
       })
     );
     await this.write(document);
+  }
+
+  /**
+   * Purge terminal one-time message definitions after their quiet period.
+   *
+   * Retention starts at the owner's terminal runtime projection, not creation,
+   * so editing or a delayed restart cannot shorten the visible history. The
+   * document is removed before its Registry row so a busy or failed purge is
+   * retried on the next evaluation instead of hiding the only retry handle.
+   */
+  async pruneExpiredMessages(args: {
+    now: number;
+    ownerId: string;
+    machineId: string;
+    retentionMs?: number;
+  }): Promise<string[]> {
+    const purgeDoc = this.repo.purgeDoc?.bind(this.repo);
+    if (!purgeDoc) return [];
+    const registry = await this.repo.openFlockDoc(getScheduleRegistryFlockDocId(this.workspaceId));
+    if (!registry.flock.delete) return [];
+    const remove = (key: string[]) => registry.flock.delete?.(key);
+    const retentionMs = args.retentionMs ?? SCHEDULED_MESSAGE_RETENTION_MS;
+    if (!Number.isFinite(retentionMs) || retentionMs < 0)
+      throw new Error('Invalid scheduled message retention');
+    const purged: string[] = [];
+    for (const row of readScheduleRegistryRows(registry.flock.scan())) {
+      if (!row.scheduledMessage || row.ownerId !== args.ownerId || row.machineId !== args.machineId)
+        continue;
+      const runtime = ScheduleRuntimeRowSchema.safeParse(
+        registry.flock.get(scheduleRegistryKeys.runtime(row.scheduleId, row.machineId))
+      );
+      if (!runtime.success || runtime.data.activationId !== row.activationId) continue;
+      if (
+        runtime.data.messageState !== 'sent' &&
+        runtime.data.messageState !== 'cancelled' &&
+        runtime.data.messageState !== 'failed'
+      )
+        continue;
+      if (args.now - runtime.data.updatedAt < retentionMs) continue;
+      try {
+        await purgeDoc(getScheduleRoomId(row.scheduleId));
+      } catch {
+        // A live detail view or in-flight sync keeps the doc leased. Keep the
+        // row and retry after the lease clears.
+        continue;
+      }
+      registry.flock.set(scheduleRegistryKeys.tombstone(row.scheduleId), {
+        deletedAt: args.now,
+        actorId: args.ownerId,
+      } as never);
+      remove(scheduleRegistryKeys.schedule(row.scheduleId));
+      for (const entry of registry.flock.scan()) {
+        if (
+          (entry.key[0] === 'runtime' || entry.key[0] === 'manual') &&
+          entry.key[1] === row.scheduleId
+        )
+          remove(entry.key.map(String));
+      }
+      await this.repo.flush();
+      purged.push(row.scheduleId);
+    }
+    return purged;
   }
 
   async delete(scheduleId: string, actorId: string, now: number): Promise<void> {
@@ -320,6 +441,15 @@ export class ScheduleRepository {
       )
         throw new Error('Idempotency key conflict');
       return;
+    }
+    if (this.options.protectedContent) {
+      const handle = await this.repo.openPersistedDoc(getScheduleRoomId(args.scheduleId));
+      recordScheduleAuthorization(
+        handle.doc as LoroDoc,
+        document,
+        manualScheduleRunKey(args.scheduleId, args.manualRunId)
+      );
+      await this.repo.flush();
     }
     registry.flock.set(key, request as never);
     await this.repo.flush();

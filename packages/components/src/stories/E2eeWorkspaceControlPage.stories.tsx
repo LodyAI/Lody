@@ -1,3 +1,4 @@
+import removalVector from '../../../e2ee-core/test/ledger-v1-vector.json';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
 import { E2eeWorkspaceControlPage } from '@/components/pages/e2ee-workspace-control-page';
@@ -98,12 +99,11 @@ const vectorHistory = (recorded: typeof vectorPage) =>
     genesisHash: vectorGenesis,
     localPin: vectorGenesis,
   });
-// Synthetic display profiles; the vector's memberships are 0a…, 0b… and 0c….
+// Synthetic profiles keyed by the vector's crypto user IDs, never account authority.
 const teamProfiles = {
-  you: { name: 'Alex Chen' },
   memberProfiles: new Map([
-    ['0b'.repeat(16), { name: 'Sam Rivera' }],
-    ['0c'.repeat(16), { name: 'Jordan Lee' }],
+    ['0a'.repeat(32), { name: 'Alex Chen' }],
+    ['03'.repeat(32), { name: 'Jordan Lee' }],
   ]),
 };
 // The first nine records: everything this client can verify.
@@ -122,12 +122,55 @@ export const TeamHistory: Story = {
     }),
   },
 };
-// Record ten declares a capability this client cannot verify past.
+// The final vector record declares unsupported capability 2.
 export const UpgradeRequired: Story = {
   args: {
     workspaceId: vectorPage.workspaceId,
     genesisHash: vectorGenesis,
     ...teamProfiles,
-    history: vectorHistory(vectorPage),
+    history: appendLedgerHistory(
+      null,
+      {
+        ...vectorPage,
+        genesisHash: removalVector.anchor,
+        checkpoint: {
+          headHash: removalVector.records.at(-1)!.hash,
+          length: removalVector.records.length,
+        },
+        recordsHex: removalVector.records.map((record) => record.hex),
+      },
+      {
+        workspaceId: vectorPage.workspaceId,
+        genesisHash: removalVector.anchor,
+        localPin: removalVector.anchor,
+      }
+    ),
+  },
+};
+
+// Real signed fixture before removals; the native callbacks are synthetic in this preview.
+const memberPage = {
+  workspaceId: 'synthetic-workspace',
+  genesisHash: removalVector.anchor,
+  checkpoint: { headHash: removalVector.records[1]!.hash, length: 2 },
+  startIndex: 0,
+  position: 'p1:synthetic-workspace:2:offset:0',
+  nextCursor: null,
+  recordsHex: removalVector.records.slice(0, 2).map((record) => record.hex),
+};
+export const OwnerMemberControls: Story = {
+  args: {
+    workspaceId: memberPage.workspaceId,
+    genesisHash: memberPage.genesisHash,
+    history: appendLedgerHistory(null, memberPage, {
+      workspaceId: memberPage.workspaceId,
+      genesisHash: memberPage.genesisHash,
+      localPin: memberPage.genesisHash,
+    }),
+    memberProfiles: new Map([
+      ['0a'.repeat(32), { name: 'Alex Chen' }],
+      ['02'.repeat(32), { name: 'Jordan Lee' }],
+    ]),
+    memberManagement: { actorRole: 'owner', remove: fn(), setRole: fn() },
   },
 };

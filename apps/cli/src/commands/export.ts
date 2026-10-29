@@ -6,6 +6,7 @@ import { listWorkspaceScheduleIds } from '@/lib/schedules/schedule-documents';
 import {
   getAuthContextOrThrow,
   listAliveSessionMetas,
+  listWorkspaceCandidates,
   resolveWorkspaceOrThrow,
   runOneShotCommand,
   syncDocForRead,
@@ -15,7 +16,8 @@ import {
 } from '@/lib/command-runtime';
 import { exportWorkspaceData } from '@/lib/session-export';
 import { mapWithConcurrency } from '@/lib/session-export/concurrency';
-import { listWorkspacesForToken, type WorkspaceSummary } from '@/lib/workspace';
+import type { WorkspaceSummary } from '@/lib/workspace';
+import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 
 type ExportOptions = Pick<CommonCommandOptions, 'workspace' | 'debug'> & {
   images?: boolean;
@@ -49,6 +51,14 @@ async function syncWorkspaceSessionsForExport(
     );
   });
 
+  if (
+    !workspaceSupports(
+      { mode: workspace.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+      'schedules'
+    )
+  )
+    return;
+
   // This reconciles visible index rows with repo existence, repairing a missing
   // projection row without reviving an explicit index tombstone.
   const workspaceId = workspace.id as WorkspaceId;
@@ -80,9 +90,10 @@ export const exportCommand = new Command('export')
         throw new Error('Pass either --workspace or --all-workspace, not both.');
       }
 
+      const offline = { offline: options.offline };
       const workspaces = options.allWorkspace
-        ? await listWorkspacesForToken(auth.token)
-        : [await resolveWorkspaceOrThrow(auth, options.workspace)];
+        ? await listWorkspaceCandidates(auth, offline)
+        : [await resolveWorkspaceOrThrow(auth, options.workspace, offline)];
 
       let totalSessions = 0;
       const warnings: string[] = [];

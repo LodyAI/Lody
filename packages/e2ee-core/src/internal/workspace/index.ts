@@ -27,6 +27,7 @@ export {
   runWorkspaceKeyRound,
   WorkspaceKeyRoundCursors,
   WorkspaceKeyRoundError,
+  WorkspaceKeyRoundFailure,
 } from './key-round';
 export * from './invitation';
 export { verifyRetainedWorkspaceGenesis } from './creation';

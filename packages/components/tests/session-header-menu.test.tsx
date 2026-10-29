@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
+import { initI18n } from '../src/i18n';
 
 import { act, useState, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -44,7 +46,8 @@ describe('SessionHeaderMenu', () => {
   let root: Root | undefined;
   let container: HTMLDivElement | undefined;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    await initI18n('en');
     vi.useFakeTimers();
     Object.defineProperty(globalThis, 'PointerEvent', {
       configurable: true,
@@ -382,5 +385,66 @@ describe('SessionHeaderMenu', () => {
     await act(async () => trigger.click());
     await act(async () => menuItem('Cursor').click());
     expect(onSelect).toHaveBeenCalledWith(cursorLauncher);
+  });
+  it('allows encrypted sharing, local export and preview while keeping unsupported operations restricted', async () => {
+    let exported = false;
+    let shareOpened = false;
+    const store = createStore();
+    store.set(workspaceContentModeAtom, {
+      accountId: 'user',
+      workspaceSlug: 'encrypted',
+      workspaceId: 'workspace',
+      descriptor: { contentMode: 'e2ee', contentModeVersion: 1 },
+    } as never);
+    await act(async () =>
+      root?.render(
+        <Provider store={store}>
+          <ForkMenuHarness
+            onOpenPublicShare={() => {
+              shareOpened = true;
+            }}
+            onShareWithTeam={() => {
+              throw new Error('must not share with team');
+            }}
+            sharing={{
+              visibility: 'private',
+              privateReason: 'machine',
+              canManage: true,
+              machineId: session.machineId,
+              localProjectId: null,
+              machineName: 'remote',
+              projectName: null,
+            }}
+            onShareAsImage={() => {
+              exported = true;
+            }}
+          />
+        </Provider>
+      )
+    );
+    await openMenu();
+    for (const reason of ['Encrypted workspaces do not yet support remote machine operations.']) {
+      const item = menuItem(reason);
+      expect(item.getAttribute('aria-disabled')).toBe('true');
+      await act(async () => item.click());
+    }
+    expect(document.body.textContent).not.toContain(
+      'Encrypted workspaces do not yet support remote preview.'
+    );
+    expect(document.body.textContent).not.toContain(
+      'Encrypted workspaces do not yet support sharing.'
+    );
+    await act(async () => menuItem('Share').click());
+    expect(shareOpened).toBe(true);
+    await openMenu();
+    expect(container?.querySelector('[data-testid="copy-result"]')?.textContent).toBe('not copied');
+    expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe('none');
+    await act(async () => menuItem('Fork session').click());
+    await act(async () => menuItem('Copy context as Markdown').click());
+    expect(container?.querySelector('[data-testid="copy-result"]')?.textContent).toBe('copied');
+    expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe('none');
+    await openMenu();
+    await act(async () => menuItem('Share as image').click());
+    expect(exported).toBe(true);
   });
 });

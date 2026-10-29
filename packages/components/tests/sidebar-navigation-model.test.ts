@@ -4,6 +4,8 @@ import { ONLY_CHATS_KEY, type SidebarNavItem } from '../src/atoms/focus-layer';
 import { buildSidebarNavigationItems } from '../src/components/sidebar-navigation-model';
 import type { SidebarUpdatedItem } from '../src/components/sidebar-updated-task-list';
 import type { SessionListRow } from '../src/components/session-list';
+import { placeProjectGroups } from '../src/lib/project-group-placement';
+import type { LocalProjectId, MachineId, ProjectMemberId, WorkspaceProject } from '@lody/shared';
 
 function sessionRow(
   sessionId: string,
@@ -383,5 +385,68 @@ describe('sidebar navigation model opened-by tree', () => {
       },
     });
     expect(items).toEqual([]);
+  });
+
+  it('lists GitHub-side projects only while they have conversations, like repositories', () => {
+    const row = (id: string, group: { id: string; name: string }) => ({
+      ...sessionRow(id, '2026-04-22T08:00:00.000Z', 'acme/web'),
+      projectGroup: group,
+    });
+    const folder = (machineId: string): WorkspaceProject['members'] => [
+      {
+        id: 'm1' as ProjectMemberId,
+        source: {
+          kind: 'local',
+          machineId: machineId as MachineId,
+          localProjectId: 'notes' as LocalProjectId,
+        },
+        placement: { kind: 'root', dir: 'notes' },
+      },
+    ];
+    const placed = placeProjectGroups({
+      projects: [
+        { id: 'local', members: folder('machine-1') },
+        { id: 'idle', members: [] },
+        { id: 'busy', members: [] },
+      ],
+      states: [
+        { projectId: 'local', name: 'Local', collapsed: false },
+        { projectId: 'idle', name: 'Idle', collapsed: false },
+        { projectId: 'busy', name: 'Busy', collapsed: false },
+        // Deleted, its restored conversation still names it; folded by the user.
+        { projectId: 'gone', name: 'Gone', collapsed: true, removed: true },
+      ],
+      sessions: [
+        row('busy-row', { id: 'busy', name: 'Busy' }),
+        row('gone-row', { id: 'gone', name: 'Gone' }),
+      ],
+      listedMachineIds: new Set(['machine-1' as MachineId]),
+    });
+    const local = placed.byMachine.get('machine-1' as MachineId);
+    const items = buildSidebarNavigationItems({
+      ...baseOptions,
+      workspace: {
+        ...baseOptions.workspace,
+        localSections: [
+          {
+            collapsed: false,
+            projects: [],
+            projectGroups: local?.states,
+            projectGroupSessions: local?.sessions,
+          },
+        ],
+        projectGroups: placed.anywhere.states,
+        repoSessions: placed.anywhere.sessions,
+      },
+    });
+
+    // A machine's project stays like its folders; an idle GitHub-side one does not.
+    expect(items.flatMap((item) => (item.kind === 'group-header' ? [item.groupKey] : []))).toEqual([
+      'projectGroup:local',
+      'projectGroup:busy',
+      'projectGroup:gone',
+    ]);
+    // The deleted project's group honours its fold.
+    expect(sessionIds(items)).toEqual(['busy-row']);
   });
 });

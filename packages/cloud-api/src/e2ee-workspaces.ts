@@ -68,3 +68,10 @@ export type E2eeWorkspaceHistoryPage = {
   /** null means every record through checkpoint.length has been returned. */
   nextCursor: string | null;
 };
+
+/** Account directory labels only; these never establish ledger membership or key trust. */
+export type E2eeWorkspaceMemberProfilesRequest = { workspaceId: string };
+export type E2eeWorkspaceMemberProfiles = {
+  workspaceId: string;
+  profiles: { cryptoUserId: string; name: string | null; image: string | null }[];
+};

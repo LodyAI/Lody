@@ -20,6 +20,14 @@ import {
 import { SettingsAccountEntry } from './settings-account-entry';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 import { settingsSurface as surface } from './surface';
+import { useMobileSettingsFold } from '@/components/mobile/mobile-settings-fold-context';
+import { useOptionalSettingsDataCache } from './settings-data-cache';
+import { formatCompactNumber, formatUsdTight } from '@/lib/format-compact-number';
+import { toIntlLocaleOrEn } from '@/lib/intl-locale';
+import { computeUsageShareModelSlices } from './usage-share-stats';
+import { stripRecommended } from '@/components/shared/acp-selector-options';
+import { WorkspaceAvatar } from '@/components/workspace-avatar';
+import { resolveWorkspaceIdentityLogo } from '@/lib/workspace-identity';
 
 const styles = stylex.create({
   list: {
@@ -30,6 +38,138 @@ const styles = stylex.create({
     paddingBottom: space[6],
   },
   groups: { display: 'flex', flexDirection: 'column', gap: '20px' },
+  foldList: { height: '100%', minHeight: 0, paddingTop: 0, paddingBottom: 0 },
+  foldPanel: { minHeight: 0, overflowY: 'auto', paddingTop: space[3], paddingBottom: space[3] },
+  foldLower: { flex: '1 1 0%' },
+  foldAccountPanel: { display: 'flex', flexDirection: 'column', justifyContent: 'center' },
+  foldOverview: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))',
+    alignItems: 'stretch',
+    gap: space[3],
+    marginInline: space[3],
+  },
+  foldAccount: { minWidth: 0, display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' },
+  foldAccountSingle: { gridTemplateColumns: 'minmax(0, 1fr)' },
+  foldAccountFill: { height: '100%' },
+  foldWorkspace: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'column',
+    gap: space[3],
+    minWidth: 0,
+    paddingInline: space[3],
+    paddingBlock: space[6],
+    borderWidth: 0,
+    borderInlineStart: '1px solid hsl(var(--border) / 0.65)',
+    backgroundColor: 'transparent',
+    color: colors.label,
+    fontFamily: 'inherit',
+    cursor: 'pointer',
+    textAlign: 'center',
+  },
+  foldWorkspaceText: { width: '100%', minWidth: 0 },
+  foldWorkspaceName: {
+    display: 'block',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '1.1em',
+  },
+  foldWorkspaceLabel: {
+    display: 'block',
+    marginTop: '2px',
+    color: colors.secondaryLabel,
+    fontSize: uiText.footnoteSize,
+  },
+  foldUsage: {
+    display: 'flex',
+    minWidth: 0,
+    flexDirection: 'column',
+    justifyContent: 'center',
+    gap: space[1],
+    padding: space[4],
+    color: colors.label,
+    fontFamily: 'inherit',
+    textAlign: 'start',
+    borderWidth: 0,
+    cursor: 'pointer',
+  },
+  foldUsageHeading: { display: 'flex', justifyContent: 'space-between', gap: space[2] },
+  foldUsageLabel: {
+    color: colors.secondaryLabel,
+    fontSize: uiText.footnoteSize,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  foldUsageValue: { fontSize: '1.5em', fontWeight: 600, fontVariantNumeric: 'tabular-nums' },
+  foldUsageCost: { color: colors.secondaryLabel, fontSize: uiText.footnoteSize },
+  foldUsageVisuals: { display: 'flex', alignItems: 'end', gap: space[3], marginTop: space[2] },
+  foldUsageModel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1],
+    minWidth: 0,
+    width: '44%',
+    flexShrink: 0,
+  },
+  foldUsageRing: {
+    position: 'relative',
+    width: '44px',
+    height: '44px',
+    borderRadius: '50%',
+    flexShrink: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  foldUsageRingCenter: {
+    width: '28px',
+    height: '28px',
+    borderRadius: '50%',
+    backgroundColor: colors.elevatedBackground,
+  },
+  foldUsageModelText: {
+    display: 'flex',
+    flexDirection: 'column',
+    minWidth: 0,
+    fontSize: '10px',
+    lineHeight: 1.4,
+    color: colors.secondaryLabel,
+  },
+  foldUsageModelName: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: colors.label,
+  },
+  foldUsageChartWrap: { minWidth: 0, flexGrow: 1 },
+  foldUsageChart: {
+    display: 'flex',
+    alignItems: 'end',
+    height: '52px',
+    gap: '2px',
+    borderBottom: '1px solid hsl(var(--border))',
+    backgroundImage:
+      'repeating-linear-gradient(to bottom, transparent 0, transparent calc(33.333% - 1px), hsl(var(--border) / 0.5) calc(33.333% - 1px), hsl(var(--border) / 0.5) 33.333%)',
+  },
+  foldUsageChartBar: {
+    flex: '1 1 0%',
+    minWidth: 0,
+    borderTopLeftRadius: '2px',
+    borderTopRightRadius: '2px',
+    backgroundColor: 'hsl(var(--chart-1))',
+  },
+  foldUsageAxis: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    color: colors.tertiaryLabel,
+    fontSize: '10px',
+    lineHeight: 1,
+  },
   inset: { marginInline: space[3] },
   heading: {
     margin: 0,
@@ -164,7 +304,13 @@ const SETTINGS_SECTIONS: Array<{
 ];
 
 export function SettingsCategoryList({ workspaceName }: SettingsCategoryListProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const fold = useMobileSettingsFold();
+  const usageAvailable = useAppCapability('usageAnalytics');
+  const multiWorkspaceAvailable = useAppCapability('multiWorkspace');
+  const settingsData = useOptionalSettingsDataCache();
+  const weekUsage = usageAvailable ? settingsData?.usageTimelineByRange.week : undefined;
+  const locale = toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language);
   const scopeId = useId();
   const navigate = useNavigate();
   const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
@@ -178,6 +324,33 @@ export function SettingsCategoryList({ workspaceName }: SettingsCategoryListProp
   const resolvedWorkspaceName = workspaceName ?? workspaceSlug ?? null;
   const isNativeApp = isNativeAppShell();
   const accountTab = visibleTabs.find((tab) => tab.section === 'account') ?? null;
+  const usageTab = visibleTabs.find((tab) => tab.id === 'ai-usage');
+  const workspaceTab = visibleTabs.find((tab) => tab.id === 'workspace');
+  const usageBuckets = weekUsage?.buckets ?? [];
+  const dailyTokens = new Map<number, number>();
+  for (const bucket of usageBuckets) {
+    const dayStartMs = Math.floor(bucket.bucketStartMs / 86_400_000) * 86_400_000;
+    dailyTokens.set(dayStartMs, (dailyTokens.get(dayStartMs) ?? 0) + bucket.tokens);
+  }
+  const usageDays = [...dailyTokens].sort(([a], [b]) => a - b);
+  const dateFormatter = new Intl.DateTimeFormat(locale, {
+    month: 'numeric',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+  const usageDates = usageDays.map(([day]) => dateFormatter.format(new Date(day)));
+  const maxBucketTokens = usageDays.reduce((peak, [, tokens]) => Math.max(peak, tokens), 0);
+  const modelSlices = usageBuckets.length
+    ? computeUsageShareModelSlices(weekUsage, stripRecommended, t('workspace.usage.skyline.other'))
+    : [];
+  let modelPercent = 0;
+  const modelGradient = modelSlices
+    .map((slice, index) => {
+      const start = modelPercent;
+      modelPercent += slice.share * 100;
+      return `hsl(var(--chart-${(index % 5) + 1})) ${start}% ${modelPercent}%`;
+    })
+    .join(', ');
 
   const openCategory = useCallback(
     (category: SettingsTabConfig) => {
@@ -202,57 +375,209 @@ export function SettingsCategoryList({ workspaceName }: SettingsCategoryListProp
 
   if (!resolvedWorkspaceName) return null;
 
+  const account = accountTab ? (
+    <div
+      {...stylex.props(fold ? styles.foldAccountFill : styles.inset)}
+      data-id="settings:account"
+      data-scope-item="row"
+      data-settings-tab-id={accountTab.id}
+    >
+      <SettingsAccountEntry
+        user={user}
+        mobile
+        hero={Boolean(fold)}
+        embedded={Boolean(fold)}
+        onSelect={() => openCategory(accountTab)}
+      />
+    </div>
+  ) : null;
+  const renderSections = (sections: typeof SETTINGS_SECTIONS) => (
+    <>
+      {sections.map((section) => {
+        const sectionTabs = visibleTabs.filter(
+          (tab) => tab.section === section.id && !(tab.id === 'billing' && isNativeApp)
+        );
+        if (sectionTabs.length === 0) return null;
+        return (
+          <section key={section.id} aria-label={t(section.headingKey, section.defaultHeading)}>
+            <h2 {...stylex.props(styles.heading)}>
+              {t(section.headingKey, section.defaultHeading)}
+            </h2>
+            <div {...stylex.props(surface.card, styles.inset)}>
+              {sectionTabs.map((tab, index) => (
+                <SettingsCategoryRow
+                  key={tab.id}
+                  tab={tab}
+                  label={t(tab.labelKey)}
+                  description={t(tab.descriptionKey)}
+                  hasDivider={index > 0}
+                  onSelect={() => openCategory(tab)}
+                />
+              ))}
+            </div>
+          </section>
+        );
+      })}
+    </>
+  );
+  const footer = canReportBug && (
+    <div {...stylex.props(styles.footer)}>
+      <SettingsActionRow
+        icon={Bug}
+        label={t('bugReport.title', 'Report a bug')}
+        description={t(
+          'settings.bugReport.description',
+          'Send a report with optional machine logs'
+        )}
+        onSelect={() => setBugReportDialogOpen(true)}
+      />
+    </div>
+  );
+
   return (
-    <FocusScope id={scopeId} {...stylex.props(styles.list)}>
-      <div {...stylex.props(styles.groups)}>
-        {accountTab ? (
+    <FocusScope id={scopeId} {...stylex.props(styles.list, fold && styles.foldList)}>
+      {fold ? (
+        <>
           <div
-            {...stylex.props(styles.inset)}
-            data-id="settings:account"
-            data-scope-item="row"
-            data-settings-tab-id={accountTab.id}
+            data-settings-fold-upper
+            {...stylex.props(styles.foldPanel, styles.foldAccountPanel)}
+            style={{ flex: `0 0 ${fold.messageHeight}px` }}
           >
-            <SettingsAccountEntry user={user} mobile onSelect={() => openCategory(accountTab)} />
-          </div>
-        ) : null}
-        {SETTINGS_SECTIONS.map((section) => {
-          const sectionTabs = visibleTabs.filter(
-            (tab) => tab.section === section.id && !(tab.id === 'billing' && isNativeApp)
-          );
-          if (sectionTabs.length === 0) return null;
-          return (
-            <section key={section.id} aria-label={t(section.headingKey, section.defaultHeading)}>
-              <h2 {...stylex.props(styles.heading)}>
-                {t(section.headingKey, section.defaultHeading)}
-              </h2>
-              <div {...stylex.props(surface.card, styles.inset)}>
-                {sectionTabs.map((tab, index) => (
-                  <SettingsCategoryRow
-                    key={tab.id}
-                    tab={tab}
-                    label={t(tab.labelKey)}
-                    description={t(tab.descriptionKey)}
-                    hasDivider={index > 0}
-                    onSelect={() => openCategory(tab)}
+            <div {...stylex.props(styles.foldOverview)}>
+              <div
+                {...stylex.props(
+                  surface.card,
+                  styles.foldAccount,
+                  !account && styles.foldAccountSingle
+                )}
+              >
+                {account}
+                <button
+                  type="button"
+                  data-settings-fold-workspace
+                  {...stylex.props(styles.foldWorkspace)}
+                  disabled={!workspaceTab}
+                  onClick={() => workspaceTab && openCategory(workspaceTab)}
+                  aria-label={t('settings.tabs.workspaceGeneral')}
+                >
+                  <WorkspaceAvatar
+                    workspace={{
+                      name: activeOrganization?.name ?? resolvedWorkspaceName,
+                      logo: resolveWorkspaceIdentityLogo(
+                        activeOrganization?.logo,
+                        multiWorkspaceAvailable
+                      ),
+                    }}
+                    size="xlarge"
                   />
-                ))}
+                  <span {...stylex.props(styles.foldWorkspaceText)}>
+                    <span {...stylex.props(styles.foldWorkspaceName)}>
+                      {activeOrganization?.name ?? resolvedWorkspaceName}
+                    </span>
+                    <span {...stylex.props(styles.foldWorkspaceLabel)}>
+                      {t('settings.sections.workspace', 'Workspace')}
+                    </span>
+                  </span>
+                </button>
               </div>
-            </section>
-          );
-        })}
-      </div>
-      {canReportBug && (
-        <div {...stylex.props(styles.footer)}>
-          <SettingsActionRow
-            icon={Bug}
-            label={t('bugReport.title', 'Report a bug')}
-            description={t(
-              'settings.bugReport.description',
-              'Send a report with optional machine logs'
-            )}
-            onSelect={() => setBugReportDialogOpen(true)}
-          />
-        </div>
+              <button
+                type="button"
+                {...stylex.props(surface.card, styles.foldUsage)}
+                data-settings-fold-usage
+                disabled={!usageTab}
+                onClick={() => usageTab && openCategory(usageTab)}
+              >
+                <div {...stylex.props(styles.foldUsageHeading)}>
+                  <span {...stylex.props(styles.foldUsageLabel)}>
+                    {t('settings.sections.workspace', 'Workspace')}
+                    {activeOrganization?.name ? ` · ${activeOrganization.name}` : null}
+                  </span>
+                  {usageTab ? (
+                    <ChevronRight {...stylex.props(styles.chevron)} aria-hidden="true" />
+                  ) : null}
+                </div>
+                {usageAvailable ? (
+                  <>
+                    <div {...stylex.props(styles.foldUsageLabel)}>
+                      {t('workspace.usage.window.week.long', 'Last 7 days')} ·{' '}
+                      {t('workspace.usage.tokens')}
+                    </div>
+                    <div {...stylex.props(styles.foldUsageValue)}>
+                      {weekUsage ? formatCompactNumber(weekUsage.totals.tokens, locale) : '—'}
+                    </div>
+                    <div {...stylex.props(styles.foldUsageCost)}>
+                      {weekUsage
+                        ? `${t('workspace.usage.cost')} · ${formatUsdTight(weekUsage.totals.costUSD, locale)}`
+                        : settingsData?.workspaceId
+                          ? t('workspace.usage.loading', 'Loading usage data...')
+                          : t('workspace.usage.empty', 'No usage data in this range')}
+                    </div>
+                    {usageBuckets.length > 0 ? (
+                      <>
+                        <div {...stylex.props(styles.foldUsageVisuals)}>
+                          {modelSlices.length ? (
+                            <div {...stylex.props(styles.foldUsageModel)}>
+                              <span
+                                {...stylex.props(styles.foldUsageRing)}
+                                style={{ background: `conic-gradient(${modelGradient})` }}
+                                aria-hidden="true"
+                              >
+                                <span {...stylex.props(styles.foldUsageRingCenter)} />
+                              </span>
+                              <span {...stylex.props(styles.foldUsageModelText)}>
+                                <span>{t('workspace.usage.byModel')}</span>
+                                <span {...stylex.props(styles.foldUsageModelName)}>
+                                  {modelSlices[0]?.label}
+                                </span>
+                                <span>{Math.round((modelSlices[0]?.share ?? 0) * 100)}%</span>
+                              </span>
+                            </div>
+                          ) : null}
+                          <div {...stylex.props(styles.foldUsageChartWrap)}>
+                            <div
+                              {...stylex.props(styles.foldUsageChart)}
+                              aria-hidden="true"
+                              data-settings-usage-chart
+                            >
+                              {usageDays.map(([dayStartMs, tokens]) => (
+                                <span
+                                  key={dayStartMs}
+                                  {...stylex.props(styles.foldUsageChartBar)}
+                                  style={{
+                                    height: `${maxBucketTokens > 0 && tokens > 0 ? Math.max(7, (tokens / maxBucketTokens) * 100) : 0}%`,
+                                    opacity: tokens > 0 ? 0.8 : 0,
+                                  }}
+                                />
+                              ))}
+                            </div>
+                            <div {...stylex.props(styles.foldUsageAxis)} aria-hidden="true">
+                              <span>{usageDates[0]}</span>
+                              <span>{usageDates[Math.floor(usageDates.length / 2)]}</span>
+                              <span>{usageDates.at(-1)}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    ) : null}
+                  </>
+                ) : null}
+              </button>
+            </div>
+          </div>
+          <div aria-hidden="true" style={{ flex: `0 0 ${fold.gapHeight}px` }} />
+          <div data-settings-fold-lower {...stylex.props(styles.foldPanel, styles.foldLower)}>
+            <div {...stylex.props(styles.groups)}>{renderSections(SETTINGS_SECTIONS)}</div>
+            {footer}
+          </div>
+        </>
+      ) : (
+        <>
+          <div {...stylex.props(styles.groups)}>
+            {account}
+            {renderSections(SETTINGS_SECTIONS)}
+          </div>
+          {footer}
+        </>
       )}
     </FocusScope>
   );

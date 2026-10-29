@@ -37,8 +37,10 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
   worktree, PR icon or mobile time with one 14px mark. +/- totals: hover card only.
   Mobile: [mobile/AGENTS.md](mobile/AGENTS.md). Folded groups: only
   `SidebarGroupActivityMark`, no counts ([why](../../../../.agents/notes/implemented/feature/2026-09-26-sidebar-folded-group-status.md)).
-- Never hide a Session through nesting: missing, cross-section, cross-group, cycling,
-  or deeper-than-one-level openers render top-level. `MAX_VISIBLE_SESSIONS` /
+- Never hide a Session through nesting: missing, cross-section, cycling, or
+  deeper-than-one-level openers render top-level. In Workspace mode,
+  `placeWorkspaceSessionsWithOpeners` first moves a Session whose opener renders in
+  another group into that group; Pinned and Updated keep natural membership. `MAX_VISIBLE_SESSIONS` /
   `SHOW_FULL_BUCKET_THRESHOLD` count top-level rows. Every list passes `rootRank` for
   latest-activity sorting; rank an opener by its freshest opened Session.
 - Collapse state uses `sidebarCollapsedOpenedBySessionsAtom`, default expanded. Keep
@@ -56,6 +58,7 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
 
 ## Entry points, drafts, and layout
 
+- iOS divisions separate workspace panes; never save the temporary sidebar width. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-10-28-ios-vertical-division.md).
 - The window is `bg-sidebar`; pages use one inset `WorkspaceCard`. Keep the sidebar on the
   window, never as a floating surface. See [layout docs](../../../../.agents/docs/components-package.md).
 - Child-tab drafts send through the same accept unit as every other first message:
@@ -98,15 +101,14 @@ Ancestor/scoped rules apply. `CLAUDE.md` links here; edit `AGENTS.md` only.
   `useAddLocalProjectMachines`; the ownership rule (`canAddProjects`) has one home and
   must not be re-derived per surface. Onboarding is the deliberate exception: its
   desktop native picker really is this-machine only.
-- A pending local-project removal is a visible lifecycle state, not an absent project:
-  keep the project and its Sessions discoverable while the owning machine is offline or
-  retrying, but exclude it from new-Session selectors. Once the catalog row is gone,
-  archived Sessions stay readable and deletable; Restore waits until the same local
-  project is added again.
-- Local-project removal may optionally clean Lody-created Session worktrees, but the
-  option defaults off and appears only after the owning machine preflights every
-  worktree. Always state the original project directory is never deleted; list dirty
-  worktrees and keep them by default. A completed cleanup is not pending removal and
-  must be visibly acknowledged even when worktrees were kept or failed.
+- Local directory registration and standalone display are independent. Missing
+  `standaloneVisible` means visible. Standalone lists filter hidden registrations;
+  member resolution, repository-copy selection and session access retain them.
+- Local-project deletion uses the existing action without confirmation or dependency
+  UI. The daemon retains referenced registrations and sessions; unreferenced ones
+  follow normal deletion. Explicit Add restores standalone display and identity.
+- Direct folder selection is draft-only until save. Gate read-only inspection on
+  `projectFolderSelection`; register missing directories before saving the complete
+  Project. Retried saves reuse registrations; source paths stay out of definitions.
 
 E2EE/terminals: read [rules](e2ee/AGENTS.md).

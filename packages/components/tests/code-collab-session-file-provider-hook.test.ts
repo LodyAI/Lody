@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
+import { localProbeResultAtom } from '../src/atoms/local-probe';
 
 import { createElement, useEffect, type ReactNode } from 'react';
 import { act } from 'react';
@@ -205,14 +207,28 @@ describe('materializeCodeCollabV2FileIndexForFileProvider', () => {
 });
 
 describe('useCodeCollabSessionFileProvider', () => {
-  it.each([null, '/original/workspace'])(
-    'opens a desktop file while the daemon index is unavailable (root %s)',
-    async (workspaceRoot) => {
+  it.each([
+    [null, false],
+    ['/original/workspace', false],
+    [null, true],
+    ['/original/workspace', true],
+  ] as const)(
+    'opens a desktop file while the daemon index is unavailable (root %s, encrypted %s)',
+    async (workspaceRoot, encrypted) => {
       (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
       vi.stubGlobal('window', Object.assign(window, { __LODY_ELECTRON__: true }));
       const store = createStore();
       const sessionId = 'offline-session' as SessionId;
       const machineId = 'offline-machine' as MachineId;
+      if (encrypted) {
+        store.set(localProbeResultAtom, { ok: true, machineId });
+        store.set(workspaceContentModeAtom, {
+          accountId: 'user',
+          workspaceSlug: 'encrypted',
+          workspaceId: 'workspace-1',
+          descriptor: { contentMode: 'e2ee', contentModeVersion: 1 },
+        } as never);
+      }
       const ownerSessionId = 'offline-parent' as SessionId;
       store.set(
         runtimeAtom,

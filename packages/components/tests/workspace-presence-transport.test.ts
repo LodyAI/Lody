@@ -1,7 +1,10 @@
+import { EphemeralStore } from 'loro-crdt';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_LORO_STREAMS_BASE_URL,
   LODY_PRESENCE_CHANNEL,
+  LODY_PRESENCE_TTL_MS,
+  type LodyPresenceStateMap,
   LODY_PRESENCE_HEARTBEAT_MS,
   getLodyMachinePresenceKey,
   parseLodyPresenceStates,
@@ -112,6 +115,200 @@ const installTestWindow = (): {
 };
 
 describe('WorkspacePresenceTransport', () => {
+  it.each([false, true])(
+    'drops invalid viewing routes without throwing or retaining a heartbeat (started=%s)',
+    async (started) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(1_790_000_000_000);
+      const store = new EphemeralStore(LODY_PRESENCE_TTL_MS);
+      const server = new EphemeralStore(LODY_PRESENCE_TTL_MS);
+      const emitted: Uint8Array[] = [];
+      const detach = store.subscribeLocalUpdates((bytes) => {
+        emitted.push(bytes);
+        server.apply(bytes);
+      });
+      const presence = new WorkspacePresenceTransport({
+        workspaceId: 'workspace-1' as WorkspaceId,
+        minimal: true,
+        createStore: () => store,
+        createTransport: () => new FakePresenceTransport(),
+      });
+      const start = () =>
+        presence.start({ baseUrl: 'https://synthetic.invalid', auth: async () => undefined });
+      try {
+        if (started) start();
+        for (const sessionId of [
+          'Private roadmap: /Users/example/project',
+          'TitleWithoutSpaces',
+          '1790000000000-privateroadmap',
+          '1790000000000-k5zmz7k',
+          'a'.repeat(1024),
+        ]) {
+          expect(() =>
+            presence.publishSessionViewing({
+              sessionId: sessionId as SessionId,
+              userId: 'Abcdef0123456789Abcdef0123456789',
+            })
+          ).not.toThrow();
+        }
+        expect(() =>
+          presence.publishSessionViewing({
+            sessionId: '01020304-1111-4222-8333-010203040508' as SessionId,
+            userId: 'User name /private/path',
+          })
+        ).not.toThrow();
+        // An unstarted room must not retain this route for its first publication either.
+        presence.publishSessionViewing({
+          sessionId: '1790000000000-privateroadmap' as SessionId,
+          userId: 'Abcdef0123456789Abcdef0123456789',
+        });
+        if (!started) start();
+        vi.advanceTimersByTime(LODY_PRESENCE_HEARTBEAT_MS);
+        expect(server.getAllStates()).toEqual({});
+        expect(emitted).toEqual([]);
+        expect(presence.getSyncState()).toBe('connecting');
+      } finally {
+        detach();
+        await presence.stop();
+        server.destroy();
+        vi.useRealTimers();
+      }
+    }
+  );
+
+  it('clears a valid viewing entry when the next route is invalid, without leaking the route on heartbeat', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_790_000_000_000);
+    const store = new EphemeralStore(LODY_PRESENCE_TTL_MS);
+    const server = new EphemeralStore(LODY_PRESENCE_TTL_MS);
+    const detach = store.subscribeLocalUpdates((bytes) => server.apply(bytes));
+    const presence = new WorkspacePresenceTransport({
+      workspaceId: 'workspace-1' as WorkspaceId,
+      minimal: true,
+      createStore: () => store,
+      createTransport: () => new FakePresenceTransport(),
+    });
+    try {
+      presence.start({ baseUrl: 'https://synthetic.invalid', auth: async () => undefined });
+      presence.publishSessionViewing({
+        sessionId: '01020304-1111-4222-8333-010203040508' as SessionId,
+        userId: 'Abcdef0123456789Abcdef0123456789',
+      });
+      expect(Object.values(server.getAllStates())).toHaveLength(1);
+      vi.advanceTimersByTime(1);
+      expect(() =>
+        presence.publishSessionViewing({
+          sessionId: '/private/invalid route' as SessionId,
+          userId: 'Abcdef0123456789Abcdef0123456789',
+        })
+      ).not.toThrow();
+      vi.advanceTimersByTime(LODY_PRESENCE_HEARTBEAT_MS);
+      expect(server.getAllStates()).toEqual({});
+      expect(store.getAllStates()).toEqual({});
+    } finally {
+      detach();
+      await presence.stop();
+      server.destroy();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([false, true])(
+    'projects received fields and publishes viewing through real Loro (minimal=%s)',
+    async (minimal) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(10_000);
+      const store = new EphemeralStore(LODY_PRESENCE_TTL_MS);
+      const transport = new FakePresenceTransport();
+      let snapshot: LodyPresenceStateMap = {};
+      let streamUrl = '';
+      const presence = new WorkspacePresenceTransport({
+        workspaceId: 'workspace-1' as WorkspaceId,
+        minimal,
+        presenceShardId: 0,
+        createStore: () => store,
+        onSnapshot: (states) => {
+          snapshot = states;
+        },
+        createTransport: (args) => {
+          streamUrl = args.streamUrl;
+          return transport;
+        },
+      });
+      const peer = new EphemeralStore(LODY_PRESENCE_TTL_MS);
+      const wire = new EphemeralStore(LODY_PRESENCE_TTL_MS);
+      try {
+        presence.start({
+          baseUrl: 'https://synthetic.invalid',
+          bucketId: 'protected-bucket',
+          auth: async () => 'token',
+        });
+        expect(streamUrl).toContain('/protected-bucket/');
+        presence.publishSessionViewing({
+          sessionId: '01020304-1111-4222-8333-010203040501' as SessionId,
+          userId: 'Abcdef0123456789Abcdef0123456789',
+          detail: 'must be ignored',
+        } as never);
+        wire.apply(store.encodeAll());
+        expect(Object.values(wire.getAllStates())).toEqual([
+          {
+            kind: 'session-viewing',
+            userId: 'Abcdef0123456789Abcdef0123456789',
+            instanceId: expect.any(String),
+            sessionId: '01020304-1111-4222-8333-010203040501',
+            since: 10_000,
+            updatedAt: 10_000,
+          },
+        ]);
+        peer.set('remote', {
+          kind: 'session',
+          sessionId: '01020304-1111-4222-8333-010203040502',
+          machineId: '01020304-1111-4222-8333-010203040503',
+          instanceId: '01020304-1111-4222-8333-010203040504',
+          updatedAt: 10_000,
+          status: { type: 'initializing', stage: 'acp', detail: 'secret' },
+          unknownText: 'ignored',
+        });
+        store.apply(peer.encodeAll());
+        expect(snapshot.remote).toEqual({
+          kind: 'session',
+          sessionId: '01020304-1111-4222-8333-010203040502',
+          machineId: '01020304-1111-4222-8333-010203040503',
+          instanceId: '01020304-1111-4222-8333-010203040504',
+          updatedAt: 10_000,
+          status: minimal
+            ? { type: 'initializing', stage: 'acp' }
+            : { type: 'initializing', stage: 'acp', detail: 'secret' },
+        });
+        transport.emitStatus('joined');
+        expect(presence.getDisplaySyncState()).toBe('synced');
+        const deleted = Promise.withResolvers<void>();
+        const unsubscribeWire = store.subscribeLocalUpdates((bytes) => {
+          wire.apply(bytes);
+          deleted.resolve();
+        });
+        vi.advanceTimersByTime(1);
+        presence.publishSessionViewing(null);
+        await deleted.promise;
+        unsubscribeWire();
+        expect(
+          Object.values(wire.getAllStates()).some(
+            (entry) =>
+              typeof entry === 'object' &&
+              entry !== null &&
+              'kind' in entry &&
+              entry.kind === 'session-viewing'
+          )
+        ).toBe(false);
+      } finally {
+        await presence.stop();
+        peer.destroy();
+        wire.destroy();
+        vi.useRealTimers();
+      }
+    }
+  );
+
   afterEach(() => {
     if (typeof window !== 'undefined') {
       delete window.lodyPresence;

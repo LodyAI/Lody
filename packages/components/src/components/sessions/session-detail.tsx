@@ -1,3 +1,5 @@
+import { useSessionForkCapabilities } from '@/hooks/use-session-fork-capabilities';
+import { requireWorkspaceFeature } from '@/lib/workspace-feature';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { FileLinkCandidateDialog } from './file-link-candidate-dialog';
 import {
@@ -15,7 +17,6 @@ import {
   Archive,
   ArchiveRestore,
   ArrowLeft,
-  ChevronLeft,
   Copy,
   Ellipsis,
   FileText,
@@ -40,13 +41,10 @@ import { useRouter } from '@tanstack/react-router';
 import { useComposerNavigationFocus } from '../chat/submission/use-composer-navigation-focus';
 import { usePostHog } from '@posthog/react';
 import {
-  getAcpCapabilityCacheKey,
-  resolveSessionAcpTargetId,
   getProjectRefBranch,
   getServerNow,
   getSessionPullRequestLegacyFields,
   getSessionRoomId,
-  getAcpCapabilityCacheEntryAuthority,
   isLoroRepoDocDeleted,
   resolveProjectGitHubRepo,
   SessionForkOperationSchema,
@@ -118,7 +116,17 @@ import {
   zenLayoutModeAtom,
   zenRightPanelAtom,
 } from '@/atoms/layout-state';
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import { useNativeSideRail } from '../mobile/native-side-rail';
 import * as stylex from '@stylexjs/stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { useDocumentTitle } from '@/hooks/use-document-title';
@@ -169,7 +177,10 @@ import type {
 } from '@/components/mobile/mobile-session-menu-sheet';
 import { SessionShareMobileMenu } from '@/components/sharing/session-share-mobile-menu';
 import { MobileFileViewerDrawer } from '@/components/mobile/mobile-file-viewer-drawer';
-import { GlassIconButton } from '@/components/mobile/glass-icon-button';
+import {
+  GlassIconButton,
+  MobileSessionHeaderBackButton,
+} from '@/components/mobile/glass-icon-button';
 import { toast } from '@/lib/toast';
 
 import { SessionConversationDiffPanel } from './session-conversation-diff-panel';
@@ -715,9 +726,6 @@ const detailStyles = stylex.create({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  leftNudge: {
-    marginInlineStart: '-4px',
-  },
   iconCurrent: {
     width: '20px',
     height: '20px',
@@ -915,22 +923,53 @@ const MobileProjectInfo = memo(function MobileProjectInfo({
   );
 });
 
-/* Glass back chevron for the mobile floating header. `onBack` leaves the
-   session route, which closes the `MobileWorkspaceStack` drawer — Vaul then
-   plays the slide-out and the home/project base beneath is revealed. */
-function MobileSessionHeaderBackButton({ onBack }: { onBack: () => void }) {
+function AdaptiveMobileSessionHeader({
+  inset,
+  title,
+  hasUnread,
+  onBack,
+  onTabs,
+  onMore,
+}: {
+  inset: string;
+  title: ReactNode;
+  hasUnread: boolean;
+  onBack: () => void;
+  onTabs: () => void;
+  onMore: () => void;
+}) {
   const { t } = useTranslation();
+  const sideRailVisible = useNativeSideRail(
+    [
+      { id: 'back', label: t('common.back', 'Back'), symbol: 'chevron.left', onPress: onBack },
+      {
+        id: 'more',
+        label: t('sessions.moreActions', 'More actions'),
+        symbol: 'ellipsis',
+        onPress: onMore,
+      },
+    ],
+    2
+  );
   return (
-    /* -ml-1: glass disc is 36px inside a 44px hit target, so without this the
-       disc sits 4px right of the conversation gutter. Shift so the disc's left
-       edge lines up with the agent avatar below (ConversationColumn px-3). */
-    <GlassIconButton
-      label={t('common.back', 'Back')}
-      onClick={onBack}
-      className={stylex.props(detailStyles.leftNudge).className}
-    >
-      <ChevronLeft {...stylex.props(detailStyles.iconCurrent)} strokeWidth={1.75} />
-    </GlassIconButton>
+    <BaseHeader
+      truncateTitle={false}
+      hideMenuButton
+      className="absolute inset-x-0 top-0 z-30 border-b-0 bg-background/55 backdrop-blur-xl"
+      style={{ height: inset, paddingTop: 'var(--safe-area-top, 0px)' }}
+      leading={sideRailVisible ? undefined : <MobileSessionHeaderBackButton onBack={onBack} />}
+      title={title}
+      actions={
+        <div {...stylex.props(detailStyles.mobileHeaderRight)}>
+          <MobileSessionTabButton hasUnread={hasUnread} onOpen={onTabs} />
+          {!sideRailVisible && (
+            <GlassIconButton label={t('sessions.moreActions', 'More actions')} onClick={onMore}>
+              <Ellipsis {...stylex.props(detailStyles.iconCurrent)} strokeWidth={1.75} />
+            </GlassIconButton>
+          )}
+        </div>
+      }
+    />
   );
 }
 
@@ -1044,6 +1083,7 @@ const SessionDetail = ({
   urlBrowser,
   urlSimulator,
   onMobileBack,
+  onMobilePresented,
 }: {
   sessionId: SessionId;
   urlTab?: string;
@@ -1051,6 +1091,7 @@ const SessionDetail = ({
   urlBrowser?: boolean;
   urlSimulator?: boolean;
   onMobileBack?: () => void;
+  onMobilePresented?: (sessionId: string) => void;
 }) => {
   const { t } = useTranslation();
   const router = useRouter();
@@ -1651,37 +1692,9 @@ const SessionDetail = ({
     MACHINE_PROTOCOL_CAPABILITIES.codeCollabAllChangesScope
   );
   const effectiveAllChangesDiffScope = allChangesScopeSupported ? allChangesDiffScope : 'branch';
-  const canForkSession = useCallback(
-    (target: SessionMeta): boolean => {
-      if (target.isArchived || !target.agentConfigId || !resolveSessionAcpTargetId(target))
-        return false;
-      const capability =
-        sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(target.agentConfigId)];
-      return (
-        getAcpCapabilityCacheEntryAuthority(capability, undefined) === 'authoritative' &&
-        capability?.sessionFork === true
-      );
-    },
-    [sessionMachine?.acpCapabilities]
-  );
-  const canForkSessionToWorktree = useCallback(
-    (target: SessionMeta): boolean => {
-      if (
-        !target.agentConfigId ||
-        !resolveSessionAcpTargetId(target) ||
-        !target.project ||
-        (target.project.kind !== 'local' && target.project.kind !== 'github')
-      ) {
-        return false;
-      }
-      const capability =
-        sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(target.agentConfigId)];
-      return (
-        getAcpCapabilityCacheEntryAuthority(capability, undefined) === 'authoritative' &&
-        capability?.sessionForkWorktree === true
-      );
-    },
-    [sessionMachine?.acpCapabilities]
+  const { canForkSession, canForkSessionToWorktree } = useSessionForkCapabilities(
+    activeSessionMachineId,
+    sessionMachine?.acpCapabilities
   );
   const handleForkAssistant = useCallback(
     async (
@@ -3253,7 +3266,10 @@ const SessionDetail = ({
   }, [activeSession, machineDotlodyPath, resolvedLocalProjectMeta?.rootPath, sessionMachine]);
 
   const handleCopyConversationHistory = useCallback(() => {
-    if (runtime?.contentMode === 'e2ee') throw new Error('e2ee_export_unavailable');
+    requireWorkspaceFeature(
+      { mode: runtime?.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+      'export'
+    );
     if (activeDraftTab) {
       return;
     }
@@ -3275,7 +3291,10 @@ const SessionDetail = ({
   }, [runtime?.contentMode, activeDraftTab, activeTabSessionId, captureSessionDetailEvent, t]);
 
   const handleShareAsImage = useCallback(async () => {
-    if (runtime?.contentMode === 'e2ee') throw new Error('e2ee_export_unavailable');
+    requireWorkspaceFeature(
+      { mode: runtime?.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+      'export'
+    );
     if (activeDraftTab) {
       return;
     }
@@ -3926,7 +3945,10 @@ const SessionDetail = ({
 
   const handleOpenBrowser = useCallback(
     (tabSessionId?: SessionId, navigateCandidate = false) => {
-      if (runtime?.contentMode === 'e2ee') throw new Error('e2ee_preview_unavailable');
+      requireWorkspaceFeature(
+        { mode: runtime?.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+        'remote-preview'
+      );
       const browserSessionId = tabSessionId ?? activeBrowserSession?.id;
       if (tabSessionId) {
         navigateToSessionTab(tabSessionId, { push: true });
@@ -4763,6 +4785,9 @@ const SessionDetail = ({
     }
     return viewerTabs.find((tab) => tab.id === effectiveActiveViewerTabId) ?? null;
   }, [effectiveActiveViewerTabId, viewerTabs]);
+  // Mobile diff viewers replace the conversation; file drawers do not.
+  const hasActiveViewerTab =
+    effectiveActiveViewerTabId !== null && (!isMobile || activeViewerTab?.type !== 'file');
   const activeViewerTabSaveState = effectiveActiveViewerTabId
     ? viewerTabSaveStates[effectiveActiveViewerTabId]
     : undefined;
@@ -4819,16 +4844,20 @@ const SessionDetail = ({
     });
   }, [activeTabSessionId, isMobile]);
 
+  // Drafts and pending children can resolve to the parent for display only.
+  const canRenameCurrentSession =
+    activeTabSession?.id === activeTabSessionId &&
+    !activeTabSession.isArchived &&
+    (!isMobile || !hasActiveViewerTab);
   const handleRenameCurrentSession = useCallback(() => {
-    const targetSession = activeDraftTab ? null : activeTabSession;
-    if (!targetSession || targetSession.isArchived) {
+    if (!canRenameCurrentSession) {
       return;
     }
     setRenameDialogTarget({
-      sessionId: targetSession.id,
-      initialTitle: targetSession.title ?? '',
+      sessionId: activeTabSession.id,
+      initialTitle: activeTabSession.title ?? '',
     });
-  }, [activeDraftTab, activeTabSession]);
+  }, [canRenameCurrentSession, activeTabSession]);
 
   const handleToggleCurrentSessionPinned = useCallback(() => {
     const targetSession = activeDraftTab ? null : activeTabSession;
@@ -5004,12 +5033,7 @@ const SessionDetail = ({
     title: t('commands.session.renameCurrent', 'Rename Current Chat'),
     category: 'Session',
     keybindings: getCommandKeybindings('session.renameCurrent'),
-    /* Same pending-child rule as toggleCurrentPinned above. */
-    when: () =>
-      Boolean(activeTabSession) &&
-      !activeDraftTab &&
-      !activeTabIsPendingChild &&
-      activeTabSession?.isArchived !== true,
+    when: () => canRenameCurrentSession,
     run: handleRenameCurrentSession,
   });
 
@@ -5372,10 +5396,6 @@ const SessionDetail = ({
     sidePanelTabs,
   ]);
 
-  // Mobile diff viewers still replace the conversation surface. File viewers
-  // open in their own drawer and therefore never hide the conversation.
-  const hasActiveViewerTab =
-    effectiveActiveViewerTabId !== null && (!isMobile || activeViewerTab?.type !== 'file');
   const mobileSkipTargetId = getSessionDetailSkipTargetId(hasActiveViewerTab);
 
   /* ── Mobile tab-switcher sheet (replaces the mobile SessionTabBar) ──
@@ -5692,7 +5712,7 @@ const SessionDetail = ({
         onDeleteSession: handleRequestDeleteCurrentSession,
         onOpenSearch: handleOpenSearch,
         onCopyConversationHistory: exportAllowed ? handleCopyConversationHistory : undefined,
-        onRequestRename: !activeDraftTab ? handleRenameCurrentSession : undefined,
+        onRequestRename: canRenameCurrentSession ? handleRenameCurrentSession : undefined,
         onForkSession:
           !activeDraftTab && activeTabSession && canForkSession(activeTabSession)
             ? handleForkCurrentSession
@@ -5734,6 +5754,7 @@ const SessionDetail = ({
     exportAllowed,
     handleCopyConversationHistory,
     activeDraftTab,
+    canRenameCurrentSession,
     handleRenameCurrentSession,
     activeTabSession,
     canForkSession,
@@ -5778,6 +5799,12 @@ const SessionDetail = ({
     sessionId,
     sessionPresenceState,
   ]);
+
+  const mobileSurfaceResolved =
+    isMobile && Boolean(activeSession) && sessionPresenceState === 'resolved';
+  useLayoutEffect(() => {
+    if (mobileSurfaceResolved) onMobilePresented?.(sessionId);
+  }, [mobileSurfaceResolved, sessionId, onMobilePresented]);
 
   if (sessionPresenceState === 'loading') {
     return (
@@ -6171,16 +6198,14 @@ const SessionDetail = ({
           }
         }
       }
-      mobileMenuActions.push({
-        id: 'rename',
-        icon: <Pencil {...stylex.props(detailStyles.icon14)} />,
-        label: t('sidebar.renameChat.title', 'Rename Chat'),
-        onClick: () =>
-          setRenameDialogTarget({
-            sessionId: activeSession.id,
-            initialTitle: activeSession.title ?? '',
-          }),
-      });
+      if (canRenameCurrentSession) {
+        mobileMenuActions.push({
+          id: 'rename',
+          icon: <Pencil {...stylex.props(detailStyles.icon14)} />,
+          label: t('sidebar.renameChat.title', 'Rename Chat'),
+          onClick: handleRenameCurrentSession,
+        });
+      }
     }
     mobileMenuActions.push(
       {
@@ -6308,37 +6333,18 @@ const SessionDetail = ({
           detailStyles.conversationTopInset(mobileHeaderInset)
         )}
       >
-        <BaseHeader
-          truncateTitle={false}
-          hideMenuButton
-          className="absolute inset-x-0 top-0 z-30 border-b-0 bg-background/55 backdrop-blur-xl"
-          style={{ height: mobileHeaderInset, paddingTop: 'var(--safe-area-top, 0px)' }}
-          leading={<MobileSessionHeaderBackButton onBack={handleMobileSessionBack} />}
+        <AdaptiveMobileSessionHeader
+          inset={mobileHeaderInset}
+          onBack={handleMobileSessionBack}
+          onTabs={() => setMobileTabSheetOpen(true)}
+          onMore={() => setMobileMenuSheetOpen(true)}
+          hasUnread={hasBackgroundUnread(mobileConversations)}
           title={
             <MobileProjectInfo
               session={activeSession}
               localProjectMeta={resolvedLocalProjectMeta}
               isSyncing={activeSessionDocIsSyncing}
             />
-          }
-          actions={
-            /* Extra -mr beyond the 4px disc/hit-target offset: the large
-               glass radius reads optically left of the hard right gutter
-               (user avatar + composer), so nudge ~8px total. */
-            <div {...stylex.props(detailStyles.mobileHeaderRight)}>
-              {/* Files, PR, and Browser entries live in the mobile tab sheet
-                  (mobileViewers), not the header. */}
-              <MobileSessionTabButton
-                hasUnread={hasBackgroundUnread(mobileConversations)}
-                onOpen={() => setMobileTabSheetOpen(true)}
-              />
-              <GlassIconButton
-                label={t('sessions.moreActions', 'More actions')}
-                onClick={() => setMobileMenuSheetOpen(true)}
-              >
-                <Ellipsis {...stylex.props(detailStyles.iconCurrent)} strokeWidth={1.75} />
-              </GlassIconButton>
-            </div>
           }
         />
         <MobileSessionTabSheet
@@ -6637,6 +6643,7 @@ const SessionDetail = ({
           onOpenChange={setMobileFilesBrowserOpen}
         >
           <DrawerContent
+            nativeKeyboardInset
             className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
             data-sidebar-swipe-open-disabled
           >
@@ -6692,8 +6699,8 @@ const SessionDetail = ({
            `data-vaul-no-drag`), so PR diffs scroll horizontally without dragging
            the drawer toward dismissal. The zone clears the fixed header so the
            back button stays tappable. See mobile-workspace-stack.tsx. */}
-        {/* Native keyboard handling is owned by ui/drawer.tsx: live viewport
-           inset on non-iOS side drawers, Vaul repositioning on iOS. Mobile web
+        {/* Keyboard handling is owned by ui/drawer.tsx: a native keyboard
+           inset on iOS and the live viewport inset on other shells. Mobile web
            uses browser resizing; see mobile-workspace-stack.tsx. */}
         <Drawer
           direction="right"
@@ -6704,6 +6711,7 @@ const SessionDetail = ({
           }}
         >
           <DrawerContent
+            nativeKeyboardInset
             className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
             data-sidebar-swipe-open-disabled
           >
@@ -6714,6 +6722,7 @@ const SessionDetail = ({
               {latestPr && repoFullName && urlPrNumber === latestPrNumber && latestPrNumber && (
                 <PrTabContainer
                   sessionId={prSessionId}
+                  actionSessionId={activeSessionTabId}
                   repoFullName={latestPrRepoFullName}
                   prNumber={latestPrNumber}
                   headCommitSha={getSessionPullRequestLegacyFields(latestPr).headCommitSha}
@@ -6743,8 +6752,8 @@ const SessionDetail = ({
            conversation (invisible until the session drawer closes and flashes
            a few frames). Managed preview iframes survive remount via
            `managed-preview-frame-cache.ts`. */}
-        {/* Native keyboard handling is owned by ui/drawer.tsx: live viewport
-           inset on non-iOS side drawers, Vaul repositioning on iOS. Mobile web
+        {/* Keyboard handling is owned by ui/drawer.tsx: a native keyboard
+           inset on iOS and the live viewport inset on other shells. Mobile web
            uses browser resizing; see mobile-workspace-stack.tsx. */}
         <Drawer
           direction="right"
@@ -6755,6 +6764,7 @@ const SessionDetail = ({
           }}
         >
           <DrawerContent
+            nativeKeyboardInset
             className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
             data-sidebar-swipe-open-disabled
           >
@@ -6813,6 +6823,7 @@ const SessionDetail = ({
           }}
         >
           <DrawerContent
+            nativeKeyboardInset
             className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
             data-sidebar-swipe-open-disabled
           >
@@ -6904,6 +6915,7 @@ const SessionDetail = ({
     ) : activeSidebarTab === 'pr' && latestPr && repoFullName && latestPrNumber ? (
       <PrTabContainer
         sessionId={prSessionId}
+        actionSessionId={activeSessionTabId}
         repoFullName={latestPrRepoFullName}
         prNumber={latestPrNumber}
         headCommitSha={getSessionPullRequestLegacyFields(latestPr).headCommitSha}

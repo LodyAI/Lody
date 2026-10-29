@@ -69,6 +69,43 @@ export {
   type SealedEpochHpke,
 } from '../internal/crypto/hpke';
 
+// Purpose-specific opaque content primitives; no realtime authority or body profile.
+export {
+  sealPresenceContent,
+  openPresenceContent,
+  sealRpcRequestContent,
+  openRpcRequestContent,
+  sealRpcResponseContent,
+  openRpcResponseContent,
+} from '../internal/content/realtime';
+
+// Machine sharing
+export {
+  verifyMachineSharingGeneration,
+  type VerifiedMachineSharingGeneration,
+  type MachineSharingAdmission,
+} from '../internal/machine-sharing-generation';
+export {
+  updateMachineSharingState,
+  encodeMachineSharingPolicy,
+  decodeMachineSharingPolicy,
+  machineSharingContentScope,
+  machineSharingDigest,
+  sealMachineSharingPolicy,
+  openMachineSharingPolicy,
+  readMachineSharingHistoryStep,
+  verifyMachineSharingHistoryStep,
+  authorizeMachineExecution,
+  type MachineSharingBinding,
+  type MachineSharingState,
+  type MachineSharingChange,
+  type MachineSharingPolicy,
+  type MachineSharingHead,
+  type MachineSharingHistoryStep,
+  type VerifiedMachineSharingPolicy,
+  type MachineExecutionDecision,
+} from '../internal/machine-sharing';
+
 // Documents
 export {
   sealDocument,

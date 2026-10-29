@@ -53,6 +53,7 @@ export { authenticateEpochEnvelope } from '../internal/keys/envelope';
 export type { KeyMailboxStatus } from '../services/keys';
 export type { EpochStagingStore, KeyMailbox } from '../services/keys';
 export { admitDocument } from '../internal/content';
+export { admitMachineSharingFrame } from '../internal/machine-sharing';
 export {
   admitStreamsSnapshot,
   admitStreamsSnapshotEffect,

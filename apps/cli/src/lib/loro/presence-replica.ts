@@ -1,6 +1,7 @@
 import { EphemeralStore, type Value } from 'loro-crdt';
 import {
   LODY_PRESENCE_TTL_MS,
+  MinimalLodyPresenceStateSchema,
   getLodyMachinePresenceKey,
   getLodySessionPresenceKey,
   parseLodyPresenceStates,
@@ -24,12 +25,20 @@ export class PresenceReplica {
   private closed = false;
   private destroyed = false;
 
-  constructor(readonly instanceId: LodyPresenceInstanceId) {}
+  constructor(
+    readonly instanceId: LodyPresenceInstanceId,
+    private readonly options: { minimal?: boolean } = {}
+  ) {}
 
   private write(key: string, state: LodyPresenceState): void {
     if (this.closed) return;
-    this.store.set(key, state as unknown as Value);
-    this.local.set(key, state as unknown as Value);
+    const parsed = this.options.minimal
+      ? MinimalLodyPresenceStateSchema.safeParse(state)
+      : undefined;
+    if (parsed && !parsed.success) return;
+    const published = parsed?.data ?? state;
+    this.store.set(key, published as unknown as Value);
+    this.local.set(key, published as unknown as Value);
     for (const listener of this.listeners) listener();
   }
   private remove(key: string): void {
@@ -39,6 +48,16 @@ export class PresenceReplica {
   }
   setMachineOnline(machineId: MachineId, now: number): void {
     if (this.closed) return;
+    if (
+      this.options.minimal &&
+      !MinimalLodyPresenceStateSchema.safeParse({
+        kind: 'machine',
+        machineId,
+        instanceId: this.instanceId,
+        updatedAt: now,
+      }).success
+    )
+      return;
     this.machineId = machineId;
     this.machineKey = getLodyMachinePresenceKey(machineId, this.instanceId);
     this.heartbeat(now);
@@ -66,16 +85,19 @@ export class PresenceReplica {
       return this.clearSessionPresence(args.sessionId);
     const machineId = args.machineId ?? this.machineId;
     if (!machineId) return;
-    const key = getLodySessionPresenceKey(args.sessionId, this.instanceId);
-    this.sessions.set(args.sessionId, key);
-    this.write(key, {
+    const state: LodySessionPresenceState = {
       kind: 'session',
       sessionId: args.sessionId,
       machineId,
       instanceId: this.instanceId,
       status: args.status,
       updatedAt: now,
-    });
+    };
+    // Validate before retaining a key: deleting an absent Loro key still emits its bytes.
+    if (this.options.minimal && !MinimalLodyPresenceStateSchema.safeParse(state).success) return;
+    const key = getLodySessionPresenceKey(args.sessionId, this.instanceId);
+    this.sessions.set(args.sessionId, key);
+    this.write(key, state);
   }
   clearSessionPresence(sessionId: SessionId): void {
     if (this.closed) return;
@@ -92,7 +114,10 @@ export class PresenceReplica {
     }
   }
   getPresenceStates(): LodyPresenceStateMap {
-    return parseLodyPresenceStates(this.store.getAllStates() as Record<string, unknown>);
+    return parseLodyPresenceStates(
+      this.store.getAllStates() as Record<string, unknown>,
+      this.options
+    );
   }
   encodeLocalOriginPresence(): Uint8Array {
     return this.local.encodeAll();

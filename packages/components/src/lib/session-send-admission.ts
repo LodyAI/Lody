@@ -1,6 +1,8 @@
+import { requireWorkspaceFeature } from './workspace-feature';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import {
   getMachineRoomId,
+  normalizeSessionInputBlocks,
   getSessionRoomId,
   isLoroRepoDocDeleted,
   machineSupportsSessionInputDispatch,
@@ -34,14 +36,34 @@ export async function acceptSessionUserTurn(
   attachments?: SessionAttachmentDraft[],
   onAccepted?: () => void
 ): Promise<'written' | 'pending'> {
-  if (runtime.contentMode === 'e2ee' && attachments?.some(attachment => !attachment.ready || (attachment.ready.type !== 'file' || attachment.ready.transport !== 'local'))) throw new Error('e2ee_attachments_unavailable');
+  if (
+    attachments?.some(
+      (attachment) =>
+        !attachment.ready ||
+        attachment.ready.type !== 'file' ||
+        attachment.ready.transport !== 'local'
+    )
+  ) {
+    requireWorkspaceFeature(
+      { mode: runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
+      'attachments'
+    );
+  }
+  if (runtime.contentMode === 'e2ee') {
+    const blocks = normalizeSessionInputBlocks(entry.inputConfig?.inputBlocks, '');
+    for (const ready of [...blocks, ...(attachments?.flatMap((item) => item.ready ? [item.ready] : []) ?? [])]) {
+      if ((ready.type === 'image' || (ready.type === 'file' && ready.transport !== 'local')) && !ready.encryption)
+        throw new Error('e2ee_attachment_unprotected');
+    }
+  }
   const pending = runtime.pendingSends;
   const unprepared = attachments?.some((attachment) => !attachment.ready) ?? false;
   const found = creation ? undefined : await runtime.repo.getDocMeta(getSessionRoomId(sessionId));
   if (isLoroRepoDocDeleted(found)) throw new Error('Target conversation was deleted');
   const meta = creation ?? (found?.meta as SessionMeta | undefined);
   const roostBackend = meta?.historyBackend === 'roost';
-  if (runtime.contentMode === 'e2ee' && roostBackend) throw new Error('e2ee_history_backend_unavailable');
+  if (runtime.contentMode === 'e2ee' && roostBackend)
+    throw new Error('e2ee_history_backend_unavailable');
   if (pending && (unprepared || pending.hasSession(sessionId) || roostBackend)) {
     let targetMachineId = creation?.machineId;
     if (!targetMachineId) {
