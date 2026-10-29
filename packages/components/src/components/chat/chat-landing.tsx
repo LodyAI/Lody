@@ -3129,6 +3129,11 @@ function WorkspaceChatLanding({
     // would create the conversation with no MCP servers instead of its defaults.
     if (!mcpSelection.ready && !withoutMcp) {
       captureSessionInputBlocked('mcp_defaults_not_ready');
+      if (!mcpSelection.defaultsFailed) {
+        setComposerError(
+          t('chat.validation.mcpDefaultsLoading', 'Loading this project’s default MCP servers…')
+        );
+      }
       return;
     }
     const scopedMachineId =
