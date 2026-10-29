@@ -296,9 +296,9 @@ const makeHarness = async (options?: {
     const factoryStore = new LodyOperationStore(storePath, options?.now ?? (() => TEST_NOW_MS));
     openedStores.push(factoryStore);
     const activate = factoryStore.inbox.activate.bind(factoryStore.inbox);
-    factoryStore.inbox.activate = (workspaceId, owner) => {
+    factoryStore.inbox.activate = (activatedWorkspaceId, owner) => {
       options?.beforeActivate?.();
-      activate(workspaceId, owner);
+      activate(activatedWorkspaceId, owner);
     };
     const close = factoryStore.close.bind(factoryStore);
     factoryStore.close = () => {

@@ -291,12 +291,12 @@ export class LodyOperationCoordinator {
             if (this.startupFailure !== failure) return;
             try {
               this.start();
-            } catch (cause) {
-              this.degradeStartup(cause);
+            } catch (retryCause) {
+              this.degradeStartup(retryCause);
             }
           })
-          .catch((cause) => {
-            if (this.startupFailure === failure) this.degradeStartup(cause);
+          .catch((retryCause) => {
+            if (this.startupFailure === failure) this.degradeStartup(retryCause);
           });
       }, this.startupRetryDelay);
       this.startupRetry.unref();
