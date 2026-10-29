@@ -1,6 +1,14 @@
 import { E2eeTeamInboxHost } from '@/components/e2ee/email-admission-worker';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useAtomValue } from 'jotai';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useAtomValue, useStore } from 'jotai';
+import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom, userAtom } from '@/atoms';
+import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
+import {
+  getTelemetryRouteTarget,
+  installWorkspaceTelemetryScope,
+  postHogPrivacy,
+  suspendWorkspaceTelemetry,
+} from '@/lib/posthog-privacy';
 import {
   CLOUD_PLATFORM_CAPABILITIES,
   createStore,
@@ -80,6 +88,67 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
   const signOut = useAuthSignOut();
   const [sessionStore] = useState(() => createStore<PlatformSessionState>({ status: 'loading' }));
   const [workspacesStore] = useState(() => createStore<WorkspacesState>({ status: 'loading' }));
+  const atomStore = useStore();
+  const telemetryLive = useRef({ session, organization });
+  telemetryLive.current = { session, organization };
+  useLayoutEffect(() => postHogPrivacy.sync());
+  useEffect(() => {
+    const uninstall = installWorkspaceTelemetryScope(() => {
+      const live = telemetryLive.current;
+      if (
+        live.session.isPending ||
+        live.session.isRetrying ||
+        live.session.isOptimistic ||
+        live.organization.error ||
+        !live.organization.activeOrganization
+      )
+        return null;
+      const identity = sessionStore.get();
+      const mode = atomStore.get(workspaceContentModeAtom);
+      const target = getTelemetryRouteTarget();
+      if (
+        identity.status !== 'authenticated' ||
+        live.session.data?.user.id !== identity.user.id ||
+        live.organization.activeOrganization.id !== mode?.workspaceId ||
+        ('contentMode' in live.organization.activeOrganization &&
+          live.organization.activeOrganization.contentMode !== undefined &&
+          String(live.organization.activeOrganization.contentMode) !== 'plaintext') ||
+        atomStore.get(userAtom)?.id !== identity.user.id ||
+        !target ||
+        mode?.accountId !== identity.user.id ||
+        mode.workspaceSlug !== target ||
+        atomStore.get(currentWorkspaceSlugAtom) !== target ||
+        atomStore.get(currentWorkspaceIdAtom) !== mode.workspaceId ||
+        !mode.descriptor ||
+        !('contentMode' in mode.descriptor) ||
+        mode.descriptor.contentMode !== 'plaintext'
+      )
+        return null;
+      const listed = workspacesStore.get();
+      if (
+        listed.status !== 'ready' ||
+        listed.activeWorkspaceId !== mode.workspaceId ||
+        listed.workspaces.some(
+          (item) => item.id === mode.workspaceId && item.contentMode === 'e2ee'
+        )
+      )
+        return null;
+      return JSON.stringify([identity.user.id, mode.workspaceId, target]);
+    });
+    const refresh = () => postHogPrivacy.sync();
+    const unsubscribes = [
+      sessionStore.subscribe(refresh),
+      workspacesStore.subscribe(refresh),
+      atomStore.sub(userAtom, refresh),
+      atomStore.sub(workspaceContentModeAtom, refresh),
+      atomStore.sub(currentWorkspaceIdAtom, refresh),
+      atomStore.sub(currentWorkspaceSlugAtom, refresh),
+    ];
+    return () => {
+      uninstall();
+      for (const unsubscribe of unsubscribes) unsubscribe();
+    };
+  }, [atomStore, sessionStore, workspacesStore]);
   const [uninstallGitHubTokenPort] = useState(() => installGitHubTokenPort(cloudGitHubTokenPort));
   const [uninstallCloudHttpPort] = useState(() => installCloudHttpPort(CLOUD_HTTP_PORT));
 
@@ -237,8 +306,10 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
                 native.prepareFeatureRpc(workspaceId, input),
               acceptFeatureRpcResponse: (workspaceId, input, frame) =>
                 native.acceptFeatureRpcResponse(workspaceId, input, frame),
-              readMachineSharing: (workspaceId, machineId) => native.readMachineSharing(workspaceId, machineId),
-              updateMachineSharing: (workspaceId, machineId, generation, requestId, change) => native.updateMachineSharing(workspaceId, machineId, generation, requestId, change),
+              readMachineSharing: (workspaceId, machineId) =>
+                native.readMachineSharing(workspaceId, machineId),
+              updateMachineSharing: (workspaceId, machineId, generation, requestId, change) =>
+                native.updateMachineSharing(workspaceId, machineId, generation, requestId, change),
               prepareDispatch: (workspaceId, machineId, input) =>
                 native.prepareDispatch(workspaceId, machineId, input),
               acceptDispatchResponse: (workspaceId, machineId, input, frame) =>
@@ -291,7 +362,18 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
           ]);
         },
         setActive: async (workspaceId) => {
-          await actions.current.activateOrganization(workspaceId);
+          const current = workspacesStore.get();
+          if (current.status === 'ready' && current.activeWorkspaceId === workspaceId) {
+            await actions.current.activateOrganization(workspaceId);
+            return;
+          }
+          const resume = suspendWorkspaceTelemetry();
+          try {
+            await actions.current.activateOrganization(workspaceId);
+          } catch (error) {
+            resume();
+            throw error;
+          }
         },
         updateSlug: async (workspaceId, slug) => {
           const updated = await actions.current.updateOrganization(workspaceId, { slug });

@@ -1,6 +1,7 @@
 import { createRouter as createTanstackRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
 import type { LodyAuthClient } from './lib/auth';
+import { setTelemetryRouteTarget } from './lib/posthog-privacy';
 
 export type RouterContext = {
   authClient: LodyAuthClient;
@@ -36,6 +37,20 @@ export const createRouter = (options: CreateRouterOptions) => {
       authClient: options.authClient,
     },
   });
+  const publishTelemetryTarget = (pathname: string, committed: boolean) => {
+    const matches = router.matchRoutes(pathname);
+    const workspace = matches.find((match) => 'workspaceName' in match.params);
+    const slug = workspace?.params as { workspaceName?: string } | undefined;
+    setTelemetryRouteTarget(slug?.workspaceName ?? null, committed);
+  };
+  // Subscribe outside React so a switch closes the gate before route rendering,
+  // and never enables a new scope while the old DOM is still committed.
+  router.subscribe('onBeforeNavigate', ({ toLocation }) =>
+    publishTelemetryTarget(toLocation.pathname, false)
+  );
+  router.subscribe('onResolved', ({ toLocation }) =>
+    publishTelemetryTarget(toLocation.pathname, true)
+  );
   return router;
 };
 

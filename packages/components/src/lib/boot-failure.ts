@@ -155,7 +155,8 @@ function resolveBootBeaconInstallId(): string {
 function getBootBeaconConfig(): { key: string; host: string } | null {
   // import.meta.env is statically replaced by Vite at build time in every shell
   // that bundles this module, so reading it here works pre-React.
-  const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
+  const env = import.meta.env;
+  if (env.VITE_LODY_PLATFORM !== 'cloud') return null;
   const key = env.VITE_PUBLIC_POSTHOG_KEY;
   const host = env.VITE_PUBLIC_POSTHOG_HOST;
   if (!key || !host) return null;
@@ -221,7 +222,7 @@ export function captureBootFailedBeacon(error: unknown, options: BootFailureOpti
   postBootBeaconEvent('app/boot_failed', {
     failure_kind: failureKind,
     platform: options.platform ?? 'web',
-    error_type: error instanceof Error ? error.name : typeof error,
+    error_type: error instanceof Error ? 'Error' : typeof error,
     is_online: typeof navigator !== 'undefined' ? navigator.onLine : null,
     // install_id doubles as the distinct id; surface it as a prop too so it
     // joins with `app/launch.install_id` for the same install.

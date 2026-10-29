@@ -69,6 +69,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:posthog-browser": "node tests/posthog-browser.integration.mjs",
     "test:e2e:ui": "playwright test --ui",
     "storybook": "storybook dev --host 127.0.0.1 -p 6006",
     "build-storybook": "storybook build",

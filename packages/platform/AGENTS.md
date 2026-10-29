@@ -21,6 +21,17 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
 - Local CLI, renderer, and Electron-main telemetry is hard-disabled even when
   unrelated PostHog variables exist in the caller's shell.
 
+## Telemetry privacy
+
+- E2EE and unconfirmed workspace scopes must not record or upload replay. Only a
+  matching account, route, workspace and verified plaintext descriptor may enable
+  it; an ordinary provisional runtime or listing is not plaintext proof. Pause
+  before switching targets and discard buffered work across that boundary.
+- Automatic exceptions in those scopes use a fixed diagnostic vocabulary. Shared
+  main/daemon processes cannot infer one workspace mode and always use that
+  vocabulary. Preserve detailed local, user-submitted support reports.
+  [SDK buffering rationale](../../.agents/notes/implemented/bug-fix/2026-10-29-workspace-telemetry-privacy.md).
+
 ## Streams token capability
 
 - Only official cloud composition constructs Streams token ports. Native

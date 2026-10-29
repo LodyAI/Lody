@@ -7,3 +7,4 @@ export * from './local';
 export * from './provider';
 export * from './runtime-artifacts';
 export * from './store';
+export * from './telemetry';
