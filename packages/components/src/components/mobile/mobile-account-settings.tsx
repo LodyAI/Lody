@@ -597,7 +597,7 @@ export function MobileAccountSettings({
                   maxLength={120}
                   placeholder={t('settings.profile.namePlaceholder')}
                   disabled={isSavingUserName}
-                  className="h-9"
+                  controlHeight="calc(var(--spacing) * 9)"
                   aria-label={t('settings.profile.name')}
                 />
               ) : (
@@ -704,7 +704,7 @@ export function MobileAccountSettings({
                   maxLength={120}
                   placeholder={t('settings.account.workspaceNamePlaceholder')}
                   disabled={isRenamingOrganization}
-                  className="h-9"
+                  controlHeight="calc(var(--spacing) * 9)"
                   aria-label={t('settings.account.workspaceName')}
                 />
               ) : (

@@ -247,7 +247,10 @@ export function MobileDeleteWorkspaceSheet({
             >
               {isDeleting ? (
                 <>
-                  <Spinner {...withClassName(stylex.props(styles.busyMark), 'h-3.5 w-3.5')} />
+                  <Spinner
+                    diameter="calc(var(--spacing) * 3.5)"
+                    {...stylex.props(styles.busyMark)}
+                  />
                   {t('common.processing', 'Processing...')}
                 </>
               ) : (

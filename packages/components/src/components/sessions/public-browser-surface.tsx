@@ -346,7 +346,7 @@ export function PublicBrowserSurface({
     >
       {phase === 'loading' ? (
         <div {...stylex.props(styles.overlay)}>
-          <Spinner className="h-5 w-5 text-muted-foreground" />
+          <Spinner diameter="calc(var(--spacing) * 5)" className="text-muted-foreground" />
         </div>
       ) : null}
       {localError ? (

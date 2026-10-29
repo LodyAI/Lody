@@ -1,0 +1,207 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "ids": [
+    "components-ownedmobileworkspacesheetsmigration--delete",
+    "components-ownedmobileworkspacesheetsmigration--delete-warning",
+    "components-ownedmobileworkspacesheetsmigration--delete-long-text"
+  ],
+  "ready": {
+    "components-ownedmobileworkspacesheetsmigration--delete": [
+      {
+        "action": "visible",
+        "selector": "#mobile-delete-workspace-confirm"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const f=document.querySelector('[data-mobile-workspace-fixture=delete]'),p=document.querySelector('[data-slot=drawer-content]'),i=document.querySelector('#mobile-delete-workspace-confirm');if(!f||!p||!i||getComputedStyle(p).opacity!=='1'||getComputedStyle(p).display==='none')return false;if(i.value!==''||i.disabled||p.querySelector('[data-slot=spinner]')||f.querySelector('[data-mobile-workspace-result]')?.dataset.pending!=='false')return false;const b=[...p.querySelectorAll('button')].find(b=>b.textContent.trim()==='Delete Permanently');if(!b?.disabled)return false;return document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "components-ownedmobileworkspacesheetsmigration--delete-warning": [
+      {
+        "action": "visible",
+        "selector": "#mobile-delete-workspace-confirm"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const f=document.querySelector('[data-mobile-workspace-fixture=delete]'),p=document.querySelector('[data-slot=drawer-content]'),i=document.querySelector('#mobile-delete-workspace-confirm');if(!f||!p||!i||getComputedStyle(p).opacity!=='1'||getComputedStyle(p).display==='none')return false;if(i.value!==''||i.disabled||p.querySelector('[data-slot=spinner]')||f.querySelector('[data-mobile-workspace-result]')?.dataset.pending!=='false')return false;const b=[...p.querySelectorAll('button')].find(b=>b.textContent.trim()==='Delete Permanently');if(!b?.disabled)return false;return document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "components-ownedmobileworkspacesheetsmigration--delete-long-text": [
+      {
+        "action": "visible",
+        "selector": "#mobile-delete-workspace-confirm"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const f=document.querySelector('[data-mobile-workspace-fixture=delete]'),p=document.querySelector('[data-slot=drawer-content]'),i=document.querySelector('#mobile-delete-workspace-confirm');if(!f||!p||!i||getComputedStyle(p).opacity!=='1'||getComputedStyle(p).display==='none')return false;if(i.value!==''||i.disabled||p.querySelector('[data-slot=spinner]')||f.querySelector('[data-mobile-workspace-result]')?.dataset.pending!=='false')return false;const b=[...p.querySelectorAll('button')].find(b=>b.textContent.trim()==='Delete Permanently');if(!b?.disabled)return false;return document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {
+    "components-ownedmobileworkspacesheetsmigration--delete": [
+      {
+        "name": "pending",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#mobile-delete-workspace-confirm",
+            "value": "Synthetic Workspace"
+          },
+          {
+            "action": "enabled",
+            "role": "button",
+            "name": "Delete Permanently",
+            "exact": true
+          },
+          {
+            "action": "press",
+            "selector": "#mobile-delete-workspace-confirm",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const f=document.querySelector('[data-mobile-workspace-fixture=delete]'),p=document.querySelector('[data-slot=drawer-content]'),i=document.querySelector('#mobile-delete-workspace-confirm');if(!f||!p||!i||getComputedStyle(p).opacity!=='1'||getComputedStyle(p).display==='none')return false;const s=p.querySelector('[data-slot=spinner]'),b=s?.closest('button');if(!s||!b||!b.disabled||!i.disabled||!p.querySelector('button[aria-label=Close]')?.disabled||f.querySelector('[data-mobile-workspace-result]')?.dataset.pending!=='true')return false;const r=s.getBoundingClientRect(),c=getComputedStyle(s);if(c.width!=='14px'||c.height!=='14px'||r.top<0||r.bottom>innerHeight||r.left<0||r.right>innerWidth)return false;return document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "completed-reopened",
+        "steps": [
+          {
+            "action": "waitForFunction",
+            "expression": "() => {window.dispatchEvent(new Event('mobile-workspace-fixture-settle'));return true;}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-slot=drawer-content]')&&document.querySelector('[data-mobile-workspace-result]')?.dataset.pending==='false'"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open delete workspace sheet",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const f=document.querySelector('[data-mobile-workspace-fixture=delete]'),p=document.querySelector('[data-slot=drawer-content]'),i=document.querySelector('#mobile-delete-workspace-confirm');if(!f||!p||!i||getComputedStyle(p).opacity!=='1'||getComputedStyle(p).display==='none')return false;if(i.value!==''||i.disabled||p.querySelector('[data-slot=spinner]')||f.querySelector('[data-mobile-workspace-result]')?.dataset.pending!=='false')return false;const b=[...p.querySelectorAll('button')].find(b=>b.textContent.trim()==='Delete Permanently');if(!b?.disabled)return false;return document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "components-ownedmobileworkspacesheetsmigration--delete-warning": [
+      {
+        "name": "pending",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#mobile-delete-workspace-confirm",
+            "value": "Synthetic Workspace"
+          },
+          {
+            "action": "enabled",
+            "role": "button",
+            "name": "Delete Permanently",
+            "exact": true
+          },
+          {
+            "action": "press",
+            "selector": "#mobile-delete-workspace-confirm",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const f=document.querySelector('[data-mobile-workspace-fixture=delete]'),p=document.querySelector('[data-slot=drawer-content]'),i=document.querySelector('#mobile-delete-workspace-confirm');if(!f||!p||!i||getComputedStyle(p).opacity!=='1'||getComputedStyle(p).display==='none')return false;const s=p.querySelector('[data-slot=spinner]'),b=s?.closest('button');if(!s||!b||!b.disabled||!i.disabled||!p.querySelector('button[aria-label=Close]')?.disabled||f.querySelector('[data-mobile-workspace-result]')?.dataset.pending!=='true')return false;const r=s.getBoundingClientRect(),c=getComputedStyle(s);if(c.width!=='14px'||c.height!=='14px'||r.top<0||r.bottom>innerHeight||r.left<0||r.right>innerWidth)return false;return document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "completed-reopened",
+        "steps": [
+          {
+            "action": "waitForFunction",
+            "expression": "() => {window.dispatchEvent(new Event('mobile-workspace-fixture-settle'));return true;}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-slot=drawer-content]')&&document.querySelector('[data-mobile-workspace-result]')?.dataset.pending==='false'"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open delete workspace sheet",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const f=document.querySelector('[data-mobile-workspace-fixture=delete]'),p=document.querySelector('[data-slot=drawer-content]'),i=document.querySelector('#mobile-delete-workspace-confirm');if(!f||!p||!i||getComputedStyle(p).opacity!=='1'||getComputedStyle(p).display==='none')return false;if(i.value!==''||i.disabled||p.querySelector('[data-slot=spinner]')||f.querySelector('[data-mobile-workspace-result]')?.dataset.pending!=='false')return false;const b=[...p.querySelectorAll('button')].find(b=>b.textContent.trim()==='Delete Permanently');if(!b?.disabled)return false;return document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "components-ownedmobileworkspacesheetsmigration--delete-long-text": [
+      {
+        "name": "pending",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#mobile-delete-workspace-confirm",
+            "value": "Synthetic collaborative development workspace \u2014 international team"
+          },
+          {
+            "action": "enabled",
+            "role": "button",
+            "name": "Delete Permanently",
+            "exact": true
+          },
+          {
+            "action": "press",
+            "selector": "#mobile-delete-workspace-confirm",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const f=document.querySelector('[data-mobile-workspace-fixture=delete]'),p=document.querySelector('[data-slot=drawer-content]'),i=document.querySelector('#mobile-delete-workspace-confirm');if(!f||!p||!i||getComputedStyle(p).opacity!=='1'||getComputedStyle(p).display==='none')return false;const s=p.querySelector('[data-slot=spinner]'),b=s?.closest('button');if(!s||!b||!b.disabled||!i.disabled||!p.querySelector('button[aria-label=Close]')?.disabled||f.querySelector('[data-mobile-workspace-result]')?.dataset.pending!=='true')return false;const r=s.getBoundingClientRect(),c=getComputedStyle(s);if(c.width!=='14px'||c.height!=='14px'||r.top<0||r.bottom>innerHeight||r.left<0||r.right>innerWidth)return false;return document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "completed-reopened",
+        "steps": [
+          {
+            "action": "waitForFunction",
+            "expression": "() => {window.dispatchEvent(new Event('mobile-workspace-fixture-settle'));return true;}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-slot=drawer-content]')&&document.querySelector('[data-mobile-workspace-result]')?.dataset.pending==='false'"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open delete workspace sheet",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const f=document.querySelector('[data-mobile-workspace-fixture=delete]'),p=document.querySelector('[data-slot=drawer-content]'),i=document.querySelector('#mobile-delete-workspace-confirm');if(!f||!p||!i||getComputedStyle(p).opacity!=='1'||getComputedStyle(p).display==='none')return false;if(i.value!==''||i.disabled||p.querySelector('[data-slot=spinner]')||f.querySelector('[data-mobile-workspace-result]')?.dataset.pending!=='false')return false;const b=[...p.querySelectorAll('button')].find(b=>b.textContent.trim()==='Delete Permanently');if(!b?.disabled)return false;return document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ]
+  }
+}

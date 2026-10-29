@@ -7,6 +7,7 @@ import { X } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
 import { useStuckConnectionHint } from '@/hooks/use-stuck-connection';
 import { useWorkspaceDataScopeState } from '@/hooks/use-workspace-data-scope-state';
 import { RecoveryPage, reportRecoveryShown } from './blocking-wait-placeholder';
@@ -21,6 +22,7 @@ import {
 } from '../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  dismissSpacing: { marginRight: 'calc(var(--spacing) * -1)' },
   connectionSpinner: { color: 'hsl(var(--muted-foreground) / 1)' },
   /** The sheet's place: pinned above the mobile dock, letting the pointer through. */
   sheet: {
@@ -158,7 +160,7 @@ export function StuckConnectionBanner({
             icon
             height="calc(var(--spacing) * 6)"
             width="calc(var(--spacing) * 6)"
-            className="-mr-1 text-muted-foreground"
+            className={clsx(stylex.props(styles.dismissSpacing).className, 'text-muted-foreground')}
             onClick={onDismiss}
             aria-label={labels.dismissAriaLabel}
           >

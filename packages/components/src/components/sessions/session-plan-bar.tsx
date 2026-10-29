@@ -20,6 +20,7 @@ import {
 } from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  panelSpacing: { marginTop: 'calc(var(--spacing) * 2)' },
   root: {
     borderWidth: '1px',
     borderStyle: 'solid',
@@ -210,7 +211,7 @@ export const SessionPlanBar = ({
             />
           </div>
         </Collapsible.Trigger>
-        <Collapsible.Panel className="mt-2">
+        <Collapsible.Panel {...stylex.props(styles.panelSpacing)}>
           {/* The rule and the space above the list ride on a child: the panel's
               own height is what the reveal animates, and Base UI measures it
               with `scrollHeight`, which counts padding. */}

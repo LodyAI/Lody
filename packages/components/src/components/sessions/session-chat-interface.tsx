@@ -2142,9 +2142,10 @@ export function SessionSearchBar({
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder={t('sessions.findInConversation', 'Find in session')}
           aria-label={t('sessions.findInConversation', 'Find in session')}
+          controlHeight="calc(var(--spacing) * 7)"
           className={cn(
             stylex.props(styles.searchInputLayout).className,
-            'h-7 border-0 bg-transparent px-1.5 py-0 text-[13px] tracking-tight shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 [&::-webkit-search-cancel-button]:hidden'
+            'border-0 bg-transparent px-1.5 py-0 text-[13px] tracking-tight shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 [&::-webkit-search-cancel-button]:hidden'
           )}
           onKeyDown={(event) => {
             if (event.key === 'Enter') {

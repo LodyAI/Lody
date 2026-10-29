@@ -10,6 +10,7 @@ import {
   TerminalSquare,
 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
@@ -31,6 +32,11 @@ import {
 const LODY_DESKTOP_DOWNLOAD_URL = 'https://lody.ai/download';
 
 const styles = stylex.create({
+  downloadSpacing: { marginTop: 'calc(var(--spacing) * 3)' },
+  commandCopyOffset: {
+    right: 'calc(var(--spacing) * 1.5)',
+    top: 'calc(var(--spacing) * 1.5)',
+  },
   /* Glyphs */
   icon20: { width: themeSpace[5], height: themeSpace[5] },
   icon16: { width: themeSpace[4], height: themeSpace[4] },
@@ -322,7 +328,11 @@ export function MachinePairingDialog({
                       </p>
                     </div>
                   </div>
-                  <Button width="100%" className="mt-3" onClick={downloadDesktop}>
+                  <Button
+                    width="100%"
+                    {...stylex.props(styles.downloadSpacing)}
+                    onClick={downloadDesktop}
+                  >
                     <Download {...stylex.props(styles.icon16)} aria-hidden="true" />
                     {t('machinePairing.downloadDesktop', 'Download Lody Desktop')}
                   </Button>
@@ -364,7 +374,10 @@ export function MachinePairingDialog({
                             type="button"
                             variant="ghost"
                             icon
-                            className="absolute right-1.5 top-1.5"
+                            className={clsx(
+                              stylex.props(styles.commandCopyOffset).className,
+                              'absolute'
+                            )}
                             onClick={() => void copyCommand()}
                             aria-label={t('machinePairing.copyCommand', 'Copy command')}
                           >

@@ -1782,6 +1782,36 @@ known-overflow captures rather than fabricating a capture manifest. The matching
 result does not assert viewport fit, native/backend execution or closure of earlier
 OPENs. Current implementation and visual limits remain distinct.
 
+The private-spacing/input/loading continuation removes seventeen utilities in
+eleven product files. Existing primitive APIs own the three input heights and
+workspace-delete, Emoji and public-browser Spinner dimensions. Nine private
+margin/offset changes preserve local spacing; actual build rules establish their
+longhand precedence while retaining absolute positioning and the opaque Skeleton
+class marker. Unknown source markers are not treated as redundant shrink utilities.
+The Emoji runner holds real bundled requests and continues their actual responses,
+so Loading and loaded/search/keyboard/scroll/forced-color states are real UI.
+
+`leaves50-54-acceptance.html` contains 208 formal pairs/12,304 equal full recorded
+layout nodes: 204 exact PNGs and four original OPENs. Method origins remain explicit:
+180 standard and 28 native pairs. The collapsed PlanBar retains 14 raw pixels/zero
+above-threshold pixels; three deletion-sheet frames retain 28 raw/four
+above-threshold pixels. Bounded controls and equal CSS/geometry do not prove those
+original raster triggers. Four real normal-motion renderer Spinner pairs are
+separate and exact. Selected CSS probes retain their expected private variables
+and raw attributes; the first unsettled Emoji color samples are not silently
+normalized or substituted for formal screenshots.
+
+The public-browser fixture accepts only renderer Loading/ready/error and explicit
+never-forward synthetic IPC replies. Its first 32 candidate frames are rejected:
+a normal probe exposed two actual unhandled theme-setter IPC errors. Correcting
+only the fixture and rebuilding original product source establishes a new clean
+Before32/normal4. Original errors/images and the first 32 candidates remain. This
+does not cover WebContentsView contents, native navigation or network execution.
+The five owning groups retain their scoped check results; the full components/UI
+runs keep their through49 boundary. The report includes eight original spacing
+gate failures, with four Banner triggers still UNKNOWN. New successful scopes
+do not close these or earlier OPENs.
+
 ## Remaining work
 
 The compiler-backed [inventory](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -1799,7 +1829,8 @@ completion percentage. Unresolved expressions remain a separate work list.
 | Frozen source through 43                                   | v2             |       1,664 |   173 |        721 |
 | Frozen source through 45                                   | v2             |       1,656 |   171 |        721 |
 | Frozen source through 47                                   | v2             |       1,646 |   169 |        721 |
-| Exact source through 49, visual limits recorded separately | v2             |       1,637 |   169 |        721 |
+| Exact source through 49                                    | v2             |       1,637 |   169 |        721 |
+| Exact source through 54, visual limits recorded separately | v2             |       1,620 |   168 |        721 |
 
 Earlier method changes recognized single utilities, `withClassName`'s second
 argument and supported static class arrays. Historical per-batch counts remain
@@ -1819,10 +1850,10 @@ utility-looking strings in comparisons or unrelated properties. Ambiguous writes
 remain unresolved. Two adapter `className` writes expose four additional unresolved expressions,
 explaining the corresponding increase in that count.
 
-The current v2 source split is components 1,187 occurrences/153 files/628 unresolved,
-legacy UI 445/14/93 and routes 5/two/zero. The through49 component scan uses an
-exact source copy checked against the pre-test lock while later batches proceed;
-all 688 JS/TS files match that boundary. Batch34–39 visual differences and rejected
+The current v2 source split is components 1,171 occurrences/152 files/628 unresolved,
+legacy UI 444/14/93 and routes 5/two/zero. The through54 component scan extends the
+exact through49 pre-test source copy with ten verified owned updates while later
+batches proceed; all 688 JS/TS files match that boundary. Batch34–39 visual differences and rejected
 calibrations retain their own status; this source inventory does not accept them.
 
 WebWorkspaceLayout remains deferred until its actual sidebar/runtime/router

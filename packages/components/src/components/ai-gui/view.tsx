@@ -374,6 +374,8 @@ const TRANSITION_COLORS = {
 } as const;
 
 const viewStyles = stylex.create({
+  forkFooterSpacing: { marginRight: 'calc(var(--spacing) * 2)' },
+  planCopySpacing: { marginRight: 'calc(var(--spacing) * -1)' },
   /* ── The live status row ──────────────────────────────────────────────── */
   agentActivityRow: {
     paddingBottom: {
@@ -6703,7 +6705,7 @@ export const AssistantTurnFooter = ({
               {showFinishedMetadata && (onFork || copyContext) ? (
                 <AssistantForkButton
                   turnId={message.id}
-                  className="mr-2"
+                  className={stylex.props(viewStyles.forkFooterSpacing).className}
                   isForking={isForking}
                   worktreeAvailability={forkWorktreeAvailability}
                   onFork={showFinishedMetadata ? onFork : undefined}
@@ -8696,9 +8698,10 @@ const PlanPanel = ({
                   icon
                   height="calc(var(--spacing) * 6)"
                   width="calc(var(--spacing) * 6)"
-                  className={cn(
-                    stylex.props(messageActionButtonTheme, messageActionInkTheme).className,
-                    '-mr-1'
+                  {...stylex.props(
+                    messageActionButtonTheme,
+                    messageActionInkTheme,
+                    viewStyles.planCopySpacing
                   )}
                   onClick={() => {
                     void handleCopy();

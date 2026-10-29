@@ -248,7 +248,7 @@ function EmojiPickerContent({
         className={stylex.props(styles.feedback).className}
         data-slot="emoji-picker-loading"
       >
-        <Spinner className="size-4" />
+        <Spinner diameter="calc(var(--spacing) * 4)" />
       </EmojiPickerPrimitive.Loading>
       <EmojiPickerPrimitive.Empty
         className={stylex.props(styles.feedback, styles.empty).className}

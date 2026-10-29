@@ -38,6 +38,7 @@ const TREE_INDENT_PX = 8;
 const ROW_BASE_PADDING_PX = 8;
 
 const styles = stylex.create({
+  skeletonIconSpacing: { marginRight: 'calc(var(--spacing) * 1.5)' },
   skeletonRoot: { padding: themeSpace[1] },
   skeletonRow: { display: 'flex', height: '22px', alignItems: 'center' },
   visuallyHidden: {
@@ -111,7 +112,11 @@ export function FileTreeSkeleton({ className }: { className?: string }) {
           {...stylex.props(styles.skeletonRow)}
           style={{ paddingLeft: row.level * TREE_INDENT_PX + ROW_BASE_PADDING_PX }}
         >
-          <Skeleton width={16} height={16} className="mr-1.5 shrink-0" />
+          <Skeleton
+            width={16}
+            height={16}
+            className={clsx(stylex.props(styles.skeletonIconSpacing).className, 'shrink-0')}
+          />
           <Skeleton width={row.width} height={10} />
         </div>
       ))}

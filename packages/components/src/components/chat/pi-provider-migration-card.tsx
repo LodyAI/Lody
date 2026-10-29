@@ -11,6 +11,7 @@ import {
 } from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  confirmSpacing: { marginTop: 'calc(var(--spacing) * 3)' },
   card: {
     marginBottom: themeSpace[3],
     borderRadius: themeRadius.lg,
@@ -61,7 +62,12 @@ export function PiProviderMigrationCard({
           )}
         </p>
       )}
-      <Button className="mt-3" size="small" disabled={busy || !canMigrate} onClick={onConfirm}>
+      <Button
+        {...stylex.props(styles.confirmSpacing)}
+        size="small"
+        disabled={busy || !canMigrate}
+        onClick={onConfirm}
+      >
         {busy
           ? t('chat.piMigration.running', 'Upgrading…')
           : t('chat.piMigration.confirm', 'Confirm upgrade')}
