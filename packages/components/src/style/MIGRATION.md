@@ -70,6 +70,13 @@ that owner instead of stacking themes or increasing selector specificity. Preser
 element-local variable reads and compare every non-target token, not just the
 changed padding or gap.
 
+Token writes also inherit into descendants. Audit every reader under the owned
+part before replacing a physical property with a public-token override. A panel
+accepting arbitrary children cannot safely publish a transparent background token
+merely because its own background was transparent; contained modal surfaces may
+read that token too. Keep the physical compatibility class until a replacement
+preserves that boundary.
+
 The message-action themes use their same-file complete key maps. Their semantic
 label override is limited to the reviewed fixed glyph subtrees; a child explicitly
 reading that semantic token would also change. A direct inline write to the old

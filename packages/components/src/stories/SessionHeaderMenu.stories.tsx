@@ -84,6 +84,8 @@ export const GitHubWorktree: Story = {
   globals: { theme: 'dark' },
 };
 
+export const GitHubWorktreeAmbient: Story = {};
+
 /**
  * Multi-member workspace: the "Change owner" submenu lists members with the
  * current owner checked. Single-member workspaces pass no `owner` at all, so

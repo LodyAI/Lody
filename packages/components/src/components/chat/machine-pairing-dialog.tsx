@@ -32,6 +32,11 @@ import {
 const LODY_DESKTOP_DOWNLOAD_URL = 'https://lody.ai/download';
 
 const styles = stylex.create({
+  connectedTitle: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
   downloadSpacing: { marginTop: 'calc(var(--spacing) * 3)' },
   commandCopyOffset: {
     right: 'calc(var(--spacing) * 1.5)',
@@ -252,7 +257,7 @@ export function MachinePairingDialog({
         {connected ? (
           <>
             <Dialog.Header>
-              <Dialog.Title className="flex items-center gap-2">
+              <Dialog.Title className={stylex.props(styles.connectedTitle).className}>
                 <CheckCircle2
                   {...stylex.props(styles.icon20, styles.iconSuccess)}
                   aria-hidden="true"

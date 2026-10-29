@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
+import { tooltip } from '@lody/ui/tooltip/tooltip.tokens.stylex';
 import { toast } from '@/lib/toast';
 
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
@@ -35,6 +36,10 @@ import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  tooltipPadding: {
+    [tooltip.paddingX]: 'calc(var(--spacing) * 2.5)',
+    [tooltip.paddingY]: 'calc(var(--spacing) * 2)',
+  },
   groupGlyph: {
     width: 'calc(var(--spacing) * 4)',
     height: 'calc(var(--spacing) * 4)',
@@ -553,7 +558,7 @@ function ProjectAccessStatus({
       <Tooltip.Trigger delay={300} render={content} />
       <Tooltip.Content
         side={variant === 'trigger' ? 'top' : 'right'}
-        className="max-w-72 px-2.5 py-2"
+        className={cn(stylex.props(styles.tooltipPadding).className, 'max-w-72')}
       >
         <div {...stylex.props(styles.accessTitle)}>{title}</div>
         <div {...stylex.props(styles.accessDescription)}>{description}</div>

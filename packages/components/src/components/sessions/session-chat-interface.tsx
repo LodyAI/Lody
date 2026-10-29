@@ -220,6 +220,7 @@ import {
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontSize, themeLineHeight, themeSpace } from '../../style/theme-scale.stylex';
 import * as stylex from '@stylexjs/stylex';
+import { tooltip } from '@lody/ui/tooltip/tooltip.tokens.stylex';
 import type { SessionSharingState } from '@/lib/session-sharing';
 import {
   SessionAccessControl,
@@ -389,6 +390,10 @@ import { resolveSessionHtmlAttachmentAction } from './session-html-attachment-ac
 const { formatLoroSyncError } = createLoroSyncErrorTools({ RepoSyncError, RepoTransportError });
 
 const styles = stylex.create({
+  tooltipPadding: {
+    [tooltip.paddingX]: 'calc(var(--spacing) * 2.5)',
+    [tooltip.paddingY]: 'calc(var(--spacing) * 2)',
+  },
   historyTriggerIcon: { width: 'calc(var(--spacing) * 4)', height: 'calc(var(--spacing) * 4)' },
   historyTriggerIconSpaced: { marginRight: 'calc(var(--spacing) * 2)' },
   historySubtitle: {
@@ -1702,7 +1707,13 @@ export function SessionHeaderMenu({
                       </div>
                     }
                   />
-                  <Tooltip.Content side="left" className="max-w-64 px-2.5 py-2 text-xs">
+                  <Tooltip.Content
+                    side="left"
+                    className={cn(
+                      stylex.props(styles.tooltipPadding).className,
+                      'max-w-64 text-xs'
+                    )}
+                  >
                     {getSessionSharingDescription(t, sharing)}
                   </Tooltip.Content>
                 </Tooltip.Root>

@@ -12,6 +12,8 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
+import { tooltip } from '@lody/ui/tooltip/tooltip.tokens.stylex';
+import { popup } from '@lody/ui/popup/popup.tokens.stylex';
 import { clsx } from 'clsx';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
@@ -163,7 +165,10 @@ export function SessionSharingIndicator({
           </span>
         }
       />
-      <Tooltip.Content side="right" className="max-w-72 px-2.5 py-2">
+      <Tooltip.Content
+        side="right"
+        className={clsx(stylex.props(styles.tooltipPadding).className, 'max-w-72')}
+      >
         <div {...stylex.props(styles.tooltipTitle)}>{label}</div>
         <div {...stylex.props(styles.tooltipDescription)}>{description}</div>
       </Tooltip.Content>
@@ -202,6 +207,11 @@ function getSessionShareActionLabel(
  * on the dark canvas. */
 
 const styles = stylex.create({
+  tooltipPadding: {
+    [tooltip.paddingX]: 'calc(var(--spacing) * 2.5)',
+    [tooltip.paddingY]: 'calc(var(--spacing) * 2)',
+  },
+  accessPopoverPadding: { [popup.panelPadding]: 'calc(var(--spacing) * 2)' },
   confirmationPendingSpacing: { marginRight: 'calc(var(--spacing) * 1.5)' },
   /** The lock mark in the header: a small box the pointer can find. */
   lockMark: {
@@ -314,7 +324,11 @@ export function SessionArchivedBadge({ className }: { className?: string }) {
           </span>
         }
       />
-      <Tooltip.Content side="bottom" align="end" className="max-w-72 px-2.5 py-2">
+      <Tooltip.Content
+        side="bottom"
+        align="end"
+        className={clsx(stylex.props(styles.tooltipPadding).className, 'max-w-72')}
+      >
         <div {...stylex.props(styles.tooltipTitle)}>{label}</div>
         <div {...stylex.props(styles.tooltipDescription)}>{description}</div>
       </Tooltip.Content>
@@ -681,7 +695,13 @@ export function SessionAccessControl({
           </button>
         }
       />
-      <Popover.Content align="end" sideOffset={6} gap="none" width="18.5rem" className="p-2">
+      <Popover.Content
+        align="end"
+        sideOffset={6}
+        gap="none"
+        width="18.5rem"
+        className={stylex.props(styles.accessPopoverPadding).className}
+      >
         <Popover.Title {...stylex.props(shareSurface.visuallyHidden)}>
           {t('sessions.sharing.panelTitle', 'Share this conversation')}
         </Popover.Title>

@@ -1,0 +1,171 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "ui-drawermigration--bottom",
+    "ui-drawermigration--top",
+    "ui-drawermigration--left",
+    "ui-drawermigration--right",
+    "ui-drawermigration--caller-overrides",
+    "ui-drawermigration--fullscreen-left",
+    "ui-drawermigration--fullscreen-right",
+    "ui-drawermigration--inline-height"
+  ],
+  "ready": {
+    "ui-drawermigration--bottom": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Open drawer"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const e=document.querySelector('[data-slot=\"drawer-content\"][data-state=\"open\"]');if(!e||document.fonts.status!=='loaded')return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||document.documentElement.classList.contains('dark')!==(theme==='dark')||r.width<30||r.height<100||r.left<-.1||r.top<-.1||r.right>innerWidth+.1||r.bottom>innerHeight+.1||c.opacity!=='1'||e.getAttribute('data-state')!=='open')return false;return document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "ui-drawermigration--top": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Open drawer"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const e=document.querySelector('[data-slot=\"drawer-content\"][data-state=\"open\"]');if(!e||document.fonts.status!=='loaded')return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||document.documentElement.classList.contains('dark')!==(theme==='dark')||r.width<30||r.height<100||r.left<-.1||r.top<-.1||r.right>innerWidth+.1||r.bottom>innerHeight+.1||c.opacity!=='1'||e.getAttribute('data-state')!=='open')return false;return document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "ui-drawermigration--left": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Open drawer"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const e=document.querySelector('[data-slot=\"drawer-content\"][data-state=\"open\"]');if(!e||document.fonts.status!=='loaded')return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||document.documentElement.classList.contains('dark')!==(theme==='dark')||r.width<30||r.height<100||r.left<-.1||r.top<-.1||r.right>innerWidth+.1||r.bottom>innerHeight+.1||c.opacity!=='1'||e.getAttribute('data-state')!=='open')return false;return document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "ui-drawermigration--right": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Open drawer"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const e=document.querySelector('[data-slot=\"drawer-content\"][data-state=\"open\"]');if(!e||document.fonts.status!=='loaded')return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||document.documentElement.classList.contains('dark')!==(theme==='dark')||r.width<30||r.height<100||r.left<-.1||r.top<-.1||r.right>innerWidth+.1||r.bottom>innerHeight+.1||c.opacity!=='1'||e.getAttribute('data-state')!=='open')return false;return document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "ui-drawermigration--caller-overrides": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Open drawer"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const e=document.querySelector('[data-slot=\"drawer-content\"][data-state=\"open\"]');if(!e||document.fonts.status!=='loaded')return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||document.documentElement.classList.contains('dark')!==(theme==='dark')||r.width<30||r.height<100||r.left<-.1||r.top<-.1||r.right>innerWidth+.1||r.bottom>innerHeight+.1||c.opacity!=='1'||e.getAttribute('data-state')!=='open')return false;return document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "ui-drawermigration--fullscreen-left": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Open drawer"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const e=document.querySelector('[data-slot=\"drawer-content\"][data-state=\"open\"]');if(!e||document.fonts.status!=='loaded')return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||document.documentElement.classList.contains('dark')!==(theme==='dark')||r.width<30||r.height<100||r.left<-.1||r.top<-.1||r.right>innerWidth+.1||r.bottom>innerHeight+.1||c.opacity!=='1'||e.getAttribute('data-state')!=='open')return false;if(Math.abs(r.width-innerWidth)>.1||c.maxWidth!=='none')return false;if(c.borderRightWidth!=='1px'||c.borderLeftWidth!=='0px')return false;return document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "ui-drawermigration--fullscreen-right": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Open drawer"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const e=document.querySelector('[data-slot=\"drawer-content\"][data-state=\"open\"]');if(!e||document.fonts.status!=='loaded')return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||document.documentElement.classList.contains('dark')!==(theme==='dark')||r.width<30||r.height<100||r.left<-.1||r.top<-.1||r.right>innerWidth+.1||r.bottom>innerHeight+.1||c.opacity!=='1'||e.getAttribute('data-state')!=='open')return false;if(Math.abs(r.width-innerWidth)>.1||c.maxWidth!=='none')return false;if(c.borderTopWidth!=='0px'||c.borderRightWidth!=='0px'||c.borderBottomWidth!=='0px'||c.borderLeftWidth!=='0px')return false;return document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "ui-drawermigration--inline-height": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Open drawer"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const e=document.querySelector('[data-slot=\"drawer-content\"][data-state=\"open\"]');if(!e||document.fonts.status!=='loaded')return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||document.documentElement.classList.contains('dark')!==(theme==='dark')||r.width<30||r.height<100||r.left<-.1||r.top<-.1||r.right>innerWidth+.1||r.bottom>innerHeight+.1||c.opacity!=='1'||e.getAttribute('data-state')!=='open')return false;return document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {
+    "ui-drawermigration--fullscreen-right": [
+      {
+        "name": "typed-and-reopened",
+        "steps": [
+          {
+            "action": "fill",
+            "role": "textbox",
+            "name": "Drawer input",
+            "value": "A first local draft"
+          },
+          {
+            "action": "press",
+            "role": "textbox",
+            "name": "Drawer input",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-slot=drawer-content][data-state=open]"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open drawer"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const e=document.querySelector('[data-slot=\"drawer-content\"][data-state=\"open\"]');if(!e||document.fonts.status!=='loaded')return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||document.documentElement.classList.contains('dark')!==(theme==='dark')||r.width<30||r.height<100||r.left<-.1||r.top<-.1||r.right>innerWidth+.1||r.bottom>innerHeight+.1||c.opacity!=='1'||e.getAttribute('data-state')!=='open')return false;if(Math.abs(r.width-innerWidth)>.1||c.maxWidth!=='none')return false;if(c.borderTopWidth!=='0px'||c.borderRightWidth!=='0px'||c.borderBottomWidth!=='0px'||c.borderLeftWidth!=='0px')return false;return document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          },
+          {
+            "action": "fill",
+            "role": "textbox",
+            "name": "Drawer input",
+            "value": "Width migration draft"
+          },
+          {
+            "action": "press",
+            "role": "textbox",
+            "name": "Drawer input",
+            "key": "End"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.querySelector('input[aria-label=\"Drawer input\"]')?.value==='Width migration draft'&&document.activeElement===document.querySelector('input[aria-label=\"Drawer input\"]')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const e=document.querySelector('[data-slot=\"drawer-content\"][data-state=\"open\"]');if(!e||document.fonts.status!=='loaded')return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||document.documentElement.classList.contains('dark')!==(theme==='dark')||r.width<30||r.height<100||r.left<-.1||r.top<-.1||r.right>innerWidth+.1||r.bottom>innerHeight+.1||c.opacity!=='1'||e.getAttribute('data-state')!=='open')return false;if(Math.abs(r.width-innerWidth)>.1||c.maxWidth!=='none')return false;if(c.borderTopWidth!=='0px'||c.borderRightWidth!=='0px'||c.borderBottomWidth!=='0px'||c.borderLeftWidth!=='0px')return false;return document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ]
+  }
+}

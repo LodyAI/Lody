@@ -6,6 +6,7 @@ import { toast } from '@/lib/toast';
 import { AlertCircle, Check, Copy } from 'lucide-react';
 
 import { Button } from '@lody/ui/button';
+import { dialog } from '@lody/ui/dialog/dialog.tokens.stylex';
 import { Dialog } from '@/ui/dialog';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontSize, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
@@ -18,6 +19,8 @@ const MONO_FONT =
   'JetBrains Mono, SF Mono, Monaco, Inconsolata, Fira Code, Droid Sans Mono, Source Code Pro, monospace';
 
 const styles = stylex.create({
+  panelSpacing: { [dialog.gap]: 'calc(var(--spacing) * 3)' },
+  footerSpacing: { [dialog.footerGap]: 'calc(var(--spacing) * 2)' },
   header: {
     paddingRight: themeSpace[6],
     textAlign: 'left',
@@ -151,7 +154,7 @@ export function ChatFailedDetailDialog({
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       {/* A wider panel than the modal default keeps the raw error readable; the
           rung's own viewport cap still bounds it on phones. */}
-      <Dialog.Content width="42rem" className="gap-3">
+      <Dialog.Content width="42rem" className={stylex.props(styles.panelSpacing).className}>
         <Dialog.Header className={stylex.props(styles.header).className}>
           <Dialog.Title
             className={clsx(
@@ -197,7 +200,7 @@ export function ChatFailedDetailDialog({
           </div>
         ) : null}
 
-        <Dialog.Footer className="gap-2">
+        <Dialog.Footer className={stylex.props(styles.footerSpacing).className}>
           <Dialog.Close render={<Button type="button" variant="ghost" size="small" />}>
             {t('common.close', 'Close')}
           </Dialog.Close>

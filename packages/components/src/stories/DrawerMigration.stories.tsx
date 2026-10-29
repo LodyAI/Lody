@@ -57,9 +57,10 @@ function DrawerFixture({
           <Button>Open drawer</Button>
         </DrawerTrigger>
         <DrawerContent
+          width={fullscreen ? 'full' : undefined}
           className={
             fullscreen
-              ? 'inset-0 w-full! max-w-none! rounded-none border-0 border-l-0!'
+              ? 'inset-0 rounded-none border-0 border-l-0!'
               : caller
                 ? 'h-auto! max-h-[88dvh]! rounded-t-2xl border-border/60'
                 : undefined
@@ -148,5 +149,8 @@ export const WorktreeConfiguration: Story = { render: () => <WorktreeConsumer />
 
 export const FullscreenLeft: Story = {
   render: () => <DrawerFixture direction="left" fullscreen />,
+};
+export const FullscreenRight: Story = {
+  render: () => <DrawerFixture direction="right" fullscreen />,
 };
 export const InlineHeight: Story = { render: () => <DrawerFixture inlineHeight /> };

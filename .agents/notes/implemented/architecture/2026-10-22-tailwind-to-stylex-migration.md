@@ -1918,6 +1918,25 @@ are After-only, without an application Before baseline. These checks establish
 no native icon, export or backend workflows. Frozen reports keep their own
 source boundaries.
 
+The modal/popup continuation removes 18 utilities across eight product files.
+Fixed title, footer and popup geometry writes existing public tokens locally;
+three standard token-module exports add no group or dependency. DrawerContent's
+opt-in `width="full"` lets the actual file-viewer caller drop its two important
+width classes; omission keeps the original directional class/style contract.
+The five other fullscreen callers are not counted as migrated. Token overrides
+remain limited to audited descendant readers, as the owning guide requires.
+
+`leaves68-71-acceptance.html` separates **208 product pairs / 200 byte-exact /
+10,248 identical full standard records** from 20 unchanged fixture-correction
+pairs. Eight original trigger-corner differences remain OPEN (48 raw pixels,
+zero threshold pixels). Two original normal-motion Drawer pairs also remain
+OPEN (25,902 raw / 11,176 threshold pixels). A later protocol produced three
+wrong compositor poses despite identical main-thread animation records; actual
+pixel boundaries and a same-page WAAPI-order control establish that sampling
+failure. Those captures are excluded, while a later matching control does not
+close the original two differences. Known inline-token negatives, calibration
+errors and the actual Electron After-only images are separate evidence.
+
 ## Remaining work
 
 The compiler-backed [inventory](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -1940,6 +1959,7 @@ completion percentage. Unresolved expressions remain a separate work list.
 | Exact source through 59, excluding later candidates        | v2             |       1,602 |   168 |        722 |
 | Exact source through 63, with partial visual acceptance    | v2             |       1,594 |   167 |        722 |
 | Exact source through 67, with partial visual acceptance    | v2             |       1,572 |   166 |        718 |
+| Exact source through 71, with partial visual acceptance    | v2             |       1,554 |   165 |        718 |
 
 Earlier method changes recognized single utilities, `withClassName`'s second
 argument and supported static class arrays. Historical per-batch counts remain
@@ -1959,11 +1979,12 @@ utility-looking strings in comparisons or unrelated properties. Ambiguous writes
 remain unresolved. Two adapter `className` writes expose four additional unresolved expressions,
 explaining the corresponding increase in that count.
 
-The published through 67 v2 split is components: 1,123 occurrences/150 files/625
+The published through 71 v2 split is components: 1,105 occurrences/149 files/625
 unresolved, legacy UI: 444/14/93 and routes: 5/2/0. These totals cover only those
 three source roots. Normalized paths retain the raw scanner output and all 688
-component JS/TS byte hashes. The through 67 snapshot adds eight audited source
-updates to the frozen through 63 snapshot and excludes later candidates.
+component JS/TS byte hashes. The through 71 component snapshot adds seven audited
+source updates to frozen through 67; UI/routes are frozen separately. It excludes
+later candidates. The through 67 transition below explains its unresolved changes.
 Five Usage templates and one Archive class lookup disappear; two FileError/Bub
 StyleX templates remain unresolved, not new unknown Tailwind utilities. A separate helper audit identifies another nine
 occurrences across two lib/hooks files, outside these three roots; it is neither

@@ -1,0 +1,45 @@
+{
+  "viewports": [
+    {
+      "name": "sm-before",
+      "width": 639,
+      "height": 900
+    },
+    {
+      "name": "sm",
+      "width": 640,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": ["ui-drawermigration--right", "ui-drawermigration--fullscreen-right"],
+  "ready": {
+    "ui-drawermigration--right": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Open drawer"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const e=document.querySelector('[data-slot=\"drawer-content\"][data-state=\"open\"]');if(!e||document.fonts.status!=='loaded')return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||document.documentElement.classList.contains('dark')!==(theme==='dark')||r.width<30||r.height<100||r.left<-.1||r.top<-.1||r.right>innerWidth+.1||r.bottom>innerHeight+.1||c.opacity!=='1'||e.getAttribute('data-state')!=='open')return false;return document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const e=document.querySelector('[data-slot=drawer-content][data-state=open]'),c=getComputedStyle(e),r=e.getBoundingClientRect();return innerWidth===639?c.maxWidth==='none'&&r.width===479.25:innerWidth===640&&c.maxWidth==='384px'&&r.width===384;}"
+      }
+    ],
+    "ui-drawermigration--fullscreen-right": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Open drawer"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const e=document.querySelector('[data-slot=\"drawer-content\"][data-state=\"open\"]');if(!e||document.fonts.status!=='loaded')return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),theme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!theme||document.documentElement.classList.contains('dark')!==(theme==='dark')||r.width<30||r.height<100||r.left<-.1||r.top<-.1||r.right>innerWidth+.1||r.bottom>innerHeight+.1||c.opacity!=='1'||e.getAttribute('data-state')!=='open')return false;if(Math.abs(r.width-innerWidth)>.1||c.maxWidth!=='none')return false;if(c.borderTopWidth!=='0px'||c.borderRightWidth!=='0px'||c.borderBottomWidth!=='0px'||c.borderLeftWidth!=='0px')return false;return document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  }
+}

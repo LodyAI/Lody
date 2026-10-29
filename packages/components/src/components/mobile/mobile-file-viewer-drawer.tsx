@@ -156,11 +156,11 @@ export function MobileFileViewerDrawer({
           onOpenChange(nextOpen);
         }}
       >
-        {/* The drawer's own geometry wins over the shared drawer's, so its
-            full-bleed rules stay Tailwind classes with `!important`. */}
+        {/* Width belongs to the Drawer; keep the consumer's insets and border compatibility. */}
         <DrawerContent
           forceMount
-          className="inset-0 w-full! max-w-none! rounded-none border-0 border-l-0!"
+          width="full"
+          className="inset-0 rounded-none border-0 border-l-0!"
           style={isNativeIOS ? { bottom: 'var(--native-keyboard-height, 0px)' } : undefined}
           data-sidebar-swipe-open-disabled
         >

@@ -28,6 +28,7 @@ const styles = stylex.create({
     height: 'auto',
     flexDirection: 'column',
   },
+  fullWidth: { width: '100%', maxWidth: 'none' },
   grabber: {
     backgroundColor: `color-mix(in oklab, ${themeColors.mutedForeground} 40%, transparent)`,
     marginInline: 'auto',
@@ -146,12 +147,16 @@ const DrawerOverlay = React.forwardRef<
 ));
 DrawerOverlay.displayName = 'DrawerOverlay';
 
-function DrawerContent({
-  className,
-  children,
-  style,
-  ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Content>) {
+export type DrawerContentProps = Omit<
+  React.ComponentProps<typeof DrawerPrimitive.Content>,
+  'width'
+> & {
+  /** Fill the available width without directional caps. Omission preserves defaults.
+   * Regular class and inline-style precedence still applies. */
+  width?: 'full';
+};
+
+function DrawerContent({ width, className, children, style, ...props }: DrawerContentProps) {
   const viewportBottom = useDrawerViewportBottom();
   const [popupContainer, setPopupContainer] = React.useState<HTMLDivElement | null>(null);
   const mergedStyle = {
@@ -166,14 +171,20 @@ function DrawerContent({
       <DrawerPrimitive.Content
         data-slot="drawer-content"
         className={cn(
-          stylex.props(styles.content).className,
+          stylex.props(styles.content, width === 'full' && styles.fullWidth).className,
           'group/drawer-content',
           // Directional variants outrank ordinary caller classes in the original
           // utilities layer. Keep that public override order during coexistence.
           'data-[vaul-drawer-direction=top]:inset-x-0 data-[vaul-drawer-direction=top]:top-0 data-[vaul-drawer-direction=top]:mb-24 data-[vaul-drawer-direction=top]:max-h-[80dvh] data-[vaul-drawer-direction=top]:rounded-b-lg data-[vaul-drawer-direction=top]:border-b data-[vaul-drawer-direction=top]:border-border',
           'data-[vaul-drawer-direction=bottom]:inset-x-0 data-[vaul-drawer-direction=bottom]:bottom-0 data-[vaul-drawer-direction=bottom]:mt-24 data-[vaul-drawer-direction=bottom]:max-h-[80dvh] data-[vaul-drawer-direction=bottom]:rounded-t-lg data-[vaul-drawer-direction=bottom]:border-t data-[vaul-drawer-direction=bottom]:border-border',
-          'data-[vaul-drawer-direction=right]:inset-y-0 data-[vaul-drawer-direction=right]:right-0 data-[vaul-drawer-direction=right]:w-3/4 data-[vaul-drawer-direction=right]:border-l data-[vaul-drawer-direction=right]:border-border data-[vaul-drawer-direction=right]:sm:max-w-sm',
-          'data-[vaul-drawer-direction=left]:inset-y-0 data-[vaul-drawer-direction=left]:left-0 data-[vaul-drawer-direction=left]:w-[var(--lody-drawer-width)] data-[vaul-drawer-direction=left]:border-r data-[vaul-drawer-direction=left]:border-border data-[vaul-drawer-direction=left]:max-w-[var(--lody-drawer-width)]',
+          'data-[vaul-drawer-direction=right]:inset-y-0 data-[vaul-drawer-direction=right]:right-0',
+          width !== 'full' && 'data-[vaul-drawer-direction=right]:w-3/4',
+          'data-[vaul-drawer-direction=right]:border-l data-[vaul-drawer-direction=right]:border-border',
+          width !== 'full' && 'data-[vaul-drawer-direction=right]:sm:max-w-sm',
+          'data-[vaul-drawer-direction=left]:inset-y-0 data-[vaul-drawer-direction=left]:left-0',
+          width !== 'full' && 'data-[vaul-drawer-direction=left]:w-[var(--lody-drawer-width)]',
+          'data-[vaul-drawer-direction=left]:border-r data-[vaul-drawer-direction=left]:border-border',
+          width !== 'full' && 'data-[vaul-drawer-direction=left]:max-w-[var(--lody-drawer-width)]',
           className
         )}
         style={mergedStyle}

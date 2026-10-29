@@ -11,6 +11,11 @@ evidence is separate from behavior tests and from the real Electron smoke run.
 | `*-targets.json`        | Story, viewport, theme and interaction-state coverage.                                                        |
 | `electron-smoke.mts`    | Launch the actual built OSS desktop through the existing isolated E2E harness.                                |
 
+The legacy report's `identical` status uses threshold/layout checks, and
+`changedPixels: 0` does not prove byte equality or zero raw RGBA differences.
+Inspect `pngIdentical` and retain independent raw-pixel counts. A nonzero raw
+comparison stays OPEN even when its threshold count is zero.
+
 ## Capture a component batch
 
 From `packages/components`, before editing the selected components:
@@ -610,11 +615,12 @@ artifacts out of commits.
 
 ## Frozen continuation reports
 
-| Local report                                   | Accepted source scope                                                                                                        | Formal visual result                                                                       | Separate boundaries                                                                                                                             |
-| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `artifacts/visual/leaves55-59-acceptance.html` | 18 utilities in six product files: private margin/offsets, native dark options, pinned-message layout and usage-share Header | 164/164 original PNG pairs exact; 26,232 full recorded layout records equal                | 58: deferred, 0 accepted; 60: rejected, 0 accepted; 16 retained candidate pairs and 4 original batch 59 failed images outside formal acceptance |
-| `artifacts/visual/leaves60-63-acceptance.html` | Eight utilities in six files: notification ink, popup dimensions/overflow and native dark maps                               | 132/134 PNG pairs exact; two OPEN, 43 raw pixels; 14 hidden-helper height records retained | Partial acceptance; 60 rejected, six phone Role failures, inline-token negative controls and all historical OPENs remain                        |
-| `artifacts/visual/leaves64-67-acceptance.html` | 22 utilities in eight files: redundant Select widths, private archive fill and fixed control layout                          | 191/192 PNG pairs exact; 48,356 full standard records equal                                | One 11-pixel OPEN, a separate four-node y−4px native OPEN, rejected theme-reset candidates and inline-token negatives retained                  |
+| Local report                                   | Accepted source scope                                                                                                        | Formal visual result                                                                          | Separate boundaries                                                                                                                             |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `artifacts/visual/leaves55-59-acceptance.html` | 18 utilities in six product files: private margin/offsets, native dark options, pinned-message layout and usage-share Header | 164/164 original PNG pairs exact; 26,232 full recorded layout records equal                   | 58: deferred, 0 accepted; 60: rejected, 0 accepted; 16 retained candidate pairs and 4 original batch 59 failed images outside formal acceptance |
+| `artifacts/visual/leaves60-63-acceptance.html` | Eight utilities in six files: notification ink, popup dimensions/overflow and native dark maps                               | 132/134 PNG pairs exact; two OPEN, 43 raw pixels; 14 hidden-helper height records retained    | Partial acceptance; 60 rejected, six phone Role failures, inline-token negative controls and all historical OPENs remain                        |
+| `artifacts/visual/leaves64-67-acceptance.html` | 22 utilities in eight files: redundant Select widths, private archive fill and fixed control layout                          | 191/192 PNG pairs exact; 48,356 full standard records equal                                   | One 11-pixel OPEN, a separate four-node y−4px native OPEN, rejected theme-reset candidates and inline-token negatives retained                  |
+| `artifacts/visual/leaves68-71-acceptance.html` | 18 utilities in eight product files: modal/popup geometry, opt-in full-width Drawer and Tooltip padding                      | 200/208 product PNG pairs exact; 10,248 full standard records equal; fixture20 pairs separate | Eight corner OPENs, two original normal-motion OPENs, three proven wrong-pose captures and all known negative controls retained                 |
 
 The self-contained report keeps the original images and per-frame immutable build
 origins. Computed-only 55/56/57/59 probes add no PNG pairs. Keep SessionPin's actual
@@ -624,9 +630,10 @@ fallback visible to reviewers. Calendar's protected user formatting is outside t
 task-only patch. Local selector scopes do not establish a whole application palette;
 phone initial-preview visibility and native/backend/export behavior remain bounded.
 
-The normalized through 67 inventory is 1,572 occurrences/166 files/718 unresolved
+The normalized through 71 inventory is 1,554 occurrences/165 files/718 unresolved
 expressions across components, legacy UI and routes only. Its 688-file component
-snapshot includes eight verified updates after 63 and excludes later candidates.
+snapshot includes seven verified component updates after 67, with UI/routes
+frozen separately, and excludes later candidates.
 Earlier inventories remain frozen. A separate lib/hooks audit identifies
 nine more occurrences in two files outside those roots; do not merge scopes or call
 that a product regression. Later source-locked through 63 components (620 files / 6,207 tests) and

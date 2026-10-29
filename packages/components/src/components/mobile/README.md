@@ -59,6 +59,9 @@ relative-time`, a collapsed `Archived (N)` disclosure whose rows restore and
   conversation. Session HTML opens in preview with an eye toggle for source;
   WebKit uses the shared script-free HTML/CSS preview. The project file browser
   also previews complete HTML by default with the same source toggle.
+  Its [DrawerContent](../../ui/drawer.tsx) uses `width="full"` for 100% width without
+  directional width caps. Caller classes and inline styles retain normal cascade
+  precedence. Insets, borders, radii and keyboard handling keep their current owners.
   `glass-icon-button.tsx` — the frosted header's `GlassIconButton`
   (canvas-drawn glass disc; story `MobileFrostedHeader.stories.tsx`).
 

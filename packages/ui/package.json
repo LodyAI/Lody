@@ -21,6 +21,7 @@
     "./combobox": "./src/field/combobox.tsx",
     "./context-menu": "./src/menu/context-menu.tsx",
     "./dialog": "./src/dialog/dialog.tsx",
+    "./dialog/dialog.tokens.stylex": "./src/dialog/dialog.tokens.stylex.ts",
     "./drawer": "./src/drawer/drawer.tsx",
     "./field": "./src/field/field.tsx",
     "./field/field.tokens.stylex": "./src/field/field.tokens.stylex.ts",
@@ -33,6 +34,7 @@
     "./number-field": "./src/field/number-field.tsx",
     "./password-input": "./src/field/password-input.tsx",
     "./popover": "./src/popover/popover.tsx",
+    "./popup/popup.tokens.stylex": "./src/popup/popup.tokens.stylex.ts",
     "./popup-container": "./src/popup/portal-container.tsx",
     "./preview-card": "./src/popover/preview-card.tsx",
     "./progress": "./src/feedback/progress.tsx",
@@ -55,7 +57,8 @@
     "./tokens/colors.stylex": "./src/tokens/colors.stylex.ts",
     "./tokens/scales.stylex": "./src/tokens/scales.stylex.ts",
     "./toolbar": "./src/toggle/toolbar.tsx",
-    "./tooltip": "./src/tooltip/tooltip.tsx"
+    "./tooltip": "./src/tooltip/tooltip.tsx",
+    "./tooltip/tooltip.tokens.stylex": "./src/tooltip/tooltip.tokens.stylex.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

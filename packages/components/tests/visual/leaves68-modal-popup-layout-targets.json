@@ -1,0 +1,269 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 900,
+      "device": "iPhone SE"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "chat-machinepairingdialog--connected",
+    "components-chatfaileddetaildialog--upstream-api-error",
+    "components-chatfaileddetaildialog--with-suggested-action",
+    "components-chatfaileddetaildialog--long-raw-payload",
+    "components-chatfaileddetaildialog--no-raw-message",
+    "ui-emojipickermigration--consumer-popover"
+  ],
+  "allowBlankIds": [
+    "chat-machinepairingdialog--connected",
+    "components-chatfaileddetaildialog--upstream-api-error",
+    "components-chatfaileddetaildialog--with-suggested-action",
+    "components-chatfaileddetaildialog--long-raw-payload",
+    "components-chatfaileddetaildialog--no-raw-message"
+  ],
+  "ready": {
+    "chat-machinepairingdialog--connected": [
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const h=document.querySelector('[role=dialog] h2'),c=h&&getComputedStyle(h);return h?.textContent==='Machine connected'&&c.display==='flex'&&c.alignItems==='center'&&c.gap==='8px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "components-chatfaileddetaildialog--upstream-api-error": [
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const d=document.querySelector('[role=dialog]'),f=[...d?.querySelectorAll('button')??[]].find(e=>e.textContent==='Copy error')?.parentElement;return d&&f&&getComputedStyle(d).gap==='12px'&&getComputedStyle(f).gap==='8px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "components-chatfaileddetaildialog--with-suggested-action": [
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const d=document.querySelector('[role=dialog]'),f=[...d?.querySelectorAll('button')??[]].find(e=>e.textContent==='Copy error')?.parentElement;return d&&f&&getComputedStyle(d).gap==='12px'&&getComputedStyle(f).gap==='8px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "components-chatfaileddetaildialog--long-raw-payload": [
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const d=document.querySelector('[role=dialog]'),f=[...d?.querySelectorAll('button')??[]].find(e=>e.textContent==='Copy error')?.parentElement;return d&&f&&getComputedStyle(d).gap==='12px'&&getComputedStyle(f).gap==='8px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "components-chatfaileddetaildialog--no-raw-message": [
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const d=document.querySelector('[role=dialog]'),f=[...d?.querySelectorAll('button')??[]].find(e=>e.textContent==='Copy error')?.parentElement;return d&&f&&getComputedStyle(d).gap==='12px'&&getComputedStyle(f).gap==='8px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "ui-emojipickermigration--consumer-popover": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Emoji",
+        "exact": true
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-emoji-result]')?.textContent==='Selected: none'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ]
+  },
+  "states": {
+    "chat-machinepairingdialog--connected": [
+      {
+        "name": "configure-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Configure agents",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement?.textContent==='Configure agents'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "components-chatfaileddetaildialog--upstream-api-error": [
+      {
+        "name": "copy-focus-only",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Copy error",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement?.textContent==='Copy error'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "components-chatfaileddetaildialog--with-suggested-action": [
+      {
+        "name": "copy-focus-only",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Copy error",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement?.textContent==='Copy error'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "components-chatfaileddetaildialog--long-raw-payload": [
+      {
+        "name": "copy-focus-only",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Copy error",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement?.textContent==='Copy error'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "components-chatfaileddetaildialog--no-raw-message": [
+      {
+        "name": "copy-focus-only",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Copy error",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement?.textContent==='Copy error'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "ui-emojipickermigration--consumer-popover": [
+      {
+        "name": "loaded-open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Emoji",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-slot=emoji-picker]')?.closest('[role=dialog]');return e&&getComputedStyle(e).paddingLeft==='4px'&&getComputedStyle(e).paddingTop==='4px'&&getComputedStyle(e).gap==='4px'&&[...document.querySelectorAll('[data-slot=emoji-picker-emoji]')].some(e=>getComputedStyle(e).visibility==='visible'&&e.getBoundingClientRect().width>0)&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "searched-keyboard-active",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "[data-slot=emoji-picker-search]",
+            "value": "grinning"
+          },
+          {
+            "action": "press",
+            "selector": "[data-slot=emoji-picker-search]",
+            "key": "ArrowDown"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !!document.querySelector('[data-slot=emoji-picker-emoji][data-active]')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "selected",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-slot=emoji-picker-search]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-emoji-result]')?.textContent!=='Selected: none'&&!document.querySelector('[data-slot=emoji-picker]')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "reopen-reset-footer",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Emoji",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-slot=emoji-picker]')?.closest('[role=dialog]');return e&&getComputedStyle(e).paddingLeft==='4px'&&getComputedStyle(e).paddingTop==='4px'&&getComputedStyle(e).gap==='4px'&&[...document.querySelectorAll('[data-slot=emoji-picker-emoji]')].some(e=>getComputedStyle(e).visibility==='visible'&&e.getBoundingClientRect().width>0)&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          },
+          {
+            "action": "visible",
+            "role": "button",
+            "name": "Reset to \u2728",
+            "exact": true
+          }
+        ]
+      },
+      {
+        "name": "reset-receipt",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Reset to \u2728",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-emoji-result]')?.textContent==='Selected: none'&&!document.querySelector('[data-slot=emoji-picker]')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ]
+  }
+}

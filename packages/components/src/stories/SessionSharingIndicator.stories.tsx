@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import type { LocalProjectId, MachineId } from '@lody/shared';
-import { SessionSharingIndicator } from '@/components/session-sharing';
+import { SessionArchivedBadge, SessionSharingIndicator } from '@/components/session-sharing';
 import { Tooltip } from '@lody/ui/tooltip';
 
 const meta = {
@@ -35,6 +35,10 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Private: Story = {};
+
+export const Archived: Story = {
+  render: () => <SessionArchivedBadge />,
+};
 
 export const TeamHidden: Story = {
   args: {
