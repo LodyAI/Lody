@@ -165,6 +165,10 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
         readLiveStatus: async () => {
           throw new Error('No live-status query');
         },
+        readActiveTurnId: () => undefined,
+        steerSession: async () => {
+          throw new Error('No steer');
+        },
         cancelSession: async () => {
           throw new Error('No cancellation');
         },
@@ -638,6 +642,10 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
         readLiveStatus: async () => {
           throw new Error('Unexpected live status');
         },
+        readActiveTurnId: () => undefined,
+        steerSession: async () => {
+          throw new Error('Unexpected steer');
+        },
         cancelSession: async () => {
           throw new Error('Unexpected cancellation');
         },
@@ -706,6 +714,10 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
           }),
           readLiveStatus: async () => {
             throw new Error('Archive must not request live status');
+          },
+          readActiveTurnId: () => undefined,
+          steerSession: async () => {
+            throw new Error('Archive must not steer a Session');
           },
           cancelSession: async () => {
             throw new Error('Archive is observed, not a cancellation request');

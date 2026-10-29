@@ -31,6 +31,21 @@ Spec。
 发信人来源；缺少来源的旧输入继续可读并保留原行为。本次不新增留言工具，
 也不改变结果派发时机。
 
+## Agent chat 发给正在工作的会话
+
+编排 Agent 会向仍在工作的会话补充纠正或新信息。只要目标在发起调用的同一
+Machine 上运行，且其 agent 接受 steer，`lody_session_chat` 和
+`lody_session_chat_many` 就把输入 steer 进当前 turn，不受用户排队或引导偏好
+影响，也不管当前 turn 由谁发起。被 steer 的输入有自己的回复，作为 Operation
+结果；被它打断的更早 turn 在该处结束。
+
+能证明未送达的 steer 与人类发送一样转为下一个普通 turn。送达不确定时绝不重放：
+该项以不可重试的 `STEER_DELIVERY_UNKNOWN` 失败，由发起请求的 Agent 决定是否重发。
+空闲目标、其他 Machine 上的目标和恢复重放仍走普通派发。证据：
+`apps/cli/src/commands/session.ts` 中的 `sendSessionChatResult`、其测试
+`session-default-fallback.test.ts`，以及 `apps/cli/src/orchestration/coordinator-workflow.ts`
+中的项协调。
+
 ## 会话创建配置
 
 编排 Agent 可以通过 `lody_session_create` 和 `lody_session_create_many`

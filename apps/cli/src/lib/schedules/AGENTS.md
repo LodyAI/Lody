@@ -27,12 +27,9 @@
   requires the initial and current connection sync; a previously resolved
   first-sync promise is insufficient after reconnect. Pure local bypasses only
   this cloud gate, never ownership/config validation.
-- `AgentExecutionSlots` is host-local, per-Agent-config generic Schedule admission.
-  Complete messages never reserve or restore these slots; only their destination
-  session busy check gates admission. Keep their ledger completion tracking.
-  Restore accepted occupancy before evaluating; retain it while Session
-  dispatch, queues, Operations or deliveries still have work. Release before
-  prehandoff retry.
+- Due runs do not wait for other runs of the same Schedule or Agent configuration.
+  Session dispatch owns conversation ordering; complete messages still defer while
+  their destination chat is busy. Preserve ledger completion and recovery tracking.
 - Configuration unavailability is recoverable without consuming an attempt.
   Infrastructure failures use bounded backoff; all prehandoff work expires after
   its fixed dispatch age. Only unprepared pending automatic runs may be superseded.
