@@ -2,6 +2,11 @@
 
 `CLAUDE.md` links here; ancestor rules apply.
 
+`CloudPlatformProvider` also wraps standalone login without authenticated Convex
+context. Keep organization queries and E2EE email inbox hosts in its optional
+authenticated child; absence of that context must still render login. The shared
+router supplies the context and retains workspace actions and owner/admin inboxes.
+
 ## Mirrors over synced docs tolerate unknown root keys
 
 Synced Mirrors require `ignoreUnknownProperties: true` or new peers block writes.

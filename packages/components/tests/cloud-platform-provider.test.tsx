@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from 'react';
+import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getFunctionName, type FunctionReference } from 'convex/server';
@@ -86,10 +86,29 @@ import { ipcBridge } from '../../../apps/electron/src/preload/ipc-bridge';
 import { createDesktopE2eeContent } from '@/providers/desktop-e2ee-content';
 import { initI18n } from '@/i18n';
 import { MachineSharingController } from '@/components/settings/e2ee/machine-sharing-settings';
-import { CloudPlatformProvider } from '@/providers/cloud-platform-provider';
+import { CloudPlatformProvider as CloudProvider } from '@/providers/cloud-platform-provider';
+import { AuthenticatedConvexContext } from '@/hooks/use-authenticated-convex';
 import { createCloudE2eeWorkspaces } from '@/providers/cloud-e2ee-workspaces';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { readAuthBootstrapSnapshot, writeStoredAuthToken } from '@/lib/auth-bootstrap';
+
+function CloudPlatformProvider({ children }: { children?: ReactNode }) {
+  return (
+    <AuthenticatedConvexContext.Provider
+      value={{
+        authSessionId: 'session-a',
+        isAuthenticated: true,
+        isLoading: false,
+        isRecovering: false,
+        confirmedUnauthenticated: false,
+        claimAutomaticCommand: () => true,
+        requestAuthRecovery: () => {},
+      }}
+    >
+      <CloudProvider>{children}</CloudProvider>
+    </AuthenticatedConvexContext.Provider>
+  );
+}
 
 /** What better-auth hands back on a refetch: equal data in new objects. */
 function refetch(workspaceName: string) {
@@ -145,6 +164,44 @@ describe('CloudPlatformProvider', () => {
     localStorage.clear();
     delete window.ipc;
   });
+
+  it.each(['owner', 'admin'])(
+    'keeps encrypted email admission running for an authenticated %s',
+    async (role) => {
+      fixture.electron = true;
+      fixture.usePreload = true;
+      window.ipc = ipcBridge;
+      refetch('Encrypted');
+      fixture.organization.organizations = [
+        { id: 'workspace-a', name: 'Encrypted', contentMode: 'e2ee', role },
+      ];
+      const completed = Promise.withResolvers<void>();
+      const approvals: unknown[][] = [];
+      fixture.invoke = async (channel, ...args) => {
+        if (channel === 'e2ee.open') return { readerOwner: 'inbox-reader' };
+        if (channel === 'e2ee.refresh') return undefined;
+        if (channel === 'e2ee.status') return { deviceKind: 'personal', memberRole: role };
+        if (channel === 'e2ee.memberJoinRequests')
+          return { items: [{ requestId: 'email-request', source: 'email' }] };
+        if (channel === 'e2ee.approveMemberJoin') {
+          approvals.push(args);
+          return undefined;
+        }
+        if (channel === 'e2ee.close') {
+          completed.resolve();
+          return undefined;
+        }
+        throw new Error(`unexpected IPC invocation: ${channel}`);
+      };
+      await render();
+      await completed.promise;
+      expect(approvals).toEqual([['workspace-a', 'email-request', 'automatic']]);
+      expect(seen.at(-1)!.workspaces.state.get()).toMatchObject({
+        status: 'ready',
+        workspaces: [{ id: 'workspace-a', contentMode: 'e2ee' }],
+      });
+    }
+  );
 
   it('routes encrypted dispatch and ACK verification through the production provider, IPC proxy and preload', async () => {
     fixture.electron = true;
