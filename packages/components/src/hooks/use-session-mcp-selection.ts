@@ -10,6 +10,7 @@ import {
 import type { AttachmentAddMenuMcp } from '@/components/chat/attachment-add-menu';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useWorkspaceCatalog } from './use-workspace-catalog';
+import { retryWorkspaceCatalog } from '@/lib/workspace-catalog-room';
 
 export type SessionMcpSelection = {
   servers: WorkspaceMcpServerMeta[];
@@ -25,6 +26,7 @@ export type SessionMcpSelection = {
   ready: boolean;
   /** The defaults this selection depends on could not be read at all. */
   defaultsFailed: boolean;
+  retryDefaults: () => void;
 };
 
 /** The project a NEW conversation is created in; its defaults preselect servers. */
@@ -123,6 +125,10 @@ export function useSessionMcpSelection(
     [disabled, existingSession, selectedIds, servers, setSelectedIds]
   );
 
+  const retryDefaults = useCallback(() => {
+    if (runtime) retryWorkspaceCatalog(runtime);
+  }, [runtime]);
+
   return {
     servers,
     selectedIds,
@@ -130,5 +136,6 @@ export function useSessionMcpSelection(
     menu,
     ready,
     defaultsFailed: dependsOnDefaults && failed,
+    retryDefaults,
   };
 }

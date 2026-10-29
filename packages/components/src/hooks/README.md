@@ -29,11 +29,12 @@ See the [attachment draft Spec](../../../../specs/session-files.md).
 
 ## MCP default readiness
 
-`use-session-mcp-selection.ts` allows default-derived creation after the local
-catalog loads on local-only platforms. Cloud/dual composition additionally waits
-for the first catalog sync: a nonempty local catalog can still lack the project's
-preference row. Existing conversations and explicit selections bypass this gate.
-No extra transport or cloud request is created by the hook.
+`use-session-mcp-selection.ts` allows default-derived sends after the local catalog
+loads in every composition; remote catch-up does not gate sending. Unreadable
+snapshots stay errors. The shared room retries with capped backoff while borrowed,
+and the notice offers retry or an explicit one-send `[]` without changing defaults.
+Existing conversations remain usable. See the
+[availability decision](../../../../.agents/notes/implemented/bug-fix/2026-10-26-mcp-defaults-send-gate.md).
 
 ## Session ACP catalogs
 

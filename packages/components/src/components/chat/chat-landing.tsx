@@ -1,3 +1,4 @@
+import { McpDefaultsRecovery } from './mcp-defaults-recovery';
 import {
   useLegacyWorkspaceMutation,
   useLegacyWorkspaceQuery,
@@ -3091,7 +3092,7 @@ function WorkspaceChatLanding({
   );
 
   // ── Submit ──
-  const handleSubmit = async () => {
+  const handleSubmit = async (withoutMcp = false) => {
     if (submitting) return;
     const submitStartedAtMs = getPerformanceNowMs();
     if (hasBlockingImages || hasBlockingFiles) {
@@ -3126,16 +3127,8 @@ function WorkspaceChatLanding({
     }
     // The selection still comes from defaults that were never read; sending now
     // would create the conversation with no MCP servers instead of its defaults.
-    if (!mcpSelection.ready) {
+    if (!mcpSelection.ready && !withoutMcp) {
       captureSessionInputBlocked('mcp_defaults_not_ready');
-      setComposerError(
-        mcpSelection.defaultsFailed
-          ? t(
-              'chat.validation.mcpDefaultsFailed',
-              'Default MCP servers couldn’t be read, so this conversation can’t be created yet.'
-            )
-          : t('chat.validation.mcpDefaultsLoading', 'Loading this project’s default MCP servers…')
-      );
       return;
     }
     const scopedMachineId =
@@ -3301,7 +3294,7 @@ function WorkspaceChatLanding({
         modelId: modelOptions.length > 0 ? (selectedModelId ?? undefined) : undefined,
         configOptionValues: dispatchConfigOptionValues,
         issuePRMentions,
-        mcpServerIds: mcpSelection.selectedIds,
+        mcpServerIds: withoutMcp ? [] : mcpSelection.selectedIds,
         agentRoleId: activeAgentRole?.id ?? null,
         agentRoleRevision: activeAgentRole?.revision,
         memory: activeAgentRole?.runConfig.memory,
@@ -6297,7 +6290,11 @@ function WorkspaceChatLanding({
       />
     ) : null;
   const composerNoticeNode =
-    e2eeLocalAgentNode || sharingReviewNoticeNode || sessionLimitNoticeNode || canMigratePi ? (
+    mcpSelection.defaultsFailed ||
+    e2eeLocalAgentNode ||
+    sharingReviewNoticeNode ||
+    sessionLimitNoticeNode ||
+    canMigratePi ? (
       <>
         <PiProviderMigrationCard
           count={migratablePiProviders.length}
@@ -6306,6 +6303,13 @@ function WorkspaceChatLanding({
           canMigrate={canMigratePi}
           onConfirm={() => void confirmPiMigration()}
         />
+        {mcpSelection.defaultsFailed ? (
+          <McpDefaultsRecovery
+            onRetry={mcpSelection.retryDefaults}
+            onSendWithoutMcp={() => void handleSubmit(true)}
+            disabled={submitting}
+          />
+        ) : null}
         {e2eeLocalAgentNode}
         {sharingReviewNoticeNode}
         {sessionLimitNoticeNode}

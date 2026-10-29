@@ -997,6 +997,38 @@ describe('SessionChatInputArea submission feedback', () => {
       expect(onSendMessage).not.toHaveBeenCalled();
     });
 
+    it('sends an explicit one-turn opt-out without changing the next selection', async () => {
+      const submissions: Parameters<SessionChatInputAreaProps['onSendMessage']>[] = [];
+      const onSendMessage: SessionChatInputAreaProps['onSendMessage'] = async (...args) => {
+        submissions.push(args);
+        return false; // Keep the draft to exercise a second independent send.
+      };
+      const sessionId = `mcp-opt-out-${++nextSession}`;
+      const overrides = {
+        mcpSelectionReady: false,
+        mcpDefaultsFailed: true,
+        onRetryMcpDefaults: () => {},
+      };
+      await renderComposer({ sessionId, onSendMessage, overrides });
+      await submit('keyboard');
+      expect(submissions).toEqual([]);
+      const optOut = [...container!.querySelectorAll('button')].find(
+        (button) => button.textContent === 'Send without MCP'
+      )!;
+      await act(async () => optOut.click());
+      expect(submissions).toHaveLength(1);
+      expect(submissions[0][2]?.mcpServerIds).toEqual([]);
+      expect(container!.querySelector('textarea')!.value).toBe('focus regression draft');
+      await renderComposer({
+        sessionId,
+        onSendMessage,
+        overrides: { mcp: mcp(['files']), mcpSelectionReady: true },
+      });
+      await submit('keyboard');
+      expect(submissions).toHaveLength(2);
+      expect(submissions[1][2]?.mcpServerIds).toEqual(['files']);
+    });
+
     it('dispatches the selection shown at the click, not one that changed before acceptance', async () => {
       const acceptance = deferredBoolean();
       const submissions: Parameters<SessionChatInputAreaProps['onSendMessage']>[] = [];

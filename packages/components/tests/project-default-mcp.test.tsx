@@ -23,6 +23,7 @@ import {
   type SessionMcpDefaultsTarget,
   type SessionMcpSelection,
 } from '../src/hooks/use-session-mcp-selection';
+import { McpDefaultsRecovery } from '../src/components/chat/mcp-defaults-recovery';
 import { initI18n } from '../src/i18n';
 import type {
   ProjectMcpDefaultAccess,
@@ -57,7 +58,7 @@ function createWorkspace(workspaceId: string, rows: Array<[readonly string[], un
   const listeners = new Set<(batch: unknown) => void>();
   let open!: () => void;
   let fail!: (error: Error) => void;
-  const opened = new Promise<void>((resolve, reject) => {
+  let opened = new Promise<void>((resolve, reject) => {
     open = resolve;
     fail = reject;
   });
@@ -102,6 +103,9 @@ function createWorkspace(workspaceId: string, rows: Array<[readonly string[], un
     runtime,
     open,
     fail,
+    recover: () => {
+      opened = Promise.resolve();
+    },
     sync,
     put,
     rowOf: (key: readonly string[]) => store.get(JSON.stringify(key))?.value,
@@ -158,7 +162,9 @@ function renderSelection(props: {
       defaultsTarget: current.defaultsTarget,
     });
     renders.push(latest);
-    return null;
+    return latest.defaultsFailed ? (
+      <McpDefaultsRecovery onRetry={latest.retryDefaults} onSendWithoutMcp={() => {}} />
+    ) : null;
   }
   const render = (next: typeof props) =>
     act(() =>
@@ -252,6 +258,24 @@ describe('composer MCP selection', () => {
     workspace.fail(new Error('storage unavailable'));
     await settle();
     expect(view.current()).toMatchObject({ ready: false, defaultsFailed: true });
+    // Existing conversations remain sendable during the same catalog outage.
+    view.render({ existingSession: true });
+    expect(view.current().ready).toBe(true);
+    view.render({ defaultsTarget: { project: projectA, machineId: 'machine-1' } });
+    workspace.recover();
+    act(() =>
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Retry')!
+        .click()
+    );
+    await settle();
+    expect(view.current()).toMatchObject({
+      ready: true,
+      defaultsFailed: false,
+      selectedIds: ['db', 'files'],
+    });
+    expect(container.querySelector('[role=alert]')).toBeNull();
+    expect(workspace.rowOf(workspaceFlockKeys.projectMcpDefault(keyOf(projectA)))).toBeUndefined();
     error.mockRestore();
   });
 

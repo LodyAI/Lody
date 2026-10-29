@@ -674,6 +674,8 @@ export const DraftSessionChatInterface = memo(
             onConfigOptionChange={selectConfigOption}
             mcp={mcpSelection.menu}
             mcpSelectionReady={mcpSelection.ready}
+            mcpDefaultsFailed={mcpSelection.defaultsFailed}
+            onRetryMcpDefaults={mcpSelection.retryDefaults}
             onSendMessage={handleSendMessage}
             onStop={() => {}}
             onRemoveQueueItem={async () => {}}

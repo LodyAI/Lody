@@ -1,3 +1,4 @@
+import { McpDefaultsRecovery } from '../chat/mcp-defaults-recovery';
 import { getSessionChatInputAreaShellClassName } from '@/components/chat/composer-surface';
 export { getSessionChatInputAreaShellClassName } from '@/components/chat/composer-surface';
 import { useScheduledMessage } from '../schedules/use-scheduled-message';
@@ -447,6 +448,8 @@ export interface SessionChatInputAreaProps {
   durableAgentRoleReady?: boolean;
   /** False while the MCP selection still waits on project defaults that are not read. */
   mcpSelectionReady?: boolean;
+  mcpDefaultsFailed?: boolean;
+  onRetryMcpDefaults?: () => void;
   /** True when the composer run config differs through an unsent user edit. */
   runConfigHasUserEdits?: boolean;
   modeOptions: AcpSessionSelectOption[];
@@ -581,6 +584,8 @@ export const SessionChatInputArea = memo(
       durableAgentRoleKnownTurnKeys,
       durableAgentRoleReady,
       mcpSelectionReady,
+      mcpDefaultsFailed,
+      onRetryMcpDefaults,
       runConfigHasUserEdits,
       modeOptions,
       modelOptions,
@@ -1659,7 +1664,10 @@ export const SessionChatInputArea = memo(
           });
           return;
         }
-        if (durableAgentRoleReady === false || mcpSelectionReady === false) {
+        if (
+          durableAgentRoleReady === false ||
+          (mcpSelectionReady === false && options?.mcpServerIds === undefined)
+        ) {
           return;
         }
         if (isMachineRemoved) {
@@ -1710,7 +1718,8 @@ export const SessionChatInputArea = memo(
             ]
           : [];
         const attachments = snapshotAttachmentDrafts(pendingImages, pendingFiles);
-        const mcpServerIds = mcp ? [...mcp.selectedIds] : undefined;
+        const selectedMcpIds = options?.mcpServerIds ?? mcp?.selectedIds;
+        const mcpServerIds = selectedMcpIds ? [...selectedMcpIds] : undefined;
         const commentRefBlocks: SessionInputBlock[] = commentReferencesRef.current.map((item) => ({
           type: 'comment_reference' as const,
           ...item.reference,
@@ -2464,6 +2473,13 @@ export const SessionChatInputArea = memo(
               multiple
               {...stylex.props(styles.hiddenInput)}
               onChange={handleAttachmentInputChange}
+            />
+          ) : null}
+          {mcpDefaultsFailed && onRetryMcpDefaults ? (
+            <McpDefaultsRecovery
+              onRetry={onRetryMcpDefaults}
+              onSendWithoutMcp={() => void sendMessage({ mcpServerIds: [] })}
+              disabled={submissionPending || isArchived || isMachineRemoved}
             />
           ) : null}
           {composerNode}
