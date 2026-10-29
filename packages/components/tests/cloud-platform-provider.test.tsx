@@ -1,5 +1,10 @@
 // @vitest-environment jsdom
 
+import { getDefaultStore } from 'jotai';
+import type { WorkspaceId } from '@lody/shared';
+import { userAtom, currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms';
+import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
+import { postHogPrivacy, setTelemetryRouteTarget } from '@/lib/posthog-privacy';
 import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -49,7 +54,14 @@ vi.mock('jotai', async (importOriginal) => ({
   ...(await importOriginal<typeof import('jotai')>()),
   useAtomValue: () => false,
 }));
-vi.mock('@/atoms', () => ({ userAtom: 'user' }));
+vi.mock('@/atoms', async () => {
+  const { atom } = await import('jotai');
+  return {
+    userAtom: atom(null),
+    currentWorkspaceIdAtom: atom(null),
+    currentWorkspaceSlugAtom: atom(null),
+  };
+});
 vi.mock('@/atoms/runtime', () => ({ activeWorkspaceRuntimeAtom: 'runtime' }));
 vi.mock('@/atoms/local-probe', () => ({ localAgentEnabledAtom: 'local-agent' }));
 vi.mock('@/lib/electron', () => ({ isElectronRenderer: () => fixture.electron }));
@@ -163,6 +175,84 @@ describe('CloudPlatformProvider', () => {
     container.remove();
     localStorage.clear();
     delete window.ipc;
+  });
+
+  it('authorizes telemetry only for the matched, confirmed plaintext scope and closes on switches', () => {
+    refetch('Plain');
+    const store = getDefaultStore();
+    const user = { id: 'user-a', email: 'a@example.com', name: 'A', image: null };
+    store.set(userAtom, user);
+    store.set(currentWorkspaceSlugAtom, 'a');
+    store.set(currentWorkspaceIdAtom, 'workspace-a' as WorkspaceId);
+    store.set(workspaceContentModeAtom, {
+      accountId: user.id,
+      workspaceSlug: 'a',
+      workspaceId: 'workspace-a',
+      descriptor: null,
+    });
+    setTelemetryRouteTarget('a', true);
+    render();
+    expect(postHogPrivacy.isAllowed()).toBe(false);
+    act(() =>
+      store.set(workspaceContentModeAtom, {
+        accountId: user.id,
+        workspaceSlug: 'a',
+        workspaceId: 'workspace-a',
+        descriptor: { workspaceId: 'workspace-a', contentMode: 'plaintext', contentModeVersion: 1 },
+      })
+    );
+    expect(postHogPrivacy.isAllowed()).toBe(true);
+    setTelemetryRouteTarget('b', false);
+    expect(postHogPrivacy.isAllowed()).toBe(false);
+    // A late old-scope answer cannot authorize the pending route.
+    act(() =>
+      store.set(workspaceContentModeAtom, {
+        accountId: user.id,
+        workspaceSlug: 'a',
+        workspaceId: 'workspace-a',
+        descriptor: { workspaceId: 'workspace-a', contentMode: 'plaintext', contentModeVersion: 1 },
+      })
+    );
+    expect(postHogPrivacy.isAllowed()).toBe(false);
+    setTelemetryRouteTarget('a', true);
+    expect(postHogPrivacy.isAllowed()).toBe(true);
+    fixture.organization = {
+      ...fixture.organization,
+      activeOrganization: { id: 'workspace-a', contentMode: 'e2ee' },
+    };
+    render();
+    expect(postHogPrivacy.isAllowed()).toBe(false);
+    refetch('Plain');
+    render();
+    expect(postHogPrivacy.isAllowed()).toBe(true);
+    fixture.session = { ...fixture.session, isRetrying: true };
+    render();
+    expect(postHogPrivacy.isAllowed()).toBe(false);
+    refetch('Plain');
+    render();
+    expect(postHogPrivacy.isAllowed()).toBe(true);
+    act(() => store.set(userAtom, { ...user, id: 'user-b' }));
+    expect(postHogPrivacy.isAllowed()).toBe(false);
+  });
+
+  it('keeps telemetry closed without authenticated context even with retained plaintext state', () => {
+    refetch('Plain');
+    const store = getDefaultStore();
+    const user = { id: 'user-a', email: 'a@example.com', name: 'A', image: null };
+    store.set(userAtom, user);
+    store.set(currentWorkspaceSlugAtom, 'a');
+    store.set(currentWorkspaceIdAtom, 'workspace-a' as WorkspaceId);
+    store.set(workspaceContentModeAtom, {
+      accountId: user.id,
+      workspaceSlug: 'a',
+      workspaceId: 'workspace-a',
+      descriptor: { workspaceId: 'workspace-a', contentMode: 'plaintext', contentModeVersion: 1 },
+    });
+    setTelemetryRouteTarget('a', true);
+    act(() => root.render(createElement(CloudProvider, null, createElement(Probe))));
+    expect(seen.at(-1)!.identity.session.get()).toMatchObject({ status: 'authenticated' });
+    expect(seen.at(-1)!.workspaces.state.get()).toEqual({ status: 'loading' });
+    expect(postHogPrivacy.isAllowed()).toBe(false);
   });
 
   it.each(['owner', 'admin'])(

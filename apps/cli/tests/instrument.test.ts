@@ -1,95 +1,84 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createServer, type Server } from 'node:http';
+import { gunzipSync } from 'node:zlib';
+import { once } from 'node:events';
 
-const posthogInstance = vi.hoisted(() => ({
-  captureException: vi.fn(),
-  capture: vi.fn(),
-  flush: vi.fn(async () => {}),
-}));
-
-const PostHogCtor = vi.hoisted(() =>
-  vi.fn(function () {
-    return posthogInstance;
-  })
-);
-
-vi.mock('posthog-node', () => ({ PostHog: PostHogCtor }));
-
-// The analytics poster is exercised by its own suite; here we only assert that
-// captureMessage is routed to it rather than to the exception client.
-const analyticsMock = vi.hoisted(() => ({
+vi.mock('../src/utils/const', () => ({ getSystemMachineId: () => 'synthetic-machine' }));
+const analytics = vi.hoisted(() => ({
   captureCli: vi.fn(),
   flushCliAnalytics: vi.fn(async () => {}),
 }));
-
-vi.mock('../src/lib/analytics/posthog', () => analyticsMock);
-
+vi.mock('../src/lib/analytics/posthog', () => analytics);
 const originalEnv = { ...process.env };
+let server: Server;
+let bodies: unknown[];
 
-describe('CLI PostHog error reporting', () => {
-  beforeEach(() => {
+describe('CLI exception ingestion using the real SDK', () => {
+  beforeEach(async () => {
     vi.resetModules();
-    vi.clearAllMocks();
-    setEnv({
-      ...originalEnv,
-      LODY_PLATFORM: 'cloud',
-      LODY_ENV: 'production',
-      LODY_POSTHOG_KEY: 'phc_test_key',
-      POSTHOG_HOST: 'https://us.i.posthog.com',
+    bodies = [];
+    server = createServer((request, response) => {
+      void (async () => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(Buffer.from(chunk));
+        const bytes = Buffer.concat(chunks);
+        bodies.push(
+          JSON.parse(
+            (request.headers['content-encoding'] === 'gzip' ? gunzipSync(bytes) : bytes).toString()
+          )
+        );
+        response.setHeader('content-type', 'application/json');
+        response.end('{}');
+      })().catch((error: Error) => response.destroy(error));
     });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('missing listener');
+    process.env.LODY_ENV = 'production';
+    process.env.LODY_PLATFORM = 'cloud';
+    process.env.LODY_POSTHOG_KEY = 'synthetic-key';
+    process.env.POSTHOG_HOST = `http://127.0.0.1:${address.port}`;
   });
-
-  afterEach(() => {
-    setEnv(originalEnv);
-  });
-
-  it('initializes a PostHog client when a key is present in a non-dev env', async () => {
-    const mod = await import('../src/instrument');
-
-    expect(PostHogCtor).toHaveBeenCalledTimes(1);
-    expect(PostHogCtor).toHaveBeenCalledWith(
-      'phc_test_key',
-      expect.objectContaining({ host: 'https://us.i.posthog.com' })
+  afterEach(async () => {
+    process.env = { ...originalEnv };
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve()))
     );
-    expect(mod.isErrorReportingEnabled()).toBe(true);
   });
 
-  it('does not initialize a client in dev', async () => {
+  it('sends only the fixed error vocabulary, excluding original errors and extra fields', async () => {
+    const { captureException, isErrorReportingEnabled } = await import('../src/instrument');
+    expect(isErrorReportingEnabled()).toBe(true);
+    await captureException(new Error('PRIVATE_ATTACHMENT_NAME'), {
+      component: 'PRIVATE_PATH',
+      extra: { error_code: 'e2ee_feature_unavailable', nested: { path: 'PRIVATE_CODE' } },
+    });
+    expect(bodies.length).toBeGreaterThan(0);
+    const wire = JSON.stringify(bodies);
+    expect(wire).not.toContain('PRIVATE_');
+    expect(wire).toContain('e2ee_feature_unavailable');
+    expect(wire).toContain('$exception');
+    await captureException('OTHER_PRIVATE_ERROR', {
+      extra: { error_code: 'PRIVATE_UNRECOGNIZED_CODE' },
+    });
+    expect(JSON.stringify(bodies)).not.toContain('PRIVATE_');
+    expect(JSON.stringify(bodies)).toContain('redacted_exception');
+  });
+
+  it('keeps local OSS telemetry disabled despite inherited cloud variables', async () => {
+    process.env.LODY_PLATFORM = 'local';
+    const { captureException, isErrorReportingEnabled } = await import('../src/instrument');
+    expect(isErrorReportingEnabled()).toBe(false);
+    await captureException(new Error('PRIVATE_LOCAL'));
+    expect(bodies).toEqual([]);
+  });
+
+  it('keeps development telemetry disabled', async () => {
     process.env.LODY_ENV = 'dev';
-    const mod = await import('../src/instrument');
-
-    expect(PostHogCtor).not.toHaveBeenCalled();
-    expect(mod.isErrorReportingEnabled()).toBe(false);
-  });
-
-  it('routes captureException to the PostHog exception client', async () => {
-    const { captureException } = await import('../src/instrument');
-    const error = new Error('boom');
-
-    await captureException(error, { component: 'test', extra: { foo: 'bar' } });
-
-    expect(posthogInstance.captureException).toHaveBeenCalledTimes(1);
-    const [reported, , properties] = posthogInstance.captureException.mock.calls[0]!;
-    expect(reported).toBe(error);
-    expect(properties).toMatchObject({ component: 'test', foo: 'bar', platform: 'cli' });
-    expect(analyticsMock.captureCli).not.toHaveBeenCalled();
-  });
-
-  it('routes captureMessage to a regular analytics event, not an exception', async () => {
-    const { captureMessage } = await import('../src/instrument');
-
-    await captureMessage('something slow', { component: 'heartbeat', level: 'error' });
-
-    expect(analyticsMock.captureCli).toHaveBeenCalledWith(
-      'cli/diagnostic',
-      expect.objectContaining({ message: 'something slow', level: 'error', component: 'heartbeat' })
-    );
-    expect(posthogInstance.captureException).not.toHaveBeenCalled();
+    const { captureException, isErrorReportingEnabled } = await import('../src/instrument');
+    expect(isErrorReportingEnabled()).toBe(false);
+    await captureException(new Error('PRIVATE_DEV'));
+    expect(bodies).toEqual([]);
   });
 });
-
-function setEnv(nextEnv: NodeJS.ProcessEnv): void {
-  for (const key of Object.keys(process.env)) {
-    delete process.env[key];
-  }
-  Object.assign(process.env, nextEnv);
-}

@@ -20,6 +20,9 @@ platform/cloud-api 定义对应 CAS DTO。这些原语
 尚未接入网络、UI 或执行路径；[共享策略提案](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.zh.md)
 说明待批准 Spec 增量与后续宿主职责。
 
+Web/移动端保管已有 [已批准合同](../../specs/e2ee/client-custody.zh.md)及 services 入口的
+可选客户端保护/安装端口。这些声明不启用浏览器或原生实现。
+
 ## 从这里开始
 
 | 你想要… | 阅读 |

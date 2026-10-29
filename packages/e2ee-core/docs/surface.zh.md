@@ -34,6 +34,8 @@
 | 值类型   | `GenesisHash`, `SigningPublicKey`, `LedgerView`, `LedgerCheckpoint`, `LedgerReadPage`, `LedgerFeedState`, `MailboxSlot`, `EpochStagedGroup`, `EpochStagedGroupKey`                                                                                                                                                                                                                                                                  |
 | 恢复     | `RecoveryVaultStore`, `RecoveryVaultLocalStore`, `VaultCiphertext`                                                                                                                                                                                                                                                                                                                                                                  |
 
+| 客户端保管 | `ClientKeyCustody`, `CLIENT_KEY_PURPOSES`, `ClientCustodyScope`, `ClientCustodyBinding`, `ClientCustodyStatus`, `ClientCustodyError`, `ClientKeyPurpose`, `ClientWrappedKey`, `ClientInstallation`, `ClientInstallationStore` |
+
 ## `@lody/e2ee-core/protocol` — 纯协议
 
 | 分组         | 导出                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |

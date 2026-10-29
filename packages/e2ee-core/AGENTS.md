@@ -25,6 +25,12 @@ whitepaper, Specs, decisions and this package's docs. Contract:
   native protection is borrowed; the close guard elsewhere.
 - `KeyProtector` and `CandidateProtector` stay distinct ports: an unpublished
   rotation key is never protected through the installed-key capability.
+- Before changing client custody or installation, read the [client custody Spec](../../specs/e2ee/client-custody.md).
+  Its new ports do not enable a host; native bridges stay scoped to protection,
+  and installation receipts never grant ledger authority.
+  Replacement archives the old receipt atomically without resetting the slot or
+  its revision. Client wrapping uses DAG-CBOR text AAD; never expand the ledger
+  CBOR subset to encode it. Shared bytes are pinned by `test/client-custody-vector.json`.
 
 ## Documentation
 

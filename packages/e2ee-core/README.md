@@ -21,6 +21,10 @@ composition is not enabled. Node SQLite and Loro Streams adapters are provided;
 other runtimes need their own storage and platform adapters. Backend ports and
 `/host` define what another backend must implement; they do not deploy a server.
 
+Web/mobile custody has an [approved contract](../../specs/e2ee/client-custody.md) and
+opt-in client protection/installation ports in the services entry. No browser or
+native implementation is enabled by those declarations.
+
 ## Start here
 
 | You want to… | Read |

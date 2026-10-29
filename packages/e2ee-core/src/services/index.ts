@@ -69,6 +69,18 @@ export {
 } from './stores';
 export { DeviceIdentity, WorkspaceScope } from './workspace';
 export { RecoveryVaultLocalStore, RecoveryVaultStore } from './recovery';
+export {
+  ClientCustodyError,
+  ClientKeyCustody,
+  ClientInstallationStore,
+  CLIENT_KEY_PURPOSES,
+  type ClientCustodyBinding,
+  type ClientCustodyScope,
+  type ClientCustodyStatus,
+  type ClientKeyPurpose,
+  type ClientWrappedKey,
+  type ClientInstallation,
+} from './client-custody';
 
 // Value types that appear in port signatures.
 export type { DeviceSigner } from '../internal/foundation/signing';

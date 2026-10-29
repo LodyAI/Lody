@@ -923,12 +923,18 @@ milestones, not periodic keepalives. Up to four independent checkouts run togeth
 selected submodules wait for their parent, and siblings sharing parent Git config
 are serialized. Branch receipts publish serially, and failures drain started work
 before releasing the Project owner. Selected members initialize non-recursively
-with their own credentials; remaining submodules initialize afterward with four Git
-fetch jobs per command. Complete standalone local copies lend objects via `--reference`
-and `--dissociate`, so source GC cannot invalidate a checkout. Partial clones, shallow
-copies and linked worktrees use ordinary cloning instead; preparation never hydrates
-the source. Remaining submodule initialization follows gitlinks in the current index,
-ignoring residual `.gitmodules` entries. Archive skips unmaterialized empty selected
+with their own credentials. Remaining submodules borrow objects from the corresponding
+checkout inside a local parent's original tree when its remote identity matches and
+its object store is complete. References are per repository and use `--dissociate`;
+parent and child clones never share one reference argument. Unsupported or absent
+sources use ordinary recursive initialization with four Git fetch jobs per command.
+Partial clones, shallow copies and linked worktrees cannot lend objects; unselected
+sources with alternates or symlinked paths are also skipped. Preparation never
+hydrates or changes the source. Existing checkouts keep their HEAD and local edits;
+missing descendants are revisited after an interrupted preparation. Selected Members
+are excluded from their parent's traversal and initialize under their own owner.
+Remaining initialization follows current index gitlinks, ignoring residual
+`.gitmodules` entries. Archive skips unmaterialized empty selected
 submodules and verifies that populated members are independent checkouts before backup;
 unknown local content is retained. Setup retains the prior serial traversal order,
 including parents before children.

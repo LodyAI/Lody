@@ -9,7 +9,15 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useStore } from 'jotai';
+import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom, userAtom } from '@/atoms';
+import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
+import {
+  getTelemetryRouteTarget,
+  installWorkspaceTelemetryScope,
+  postHogPrivacy,
+  suspendWorkspaceTelemetry,
+} from '@/lib/posthog-privacy';
 import {
   CLOUD_PLATFORM_CAPABILITIES,
   createStore,
@@ -81,9 +89,77 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
     localAgentEnabled,
   });
   const session = useStableSession();
+  const hasAuthenticatedConvex = useOptionalAuthenticatedConvex() !== null;
   const signOut = useAuthSignOut();
   const [sessionStore] = useState(() => createStore<PlatformSessionState>({ status: 'loading' }));
   const [workspacesStore] = useState(() => createStore<WorkspacesState>({ status: 'loading' }));
+  // Session refetches replace organization callbacks. Publish the committed
+  // child's latest actions without replacing the platform object or its consumers.
+  const organizationRef = useRef<ReturnType<typeof useOrganization> | null>(null);
+  const atomStore = useStore();
+  const telemetryLive = useRef({ session, hasAuthenticatedConvex });
+  telemetryLive.current = { session, hasAuthenticatedConvex };
+  useLayoutEffect(() => postHogPrivacy.sync());
+  useEffect(() => {
+    const uninstall = installWorkspaceTelemetryScope(() => {
+      const live = telemetryLive.current;
+      const organization = organizationRef.current;
+      if (
+        !live.hasAuthenticatedConvex ||
+        live.session.isPending ||
+        live.session.isRetrying ||
+        live.session.isOptimistic ||
+        !organization ||
+        organization.error ||
+        !organization.activeOrganization
+      )
+        return null;
+      const identity = sessionStore.get();
+      const mode = atomStore.get(workspaceContentModeAtom);
+      const target = getTelemetryRouteTarget();
+      if (
+        identity.status !== 'authenticated' ||
+        live.session.data?.user.id !== identity.user.id ||
+        organization.activeOrganization.id !== mode?.workspaceId ||
+        ('contentMode' in organization.activeOrganization &&
+          organization.activeOrganization.contentMode !== undefined &&
+          String(organization.activeOrganization.contentMode) !== 'plaintext') ||
+        atomStore.get(userAtom)?.id !== identity.user.id ||
+        !target ||
+        mode?.accountId !== identity.user.id ||
+        mode.workspaceSlug !== target ||
+        atomStore.get(currentWorkspaceSlugAtom) !== target ||
+        atomStore.get(currentWorkspaceIdAtom) !== mode.workspaceId ||
+        !mode.descriptor ||
+        !('contentMode' in mode.descriptor) ||
+        mode.descriptor.contentMode !== 'plaintext'
+      )
+        return null;
+      const listed = workspacesStore.get();
+      if (
+        listed.status !== 'ready' ||
+        listed.activeWorkspaceId !== mode.workspaceId ||
+        listed.workspaces.some(
+          (item) => item.id === mode.workspaceId && item.contentMode === 'e2ee'
+        )
+      )
+        return null;
+      return JSON.stringify([identity.user.id, mode.workspaceId, target]);
+    });
+    const refresh = () => postHogPrivacy.sync();
+    const unsubscribes = [
+      sessionStore.subscribe(refresh),
+      workspacesStore.subscribe(refresh),
+      atomStore.sub(userAtom, refresh),
+      atomStore.sub(workspaceContentModeAtom, refresh),
+      atomStore.sub(currentWorkspaceIdAtom, refresh),
+      atomStore.sub(currentWorkspaceSlugAtom, refresh),
+    ];
+    return () => {
+      uninstall();
+      for (const unsubscribe of unsubscribes) unsubscribe();
+    };
+  }, [atomStore, sessionStore, workspacesStore]);
   const [uninstallGitHubTokenPort] = useState(() => installGitHubTokenPort(cloudGitHubTokenPort));
   const [uninstallCloudHttpPort] = useState(() => installCloudHttpPort(CLOUD_HTTP_PORT));
 
@@ -122,9 +198,6 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
     sessionStore,
   ]);
 
-  // Session refetches replace organization callbacks. Publish the committed
-  // child's latest actions without replacing the platform object or its consumers.
-  const organizationRef = useRef<ReturnType<typeof useOrganization> | null>(null);
   const readOrganization = useCallback(() => {
     if (!organizationRef.current) {
       throw new Error('Cloud workspace operations require AuthenticatedConvexProvider');
@@ -248,7 +321,18 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
           ]);
         },
         setActive: async (workspaceId) => {
-          await readOrganization().activateOrganization(workspaceId);
+          const current = workspacesStore.get();
+          if (current.status === 'ready' && current.activeWorkspaceId === workspaceId) {
+            await readOrganization().activateOrganization(workspaceId);
+            return;
+          }
+          const resume = suspendWorkspaceTelemetry();
+          try {
+            await readOrganization().activateOrganization(workspaceId);
+          } catch (error) {
+            resume();
+            throw error;
+          }
         },
         updateSlug: async (workspaceId, slug) => {
           const updated = await readOrganization().updateOrganization(workspaceId, { slug });

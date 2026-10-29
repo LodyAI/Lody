@@ -111,4 +111,7 @@ and file responsibilities: [../README.md](../README.md).
 - Project roots use registrations. Repair links, never removing a correct one (tabs share
   it); archive unlinks without following targets.
   Submodule init uses actual gitlinks; backup requires its own checkout. Only complete,
-  standalone, non-shallow repositories may lend objects.
+  standalone, non-shallow repositories may lend objects. Unselected references must
+  match the effective submodule URL, stay inside the local source tree without
+  symlinks, and have no alternates. Always dissociate borrowed objects before
+  descending; selected Members retain their own initialization owner.
