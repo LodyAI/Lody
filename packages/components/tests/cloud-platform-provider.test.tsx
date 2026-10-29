@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getFunctionName, type FunctionReference } from 'convex/server';
 import type {
   PlatformProvider,
+  E2eeRuntimeFactory,
   PlatformSessionState,
   E2eeWorkspacePrepared,
   E2eeWorkspacePrepareInput,
@@ -104,7 +105,13 @@ import { createCloudE2eeWorkspaces } from '@/providers/cloud-e2ee-workspaces';
 import { useE2eeAccountId } from '@/lib/e2ee-account';
 import { readAuthBootstrapSnapshot, writeStoredAuthToken } from '@/lib/auth-bootstrap';
 
-function CloudPlatformProvider({ children }: { children?: ReactNode }) {
+function CloudPlatformProvider({
+  children,
+  createE2eeRuntime,
+}: {
+  children?: ReactNode;
+  createE2eeRuntime?: E2eeRuntimeFactory;
+}) {
   return (
     <AuthenticatedConvexContext.Provider
       value={{
@@ -117,7 +124,7 @@ function CloudPlatformProvider({ children }: { children?: ReactNode }) {
         requestAuthRecovery: () => {},
       }}
     >
-      <CloudProvider>{children}</CloudProvider>
+      <CloudProvider {...{ createE2eeRuntime }}>{children}</CloudProvider>
     </AuthenticatedConvexContext.Provider>
   );
 }
@@ -148,8 +155,10 @@ describe('CloudPlatformProvider', () => {
     seen.push(usePlatform());
     return null;
   }
-  const render = () =>
-    act(() => root.render(createElement(CloudPlatformProvider, null, createElement(Probe))));
+  const render = (createE2eeRuntime?: E2eeRuntimeFactory) =>
+    act(() =>
+      root.render(createElement(CloudPlatformProvider, { createE2eeRuntime }, createElement(Probe)))
+    );
 
   beforeEach(() => {
     seen.length = 0;
@@ -175,6 +184,92 @@ describe('CloudPlatformProvider', () => {
     container.remove();
     localStorage.clear();
     delete window.ipc;
+  });
+
+  it('borrows the injected runtime with a live read-only session and preserves exact optional ports', async () => {
+    refetch('A');
+    let input: Parameters<E2eeRuntimeFactory>[0] | undefined;
+    const borrowed = {
+      readerLeases: 'preallocated-v1',
+      account: async () => {
+        const session = input!.session.get();
+        return session.status === 'authenticated'
+          ? { userId: session.user.id, source: 'network' }
+          : null;
+      },
+    } as E2eeWorkspaceRuntime;
+    const factory: E2eeRuntimeFactory = (context) => {
+      input = context;
+      return borrowed;
+    };
+    await render(factory);
+    expect(seen.at(-1)!.e2eeWorkspaces!.runtime).toBe(borrowed);
+    expect(await seen.at(-1)!.e2eeWorkspaces!.runtime!.account!()).toMatchObject({
+      userId: 'user-a',
+    });
+    expect('set' in input!.session).toBe(false);
+    expect(seen.at(-1)!.e2eeWorkspaces!.runtime!.prepareFeatureRpc).toBeUndefined();
+    const first = seen.at(-1)!.e2eeWorkspaces!.runtime;
+    refetch('Renamed');
+    await render(factory);
+    expect(seen.at(-1)!.e2eeWorkspaces!.runtime).toBe(first);
+    fixture.session = {
+      ...fixture.session,
+      data: { user: { id: 'user-b', email: 'b@example.test', name: 'B', image: null } },
+    };
+    await render(factory);
+    expect(seen.at(-1)!.e2eeWorkspaces!.runtime).toBe(first);
+    expect(await first!.account!()).toMatchObject({ userId: 'user-b' });
+    fixture.session = { ...fixture.session, data: null };
+    await render(factory);
+    expect(await first!.account!()).toBeNull();
+  });
+
+  it('keeps standalone anonymous login independent of an injected runtime factory', async () => {
+    fixture.session = { data: null, isPending: false };
+    const factory: E2eeRuntimeFactory = () => {
+      throw new Error('anonymous host acquisition');
+    };
+    await act(async () =>
+      root.render(
+        createElement(CloudProvider, { createE2eeRuntime: factory }, createElement(Probe))
+      )
+    );
+    expect(seen.at(-1)!.identity.session.get()).toEqual({ status: 'unauthenticated' });
+    expect(seen.at(-1)!.e2eeWorkspaces!.runtime).toBeUndefined();
+  });
+
+  it('keeps Electron IPC as the runtime owner when a browser factory is supplied', async () => {
+    fixture.electron = true;
+    refetch('A');
+    const binding = { workspaceId: 'workspace-a', genesisHash: '11'.repeat(32) };
+    fixture.native = { e2ee: { readIdentity: async () => binding } } as never;
+    const factory: E2eeRuntimeFactory = () => {
+      throw new Error('browser factory must not own Electron');
+    };
+    await render(factory);
+    expect(
+      await seen.at(-1)!.e2eeWorkspaces!.runtime!.readIdentity!({
+        workspaceId: 'workspace-a',
+        accountId: 'user-a',
+      })
+    ).toEqual(binding);
+  });
+
+  it('keeps cloud mode control available when the injected factory reports no runtime', async () => {
+    refetch('A');
+    fixture.cloudClient.query = async () => ({
+      workspaceId: 'workspace-a',
+      contentMode: 'plaintext',
+      contentModeVersion: 1,
+    });
+    await render(() => undefined);
+    expect(seen.at(-1)!.e2eeWorkspaces!.runtime).toBeUndefined();
+    expect(await seen.at(-1)!.e2eeWorkspaces!.describe({ workspaceId: 'workspace-a' })).toEqual({
+      workspaceId: 'workspace-a',
+      contentMode: 'plaintext',
+      contentModeVersion: 1,
+    });
   });
 
   it('authorizes telemetry only for the matched, confirmed plaintext scope and closes on switches', () => {

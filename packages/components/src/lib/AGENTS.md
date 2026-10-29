@@ -36,6 +36,11 @@ Rules bind callers too. [Background](../../../../.agents/docs/components-package
   still signed in; reloads one window) and `startHardReset` (full wipe/sign-out,
   host-native first, own confirmation). Defer deletes to next boot; clear synchronous
   storage BEFORE the flag. Record a clear's result; never re-run it unasked.
+- Ordinary IndexedDB cache clearing deletes only the known rebuildable cache names
+  and replica/cursor families in `clear-local-cache.ts`. Apply that policy to
+  enumerated and caller-supplied names alike. Preserve unknown databases, custody,
+  installation receipts and unresolved originals; new caches need an explicit entry.
+  Reserve disposable replica/cursor name families for caches, never durable host stores.
 - Cache clearing uses a localStorage DELETE list, never a keep-allowlist. Include
   connection caches (Streams JWT/gateway, cursor-bypass, workspace-info) and new
   `lody:*` cache keys; retain auth tokens and preferences.

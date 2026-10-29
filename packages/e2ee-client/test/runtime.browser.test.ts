@@ -709,3 +709,144 @@ it.each(['chromium', 'webkit'] as const)(
     }
   }
 );
+
+// The browser fixture uses components' build aliases; only serialized public outcomes cross this driver boundary.
+type CacheSurface = typeof globalThis & {
+  CustodyCacheFixture: {
+    personal: Fixture;
+    boot(mode: 'create-or-open' | 'open-existing'): Promise<void>;
+    signOut(): Promise<{ ok: boolean }>;
+    clear(enumerable: boolean, hard?: boolean): Promise<void>;
+    savedOriginals(): Promise<string>;
+    reopen(): Promise<{ ok: boolean; status?: unknown; reason?: unknown }>;
+  };
+};
+it.each(['chromium', 'webkit'] as const)(
+  'preserves actual custody and immutable originals through logout and cache recovery in %s',
+  async (engine) => {
+    const directory = await mkdtemp(join(tmpdir(), 'lody-custody-cache-'));
+    let context: BrowserContext | undefined;
+    try {
+      const output = await build({
+        entryPoints: [
+          fileURLToPath(
+            new URL('../../components/tests/browser/custody-cache-fixture.ts', import.meta.url)
+          ),
+        ],
+        bundle: true,
+        platform: 'browser',
+        format: 'iife',
+        globalName: 'CustodyCacheFixture',
+        target: 'safari16.4',
+        write: false,
+        logLevel: 'silent',
+        alias: { '@': fileURLToPath(new URL('../../components/src', import.meta.url)) },
+        define: {
+          'import.meta.env': JSON.stringify({ BASE_URL: '/', VITE_LODY_PLATFORM: 'cloud' }),
+        },
+      });
+      const file = join(directory, 'index.html');
+      await writeFile(
+        file,
+        '<!doctype html><script>' +
+          output.outputFiles[0].text.replaceAll('</script', '<\\/script') +
+          '</script>'
+      );
+      context = await (engine === 'chromium' ? chromium : webkit).launchPersistentContext(
+        join(directory, 'profile'),
+        { headless: true }
+      );
+      let page = await context.newPage();
+      await page.goto(pathToFileURL(file).href);
+      const operation = (command: string) =>
+        page.evaluate(
+          (commandName) =>
+            (globalThis as CacheSurface).CustodyCacheFixture.personal.runtimeInvoke(commandName),
+          command
+        );
+      await page.evaluate(() =>
+        (globalThis as CacheSurface).CustodyCacheFixture.boot('create-or-open')
+      );
+      expect((await operation('prepare')).ok).toBe(true);
+      expect(
+        (
+          await page.evaluate(() =>
+            (globalThis as CacheSurface).CustodyCacheFixture.personal.invoke('approve')
+          )
+        ).ok
+      ).toBe(true);
+      for (const command of ['claim', 'open', 'receive'])
+        expect((await operation(command)).ok, command).toBe(true);
+      const status = (await operation('status')).value as { signingPublicKey: string };
+      expect(
+        (
+          await page.evaluate(() =>
+            (globalThis as CacheSurface).CustodyCacheFixture.personal.invoke('addMachine')
+          )
+        ).ok
+      ).toBe(true);
+      expect((await operation('refresh')).ok).toBe(true);
+      const pending = await operation('rpc');
+      expect(pending.ok).toBe(true);
+      expect(pending.value).toMatchObject({
+        requestId: expect.any(String),
+        frameHex: expect.any(String),
+      });
+      await page.evaluate(() => (globalThis as CacheSurface).CustodyCacheFixture.personal.stop());
+      expect(
+        (await page.evaluate(() => (globalThis as CacheSurface).CustodyCacheFixture.signOut())).ok
+      ).toBe(true);
+      await page.evaluate(() =>
+        (globalThis as CacheSurface).CustodyCacheFixture.boot('open-existing')
+      );
+      expect((await operation('open')).ok, 'logout keeps actual identity').toBe(true);
+      expect((await operation('status')).value).toMatchObject({
+        signingPublicKey: status.signingPublicKey,
+        hasCurrentKey: true,
+      });
+      await page.evaluate(() => (globalThis as CacheSurface).CustodyCacheFixture.personal.stop());
+      const originals = await page.evaluate(() =>
+        (globalThis as CacheSurface).CustodyCacheFixture.savedOriginals()
+      );
+      for (const enumerable of [true, false]) {
+        await page.evaluate(
+          (canEnumerate) => (globalThis as CacheSurface).CustodyCacheFixture.clear(canEnumerate),
+          enumerable
+        );
+        const after = await page.evaluate(() =>
+          (globalThis as CacheSurface).CustodyCacheFixture.savedOriginals()
+        );
+        await context.close();
+        context = await (engine === 'chromium' ? chromium : webkit).launchPersistentContext(
+          join(directory, 'profile'),
+          { headless: true }
+        );
+        page = await context.newPage();
+        await page.goto(pathToFileURL(file).href);
+        const reopened = await page.evaluate(() =>
+          (globalThis as CacheSurface).CustodyCacheFixture.reopen()
+        );
+        expect(reopened, 'cache recovery reopens actual wrappers').toMatchObject({
+          ok: true,
+          status: { signingPublicKey: status.signingPublicKey, hasCurrentKey: true },
+        });
+        expect(
+          after,
+          'cache must preserve installation, wrappers, pins and pending originals'
+        ).toBe(originals);
+        expect(
+          await operation('rpc'),
+          'unconfirmed signed request must retry exact original'
+        ).toEqual(pending);
+        await page.evaluate(() => (globalThis as CacheSurface).CustodyCacheFixture.personal.stop());
+      }
+      await page.evaluate(() => (globalThis as CacheSurface).CustodyCacheFixture.clear(true, true));
+      expect(
+        await page.evaluate(() => (globalThis as CacheSurface).CustodyCacheFixture.savedOriginals())
+      ).toBe('empty');
+    } finally {
+      await context?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+);

@@ -130,7 +130,10 @@ provider has its own page boundary because it sits above the Outlet boundary. Se
 Both cache-recovery levels defer their asynchronous deletes to the next boot because
 `deleteDatabase()` blocks while the runtime still holds a connection; synchronous
 storage is cleared first so the boot flag is never written over a half-cleared state.
-The localStorage sweep is an explicit DELETE list rather than a keep-allowlist so that
+The IndexedDB pass targets known rebuildable cache names and replica/cursor
+families. Unknown stores survive, including custody, installation receipts and
+unresolved originals; late caller-supplied names use the same policy. Full reset
+retains its explicit destructive semantics. The localStorage sweep is an explicit DELETE list rather than a keep-allowlist so that
 the failure mode of forgetting a key is a surviving cache entry, not a wiped user
 preference.
 

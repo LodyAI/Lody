@@ -21,6 +21,12 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
 - Local CLI, renderer, and Electron-main telemetry is hard-disabled even when
   unrelated PostHog variables exist in the caller's shell.
 
+- `E2eeRuntimeFactory` synchronously borrows an application-owned runtime port.
+  Keep factory calls pure: acquire no custody, perform no I/O, and create no Effect
+  runtime during React render. The application retains its Layers/executor through
+  confirmed retirement. Its read-only live session is account routing, never device
+  approval. Local and Electron compositions retain their existing owners.
+
 ## Telemetry privacy
 
 - E2EE and unconfirmed workspace scopes must not record or upload replay. Only a
