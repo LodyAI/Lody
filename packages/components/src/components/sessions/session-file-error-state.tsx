@@ -340,7 +340,7 @@ export function getSessionFileErrorPresentation(
 // One row per action, all the same width. A wrapping row of buttons sized by
 // their own labels was the previous layout, and in a side panel it produced
 // three ragged widths on three lines — the width difference read as meaning.
-const ACTION_BUTTON_CLASS = 'h-8 w-full justify-start gap-2 px-2.5 text-xs font-normal';
+const ACTION_BUTTON_CLASS = 'justify-start gap-2 px-2.5 text-xs font-normal';
 
 export function SessionFileErrorState({
   message,
@@ -397,6 +397,8 @@ export function SessionFileNoticeCard({
               <Button
                 size="small"
                 variant="secondary"
+                width="100%"
+                height="calc(var(--spacing) * 8)"
                 className={ACTION_BUTTON_CLASS}
                 onClick={actions.onShare}
                 disabled={actions.sharing}
@@ -414,6 +416,8 @@ export function SessionFileNoticeCard({
                 <Button
                   size="small"
                   variant="secondary"
+                  width="100%"
+                  height="calc(var(--spacing) * 8)"
                   className={ACTION_BUTTON_CLASS}
                   onClick={localHost.onOpen}
                   data-testid="session-file-error-open"
@@ -426,6 +430,8 @@ export function SessionFileNoticeCard({
                 <Button
                   size="small"
                   variant="ghost"
+                  width="100%"
+                  height="calc(var(--spacing) * 8)"
                   className={ACTION_BUTTON_CLASS}
                   onClick={localHost.onReveal}
                   data-testid="session-file-error-reveal"
@@ -440,6 +446,8 @@ export function SessionFileNoticeCard({
               // Without the local-host pair this is the only way out of the
               // card, so it leads instead of trailing them.
               variant={localHost || actions.onShare ? 'ghost' : 'secondary'}
+              width="100%"
+              height="calc(var(--spacing) * 8)"
               className={ACTION_BUTTON_CLASS}
               onClick={actions.onCopyPath}
               data-testid="session-file-error-copy-path"

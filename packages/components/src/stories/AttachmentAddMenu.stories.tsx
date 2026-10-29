@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import type { McpServerId, WorkspaceMcpServerMeta } from '@lody/shared';
 import { AttachmentAddMenu } from '@/components/chat/attachment-add-menu';
 import { VaulDrawerEdgeBackZone } from '@/components/mobile/vaul-drawer-edge-back-zone';
@@ -172,5 +173,63 @@ export const McpOnly: Story = {
     <Frame>
       <WithMcp {...args} />
     </Frame>
+  ),
+};
+
+const scopedStyles = stylex.create({
+  scope: { '--spacing': '5px' },
+  receipt: { display: 'block', paddingInline: 16, fontSize: 12 },
+});
+const ScopedFrame = ({ children }: { children: React.ReactNode }) => (
+  <div {...stylex.props(scopedStyles.scope)}>
+    <Frame>{children}</Frame>
+  </div>
+);
+
+function ScopedMcpFixture(args: React.ComponentProps<typeof AttachmentAddMenu>) {
+  const [selectedIds, setSelectedIds] = useState<McpServerId[]>([mcpServers[0].id]);
+  const [attachments, setAttachments] = useState(0);
+  return (
+    <div data-attachment-fixture data-attachment-requests={attachments}>
+      <ScopedFrame>
+        <AttachmentAddMenu
+          {...args}
+          onAddAttachment={
+            args.onAddAttachment
+              ? () => {
+                  args.onAddAttachment?.();
+                  setAttachments((count) => count + 1);
+                }
+              : undefined
+          }
+          mcp={{ ...args.mcp!, selectedIds, onSelectedIdsChange: setSelectedIds }}
+        />
+      </ScopedFrame>
+      <output {...stylex.props(scopedStyles.receipt)}>Attachment requests: {attachments}</output>
+    </div>
+  );
+}
+
+export const ScopedDesktopWithMcp: Story = {
+  args: { ...DesktopWithMcp.args },
+  render: (args) => <ScopedMcpFixture {...args} />,
+};
+
+export const ScopedMobileWithMcp: Story = {
+  args: { ...MobileWithMcp.args },
+  render: (args) => <ScopedMcpFixture {...args} />,
+};
+
+export const ScopedMobileLandingWithMcp: Story = {
+  args: { ...MobileWithMcp.args, isLanding: true },
+  render: (args) => <ScopedMcpFixture {...args} />,
+};
+
+export const ScopedDisabled: Story = {
+  args: { isMobile: true, disabled: true, onAddAttachment: noop },
+  render: (args) => (
+    <ScopedFrame>
+      <AttachmentAddMenu {...args} />
+    </ScopedFrame>
   ),
 };

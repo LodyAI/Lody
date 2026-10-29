@@ -155,10 +155,9 @@ export function AttachmentAddMenu({
     return null;
   }
 
-  // The trigger, the menu items and the menu surface are `@lody/ui`
-  // primitives, so their own classes stay Tailwind: a StyleX class would
-  // compete with the primitive's own styles inside the `stylex` layer.
-  const triggerSize = !isLanding && isMobile ? 'size-9' : 'size-7';
+  // Primitive dimensions use their APIs; visual/state compatibility classes remain.
+  const triggerSize =
+    !isLanding && isMobile ? 'calc(var(--spacing) * 9)' : 'calc(var(--spacing) * 7)';
   const itemClass = cn('cursor-pointer', isMobile && 'gap-2.5 py-2.5 text-[15px]');
   const plusClassName = stylex.props(isMobile ? styles.plusLarge : styles.plusSmall).className;
   const selectedCount = mcp
@@ -185,10 +184,11 @@ export function AttachmentAddMenu({
             type="button"
             variant="ghost"
             icon
+            width={triggerSize}
+            height={triggerSize}
             disabled={disabled}
             aria-label={triggerLabel}
             className={cn(
-              triggerSize,
               // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
               // `bg-accent`/`bg-muted`) because those equal the background in the
               // dark theme and paint nothing.
@@ -203,10 +203,11 @@ export function AttachmentAddMenu({
           type="button"
           variant="ghost"
           icon
+          width={triggerSize}
+          height={triggerSize}
           disabled={disabled}
           aria-label={triggerLabel}
           className={cn(
-            triggerSize,
             // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
             // `bg-accent`/`bg-muted`) because those equal the background in the
             // dark theme and paint nothing.
@@ -223,11 +224,8 @@ export function AttachmentAddMenu({
            leave a wide blank gutter; a small floor keeps it from
            collapsing too narrow. The pushed MCP panel needs room for server
            names, so it takes its own floor and ceiling. */
-        className={cn(
-          view === 'mcp'
-            ? 'w-[min(20rem,calc(100vw-2rem))]'
-            : cn('w-max', isMobile ? 'min-w-[160px]' : 'min-w-[140px]')
-        )}
+        minWidth={view === 'mcp' ? undefined : isMobile ? 160 : 140}
+        className={view === 'mcp' ? 'w-[min(20rem,calc(100vw-2rem))]' : 'w-max'}
       >
         {view === 'mcp' && mcp ? (
           // Keyed so the panel swap replays the slide: the pushed level enters

@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { Provider, createStore } from 'jotai';
 import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
@@ -109,6 +109,40 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const Published: Story = {};
+export const SoloConversation: Story = {
+  args: {
+    manifest: {
+      ...meta.args.manifest,
+      conversations: [meta.args.manifest.conversations[0]!],
+      objects: [meta.args.manifest.objects[0]!],
+    },
+  },
+};
+export const ScopedSoloConversation: Story = {
+  ...SoloConversation,
+  decorators: [
+    (Story) => (
+      <div style={{ '--spacing': '5px', '--radius-md': '13px' } as CSSProperties}>
+        <Story />
+      </div>
+    ),
+  ],
+};
+export const LongSoloConversation: Story = {
+  args: {
+    manifest: {
+      ...meta.args.manifest,
+      conversations: [
+        {
+          ...meta.args.manifest.conversations[0]!,
+          title:
+            'A deliberately long shared conversation title covering narrow readers and wrapping boundaries',
+        },
+      ],
+      objects: [meta.args.manifest.objects[0]!],
+    },
+  },
+};
 export const SignedInViewer: Story = {
   args: { viewer: { status: 'signed-in', name: 'Ada Lovelace' } },
 };

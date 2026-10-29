@@ -1,0 +1,44 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "narrow-desktop",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": ["sessions-desktoprunconfigmenu--generic-select"],
+  "ready": {
+    "sessions-desktoprunconfigmenu--generic-select": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];const root=document.documentElement,rs=getComputedStyle(root);if(!expected||root.classList.contains('dark')!==(expected==='dark')||rs.colorScheme!==expected)return false;const menus=[...document.querySelectorAll('[role=menu]')].filter(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&getComputedStyle(e).visibility!=='hidden'});if(menus.length!==2)return false;for(const m of menus){const ms=getComputedStyle(m);if(ms.opacity!=='1'||!['none','matrix(1, 0, 0, 1, 0, 0)'].includes(ms.transform)||!['none','0px','0px 0px'].includes(ms.translate)||m.hasAttribute('data-starting-style')||m.hasAttribute('data-ending-style')||m.getAnimations({subtree:true}).some(a=>a.effect?.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;if(ms.getPropertyValue('--foreground')!==rs.getPropertyValue('--foreground')||ms.getPropertyValue('--background')!==rs.getPropertyValue('--background')||!ms.colorScheme.includes(expected))return false;}const p=menus.at(-1),cs=getComputedStyle(p),raw=cs.getPropertyValue('--spacing').trim(),spacing=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(rs.fontSize):1);if(!Number.isFinite(spacing)||!(Math.abs(parseFloat(cs.maxWidth)-spacing*80)<.01&&cs.minWidth==='108px'&&p.textContent.includes(\"Expanded workspace format with an intentionally long label\")&&(true))||document.fonts.status!=='loaded'||[...p.querySelectorAll('img')].some(i=>!i.complete))return false;const signature=JSON.stringify(menus.flatMap(m=>[m,...m.querySelectorAll('*')].map(e=>{const q=e.getBoundingClientRect();return[q.x,q.y,q.width,q.height,getComputedStyle(e).opacity]})));const all=window.__leaves38Readiness??={},state=all[\"generic-ready\"]??={last:'',stable:0};state.stable=state.last===signature?state.stable+1:0;state.last=signature;all[\"generic-ready\"]=state;window.__leaves38Readiness=all;if(state.stable<3)return false;(window.__leaves38ActualThemes??={})[\"generic-ready\"]={requested:expected,actualHtml:root.classList.contains('dark')?'dark':'light',rootScheme:rs.colorScheme,popupScheme:cs.colorScheme,rootForeground:rs.getPropertyValue('--foreground'),popupForeground:cs.getPropertyValue('--foreground'),rootBackground:rs.getPropertyValue('--background'),popupBackground:cs.getPropertyValue('--background'),popupColor:cs.color,popupBackgroundColor:cs.backgroundColor,minWidth:cs.minWidth,maxWidth:cs.maxWidth};return true;}"
+      }
+    ]
+  },
+  "states": {
+    "sessions-desktoprunconfigmenu--generic-select": [
+      {
+        "name": "expanded-selected",
+        "steps": [
+          {
+            "action": "click",
+            "role": "menuitemradio",
+            "name": "Expanded workspace format with an intentionally long label"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];const root=document.documentElement,rs=getComputedStyle(root);if(!expected||root.classList.contains('dark')!==(expected==='dark')||rs.colorScheme!==expected)return false;const menus=[...document.querySelectorAll('[role=menu]')].filter(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&getComputedStyle(e).visibility!=='hidden'});if(menus.length!==2)return false;for(const m of menus){const ms=getComputedStyle(m);if(ms.opacity!=='1'||!['none','matrix(1, 0, 0, 1, 0, 0)'].includes(ms.transform)||!['none','0px','0px 0px'].includes(ms.translate)||m.hasAttribute('data-starting-style')||m.hasAttribute('data-ending-style')||m.getAnimations({subtree:true}).some(a=>a.effect?.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;if(ms.getPropertyValue('--foreground')!==rs.getPropertyValue('--foreground')||ms.getPropertyValue('--background')!==rs.getPropertyValue('--background')||!ms.colorScheme.includes(expected))return false;}const p=menus.at(-1),cs=getComputedStyle(p),raw=cs.getPropertyValue('--spacing').trim(),spacing=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(rs.fontSize):1);if(!Number.isFinite(spacing)||!(Math.abs(parseFloat(cs.maxWidth)-spacing*80)<.01&&cs.minWidth==='108px'&&p.textContent.includes(\"Expanded workspace format with an intentionally long label\")&&(p.querySelector('[role=menuitemradio][aria-checked=true]')?.textContent.includes('Expanded workspace format')))||document.fonts.status!=='loaded'||[...p.querySelectorAll('img')].some(i=>!i.complete))return false;const signature=JSON.stringify(menus.flatMap(m=>[m,...m.querySelectorAll('*')].map(e=>{const q=e.getBoundingClientRect();return[q.x,q.y,q.width,q.height,getComputedStyle(e).opacity]})));const all=window.__leaves38Readiness??={},state=all[\"generic-selected\"]??={last:'',stable:0};state.stable=state.last===signature?state.stable+1:0;state.last=signature;all[\"generic-selected\"]=state;window.__leaves38Readiness=all;if(state.stable<3)return false;(window.__leaves38ActualThemes??={})[\"generic-selected\"]={requested:expected,actualHtml:root.classList.contains('dark')?'dark':'light',rootScheme:rs.colorScheme,popupScheme:cs.colorScheme,rootForeground:rs.getPropertyValue('--foreground'),popupForeground:cs.getPropertyValue('--foreground'),rootBackground:rs.getPropertyValue('--background'),popupBackground:cs.getPropertyValue('--background'),popupColor:cs.color,popupBackgroundColor:cs.backgroundColor,minWidth:cs.minWidth,maxWidth:cs.maxWidth};return true;}"
+          }
+        ]
+      }
+    ]
+  }
+}

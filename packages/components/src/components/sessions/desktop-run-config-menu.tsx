@@ -121,7 +121,11 @@ const styles = stylex.create({
 /* Option-only submenus hug the longest label instead of inheriting the
    200px surface floor. 108px is the floor so a short name is not a sliver;
    `max-w-80` still caps a long provider list. */
-const COMPACT_OPTION_SUBMENU_CLASS = 'w-max min-w-[108px] max-w-80';
+const COMPACT_OPTION_SUBMENU_CLASS = 'w-max';
+const COMPACT_OPTION_SUBMENU_BOUNDS = {
+  minWidth: '108px',
+  maxWidth: 'calc(var(--spacing) * 80)',
+} as const;
 
 /* Option row with a trailing check. Title only — no description — so submenus
    stay as compact as the parent. Selecting keeps the menu OPEN. */
@@ -278,7 +282,8 @@ export function DesktopMachineMenu({
         side="top"
         align="start"
         collisionAvoidance={{ side: 'none', align: 'none', fallbackAxisSide: 'none' }}
-        className="min-w-52 max-w-72"
+        minWidth="calc(var(--spacing) * 52)"
+        maxWidth="calc(var(--spacing) * 72)"
       >
         <Menu.GroupLabel>{t('chat.machineSelector.placeholder', 'Machine')}</Menu.GroupLabel>
         {options.map((option) => (
@@ -701,7 +706,7 @@ export function DesktopRunConfigMenu({
           {triggerFace}
         </Menu.Trigger>
       )}
-      <Menu.Content align="start" className="min-w-60">
+      <Menu.Content align="start" minWidth="calc(var(--spacing) * 60)">
         <div {...stylex.props(surface.menuList)}>
           {onRecentRunConfigSelect ? (
             <RecentRunConfigMenuGroup
@@ -759,7 +764,8 @@ export function DesktopRunConfigMenu({
                 />
                 <Menu.Content
                   {...submenuPlacement}
-                  className="max-w-[min(29.5rem,var(--radix-popper-available-width,29.5rem))] overflow-x-hidden"
+                  maxWidth="min(29.5rem, var(--radix-popper-available-width,29.5rem))"
+                  className="overflow-x-hidden"
                 >
                   <ComposerAgentRolePanel
                     items={agentRoles.items}
@@ -793,7 +799,11 @@ export function DesktopRunConfigMenu({
             ) : (
               <Menu.Submenu>
                 <ValueSubTrigger label={agentLabel} value={selectedAgentConfig?.name ?? null} />
-                <Menu.Content {...submenuPlacement} className={COMPACT_OPTION_SUBMENU_CLASS}>
+                <Menu.Content
+                  {...submenuPlacement}
+                  {...COMPACT_OPTION_SUBMENU_BOUNDS}
+                  className={COMPACT_OPTION_SUBMENU_CLASS}
+                >
                   {agentOptions.map(({ config }) => (
                     <OptionItem
                       key={`${config.id}:${config.machineId}`}
@@ -837,7 +847,11 @@ export function DesktopRunConfigMenu({
             return (
               <Menu.Submenu key={selector.configId}>
                 <ValueSubTrigger label={selector.label} value={selectedLabel} disabled={locked} />
-                <Menu.Content {...submenuPlacement} className={COMPACT_OPTION_SUBMENU_CLASS}>
+                <Menu.Content
+                  {...submenuPlacement}
+                  {...COMPACT_OPTION_SUBMENU_BOUNDS}
+                  className={COMPACT_OPTION_SUBMENU_CLASS}
+                >
                   {selector.options.map((option) => (
                     <OptionItem
                       key={option.value}
@@ -864,6 +878,7 @@ export function DesktopRunConfigMenu({
                 {...submenuPlacement}
                 // Lift the 28px search field + 4px gap above the trigger so the
                 // option area, not the input, starts beside the Model row.
+                {...COMPACT_OPTION_SUBMENU_BOUNDS}
                 alignOffset={shouldOfferOptionSearch(modelPickerOptions.length) ? -32 : 0}
                 // The popup is already a column: holding its own overflow keeps the
                 // search row put while only the options under it scroll.
@@ -896,7 +911,11 @@ export function DesktopRunConfigMenu({
           {interactionSelector ? (
             <Menu.Submenu>
               <ValueSubTrigger label={interactionSelector.label} value={interactionLabel} />
-              <Menu.Content {...submenuPlacement} className={COMPACT_OPTION_SUBMENU_CLASS}>
+              <Menu.Content
+                {...submenuPlacement}
+                {...COMPACT_OPTION_SUBMENU_BOUNDS}
+                className={COMPACT_OPTION_SUBMENU_CLASS}
+              >
                 {interactionSelector.options.map((opt) => (
                   <OptionItem
                     key={opt.value}
@@ -918,7 +937,11 @@ export function DesktopRunConfigMenu({
           {thinkingSelector ? (
             <Menu.Submenu>
               <ValueSubTrigger label={reasoningLabel} value={thinkingLabel} />
-              <Menu.Content {...submenuPlacement} className={COMPACT_OPTION_SUBMENU_CLASS}>
+              <Menu.Content
+                {...submenuPlacement}
+                {...COMPACT_OPTION_SUBMENU_BOUNDS}
+                className={COMPACT_OPTION_SUBMENU_CLASS}
+              >
                 {thinkingSelector.options.map((opt) => (
                   <OptionItem
                     key={opt.value}
@@ -1115,7 +1138,12 @@ export function DesktopPermissionModeButton({
       >
         <span {...stylex.props(surface.glyph)}>{permissionModeIcon(value ?? null)}</span>
       </Menu.Trigger>
-      <Menu.Content align="start" className="w-max min-w-44 max-w-64">
+      <Menu.Content
+        align="start"
+        minWidth="calc(var(--spacing) * 44)"
+        maxWidth="calc(var(--spacing) * 64)"
+        className="w-max"
+      >
         <div {...stylex.props(surface.menuList)}>
           {options.map((opt) => (
             <PermissionModeItem

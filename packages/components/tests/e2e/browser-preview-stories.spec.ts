@@ -18,6 +18,7 @@ test('Browser Preview stories render, complete their interactions and expose rec
     await test.step(id, async () => {
       // A fresh context also isolates next-themes, locale and resume-state caches.
       const context = await browser.newContext({
+        baseURL: testInfo.project.use.baseURL,
         viewport: {
           width:
             id.endsWith('--mobile-expired') || id.endsWith('--status-popover-narrow') ? 390 : 1000,
@@ -38,7 +39,7 @@ test('Browser Preview stories render, complete their interactions and expose rec
         if (message.type() === 'error') errors.push(message.text());
       });
       try {
-        await page.goto(`http://127.0.0.1:6006/iframe.html?id=${id}&viewMode=story`);
+        await page.goto(`/iframe.html?id=${id}&viewMode=story`);
         await page.waitForFunction(() => {
           const preview = (
             window as typeof window & {

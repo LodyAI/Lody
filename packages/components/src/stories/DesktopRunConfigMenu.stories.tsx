@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
 import { useMemo, useState } from 'react';
-import { fn } from 'storybook/test';
+import { fn, userEvent, within } from 'storybook/test';
 import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
 import {
@@ -194,9 +194,11 @@ const grokSelectors: AcpConfigOptionSelector[] = [
 function StoryShell({
   isEmptyConversation,
   machineSelected = true,
+  configuredSelectors = selectors,
 }: {
   isEmptyConversation: boolean;
   machineSelected?: boolean;
+  configuredSelectors?: AcpConfigOptionSelector[];
 }) {
   const store = useMemo(() => {
     const s = createStore();
@@ -210,7 +212,7 @@ function StoryShell({
   const [model, setModel] = useState<string | null>(modelOptions[0]?.value ?? null);
   const [mode, setMode] = useState<string | null>(modeOptions[0]?.value ?? null);
   const [values, setValues] = useState<Record<string, AcpConfigOptionValue>>(() =>
-    Object.fromEntries(selectors.map((sel) => [sel.configId, sel.currentValue]))
+    Object.fromEntries(configuredSelectors.map((sel) => [sel.configId, sel.currentValue]))
   );
 
   return (
@@ -228,7 +230,7 @@ function StoryShell({
             modelOptions={modelOptions}
             selectedModelId={model}
             onModelChange={setModel}
-            configOptionSelectors={selectors}
+            configOptionSelectors={configuredSelectors}
             configOptionValues={values}
             onConfigOptionChange={(id, v) => setValues((p) => ({ ...p, [id]: v }))}
           />
@@ -236,7 +238,7 @@ function StoryShell({
             modeOptions={modeOptions}
             selectedModeId={mode}
             onModeChange={setMode}
-            configOptionSelectors={selectors}
+            configOptionSelectors={configuredSelectors}
             configOptionValues={values}
             onConfigOptionChange={(id, v) => setValues((p) => ({ ...p, [id]: v }))}
           />
@@ -430,7 +432,6 @@ const meta = {
   title: 'Sessions/DesktopRunConfigMenu',
   component: StoryShell,
   parameters: { layout: 'fullscreen' },
-  globals: { theme: 'dark' },
   decorators: [
     (Story) => (
       <PlatformContext.Provider value={storyPlatform}>
@@ -468,4 +469,34 @@ export const MachineScopeEmpty: Story = {
 export const LongModelName: Story = {
   args: { isEmptyConversation: false },
   render: () => <LongModelNameShell />,
+};
+
+export const GenericSelect: Story = {
+  args: {
+    isEmptyConversation: true,
+    configuredSelectors: [
+      ...selectors,
+      {
+        type: 'select',
+        configId: 'workspace-format',
+        label: 'Workspace format',
+        currentValue: 'compact',
+        options: [
+          { value: 'compact', label: 'Compact' },
+          {
+            value: 'expanded',
+            label: 'Expanded workspace format with an intentionally long label',
+          },
+        ],
+      },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const trigger = canvasElement.querySelector<HTMLButtonElement>('[data-run-config-trigger]');
+    if (!trigger) throw new Error('Run configuration trigger is missing');
+    await userEvent.click(trigger);
+    await userEvent.hover(
+      await within(document.body).findByRole('menuitem', { name: /Workspace format/ })
+    );
+  },
 };

@@ -1,0 +1,452 @@
+{
+  "viewports": [
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 900,
+      "device": "iPhone 13"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "chat-attachmentaddmenu--mobile-with-mcp",
+    "chat-attachmentaddmenu--scoped-mobile-with-mcp",
+    "chat-attachmentaddmenu--scoped-mobile-landing-with-mcp",
+    "chat-attachmentaddmenu--scoped-disabled"
+  ],
+  "ready": {
+    "chat-attachmentaddmenu--mobile-with-mcp": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Add attachment"
+      },
+      {
+        "action": "enabled",
+        "role": "button",
+        "name": "Add attachment"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const all=document.querySelectorAll('button[aria-label=\"Add attachment\"]');if(all.length!==1)return false;const e=all[0],s=getComputedStyle(e);return e.disabled===false&&s.width==='36px'&&s.height==='36px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+      }
+    ],
+    "chat-attachmentaddmenu--scoped-mobile-with-mcp": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Add attachment"
+      },
+      {
+        "action": "enabled",
+        "role": "button",
+        "name": "Add attachment"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const all=document.querySelectorAll('button[aria-label=\"Add attachment\"]');if(all.length!==1)return false;const e=all[0],s=getComputedStyle(e);return e.disabled===false&&s.width==='45px'&&s.height==='45px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+      }
+    ],
+    "chat-attachmentaddmenu--scoped-mobile-landing-with-mcp": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Add attachment"
+      },
+      {
+        "action": "enabled",
+        "role": "button",
+        "name": "Add attachment"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const all=document.querySelectorAll('button[aria-label=\"Add attachment\"]');if(all.length!==1)return false;const e=all[0],s=getComputedStyle(e);return e.disabled===false&&s.width==='35px'&&s.height==='35px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+      }
+    ],
+    "chat-attachmentaddmenu--scoped-disabled": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Add attachment"
+      },
+      {
+        "action": "disabled",
+        "role": "button",
+        "name": "Add attachment"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const all=document.querySelectorAll('button[aria-label=\"Add attachment\"]');if(all.length!==1)return false;const e=all[0],s=getComputedStyle(e);return e.disabled===true&&s.width==='45px'&&s.height==='45px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+      }
+    ]
+  },
+  "states": {
+    "chat-attachmentaddmenu--mobile-with-mcp": [
+      {
+        "name": "touch-root-open",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "button",
+            "name": "Add attachment"
+          },
+          {
+            "action": "visible",
+            "role": "menu"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll('[role=menu]').length===1&&getComputedStyle(document.querySelector('[role=menu]')).minWidth==='160px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          }
+        ]
+      },
+      {
+        "name": "touch-mcp-pushed",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "menuitem",
+            "name": "Load 1 MCP server"
+          },
+          {
+            "action": "visible",
+            "role": "menuitemcheckbox",
+            "name": "Search",
+            "exact": false
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll('[role=menu]').length===1&&getComputedStyle(document.querySelector('[role=menu]')).minWidth==='200px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          }
+        ]
+      },
+      {
+        "name": "touch-mcp-select-keeps-open",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "menuitemcheckbox",
+            "name": "Search",
+            "exact": false
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[role=menuitemcheckbox][aria-checked=true]')&&[...document.querySelectorAll('[role=menuitemcheckbox][aria-checked=true]')].length===2&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "MCP servers"
+          }
+        ]
+      },
+      {
+        "name": "touch-back-restores-root",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "menuitem",
+            "name": "MCP servers"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Load 2 MCP servers"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll('[role=menu]').length===1&&getComputedStyle(document.querySelector('[role=menu]')).minWidth==='160px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          },
+          {
+            "action": "press",
+            "role": "menu",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "menu"
+          }
+        ]
+      },
+      {
+        "name": "attachment-callback",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "button",
+            "name": "Add attachment"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Add attachment"
+          },
+          {
+            "action": "tap",
+            "role": "menuitem",
+            "name": "Add attachment"
+          },
+          {
+            "action": "hidden",
+            "role": "menu"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('button[aria-label=\"Add attachment\"]').getAttribute('aria-expanded')==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          }
+        ]
+      }
+    ],
+    "chat-attachmentaddmenu--scoped-mobile-with-mcp": [
+      {
+        "name": "touch-root-open",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "button",
+            "name": "Add attachment"
+          },
+          {
+            "action": "visible",
+            "role": "menu"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll('[role=menu]').length===1&&getComputedStyle(document.querySelector('[role=menu]')).minWidth==='160px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          }
+        ]
+      },
+      {
+        "name": "touch-mcp-pushed",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "menuitem",
+            "name": "Load 1 MCP server"
+          },
+          {
+            "action": "visible",
+            "role": "menuitemcheckbox",
+            "name": "Search",
+            "exact": false
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll('[role=menu]').length===1&&getComputedStyle(document.querySelector('[role=menu]')).minWidth==='200px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          }
+        ]
+      },
+      {
+        "name": "touch-mcp-select-keeps-open",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "menuitemcheckbox",
+            "name": "Search",
+            "exact": false
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[role=menuitemcheckbox][aria-checked=true]')&&[...document.querySelectorAll('[role=menuitemcheckbox][aria-checked=true]')].length===2&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "MCP servers"
+          }
+        ]
+      },
+      {
+        "name": "touch-back-restores-root",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "menuitem",
+            "name": "MCP servers"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Load 2 MCP servers"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll('[role=menu]').length===1&&getComputedStyle(document.querySelector('[role=menu]')).minWidth==='160px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          },
+          {
+            "action": "press",
+            "role": "menu",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "menu"
+          }
+        ]
+      },
+      {
+        "name": "attachment-callback",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "button",
+            "name": "Add attachment"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Add attachment"
+          },
+          {
+            "action": "tap",
+            "role": "menuitem",
+            "name": "Add attachment"
+          },
+          {
+            "action": "hidden",
+            "role": "menu"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-attachment-requests=\"1\"]"
+          }
+        ]
+      }
+    ],
+    "chat-attachmentaddmenu--scoped-mobile-landing-with-mcp": [
+      {
+        "name": "touch-root-open",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "button",
+            "name": "Add attachment"
+          },
+          {
+            "action": "visible",
+            "role": "menu"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll('[role=menu]').length===1&&getComputedStyle(document.querySelector('[role=menu]')).minWidth==='160px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          }
+        ]
+      },
+      {
+        "name": "touch-mcp-pushed",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "menuitem",
+            "name": "Load 1 MCP server"
+          },
+          {
+            "action": "visible",
+            "role": "menuitemcheckbox",
+            "name": "Search",
+            "exact": false
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll('[role=menu]').length===1&&getComputedStyle(document.querySelector('[role=menu]')).minWidth==='200px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          }
+        ]
+      },
+      {
+        "name": "touch-mcp-select-keeps-open",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "menuitemcheckbox",
+            "name": "Search",
+            "exact": false
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[role=menuitemcheckbox][aria-checked=true]')&&[...document.querySelectorAll('[role=menuitemcheckbox][aria-checked=true]')].length===2&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "MCP servers"
+          }
+        ]
+      },
+      {
+        "name": "touch-back-restores-root",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "menuitem",
+            "name": "MCP servers"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Load 2 MCP servers"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll('[role=menu]').length===1&&getComputedStyle(document.querySelector('[role=menu]')).minWidth==='160px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          },
+          {
+            "action": "press",
+            "role": "menu",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "menu"
+          }
+        ]
+      },
+      {
+        "name": "attachment-callback",
+        "steps": [
+          {
+            "action": "tap",
+            "role": "button",
+            "name": "Add attachment"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Add attachment"
+          },
+          {
+            "action": "tap",
+            "role": "menuitem",
+            "name": "Add attachment"
+          },
+          {
+            "action": "hidden",
+            "role": "menu"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-attachment-requests=\"1\"]"
+          }
+        ]
+      }
+    ],
+    "chat-attachmentaddmenu--scoped-disabled": [
+      {
+        "name": "disabled-keyboard-no-open",
+        "steps": [
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Add attachment",
+            "key": "ArrowDown"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll('[role=menu]').length===0&&document.querySelector('button[aria-label=\"Add attachment\"]').disabled&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          }
+        ]
+      }
+    ]
+  }
+}

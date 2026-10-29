@@ -1,0 +1,97 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "ids": [
+    "pages-sessionsharepage--solo-conversation",
+    "pages-sessionsharepage--scoped-solo-conversation",
+    "pages-sessionsharepage--long-solo-conversation",
+    "pages-sessionsharepage--published"
+  ],
+  "ready": {
+    "pages-sessionsharepage--solo-conversation": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.documentElement, expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!expected||root.classList.contains('dark')!==(expected==='dark'))return false;if(document.fonts.status!=='loaded'||[...document.images].some(i=>!i.complete))return false;if(document.getAnimations().some(a=>a.effect?.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;const section=document.querySelector('main section[aria-label]');const pill=section?.querySelector(':scope > div > span');if(!pill||section.querySelector('[role=tablist]'))return false;const c=getComputedStyle(pill),r=pill.getBoundingClientRect(),raw=c.getPropertyValue('--spacing').trim(),step=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(root).fontSize):1);if(!Number.isFinite(step)||r.width<=0||r.height<=0||c.display!=='flex'||Math.abs(parseFloat(c.height)-step*8)>.01||c.minWidth!=='0px'||c.alignItems!=='center'||c.borderTopWidth!=='1px'||c.borderTopStyle!=='solid'||c.borderTopColor!=='rgba(0, 0, 0, 0)'||Math.abs(parseFloat(c.paddingLeft)-step*3)>.01||Math.abs(parseFloat(c.paddingRight)-step*3)>.01||c.fontWeight!=='500'||pill.textContent!==section.getAttribute('aria-label'))return false;return section.textContent.includes('Choose the conversations')&&!!document.querySelector('main');}"
+      }
+    ],
+    "pages-sessionsharepage--scoped-solo-conversation": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.documentElement, expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!expected||root.classList.contains('dark')!==(expected==='dark'))return false;if(document.fonts.status!=='loaded'||[...document.images].some(i=>!i.complete))return false;if(document.getAnimations().some(a=>a.effect?.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;const section=document.querySelector('main section[aria-label]');const pill=section?.querySelector(':scope > div > span');if(!pill||section.querySelector('[role=tablist]'))return false;const c=getComputedStyle(pill),r=pill.getBoundingClientRect(),raw=c.getPropertyValue('--spacing').trim(),step=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(root).fontSize):1);if(!Number.isFinite(step)||r.width<=0||r.height<=0||c.display!=='flex'||Math.abs(parseFloat(c.height)-step*8)>.01||c.minWidth!=='0px'||c.alignItems!=='center'||c.borderTopWidth!=='1px'||c.borderTopStyle!=='solid'||c.borderTopColor!=='rgba(0, 0, 0, 0)'||Math.abs(parseFloat(c.paddingLeft)-step*3)>.01||Math.abs(parseFloat(c.paddingRight)-step*3)>.01||c.fontWeight!=='500'||pill.textContent!==section.getAttribute('aria-label'))return false;if(step!==5||c.borderTopLeftRadius!=='13px')return false;return section.textContent.includes('Choose the conversations')&&!!document.querySelector('main');}"
+      }
+    ],
+    "pages-sessionsharepage--long-solo-conversation": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.documentElement, expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!expected||root.classList.contains('dark')!==(expected==='dark'))return false;if(document.fonts.status!=='loaded'||[...document.images].some(i=>!i.complete))return false;if(document.getAnimations().some(a=>a.effect?.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;const section=document.querySelector('main section[aria-label]');const pill=section?.querySelector(':scope > div > span');if(!pill||section.querySelector('[role=tablist]'))return false;const c=getComputedStyle(pill),r=pill.getBoundingClientRect(),raw=c.getPropertyValue('--spacing').trim(),step=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(root).fontSize):1);if(!Number.isFinite(step)||r.width<=0||r.height<=0||c.display!=='flex'||Math.abs(parseFloat(c.height)-step*8)>.01||c.minWidth!=='0px'||c.alignItems!=='center'||c.borderTopWidth!=='1px'||c.borderTopStyle!=='solid'||c.borderTopColor!=='rgba(0, 0, 0, 0)'||Math.abs(parseFloat(c.paddingLeft)-step*3)>.01||Math.abs(parseFloat(c.paddingRight)-step*3)>.01||c.fontWeight!=='500'||pill.textContent!==section.getAttribute('aria-label'))return false;return section.textContent.includes('Choose the conversations')&&!!document.querySelector('main');}"
+      }
+    ],
+    "pages-sessionsharepage--published": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.documentElement, expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!expected||root.classList.contains('dark')!==(expected==='dark'))return false;if(document.fonts.status!=='loaded'||[...document.images].some(i=>!i.complete))return false;if(document.getAnimations().some(a=>a.effect?.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;return document.querySelectorAll('main section [role=tab]').length===3&&document.querySelectorAll('main section [role=tab][aria-selected=true]').length===1&&document.querySelector('main section')?.textContent.includes('Choose the conversations');}"
+      }
+    ]
+  },
+  "states": {
+    "pages-sessionsharepage--solo-conversation": [
+      {
+        "name": "hover-solo-title",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "main section[aria-label] > div > span"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const root=document.documentElement, expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!expected||root.classList.contains('dark')!==(expected==='dark'))return false;if(document.fonts.status!=='loaded'||[...document.images].some(i=>!i.complete))return false;if(document.getAnimations().some(a=>a.effect?.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;const section=document.querySelector('main section[aria-label]');const pill=section?.querySelector(':scope > div > span');if(!pill||section.querySelector('[role=tablist]'))return false;const c=getComputedStyle(pill),r=pill.getBoundingClientRect(),raw=c.getPropertyValue('--spacing').trim(),step=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(root).fontSize):1);if(!Number.isFinite(step)||r.width<=0||r.height<=0||c.display!=='flex'||Math.abs(parseFloat(c.height)-step*8)>.01||c.minWidth!=='0px'||c.alignItems!=='center'||c.borderTopWidth!=='1px'||c.borderTopStyle!=='solid'||c.borderTopColor!=='rgba(0, 0, 0, 0)'||Math.abs(parseFloat(c.paddingLeft)-step*3)>.01||Math.abs(parseFloat(c.paddingRight)-step*3)>.01||c.fontWeight!=='500'||pill.textContent!==section.getAttribute('aria-label'))return false;return section.textContent.includes('Choose the conversations')&&!!document.querySelector('main');}"
+          }
+        ]
+      }
+    ],
+    "pages-sessionsharepage--scoped-solo-conversation": [
+      {
+        "name": "hover-solo-title",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "main section[aria-label] > div > span"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const root=document.documentElement, expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!expected||root.classList.contains('dark')!==(expected==='dark'))return false;if(document.fonts.status!=='loaded'||[...document.images].some(i=>!i.complete))return false;if(document.getAnimations().some(a=>a.effect?.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;const section=document.querySelector('main section[aria-label]');const pill=section?.querySelector(':scope > div > span');if(!pill||section.querySelector('[role=tablist]'))return false;const c=getComputedStyle(pill),r=pill.getBoundingClientRect(),raw=c.getPropertyValue('--spacing').trim(),step=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(root).fontSize):1);if(!Number.isFinite(step)||r.width<=0||r.height<=0||c.display!=='flex'||Math.abs(parseFloat(c.height)-step*8)>.01||c.minWidth!=='0px'||c.alignItems!=='center'||c.borderTopWidth!=='1px'||c.borderTopStyle!=='solid'||c.borderTopColor!=='rgba(0, 0, 0, 0)'||Math.abs(parseFloat(c.paddingLeft)-step*3)>.01||Math.abs(parseFloat(c.paddingRight)-step*3)>.01||c.fontWeight!=='500'||pill.textContent!==section.getAttribute('aria-label'))return false;if(step!==5||c.borderTopLeftRadius!=='13px')return false;return section.textContent.includes('Choose the conversations')&&!!document.querySelector('main');}"
+          }
+        ]
+      }
+    ],
+    "pages-sessionsharepage--long-solo-conversation": [
+      {
+        "name": "hover-solo-title",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "main section[aria-label] > div > span"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const root=document.documentElement, expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!expected||root.classList.contains('dark')!==(expected==='dark'))return false;if(document.fonts.status!=='loaded'||[...document.images].some(i=>!i.complete))return false;if(document.getAnimations().some(a=>a.effect?.getTiming().iterations!==Infinity&&(a.pending||a.playState==='running')))return false;const section=document.querySelector('main section[aria-label]');const pill=section?.querySelector(':scope > div > span');if(!pill||section.querySelector('[role=tablist]'))return false;const c=getComputedStyle(pill),r=pill.getBoundingClientRect(),raw=c.getPropertyValue('--spacing').trim(),step=parseFloat(raw)*(raw.endsWith('rem')?parseFloat(getComputedStyle(root).fontSize):1);if(!Number.isFinite(step)||r.width<=0||r.height<=0||c.display!=='flex'||Math.abs(parseFloat(c.height)-step*8)>.01||c.minWidth!=='0px'||c.alignItems!=='center'||c.borderTopWidth!=='1px'||c.borderTopStyle!=='solid'||c.borderTopColor!=='rgba(0, 0, 0, 0)'||Math.abs(parseFloat(c.paddingLeft)-step*3)>.01||Math.abs(parseFloat(c.paddingRight)-step*3)>.01||c.fontWeight!=='500'||pill.textContent!==section.getAttribute('aria-label'))return false;return section.textContent.includes('Choose the conversations')&&!!document.querySelector('main');}"
+          }
+        ]
+      }
+    ]
+  }
+}

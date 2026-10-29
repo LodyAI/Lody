@@ -314,6 +314,22 @@ completion and stalled cleanup are separately reported. Original image/source
 hashes, all payload decode and two continuous1280/390 report UI cycles qualify
 this batch without changing prior frozen reports or inventory-method baselines.
 
+The 36–39 control-dimension report separates 248 formal pairs (246 exact, two
+OPEN, 13,210 equal standard records), twenty exact selected native pairs and
+51 broader browser-story pairs (44 exact, seven OPEN). Keep the original invalid
+viewport frames and four cross-method native differences diagnostic; a same-method
+comparison does not retroactively close them. Width/height checks must include
+both `innerWidth`/`innerHeight` and the actual PNG dimensions. Full CSS and actual
+pointer/focus/animation records constrain a diagnosis without proving its raster
+cause. The solo share-title continuation separately records 28 exact pairs and
+4,102 records, including scoped dimensions and actual long-title clipping.
+
+The existing Browser Preview sweep inherits its configured base URL in every
+fresh context. Static builds use production React, so story input helpers must
+not call `React.act`; dispatch the native input boundary, allow the controlled
+value to commit, submit and await each scenario's actual result. Keep original
+failed story runs distinct from corrected Before/After acceptance.
+
 A repair's immediate Before may already contain a migration bug. Keep that
 Before→Final witness, but establish restoration against a separately built,
 hash-identified original-source reference. A matching buggy layout screenshot

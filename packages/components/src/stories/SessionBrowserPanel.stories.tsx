@@ -1,4 +1,4 @@
-import { act, useMemo } from 'react';
+import { useMemo } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
 import { expect, userEvent, within } from 'storybook/test';
@@ -161,26 +161,16 @@ type Story = StoryObj<typeof meta>;
 const enterAddress: NonNullable<Story['play']> = async ({ canvasElement }) => {
   const canvas = within(canvasElement);
   const input = canvas.getByRole('textbox', { name: 'Address' }) as HTMLInputElement;
-  // Storybook's synchronous user-event act wrapper cannot await this controller's
-  // async route resolution. Dispatch the native input/submit boundary in awaited
-  // act scopes; the Playwright sweep separately presses the real Enter key.
-  const environment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
-  const previous = environment.IS_REACT_ACT_ENVIRONMENT;
-  environment.IS_REACT_ACT_ENVIRONMENT = true;
-  try {
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
-        input,
-        'localhost:5173/dashboard?mode=dev'
-      );
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    await act(async () => {
-      input.form!.requestSubmit();
-    });
-  } finally {
-    environment.IS_REACT_ACT_ENVIRONMENT = previous;
-  }
+  // Static Storybook uses production React, which does not expose act. Let the
+  // native input event commit before submitting the controlled address. Each
+  // scenario then awaits its actual controller result; Playwright also tests Enter.
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+    input,
+    'localhost:5173/dashboard?mode=dev'
+  );
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  input.form!.requestSubmit();
   await expect(canvas.queryByRole('dialog')).not.toBeInTheDocument();
 };
 export const Empty: Story = {};

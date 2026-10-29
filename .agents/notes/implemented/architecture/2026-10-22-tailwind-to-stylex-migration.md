@@ -1627,6 +1627,53 @@ owners already frozen; no snapshotted source changed, but the launch-to-snapshot
 interval remains a stated limit. This later evidence does not close pixel OPENs
 or the unrelated root ACP preparation failure.
 
+The control-dimension continuation removes twenty utilities across file-error actions,
+attachment menus, desktop run-config bounds and preview connection status, using
+existing primitive APIs. Exact local spacing expressions preserve subtree readers;
+compact submenu bounds are transferred through one private shared object across
+five actually rendered consumers. No primitive defaults or behavior change.
+
+`leaves36-39-acceptance.html` preserves **248 formal pairs: 246 byte-exact, two
+OPEN; all 13,210 standard node records agree**. The file actions contribute
+60/1,332, attachment 68/2,512, run-config 72/7,390 and preview 48/1,976. The two
+original differences are eight raw pixels at a model-search popup edge and
+226 raw/three threshold pixels at the unchanged fixture control's edge. Seven
+of 51 additional Browser Preview pairs retain 57 raw/zero threshold pixels.
+Twenty selected normal-motion/local-variable supplementary pairs are exact.
+New bounded captures and matching CSS do not close original pixel differences.
+
+The preview's first element-local capture mixed a 633px After screenshot height
+with 1,000px Before images. Those frames are rejected as capture mismatches.
+Four later cross-method pairs also differ despite equal sampled styles; they
+remain separate diagnostic evidence. Repeating both sources with the same real
+Chromium, viewport/PNG-dimension gates and actual animation timelines gives four
+exact pairs. A bounded original-flow probe records full ordinary/pseudo styles,
+ancestors, hit stacks, pointer/focus states and animations without CSS writes:
+new PNGs match the original Before, but no original raster cause is proved.
+
+The existing 51-story browser regression also exposed four production Storybook
+`React.act` failures. Only the story's native input/submit sequencing and the
+test's configured base URL changed; both corrected Before and After runs pass.
+The original failed runs and screenshots remain evidence. Temporary verification
+directories disappeared during continuation; stored manifests/PNGs survived.
+The approved Node archive was restored against its official SHA, and isolated
+builds were recreated from the local committed UI plus hash-locked inputs. No
+main synchronization, runtime/backend repair or user-work reset was performed.
+
+The subsequent solo share-title continuation removes nine owned native layout
+utilities while retaining the font-weight writer and explicitly composing the
+existing active-tab styles. Its 28 real PNG pairs and 4,102 standard node records
+agree. Twelve CSS scenes compare 24 pill/label nodes and 112,728 ordinary/pseudo
+values, including scoped 40px height/13px radius and actual long-title ellipsis.
+The border still reads the existing global `--tw-border-style` registration;
+removing Tailwind's global infrastructure needs separate contract work. Scope
+checks pass, including twenty sharing tests; lint retains thirteen warnings and
+zero errors. This successful subset leaves all prior OPEN evidence unchanged.
+A subsequent frozen-source regression passes all 620 component files/6,207 tests
+and 25 UI files/302 tests. Its 1,264 product/style files were hashed before test
+launch and remained unchanged; independently prepared next-batch stories were
+outside that product freeze. This is UI-suite evidence, not a root/Electron pass.
+
 ## Remaining work
 
 The compiler-backed [inventory](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -1639,7 +1686,8 @@ completion percentage. Unresolved expressions remain a separate work list.
 | Frozen 29–30                                                 | v1             |       1,736 |   175 |        721 |
 | Frozen 31–33                                                 | v1             |       1,715 |   175 |        717 |
 | Same pre31 source snapshot                                   | v2             |       1,741 |   176 |        725 |
-| Current source through 35, visual limits recorded separately | v2             |       1,705 |   175 |        721 |
+| Frozen source through 35                                     | v2             |       1,705 |   175 |        721 |
+| Current source through 40, visual limits recorded separately | v2             |       1,676 |   175 |        721 |
 
 Earlier method changes recognized single utilities, `withClassName`'s second
 argument and supported static class arrays. Historical per-batch counts remain
@@ -1659,8 +1707,8 @@ utility-looking strings in comparisons or unrelated properties. Ambiguous writes
 remain unresolved. Two adapter `className` writes expose four additional unresolved expressions,
 explaining the corresponding increase in that count.
 
-The current v2 source split is components 1,250 occurrences/159 files/628 unresolved,
-legacy UI 450/14/93 and routes 5/two/zero. Batch34–35 visual differences and rejected
+The current v2 source split is components 1,221 occurrences/159 files/628 unresolved,
+legacy UI 450/14/93 and routes 5/two/zero. Batch34–39 visual differences and rejected
 calibrations retain their own status; this source inventory does not accept them.
 
 WebWorkspaceLayout remains deferred until its actual sidebar/runtime/router
