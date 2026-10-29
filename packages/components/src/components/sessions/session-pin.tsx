@@ -1,6 +1,7 @@
 import { memo, useCallback, useMemo } from 'react';
 import { Pin, X } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
 import { Button } from '@lody/ui/button';
 import type { SessionHistoryParsed } from '@lody/shared';
 import { useTranslation } from 'react-i18next';
@@ -9,6 +10,14 @@ import { themeColors } from '../../style/theme-colors.stylex';
 import { themeSpace } from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  messageButton: {
+    minWidth: 'calc(var(--spacing) * 0)',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    textAlign: 'left',
+    cursor: 'pointer',
+  },
   banner: {
     position: 'relative',
     zIndex: 10,
@@ -86,7 +95,7 @@ export const SessionPin = memo(function SessionPin({
         <Button
           type="button"
           variant="ghost"
-          className="flex-1 min-w-0 truncate text-left cursor-pointer justify-start"
+          className={clsx(stylex.props(styles.messageButton).className, 'flex-1 justify-start')}
           onClick={handleClick}
           title={pinnedText}
         >

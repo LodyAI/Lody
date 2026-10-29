@@ -1,0 +1,69 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "below-sm",
+      "width": 639,
+      "height": 1000
+    },
+    {
+      "name": "sm",
+      "width": 640,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone SE",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "settings-usageshareimagedialog--default",
+    "settings-usageshareimagedialog--single-contributor",
+    "settings-usageshareimagedialog--timeline-pending"
+  ],
+  "ready": {
+    "settings-usageshareimagedialog--default": [
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const d=document.querySelector('[role=dialog]'),h=d?.querySelector('h2')?.parentElement;if(!h)return false;const c=getComputedStyle(h),r=h.getBoundingClientRect(),u=getComputedStyle(h).getPropertyValue('--spacing').trim(),n=parseFloat(u)*(u.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),wide=innerWidth>=640;return document.fonts.status==='loaded'&&r.left>=0&&r.right<=innerWidth&&r.width>200&&r.height>50&&Math.abs(parseFloat(c.paddingLeft)-n*(wide?5:4))<.01&&Math.abs(parseFloat(c.paddingRight)-n*12)<.01&&Math.abs(parseFloat(c.paddingTop)-n*3.5)<.01&&Math.abs(parseFloat(c.paddingBottom)-n*3.5)<.01&&c.borderBottomWidth==='1px'&&c.borderBottomStyle==='solid'&&c.textAlign==='left'&&document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "settings-usageshareimagedialog--single-contributor": [
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const d=document.querySelector('[role=dialog]'),h=d?.querySelector('h2')?.parentElement;if(!h)return false;const c=getComputedStyle(h),r=h.getBoundingClientRect(),u=getComputedStyle(h).getPropertyValue('--spacing').trim(),n=parseFloat(u)*(u.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),wide=innerWidth>=640;return document.fonts.status==='loaded'&&r.left>=0&&r.right<=innerWidth&&r.width>200&&r.height>50&&Math.abs(parseFloat(c.paddingLeft)-n*(wide?5:4))<.01&&Math.abs(parseFloat(c.paddingRight)-n*12)<.01&&Math.abs(parseFloat(c.paddingTop)-n*3.5)<.01&&Math.abs(parseFloat(c.paddingBottom)-n*3.5)<.01&&c.borderBottomWidth==='1px'&&c.borderBottomStyle==='solid'&&c.textAlign==='left'&&document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "settings-usageshareimagedialog--timeline-pending": [
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const d=document.querySelector('[role=dialog]'),h=d?.querySelector('h2')?.parentElement;if(!h)return false;const c=getComputedStyle(h),r=h.getBoundingClientRect(),u=getComputedStyle(h).getPropertyValue('--spacing').trim(),n=parseFloat(u)*(u.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),wide=innerWidth>=640;return document.fonts.status==='loaded'&&r.left>=0&&r.right<=innerWidth&&r.width>200&&r.height>50&&Math.abs(parseFloat(c.paddingLeft)-n*(wide?5:4))<.01&&Math.abs(parseFloat(c.paddingRight)-n*12)<.01&&Math.abs(parseFloat(c.paddingTop)-n*3.5)<.01&&Math.abs(parseFloat(c.paddingBottom)-n*3.5)<.01&&c.borderBottomWidth==='1px'&&c.borderBottomStyle==='solid'&&c.textAlign==='left'&&document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "allowBlankIds": [
+    "settings-usageshareimagedialog--default",
+    "settings-usageshareimagedialog--single-contributor",
+    "settings-usageshareimagedialog--timeline-pending"
+  ]
+}

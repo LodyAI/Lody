@@ -1,0 +1,211 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "sessions-pinmigration--default",
+    "sessions-pinmigration--long-text",
+    "sessions-pinmigration--empty-text",
+    "sessions-pinmigration--invalid-role"
+  ],
+  "ready": {
+    "sessions-pinmigration--default": [
+      {
+        "action": "visible",
+        "selector": "#storybook-root button[title]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.documentElement,expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],e=document.querySelector('#storybook-root button[title]');if(document.fonts.status!=='loaded'||root.classList.contains('dark')!==(expected==='dark')||!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect();return c.flexGrow==='1'&&c.flexShrink==='1'&&c.flexBasis==='0%'&&c.minWidth==='0px'&&c.justifyContent==='flex-start'&&c.textAlign==='left'&&c.overflowX==='hidden'&&c.overflowY==='hidden'&&c.whiteSpace==='nowrap'&&c.textOverflow==='ellipsis'&&c.cursor==='pointer'&&c.margin==='0px'&&r.width>0&&r.height>0&&r.left>=0&&r.right<=innerWidth&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "sessions-pinmigration--long-text": [
+      {
+        "action": "visible",
+        "selector": "#storybook-root button[title]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.documentElement,expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],e=document.querySelector('#storybook-root button[title]');if(document.fonts.status!=='loaded'||root.classList.contains('dark')!==(expected==='dark')||!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect();return c.flexGrow==='1'&&c.flexShrink==='1'&&c.flexBasis==='0%'&&c.minWidth==='0px'&&c.justifyContent==='flex-start'&&c.textAlign==='left'&&c.overflowX==='hidden'&&c.overflowY==='hidden'&&c.whiteSpace==='nowrap'&&c.textOverflow==='ellipsis'&&c.cursor==='pointer'&&c.margin==='0px'&&r.width>0&&r.height>0&&r.left>=0&&r.right<=innerWidth&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "sessions-pinmigration--empty-text": [
+      {
+        "action": "visible",
+        "selector": "output[aria-label=\"Pin action\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => !document.querySelector('#storybook-root button[title]')&&document.querySelector('output[aria-label=\"Pin action\"]')?.textContent==='Ready'"
+      }
+    ],
+    "sessions-pinmigration--invalid-role": [
+      {
+        "action": "visible",
+        "selector": "output[aria-label=\"Pin action\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => !document.querySelector('#storybook-root button[title]')&&document.querySelector('output[aria-label=\"Pin action\"]')?.textContent==='Ready'"
+      }
+    ]
+  },
+  "states": {
+    "sessions-pinmigration--default": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "#storybook-root button[title]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const root=document.documentElement,expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],e=document.querySelector('#storybook-root button[title]');if(document.fonts.status!=='loaded'||root.classList.contains('dark')!==(expected==='dark')||!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect();return c.flexGrow==='1'&&c.flexShrink==='1'&&c.flexBasis==='0%'&&c.minWidth==='0px'&&c.justifyContent==='flex-start'&&c.textAlign==='left'&&c.overflowX==='hidden'&&c.overflowY==='hidden'&&c.whiteSpace==='nowrap'&&c.textOverflow==='ellipsis'&&c.cursor==='pointer'&&c.margin==='0px'&&r.width>0&&r.height>0&&r.left>=0&&r.right<=innerWidth&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "focus-keyboard-scroll",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          },
+          {
+            "action": "focus",
+            "selector": "#storybook-root button[title]"
+          },
+          {
+            "action": "press",
+            "selector": "#storybook-root button[title]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('output[aria-label=\"Pin action\"]')?.textContent==='Scrolled to migration-pinned-message'&&document.activeElement===document.querySelector('#storybook-root button[title]')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const root=document.documentElement,expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],e=document.querySelector('#storybook-root button[title]');if(document.fonts.status!=='loaded'||root.classList.contains('dark')!==(expected==='dark')||!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect();return c.flexGrow==='1'&&c.flexShrink==='1'&&c.flexBasis==='0%'&&c.minWidth==='0px'&&c.justifyContent==='flex-start'&&c.textAlign==='left'&&c.overflowX==='hidden'&&c.overflowY==='hidden'&&c.whiteSpace==='nowrap'&&c.textOverflow==='ellipsis'&&c.cursor==='pointer'&&c.margin==='0px'&&r.width>0&&r.height>0&&r.left>=0&&r.right<=innerWidth&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "wide-mode",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle wide mode",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const root=document.documentElement,expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],e=document.querySelector('#storybook-root button[title]');if(document.fonts.status!=='loaded'||root.classList.contains('dark')!==(expected==='dark')||!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect();return c.flexGrow==='1'&&c.flexShrink==='1'&&c.flexBasis==='0%'&&c.minWidth==='0px'&&c.justifyContent==='flex-start'&&c.textAlign==='left'&&c.overflowX==='hidden'&&c.overflowY==='hidden'&&c.whiteSpace==='nowrap'&&c.textOverflow==='ellipsis'&&c.cursor==='pointer'&&c.margin==='0px'&&r.width>0&&r.height>0&&r.left>=0&&r.right<=innerWidth&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "unpin",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Unpin message",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('output[aria-label=\"Pin action\"]')?.textContent==='Unpinned'&&!document.querySelector('#storybook-root button[title]')"
+          }
+        ]
+      }
+    ],
+    "sessions-pinmigration--long-text": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "#storybook-root button[title]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const root=document.documentElement,expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],e=document.querySelector('#storybook-root button[title]');if(document.fonts.status!=='loaded'||root.classList.contains('dark')!==(expected==='dark')||!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect();return c.flexGrow==='1'&&c.flexShrink==='1'&&c.flexBasis==='0%'&&c.minWidth==='0px'&&c.justifyContent==='flex-start'&&c.textAlign==='left'&&c.overflowX==='hidden'&&c.overflowY==='hidden'&&c.whiteSpace==='nowrap'&&c.textOverflow==='ellipsis'&&c.cursor==='pointer'&&c.margin==='0px'&&r.width>0&&r.height>0&&r.left>=0&&r.right<=innerWidth&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "focus-keyboard-scroll",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          },
+          {
+            "action": "focus",
+            "selector": "#storybook-root button[title]"
+          },
+          {
+            "action": "press",
+            "selector": "#storybook-root button[title]",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('output[aria-label=\"Pin action\"]')?.textContent==='Scrolled to migration-pinned-message'&&document.activeElement===document.querySelector('#storybook-root button[title]')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const root=document.documentElement,expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],e=document.querySelector('#storybook-root button[title]');if(document.fonts.status!=='loaded'||root.classList.contains('dark')!==(expected==='dark')||!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect();return c.flexGrow==='1'&&c.flexShrink==='1'&&c.flexBasis==='0%'&&c.minWidth==='0px'&&c.justifyContent==='flex-start'&&c.textAlign==='left'&&c.overflowX==='hidden'&&c.overflowY==='hidden'&&c.whiteSpace==='nowrap'&&c.textOverflow==='ellipsis'&&c.cursor==='pointer'&&c.margin==='0px'&&r.width>0&&r.height>0&&r.left>=0&&r.right<=innerWidth&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "wide-mode",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle wide mode",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const root=document.documentElement,expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],e=document.querySelector('#storybook-root button[title]');if(document.fonts.status!=='loaded'||root.classList.contains('dark')!==(expected==='dark')||!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect();return c.flexGrow==='1'&&c.flexShrink==='1'&&c.flexBasis==='0%'&&c.minWidth==='0px'&&c.justifyContent==='flex-start'&&c.textAlign==='left'&&c.overflowX==='hidden'&&c.overflowY==='hidden'&&c.whiteSpace==='nowrap'&&c.textOverflow==='ellipsis'&&c.cursor==='pointer'&&c.margin==='0px'&&r.width>0&&r.height>0&&r.left>=0&&r.right<=innerWidth&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "unpin",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Unpin message",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('output[aria-label=\"Pin action\"]')?.textContent==='Unpinned'&&!document.querySelector('#storybook-root button[title]')"
+          }
+        ]
+      }
+    ]
+  }
+}

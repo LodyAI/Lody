@@ -27,11 +27,8 @@ import type { SidebarChatScope } from '@/atoms/sidebar-state';
 import { themeColors } from '../style/theme-colors.stylex';
 import { themeRadius, themeSpace } from '../style/theme-scale.stylex';
 
-/**
- * The dark theme's own wash for a hovered option. StyleX cannot select a
- * `.dark` ancestor, so these two stay Tailwind classes on the row.
- */
-const DARK_OPTION_CLASS = 'dark:hover:bg-white/[0.10] dark:focus-visible:bg-white/[0.10]';
+const DARK_SCOPE =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
 
 const styles = stylex.create({
   /** A menu option: the row a person picks an option from. */
@@ -48,8 +45,24 @@ const styles = stylex.create({
     textAlign: 'left',
     backgroundColor: {
       default: 'transparent',
-      ':hover': 'hsl(var(--foreground) / 0.05)',
-      ':focus-visible': 'hsl(var(--foreground) / 0.05)',
+      ':hover': {
+        default: 'hsl(var(--foreground) / 0.05)',
+        [DARK_SCOPE]: {
+          '@media (hover: hover)': {
+            default: '#ffffff1a',
+            '@supports (color: color-mix(in lab, red, red))':
+              'color-mix(in oklab, var(--color-white) 10%, transparent)',
+          },
+        },
+      },
+      ':focus-visible': {
+        default: 'hsl(var(--foreground) / 0.05)',
+        [DARK_SCOPE]: {
+          default: '#ffffff1a',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, var(--color-white) 10%, transparent)',
+        },
+      },
     },
     color: {
       default: themeColors.popoverForeground,
@@ -192,7 +205,7 @@ function MenuOption({ label, icon: Icon, selected, onSelect }: MenuOptionProps) 
       type="button"
       role="menuitemradio"
       aria-checked={selected}
-      className={clsx(optionProps.className, DARK_OPTION_CLASS)}
+      className={optionProps.className}
       onClick={onSelect}
     >
       <Icon {...stylex.props(styles.optionIcon)} strokeWidth={1.75} aria-hidden="true" />

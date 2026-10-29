@@ -202,6 +202,7 @@ function getSessionShareActionLabel(
  * on the dark canvas. */
 
 const styles = stylex.create({
+  confirmationPendingSpacing: { marginRight: 'calc(var(--spacing) * 1.5)' },
   /** The lock mark in the header: a small box the pointer can find. */
   lockMark: {
     margin: 'calc(var(--spacing) * -1)',
@@ -820,7 +821,12 @@ function ShareConfirmationDialog({
               onConfirm();
             }}
           >
-            {isSharing ? <Spinner diameter="calc(var(--spacing) * 4)" className="mr-1.5" /> : null}
+            {isSharing ? (
+              <Spinner
+                diameter="calc(var(--spacing) * 4)"
+                className={stylex.props(styles.confirmationPendingSpacing).className}
+              />
+            ) : null}
             {actionLabel}
           </Button>
         </AlertDialog.Footer>

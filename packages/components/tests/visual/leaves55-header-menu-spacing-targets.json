@@ -1,0 +1,82 @@
+{
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "viewports": [
+    {
+      "name": "phone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 1000
+    },
+    {
+      "name": "touch767",
+      "device": "iPhone 13",
+      "width": 767,
+      "height": 1000
+    },
+    {
+      "name": "touch768",
+      "device": "iPhone 13",
+      "width": 768,
+      "height": 1000
+    }
+  ],
+  "ids": ["components-baseheader--mobile", "components-baseheader--tablet"],
+  "ready": {
+    "components-baseheader--mobile": [
+      {
+        "action": "visible",
+        "selector": "#storybook-root h2"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const h=document.querySelector('#storybook-root h2'),bar=h?.parentElement,b=bar?.querySelector('button[data-size=medium]');if(!h||!bar)return false;if(innerWidth>=768){if(b)return false;}else{if(!b||getComputedStyle(b).marginRight!=='8px'||getComputedStyle(b).display==='none'||Math.abs(h.getBoundingClientRect().left-b.getBoundingClientRect().right-8)>.02)return false;}return document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "components-baseheader--tablet": [
+      {
+        "action": "visible",
+        "selector": "#storybook-root h2"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const h=document.querySelector('#storybook-root h2'),bar=h?.parentElement,b=bar?.querySelector('button[data-size=medium]');if(!h||!bar)return false;if(innerWidth>=768){if(b)return false;}else{if(!b||getComputedStyle(b).marginRight!=='8px'||getComputedStyle(b).display==='none'||Math.abs(h.getBoundingClientRect().left-b.getBoundingClientRect().right-8)>.02)return false;}return document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {
+    "components-baseheader--mobile": [
+      {
+        "name": "keyboard-focus-or-cutoff",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const h=document.querySelector('#storybook-root h2'),b=h?.parentElement.querySelector('button[data-size=medium]');return (innerWidth>=768?!b:b===document.activeElement&&b.matches(':focus-visible'))&&(document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')));}"
+          }
+        ]
+      }
+    ],
+    "components-baseheader--tablet": [
+      {
+        "name": "keyboard-focus-or-cutoff",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const h=document.querySelector('#storybook-root h2'),b=h?.parentElement.querySelector('button[data-size=medium]');return (innerWidth>=768?!b:b===document.activeElement&&b.matches(':focus-visible'))&&(document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')));}"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1812,6 +1812,56 @@ runs keep their through49 boundary. The report includes eight original spacing
 gate failures, with four Banner triggers still UNKNOWN. New successful scopes
 do not close these or earlier OPENs.
 
+The private-header, dark-option and pinned-message continuation removes eighteen
+utilities in six product files. Existing primitive APIs retain control sizes;
+local StyleX owns private margins, offsets and the usage-share Header. The
+protected Calendar source reverses only its two task hunks to reproduce the
+actual original working bytes; its user formatting is not part of that patch.
+
+`leaves55-59-acceptance.html` records **164 exact formal PNG pairs and 26,232
+identical full standard layout records**: 55 has 44/7,920, 56 has 48/4,080,
+57 has 48/880 and 59 has 24/13,352. Each row retains its original immutable
+build/manifest and hashes; computed-only checks add no screenshot pairs. The
+report embeds 143 unique actual browser PNGs, four separately labelled derived
+masks, sixteen rejected candidate pairs and four original readiness-error images.
+Prior reports and their OPENs stay frozen.
+
+The dark option map retains the exact dark/light-exclusion predicate, white-alpha
+fallback/support branch and hover media. Coarse hover still uses the original
+foreground at 5%; dark keyboard focus reads local `--color-white` at 10%. The local
+scope fixtures do not force a whole UIThemeRoot palette. SessionPin retains
+`flex-1`/`justify-start`: a real full-build DOM prototype replacing all six classes
+changed flex-shrink from 1 to 0; only four non-conflicting properties migrated. The wide
+action is a toggle, not uniformly expansion. The usage-share Header preserves
+logical padding-inline and physical right padding at 639/640px and RTL, the
+local border-style writer and the compiler's **opaque** border-color fallback;
+color-mix support supplies 70%. Other typography/primitive compatibility remains.
+
+WindowDragStrip (58) accepts zero utilities. Its actual renderer/public-caller
+counterexample reverses absolute/fixed precedence; the tested z-index case stays
+unchanged, and other geometry properties remain unproved. It does not verify
+native OS window dragging. The later sidebar (60) candidate also accepts zero:
+all three original sources are restored after real base/state and public
+descendant callers change color, opacity and pointer-event winners. Its retained
+16-pair candidate subset has 12 pixel matches and four differences, outside the
+164 formal pairs. Remaining properties are not all assigned the same proven
+failure. These are scoped counterexamples, not a permanent block on public
+styling: a later unit can migrate the complete owner and real caller contracts
+together. The incomplete native candidate has 25/28 checkpoints; its timeout
+trigger remains unproved, with no missing screenshots invented.
+
+Owning checks pass (55: 22 tests; 56: 5; 59: 27 related aggregation/export-adapter
+tests). Batch 57 has no direct owning suite, so actual callbacks, keyboard/unpin/wide-toggle
+and CSS evidence retain that boundary. Types/explicit format pass; typed lint
+reports 32/0/1/2 warnings respectively and zero errors. A later source-locked
+through 63 run passes components (620 files / 6,207 tests) and UI (25 / 307), with 1,486 product
+files unchanged; it is not relabelled as an exact-through59 run or pixel gate.
+Original batch 59 portal-root errors remain beside the corrected strict dialog capture.
+Component Header stories do not establish a current production menu flow; Calendar
+phone bottom content and usage-share phone initial preview visibility stay
+limited. Synthetic public data does not prove backend/publication/export/native
+workflows, every animation frame or physical iOS behavior.
+
 ## Remaining work
 
 The compiler-backed [inventory](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -1831,6 +1881,7 @@ completion percentage. Unresolved expressions remain a separate work list.
 | Frozen source through 47                                   | v2             |       1,646 |   169 |        721 |
 | Exact source through 49                                    | v2             |       1,637 |   169 |        721 |
 | Exact source through 54, visual limits recorded separately | v2             |       1,620 |   168 |        721 |
+| Exact source through 59, excluding later candidates        | v2             |       1,602 |   168 |        722 |
 
 Earlier method changes recognized single utilities, `withClassName`'s second
 argument and supported static class arrays. Historical per-batch counts remain
@@ -1850,10 +1901,15 @@ utility-looking strings in comparisons or unrelated properties. Ambiguous writes
 remain unresolved. Two adapter `className` writes expose four additional unresolved expressions,
 explaining the corresponding increase in that count.
 
-The current v2 source split is components 1,171 occurrences/152 files/628 unresolved,
-legacy UI 444/14/93 and routes 5/two/zero. The through54 component scan extends the
-exact through49 pre-test source copy with ten verified owned updates while later
-batches proceed; all 688 JS/TS files match that boundary. Batch34–39 visual differences and rejected
+The published through 59 v2 split is components: 1,153 occurrences/152 files/629
+unresolved, legacy UI: 444/14/93 and routes: 5/2/0. These totals cover only those
+three source roots. Normalized paths retain the raw scanner output and all 688
+component JS/TS byte hashes in the exact through 59 snapshot; later 61–63 edits are
+excluded. Calendar's className template adds one unresolved expression while 18
+utilities disappear. A separate through 63 helper audit identifies another nine
+occurrences across two lib/hooks files, outside these three roots; it is neither
+folded into the same-boundary through59 total nor called a new product regression.
+Expand the inventory scope explicitly before comparing that additional work. Batch34–39 visual differences and rejected
 calibrations retain their own status; this source inventory does not accept them.
 
 WebWorkspaceLayout remains deferred until its actual sidebar/runtime/router

@@ -1,0 +1,90 @@
+{
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "ids": [
+    "settings-usagecalendarvisualization--last-24-hours-day-selected",
+    "settings-usagecalendarvisualization--last-7-days-day-selected",
+    "sessions-sessionsharedialog--sharing"
+  ],
+  "ready": {
+    "settings-usagecalendarvisualization--last-24-hours-day-selected": [
+      {
+        "action": "visible",
+        "role": "region",
+        "name": "Day detail"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('section[aria-label=\"Day detail\"]'),b=p?.querySelector('button[aria-label=Close]');if(!p||!b)return false;const c=getComputedStyle(b),r=b.getBoundingClientRect(),pr=p.getBoundingClientRect();if(c.position!=='absolute'||c.top!=='8px'||c.right!=='8px'||c.width!=='24px'||c.height!=='24px'||Math.abs(r.top-pr.top-8)>.02||Math.abs(pr.right-r.right-8)>.02||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;return document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "settings-usagecalendarvisualization--last-7-days-day-selected": [
+      {
+        "action": "visible",
+        "role": "region",
+        "name": "Day detail"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('section[aria-label=\"Day detail\"]'),b=p?.querySelector('button[aria-label=Close]');if(!p||!b)return false;const c=getComputedStyle(b),r=b.getBoundingClientRect(),pr=p.getBoundingClientRect();if(c.position!=='absolute'||c.top!=='8px'||c.right!=='8px'||c.width!=='24px'||c.height!=='24px'||Math.abs(r.top-pr.top-8)>.02||Math.abs(pr.right-r.right-8)>.02||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;return document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "sessions-sessionsharedialog--sharing": [
+      {
+        "action": "visible",
+        "selector": "[role=alertdialog] [data-slot=spinner]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[role=alertdialog]'),s=p?.querySelector('[data-slot=spinner]');if(!p||!s||!s.closest('button')?.disabled)return false;const c=getComputedStyle(s),r=s.getBoundingClientRect();if(c.width!=='16px'||c.height!=='16px'||c.marginRight!=='6px'||getComputedStyle(p).opacity!=='1'||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;return document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {
+    "settings-usagecalendarvisualization--last-24-hours-day-selected": [
+      {
+        "name": "detail-closed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "section[aria-label=\"Day detail\"] button[aria-label=Close]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('section[aria-label=\"Day detail\"]')&&(document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')))"
+          }
+        ]
+      }
+    ],
+    "settings-usagecalendarvisualization--last-7-days-day-selected": [
+      {
+        "name": "detail-closed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "section[aria-label=\"Day detail\"] button[aria-label=Close]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('section[aria-label=\"Day detail\"]')&&(document.fonts.status==='loaded'&&document.documentElement.classList.contains('dark')===matchMedia('(prefers-color-scheme:dark)').matches&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')))"
+          }
+        ]
+      }
+    ]
+  },
+  "allowBlankIds": ["sessions-sessionsharedialog--sharing"]
+}

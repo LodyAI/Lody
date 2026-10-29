@@ -89,6 +89,7 @@ const styles = stylex.create({
   },
   /** The drawer's glyph. */
   menuIcon: { height: themeSpace[5], width: themeSpace[5] },
+  menuButtonSpacing: { marginRight: 'calc(var(--spacing) * 2)' },
 });
 
 /**
@@ -123,7 +124,7 @@ export function BaseHeader({
         <Button
           variant="ghost"
           icon
-          className="mr-2 md:hidden"
+          className={clsx(stylex.props(styles.menuButtonSpacing).className, 'md:hidden')}
           onClick={(e) => {
             // Remove focus to avoid aria-hidden warnings in some browsers.
             (e.currentTarget as HTMLElement).blur();

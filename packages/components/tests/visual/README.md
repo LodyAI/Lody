@@ -608,6 +608,31 @@ when native captures are part of the matrix.
 coverage, reviewed differences and separate Electron images. Keep ignored runtime
 artifacts out of commits.
 
+## Frozen continuation through 59
+
+| Local report                                   | Accepted source scope                                                                                                        | Formal visual result                                                        | Separate boundaries                                                                                                                             |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `artifacts/visual/leaves55-59-acceptance.html` | 18 utilities in six product files: private margin/offsets, native dark options, pinned-message layout and usage-share Header | 164/164 original PNG pairs exact; 26,232 full recorded layout records equal | 58: deferred, 0 accepted; 60: rejected, 0 accepted; 16 retained candidate pairs and 4 original batch 59 failed images outside formal acceptance |
+
+The self-contained report keeps the original images and per-frame immutable build
+origins. Computed-only 55/56/57/59 probes add no PNG pairs. Keep SessionPin's actual
+flex-shrink counterexample, exact dark/light-exclusion and coarse/focus conditions,
+local spacing/border writers, RTL physical-right padding and the opaque border-color
+fallback visible to reviewers. Calendar's protected user formatting is outside the
+task-only patch. Local selector scopes do not establish a whole application palette;
+phone initial-preview visibility and native/backend/export behavior remain bounded.
+
+The normalized through 59 inventory is 1,602 occurrences/168 files/722 unresolved
+expressions across components, legacy UI and routes only. Its 688-file component
+snapshot excludes later 61–63 source. A separate through 63 lib/hooks audit identifies
+nine more occurrences in two files outside those roots; do not merge scopes or call
+that a product regression. Later source-locked through 63 components (620 files / 6,207 tests) and
+UI (25 / 307) test results are supplemental regression, not exact-through59 visual proof.
+Previous OPENs remain in their frozen reports. Batch 60's failed candidate does not block
+all public classes permanently: migrate complete owners with their real caller
+contracts and verify the resulting winners, rather than hiding a rule under retained
+Tailwind or increasing specificity.
+
 ## Real desktop smoke
 
 From the repository root:

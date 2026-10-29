@@ -36,6 +36,25 @@ import type {
 const BACKDROPS: Exclude<UsageShareCardBackdrop, 'none'>[] = ['lody', 'aurora', 'ocean', 'sunset'];
 
 const styles = stylex.create({
+  header: {
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'var(--tw-border-style)',
+    borderColor: {
+      default: 'hsl(var(--border) / 1)',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+    },
+    paddingInline: {
+      default: 'calc(var(--spacing) * 4)',
+      '@media (min-width: 40rem)': 'calc(var(--spacing) * 5)',
+    },
+    paddingBlock: 'calc(var(--spacing) * 3.5)',
+    paddingRight: {
+      default: 'calc(var(--spacing) * 12)',
+      '@media (min-width: 40rem)': 'calc(var(--spacing) * 12)',
+    },
+    textAlign: 'left',
+  },
   preview: {
     display: 'flex',
     width: '100%',
@@ -360,7 +379,7 @@ export function UsageShareImageDialog({
           padding: 0,
         }}
       >
-        <Dialog.Header className="border-b border-border/70 px-4 py-3.5 pr-12 text-left sm:px-5 sm:pr-12">
+        <Dialog.Header {...stylex.props(styles.header)}>
           <Dialog.Title className="text-base">
             {t('workspace.usage.shareImage.dialogTitle')}
           </Dialog.Title>
