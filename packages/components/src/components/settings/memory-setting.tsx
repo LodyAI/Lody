@@ -549,74 +549,26 @@ function LodyMemorySection() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<string>();
   const [removing, setRemoving] = useState<MemoryAssociation>();
-  const rows = lodyMemoryRows(state, '', t('settings.memory.lody.untitled'));
-  const available = state.status !== 'unavailable' && state.status !== 'error';
-  const getAssignedRoles = (entry: MemoryAssociation) =>
-    roles.filter((role) =>
-      getAgentRoleTargets(role).some(
-        (target) =>
-          target.runConfig.memory?.providerId === LODY_MEMORY_PROVIDER_ID &&
-          target.runConfig.memory.memoryId === entry.memoryId
-      )
-    );
   return (
-    <section {...stylex.props(surface.section, surface.sectionTitled, styles.sectionStack)}>
-      <MemorySectionHeader
-        title={t('settings.memory.lody.title')}
-        description={t('settings.memory.lody.description')}
-        actions={
-          rows.length > 0 ? (
-            <Button
-              type="button"
-              size="small"
-              variant="secondary"
-              disabled={!available}
-              onClick={() => setCreating(true)}
-            >
-              <Plus size={14} />
-              {t('settings.memory.lody.create')}
-            </Button>
-          ) : null
+    <>
+      <LodyMemorySectionView
+        status={state.status}
+        rows={lodyMemoryRows(state, '', t('settings.memory.lody.untitled'))}
+        theme={theme}
+        getAssignedRoles={(entry) =>
+          roles.filter((role) =>
+            getAgentRoleTargets(role).some(
+              (target) =>
+                target.runConfig.memory?.providerId === LODY_MEMORY_PROVIDER_ID &&
+                target.runConfig.memory.memoryId === entry.memoryId
+            )
+          )
         }
+        onAssociateRole={synced ? () => openSettings('agent-roles') : undefined}
+        onCreate={() => setCreating(true)}
+        onEdit={(entry) => setEditing(entry.memoryId)}
+        onRemove={setRemoving}
       />
-      {state.status === 'unavailable' ? (
-        <SettingsEmptyList>{t('settings.memory.lody.unavailable')}</SettingsEmptyList>
-      ) : state.status === 'error' ? (
-        <SettingsEmptyList>{t('settings.memory.lody.loadError')}</SettingsEmptyList>
-      ) : state.status === 'loading' ? (
-        <div {...stylex.props(settingsRecordsCard)}>
-          <div {...stylex.props(surface.cardNote)}>
-            <Spinner size="small" />
-          </div>
-        </div>
-      ) : (
-        <MemoryAssociationList
-          entries={rows}
-          getAssignedRoles={getAssignedRoles}
-          onAssociateRole={synced ? () => openSettings('agent-roles') : undefined}
-          onEdit={(entry) => setEditing(entry.memoryId)}
-          onRemove={setRemoving}
-          empty={
-            <div {...stylex.props(settingsRecordsCard)}>
-              <div {...stylex.props(styles.emptyState)}>
-                <LodyMemoryEmptyIllustration theme={theme} />
-                <div {...stylex.props(styles.emptyCopy)}>
-                  <span {...stylex.props(catalog.name)}>
-                    {t('settings.memory.lody.emptyTitle')}
-                  </span>
-                  <span {...stylex.props(styles.description)}>
-                    {t('settings.memory.lody.emptyHint')}
-                  </span>
-                </div>
-                <Button type="button" size="small" onClick={() => setCreating(true)}>
-                  <Plus size={14} />
-                  {t('settings.memory.lody.create')}
-                </Button>
-              </div>
-            </div>
-          }
-        />
-      )}
       {creating ? (
         <LodyMemoryCreateDialog onClose={() => setCreating(false)} onCreated={setEditing} />
       ) : null}
@@ -630,6 +582,89 @@ function LodyMemorySection() {
           onClose={() => setRemoving(undefined)}
         />
       ) : null}
+    </>
+  );
+}
+
+export function LodyMemorySectionView({
+  status,
+  rows,
+  theme,
+  getAssignedRoles,
+  onAssociateRole,
+  onCreate,
+  onEdit,
+  onRemove,
+}: {
+  status: LodyMemoriesState['status'];
+  rows: MemoryAssociation[];
+  theme?: 'light' | 'dark';
+  getAssignedRoles?: (entry: MemoryAssociation) => readonly AgentRole[];
+  onAssociateRole?: (entry: MemoryAssociation) => void;
+  onCreate: () => void;
+  onEdit: (entry: MemoryAssociation) => void;
+  onRemove: (entry: MemoryAssociation) => void;
+}) {
+  const { t } = useTranslation();
+  const available = status !== 'unavailable' && status !== 'error';
+  return (
+    <section {...stylex.props(surface.section, surface.sectionTitled, styles.sectionStack)}>
+      <MemorySectionHeader
+        title={t('settings.memory.lody.title')}
+        description={t('settings.memory.lody.description')}
+        actions={
+          rows.length > 0 ? (
+            <Button
+              type="button"
+              size="small"
+              variant="secondary"
+              disabled={!available}
+              onClick={onCreate}
+            >
+              <Plus size={14} />
+              {t('settings.memory.lody.create')}
+            </Button>
+          ) : null
+        }
+      />
+      {status === 'unavailable' ? (
+        <SettingsEmptyList>{t('settings.memory.lody.unavailable')}</SettingsEmptyList>
+      ) : status === 'error' ? (
+        <SettingsEmptyList>{t('settings.memory.lody.loadError')}</SettingsEmptyList>
+      ) : status === 'loading' ? (
+        <div {...stylex.props(settingsRecordsCard)}>
+          <div {...stylex.props(surface.cardNote)}>
+            <Spinner size="small" />
+          </div>
+        </div>
+      ) : (
+        <MemoryAssociationList
+          entries={rows}
+          getAssignedRoles={getAssignedRoles}
+          onAssociateRole={onAssociateRole}
+          onEdit={onEdit}
+          onRemove={onRemove}
+          empty={
+            <div {...stylex.props(settingsRecordsCard)}>
+              <div {...stylex.props(styles.emptyState)}>
+                <LodyMemoryEmptyIllustration theme={theme} />
+                <div {...stylex.props(styles.emptyCopy)}>
+                  <span {...stylex.props(catalog.name)}>
+                    {t('settings.memory.lody.emptyTitle')}
+                  </span>
+                  <span {...stylex.props(styles.description)}>
+                    {t('settings.memory.lody.emptyHint')}
+                  </span>
+                </div>
+                <Button type="button" size="small" onClick={onCreate}>
+                  <Plus size={14} />
+                  {t('settings.memory.lody.create')}
+                </Button>
+              </div>
+            </div>
+          }
+        />
+      )}
     </section>
   );
 }
@@ -1163,37 +1198,14 @@ export function RoleMemoryPicker({
         </div>
       ) : null}
       {lody.status !== 'unavailable' ? (
-        <div {...stylex.props(styles.stack)}>
-          <span {...stylex.props(catalog.meta)}>{t('settings.memory.lody.title')}</span>
-          {lodyMissing ? (
-            <FormMessage tone="warning">{t('settings.memory.lody.missing')}</FormMessage>
-          ) : null}
-          {!lodyUsable && lodyRows.length > 0 ? (
-            <span {...stylex.props(catalog.meta)}>{t('settings.memory.lody.roleLocalOnly')}</span>
-          ) : null}
-          <MemoryAssociationList
-            entries={lodyRows}
-            selected={value}
-            disabled={!lodyUsable}
-            onSelect={(entry) => onChange(lodyMemoryBinding(entry.memoryId))}
-            empty={
-              <SettingsEmptyList
-                action={
-                  <Button
-                    type="button"
-                    size="small"
-                    variant="secondary"
-                    onClick={() => openSettings('memory')}
-                  >
-                    {t('settings.memory.lody.create')}
-                  </Button>
-                }
-              >
-                {t('settings.memory.lody.roleEmpty')}
-              </SettingsEmptyList>
-            }
-          />
-        </div>
+        <RoleLodyMemoryList
+          rows={lodyRows}
+          value={value}
+          usable={lodyUsable}
+          missing={lodyMissing}
+          onSelect={onChange}
+          onCreate={() => openSettings('memory')}
+        />
       ) : null}
       {entries.length ? (
         <div {...stylex.props(styles.stack)}>
@@ -1217,6 +1229,54 @@ export function RoleMemoryPicker({
     </div>
   );
 }
+/** The Role picker's Lody Memory group, listed before provider associations. */
+export function RoleLodyMemoryList({
+  rows,
+  value,
+  usable,
+  missing,
+  onSelect,
+  onCreate,
+}: {
+  rows: MemoryAssociation[];
+  value?: MemoryBinding;
+  /** Only this device's daemon can reach the Renderer's Lody Memory replica. */
+  usable: boolean;
+  missing: boolean;
+  onSelect: (value: MemoryBinding) => void;
+  onCreate: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div {...stylex.props(styles.stack)}>
+      <span {...stylex.props(catalog.meta)}>{t('settings.memory.lody.title')}</span>
+      {missing ? (
+        <FormMessage tone="warning">{t('settings.memory.lody.missing')}</FormMessage>
+      ) : null}
+      {!usable && rows.length > 0 ? (
+        <span {...stylex.props(catalog.meta)}>{t('settings.memory.lody.roleLocalOnly')}</span>
+      ) : null}
+      <MemoryAssociationList
+        entries={rows}
+        selected={value}
+        disabled={!usable}
+        onSelect={(entry) => onSelect(lodyMemoryBinding(entry.memoryId))}
+        empty={
+          <SettingsEmptyList
+            action={
+              <Button type="button" size="small" variant="secondary" onClick={onCreate}>
+                {t('settings.memory.lody.create')}
+              </Button>
+            }
+          >
+            {t('settings.memory.lody.roleEmpty')}
+          </SettingsEmptyList>
+        }
+      />
+    </div>
+  );
+}
+
 function RoleProviderMemories({
   machineId,
   provider,
