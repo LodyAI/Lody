@@ -54,6 +54,7 @@ import { useSessionAllChangesDiffData } from './use-session-all-changes-diff-dat
 import { useSessionConversationDiffData } from './use-session-conversation-diff-data';
 import { useDiffViewport } from './use-diff-viewport';
 import { useGitHubReviewComments } from '@/hooks/use-github-review-comments';
+import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
 import {
   getPullRequestNumber,
   getPullRequestRepoFullName,
@@ -564,6 +565,7 @@ function SessionConversationDiffPanelImpl({
   // recorded under encoded keys. Shown, matched and opened as display paths;
   // the file provider splits them back into `rootId` for the machine.
   const projectRun = (workspaceSession ?? session)?.projectRun;
+  const ownerMachineStatus = useMachineOnlineStatus((workspaceSession ?? session)?.machineId);
   const mounts = useMemo(() => buildSessionFileRootMounts(projectRun), [projectRun]);
   const filePaths = useMemo(
     () =>
@@ -666,6 +668,7 @@ function SessionConversationDiffPanelImpl({
     fileProviderPending,
     enabled: active && isBaseMode,
     scope: allChangesScope ?? 'branch',
+    ownerOffline: ownerMachineStatus === 'offline',
   });
   const { cacheKey, normalizedPaths, resolvedByPath, isDiffUnavailable } = isBaseMode
     ? allChangesDiffData
@@ -676,6 +679,7 @@ function SessionConversationDiffPanelImpl({
     : null;
   const allChangesUnavailableMessage = isBaseMode ? allChangesDiffData.unavailableMessage : null;
   const allChangesBatchReady = isBaseMode ? allChangesDiffData.batchReady : false;
+  const allChangesOwnerOffline = isBaseMode && allChangesDiffData.ownerOffline;
   const effectiveScope = allChangesScope ?? 'branch';
   const {
     sourceSessionId: prSessionId,
@@ -957,8 +961,12 @@ function SessionConversationDiffPanelImpl({
     </div>
   ) : null;
 
-  const baseEmptyText =
-    !isBaseMode || effectiveScope !== 'uncommitted'
+  const baseEmptyText = allChangesOwnerOffline
+    ? t(
+        'sessions.fileDiff.ownerMachineOffline',
+        'The machine running this session is offline. Changes will load when it reconnects.'
+      )
+    : !isBaseMode || effectiveScope !== 'uncommitted'
       ? null
       : allChangesUnavailableScopeReason !== null || allChangesUnavailableMessage !== null
         ? allChangesUnavailableScopeReason === 'not_a_git_worktree'
