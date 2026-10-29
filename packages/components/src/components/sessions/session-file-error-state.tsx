@@ -1,5 +1,6 @@
 import type { CodeCollabContentUnavailableReason } from '@lody/shared';
 import * as stylex from '@stylexjs/stylex';
+import { button } from '@lody/ui/button/button.tokens.stylex';
 import { Copy, ExternalLink, FolderOpen, Loader2, Share2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 // The action model is shared with the file tree context menu and the side
@@ -9,6 +10,10 @@ import { Button } from '@lody/ui/button';
 
 const spin = stylex.keyframes({ to: { transform: 'rotate(360deg)' } });
 const styles = stylex.create({
+  actionSpacing: {
+    [button.paddingXSmall]: 'calc(var(--spacing) * 2.5)',
+    [button.gap]: 'calc(var(--spacing) * 2)',
+  },
   frame: {
     display: 'flex',
     minHeight: '100%',
@@ -340,7 +345,7 @@ export function getSessionFileErrorPresentation(
 // One row per action, all the same width. A wrapping row of buttons sized by
 // their own labels was the previous layout, and in a side panel it produced
 // three ragged widths on three lines — the width difference read as meaning.
-const ACTION_BUTTON_CLASS = 'justify-start gap-2 px-2.5 text-xs font-normal';
+const ACTION_BUTTON_CLASS = `justify-start text-xs font-normal ${stylex.props(styles.actionSpacing).className}`;
 
 export function SessionFileErrorState({
   message,

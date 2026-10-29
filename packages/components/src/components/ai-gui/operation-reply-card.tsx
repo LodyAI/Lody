@@ -3,14 +3,13 @@ import { useTranslation } from 'react-i18next';
 import { ArrowUpRight, MessageSquareReply } from 'lucide-react';
 import type { SessionId } from '@lody/shared';
 import * as stylex from '@stylexjs/stylex';
+import type { TokensFromVarGroup } from '@stylexjs/stylex/lib/types/StyleXTypes';
 
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import { Button } from '@lody/ui/button';
+import { button } from '@lody/ui/button/button.tokens.stylex';
 import { cn } from '@/lib/utils';
-import {
-  messageActionLabelTheme,
-  messageActionInkTheme,
-} from '../../style/message-action-button.stylex';
+import { messageActionInkTheme } from '../../style/message-action-button.stylex';
 import { Dialog } from '@/ui/dialog';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
@@ -22,6 +21,51 @@ import {
 } from '../../style/theme-scale.stylex';
 import { useOperationTargetTitle } from './created-session-operation-card';
 import { MarkdownRenderer } from './markdown-renderer';
+
+// The locked compiler drops cross-file object spreads in createTheme. Keep this
+// complete map local so the two private actions inherit every other button token.
+const inheritedButtonTokens = {
+  heightMini: 'inherit',
+  heightSmall: 'inherit',
+  heightMedium: 'inherit',
+  heightLarge: 'inherit',
+  paddingXMini: 'inherit',
+  paddingXSmall: 'inherit',
+  paddingXMedium: 'inherit',
+  paddingXLarge: 'inherit',
+  radiusMini: 'inherit',
+  radiusSmall: 'inherit',
+  radiusMedium: 'inherit',
+  textMini: 'inherit',
+  text: 'inherit',
+  gap: 'inherit',
+  iconSize: 'inherit',
+  primaryBackground: 'inherit',
+  primaryLabel: 'inherit',
+  primaryEdge: 'inherit',
+  primarySheen: 'inherit',
+  secondaryBackground: 'inherit',
+  secondaryShadow: 'inherit',
+  secondarySheen: 'inherit',
+  pressedEdge: 'inherit',
+  ghostLabel: 'inherit',
+  ghostHover: 'inherit',
+  ring: 'inherit',
+  ringWidth: 'inherit',
+} satisfies Record<keyof TokensFromVarGroup<typeof button>, 'inherit'>;
+
+const navigationLayoutTheme = stylex.createTheme(button, {
+  ...inheritedButtonTokens,
+  ghostLabel: 'hsl(var(--muted-foreground))',
+  gap: 'calc(var(--spacing) * 1)',
+  paddingXSmall: 'calc(var(--spacing) * 2)',
+});
+
+const dialogNavigationLayoutTheme = stylex.createTheme(button, {
+  ...inheritedButtonTokens,
+  gap: 'calc(var(--spacing) * 1)',
+  paddingXSmall: 'calc(var(--spacing) * 2.5)',
+});
 
 const styles = stylex.create({
   errorLine: {
@@ -230,8 +274,8 @@ export function OperationReplyCard(props: OperationReplyCardProps) {
         size="small"
         height="calc(var(--spacing) * 7)"
         className={cn(
-          stylex.props(messageActionLabelTheme, messageActionInkTheme).className,
-          'gap-1 px-2 text-xs'
+          stylex.props(navigationLayoutTheme, messageActionInkTheme).className,
+          'text-xs'
         )}
         disabled={!navigate}
         onClick={navigate}
@@ -258,7 +302,7 @@ export function OperationReplyCard(props: OperationReplyCardProps) {
                   variant="secondary"
                   size="small"
                   height="calc(var(--spacing) * 7)"
-                  className="gap-1 px-2.5 text-xs"
+                  className={cn(stylex.props(dialogNavigationLayoutTheme).className, 'text-xs')}
                   onClick={() => {
                     setOpen(false);
                     navigate();

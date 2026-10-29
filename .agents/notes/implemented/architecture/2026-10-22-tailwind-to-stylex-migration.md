@@ -1886,6 +1886,38 @@ subsets overlap those totals. Root checks retain the existing ACP prerequisite
 failure; this UI work changes no ACP dependency or backend behavior. The report
 also preserves the withdrawn batch 60 candidate and every earlier OPEN.
 
+The control-spacing continuation removes 22 utilities in eight product files.
+Five Select widths are already supplied by the well; the private archive fill
+retains its opaque fallback and supported 35% mix. Other fixed controls write
+existing public Button tokens at the element. An already themed Operation action
+keeps appearance and spacing in one complete compiler-local theme; the owning
+rules are in [`MIGRATION.md`](../../../../packages/components/src/style/MIGRATION.md).
+
+Default screenshots alone missed a real imported-spread regression: 48 pairs
+matched while parent gap reset 9→6px, radius 9→8px, font and colors changed. Its
+actual parent-theme image has 3,317 raw differing pixels; the corrected image
+matches Before byte-for-byte. The other rejected candidate has 180 unexpected
+CSS differences. Final non-target token values agree. The private Button fixture now uses the same compiler-local complete map: its
+20 affected real pairs and 724 records remain identical, and both actual CSSOM
+themes contain all 27 declarations, including 18 inherited fields. This fixture
+correction removes no product utilities. The two older message-action fixture
+helpers still need that audit; measured explicit overrides do not prove omitted
+inheritance declarations were emitted.
+
+`leaves64-67-acceptance.html` retains **192 formal pairs, 191 byte-exact, and
+48,356 identical full standard records**. One Select corner difference remains
+OPEN (11 raw / 6 threshold pixels). A separate native sample retains one Button
+and three children at y−4px, with no original PNG; a later matching full Dialog
+control establishes no original cause. Eight same-element inline-token negative
+pairs keep known layout changes outside the closed product inputs. Twelve
+original error images, corrected gate assemblies and every earlier OPEN remain.
+A supplemental working-tree regression through 71 passes components 620 files /
+6,207 tests and UI 25 / 307, with all 1,861 UI source hashes unchanged during
+the run. The actual OSS Electron build and four-page smoke pass; those images
+are After-only, without an application Before baseline. These checks establish
+no native icon, export or backend workflows. Frozen reports keep their own
+source boundaries.
+
 ## Remaining work
 
 The compiler-backed [inventory](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -1907,6 +1939,7 @@ completion percentage. Unresolved expressions remain a separate work list.
 | Exact source through 54, visual limits recorded separately | v2             |       1,620 |   168 |        721 |
 | Exact source through 59, excluding later candidates        | v2             |       1,602 |   168 |        722 |
 | Exact source through 63, with partial visual acceptance    | v2             |       1,594 |   167 |        722 |
+| Exact source through 67, with partial visual acceptance    | v2             |       1,572 |   166 |        718 |
 
 Earlier method changes recognized single utilities, `withClassName`'s second
 argument and supported static class arrays. Historical per-batch counts remain
@@ -1926,13 +1959,13 @@ utility-looking strings in comparisons or unrelated properties. Ambiguous writes
 remain unresolved. Two adapter `className` writes expose four additional unresolved expressions,
 explaining the corresponding increase in that count.
 
-The published through 63 v2 split is components: 1,145 occurrences/151 files/629
+The published through 67 v2 split is components: 1,123 occurrences/150 files/625
 unresolved, legacy UI: 444/14/93 and routes: 5/2/0. These totals cover only those
 three source roots. Normalized paths retain the raw scanner output and all 688
-component JS/TS byte hashes. The through 63 snapshot adds six audited source
-updates to the frozen through 59 snapshot and excludes later candidates.
-Calendar's template accounts for the earlier unresolved-expression increase;
-the eight subsequent removals do not change that count. A separate helper audit identifies another nine
+component JS/TS byte hashes. The through 67 snapshot adds eight audited source
+updates to the frozen through 63 snapshot and excludes later candidates.
+Five Usage templates and one Archive class lookup disappear; two FileError/Bub
+StyleX templates remain unresolved, not new unknown Tailwind utilities. A separate helper audit identifies another nine
 occurrences across two lib/hooks files, outside these three roots; it is neither
 folded into the same-boundary through59 total nor called a new product regression.
 Expand the inventory scope explicitly before comparing that additional work. Batch34–39 visual differences and rejected

@@ -53,13 +53,29 @@ mounted control, as well as its actual animation and rendered pixels.
 
 Local primitive themes need their own inheritance check. `createTheme` also
 applies the variable group's defaults: a partial Button theme reset an inherited
-23px gap and 3px orange focus ring. The message-action themes explicitly inherit
-every non-target Button/semantic token, with complete typed key maps. Their
-semantic label override is limited to the reviewed fixed glyph subtrees; a child
-that explicitly reads that semantic label would also change. A direct inline
-write to the old primitive color tokens changes precedence after migration, so
-that negative control is retained rather than claimed equivalent. Apply these
-themes to the actual Button; arbitrary local themes do not travel across portals.
+23px gap and 3px orange focus ring. Explicitly inherit every non-target token with
+a complete typed key map. Keep that map in the compiler owner: the locked StyleX
+0.19 compiler silently omitted an ordinary cross-file object spread, while
+literal fields and a same-file local spread emitted the expected `inherit`
+declarations. The resulting default-group class reset parent colors, gap, radius
+and text size even though default-theme screenshots matched. Inspect the actual
+full-build declarations and test nondefault parent tokens before accepting a theme.
+
+For a few existing public tokens, component-owned `stylex.create` declarations
+such as `[button.paddingXSmall]: 'calc(var(--spacing) * 2.5)'` can write only the
+target variables without attaching a default-group class. They still require a
+full-build cascade check. An element already carrying a theme may have stronger
+variable declarations; merge spacing and appearance into one complete theme in
+that owner instead of stacking themes or increasing selector specificity. Preserve
+element-local variable reads and compare every non-target token, not just the
+changed padding or gap.
+
+The message-action themes use their same-file complete key maps. Their semantic
+label override is limited to the reviewed fixed glyph subtrees; a child explicitly
+reading that semantic token would also change. A direct inline write to the old
+primitive color tokens changes precedence after migration, so that negative
+control remains unaccepted. Apply a theme to the actual Button; arbitrary local
+themes do not travel across portals.
 
 A component's styles live with its implementation; area-wide repeated styles
 live in its `surface.ts`. Import tokens using relative `.stylex` paths. The shared

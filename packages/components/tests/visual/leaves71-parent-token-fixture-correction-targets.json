@@ -1,0 +1,84 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 900,
+      "device": "iPhone SE"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "migration-ownedprivatebuttonlayout--icons-scoped-pending",
+    "migration-ownedprivatebuttonlayout--operation-scoped"
+  ],
+  "ready": {
+    "migration-ownedprivatebuttonlayout--icons-scoped-pending": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const r=document.querySelector('[data-private-layout-fixture=icons]'),b=[...r?.querySelectorAll('button')??[]],im=[...r?.querySelectorAll('img')??[]];return b.length===4&&b.every(e=>!e.disabled&&getComputedStyle(e).flexDirection==='column'&&getComputedStyle(e).paddingLeft==='15px'&&getComputedStyle(e).gap==='10px')&&im.length===4&&im.every(i=>i.complete&&i.naturalWidth>0)&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedprivatebuttonlayout--operation-scoped": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const b=document.querySelector('[data-operation-reply-card] button[data-variant=ghost]');return b&&!b.disabled&&getComputedStyle(b).gap==='5px'&&getComputedStyle(b).paddingLeft==='10px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedprivatebuttonlayout--icons-scoped-pending": [
+      {
+        "name": "actual-pending",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-private-layout=icons-mobile] button:nth-child(2)"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-icon-receipt]')?.textContent==='pending:alternate'&&[...document.querySelectorAll('[data-private-layout=icons-mobile] button')].every(e=>e.disabled)&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "migration-ownedprivatebuttonlayout--operation-scoped": [
+      {
+        "name": "reply-dialog",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button[title=\"View full reply\"]"
+          },
+          {
+            "action": "visible",
+            "role": "dialog"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const b=document.querySelector('[role=dialog] button[data-variant=secondary]');return b&&getComputedStyle(b).gap==='5px'&&getComputedStyle(b).paddingLeft==='12.5px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "dialog-navigation-receipt",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[role=dialog] button[data-variant=secondary]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[role=dialog]')&&document.querySelector('[data-operation-receipt]')?.textContent==='private-layout-operation'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ]
+  }
+}

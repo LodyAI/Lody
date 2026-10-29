@@ -409,7 +409,7 @@ export function UsageShareImageDialog({
               >
                 <Select.Trigger
                   id="usage-share-metric"
-                  className={`w-full ${stylex.props(styles.controlSpacing).className}`}
+                  className={stylex.props(styles.controlSpacing).className}
                 >
                   <Select.Value />
                 </Select.Trigger>
@@ -447,7 +447,7 @@ export function UsageShareImageDialog({
               >
                 <Select.Trigger
                   id="usage-share-aspect"
-                  className={`w-full ${stylex.props(styles.controlSpacing).className}`}
+                  className={stylex.props(styles.controlSpacing).className}
                 >
                   <Select.Value />
                 </Select.Trigger>
@@ -484,7 +484,7 @@ export function UsageShareImageDialog({
               >
                 <Select.Trigger
                   id="usage-share-subject"
-                  className={`w-full ${stylex.props(styles.controlSpacing).className}`}
+                  className={stylex.props(styles.controlSpacing).className}
                 >
                   <Select.Value />
                 </Select.Trigger>
@@ -524,7 +524,7 @@ export function UsageShareImageDialog({
               >
                 <Select.Trigger
                   id="usage-share-theme"
-                  className={`w-full ${stylex.props(styles.controlSpacing).className}`}
+                  className={stylex.props(styles.controlSpacing).className}
                 >
                   <Select.Value />
                 </Select.Trigger>
@@ -560,7 +560,7 @@ export function UsageShareImageDialog({
               >
                 <Select.Trigger
                   id="usage-share-footer"
-                  className={`w-full ${stylex.props(styles.controlSpacing).className}`}
+                  className={stylex.props(styles.controlSpacing).className}
                 >
                   <Select.Value />
                 </Select.Trigger>

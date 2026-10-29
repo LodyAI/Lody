@@ -24,14 +24,10 @@ import {
 
 const CONFIRM_RESET_DELAY_MS = 3500;
 
-/**
- * The dark-mode colours of the armed button. StyleX cannot select a `.dark`
- * ancestor, so these two stay Tailwind classes on the button; everything else
- * on it moves to StyleX.
- */
+/** The public button retains its dark ink and border compatibility classes. */
 const DARK_CLASS = 'dark:border-destructive/30 dark:text-destructive-foreground';
-/** The pill's own fill, in the dark theme. */
-const DARK_FILL_CLASS = 'dark:bg-destructive/35';
+const DARK_SCOPE =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
 
 const styles = stylex.create({
   button: {
@@ -89,7 +85,14 @@ const styles = stylex.create({
     bottom: 0,
     left: 0,
     borderRadius: themeRadius.full,
-    backgroundColor: 'hsl(var(--destructive) / 0.12)',
+    backgroundColor: {
+      default: 'hsl(var(--destructive) / 0.12)',
+      [DARK_SCOPE]: {
+        default: 'hsl(var(--destructive) / 1)',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in oklab, hsl(var(--destructive) / 1) 35%, transparent)',
+      },
+    },
   },
   label: {
     position: 'relative',
@@ -213,7 +216,7 @@ export const SidebarConfirmArchiveButton = forwardRef<
     >
       {isConfirming ? (
         <>
-          <span aria-hidden="true" className={clsx(fillStyle.className, DARK_FILL_CLASS)} />
+          <span aria-hidden="true" {...fillStyle} />
           <span {...stylex.props(styles.label)}>{confirmLabel}</span>
         </>
       ) : (

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Check, Copy } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import * as stylex from '@stylexjs/stylex';
+import { button } from '@lody/ui/button/button.tokens.stylex';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/native-browser';
 
@@ -11,6 +12,10 @@ export const BUB_ACP_INSTALL_DOCS_URL =
 const BUB_ACP_INSTALL_COMMAND = 'curl -fsSL https://bub.build/install.sh | bash -- --preset acp';
 
 const styles = stylex.create({
+  actionSpacing: {
+    [button.paddingXSmall]: 'calc(var(--spacing) * 2)',
+    [button.gap]: 'calc(var(--spacing) * 1)',
+  },
   intro: {
     marginBlockStart: 0,
     marginBlockEnd: 'calc(var(--spacing) * 2)',
@@ -57,7 +62,7 @@ export function BubInstallGuide() {
           variant="ghost"
           size="small"
           height="calc(var(--spacing) * 7)"
-          className="gap-1 px-2 text-xs"
+          className={`text-xs ${stylex.props(styles.actionSpacing).className}`}
           aria-label={copied ? t('common.copied', 'Copied') : t('common.copy', 'Copy')}
           onClick={() => {
             void writeTextToClipboard(BUB_ACP_INSTALL_COMMAND).then((success) => {

@@ -3,6 +3,7 @@ import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import { Progress } from '@lody/ui/progress';
 import * as stylex from '@stylexjs/stylex';
+import { button } from '@lody/ui/button/button.tokens.stylex';
 import type { UpdateBannerState } from '@/lib/electron-update-banner';
 import { themeColors } from '../style/theme-colors.stylex';
 import {
@@ -15,6 +16,9 @@ import {
 } from '../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  actionSpacing: {
+    [button.paddingXSmall]: 'calc(var(--spacing) * 2.5)',
+  },
   pendingSpinnerSpacing: { marginRight: 'calc(var(--spacing) * 1.5)' },
   banner: {
     borderRadius: themeRadius.lg,
@@ -129,7 +133,7 @@ export function SidebarUpdateBanner({
           variant="ghost"
           size="small"
           height="calc(var(--spacing) * 7)"
-          className="px-2.5"
+          className={stylex.props(styles.actionSpacing).className}
           onClick={onLater}
         >
           {t('sidebar.updateReady.later', 'Later')}
@@ -139,7 +143,7 @@ export function SidebarUpdateBanner({
             type="button"
             size="small"
             height="calc(var(--spacing) * 7)"
-            className="px-2.5"
+            className={stylex.props(styles.actionSpacing).className}
             onClick={onRestart}
           >
             {isRestarting ? (

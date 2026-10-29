@@ -614,6 +614,7 @@ artifacts out of commits.
 | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | `artifacts/visual/leaves55-59-acceptance.html` | 18 utilities in six product files: private margin/offsets, native dark options, pinned-message layout and usage-share Header | 164/164 original PNG pairs exact; 26,232 full recorded layout records equal                | 58: deferred, 0 accepted; 60: rejected, 0 accepted; 16 retained candidate pairs and 4 original batch 59 failed images outside formal acceptance |
 | `artifacts/visual/leaves60-63-acceptance.html` | Eight utilities in six files: notification ink, popup dimensions/overflow and native dark maps                               | 132/134 PNG pairs exact; two OPEN, 43 raw pixels; 14 hidden-helper height records retained | Partial acceptance; 60 rejected, six phone Role failures, inline-token negative controls and all historical OPENs remain                        |
+| `artifacts/visual/leaves64-67-acceptance.html` | 22 utilities in eight files: redundant Select widths, private archive fill and fixed control layout                          | 191/192 PNG pairs exact; 48,356 full standard records equal                                | One 11-pixel OPEN, a separate four-node y−4px native OPEN, rejected theme-reset candidates and inline-token negatives retained                  |
 
 The self-contained report keeps the original images and per-frame immutable build
 origins. Computed-only 55/56/57/59 probes add no PNG pairs. Keep SessionPin's actual
@@ -623,10 +624,10 @@ fallback visible to reviewers. Calendar's protected user formatting is outside t
 task-only patch. Local selector scopes do not establish a whole application palette;
 phone initial-preview visibility and native/backend/export behavior remain bounded.
 
-The normalized through 63 inventory is 1,594 occurrences/167 files/722 unresolved
+The normalized through 67 inventory is 1,572 occurrences/166 files/718 unresolved
 expressions across components, legacy UI and routes only. Its 688-file component
-snapshot includes six verified updates after 59 and excludes later candidates.
-The earlier through 59 inventory remains frozen. A separate lib/hooks audit identifies
+snapshot includes eight verified updates after 63 and excludes later candidates.
+Earlier inventories remain frozen. A separate lib/hooks audit identifies
 nine more occurrences in two files outside those roots; do not merge scopes or call
 that a product regression. Later source-locked through 63 components (620 files / 6,207 tests) and
 UI (25 / 307) test results are supplemental regression, not exact-through59 visual proof.
@@ -641,6 +642,20 @@ pixels; later matching controls establish no historical raster cause. CSS-only
 checks, wheel PNG supplements and terminal After-only inspection have separate
 counters. The scope table scrolls locally on narrow screens; offline QA verifies
 original payloads, previews, filtering, zoom and keyboard access at 1280/390px.
+
+The 64–67 report separates default-theme success from parent-token acceptance.
+Actual Before / Rejected / Final images retain the repaired material contract.
+Inspect emitted full-build rules and non-target tokens: direct public-token atoms
+avoid a default group, while an existing same-element theme needs one complete
+compiler-local map. See [`MIGRATION.md`](../../src/style/MIGRATION.md). Ordinary
+imported maps in fixtures need this audit too; source completeness proves no
+emitted inheritance. The private Button fixture correction separately verifies
+20 unchanged real pairs and all 27 emitted declarations (18 inherited); two older
+message-action fixture helpers remain pending. Supplementary geometry, negative
+controls and original pixel OPENs remain separate from formal counts. The later
+through71 source-stable full suite and four actual Electron After-only screenshots
+are recorded in `artifacts/visual/leaves71-stable-full-regression-verification.json`;
+they do not replace any report's original source or application Before baseline.
 
 ## Real desktop smoke
 

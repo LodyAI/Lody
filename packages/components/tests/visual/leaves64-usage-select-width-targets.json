@@ -1,0 +1,296 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone SE",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "settings-usageshareimagedialog--default",
+    "settings-usageshareimagedialog--single-contributor"
+  ],
+  "allowBlankIds": [
+    "settings-usageshareimagedialog--default",
+    "settings-usageshareimagedialog--single-contributor"
+  ],
+  "ready": {
+    "settings-usageshareimagedialog--default": [
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const d=document.querySelector('[role=dialog]'),h=d?.querySelector('h2')?.parentElement;if(!h)return false;const c=getComputedStyle(h),r=h.getBoundingClientRect(),u=getComputedStyle(h).getPropertyValue('--spacing').trim(),n=parseFloat(u)*(u.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),wide=innerWidth>=640;return document.fonts.status==='loaded'&&r.left>=0&&r.right<=innerWidth&&r.width>200&&r.height>50&&Math.abs(parseFloat(c.paddingLeft)-n*(wide?5:4))<.01&&Math.abs(parseFloat(c.paddingRight)-n*12)<.01&&Math.abs(parseFloat(c.paddingTop)-n*3.5)<.01&&Math.abs(parseFloat(c.paddingBottom)-n*3.5)<.01&&c.borderBottomWidth==='1px'&&c.borderBottomStyle==='solid'&&c.textAlign==='left'&&document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => ['metric','aspect','subject','theme','footer'].every(k=>{const e=document.getElementById('usage-share-'+k);return e?.tagName==='BUTTON'&&e.getBoundingClientRect().width>0})"
+      }
+    ],
+    "settings-usageshareimagedialog--single-contributor": [
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const d=document.querySelector('[role=dialog]'),h=d?.querySelector('h2')?.parentElement;if(!h)return false;const c=getComputedStyle(h),r=h.getBoundingClientRect(),u=getComputedStyle(h).getPropertyValue('--spacing').trim(),n=parseFloat(u)*(u.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),wide=innerWidth>=640;return document.fonts.status==='loaded'&&r.left>=0&&r.right<=innerWidth&&r.width>200&&r.height>50&&Math.abs(parseFloat(c.paddingLeft)-n*(wide?5:4))<.01&&Math.abs(parseFloat(c.paddingRight)-n*12)<.01&&Math.abs(parseFloat(c.paddingTop)-n*3.5)<.01&&Math.abs(parseFloat(c.paddingBottom)-n*3.5)<.01&&c.borderBottomWidth==='1px'&&c.borderBottomStyle==='solid'&&c.textAlign==='left'&&document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => ['metric','aspect','subject','theme','footer'].every(k=>{const e=document.getElementById('usage-share-'+k);return e?.tagName==='BUTTON'&&e.getBoundingClientRect().width>0})"
+      }
+    ]
+  },
+  "states": {
+    "settings-usageshareimagedialog--default": [
+      {
+        "name": "focus-metric",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#usage-share-metric"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.getElementById('usage-share-metric');if(!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),p=e.parentElement,cs=getComputedStyle(p),available=p.getBoundingClientRect().width-parseFloat(cs.borderLeftWidth)-parseFloat(cs.borderRightWidth)-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);if(c.display!=='flex'||c.boxSizing!=='border-box'||Math.abs(r.width-available)>.02||r.width<100||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let n=e.parentElement;n&&n!==document.body;n=n.parentElement){const s=getComputedStyle(n),b=n.getBoundingClientRect();if(s.visibility==='hidden'||s.display==='none'||s.opacity!=='1')return false;if(['auto','scroll','hidden','clip'].includes(s.overflowY)&&(r.top<b.top||r.bottom>b.bottom))return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "focus-aspect",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#usage-share-aspect"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.getElementById('usage-share-aspect');if(!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),p=e.parentElement,cs=getComputedStyle(p),available=p.getBoundingClientRect().width-parseFloat(cs.borderLeftWidth)-parseFloat(cs.borderRightWidth)-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);if(c.display!=='flex'||c.boxSizing!=='border-box'||Math.abs(r.width-available)>.02||r.width<100||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let n=e.parentElement;n&&n!==document.body;n=n.parentElement){const s=getComputedStyle(n),b=n.getBoundingClientRect();if(s.visibility==='hidden'||s.display==='none'||s.opacity!=='1')return false;if(['auto','scroll','hidden','clip'].includes(s.overflowY)&&(r.top<b.top||r.bottom>b.bottom))return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "focus-subject",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#usage-share-subject"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.getElementById('usage-share-subject');if(!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),p=e.parentElement,cs=getComputedStyle(p),available=p.getBoundingClientRect().width-parseFloat(cs.borderLeftWidth)-parseFloat(cs.borderRightWidth)-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);if(c.display!=='flex'||c.boxSizing!=='border-box'||Math.abs(r.width-available)>.02||r.width<100||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let n=e.parentElement;n&&n!==document.body;n=n.parentElement){const s=getComputedStyle(n),b=n.getBoundingClientRect();if(s.visibility==='hidden'||s.display==='none'||s.opacity!=='1')return false;if(['auto','scroll','hidden','clip'].includes(s.overflowY)&&(r.top<b.top||r.bottom>b.bottom))return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "focus-theme",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#usage-share-theme"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.getElementById('usage-share-theme');if(!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),p=e.parentElement,cs=getComputedStyle(p),available=p.getBoundingClientRect().width-parseFloat(cs.borderLeftWidth)-parseFloat(cs.borderRightWidth)-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);if(c.display!=='flex'||c.boxSizing!=='border-box'||Math.abs(r.width-available)>.02||r.width<100||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let n=e.parentElement;n&&n!==document.body;n=n.parentElement){const s=getComputedStyle(n),b=n.getBoundingClientRect();if(s.visibility==='hidden'||s.display==='none'||s.opacity!=='1')return false;if(['auto','scroll','hidden','clip'].includes(s.overflowY)&&(r.top<b.top||r.bottom>b.bottom))return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "focus-footer",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#usage-share-footer"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.getElementById('usage-share-footer');if(!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),p=e.parentElement,cs=getComputedStyle(p),available=p.getBoundingClientRect().width-parseFloat(cs.borderLeftWidth)-parseFloat(cs.borderRightWidth)-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);if(c.display!=='flex'||c.boxSizing!=='border-box'||Math.abs(r.width-available)>.02||r.width<100||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let n=e.parentElement;n&&n!==document.body;n=n.parentElement){const s=getComputedStyle(n),b=n.getBoundingClientRect();if(s.visibility==='hidden'||s.display==='none'||s.opacity!=='1')return false;if(['auto','scroll','hidden','clip'].includes(s.overflowY)&&(r.top<b.top||r.bottom>b.bottom))return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "subject-open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "#usage-share-subject"
+          },
+          {
+            "action": "visible",
+            "role": "option",
+            "name": "Workspace and members",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.getElementById('usage-share-subject');if(!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),p=e.parentElement,cs=getComputedStyle(p),available=p.getBoundingClientRect().width-parseFloat(cs.borderLeftWidth)-parseFloat(cs.borderRightWidth)-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);if(c.display!=='flex'||c.boxSizing!=='border-box'||Math.abs(r.width-available)>.02||r.width<100||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let n=e.parentElement;n&&n!==document.body;n=n.parentElement){const s=getComputedStyle(n),b=n.getBoundingClientRect();if(s.visibility==='hidden'||s.display==='none'||s.opacity!=='1')return false;if(['auto','scroll','hidden','clip'].includes(s.overflowY)&&(r.top<b.top||r.bottom>b.bottom))return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "subject-members",
+        "steps": [
+          {
+            "action": "click",
+            "role": "option",
+            "name": "Workspace and members",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.getElementById('usage-share-subject')?.textContent==='Workspace and members'&&document.getElementById('usage-share-subject')?.getAttribute('aria-expanded')==='false'&&![...document.querySelectorAll('[role=listbox]')].some(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect();return c.display!=='none'&&c.visibility==='visible'&&Number(c.opacity)>0&&r.width>0&&r.height>0&&!e.closest('[data-closed]')})"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.getElementById('usage-share-subject');if(!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),p=e.parentElement,cs=getComputedStyle(p),available=p.getBoundingClientRect().width-parseFloat(cs.borderLeftWidth)-parseFloat(cs.borderRightWidth)-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);if(c.display!=='flex'||c.boxSizing!=='border-box'||Math.abs(r.width-available)>.02||r.width<100||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let n=e.parentElement;n&&n!==document.body;n=n.parentElement){const s=getComputedStyle(n),b=n.getBoundingClientRect();if(s.visibility==='hidden'||s.display==='none'||s.opacity!=='1')return false;if(['auto','scroll','hidden','clip'].includes(s.overflowY)&&(r.top<b.top||r.bottom>b.bottom))return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "metric-open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "#usage-share-metric"
+          },
+          {
+            "action": "visible",
+            "role": "option",
+            "name": "Estimated cost (USD)",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.getElementById('usage-share-metric');if(!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),p=e.parentElement,cs=getComputedStyle(p),available=p.getBoundingClientRect().width-parseFloat(cs.borderLeftWidth)-parseFloat(cs.borderRightWidth)-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);if(c.display!=='flex'||c.boxSizing!=='border-box'||Math.abs(r.width-available)>.02||r.width<100||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let n=e.parentElement;n&&n!==document.body;n=n.parentElement){const s=getComputedStyle(n),b=n.getBoundingClientRect();if(s.visibility==='hidden'||s.display==='none'||s.opacity!=='1')return false;if(['auto','scroll','hidden','clip'].includes(s.overflowY)&&(r.top<b.top||r.bottom>b.bottom))return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "metric-cost-keyboard",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "#usage-share-metric",
+            "key": "End"
+          },
+          {
+            "action": "press",
+            "role": "option",
+            "name": "Estimated cost (USD)",
+            "exact": true,
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.getElementById('usage-share-metric')?.textContent==='Estimated cost (USD)'&&document.getElementById('usage-share-metric')?.getAttribute('aria-expanded')==='false'&&![...document.querySelectorAll('[role=listbox]')].some(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect();return c.display!=='none'&&c.visibility==='visible'&&Number(c.opacity)>0&&r.width>0&&r.height>0&&!e.closest('[data-closed]')})"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.getElementById('usage-share-metric');if(!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),p=e.parentElement,cs=getComputedStyle(p),available=p.getBoundingClientRect().width-parseFloat(cs.borderLeftWidth)-parseFloat(cs.borderRightWidth)-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);if(c.display!=='flex'||c.boxSizing!=='border-box'||Math.abs(r.width-available)>.02||r.width<100||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let n=e.parentElement;n&&n!==document.body;n=n.parentElement){const s=getComputedStyle(n),b=n.getBoundingClientRect();if(s.visibility==='hidden'||s.display==='none'||s.opacity!=='1')return false;if(['auto','scroll','hidden','clip'].includes(s.overflowY)&&(r.top<b.top||r.bottom>b.bottom))return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "settings-usageshareimagedialog--single-contributor": [
+      {
+        "name": "focus-metric",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#usage-share-metric"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.getElementById('usage-share-metric');if(!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),p=e.parentElement,cs=getComputedStyle(p),available=p.getBoundingClientRect().width-parseFloat(cs.borderLeftWidth)-parseFloat(cs.borderRightWidth)-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);if(c.display!=='flex'||c.boxSizing!=='border-box'||Math.abs(r.width-available)>.02||r.width<100||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let n=e.parentElement;n&&n!==document.body;n=n.parentElement){const s=getComputedStyle(n),b=n.getBoundingClientRect();if(s.visibility==='hidden'||s.display==='none'||s.opacity!=='1')return false;if(['auto','scroll','hidden','clip'].includes(s.overflowY)&&(r.top<b.top||r.bottom>b.bottom))return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "focus-aspect",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#usage-share-aspect"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.getElementById('usage-share-aspect');if(!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),p=e.parentElement,cs=getComputedStyle(p),available=p.getBoundingClientRect().width-parseFloat(cs.borderLeftWidth)-parseFloat(cs.borderRightWidth)-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);if(c.display!=='flex'||c.boxSizing!=='border-box'||Math.abs(r.width-available)>.02||r.width<100||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let n=e.parentElement;n&&n!==document.body;n=n.parentElement){const s=getComputedStyle(n),b=n.getBoundingClientRect();if(s.visibility==='hidden'||s.display==='none'||s.opacity!=='1')return false;if(['auto','scroll','hidden','clip'].includes(s.overflowY)&&(r.top<b.top||r.bottom>b.bottom))return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "focus-subject",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#usage-share-subject"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.getElementById('usage-share-subject');if(!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),p=e.parentElement,cs=getComputedStyle(p),available=p.getBoundingClientRect().width-parseFloat(cs.borderLeftWidth)-parseFloat(cs.borderRightWidth)-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);if(c.display!=='flex'||c.boxSizing!=='border-box'||Math.abs(r.width-available)>.02||r.width<100||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let n=e.parentElement;n&&n!==document.body;n=n.parentElement){const s=getComputedStyle(n),b=n.getBoundingClientRect();if(s.visibility==='hidden'||s.display==='none'||s.opacity!=='1')return false;if(['auto','scroll','hidden','clip'].includes(s.overflowY)&&(r.top<b.top||r.bottom>b.bottom))return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "focus-theme",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#usage-share-theme"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.getElementById('usage-share-theme');if(!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),p=e.parentElement,cs=getComputedStyle(p),available=p.getBoundingClientRect().width-parseFloat(cs.borderLeftWidth)-parseFloat(cs.borderRightWidth)-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);if(c.display!=='flex'||c.boxSizing!=='border-box'||Math.abs(r.width-available)>.02||r.width<100||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let n=e.parentElement;n&&n!==document.body;n=n.parentElement){const s=getComputedStyle(n),b=n.getBoundingClientRect();if(s.visibility==='hidden'||s.display==='none'||s.opacity!=='1')return false;if(['auto','scroll','hidden','clip'].includes(s.overflowY)&&(r.top<b.top||r.bottom>b.bottom))return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "focus-footer",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#usage-share-footer"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.getElementById('usage-share-footer');if(!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),p=e.parentElement,cs=getComputedStyle(p),available=p.getBoundingClientRect().width-parseFloat(cs.borderLeftWidth)-parseFloat(cs.borderRightWidth)-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);if(c.display!=='flex'||c.boxSizing!=='border-box'||Math.abs(r.width-available)>.02||r.width<100||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let n=e.parentElement;n&&n!==document.body;n=n.parentElement){const s=getComputedStyle(n),b=n.getBoundingClientRect();if(s.visibility==='hidden'||s.display==='none'||s.opacity!=='1')return false;if(['auto','scroll','hidden','clip'].includes(s.overflowY)&&(r.top<b.top||r.bottom>b.bottom))return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "subject-team-disabled",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "#usage-share-subject"
+          },
+          {
+            "action": "visible",
+            "role": "option",
+            "name": "Workspace and members",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => [...document.querySelectorAll('[role=option]')].some(e=>e.textContent==='Workspace and members'&&e.getAttribute('aria-disabled')==='true')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.getElementById('usage-share-subject');if(!e)return false;const c=getComputedStyle(e),r=e.getBoundingClientRect(),p=e.parentElement,cs=getComputedStyle(p),available=p.getBoundingClientRect().width-parseFloat(cs.borderLeftWidth)-parseFloat(cs.borderRightWidth)-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);if(c.display!=='flex'||c.boxSizing!=='border-box'||Math.abs(r.width-available)>.02||r.width<100||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let n=e.parentElement;n&&n!==document.body;n=n.parentElement){const s=getComputedStyle(n),b=n.getBoundingClientRect();if(s.visibility==='hidden'||s.display==='none'||s.opacity!=='1')return false;if(['auto','scroll','hidden','clip'].includes(s.overflowY)&&(r.top<b.top||r.bottom>b.bottom))return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ]
+  }
+}

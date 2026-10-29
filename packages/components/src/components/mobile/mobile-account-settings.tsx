@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
+import { button } from '@lody/ui/button/button.tokens.stylex';
 import type { AvatarKind, CliApiKeyRecord } from '@lody/shared';
 import {
   UserPlus,
@@ -46,6 +47,9 @@ import {
 const MONO = 'var(--font-mono, ui-monospace, monospace)';
 
 const styles = stylex.create({
+  actionSpacing: {
+    [button.paddingXSmall]: 'calc(var(--spacing) * 2.5)',
+  },
   pendingNameInk: { color: 'hsl(var(--muted-foreground) / 1)' },
   pendingActionSpacing: { marginRight: 'calc(var(--spacing) * 1.5)' },
   pendingAccountDeletionSpacing: { marginRight: 'calc(var(--spacing) * 2)' },
@@ -751,7 +755,7 @@ export function MobileAccountSettings({
                 size="small"
                 variant="secondary"
                 height="calc(var(--spacing) * 8)"
-                className="px-2.5"
+                className={stylex.props(styles.actionSpacing).className}
                 onClick={() => setInviteDialogOpen(true)}
               >
                 <UserPlus {...stylex.props(styles.buttonIcon)} />
@@ -932,7 +936,7 @@ export function MobileAccountSettings({
             <Button
               size="small"
               height="calc(var(--spacing) * 8)"
-              className="px-2.5"
+              className={stylex.props(styles.actionSpacing).className}
               onClick={() => {
                 setCliApiKeyDialogOpen(true);
               }}

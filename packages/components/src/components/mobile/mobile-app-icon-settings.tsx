@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Check } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
+import { button } from '@lody/ui/button/button.tokens.stylex';
 import { deferredPostHog } from '@/lib/deferred-posthog';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 // The theme tokens are imported by path, not by the `@/` alias: the StyleX
@@ -18,6 +19,13 @@ import { MobileSettingsSection } from './mobile-settings-row';
 import { CompactSection } from '../settings/compact-layout';
 
 const styles = stylex.create({
+  choiceLayout: {
+    [button.gap]: 'calc(var(--spacing) * 2)',
+    [button.paddingXMedium]: 'calc(var(--spacing) * 3)',
+    minWidth: 'calc(var(--spacing) * 24)',
+    flexDirection: 'column',
+    paddingBlock: 'calc(var(--spacing) * 3)',
+  },
   /** The icon choices, laid out in a wrapping row. */
   choices: {
     display: 'flex',
@@ -127,7 +135,7 @@ export function MobileAppIconSettings({
               key={icon.name}
               variant="secondary"
               height="auto"
-              className="min-w-24 flex-col gap-2 p-3"
+              className={stylex.props(styles.choiceLayout).className}
               aria-pressed={selected}
               disabled={!state || pending}
               onClick={() => void selectIcon(icon.name)}

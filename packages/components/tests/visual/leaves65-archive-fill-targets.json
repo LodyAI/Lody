@@ -1,0 +1,125 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "narrow-desktop-UA",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": ["components-sidebar-migration--row-anatomy"],
+  "ready": {
+    "components-sidebar-migration--row-anatomy": [
+      {
+        "action": "hover",
+        "text": "Resting session"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const e=document.querySelector('button[aria-label$=\"Archive Resting session\"]');if(!e||document.fonts.status!=='loaded')return false;const s=getComputedStyle(e),r=e.getBoundingClientRect();if(r.width<19||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;if(!document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')))return false;return e.getAttribute('aria-label')==='Archive Resting session'&&!e.querySelector('span[aria-hidden=true]')&&s.opacity==='1'&&s.pointerEvents==='auto';}"
+      },
+      {
+        "action": "hover",
+        "selector": "button[aria-label$=\"Archive Resting session\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const e=document.querySelector('button[aria-label$=\"Archive Resting session\"]');if(!e||document.fonts.status!=='loaded')return false;const s=getComputedStyle(e),r=e.getBoundingClientRect();if(r.width<19||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;if(!document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')))return false;return e.getAttribute('aria-label')==='Archive Resting session'&&!e.querySelector('span[aria-hidden=true]')&&s.opacity==='1'&&s.pointerEvents==='auto';}"
+      }
+    ]
+  },
+  "states": {
+    "components-sidebar-migration--row-anatomy": [
+      {
+        "name": "armed-pointer",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button[aria-label$=\"Archive Resting session\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const e=document.querySelector('button[aria-label$=\"Archive Resting session\"]');if(!e||document.fonts.status!=='loaded')return false;const s=getComputedStyle(e),r=e.getBoundingClientRect();if(r.width<19||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;if(!document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')))return false;return e.getAttribute('aria-label')==='Confirm Archive Resting session'&&!!e.querySelector('span[aria-hidden=true]')&&e.textContent==='Confirm archive'&&s.opacity==='1'&&s.pointerEvents==='auto';}"
+          }
+        ]
+      },
+      {
+        "name": "escape-idle",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "button[aria-label$=\"Archive Resting session\"]",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const e=document.querySelector('button[aria-label$=\"Archive Resting session\"]');if(!e||document.fonts.status!=='loaded')return false;const s=getComputedStyle(e),r=e.getBoundingClientRect();if(r.width<19||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;if(!document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')))return false;return e.getAttribute('aria-label')==='Archive Resting session'&&!e.querySelector('span[aria-hidden=true]')&&s.opacity==='1'&&s.pointerEvents==='auto';}"
+          }
+        ]
+      },
+      {
+        "name": "armed-keyboard-focus",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "button[aria-label$=\"Archive Resting session\"]",
+            "key": "Space"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const e=document.querySelector('button[aria-label$=\"Archive Resting session\"]');if(!e||document.fonts.status!=='loaded')return false;const s=getComputedStyle(e),r=e.getBoundingClientRect();if(r.width<19||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;if(!document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')))return false;return e.getAttribute('aria-label')==='Confirm Archive Resting session'&&!!e.querySelector('span[aria-hidden=true]')&&e.textContent==='Confirm archive'&&s.opacity==='1'&&s.pointerEvents==='auto'&&e.matches(':focus-visible');}"
+          }
+        ]
+      },
+      {
+        "name": "leave-reset",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 700,
+            "y": 500
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const e=document.querySelector('button[aria-label$=\"Archive Resting session\"]');if(!e||document.fonts.status!=='loaded')return false;const s=getComputedStyle(e),r=e.getBoundingClientRect();if(r.width<19||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;if(!document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')))return false;return e.getAttribute('aria-label')==='Archive Resting session'&&!e.querySelector('span[aria-hidden=true]')&&s.opacity==='0'&&s.pointerEvents==='none';}"
+          }
+        ]
+      },
+      {
+        "name": "confirmed-removed",
+        "steps": [
+          {
+            "action": "hover",
+            "text": "Resting session"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const e=document.querySelector('button[aria-label$=\"Archive Resting session\"]');if(!e||document.fonts.status!=='loaded')return false;const s=getComputedStyle(e),r=e.getBoundingClientRect();if(r.width<19||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;if(!document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')))return false;return e.getAttribute('aria-label')==='Archive Resting session'&&!e.querySelector('span[aria-hidden=true]')&&s.opacity==='1'&&s.pointerEvents==='auto';}"
+          },
+          {
+            "action": "click",
+            "selector": "button[aria-label$=\"Archive Resting session\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const e=document.querySelector('button[aria-label$=\"Archive Resting session\"]');if(!e||document.fonts.status!=='loaded')return false;const s=getComputedStyle(e),r=e.getBoundingClientRect();if(r.width<19||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;if(!document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running')))return false;return e.getAttribute('aria-label')==='Confirm Archive Resting session'&&!!e.querySelector('span[aria-hidden=true]')&&e.textContent==='Confirm archive'&&s.opacity==='1'&&s.pointerEvents==='auto';}"
+          },
+          {
+            "action": "click",
+            "selector": "button[aria-label$=\"Archive Resting session\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>!document.querySelector('button[aria-label$=\"Archive Resting session\"]')&&![...document.querySelectorAll('span')].some(e=>e.textContent==='Resting session')&&document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ]
+  }
+}
