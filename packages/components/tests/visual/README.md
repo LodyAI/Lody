@@ -199,6 +199,8 @@ It applies the same predicate after view changes on both immutable builds.
 | `leaves34-no-background-colors-targets.json`                                                                                                                                             | Actual fixed Operation/Header More ink; inherited hover backgrounds, focus, disabled state and two target tokens. Four inline negatives are genuine color differences.                                                       |
 | `leaves35-project-group-icons-targets.json`, `leaves35-project-group-natural-menu-targets.json`                                                                                          | Actual group resolved/fallback glyphs, caller precedence and natural 70% opacity; original six raster OPENs remain explicit.                                                                                                 |
 | `leaves35-project-group-menu-painted-targets.json`, `leaves35-project-group-natural-menu-painted-targets.json`                                                                           | Genuine painted-menu readiness; final48closed+12painted source rows retain three current raster OPENs and exact source provenance.                                                                                           |
+| `leaves44-modal-spacing-targets.json`, `leaves44-modal-spacing-consumers-targets.json`                                                                                                   | Actual Dialog/Alert default-none combinations, omission reset, retained value/focus, inline style callbacks and real modal host; Rename/Operation portals use actual-popup readiness.                                        |
+| `leaves45-avatar-glyph-targets.json`                                                                                                                                                     | Actual User/Workspace fallback glyphs across five rungs, inherited glyph-token theme, mounted theme swap/restore and initials controls; DPR3 CSS adds no PNGs.                                                               |
 | `legacy-task-targets.json`                                                                                                                                                               | Actual legacy TaskList rows, caller/root/subtree variable overrides, loading/empty/overflow and desktop pointer states.                                                                                                      |
 | `legacy-updated-task-targets.json`                                                                                                                                                       | Actual legacy flat Updated list, status/anchor rows, rename, archive, show all/less and scoped variables.                                                                                                                    |
 | `owned-session-list-targets.json`                                                                                                                                                        | Active SessionList project groups, selection, caller/root/subtree overrides, menus, folding and empty/loading states.                                                                                                        |
@@ -333,6 +335,22 @@ flex contract. The mobile-account/encrypted-mark continuation contributes anothe
 closing animation at its start does not validate its whole timeline. An empty or
 opaque caller class still replaces the encrypted mark's default rather than
 merging with it. CSS-only samples never add screenshot pairs.
+
+The modal-spacing/avatar-glyph report has 108 exact formal PNG pairs/7,536 equal
+standard records. The modal fixture's Before uses real legacy classes and its
+After swaps only that local adapter to the new Content props; retain both fixture
+hashes instead of claiming identical source bytes. Twelve modal CSS scenes and
+four DPR3 avatar CSS scenes add no screenshot pairs. Gallery and Electron images
+are After-only, with actual pixel dimensions retained.
+
+A portal-only Rename story leaves its decorated story root blank even when its
+body-mounted dialog is painted. Its target may use the existing `allowBlankIds`
+exception only with strict actual-popup spacing/paint/theme/focus/animation gates.
+Retain the initial five error PNGs, interrupted checkpoint and count correction;
+the original four-failure log summary does not enumerate that final interrupted
+image. The public Avatar root and original UserAvatar parameter-format hunk stay
+unchanged; use the actual d22e Before source rather than a HEAD format variant.
+No new matching matrix closes historical pixel OPENs or inline negative contracts.
 
 The existing Browser Preview sweep inherits its configured base URL in every
 fresh context. Static builds use production React, so story input helpers must

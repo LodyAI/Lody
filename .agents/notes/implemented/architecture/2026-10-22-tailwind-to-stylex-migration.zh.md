@@ -1216,6 +1216,30 @@ Gallery 通过声明。随后稳定源码 UI 回归通过 components 620 文件�
 范围检查通过，三批归属测试分别为 19／两项／八项；lint 为一／十二／零 warnings，
 全部零错误。原 profile 误用和标签大小写校准失败单列，不以最终匹配矩阵关闭历史 OPEN。
 
+Modal 间距／头像图标续批再移除八处 utility。Dialog 与 AlertDialog 共用显式 padding／gap
+选择，替代调用方与面板样式争夺优先级；默认值、移除属性复原及内联 style 回调合同保留，
+API 由归属 [UI README](../../../../packages/ui/README.md)说明。Drawer 的逻辑 safe-area
+内边距和 Base UI 状态回调需独立验收，本批不扩入。两个头像 fallback SVG 在既有五级
+图标槽内使用本地 100% 宽高，根 API 和挂载节点不变。UserAvatar 的 Before 是实际工作树
+中的 d22e 源码，保留原参数格式 hunk，不以格式不同的 HEAD 副本替代。
+
+`leaves44-45-acceptance.html` 内嵌 108 对字节一致的正式截图、7,536 条相同标准节点记录：
+Modal API／消费者为 84／2,520，头像图标为 24／5,016。十二 Modal CSS 场景比较
+48 个节点／231,048 值；四个头像 CSS 场景比较 120 节点／563,580 值，预期 class 属性
+变化另记。头像 DPR3 探针仅为 CSS 证据，正式截图使用 DPR1／reduced motion。四张真实
+Gallery 和四张真实 Electron 图均为 After-only，不混入正式对数。Electron 重建
+main／preload／renderer 并复用未改的 bundled CLI；配置页等待状态、应用自带 Explore
+演示和空本地聊天不证明 agent／云端流程或桌面前后等价。
+
+首次 Rename 消费者采集已满足真实 popup 条件，但 Dialog 全部 portal 到空 decorator
+外，触发了工具要求 story root 可见的门禁。仅这两个 target 使用既有空根例外，仍严格
+验证实际 popup 的绘制、间距、主题、焦点和动画。五张原始错误图、两张中断前成功图及
+数量修正 addendum 保留，不覆盖原数据。Modal 夹具在前后只将局部旧类 adapter 改为
+API 属性，两份原字节哈希均记录。UI 全套通过 25 文件／304 测试；随后冻结源码的
+components 全套通过 620 文件／6,207 测试，1,264 个产品／样式文件哈希全部未变。
+根格式化通过；实际重跑的根检查仍停在既有 ACP SDK export 构建失败。更早像素 OPEN
+和负控合同不改变状态。
+
 ## 后续工作
 
 基于编译器的[用量统计](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -1229,7 +1253,8 @@ Gallery 通过声明。随后稳定源码 UI 回归通过 components 620 文件�
 | 相同 pre31 源码快照              | v2       |    1,741 |  176 |    725 |
 | 冻结截至 35 的源码               | v2       |    1,705 |  175 |    721 |
 | 冻结截至 40 的源码               | v2       |    1,676 |  175 |    721 |
-| 当前截至 43 的源码，视觉限制另列 | v2       |    1,664 |  173 |    721 |
+| 冻结截至 43 的源码               | v2       |    1,664 |  173 |    721 |
+| 当前截至 45 的源码，视觉限制另列 | v2       |    1,656 |  171 |    721 |
 
 更早的方法修正覆盖了单个 utility、`withClassName` 第二参数和受支持的静态类名数组。
 各批历史数字继续留在冻结报告，不能跨方法混合基线。例如四文件 helper 重扫得到 165→97，
@@ -1242,7 +1267,7 @@ v1 漏记五个真实 utility，因此 31–33 批实际移除 26，而旧下界
 其他字段中看似有效 utility 的负控。模糊写入继续列为未解析；UI 适配器两处 `className` 写入新增四个未解析表达式，
 因此数量相应增加。
 
-当前 v2 分项为 components 1,209 处／157 文件／628 未解析，旧 UI 450／14／93，
+当前 v2 分项为 components 1,201 处／155 文件／628 未解析，旧 UI 450／14／93，
 routes 五处／两文件／零。34–39 批视觉差异与被拒校准保持各自状态，源码统计不构成验收。
 
 WebWorkspaceLayout 仍延期，等待真实 sidebar/runtime/router 组合的
@@ -1250,8 +1275,8 @@ WebWorkspaceLayout 仍延期，等待真实 sidebar/runtime/router 组合的
 
 未使用的 `src/ui/sidebar.tsx` 保留 304 处，`src/ui/index.ts` 没有重导出它；
 公开通配路径仍可能被外部直接导入。其公开适配层现有真实渲染夹具，包含移动打开及桌面折叠。
-未使用的 `src/components/task-list.tsx` 保留 15 处，
-`src/components/sidebar-updated-task-list.tsx` 保留 23 处；两者现有真实渲染及原生输入夹具。
+未使用的 `src/components/task-list.tsx` 保留 14 处，
+`src/components/sidebar-updated-task-list.tsx` 保留 22 处；两者现有真实渲染及原生输入夹具。
 `PropertyRowWide` 现有真实渲染夹具，仅保留两个任意子元素选择器。其他未使用界面
 仍需先确认消费者并建立场景，再迁移。原版 phone 终端错误 span 宽度为零、
 行内反馈不可见，而桌面/平板/短视口反馈可见；原版 240px 日程场景中极长 label 与不可收缩

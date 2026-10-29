@@ -2210,6 +2210,58 @@ function FilterDrawer({ side, inset }: { side: DrawerSide; inset?: boolean }) {
   );
 }
 
+/** Actual modal panels: spacing is measured from the node the reader opens. */
+function ModalSpacingExample({ alert = false }: { alert?: boolean }) {
+  const [layout, setLayout] = useState<'default' | 'padding' | 'gap' | 'both'>('both');
+  const [panel, setPanel] = useState<HTMLDivElement | null>(null);
+  const [readout, setReadout] = useState('Open to measure');
+  const Modal = alert ? AlertDialog : Dialog;
+  const padding = layout === 'padding' || layout === 'both' ? 'none' : undefined;
+  const gap = layout === 'gap' || layout === 'both' ? 'none' : undefined;
+  useEffect(() => {
+    if (!panel) return;
+    const css = getComputedStyle(panel);
+    setReadout(`padding ${css.paddingTop} · gap ${css.rowGap}`);
+  }, [panel, padding, gap]);
+  return (
+    <div>
+      <Modal.Root>
+        <Modal.Trigger render={<Button variant="secondary" />}>
+          {alert ? 'Alert spacing' : 'Dialog spacing'}
+        </Modal.Trigger>
+        <Modal.Content ref={setPanel} padding={padding} gap={gap}>
+          <Modal.Header>
+            <Modal.Title>Embedded content spacing</Modal.Title>
+            <Modal.Description>Padding and gap can belong to the content.</Modal.Description>
+          </Modal.Header>
+          <Field.Root>
+            <Field.Label>Retained value</Field.Label>
+            <Input defaultValue="Edit this value" />
+          </Field.Root>
+          <Cluster>
+            <Button size="small" onClick={() => setLayout('padding')}>
+              Zero padding
+            </Button>
+            <Button size="small" onClick={() => setLayout('gap')}>
+              Zero gap
+            </Button>
+            <Button size="small" onClick={() => setLayout('both')}>
+              Zero both
+            </Button>
+            <Button size="small" onClick={() => setLayout('default')}>
+              Default spacing
+            </Button>
+          </Cluster>
+          <Modal.Footer>
+            <Modal.Close render={<Button variant="secondary" />}>Close spacing sample</Modal.Close>
+          </Modal.Footer>
+        </Modal.Content>
+      </Modal.Root>
+      <span {...stylex.props(styles.readout)}>{readout}</span>
+    </div>
+  );
+}
+
 /** The three ways onto the modal rung, each one a reader can actually open. */
 function ModalTriggers() {
   return (
@@ -2258,6 +2310,13 @@ function ModalTriggers() {
               </AlertDialog.Footer>
             </AlertDialog.Content>
           </AlertDialog.Root>
+        </Cluster>
+      </Row>
+      <Row>
+        <LegendKey>panel padding / gap</LegendKey>
+        <Cluster>
+          <ModalSpacingExample />
+          <ModalSpacingExample alert />
         </Cluster>
       </Row>
       <Row>

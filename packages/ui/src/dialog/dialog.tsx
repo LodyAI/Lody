@@ -59,6 +59,10 @@ export interface ModalContentProps extends Omit<PopupBaseProps, 'className' | 'r
    * viewport cap still applies on top.
    */
   width?: CSSProperties['width'];
+  /** Keep the panel inset, or let embedded content reach its edges. */
+  padding?: 'default' | 'none';
+  /** Space direct content blocks, or let embedded content own their spacing. */
+  gap?: 'default' | 'none';
   /**
    * An element to centre the panel on across the window's width, in place of
    * the window's own centre: a dialog opened from one pane of a larger surface
@@ -160,6 +164,8 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(func
     closeButton = true,
     closeLabel = 'Close',
     width,
+    padding = 'default',
+    gap = 'default',
     centerOn,
     style,
     ...rest
@@ -190,6 +196,8 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(func
           appendClassName(
             stylex.props(
               modal.popup,
+              padding === 'none' && modal.noPadding,
+              gap === 'none' && modal.noGap,
               isHidden(state.transitionStatus) && modal.popupHidden,
               noAnimation && modal.noTransition
             ).className,

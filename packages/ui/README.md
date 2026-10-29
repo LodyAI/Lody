@@ -293,6 +293,14 @@ group and one surface, and differ only in how they arrive and in what may dismis
 them. A dialog carries a cross and says so; an alert dialog is answered rather
 than dismissed, so a press beside it is not an answer, though Escape still is.
 
+`Dialog.Content` and `AlertDialog.Content` keep their theme-defined inset and
+spacing unless `padding="none"` or `gap="none"` lets embedded content own them.
+The choices are independent; `"default"` or removing either prop restores that
+part of the panel's layout. Existing inline `style` objects and popup-state
+callbacks keep their precedence, so an explicit caller padding or gap still
+applies. These props address the actual panel and are consumed there; Drawer
+continues to own its separate safe-area spacing.
+
 ```tsx
 <Dialog.Root>
   <Dialog.Trigger render={<Button variant="secondary" />}>Rename</Dialog.Trigger>

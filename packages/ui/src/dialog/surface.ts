@@ -16,6 +16,8 @@ import { dialog } from './dialog.tokens.stylex';
  * than merely sit behind something.
  */
 export const modal = stylex.create({
+  noPadding: { padding: 0 },
+  noGap: { gap: 0 },
   /**
    * The overlay. It is `position: fixed` with `min-height: 100dvh` because on
    * iOS the visual viewport and the layout viewport disagree while the URL bar

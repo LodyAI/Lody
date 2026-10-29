@@ -23,6 +23,59 @@ const buttonNamed = (label: string) => {
 };
 
 describe('Dialog', () => {
+  for (const [name, Modal] of [
+    ['Dialog', Dialog],
+    ['AlertDialog', AlertDialog],
+  ] as const) {
+    test(`${name} consumes spacing options without replacing its live panel or caller style`, async () => {
+      const ref = { current: null as HTMLDivElement | null };
+      const view = (spacing: { padding?: 'default' | 'none'; gap?: 'default' | 'none' }) => (
+        <Modal.Root defaultOpen>
+          <Modal.Trigger>Reopen spacing test</Modal.Trigger>
+          <Modal.Content
+            {...spacing}
+            ref={ref}
+            data-spacing-test="panel"
+            width="400px"
+            style={(state) => ({ padding: 7, gap: 9, opacity: state.open ? 1 : 0 })}
+          >
+            <Modal.Title>Spacing contract</Modal.Title>
+            <input aria-label="Retained spacing value" defaultValue="Original value" />
+            <Modal.Close>Close spacing test</Modal.Close>
+          </Modal.Content>
+        </Modal.Root>
+      );
+      mounted = await mount(view({}));
+      const node = one('[data-spacing-test="panel"]');
+      const input = one('input') as HTMLInputElement;
+      input.value = 'Edited value';
+      await step(() => input.focus());
+      for (const spacing of [
+        { padding: 'none', gap: 'default' },
+        { padding: 'default', gap: 'none' },
+        { padding: 'none', gap: 'none' },
+        {},
+      ] as const) {
+        await step(() => mounted!.root.render(view(spacing)));
+        expect(one('[data-spacing-test="panel"]')).toBe(node);
+        expect(ref.current).toBe(node);
+        expect(one('input')).toBe(input);
+        expect(input.value).toBe('Edited value');
+        expect(document.activeElement).toBe(input);
+        expect(node.hasAttribute('padding')).toBe(false);
+        expect(node.hasAttribute('gap')).toBe(false);
+        expect(node.style.padding).toBe('7px');
+        expect(node.style.gap).toBe('9px');
+        expect(node.style.width).toBe('400px');
+        expect(node.style.opacity).toBe('1');
+      }
+      await click(buttonNamed('Close spacing test'));
+      expect(all('[data-spacing-test="panel"]')).toHaveLength(0);
+      await click(buttonNamed('Reopen spacing test'));
+      expect(one('[data-spacing-test="panel"]')).toBe(ref.current);
+    });
+  }
+
   test('modal hosts are independent of floating hosts, and explicit containers win', async () => {
     const host = document.createElement('div');
     const floating = document.createElement('div');

@@ -1,0 +1,234 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "ids": [
+    "migration-ownedmodalspacing--dialog-default",
+    "migration-ownedmodalspacing--dialog-no-padding",
+    "migration-ownedmodalspacing--dialog-no-gap",
+    "migration-ownedmodalspacing--dialog-no-both",
+    "migration-ownedmodalspacing--alert-default",
+    "migration-ownedmodalspacing--alert-no-padding",
+    "migration-ownedmodalspacing--alert-no-gap",
+    "migration-ownedmodalspacing--alert-no-both",
+    "migration-ownedmodalspacing--dialog-update",
+    "migration-ownedmodalspacing--alert-update",
+    "migration-ownedmodalspacing--caller-inline",
+    "migration-ownedmodalspacing--hosted-dark-alert"
+  ],
+  "ready": {
+    "migration-ownedmodalspacing--dialog-default": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const panel=document.querySelector('[data-modal-spacing-panel]'),fixture=document.querySelector('[data-modal-spacing]');if(!panel||!fixture||fixture.dataset.layout!==\"default\"||fixture.dataset.open!=='true'||fixture.dataset.value!==\"Preserved modal value\"||fixture.dataset.openChanges!==\"0\"||panel.getAttribute('role')!==\"dialog\")return false;const c=getComputedStyle(panel),box=panel.getBoundingClientRect();if(!['paddingTop','paddingBottom','paddingLeft','paddingRight'].every(k=>c[k]==='16px')||c.rowGap!=='16px'||c.columnGap!=='16px'||c.opacity!=='1'||box.width<=0||box.left<0||box.right>innerWidth||box.top<0||box.bottom>innerHeight||!panel.contains(document.activeElement))return false;if(panel.hasAttribute('padding')||panel.hasAttribute('gap'))return false;const forced=false;if(forced&&(!document.querySelector('[data-modal-spacing-host]')?.contains(panel)||c.colorScheme!=='dark'))return false;const requested=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==requested)return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedmodalspacing--dialog-no-padding": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const panel=document.querySelector('[data-modal-spacing-panel]'),fixture=document.querySelector('[data-modal-spacing]');if(!panel||!fixture||fixture.dataset.layout!==\"padding\"||fixture.dataset.open!=='true'||fixture.dataset.value!==\"Preserved modal value\"||fixture.dataset.openChanges!==\"0\"||panel.getAttribute('role')!==\"dialog\")return false;const c=getComputedStyle(panel),box=panel.getBoundingClientRect();if(!['paddingTop','paddingBottom','paddingLeft','paddingRight'].every(k=>c[k]==='0px')||c.rowGap!=='16px'||c.columnGap!=='16px'||c.opacity!=='1'||box.width<=0||box.left<0||box.right>innerWidth||box.top<0||box.bottom>innerHeight||!panel.contains(document.activeElement))return false;if(panel.hasAttribute('padding')||panel.hasAttribute('gap'))return false;const forced=false;if(forced&&(!document.querySelector('[data-modal-spacing-host]')?.contains(panel)||c.colorScheme!=='dark'))return false;const requested=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==requested)return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedmodalspacing--dialog-no-gap": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const panel=document.querySelector('[data-modal-spacing-panel]'),fixture=document.querySelector('[data-modal-spacing]');if(!panel||!fixture||fixture.dataset.layout!==\"gap\"||fixture.dataset.open!=='true'||fixture.dataset.value!==\"Preserved modal value\"||fixture.dataset.openChanges!==\"0\"||panel.getAttribute('role')!==\"dialog\")return false;const c=getComputedStyle(panel),box=panel.getBoundingClientRect();if(!['paddingTop','paddingBottom','paddingLeft','paddingRight'].every(k=>c[k]==='16px')||c.rowGap!=='0px'||c.columnGap!=='0px'||c.opacity!=='1'||box.width<=0||box.left<0||box.right>innerWidth||box.top<0||box.bottom>innerHeight||!panel.contains(document.activeElement))return false;if(panel.hasAttribute('padding')||panel.hasAttribute('gap'))return false;const forced=false;if(forced&&(!document.querySelector('[data-modal-spacing-host]')?.contains(panel)||c.colorScheme!=='dark'))return false;const requested=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==requested)return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedmodalspacing--dialog-no-both": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const panel=document.querySelector('[data-modal-spacing-panel]'),fixture=document.querySelector('[data-modal-spacing]');if(!panel||!fixture||fixture.dataset.layout!==\"both\"||fixture.dataset.open!=='true'||fixture.dataset.value!==\"Preserved modal value\"||fixture.dataset.openChanges!==\"0\"||panel.getAttribute('role')!==\"dialog\")return false;const c=getComputedStyle(panel),box=panel.getBoundingClientRect();if(!['paddingTop','paddingBottom','paddingLeft','paddingRight'].every(k=>c[k]==='0px')||c.rowGap!=='0px'||c.columnGap!=='0px'||c.opacity!=='1'||box.width<=0||box.left<0||box.right>innerWidth||box.top<0||box.bottom>innerHeight||!panel.contains(document.activeElement))return false;if(panel.hasAttribute('padding')||panel.hasAttribute('gap'))return false;const forced=false;if(forced&&(!document.querySelector('[data-modal-spacing-host]')?.contains(panel)||c.colorScheme!=='dark'))return false;const requested=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==requested)return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedmodalspacing--alert-default": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const panel=document.querySelector('[data-modal-spacing-panel]'),fixture=document.querySelector('[data-modal-spacing]');if(!panel||!fixture||fixture.dataset.layout!==\"default\"||fixture.dataset.open!=='true'||fixture.dataset.value!==\"Preserved modal value\"||fixture.dataset.openChanges!==\"0\"||panel.getAttribute('role')!==\"alertdialog\")return false;const c=getComputedStyle(panel),box=panel.getBoundingClientRect();if(!['paddingTop','paddingBottom','paddingLeft','paddingRight'].every(k=>c[k]==='16px')||c.rowGap!=='16px'||c.columnGap!=='16px'||c.opacity!=='1'||box.width<=0||box.left<0||box.right>innerWidth||box.top<0||box.bottom>innerHeight||!panel.contains(document.activeElement))return false;if(panel.hasAttribute('padding')||panel.hasAttribute('gap'))return false;const forced=false;if(forced&&(!document.querySelector('[data-modal-spacing-host]')?.contains(panel)||c.colorScheme!=='dark'))return false;const requested=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==requested)return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedmodalspacing--alert-no-padding": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const panel=document.querySelector('[data-modal-spacing-panel]'),fixture=document.querySelector('[data-modal-spacing]');if(!panel||!fixture||fixture.dataset.layout!==\"padding\"||fixture.dataset.open!=='true'||fixture.dataset.value!==\"Preserved modal value\"||fixture.dataset.openChanges!==\"0\"||panel.getAttribute('role')!==\"alertdialog\")return false;const c=getComputedStyle(panel),box=panel.getBoundingClientRect();if(!['paddingTop','paddingBottom','paddingLeft','paddingRight'].every(k=>c[k]==='0px')||c.rowGap!=='16px'||c.columnGap!=='16px'||c.opacity!=='1'||box.width<=0||box.left<0||box.right>innerWidth||box.top<0||box.bottom>innerHeight||!panel.contains(document.activeElement))return false;if(panel.hasAttribute('padding')||panel.hasAttribute('gap'))return false;const forced=false;if(forced&&(!document.querySelector('[data-modal-spacing-host]')?.contains(panel)||c.colorScheme!=='dark'))return false;const requested=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==requested)return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedmodalspacing--alert-no-gap": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const panel=document.querySelector('[data-modal-spacing-panel]'),fixture=document.querySelector('[data-modal-spacing]');if(!panel||!fixture||fixture.dataset.layout!==\"gap\"||fixture.dataset.open!=='true'||fixture.dataset.value!==\"Preserved modal value\"||fixture.dataset.openChanges!==\"0\"||panel.getAttribute('role')!==\"alertdialog\")return false;const c=getComputedStyle(panel),box=panel.getBoundingClientRect();if(!['paddingTop','paddingBottom','paddingLeft','paddingRight'].every(k=>c[k]==='16px')||c.rowGap!=='0px'||c.columnGap!=='0px'||c.opacity!=='1'||box.width<=0||box.left<0||box.right>innerWidth||box.top<0||box.bottom>innerHeight||!panel.contains(document.activeElement))return false;if(panel.hasAttribute('padding')||panel.hasAttribute('gap'))return false;const forced=false;if(forced&&(!document.querySelector('[data-modal-spacing-host]')?.contains(panel)||c.colorScheme!=='dark'))return false;const requested=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==requested)return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedmodalspacing--alert-no-both": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const panel=document.querySelector('[data-modal-spacing-panel]'),fixture=document.querySelector('[data-modal-spacing]');if(!panel||!fixture||fixture.dataset.layout!==\"both\"||fixture.dataset.open!=='true'||fixture.dataset.value!==\"Preserved modal value\"||fixture.dataset.openChanges!==\"0\"||panel.getAttribute('role')!==\"alertdialog\")return false;const c=getComputedStyle(panel),box=panel.getBoundingClientRect();if(!['paddingTop','paddingBottom','paddingLeft','paddingRight'].every(k=>c[k]==='0px')||c.rowGap!=='0px'||c.columnGap!=='0px'||c.opacity!=='1'||box.width<=0||box.left<0||box.right>innerWidth||box.top<0||box.bottom>innerHeight||!panel.contains(document.activeElement))return false;if(panel.hasAttribute('padding')||panel.hasAttribute('gap'))return false;const forced=false;if(forced&&(!document.querySelector('[data-modal-spacing-host]')?.contains(panel)||c.colorScheme!=='dark'))return false;const requested=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==requested)return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedmodalspacing--dialog-update": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const panel=document.querySelector('[data-modal-spacing-panel]'),fixture=document.querySelector('[data-modal-spacing]');if(!panel||!fixture||fixture.dataset.layout!==\"both\"||fixture.dataset.open!=='true'||fixture.dataset.value!==\"Preserved modal value\"||fixture.dataset.openChanges!==\"0\"||panel.getAttribute('role')!==\"dialog\")return false;const c=getComputedStyle(panel),box=panel.getBoundingClientRect();if(!['paddingTop','paddingBottom','paddingLeft','paddingRight'].every(k=>c[k]==='0px')||c.rowGap!=='0px'||c.columnGap!=='0px'||c.opacity!=='1'||box.width<=0||box.left<0||box.right>innerWidth||box.top<0||box.bottom>innerHeight||!panel.contains(document.activeElement))return false;if(panel.hasAttribute('padding')||panel.hasAttribute('gap'))return false;const forced=false;if(forced&&(!document.querySelector('[data-modal-spacing-host]')?.contains(panel)||c.colorScheme!=='dark'))return false;const requested=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==requested)return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedmodalspacing--alert-update": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const panel=document.querySelector('[data-modal-spacing-panel]'),fixture=document.querySelector('[data-modal-spacing]');if(!panel||!fixture||fixture.dataset.layout!==\"both\"||fixture.dataset.open!=='true'||fixture.dataset.value!==\"Preserved modal value\"||fixture.dataset.openChanges!==\"0\"||panel.getAttribute('role')!==\"alertdialog\")return false;const c=getComputedStyle(panel),box=panel.getBoundingClientRect();if(!['paddingTop','paddingBottom','paddingLeft','paddingRight'].every(k=>c[k]==='0px')||c.rowGap!=='0px'||c.columnGap!=='0px'||c.opacity!=='1'||box.width<=0||box.left<0||box.right>innerWidth||box.top<0||box.bottom>innerHeight||!panel.contains(document.activeElement))return false;if(panel.hasAttribute('padding')||panel.hasAttribute('gap'))return false;const forced=false;if(forced&&(!document.querySelector('[data-modal-spacing-host]')?.contains(panel)||c.colorScheme!=='dark'))return false;const requested=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==requested)return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedmodalspacing--caller-inline": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const panel=document.querySelector('[data-modal-spacing-panel]'),fixture=document.querySelector('[data-modal-spacing]');if(!panel||!fixture||fixture.dataset.layout!==\"both\"||fixture.dataset.open!=='true'||fixture.dataset.value!==\"Preserved modal value\"||fixture.dataset.openChanges!==\"0\"||panel.getAttribute('role')!==\"dialog\")return false;const c=getComputedStyle(panel),box=panel.getBoundingClientRect();if(!['paddingTop','paddingBottom','paddingLeft','paddingRight'].every(k=>c[k]==='23px')||c.rowGap!=='9px'||c.columnGap!=='9px'||c.opacity!=='1'||box.width<=0||box.left<0||box.right>innerWidth||box.top<0||box.bottom>innerHeight||!panel.contains(document.activeElement))return false;if(panel.hasAttribute('padding')||panel.hasAttribute('gap'))return false;const forced=false;if(forced&&(!document.querySelector('[data-modal-spacing-host]')?.contains(panel)||c.colorScheme!=='dark'))return false;const requested=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==requested)return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "migration-ownedmodalspacing--hosted-dark-alert": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const panel=document.querySelector('[data-modal-spacing-panel]'),fixture=document.querySelector('[data-modal-spacing]');if(!panel||!fixture||fixture.dataset.layout!==\"both\"||fixture.dataset.open!=='true'||fixture.dataset.value!==\"Preserved modal value\"||fixture.dataset.openChanges!==\"0\"||panel.getAttribute('role')!==\"alertdialog\")return false;const c=getComputedStyle(panel),box=panel.getBoundingClientRect();if(!['paddingTop','paddingBottom','paddingLeft','paddingRight'].every(k=>c[k]==='0px')||c.rowGap!=='0px'||c.columnGap!=='0px'||c.opacity!=='1'||box.width<=0||box.left<0||box.right>innerWidth||box.top<0||box.bottom>innerHeight||!panel.contains(document.activeElement))return false;if(panel.hasAttribute('padding')||panel.hasAttribute('gap'))return false;const forced=true;if(forced&&(!document.querySelector('[data-modal-spacing-host]')?.contains(panel)||c.colorScheme!=='dark'))return false;const requested=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==requested)return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedmodalspacing--dialog-update": [
+      {
+        "name": "padding-only",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#modal-spacing-value",
+            "value": "Changed retained modal value"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zero padding"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const panel=document.querySelector('[data-modal-spacing-panel]'),fixture=document.querySelector('[data-modal-spacing]');if(!panel||!fixture||fixture.dataset.layout!==\"padding\"||fixture.dataset.open!=='true'||fixture.dataset.value!==\"Changed retained modal value\"||fixture.dataset.openChanges!==\"0\"||panel.getAttribute('role')!==\"dialog\")return false;const c=getComputedStyle(panel),box=panel.getBoundingClientRect();if(!['paddingTop','paddingBottom','paddingLeft','paddingRight'].every(k=>c[k]==='0px')||c.rowGap!=='16px'||c.columnGap!=='16px'||c.opacity!=='1'||box.width<=0||box.left<0||box.right>innerWidth||box.top<0||box.bottom>innerHeight||!panel.contains(document.activeElement))return false;if(panel.hasAttribute('padding')||panel.hasAttribute('gap'))return false;const forced=false;if(forced&&(!document.querySelector('[data-modal-spacing-host]')?.contains(panel)||c.colorScheme!=='dark'))return false;const requested=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==requested)return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "gap-only",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zero gap"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const panel=document.querySelector('[data-modal-spacing-panel]'),fixture=document.querySelector('[data-modal-spacing]');if(!panel||!fixture||fixture.dataset.layout!==\"gap\"||fixture.dataset.open!=='true'||fixture.dataset.value!==\"Changed retained modal value\"||fixture.dataset.openChanges!==\"0\"||panel.getAttribute('role')!==\"dialog\")return false;const c=getComputedStyle(panel),box=panel.getBoundingClientRect();if(!['paddingTop','paddingBottom','paddingLeft','paddingRight'].every(k=>c[k]==='16px')||c.rowGap!=='0px'||c.columnGap!=='0px'||c.opacity!=='1'||box.width<=0||box.left<0||box.right>innerWidth||box.top<0||box.bottom>innerHeight||!panel.contains(document.activeElement))return false;if(panel.hasAttribute('padding')||panel.hasAttribute('gap'))return false;const forced=false;if(forced&&(!document.querySelector('[data-modal-spacing-host]')?.contains(panel)||c.colorScheme!=='dark'))return false;const requested=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==requested)return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "omitted-close-reopen",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Restore omitted spacing"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Close spacing panel"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-modal-spacing]')?.dataset.open==='false'&&!document.querySelector('[data-modal-spacing-panel]')"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open spacing panel"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const panel=document.querySelector('[data-modal-spacing-panel]'),fixture=document.querySelector('[data-modal-spacing]');if(!panel||!fixture||fixture.dataset.layout!==\"default\"||fixture.dataset.open!=='true'||fixture.dataset.value!==\"Changed retained modal value\"||fixture.dataset.openChanges!==\"2\"||panel.getAttribute('role')!==\"dialog\")return false;const c=getComputedStyle(panel),box=panel.getBoundingClientRect();if(!['paddingTop','paddingBottom','paddingLeft','paddingRight'].every(k=>c[k]==='16px')||c.rowGap!=='16px'||c.columnGap!=='16px'||c.opacity!=='1'||box.width<=0||box.left<0||box.right>innerWidth||box.top<0||box.bottom>innerHeight||!panel.contains(document.activeElement))return false;if(panel.hasAttribute('padding')||panel.hasAttribute('gap'))return false;const forced=false;if(forced&&(!document.querySelector('[data-modal-spacing-host]')?.contains(panel)||c.colorScheme!=='dark'))return false;const requested=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==requested)return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmodalspacing--alert-update": [
+      {
+        "name": "padding-only",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#modal-spacing-value",
+            "value": "Changed retained modal value"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zero padding"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const panel=document.querySelector('[data-modal-spacing-panel]'),fixture=document.querySelector('[data-modal-spacing]');if(!panel||!fixture||fixture.dataset.layout!==\"padding\"||fixture.dataset.open!=='true'||fixture.dataset.value!==\"Changed retained modal value\"||fixture.dataset.openChanges!==\"0\"||panel.getAttribute('role')!==\"alertdialog\")return false;const c=getComputedStyle(panel),box=panel.getBoundingClientRect();if(!['paddingTop','paddingBottom','paddingLeft','paddingRight'].every(k=>c[k]==='0px')||c.rowGap!=='16px'||c.columnGap!=='16px'||c.opacity!=='1'||box.width<=0||box.left<0||box.right>innerWidth||box.top<0||box.bottom>innerHeight||!panel.contains(document.activeElement))return false;if(panel.hasAttribute('padding')||panel.hasAttribute('gap'))return false;const forced=false;if(forced&&(!document.querySelector('[data-modal-spacing-host]')?.contains(panel)||c.colorScheme!=='dark'))return false;const requested=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==requested)return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "gap-only",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zero gap"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const panel=document.querySelector('[data-modal-spacing-panel]'),fixture=document.querySelector('[data-modal-spacing]');if(!panel||!fixture||fixture.dataset.layout!==\"gap\"||fixture.dataset.open!=='true'||fixture.dataset.value!==\"Changed retained modal value\"||fixture.dataset.openChanges!==\"0\"||panel.getAttribute('role')!==\"alertdialog\")return false;const c=getComputedStyle(panel),box=panel.getBoundingClientRect();if(!['paddingTop','paddingBottom','paddingLeft','paddingRight'].every(k=>c[k]==='16px')||c.rowGap!=='0px'||c.columnGap!=='0px'||c.opacity!=='1'||box.width<=0||box.left<0||box.right>innerWidth||box.top<0||box.bottom>innerHeight||!panel.contains(document.activeElement))return false;if(panel.hasAttribute('padding')||panel.hasAttribute('gap'))return false;const forced=false;if(forced&&(!document.querySelector('[data-modal-spacing-host]')?.contains(panel)||c.colorScheme!=='dark'))return false;const requested=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==requested)return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "omitted-close-reopen",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Restore omitted spacing"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Close spacing panel"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-modal-spacing]')?.dataset.open==='false'&&!document.querySelector('[data-modal-spacing-panel]')"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open spacing panel"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const panel=document.querySelector('[data-modal-spacing-panel]'),fixture=document.querySelector('[data-modal-spacing]');if(!panel||!fixture||fixture.dataset.layout!==\"default\"||fixture.dataset.open!=='true'||fixture.dataset.value!==\"Changed retained modal value\"||fixture.dataset.openChanges!==\"2\"||panel.getAttribute('role')!==\"alertdialog\")return false;const c=getComputedStyle(panel),box=panel.getBoundingClientRect();if(!['paddingTop','paddingBottom','paddingLeft','paddingRight'].every(k=>c[k]==='16px')||c.rowGap!=='16px'||c.columnGap!=='16px'||c.opacity!=='1'||box.width<=0||box.left<0||box.right>innerWidth||box.top<0||box.bottom>innerHeight||!panel.contains(document.activeElement))return false;if(panel.hasAttribute('padding')||panel.hasAttribute('gap'))return false;const forced=false;if(forced&&(!document.querySelector('[data-modal-spacing-host]')?.contains(panel)||c.colorScheme!=='dark'))return false;const requested=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==requested)return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "ids": [
+    "components-renamesessiondialog--default",
+    "components-renamesessiondialog--overflow-title",
+    "migration-ownednobackgroundactioncolors--default"
+  ],
+  "ready": {
+    "components-renamesessiondialog--default": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[role=dialog]');const dark=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark)return false;if(!p)return false;const c=getComputedStyle(p),r=p.getBoundingClientRect();return c.paddingTop==='0px'&&c.paddingBottom==='0px'&&c.paddingLeft==='0px'&&c.paddingRight==='0px'&&c.gap==='0px'&&c.opacity==='1'&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight&&p.contains(document.activeElement)&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))}"
+      }
+    ],
+    "components-renamesessiondialog--overflow-title": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[role=dialog]');const dark=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');if(document.documentElement.classList.contains('dark')!==dark)return false;if(!p)return false;const c=getComputedStyle(p),r=p.getBoundingClientRect();return c.paddingTop==='0px'&&c.paddingBottom==='0px'&&c.paddingLeft==='0px'&&c.paddingRight==='0px'&&c.gap==='0px'&&c.opacity==='1'&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight&&p.contains(document.activeElement)&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))}"
+      }
+    ],
+    "migration-ownednobackgroundactioncolors--default": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => !!document.querySelector('[data-no-bg-case=operation] button[title=\"View full reply\"]')"
+      },
+      {
+        "action": "click",
+        "selector": "[data-no-bg-case=operation] button[title=\"View full reply\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[role=dialog]');if(!p)return false;const c=getComputedStyle(p),r=p.getBoundingClientRect();return c.paddingTop==='0px'&&c.paddingBottom==='0px'&&c.paddingLeft==='0px'&&c.paddingRight==='0px'&&c.gap==='0px'&&c.opacity==='1'&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight&&p.contains(document.activeElement)&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))}"
+      }
+    ]
+  },
+  "states": {},
+  "allowBlankIds": [
+    "components-renamesessiondialog--default",
+    "components-renamesessiondialog--overflow-title"
+  ]
+}

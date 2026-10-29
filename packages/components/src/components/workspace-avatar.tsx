@@ -1,6 +1,11 @@
 import { Avatar, type AvatarSize } from '@lody/ui/avatar';
 import { Building2 } from 'lucide-react';
 import { useStableAvatarSrc } from '@/hooks/use-stable-avatar-src';
+import * as stylex from '@stylexjs/stylex';
+
+const styles = stylex.create({
+  fallbackGlyph: { width: '100%', height: '100%' },
+});
 
 interface WorkspaceAvatarProps {
   workspace?: {
@@ -63,7 +68,7 @@ export function WorkspaceAvatar({ workspace, size = 'medium', className }: Works
       >
         {initial ?? (
           <Avatar.Glyph>
-            <Building2 className="size-full" />
+            <Building2 {...stylex.props(styles.fallbackGlyph)} />
           </Avatar.Glyph>
         )}
       </Avatar.Fallback>

@@ -1,0 +1,98 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "ids": [
+    "components-ownedavatarglyphmigration--all-rungs",
+    "components-ownedavatarglyphmigration--parent-glyph-theme"
+  ],
+  "ready": {
+    "components-ownedavatarglyphmigration--all-rungs": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const expectedTheme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!expectedTheme||document.documentElement.classList.contains('dark')!==(expectedTheme==='dark')||document.fonts.status!=='loaded')return false;const host=document.querySelector('[data-avatar-glyph-theme]');if(host?.getAttribute('data-avatar-glyph-theme')!=='default')return false;const boxes=[16,20,24,32,64],glyphSizes=[10, 12, 14, 16, 28],sizes=['mini','small','medium','large','xlarge'],glyphs=[];for(let i=0;i<sizes.length;i++){const row=host.querySelector('[data-avatar-size='+sizes[i]+']');if(!row)return false;const roots=row.querySelectorAll('[data-size]');if(roots.length!==5)return false;for(const avatar of roots){const c=getComputedStyle(avatar);if(Math.abs(parseFloat(c.width)-boxes[i])>.01||Math.abs(parseFloat(c.height)-boxes[i])>.01)return false;}for(const kind of ['user-empty','user-icon','workspace-empty']){const cell=row.querySelector('[data-avatar-case='+kind+']'),svg=cell?.querySelector('svg'),holder=svg?.parentElement;if(!svg||!holder)return false;const c=getComputedStyle(svg),p=getComputedStyle(holder),r=svg.getBoundingClientRect();if(Math.abs(parseFloat(c.width)-glyphSizes[i])>.01||Math.abs(parseFloat(c.height)-glyphSizes[i])>.01||Math.abs(parseFloat(p.width)-glyphSizes[i])>.01||Math.abs(parseFloat(p.height)-glyphSizes[i])>.01||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||cell.querySelectorAll('svg').length!==1)return false;glyphs.push(svg);}const person=row.querySelector('[data-avatar-case=user-initials] [data-size]'),workspace=row.querySelector('[data-avatar-case=workspace-initial] [data-size]');if(person.textContent!=='SP'||workspace.textContent!=='S'||person.querySelector('svg')||workspace.querySelector('svg'))return false;}const refs=window.__leaves45GlyphNodes;if(refs&&refs.some((e,i)=>e!==glyphs[i]||!e.isConnected))return false;if(!refs)window.__leaves45GlyphNodes=glyphs;return document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "components-ownedavatarglyphmigration--parent-glyph-theme": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const expectedTheme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!expectedTheme||document.documentElement.classList.contains('dark')!==(expectedTheme==='dark')||document.fonts.status!=='loaded')return false;const host=document.querySelector('[data-avatar-glyph-theme]');if(host?.getAttribute('data-avatar-glyph-theme')!=='custom')return false;const boxes=[16,20,24,32,64],glyphSizes=[7, 9, 11, 13, 19],sizes=['mini','small','medium','large','xlarge'],glyphs=[];for(let i=0;i<sizes.length;i++){const row=host.querySelector('[data-avatar-size='+sizes[i]+']');if(!row)return false;const roots=row.querySelectorAll('[data-size]');if(roots.length!==5)return false;for(const avatar of roots){const c=getComputedStyle(avatar);if(Math.abs(parseFloat(c.width)-boxes[i])>.01||Math.abs(parseFloat(c.height)-boxes[i])>.01)return false;}for(const kind of ['user-empty','user-icon','workspace-empty']){const cell=row.querySelector('[data-avatar-case='+kind+']'),svg=cell?.querySelector('svg'),holder=svg?.parentElement;if(!svg||!holder)return false;const c=getComputedStyle(svg),p=getComputedStyle(holder),r=svg.getBoundingClientRect();if(Math.abs(parseFloat(c.width)-glyphSizes[i])>.01||Math.abs(parseFloat(c.height)-glyphSizes[i])>.01||Math.abs(parseFloat(p.width)-glyphSizes[i])>.01||Math.abs(parseFloat(p.height)-glyphSizes[i])>.01||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||cell.querySelectorAll('svg').length!==1)return false;glyphs.push(svg);}const person=row.querySelector('[data-avatar-case=user-initials] [data-size]'),workspace=row.querySelector('[data-avatar-case=workspace-initial] [data-size]');if(person.textContent!=='SP'||workspace.textContent!=='S'||person.querySelector('svg')||workspace.querySelector('svg'))return false;}const refs=window.__leaves45GlyphNodes;if(refs&&refs.some((e,i)=>e!==glyphs[i]||!e.isConnected))return false;if(!refs)window.__leaves45GlyphNodes=glyphs;return document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {
+    "components-ownedavatarglyphmigration--all-rungs": [
+      {
+        "name": "toggle-parent-glyph-theme",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle glyph theme"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const expectedTheme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!expectedTheme||document.documentElement.classList.contains('dark')!==(expectedTheme==='dark')||document.fonts.status!=='loaded')return false;const host=document.querySelector('[data-avatar-glyph-theme]');if(host?.getAttribute('data-avatar-glyph-theme')!=='custom')return false;const boxes=[16,20,24,32,64],glyphSizes=[7, 9, 11, 13, 19],sizes=['mini','small','medium','large','xlarge'],glyphs=[];for(let i=0;i<sizes.length;i++){const row=host.querySelector('[data-avatar-size='+sizes[i]+']');if(!row)return false;const roots=row.querySelectorAll('[data-size]');if(roots.length!==5)return false;for(const avatar of roots){const c=getComputedStyle(avatar);if(Math.abs(parseFloat(c.width)-boxes[i])>.01||Math.abs(parseFloat(c.height)-boxes[i])>.01)return false;}for(const kind of ['user-empty','user-icon','workspace-empty']){const cell=row.querySelector('[data-avatar-case='+kind+']'),svg=cell?.querySelector('svg'),holder=svg?.parentElement;if(!svg||!holder)return false;const c=getComputedStyle(svg),p=getComputedStyle(holder),r=svg.getBoundingClientRect();if(Math.abs(parseFloat(c.width)-glyphSizes[i])>.01||Math.abs(parseFloat(c.height)-glyphSizes[i])>.01||Math.abs(parseFloat(p.width)-glyphSizes[i])>.01||Math.abs(parseFloat(p.height)-glyphSizes[i])>.01||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||cell.querySelectorAll('svg').length!==1)return false;glyphs.push(svg);}const person=row.querySelector('[data-avatar-case=user-initials] [data-size]'),workspace=row.querySelector('[data-avatar-case=workspace-initial] [data-size]');if(person.textContent!=='SP'||workspace.textContent!=='S'||person.querySelector('svg')||workspace.querySelector('svg'))return false;}const refs=window.__leaves45GlyphNodes;if(refs&&refs.some((e,i)=>e!==glyphs[i]||!e.isConnected))return false;if(!refs)window.__leaves45GlyphNodes=glyphs;return document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "restore-parent-glyph-theme",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle glyph theme"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const expectedTheme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!expectedTheme||document.documentElement.classList.contains('dark')!==(expectedTheme==='dark')||document.fonts.status!=='loaded')return false;const host=document.querySelector('[data-avatar-glyph-theme]');if(host?.getAttribute('data-avatar-glyph-theme')!=='default')return false;const boxes=[16,20,24,32,64],glyphSizes=[10, 12, 14, 16, 28],sizes=['mini','small','medium','large','xlarge'],glyphs=[];for(let i=0;i<sizes.length;i++){const row=host.querySelector('[data-avatar-size='+sizes[i]+']');if(!row)return false;const roots=row.querySelectorAll('[data-size]');if(roots.length!==5)return false;for(const avatar of roots){const c=getComputedStyle(avatar);if(Math.abs(parseFloat(c.width)-boxes[i])>.01||Math.abs(parseFloat(c.height)-boxes[i])>.01)return false;}for(const kind of ['user-empty','user-icon','workspace-empty']){const cell=row.querySelector('[data-avatar-case='+kind+']'),svg=cell?.querySelector('svg'),holder=svg?.parentElement;if(!svg||!holder)return false;const c=getComputedStyle(svg),p=getComputedStyle(holder),r=svg.getBoundingClientRect();if(Math.abs(parseFloat(c.width)-glyphSizes[i])>.01||Math.abs(parseFloat(c.height)-glyphSizes[i])>.01||Math.abs(parseFloat(p.width)-glyphSizes[i])>.01||Math.abs(parseFloat(p.height)-glyphSizes[i])>.01||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||cell.querySelectorAll('svg').length!==1)return false;glyphs.push(svg);}const person=row.querySelector('[data-avatar-case=user-initials] [data-size]'),workspace=row.querySelector('[data-avatar-case=workspace-initial] [data-size]');if(person.textContent!=='SP'||workspace.textContent!=='S'||person.querySelector('svg')||workspace.querySelector('svg'))return false;}const refs=window.__leaves45GlyphNodes;if(refs&&refs.some((e,i)=>e!==glyphs[i]||!e.isConnected))return false;if(!refs)window.__leaves45GlyphNodes=glyphs;return document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "components-ownedavatarglyphmigration--parent-glyph-theme": [
+      {
+        "name": "toggle-parent-glyph-theme",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle glyph theme"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const expectedTheme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!expectedTheme||document.documentElement.classList.contains('dark')!==(expectedTheme==='dark')||document.fonts.status!=='loaded')return false;const host=document.querySelector('[data-avatar-glyph-theme]');if(host?.getAttribute('data-avatar-glyph-theme')!=='default')return false;const boxes=[16,20,24,32,64],glyphSizes=[10, 12, 14, 16, 28],sizes=['mini','small','medium','large','xlarge'],glyphs=[];for(let i=0;i<sizes.length;i++){const row=host.querySelector('[data-avatar-size='+sizes[i]+']');if(!row)return false;const roots=row.querySelectorAll('[data-size]');if(roots.length!==5)return false;for(const avatar of roots){const c=getComputedStyle(avatar);if(Math.abs(parseFloat(c.width)-boxes[i])>.01||Math.abs(parseFloat(c.height)-boxes[i])>.01)return false;}for(const kind of ['user-empty','user-icon','workspace-empty']){const cell=row.querySelector('[data-avatar-case='+kind+']'),svg=cell?.querySelector('svg'),holder=svg?.parentElement;if(!svg||!holder)return false;const c=getComputedStyle(svg),p=getComputedStyle(holder),r=svg.getBoundingClientRect();if(Math.abs(parseFloat(c.width)-glyphSizes[i])>.01||Math.abs(parseFloat(c.height)-glyphSizes[i])>.01||Math.abs(parseFloat(p.width)-glyphSizes[i])>.01||Math.abs(parseFloat(p.height)-glyphSizes[i])>.01||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||cell.querySelectorAll('svg').length!==1)return false;glyphs.push(svg);}const person=row.querySelector('[data-avatar-case=user-initials] [data-size]'),workspace=row.querySelector('[data-avatar-case=workspace-initial] [data-size]');if(person.textContent!=='SP'||workspace.textContent!=='S'||person.querySelector('svg')||workspace.querySelector('svg'))return false;}const refs=window.__leaves45GlyphNodes;if(refs&&refs.some((e,i)=>e!==glyphs[i]||!e.isConnected))return false;if(!refs)window.__leaves45GlyphNodes=glyphs;return document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "restore-parent-glyph-theme",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle glyph theme"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const expectedTheme=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];if(!expectedTheme||document.documentElement.classList.contains('dark')!==(expectedTheme==='dark')||document.fonts.status!=='loaded')return false;const host=document.querySelector('[data-avatar-glyph-theme]');if(host?.getAttribute('data-avatar-glyph-theme')!=='custom')return false;const boxes=[16,20,24,32,64],glyphSizes=[7, 9, 11, 13, 19],sizes=['mini','small','medium','large','xlarge'],glyphs=[];for(let i=0;i<sizes.length;i++){const row=host.querySelector('[data-avatar-size='+sizes[i]+']');if(!row)return false;const roots=row.querySelectorAll('[data-size]');if(roots.length!==5)return false;for(const avatar of roots){const c=getComputedStyle(avatar);if(Math.abs(parseFloat(c.width)-boxes[i])>.01||Math.abs(parseFloat(c.height)-boxes[i])>.01)return false;}for(const kind of ['user-empty','user-icon','workspace-empty']){const cell=row.querySelector('[data-avatar-case='+kind+']'),svg=cell?.querySelector('svg'),holder=svg?.parentElement;if(!svg||!holder)return false;const c=getComputedStyle(svg),p=getComputedStyle(holder),r=svg.getBoundingClientRect();if(Math.abs(parseFloat(c.width)-glyphSizes[i])>.01||Math.abs(parseFloat(c.height)-glyphSizes[i])>.01||Math.abs(parseFloat(p.width)-glyphSizes[i])>.01||Math.abs(parseFloat(p.height)-glyphSizes[i])>.01||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||cell.querySelectorAll('svg').length!==1)return false;glyphs.push(svg);}const person=row.querySelector('[data-avatar-case=user-initials] [data-size]'),workspace=row.querySelector('[data-avatar-case=workspace-initial] [data-size]');if(person.textContent!=='SP'||workspace.textContent!=='S'||person.querySelector('svg')||workspace.querySelector('svg'))return false;}const refs=window.__leaves45GlyphNodes;if(refs&&refs.some((e,i)=>e!==glyphs[i]||!e.isConnected))return false;if(!refs)window.__leaves45GlyphNodes=glyphs;return document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ]
+  }
+}

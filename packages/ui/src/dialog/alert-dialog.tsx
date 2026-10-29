@@ -52,6 +52,8 @@ export const AlertDialogContent = forwardRef<HTMLDivElement, AlertDialogContentP
       backdropClassName,
       noAnimation,
       width,
+      padding = 'default',
+      gap = 'default',
       centerOn,
       style,
       ...rest
@@ -81,6 +83,8 @@ export const AlertDialogContent = forwardRef<HTMLDivElement, AlertDialogContentP
             appendClassName(
               stylex.props(
                 modal.popup,
+                padding === 'none' && modal.noPadding,
+                gap === 'none' && modal.noGap,
                 isHidden(state.transitionStatus) && modal.popupHidden,
                 noAnimation && modal.noTransition
               ).className,

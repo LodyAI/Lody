@@ -1701,6 +1701,41 @@ and eight owning tests respectively); lint retains one/twelve/zero warnings with
 zero errors. Existing source-profile mistakes and label-case calibration failures
 remain separate from the matching final matrices; no prior OPEN is closed.
 
+The modal-spacing/avatar-glyph continuation removes eight more utilities. Dialog
+and AlertDialog share explicit padding/gap choices instead of callers competing
+with their panel styles; defaults, omission reset and inline style callbacks keep
+their contracts. The API is documented in the owning [UI README](../../../../packages/ui/README.md).
+Drawer remains separate because its logical safe-area padding and Base UI state
+callbacks require independent acceptance. The two avatar fallback SVGs use local
+100% width/height styles inside the existing five-rung glyph holders, preserving
+all root APIs and mounted nodes. UserAvatar's actual working-tree d22e source,
+including its original parameter-format hunk, is the Before; a differently
+formatted HEAD copy is not substituted.
+
+`leaves44-45-acceptance.html` embeds 108 byte-exact formal pairs and 7,536 equal
+standard node records: modal API/callers 84/2,520 and avatar glyphs 24/5,016.
+Twelve modal CSS scenes compare 48 nodes/231,048 values; four avatar CSS scenes
+compare 120 nodes/563,580 values. Expected raw class changes remain recorded.
+The avatar DPR3 probes are CSS-only; formal screenshots use DPR1 and reduced
+motion. Four actual Gallery and four actual Electron images are After-only,
+separate from these pairs. Electron main/preload/renderer were rebuilt with the
+unchanged bundled CLI artifact; its waiting configuration, synthetic Explore
+tour and empty local chat do not establish agent/cloud or desktop Before/After
+equivalence.
+
+The first Rename consumer capture met the real popup's conditions but failed the
+harness's visible-story-root gate because the entire dialog was portalled out of
+an empty decorator. Only those two target IDs opt into the existing blank-root
+exception, retaining strict actual-popup paint, spacing, theme, focus and motion
+gates. Five original error images, two interrupted successful images and the
+count-correction addendum remain; no original data is overwritten. The modal
+fixture intentionally changes only its legacy-class adapter to API props between
+Before and After, with both byte hashes recorded. Full UI checks pass 25 files/304
+tests; a later source-locked components run passes 620 files/6,207 tests, with all
+1,264 product/style hashes unchanged. Root format passes; the attempted root
+check still stops at the existing ACP SDK export build failure. Earlier pixel
+OPENs and negative contracts retain their status.
+
 ## Remaining work
 
 The compiler-backed [inventory](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -1715,7 +1750,8 @@ completion percentage. Unresolved expressions remain a separate work list.
 | Same pre31 source snapshot                                   | v2             |       1,741 |   176 |        725 |
 | Frozen source through 35                                     | v2             |       1,705 |   175 |        721 |
 | Frozen source through 40                                     | v2             |       1,676 |   175 |        721 |
-| Current source through 43, visual limits recorded separately | v2             |       1,664 |   173 |        721 |
+| Frozen source through 43                                     | v2             |       1,664 |   173 |        721 |
+| Current source through 45, visual limits recorded separately | v2             |       1,656 |   171 |        721 |
 
 Earlier method changes recognized single utilities, `withClassName`'s second
 argument and supported static class arrays. Historical per-batch counts remain
@@ -1735,7 +1771,7 @@ utility-looking strings in comparisons or unrelated properties. Ambiguous writes
 remain unresolved. Two adapter `className` writes expose four additional unresolved expressions,
 explaining the corresponding increase in that count.
 
-The current v2 source split is components 1,209 occurrences/157 files/628 unresolved,
+The current v2 source split is components 1,201 occurrences/155 files/628 unresolved,
 legacy UI 450/14/93 and routes 5/two/zero. Batch34–39 visual differences and rejected
 calibrations retain their own status; this source inventory does not accept them.
 
@@ -1745,8 +1781,8 @@ graph has a bounded production-component fixture.
 The unconsumed `src/ui/sidebar.tsx` retains 304 occurrences and is not re-exported
 by `src/ui/index.ts`; direct public wildcard imports remain possible. Its public
 adapter now has real rendering fixtures, including mobile open and desktop collapse.
-The unconsumed `src/components/task-list.tsx` retains 15 occurrences,
-`src/components/sidebar-updated-task-list.tsx` retains 23; both now have real
+The unconsumed `src/components/task-list.tsx` retains 14 occurrences,
+`src/components/sidebar-updated-task-list.tsx` retains 22; both now have real
 rendering and native-input fixtures. The unused
 `PropertyRowWide` export now has actual rendering fixtures and retains only its
 two arbitrary-child selectors. Establish actual consumers and rendering fixtures

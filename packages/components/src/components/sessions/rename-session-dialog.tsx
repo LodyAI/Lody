@@ -151,7 +151,9 @@ export function RenameSessionDialogView({
   return (
     <Dialog.Root open={target != null} onOpenChange={handleOpenChange}>
       <Dialog.Content
-        className={clsx(stylex.props(styles.content).className, 'max-w-sm gap-0 p-0 sm:p-0')}
+        padding="none"
+        gap="none"
+        className={clsx(stylex.props(styles.content).className, 'max-w-sm')}
       >
         <Dialog.Header className={stylex.props(styles.header).className}>
           <Dialog.Title className="text-base">
