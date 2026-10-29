@@ -8,7 +8,7 @@ import type {
   MemoryCreateInput,
   MemoryUpdateInput,
   MemoryForgetInput,
-} from './schema.ts';
+} from './schema';
 
 /** Expected failures carry stable codes, not plaintext content or raw storage errors. */
 export type MemoryFailureCode =

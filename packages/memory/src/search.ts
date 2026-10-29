@@ -1,5 +1,5 @@
-import { MemorySearchQuerySchema } from './schema.ts';
-import type { MemoryResult } from './contracts.ts';
+import { MemorySearchQuerySchema } from './schema';
+import type { MemoryResult } from './contracts';
 
 /** Literal description/body filter. Path keys are matched by the document service. */
 export function buildMemorySearchQuery(query: string): MemoryResult<string> {

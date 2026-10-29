@@ -6,8 +6,8 @@ import {
   MemoryMutationContextSchema,
   type MemoryIdentity,
   type MemoryMutationContext,
-} from './schema.ts';
-import type { MemoryResult } from './contracts.ts';
+} from './schema';
+import type { MemoryResult } from './contracts';
 
 /** Borrowed Doc: caller owns persistence, remote imports, subscriptions and disposal. */
 export function initializeMemoryDoc(

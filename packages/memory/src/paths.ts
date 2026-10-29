@@ -1,5 +1,5 @@
-import { MemoryPathSchema } from './schema.ts';
-import type { MemoryResult } from './contracts.ts';
+import { MemoryPathSchema } from './schema';
+import type { MemoryResult } from './contracts';
 
 /** Wiki paths are rooted in the memory, never in a filesystem or external URL. */
 export function resolveMemoryPath(input: string): MemoryResult<string> {

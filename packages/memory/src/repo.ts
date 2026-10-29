@@ -1,8 +1,8 @@
 import { LoroRepo, type StorageAdapter, type TransportAdapter } from 'loro-repo';
-import { initializeMemoryDoc, openMemoryDocument } from './loro.ts';
-import { MemoryIdSchema, type MemoryMutationContext } from './schema.ts';
-import type { MemoryChange, MemoryResult, MemorySaveReceipt } from './contracts.ts';
-import { personalMemoryRoomId } from './binding.ts';
+import { initializeMemoryDoc, openMemoryDocument } from './loro';
+import { MemoryIdSchema, type MemoryMutationContext } from './schema';
+import type { MemoryChange, MemoryResult, MemorySaveReceipt } from './contracts';
+import { personalMemoryRoomId } from './binding';
 
 /** Separate from the workspace Repo. Hosts supply local storage and, optionally, local IPC. */
 export async function createPersonalMemoryRepository(options: {

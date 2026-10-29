@@ -22,7 +22,7 @@ import {
   type MemoryReadInput,
   type MemorySearchInput,
   type MemoryListInput,
-} from './schema.ts';
+} from './schema';
 import type {
   MemoryDocument,
   MemoryResult,
@@ -32,10 +32,10 @@ import type {
   MemoryReadPage,
   MemorySearchHit,
   MemoryProvenance,
-} from './contracts.ts';
-import { inspectMemoryIdentity } from './layout.ts';
-import { resolveMemoryPath } from './paths.ts';
-import { buildMemorySearchQuery } from './search.ts';
+} from './contracts';
+import { inspectMemoryIdentity } from './layout';
+import { resolveMemoryPath } from './paths';
+import { buildMemorySearchQuery } from './search';
 
 const encoder = new TextEncoder();
 const bytes = (value: string) => encoder.encode(value).byteLength;

@@ -1,2 +1,2 @@
-export { initializeMemoryDoc, inspectMemoryIdentity } from './layout.ts';
-export { openMemoryDocument } from './document.ts';
+export { initializeMemoryDoc, inspectMemoryIdentity } from './layout';
+export { openMemoryDocument } from './document';

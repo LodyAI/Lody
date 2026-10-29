@@ -10,8 +10,8 @@ import {
   buildMemorySearchQuery,
   type MemoryIdentity,
   type MemoryResult,
-} from '../src/index.ts';
-import { initializeMemoryDoc, inspectMemoryIdentity, openMemoryDocument } from '../src/loro.ts';
+} from '../src/index';
+import { initializeMemoryDoc, inspectMemoryIdentity, openMemoryDocument } from '../src/loro';
 
 const identity: MemoryIdentity = {
   memoryId: 'memory-a',
