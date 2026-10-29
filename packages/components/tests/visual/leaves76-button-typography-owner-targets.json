@@ -1,0 +1,105 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": ["migration-ownedbuttontypography--contract"],
+  "ready": {
+    "migration-ownedbuttontypography--contract": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-typography-target]');return e&&document.querySelector('[data-button-typography]').getAttribute('data-stage')==='named'&&getComputedStyle(e).fontSize==='17px'&&getComputedStyle(e).lineHeight==='17px'}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedbuttontypography--contract": [
+      {
+        "name": "explicit",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Apply typography"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-typography-target]');return e&&getComputedStyle(e).fontSize==='12px'&&getComputedStyle(e).lineHeight==='16px'}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "zero",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zero typography"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-typography-target]');return e&&getComputedStyle(e).fontSize==='0px'&&getComputedStyle(e).lineHeight==='0px'}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "omitted",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Omit typography"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-typography-target]');return e&&document.querySelector('[data-button-typography]').getAttribute('data-stage')==='named'&&getComputedStyle(e).fontSize==='17px'&&getComputedStyle(e).lineHeight==='17px'}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "disabled",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle disabled"
+          },
+          {
+            "action": "disabled",
+            "selector": "[data-typography-target]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ]
+  }
+}

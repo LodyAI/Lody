@@ -1,0 +1,244 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 1000,
+      "device": "iPhone 13"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "components-lodysidebar--with-projects",
+    "components-lodysidebar--long-project-path-tooltip",
+    "chat-unifiedprojectselector--menu-open",
+    "chat-unifiedprojectselector--long-project-path-tooltip",
+    "ai-gui-viewmigration--turn-metadata",
+    "sessions-sessionforkdestinationmenu--available",
+    "sessions-desktoprunconfigmenu--locked-agent"
+  ],
+  "ready": {
+    "components-lodysidebar--with-projects": [
+      {
+        "action": "hover",
+        "selector": "[role=\"button\"][aria-label^=\"lody \u00b7 Mac Studio\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const es=[...document.querySelectorAll(\"div[data-base-ui-focusable][data-side]:not([role])\")];if(es.length!==1||document.fonts.status!=='loaded')return false;const e=es[0],c=getComputedStyle(e),r=e.getBoundingClientRect(),expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];return !!expected&&document.documentElement.classList.contains('dark')===(expected==='dark')&&c.opacity==='1'&&c.visibility==='visible'&&r.width>0&&r.height>0&&!e.hasAttribute('data-starting-style')&&!e.hasAttribute('data-ending-style')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))&&c.maxWidth==='420px'&&c.wordBreak==='break-all';}"
+      }
+    ],
+    "components-lodysidebar--long-project-path-tooltip": [
+      {
+        "action": "hover",
+        "selector": "[role=\"button\"][aria-label^=\"lody \u00b7 Mac Studio\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const es=[...document.querySelectorAll(\"div[data-base-ui-focusable][data-side]:not([role])\")];if(es.length!==1||document.fonts.status!=='loaded')return false;const e=es[0],c=getComputedStyle(e),r=e.getBoundingClientRect(),expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];return !!expected&&document.documentElement.classList.contains('dark')===(expected==='dark')&&c.opacity==='1'&&c.visibility==='visible'&&r.width>0&&r.height>0&&!e.hasAttribute('data-starting-style')&&!e.hasAttribute('data-ending-style')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))&&c.maxWidth==='420px'&&c.wordBreak==='break-all'&&e.textContent.includes('long-project-directory-segment-')&&r.width>300&&r.height>40;}"
+      }
+    ],
+    "chat-unifiedprojectselector--menu-open": [
+      {
+        "action": "hover",
+        "selector": "[role=menu] span:text-is(\"lody\")",
+        "index": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const es=[...document.querySelectorAll(\"div[data-base-ui-focusable][data-side]:not([role])\")];if(es.length!==1||document.fonts.status!=='loaded')return false;const e=es[0],c=getComputedStyle(e),r=e.getBoundingClientRect(),expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];return !!expected&&document.documentElement.classList.contains('dark')===(expected==='dark')&&c.opacity==='1'&&c.visibility==='visible'&&r.width>0&&r.height>0&&!e.hasAttribute('data-starting-style')&&!e.hasAttribute('data-ending-style')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))&&c.maxWidth==='352px'&&c.wordBreak==='break-all';}"
+      }
+    ],
+    "chat-unifiedprojectselector--long-project-path-tooltip": [
+      {
+        "action": "hover",
+        "selector": "[role=menu] span:text-is(\"lody\")",
+        "index": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const es=[...document.querySelectorAll(\"div[data-base-ui-focusable][data-side]:not([role])\")];if(es.length!==1||document.fonts.status!=='loaded')return false;const e=es[0],c=getComputedStyle(e),r=e.getBoundingClientRect(),expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];return !!expected&&document.documentElement.classList.contains('dark')===(expected==='dark')&&c.opacity==='1'&&c.visibility==='visible'&&r.width>0&&r.height>0&&!e.hasAttribute('data-starting-style')&&!e.hasAttribute('data-ending-style')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))&&c.maxWidth==='352px'&&c.wordBreak==='break-all'&&e.textContent.includes('long-project-directory-segment-')&&r.width>300&&r.height>40;}"
+      }
+    ],
+    "ai-gui-viewmigration--turn-metadata": [
+      {
+        "action": "press",
+        "role": "button",
+        "name": "Turn configuration",
+        "key": "Escape"
+      },
+      {
+        "action": "hover",
+        "role": "button",
+        "name": "Turn configuration"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const es=[...document.querySelectorAll(\"div[data-base-ui-focusable][data-side]:not([role])\")];if(es.length!==1||document.fonts.status!=='loaded')return false;const e=es[0],c=getComputedStyle(e),r=e.getBoundingClientRect(),expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];return !!expected&&document.documentElement.classList.contains('dark')===(expected==='dark')&&c.opacity==='1'&&c.visibility==='visible'&&r.width>0&&r.height>0&&!e.hasAttribute('data-starting-style')&&!e.hasAttribute('data-ending-style')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))&&c.maxWidth==='320px'&&e.textContent.includes('Reasoning');}"
+      }
+    ],
+    "sessions-sessionforkdestinationmenu--available": [
+      {
+        "action": "hover",
+        "role": "menuitem",
+        "name": "Fork to new tab"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const es=[...document.querySelectorAll(\"div[data-base-ui-focusable][data-side]:not([role])\")];if(es.length!==1||document.fonts.status!=='loaded')return false;const e=es[0],c=getComputedStyle(e),r=e.getBoundingClientRect(),expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];return !!expected&&document.documentElement.classList.contains('dark')===(expected==='dark')&&c.opacity==='1'&&c.visibility==='visible'&&r.width>0&&r.height>0&&!e.hasAttribute('data-starting-style')&&!e.hasAttribute('data-ending-style')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))&&c.fontSize==='12px'&&e.textContent.includes('same directory');}"
+      }
+    ],
+    "sessions-desktoprunconfigmenu--locked-agent": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Mode: Read-only"
+      },
+      {
+        "action": "hover",
+        "role": "menuitem",
+        "name": "Read-only"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const es=[...document.querySelectorAll(\"div[data-base-ui-focusable][data-side]:not([role])\")];if(es.length!==1||document.fonts.status!=='loaded')return false;const e=es[0],c=getComputedStyle(e),r=e.getBoundingClientRect(),expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1];return !!expected&&document.documentElement.classList.contains('dark')===(expected==='dark')&&c.opacity==='1'&&c.visibility==='visible'&&r.width>0&&r.height>0&&!e.hasAttribute('data-starting-style')&&!e.hasAttribute('data-ending-style')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))&&c.whiteSpace==='pre-wrap'&&e.textContent.includes('Requires approval');}"
+      }
+    ]
+  },
+  "states": {
+    "components-lodysidebar--with-projects": [
+      {
+        "name": "tooltip-closed",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>!document.querySelector(\"div[data-base-ui-focusable][data-side]:not([role])\")&&document.fonts.status==='loaded'"
+          }
+        ]
+      }
+    ],
+    "components-lodysidebar--long-project-path-tooltip": [
+      {
+        "name": "tooltip-closed",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>!document.querySelector(\"div[data-base-ui-focusable][data-side]:not([role])\")&&document.fonts.status==='loaded'"
+          }
+        ]
+      }
+    ],
+    "chat-unifiedprojectselector--menu-open": [
+      {
+        "name": "tooltip-closed",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>!document.querySelector(\"div[data-base-ui-focusable][data-side]:not([role])\")&&document.fonts.status==='loaded'"
+          }
+        ]
+      }
+    ],
+    "chat-unifiedprojectselector--long-project-path-tooltip": [
+      {
+        "name": "tooltip-closed",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>!document.querySelector(\"div[data-base-ui-focusable][data-side]:not([role])\")&&document.fonts.status==='loaded'"
+          }
+        ]
+      }
+    ],
+    "ai-gui-viewmigration--turn-metadata": [
+      {
+        "name": "open-config-panel",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Turn configuration"
+          },
+          {
+            "action": "visible",
+            "text": "Tokens",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "sessions-sessionforkdestinationmenu--available": [
+      {
+        "name": "keyboard-select-real-callback",
+        "steps": [
+          {
+            "action": "press",
+            "role": "menuitem",
+            "name": "Fork to new tab",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "text": "Last choice: shared"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>!document.querySelector('[role=menu]')&&document.fonts.status==='loaded'"
+          }
+        ]
+      }
+    ],
+    "sessions-desktoprunconfigmenu--locked-agent": [
+      {
+        "name": "keyboard-select-real-mode",
+        "steps": [
+          {
+            "action": "press",
+            "role": "menuitem",
+            "name": "Agent",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "role": "button",
+            "name": "Mode: Agent"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>!document.querySelector('[role=menu]')&&document.fonts.status==='loaded'"
+          }
+        ]
+      }
+    ]
+  }
+}

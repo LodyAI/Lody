@@ -1,6 +1,12 @@
 import { Button as BaseButton } from '@base-ui/react/button';
 import * as stylex from '@stylexjs/stylex';
-import { createContext, forwardRef, useContext, type ComponentProps } from 'react';
+import {
+  createContext,
+  forwardRef,
+  useContext,
+  type ComponentProps,
+  type CSSProperties,
+} from 'react';
 import { colors } from '../tokens/colors.stylex';
 import { corner, duration, ease, radius, text } from '../tokens/scales.stylex';
 import { button } from './button.tokens.stylex';
@@ -21,6 +27,9 @@ export interface ButtonProps extends Omit<BaseProps, 'className'> {
   /** Numbers are px; strings are CSS dimension values. Omission keeps size and variant defaults. */
   width?: string | number;
   height?: string | number;
+  /** Outer label typography. Font-size numbers are px; line-height numbers are unitless. */
+  fontSize?: CSSProperties['fontSize'];
+  lineHeight?: CSSProperties['lineHeight'];
   className?: string;
 }
 
@@ -302,6 +311,8 @@ export const Button = forwardRef<HTMLElement, ButtonProps>(function Button(
     icon = false,
     width,
     height,
+    fontSize,
+    lineHeight,
     className,
     children,
     ...rest
@@ -323,6 +334,16 @@ export const Button = forwardRef<HTMLElement, ButtonProps>(function Button(
     width != null && dyn.width(width),
     height != null && dyn.height(height)
   );
+  // CSS-wide keywords, including var() fallbacks, must reach the actual field:
+  // routing them through a custom property changes their inheritance semantics.
+  const labelStyle =
+    fontSize == null && lineHeight == null
+      ? sx.style
+      : {
+          ...sx.style,
+          ...(fontSize != null && { fontSize }),
+          ...(lineHeight != null && { lineHeight }),
+        };
   const glyph = stylex.props(styles.glyph);
   return (
     <BaseButton
@@ -332,7 +353,7 @@ export const Button = forwardRef<HTMLElement, ButtonProps>(function Button(
       {...rest}
       data-ui-button-group-item={segment ? '' : undefined}
       className={className ? `${sx.className} ${className}` : sx.className}
-      style={sx.style}
+      style={labelStyle}
     >
       {icon ? (
         <span className={glyph.className} style={glyph.style}>

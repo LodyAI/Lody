@@ -34,18 +34,28 @@ describe('Button', () => {
     expect(text).toMatch(/<button[^>]*>Save<\/button>/);
   });
 
-  test('box updates preserve the button, glyph, focus, caller class and native disabled behavior', async () => {
+  test('box and typography updates preserve the button, glyph, focus, caller class and native disabled behavior', async () => {
     const ref = createRef<HTMLElement>();
     function Example() {
-      const [box, setBox] = useState<{ width?: number; height?: number }>({
+      const [box, setBox] = useState<{
+        width?: number;
+        height?: number;
+        fontSize?: number;
+        lineHeight?: number;
+      }>({
         width: 96,
         height: 28,
+        fontSize: 18,
+        lineHeight: 1.25,
       });
       const [disabled, setDisabled] = useState(false);
       const [clicks, setClicks] = useState(0);
       return (
         <>
-          <button data-zero onClick={() => setBox({ width: 0, height: 0 })}>
+          <button
+            data-zero
+            onClick={() => setBox({ width: 0, height: 0, fontSize: 0, lineHeight: 0 })}
+          >
             Zero
           </button>
           <button data-omit onClick={() => setBox({})}>
@@ -59,6 +69,8 @@ describe('Button', () => {
             icon
             width={box.width}
             height={box.height}
+            fontSize={box.fontSize}
+            lineHeight={box.lineHeight}
             disabled={disabled}
             className="caller-owned"
             style={{ width: 999, height: 999 }}
@@ -75,6 +87,8 @@ describe('Button', () => {
     mounted = await mount(<Example />);
     const target = mounted.container.querySelector<HTMLButtonElement>('[data-target]')!;
     const glyph = target.firstElementChild;
+    expect(target.style.fontSize).toBe('18px');
+    expect(target.style.lineHeight).toBe('1.25');
     target.focus();
     expect(ref.current).toBe(target);
     for (const action of ['zero', 'omit']) {
@@ -87,8 +101,12 @@ describe('Button', () => {
       expect(target.classList.contains('caller-owned')).toBe(true);
       expect(target.hasAttribute('width')).toBe(false);
       expect(target.hasAttribute('height')).toBe(false);
+      expect(target.hasAttribute('fontSize')).toBe(false);
+      expect(target.hasAttribute('lineHeight')).toBe(false);
       expect(target.style.width).toBe('');
       expect(target.style.height).toBe('');
+      expect(target.style.fontSize).toBe(action === 'zero' ? '0px' : '');
+      expect(target.style.lineHeight).toBe(action === 'zero' ? '0' : '');
       await act(async () => target.click());
     }
     expect(mounted.container.querySelector('output')?.textContent).toBe('2');
@@ -110,7 +128,11 @@ describe('Button', () => {
           nativeButton={false}
           width={96}
           height={28}
-          render={<a href="/x" style={{ width: 105, height: 31 }} />}
+          fontSize={12}
+          lineHeight={1.3}
+          render={
+            <a href="/x" style={{ width: 105, height: 31, fontSize: 21, lineHeight: '31px' }} />
+          }
           onClick={(event) => {
             event.preventDefault();
             setClicks((n) => n + 1);
@@ -126,6 +148,8 @@ describe('Button', () => {
     expect(anchor.getAttribute('href')).toBe('/x');
     expect(anchor.style.width).toBe('105px');
     expect(anchor.style.height).toBe('31px');
+    expect(anchor.style.fontSize).toBe('21px');
+    expect(anchor.style.lineHeight).toBe('31px');
     await act(async () => anchor.click());
     expect(ref.current).toBe(anchor);
     expect(anchor.textContent).toBe('Clicks: 1');

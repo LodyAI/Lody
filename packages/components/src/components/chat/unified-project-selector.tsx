@@ -36,6 +36,7 @@ import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  projectPathTooltip: { [tooltip.maxWidth]: '22rem', wordBreak: 'break-all' },
   tooltipPadding: {
     [tooltip.paddingX]: 'calc(var(--spacing) * 2.5)',
     [tooltip.paddingY]: 'calc(var(--spacing) * 2)',
@@ -921,7 +922,10 @@ export function UnifiedProjectSelectorView({
                         {localPath ? (
                           <Tooltip.Root>
                             <Tooltip.Trigger render={labelNode} />
-                            <Tooltip.Content side="right" className="max-w-[22rem] break-all">
+                            <Tooltip.Content
+                              side="right"
+                              className={stylex.props(styles.projectPathTooltip).className}
+                            >
                               {localPath}
                             </Tooltip.Content>
                           </Tooltip.Root>

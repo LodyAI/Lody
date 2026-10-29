@@ -1,0 +1,188 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "sessions-ownedsessionlayoutmigration--open",
+    "sessions-ownedsessionlayoutmigration--subtree-variables",
+    "sessions-ownedsessionlayoutmigration--closed"
+  ],
+  "ready": {
+    "sessions-ownedsessionlayoutmigration--open": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-slot=resizable-handle]');if(!e)return false;const c=getComputedStyle(e),p=getComputedStyle(e,'::after'),r=e.getBoundingClientRect();return c.opacity==='1'&&c.backgroundColor==='rgba(0, 0, 0, 0)'&&p.left==='0px'&&p.width==='2px'&&p.translate==='0px'&&r.width===1&&r.height>100&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))}"
+      }
+    ],
+    "sessions-ownedsessionlayoutmigration--subtree-variables": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-slot=resizable-handle]');if(!e)return false;const c=getComputedStyle(e),p=getComputedStyle(e,'::after'),r=e.getBoundingClientRect();return c.opacity==='1'&&c.backgroundColor==='rgba(0, 0, 0, 0)'&&p.left==='0px'&&p.width==='2px'&&p.translate==='0px'&&r.width===1&&r.height>100&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))}"
+      }
+    ],
+    "sessions-ownedsessionlayoutmigration--closed": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-session-layout-fixture]')?.getAttribute('data-sidebar-open')==='false'&&getComputedStyle(document.querySelector('[data-slot=resizable-handle]')).opacity==='0'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded' && document.getAnimations().every(a => a.effect?.getTiming().iterations===Infinity || (!a.pending && a.playState!=='running'))"
+      }
+    ]
+  },
+  "states": {
+    "sessions-ownedsessionlayoutmigration--open": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-slot=resizable-handle]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-slot=resizable-handle]');return e?.getAttribute('data-resize-handle-state')==='hover'&&getComputedStyle(e,'::after').transitionDelay==='0.15s'&&getComputedStyle(e,'::after').backgroundColor!=='rgba(0, 0, 0, 0)'&& !getComputedStyle(e,'::after').backgroundColor.endsWith('/ 0)')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))}"
+          }
+        ]
+      },
+      {
+        "name": "keyboard",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-slot=resizable-handle]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-slot=resizable-handle]",
+            "key": "ArrowLeft"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement?.matches('[data-slot=resizable-handle]') && document.activeElement.getAttribute('aria-valuenow')==='55'"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded' && document.getAnimations().every(a => a.effect?.getTiming().iterations===Infinity || (!a.pending && a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 10,
+            "y": 10
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle panel"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-session-layout-fixture]')?.getAttribute('data-sidebar-open')==='false'&&getComputedStyle(document.querySelector('[data-slot=resizable-handle]')).opacity==='0'"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle panel"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-slot=resizable-handle]');if(!e)return false;const c=getComputedStyle(e),p=getComputedStyle(e,'::after'),r=e.getBoundingClientRect();return c.opacity==='1'&&c.backgroundColor==='rgba(0, 0, 0, 0)'&&p.left==='0px'&&p.width==='2px'&&p.translate==='0px'&&r.width===1&&r.height>100&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))}"
+          }
+        ]
+      }
+    ],
+    "sessions-ownedsessionlayoutmigration--subtree-variables": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-slot=resizable-handle]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-slot=resizable-handle]');return e?.getAttribute('data-resize-handle-state')==='hover'&&getComputedStyle(e,'::after').transitionDelay==='0.15s'&&getComputedStyle(e,'::after').backgroundColor!=='rgba(0, 0, 0, 0)'&& !getComputedStyle(e,'::after').backgroundColor.endsWith('/ 0)')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))}"
+          }
+        ]
+      },
+      {
+        "name": "keyboard",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-slot=resizable-handle]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-slot=resizable-handle]",
+            "key": "ArrowLeft"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement?.matches('[data-slot=resizable-handle]') && document.activeElement.getAttribute('aria-valuenow')==='55'"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded' && document.getAnimations().every(a => a.effect?.getTiming().iterations===Infinity || (!a.pending && a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 10,
+            "y": 10
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle panel"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-session-layout-fixture]')?.getAttribute('data-sidebar-open')==='false'&&getComputedStyle(document.querySelector('[data-slot=resizable-handle]')).opacity==='0'"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle panel"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-slot=resizable-handle]');if(!e)return false;const c=getComputedStyle(e),p=getComputedStyle(e,'::after'),r=e.getBoundingClientRect();return c.opacity==='1'&&c.backgroundColor==='rgba(0, 0, 0, 0)'&&p.left==='0px'&&p.width==='2px'&&p.translate==='0px'&&r.width===1&&r.height>100&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))}"
+          }
+        ]
+      }
+    ],
+    "sessions-ownedsessionlayoutmigration--closed": [
+      {
+        "name": "opened",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle panel"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-slot=resizable-handle]');if(!e)return false;const c=getComputedStyle(e),p=getComputedStyle(e,'::after'),r=e.getBoundingClientRect();return c.opacity==='1'&&c.backgroundColor==='rgba(0, 0, 0, 0)'&&p.left==='0px'&&p.width==='2px'&&p.translate==='0px'&&r.width===1&&r.height>100&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))}"
+          }
+        ]
+      }
+    ]
+  }
+}

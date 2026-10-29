@@ -1391,6 +1391,32 @@ ReactNode children 并不安全，即使默认面板像素相同。两份被拒�
 布局判断，最初四十对候选实际仅三十九对 PNG 字节一致；原标签与明确更正均保留。局部字号
 正控、已知 inline 负控、真实 portal 门禁失败与所有更早 OPEN 均保留。
 
+Tooltip、resize edge 与字体续迁在十六个产品调用文件中移除 35 处 utility，另一个
+源码文件是共享 Button 归属层。Tooltip 保留实际编译表达式：`max-w-xs` 是字面 `20rem`，
+而 Header 与 Sharing 的宽度仍读取元素局部 spacing。ResizableHandle 在同一归属层调用中
+组合显式 `appearance="edge"` 与 base；默认 handle 的原始 class/style 和 computed 合同
+不变。实际 edge 调用是水平方向。正常动效环境验证真实 150ms delay/duration 与稳定端点，
+不声称验证未经中断的逐帧序列。
+
+Button 仅新增 CSS 类型的 `fontSize` 和 `lineHeight` 字段。两者省略时保留原 style 对象；
+提供时与归属层 StyleX inline 变量合并，写入实际 CSS 字段。被拒的 custom-property 实现
+虽然六十对普通截图相同，却在真实 `initial`、`inherit`、`revert` 和嵌套 `var()` fallback
+上不等价。最终实现通过 104 个浏览器 CSS 语义用例和 24 个真实 class 优先级用例。
+直接 caller style 的既有行为不变，Base UI render 元素合并另行验证；不新增 Token 组或依赖。
+
+私有 diff-notice Header 保留 `dark:border-border`：真实公开 `*:` 调用方暴露了
+utilities 层排序合同，较早的 StyleX 声明不能保留原胜负。其余七处迁移；完整构建 CSSOM
+与竖排书写验证实际逻辑 inset。不能把较早 margin-block 的编译问题泛化为全部 camelCase
+逻辑属性。
+
+`leaves74-78-acceptance.html` 保留 **310 对正式图／305 对逐字节一致／30,303 条完整
+标准记录相同**。五对 Tooltip 边角仍 OPEN（13 原始／零阈值像素），另两对侧栏补充图
+仍 OPEN（882 原始／829 阈值像素）。Archive hover 状态与 Monaco tokenizer 就绪失败
+有明确同源证据，四个修正 cell 显式组装，原数据全部可查。原生模块导入失败、被拒字体
+候选、inline 负控及更早 OPEN 均保留。1,862 文件源码稳定边界通过 components
+620 文件／6,207 测试、UI 25／307、真实 OSS Electron 构建及四页冒烟；应用图仅为 After，
+不能证明全应用 Before 等价。根检查仍受既有 ACP 前置失败阻塞，位于 UI 迁移范围之外。
+
 ## 后续工作
 
 基于编译器的[用量统计](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -1413,7 +1439,8 @@ ReactNode children 并不安全，即使默认面板像素相同。两份被拒�
 | 精确截至 63 的源码，视觉部分验收 | v2       |    1,594 |  167 |    722 |
 | 精确截至 67 的源码，视觉部分验收 | v2       |    1,572 |  166 |    718 |
 | 精确截至 71 的源码，视觉部分验收 | v2       |    1,554 |  165 |    718 |
-| 精确截至 73 的源码，视觉部分验收 | v2       |    1,542 |  165 |    738 |
+| 精确截至 73 的源码，视觉部分验收 | v2       |    1,542 |  165 |    718 |
+| 精确截至 78 的源码，视觉部分验收 | v2       |    1,507 |  163 |    718 |
 
 更早的方法修正覆盖了单个 utility、`withClassName` 第二参数和受支持的静态类名数组。
 各批历史数字继续留在冻结报告，不能跨方法混合基线。例如四文件 helper 重扫得到 165→97，
@@ -1426,10 +1453,10 @@ v1 漏记五个真实 utility，因此 31–33 批实际移除 26，而旧下界
 其他字段中看似有效 utility 的负控。模糊写入继续列为未解析；UI 适配器两处 `className` 写入新增四个未解析表达式，
 因此数量相应增加。
 
-已发布截至 73 的 v2 分项为 components 1,098 处／149 文件／625 未解析，旧 UI 439／14／93，
-routes 五处／两文件／零；总数仅覆盖这三个源码根。规范化路径保留原始扫描结果及全部
-688 个组件 JS／TS 字节哈希；截至 73 的快照在已冻结截至 71 上加入五个组件及 command
-归属层更新，三根共 789 份文件逐一记录，不含后续候选。此前截至 67 时，五个 Usage 模板表达式和一个 Archive
+已发布截至 78 的 v2 分项为 components 1,063 处／147 文件／625 未解析，旧 UI 439／14／93，
+routes 五处／两文件／零；总数仅覆盖这三个源码根。三根全部 789 份文件逐一记录字节哈希。
+截至 78 快照在冻结截至 73 上更新十六份源码，共享 UI Button 归属层位于三根之外并单独记录；
+不含后续工作。此前截至 67 时，五个 Usage 模板表达式和一个 Archive
 类查找消失，新增两个 FileError／Bub
 StyleX 模板未解析，它们不代表新增未知 Tailwind utility。另一次 helper 审查在 lib／hooks 两个文件中发现另外九处，位于三根范围之外；
 不混入同边界总数，也不称为新增产品

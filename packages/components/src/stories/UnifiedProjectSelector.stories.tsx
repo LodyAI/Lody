@@ -209,6 +209,16 @@ export const MenuOpen: Story = {
   },
 };
 
+export const LongProjectPathTooltip: Story = {
+  args: {
+    localProjects: localProjects.map((project) => ({
+      ...project,
+      rootPath: `/synthetic/${'long-project-directory-segment-'.repeat(12)}${project.name}`,
+    })),
+  },
+  play: MenuOpen.play,
+};
+
 export const MenuOpenDark: Story = {
   globals: { theme: 'dark' },
   play: async ({ canvasElement }) => {

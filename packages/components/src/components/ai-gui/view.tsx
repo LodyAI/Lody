@@ -2,6 +2,7 @@ import { AgentRoleProposalNotice } from './agent-role-proposal-notice';
 import type { AgentRoleProposalMeta } from '@lody/shared';
 import { MessageAuthorIdentity } from './message-author-identity';
 import * as stylex from '@stylexjs/stylex';
+import { tooltip } from '@lody/ui/tooltip/tooltip.tokens.stylex';
 import { space, text as textScale } from '@lody/ui/tokens/scales.stylex';
 import {
   messageActionButtonTheme,
@@ -374,6 +375,7 @@ const TRANSITION_COLORS = {
 } as const;
 
 const viewStyles = stylex.create({
+  turnConfigTooltip: { [tooltip.maxWidth]: '20rem' },
   forkFooterSpacing: { marginRight: 'calc(var(--spacing) * 2)' },
   planCopySpacing: { marginRight: 'calc(var(--spacing) * -1)' },
   /* ── The live status row ──────────────────────────────────────────────── */
@@ -5758,7 +5760,10 @@ const AssistantTurnConfigInfoButton = ({
             }
           />
           {!configOpen ? (
-            <Tooltip.Content side="top" className="max-w-xs">
+            <Tooltip.Content
+              side="top"
+              className={stylex.props(viewStyles.turnConfigTooltip).className}
+            >
               {tooltipPreview}
             </Tooltip.Content>
           ) : null}

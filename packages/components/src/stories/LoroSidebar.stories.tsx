@@ -1523,6 +1523,19 @@ export const WithProjects: Story = {
   },
 };
 
+export const LongProjectPathTooltip: Story = {
+  args: { ...Default.args! },
+  render: (args) => (
+    <WorkspaceSidebarHarness
+      {...args}
+      localProjects={demoProjects.map((project) => ({
+        ...project,
+        rootPath: `/synthetic/${'long-project-directory-segment-'.repeat(12)}${project.name}`,
+      }))}
+    />
+  ),
+};
+
 /** 180 conversations across chats and eight worktree repositories for scrolling and density checks. */
 export const StressTest: Story = {
   name: 'Stress test (180 sessions)',

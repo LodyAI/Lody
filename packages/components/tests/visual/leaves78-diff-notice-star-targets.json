@@ -1,0 +1,78 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 900,
+      "device": "iPhone 13"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": ["migration-alphasurfaces--notice-direct-child-overrides"],
+  "ready": {
+    "migration-alphasurfaces--notice-direct-child-overrides": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Open file"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const root=document.querySelector('[data-alpha-notice]'),h=root?.querySelector('div[aria-expanded]'),img=h?.querySelector('img'),c=h&&getComputedStyle(h);return !!h&&h.getAttribute('aria-expanded')==='true'&&c.height==='32px'&&img?.complete&&img.naturalWidth>0&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {
+    "migration-alphasurfaces--notice-direct-child-overrides": [
+      {
+        "name": "open-file-callback",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open file"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const r=document.querySelector('[data-alpha-notice]');return r.querySelector('output').textContent.startsWith('Opened src/')&&r.querySelector('div[aria-expanded]').getAttribute('aria-expanded')==='true';}"
+          }
+        ]
+      },
+      {
+        "name": "collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle section"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const h=document.querySelector('[data-alpha-notice] div[aria-expanded]');return h?.getAttribute('aria-expanded')==='false'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-reopen",
+        "steps": [
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Toggle section",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const root=document.querySelector('[data-alpha-notice]'),h=root?.querySelector('div[aria-expanded]'),img=h?.querySelector('img'),c=h&&getComputedStyle(h);return !!h&&h.getAttribute('aria-expanded')==='true'&&c.height==='32px'&&img?.complete&&img.naturalWidth>0&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ]
+  }
+}

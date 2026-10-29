@@ -62,7 +62,9 @@ export function BubInstallGuide() {
           variant="ghost"
           size="small"
           height="calc(var(--spacing) * 7)"
-          className={`text-xs ${stylex.props(styles.actionSpacing).className}`}
+          fontSize="var(--text-xs)"
+          lineHeight="var(--tw-leading, var(--text-xs--line-height))"
+          className={stylex.props(styles.actionSpacing).className}
           aria-label={copied ? t('common.copied', 'Copied') : t('common.copy', 'Copy')}
           onClick={() => {
             void writeTextToClipboard(BUB_ACP_INSTALL_COMMAND).then((success) => {
@@ -83,7 +85,9 @@ export function BubInstallGuide() {
         variant="link"
         size="small"
         height="auto"
-        className="p-0 text-xs"
+        fontSize="var(--text-xs)"
+        lineHeight="var(--tw-leading, var(--text-xs--line-height))"
+        className="p-0"
         onClick={() => {
           void openExternalUrl(BUB_ACP_INSTALL_DOCS_URL);
         }}

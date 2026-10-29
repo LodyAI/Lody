@@ -52,6 +52,7 @@ import {
 import { cn } from '@/lib/utils';
 import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
+import { tooltip } from '@lody/ui/tooltip/tooltip.tokens.stylex';
 import { themeColors } from '../style/theme-colors.stylex';
 import {
   themeSpace,
@@ -65,6 +66,7 @@ import {
  * fills come from sidebarSurface; these are the pieces around it.
  */
 const appStyles = stylex.create({
+  projectTooltip: { [tooltip.maxWidth]: '420px', wordBreak: 'break-all' },
   rowBox: {
     width: '100%',
     borderRadius: themeRadius.md,
@@ -1540,7 +1542,11 @@ export const LocalProjectItem = memo(function LocalProjectItem({
               render={showProjectMenu ? <ContextMenu.Trigger render={projectRow} /> : projectRow}
             />
             {formattedPath || trimmedMachineName || collapsedActivityDescription ? (
-              <Tooltip.Content side="right" align="start" className="max-w-[420px] break-all">
+              <Tooltip.Content
+                side="right"
+                align="start"
+                className={stylex.props(appStyles.projectTooltip).className}
+              >
                 <div
                   className={clsx(
                     SIDEBAR_HELPER_TEXT_CLASS,

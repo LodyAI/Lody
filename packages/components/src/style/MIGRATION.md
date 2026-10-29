@@ -51,6 +51,19 @@ utility read it there; replacing it with an equal-default inherited alias change
 subtree behavior. Verify explicit zero and removal of the override on the same
 mounted control, as well as its actual animation and rendered pixels.
 
+Button typography uses its narrow `fontSize` / `lineHeight` API. The owner writes
+these dynamic values at the actual CSS fields, merging its StyleX inline values;
+custom-property indirection changes CSS-wide keywords and even `var()` fallback
+semantics. Omission preserves the original owner style. Verify actual keyword,
+relative-unit and class-priority behavior rather than relying on ordinary-size
+screenshots. Existing direct `style` and Base UI `render` merging are separate
+contracts; do not silently change either while migrating a consumer.
+
+ResizableHandle's `appearance="edge"` composes the base and session edge inside
+the primitive owner. Its actual horizontal consumer no longer competes through
+external pseudo-element classes. Default handles retain their contract; default
+vertical coverage does not establish the new edge appearance in that orientation.
+
 Local primitive themes need their own inheritance check. `createTheme` also
 applies the variable group's defaults: a partial Button theme reset an inherited
 23px gap and 3px orange focus ring. Explicitly inherit every non-target token with
@@ -142,6 +155,10 @@ does not authorize redesigning controls, changing copy or altering layout semant
 | Responsive variants    | Match the original media condition, including fractional widths at a breakpoint.                                 |
 | Alpha colors           | Preserve the exact compiled HSL or color-mix expression; see [Alpha](README.md#alpha).                           |
 | `border` without color | Preserve the existing inherited/current color and border style.                                                  |
+
+Inspect dimension utilities too: the current `max-w-xs` emits literal `20rem`,
+not a read of `--container-xs`. Preserve that literal while retaining local
+spacing expressions where the actual utility reads them.
 
 Inspect compiled font-family rules rather than assuming a utility reads the app
 font variable. The current `font-sans` preset emits a literal native/Chinese font

@@ -1,0 +1,69 @@
+{
+  "viewports": [
+    {
+      "name": "compact767",
+      "width": 767,
+      "height": 1000
+    },
+    {
+      "name": "split768",
+      "width": 768,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": ["sessions-ownedsessionlayoutmigration--open"],
+  "ready": {
+    "sessions-ownedsessionlayoutmigration--open": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-slot=resizable-handle]'),c=e&&getComputedStyle(e);return e&&document.querySelector('[data-session-layout-fixture]')?.getAttribute('data-sidebar-open')==='true'&&c.opacity===(innerWidth<768?'0':'1')&&e.getAttribute('data-panel-resize-handle-enabled')===(innerWidth<768?'false':'true')&&(innerWidth>=768||c.pointerEvents==='none')}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded' && document.getAnimations().every(a => a.effect?.getTiming().iterations===Infinity || (!a.pending && a.playState!=='running'))"
+      }
+    ]
+  },
+  "states": {
+    "sessions-ownedsessionlayoutmigration--open": [
+      {
+        "name": "closed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle panel"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-slot=resizable-handle]');return document.querySelector('[data-session-layout-fixture]')?.getAttribute('data-sidebar-open')==='false'&&e&&getComputedStyle(e).opacity==='0'&&e.getAttribute('data-panel-resize-handle-enabled')==='false'}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded' && document.getAnimations().every(a => a.effect?.getTiming().iterations===Infinity || (!a.pending && a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle panel"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-slot=resizable-handle]'),c=e&&getComputedStyle(e);return e&&document.querySelector('[data-session-layout-fixture]')?.getAttribute('data-sidebar-open')==='true'&&c.opacity===(innerWidth<768?'0':'1')&&e.getAttribute('data-panel-resize-handle-enabled')===(innerWidth<768?'false':'true')&&(innerWidth>=768||c.pointerEvents==='none')}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded' && document.getAnimations().every(a => a.effect?.getTiming().iterations===Infinity || (!a.pending && a.playState!=='running'))"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -345,7 +345,7 @@ export function getSessionFileErrorPresentation(
 // One row per action, all the same width. A wrapping row of buttons sized by
 // their own labels was the previous layout, and in a side panel it produced
 // three ragged widths on three lines — the width difference read as meaning.
-const ACTION_BUTTON_CLASS = `justify-start text-xs font-normal ${stylex.props(styles.actionSpacing).className}`;
+const ACTION_BUTTON_CLASS = `justify-start font-normal ${stylex.props(styles.actionSpacing).className}`;
 
 export function SessionFileErrorState({
   message,
@@ -404,6 +404,8 @@ export function SessionFileNoticeCard({
                 variant="secondary"
                 width="100%"
                 height="calc(var(--spacing) * 8)"
+                fontSize="var(--text-xs)"
+                lineHeight="var(--tw-leading, var(--text-xs--line-height))"
                 className={ACTION_BUTTON_CLASS}
                 onClick={actions.onShare}
                 disabled={actions.sharing}
@@ -423,6 +425,8 @@ export function SessionFileNoticeCard({
                   variant="secondary"
                   width="100%"
                   height="calc(var(--spacing) * 8)"
+                  fontSize="var(--text-xs)"
+                  lineHeight="var(--tw-leading, var(--text-xs--line-height))"
                   className={ACTION_BUTTON_CLASS}
                   onClick={localHost.onOpen}
                   data-testid="session-file-error-open"
@@ -437,6 +441,8 @@ export function SessionFileNoticeCard({
                   variant="ghost"
                   width="100%"
                   height="calc(var(--spacing) * 8)"
+                  fontSize="var(--text-xs)"
+                  lineHeight="var(--tw-leading, var(--text-xs--line-height))"
                   className={ACTION_BUTTON_CLASS}
                   onClick={localHost.onReveal}
                   data-testid="session-file-error-reveal"
@@ -453,6 +459,8 @@ export function SessionFileNoticeCard({
               variant={localHost || actions.onShare ? 'ghost' : 'secondary'}
               width="100%"
               height="calc(var(--spacing) * 8)"
+              fontSize="var(--text-xs)"
+              lineHeight="var(--tw-leading, var(--text-xs--line-height))"
               className={ACTION_BUTTON_CLASS}
               onClick={actions.onCopyPath}
               data-testid="session-file-error-copy-path"

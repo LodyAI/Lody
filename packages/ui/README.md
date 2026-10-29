@@ -46,6 +46,17 @@ strings can read local CSS variables. Explicit zero applies; omission restores
 the named size. The icon wrapper, ref, events and disabled behavior retain their
 existing contract. Use these props for owned dimensions; retain compatibility
 classes at public caller boundaries until their precedence is verified.
+`fontSize` and `lineHeight` are optional, CSS-typed label fields. Font-size
+numbers are pixels; line-height numbers are unitless. The owner writes these two
+actual CSS fields so CSS-wide keywords, variable fallbacks and relative values
+keep browser semantics. Explicit values take inline priority over ordinary
+classes; `!important` still follows CSS. Omission restores the existing component
+styles; `revert-layer` withdraws this API's inline override, retaining component
+and caller declarations. It is not a request to revert an arbitrary stylesheet
+layer. When replacing a text-size utility, pass its font size and complete
+line-height expression, including any local `--tw-leading` fallback. The existing
+`style` and rendered-element merge paths are preserved; the fields add no token,
+named size or generic style API.
 
 The existing `text` tokens derive sizes and leading from document `--ui-font-size`
 (14px when unset), so body, controls, hints and headings scale once, including

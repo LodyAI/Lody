@@ -1,0 +1,207 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone 13",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "sessions-sessionheadermenu--git-hub-worktree-ambient",
+    "sessions-sessionsharingindicator--private",
+    "sessions-sessionsharingindicator--archived"
+  ],
+  "ready": {
+    "sessions-sessionheadermenu--git-hub-worktree-ambient": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "More actions"
+      },
+      {
+        "action": "hover",
+        "selector": "[role=menu] div:has(> svg.lucide-lock-keyhole):has(> span)"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],html=document.documentElement;\nif(!expected||html.classList.contains('dark')!==(expected==='dark')||document.fonts.status!=='loaded')return false;\nconst els=[...document.querySelectorAll(\"div[data-base-ui-focusable][data-side]:not([role])\")];return els.length===1&&els.every(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect(),s=c.getPropertyValue('--spacing').trim(),u=parseFloat(s)*(s.endsWith('rem')?parseFloat(getComputedStyle(html).fontSize):1);\nreturn c.opacity==='1'&&c.visibility==='visible'&&!e.hasAttribute('data-starting-style')&&!e.hasAttribute('data-ending-style')&&r.width>0&&r.height>0&&r.left>=-0.01&&r.top>=-0.01&&r.right<=innerWidth+0.01&&r.bottom<=innerHeight+0.01&&Math.abs(parseFloat(c.paddingInlineStart)-u*2.5)<0.01&&Math.abs(parseFloat(c.paddingInlineEnd)-u*2.5)<0.01&&Math.abs(parseFloat(c.paddingBlockStart)-u*2)<0.01&&Math.abs(parseFloat(c.paddingBlockEnd)-u*2)<0.01;})&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const h=document.documentElement,wanted=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],p=document.querySelector(\"div[data-base-ui-focusable][data-side]:not([role])\");if(!p||!wanted||h.classList.contains('dark')!==(wanted==='dark'))return false;const c=getComputedStyle(p),r=p.getBoundingClientRect(),s=c.getPropertyValue('--spacing').trim(),unit=parseFloat(s)*(s.endsWith('rem')?parseFloat(getComputedStyle(h).fontSize):1);return c.fontSize==='12px'&&c.lineHeight==='16px'&&Math.abs(parseFloat(c.maxWidth)-unit*64)<.01&&c.opacity==='1'&&!p.hasAttribute('data-starting-style')&&!p.hasAttribute('data-ending-style')&&r.width>0&&r.height>0&&r.left>=-.01&&r.right<=innerWidth+.01&&r.top>=-.01&&r.bottom<=innerHeight+.01&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "sessions-sessionsharingindicator--private": [
+      {
+        "action": "hover",
+        "selector": "span[tabindex=\"0\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],html=document.documentElement;\nif(!expected||html.classList.contains('dark')!==(expected==='dark')||document.fonts.status!=='loaded')return false;\nconst els=[...document.querySelectorAll(\"div[data-base-ui-focusable][data-side]:not([role])\")];return els.length===1&&els.every(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect(),s=c.getPropertyValue('--spacing').trim(),u=parseFloat(s)*(s.endsWith('rem')?parseFloat(getComputedStyle(html).fontSize):1);\nreturn c.opacity==='1'&&c.visibility==='visible'&&!e.hasAttribute('data-starting-style')&&!e.hasAttribute('data-ending-style')&&r.width>0&&r.height>0&&r.left>=-0.01&&r.top>=-0.01&&r.right<=innerWidth+0.01&&r.bottom<=innerHeight+0.01&&Math.abs(parseFloat(c.paddingInlineStart)-u*2.5)<0.01&&Math.abs(parseFloat(c.paddingInlineEnd)-u*2.5)<0.01&&Math.abs(parseFloat(c.paddingBlockStart)-u*2)<0.01&&Math.abs(parseFloat(c.paddingBlockEnd)-u*2)<0.01;})&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const h=document.documentElement,wanted=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],p=document.querySelector(\"div[data-base-ui-focusable][data-side]:not([role])\");if(!p||!wanted||h.classList.contains('dark')!==(wanted==='dark'))return false;const c=getComputedStyle(p),r=p.getBoundingClientRect(),s=c.getPropertyValue('--spacing').trim(),unit=parseFloat(s)*(s.endsWith('rem')?parseFloat(getComputedStyle(h).fontSize):1);return c.fontSize==='12px'&&c.lineHeight==='16px'&&Math.abs(parseFloat(c.maxWidth)-unit*72)<.01&&c.opacity==='1'&&!p.hasAttribute('data-starting-style')&&!p.hasAttribute('data-ending-style')&&r.width>0&&r.height>0&&r.left>=-.01&&r.right<=innerWidth+.01&&r.top>=-.01&&r.bottom<=innerHeight+.01&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "sessions-sessionsharingindicator--archived": [
+      {
+        "action": "hover",
+        "selector": "span[tabindex=\"0\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],html=document.documentElement;\nif(!expected||html.classList.contains('dark')!==(expected==='dark')||document.fonts.status!=='loaded')return false;\nconst els=[...document.querySelectorAll(\"div[data-base-ui-focusable][data-side]:not([role])\")];return els.length===1&&els.every(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect(),s=c.getPropertyValue('--spacing').trim(),u=parseFloat(s)*(s.endsWith('rem')?parseFloat(getComputedStyle(html).fontSize):1);\nreturn c.opacity==='1'&&c.visibility==='visible'&&!e.hasAttribute('data-starting-style')&&!e.hasAttribute('data-ending-style')&&r.width>0&&r.height>0&&r.left>=-0.01&&r.top>=-0.01&&r.right<=innerWidth+0.01&&r.bottom<=innerHeight+0.01&&Math.abs(parseFloat(c.paddingInlineStart)-u*2.5)<0.01&&Math.abs(parseFloat(c.paddingInlineEnd)-u*2.5)<0.01&&Math.abs(parseFloat(c.paddingBlockStart)-u*2)<0.01&&Math.abs(parseFloat(c.paddingBlockEnd)-u*2)<0.01;})&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const h=document.documentElement,wanted=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],p=document.querySelector(\"div[data-base-ui-focusable][data-side]:not([role])\");if(!p||!wanted||h.classList.contains('dark')!==(wanted==='dark'))return false;const c=getComputedStyle(p),r=p.getBoundingClientRect(),s=c.getPropertyValue('--spacing').trim(),unit=parseFloat(s)*(s.endsWith('rem')?parseFloat(getComputedStyle(h).fontSize):1);return c.fontSize==='12px'&&c.lineHeight==='16px'&&Math.abs(parseFloat(c.maxWidth)-unit*72)<.01&&c.opacity==='1'&&!p.hasAttribute('data-starting-style')&&!p.hasAttribute('data-ending-style')&&r.width>0&&r.height>0&&r.left>=-.01&&r.right<=innerWidth+.01&&r.top>=-.01&&r.bottom<=innerHeight+.01&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {
+    "sessions-sessionheadermenu--git-hub-worktree-ambient": [
+      {
+        "name": "closed",
+        "steps": [
+          {
+            "action": "press",
+            "role": "menu",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>!document.querySelector(\"div[data-base-ui-focusable][data-side]:not([role])\")&&!document.querySelector(\"[role=dialog][data-side]\")&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "reopened-hover",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "More actions"
+          },
+          {
+            "action": "hover",
+            "selector": "[role=menu] div:has(> svg.lucide-lock-keyhole):has(> span)"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],html=document.documentElement;\nif(!expected||html.classList.contains('dark')!==(expected==='dark')||document.fonts.status!=='loaded')return false;\nconst els=[...document.querySelectorAll(\"div[data-base-ui-focusable][data-side]:not([role])\")];return els.length===1&&els.every(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect(),s=c.getPropertyValue('--spacing').trim(),u=parseFloat(s)*(s.endsWith('rem')?parseFloat(getComputedStyle(html).fontSize):1);\nreturn c.opacity==='1'&&c.visibility==='visible'&&!e.hasAttribute('data-starting-style')&&!e.hasAttribute('data-ending-style')&&r.width>0&&r.height>0&&r.left>=-0.01&&r.top>=-0.01&&r.right<=innerWidth+0.01&&r.bottom<=innerHeight+0.01&&Math.abs(parseFloat(c.paddingInlineStart)-u*2.5)<0.01&&Math.abs(parseFloat(c.paddingInlineEnd)-u*2.5)<0.01&&Math.abs(parseFloat(c.paddingBlockStart)-u*2)<0.01&&Math.abs(parseFloat(c.paddingBlockEnd)-u*2)<0.01;})&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const h=document.documentElement,wanted=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],p=document.querySelector(\"div[data-base-ui-focusable][data-side]:not([role])\");if(!p||!wanted||h.classList.contains('dark')!==(wanted==='dark'))return false;const c=getComputedStyle(p),r=p.getBoundingClientRect(),s=c.getPropertyValue('--spacing').trim(),unit=parseFloat(s)*(s.endsWith('rem')?parseFloat(getComputedStyle(h).fontSize):1);return c.fontSize==='12px'&&c.lineHeight==='16px'&&Math.abs(parseFloat(c.maxWidth)-unit*64)<.01&&c.opacity==='1'&&!p.hasAttribute('data-starting-style')&&!p.hasAttribute('data-ending-style')&&r.width>0&&r.height>0&&r.left>=-.01&&r.right<=innerWidth+.01&&r.top>=-.01&&r.bottom<=innerHeight+.01&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "sessions-sessionsharingindicator--private": [
+      {
+        "name": "keyboard-focus-open",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Tab"
+          },
+          {
+            "action": "focus",
+            "selector": "span[tabindex=\"0\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],html=document.documentElement;\nif(!expected||html.classList.contains('dark')!==(expected==='dark')||document.fonts.status!=='loaded')return false;\nconst els=[...document.querySelectorAll(\"div[data-base-ui-focusable][data-side]:not([role])\")];return els.length===1&&els.every(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect(),s=c.getPropertyValue('--spacing').trim(),u=parseFloat(s)*(s.endsWith('rem')?parseFloat(getComputedStyle(html).fontSize):1);\nreturn c.opacity==='1'&&c.visibility==='visible'&&!e.hasAttribute('data-starting-style')&&!e.hasAttribute('data-ending-style')&&r.width>0&&r.height>0&&r.left>=-0.01&&r.top>=-0.01&&r.right<=innerWidth+0.01&&r.bottom<=innerHeight+0.01&&Math.abs(parseFloat(c.paddingInlineStart)-u*2.5)<0.01&&Math.abs(parseFloat(c.paddingInlineEnd)-u*2.5)<0.01&&Math.abs(parseFloat(c.paddingBlockStart)-u*2)<0.01&&Math.abs(parseFloat(c.paddingBlockEnd)-u*2)<0.01;})&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const h=document.documentElement,wanted=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],p=document.querySelector(\"div[data-base-ui-focusable][data-side]:not([role])\");if(!p||!wanted||h.classList.contains('dark')!==(wanted==='dark'))return false;const c=getComputedStyle(p),r=p.getBoundingClientRect(),s=c.getPropertyValue('--spacing').trim(),unit=parseFloat(s)*(s.endsWith('rem')?parseFloat(getComputedStyle(h).fontSize):1);return c.fontSize==='12px'&&c.lineHeight==='16px'&&Math.abs(parseFloat(c.maxWidth)-unit*72)<.01&&c.opacity==='1'&&!p.hasAttribute('data-starting-style')&&!p.hasAttribute('data-ending-style')&&r.width>0&&r.height>0&&r.left>=-.01&&r.right<=innerWidth+.01&&r.top>=-.01&&r.bottom<=innerHeight+.01&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "closed",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "span[tabindex=\"0\"]",
+            "key": "Escape"
+          },
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>!document.querySelector(\"div[data-base-ui-focusable][data-side]:not([role])\")&&!document.querySelector(\"[role=dialog][data-side]\")&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "sessions-sessionsharingindicator--archived": [
+      {
+        "name": "keyboard-focus-open",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Tab"
+          },
+          {
+            "action": "focus",
+            "selector": "span[tabindex=\"0\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const expected=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],html=document.documentElement;\nif(!expected||html.classList.contains('dark')!==(expected==='dark')||document.fonts.status!=='loaded')return false;\nconst els=[...document.querySelectorAll(\"div[data-base-ui-focusable][data-side]:not([role])\")];return els.length===1&&els.every(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect(),s=c.getPropertyValue('--spacing').trim(),u=parseFloat(s)*(s.endsWith('rem')?parseFloat(getComputedStyle(html).fontSize):1);\nreturn c.opacity==='1'&&c.visibility==='visible'&&!e.hasAttribute('data-starting-style')&&!e.hasAttribute('data-ending-style')&&r.width>0&&r.height>0&&r.left>=-0.01&&r.top>=-0.01&&r.right<=innerWidth+0.01&&r.bottom<=innerHeight+0.01&&Math.abs(parseFloat(c.paddingInlineStart)-u*2.5)<0.01&&Math.abs(parseFloat(c.paddingInlineEnd)-u*2.5)<0.01&&Math.abs(parseFloat(c.paddingBlockStart)-u*2)<0.01&&Math.abs(parseFloat(c.paddingBlockEnd)-u*2)<0.01;})&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const h=document.documentElement,wanted=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],p=document.querySelector(\"div[data-base-ui-focusable][data-side]:not([role])\");if(!p||!wanted||h.classList.contains('dark')!==(wanted==='dark'))return false;const c=getComputedStyle(p),r=p.getBoundingClientRect(),s=c.getPropertyValue('--spacing').trim(),unit=parseFloat(s)*(s.endsWith('rem')?parseFloat(getComputedStyle(h).fontSize):1);return c.fontSize==='12px'&&c.lineHeight==='16px'&&Math.abs(parseFloat(c.maxWidth)-unit*72)<.01&&c.opacity==='1'&&!p.hasAttribute('data-starting-style')&&!p.hasAttribute('data-ending-style')&&r.width>0&&r.height>0&&r.left>=-.01&&r.right<=innerWidth+.01&&r.top>=-.01&&r.bottom<=innerHeight+.01&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "closed",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "span[tabindex=\"0\"]",
+            "key": "Escape"
+          },
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>!document.querySelector(\"div[data-base-ui-focusable][data-side]:not([role])\")&&!document.querySelector(\"[role=dialog][data-side]\")&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -16,6 +16,20 @@ import {
 } from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  noticeHeader: {
+    insetInline: 'calc(var(--spacing) * 0)',
+    borderRadius: 0,
+    borderBottomStyle: 'var(--tw-border-style)',
+    borderBottomWidth: '1px',
+    borderColor: {
+      default: 'hsl(var(--foreground) / 1)',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--foreground) / 1) 8%, transparent)',
+    },
+    backgroundColor: 'hsl(var(--background) / 1)',
+    paddingLeft: 'calc(var(--spacing) * 1)',
+    paddingRight: 'calc(var(--spacing) * 4)',
+  },
   card: {
     width: '100%',
     overflow: 'hidden',
@@ -83,7 +97,7 @@ export function SessionFileDiffNoticeCard({
       <CollapsibleCardHeader
         sticky={false}
         position="relative"
-        className="inset-x-0 h-8 rounded-none border-b border-foreground/[0.08] bg-background pl-1 pr-4 dark:border-border"
+        className={cn('h-8 dark:border-border', stylex.props(styles.noticeHeader).className)}
       >
         <FileIcon filePath={filePath} className={stylex.props(styles.fileIcon).className} />
         <div {...stylex.props(styles.headerRow)}>

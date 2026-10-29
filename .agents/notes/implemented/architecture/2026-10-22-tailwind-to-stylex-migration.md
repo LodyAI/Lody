@@ -1955,6 +1955,45 @@ initial forty-pair candidate actually has 39 byte-exact PNGs. Its old label and
 explicit correction remain, alongside local-font positive controls, known inline
 negatives and real portal-gate calibration failures. Earlier OPENs stay unchanged.
 
+The tooltip, resize-edge and typography continuation removes 35 utilities in
+sixteen product consumers; a seventeenth source is the shared Button owner.
+Tooltip geometry preserves compiler output rather than equal-default scale
+aliases: `max-w-xs` is literal `20rem`, while the header and sharing widths still
+read local spacing. ResizableHandle composes its opt-in `appearance="edge"` in the
+same owner call as its base. Default handles preserve their raw class/style and
+computed contract; the actual edge consumer is horizontal. Its no-preference
+captures establish the real 150ms delay/duration and settled endpoints, not an
+uninterrupted animation sequence.
+
+Button gains only CSS-typed `fontSize` and `lineHeight` fields. Both omitted
+preserves the original style object; supplied values merge with the owner's
+StyleX inline variables at the physical CSS fields. The rejected custom-property
+implementation passed sixty ordinary screenshots but failed real `initial`,
+`inherit`, `revert` and nested `var()` fallback semantics. The final fields pass
+104 browser CSS-semantic cases and 24 actual class-precedence cases. Direct
+caller-style behavior is unchanged; Base UI render-element merging remains
+verified separately. No token group or dependency is added.
+
+The private diff-notice header retains `dark:border-border`. Actual built-in
+public `*:` callers expose a utilities-layer ordering contract that an earlier
+StyleX declaration cannot preserve. The other seven header utilities migrate;
+complete-build CSSOM and vertical writing modes verify the emitted logical
+inset. This does not generalize the earlier margin-block compiler issue to every
+camel-case logical property.
+
+`leaves74-78-acceptance.html` retains **310 formal pairs / 305 byte-exact /
+30,303 identical full standard records**. Five tooltip corner differences remain
+OPEN (13 raw / zero threshold pixels); two supplementary sidebar pairs separately
+remain OPEN (882 raw / 829 threshold). Archive hover-state and Monaco tokenizer
+readiness failures have concrete same-source evidence and four explicit corrected
+cells, while all originals remain inspectable. Native module-import failures,
+rejected typography candidates, inline negatives and earlier OPENs are retained.
+A source-stable 1,862-file boundary passes components 620 files / 6,207 tests,
+UI 25 / 307, the actual OSS Electron build and four-page smoke. Those application
+images are After-only and cannot establish an application-wide Before comparison.
+The root check remains blocked by the existing ACP prerequisite, outside this UI
+migration.
+
 ## Remaining work
 
 The compiler-backed [inventory](../../../../packages/components/scripts/tailwind-usage.mjs)
@@ -1979,6 +2018,7 @@ completion percentage. Unresolved expressions remain a separate work list.
 | Exact source through 67, with partial visual acceptance    | v2             |       1,572 |   166 |        718 |
 | Exact source through 71, with partial visual acceptance    | v2             |       1,554 |   165 |        718 |
 | Exact source through 73, with partial visual acceptance    | v2             |       1,542 |   165 |        718 |
+| Exact source through 78, with partial visual acceptance    | v2             |       1,507 |   163 |        718 |
 
 Earlier method changes recognized single utilities, `withClassName`'s second
 argument and supported static class arrays. Historical per-batch counts remain
@@ -1998,12 +2038,12 @@ utility-looking strings in comparisons or unrelated properties. Ambiguous writes
 remain unresolved. Two adapter `className` writes expose four additional unresolved expressions,
 explaining the corresponding increase in that count.
 
-The published through 73 v2 split is components: 1,098 occurrences/149 files/625
+The published through 78 v2 split is components: 1,063 occurrences/147 files/625
 unresolved, legacy UI: 439/14/93 and routes: 5/2/0. These totals cover only those
-three source roots. Normalized paths retain the raw scanner output and all 688
-component JS/TS byte hashes. The through 73 snapshot adds five component updates
-and the command owner to frozen through 71; all 789 three-root files are recorded.
-It excludes later candidates. The through 67 transition below explains its
+three source roots. All 789 three-root files are recorded with byte hashes.
+The through 78 snapshot updates sixteen frozen through 73 sources and records the
+shared UI Button owner separately, outside these roots; it excludes later work.
+The through 67 transition below explains its
 unresolved changes.
 Five Usage templates and one Archive class lookup disappear; two FileError/Bub
 StyleX templates remain unresolved, not new unknown Tailwind utilities. A separate helper audit identifies another nine

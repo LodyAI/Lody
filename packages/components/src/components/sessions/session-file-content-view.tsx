@@ -98,6 +98,7 @@ import {
 } from '@/hooks/use-code-collab-save-text';
 import { Button } from '@lody/ui/button';
 import { Tooltip } from '@lody/ui/tooltip';
+import { tooltip } from '@lody/ui/tooltip/tooltip.tokens.stylex';
 import { useCodeCollabLsp, type CodeCollabLspState } from '@/hooks/use-code-collab-lsp';
 import { useLatestRef } from '@/hooks/use-latest-ref';
 import {
@@ -274,6 +275,10 @@ const styles = stylex.create({
     lineHeight: '1.25rem',
     color: 'hsl(var(--foreground))',
     outline: 'none',
+  },
+  previewToggleTooltip: {
+    [tooltip.text]: 'var(--text-xs)',
+    [tooltip.leading]: 'var(--tw-leading, var(--text-xs--line-height))',
   },
   previewToggle: {
     display: 'flex',
@@ -2187,7 +2192,10 @@ function FilePreviewToggle({
           </button>
         }
       />
-      <Tooltip.Content side="bottom" className="text-xs">
+      <Tooltip.Content
+        side="bottom"
+        className={stylex.props(styles.previewToggleTooltip).className}
+      >
         {label}
       </Tooltip.Content>
     </Tooltip.Root>

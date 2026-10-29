@@ -68,6 +68,7 @@ import { Menu } from '@/ui/menu';
  */
 
 const styles = stylex.create({
+  permissionTooltip: { whiteSpace: 'pre-wrap' },
   /** A row's current value, after its name: the secondary label, truncating. */
   rowValue: {
     display: 'flex',
@@ -1055,7 +1056,11 @@ function PermissionModeItem({
   return (
     <Tooltip.Root>
       <Tooltip.Trigger delay={300} render={item} />
-      <Tooltip.Content side="right" align="start" className="max-w-72 whitespace-pre-wrap">
+      <Tooltip.Content
+        side="right"
+        align="start"
+        className={cn('max-w-72', stylex.props(styles.permissionTooltip).className)}
+      >
         {option.description}
       </Tooltip.Content>
     </Tooltip.Root>

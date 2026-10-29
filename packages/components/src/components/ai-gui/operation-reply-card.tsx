@@ -285,10 +285,9 @@ export function OperationReplyCard(props: OperationReplyCardProps) {
         variant="ghost"
         size="small"
         height="calc(var(--spacing) * 7)"
-        className={cn(
-          stylex.props(navigationLayoutTheme, messageActionInkTheme).className,
-          'text-xs'
-        )}
+        fontSize="var(--text-xs)"
+        lineHeight="var(--tw-leading, var(--text-xs--line-height))"
+        className={stylex.props(navigationLayoutTheme, messageActionInkTheme).className}
         disabled={!navigate}
         onClick={navigate}
       >
@@ -317,7 +316,9 @@ export function OperationReplyCard(props: OperationReplyCardProps) {
                   variant="secondary"
                   size="small"
                   height="calc(var(--spacing) * 7)"
-                  className={cn(stylex.props(dialogNavigationLayoutTheme).className, 'text-xs')}
+                  fontSize="var(--text-xs)"
+                  lineHeight="var(--tw-leading, var(--text-xs--line-height))"
+                  className={stylex.props(dialogNavigationLayoutTheme).className}
                   onClick={() => {
                     setOpen(false);
                     navigate();

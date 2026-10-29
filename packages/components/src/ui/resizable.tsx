@@ -62,6 +62,32 @@ const styles = stylex.create({
       translate: { default: '-50% 0', ':is([data-panel-group-direction="vertical"])': '0 -50%' },
     },
   },
+  edge: {
+    backgroundColor: 'transparent',
+    '::after': {
+      content: 'var(--tw-content)',
+      insetBlock: 'calc(var(--spacing) * 0)',
+      top: 'calc(var(--spacing) * 0)',
+      bottom: 'calc(var(--spacing) * 0)',
+      left: 'calc(var(--spacing) * 0)',
+      width: '2px',
+      '--tw-translate-x': 'calc(var(--spacing) * 0)',
+      translate: 'var(--tw-translate-x) var(--tw-translate-y)',
+      '--tw-duration': '.15s',
+      transitionProperty:
+        'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      transitionDuration: '150ms',
+      transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+      transitionDelay: { default: null, ':is([data-resize-handle-state="hover"])': '150ms' },
+      backgroundColor: {
+        default: null,
+        ':is([data-resize-handle-state="hover"])':
+          'color-mix(in oklab, hsl(var(--sidebar-ring) / 1) 50%, transparent)',
+        ':is([data-resize-handle-state="drag"])':
+          'color-mix(in oklab, hsl(var(--sidebar-ring) / 1) 70%, transparent)',
+      },
+    },
+  },
   grip: {
     backgroundColor: themeColors.border,
     zIndex: 10,
@@ -105,15 +131,21 @@ const ResizablePanel = React.forwardRef<
 
 function ResizableHandle({
   withHandle,
+  appearance,
   className,
   ...props
 }: React.ComponentProps<typeof ResizablePrimitive.PanelResizeHandle> & {
   withHandle?: boolean;
+  /** A two-pixel leading edge with the session panel's delayed hover and drag ink. */
+  appearance?: 'edge';
 }) {
   return (
     <ResizablePrimitive.PanelResizeHandle
       data-slot="resizable-handle"
-      {...withClassName(stylex.props(stylex.defaultMarker(), styles.handle), className)}
+      {...withClassName(
+        stylex.props(stylex.defaultMarker(), styles.handle, appearance === 'edge' && styles.edge),
+        className
+      )}
       {...props}
     >
       {withHandle && (

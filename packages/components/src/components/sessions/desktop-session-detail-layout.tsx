@@ -109,19 +109,6 @@ const styles = stylex.create({
     transitionProperty: 'opacity',
     transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
     transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
-    '::after': {
-      transitionProperty:
-        'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
-      transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
-      transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
-      backgroundColor: {
-        default: null,
-        ':is([data-resize-handle-state="hover"])':
-          'color-mix(in oklab, hsl(var(--sidebar-ring) / 1) 50%, transparent)',
-        ':is([data-resize-handle-state="drag"])':
-          'color-mix(in oklab, hsl(var(--sidebar-ring) / 1) 70%, transparent)',
-      },
-    },
   },
   resizeHandleVisible: { opacity: 1 },
   resizeHandleHidden: { opacity: 0, pointerEvents: 'none' },
@@ -269,23 +256,19 @@ export function DesktopSessionDetailLayout({
         </ResizablePanel>
 
         <ResizableHandle
+          appearance="edge"
           disabled={!splitSidebarOpen}
           // Invisible at rest; hover/drag paints a 2px accent line that
           // covers the side panel's left hairline (see desktopSecondaryPanel
           // in session-detail.tsx).
           hitAreaMargins={{ coarse: 15, fine: 12 }}
           onDragging={setIsResizing}
-          className={cn(
+          className={
             stylex.props(
               styles.resizeHandle,
               splitSidebarOpen ? styles.resizeHandleVisible : styles.resizeHandleHidden
-            ).className,
-            'bg-transparent',
-            'after:left-0 after:w-[2px] after:translate-x-0',
-            'after:inset-y-0 after:top-0 after:bottom-0',
-            'after:duration-150',
-            'data-[resize-handle-state=hover]:after:delay-150'
-          )}
+            ).className
+          }
           style={{ transitionDuration }}
         />
         <ResizablePanel

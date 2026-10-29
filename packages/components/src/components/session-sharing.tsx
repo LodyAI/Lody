@@ -165,10 +165,7 @@ export function SessionSharingIndicator({
           </span>
         }
       />
-      <Tooltip.Content
-        side="right"
-        className={clsx(stylex.props(styles.tooltipPadding).className, 'max-w-72')}
-      >
+      <Tooltip.Content side="right" className={stylex.props(styles.tooltipPadding).className}>
         <div {...stylex.props(styles.tooltipTitle)}>{label}</div>
         <div {...stylex.props(styles.tooltipDescription)}>{description}</div>
       </Tooltip.Content>
@@ -208,6 +205,7 @@ function getSessionShareActionLabel(
 
 const styles = stylex.create({
   tooltipPadding: {
+    [tooltip.maxWidth]: 'calc(var(--spacing) * 72)',
     [tooltip.paddingX]: 'calc(var(--spacing) * 2.5)',
     [tooltip.paddingY]: 'calc(var(--spacing) * 2)',
   },
@@ -327,7 +325,7 @@ export function SessionArchivedBadge({ className }: { className?: string }) {
       <Tooltip.Content
         side="bottom"
         align="end"
-        className={clsx(stylex.props(styles.tooltipPadding).className, 'max-w-72')}
+        className={stylex.props(styles.tooltipPadding).className}
       >
         <div {...stylex.props(styles.tooltipTitle)}>{label}</div>
         <div {...stylex.props(styles.tooltipDescription)}>{description}</div>

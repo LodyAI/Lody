@@ -391,6 +391,9 @@ const { formatLoroSyncError } = createLoroSyncErrorTools({ RepoSyncError, RepoTr
 
 const styles = stylex.create({
   tooltipPadding: {
+    [tooltip.text]: 'var(--text-xs)',
+    [tooltip.leading]: 'var(--tw-leading, var(--text-xs--line-height))',
+    [tooltip.maxWidth]: 'calc(var(--spacing) * 64)',
     [tooltip.paddingX]: 'calc(var(--spacing) * 2.5)',
     [tooltip.paddingY]: 'calc(var(--spacing) * 2)',
   },
@@ -1709,10 +1712,7 @@ export function SessionHeaderMenu({
                   />
                   <Tooltip.Content
                     side="left"
-                    className={cn(
-                      stylex.props(styles.tooltipPadding).className,
-                      'max-w-64 text-xs'
-                    )}
+                    className={stylex.props(styles.tooltipPadding).className}
                   >
                     {getSessionSharingDescription(t, sharing)}
                   </Tooltip.Content>

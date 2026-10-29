@@ -723,7 +723,9 @@ function OpenMermaidDiagramViewer({
           icon
           height={CONTROL_SIZE}
           width="auto"
-          className={cn(CONTROL_CLASS_NAME, 'min-w-11 px-2 font-mono text-xs tabular-nums')}
+          fontSize="var(--text-xs)"
+          lineHeight="var(--tw-leading, var(--text-xs--line-height))"
+          className={cn(CONTROL_CLASS_NAME, 'min-w-11 px-2 font-mono tabular-nums')}
           onClick={resetZoom}
           title={resetZoomLabel}
           aria-label={resetZoomLabel}

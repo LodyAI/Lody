@@ -1,0 +1,164 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "desktop900",
+      "width": 900,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "sessions-codecollabmarkdownpreview--rendered-mode",
+    "sessions-codecollabhtmlpreview--rendered-mode"
+  ],
+  "ready": {
+    "sessions-codecollabmarkdownpreview--rendered-mode": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Hide preview"
+      },
+      {
+        "action": "hover",
+        "role": "button",
+        "name": "Hide preview"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const root=document.documentElement,wanted=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],b=document.querySelector(\"button[aria-label=\\\"Hide preview\\\"]\"),p=document.querySelector(\"div[data-base-ui-focusable][data-side]:not([role])\");if(!b||!p||root.classList.contains('dark')!==(wanted==='dark')||b.getAttribute('aria-pressed')!==\"true\")return false;const c=getComputedStyle(p),r=p.getBoundingClientRect();return p.textContent===\"Hide preview\"&&c.fontSize==='12px'&&c.lineHeight==='16px'&&c.opacity==='1'&&!p.hasAttribute('data-starting-style')&&!p.hasAttribute('data-ending-style')&&r.width>0&&r.height>0&&r.left>=-.01&&r.right<=innerWidth+.01&&r.top>=-.01&&r.bottom<=innerHeight+.01&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "sessions-codecollabhtmlpreview--rendered-mode": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Hide preview"
+      },
+      {
+        "action": "hover",
+        "role": "button",
+        "name": "Hide preview"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const root=document.documentElement,wanted=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],b=document.querySelector(\"button[aria-label=\\\"Hide preview\\\"]\"),p=document.querySelector(\"div[data-base-ui-focusable][data-side]:not([role])\");if(!b||!p||root.classList.contains('dark')!==(wanted==='dark')||b.getAttribute('aria-pressed')!==\"true\")return false;const c=getComputedStyle(p),r=p.getBoundingClientRect();return p.textContent===\"Hide preview\"&&c.fontSize==='12px'&&c.lineHeight==='16px'&&c.opacity==='1'&&!p.hasAttribute('data-starting-style')&&!p.hasAttribute('data-ending-style')&&r.width>0&&r.height>0&&r.left>=-.01&&r.right<=innerWidth+.01&&r.top>=-.01&&r.bottom<=innerHeight+.01&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {
+    "sessions-codecollabmarkdownpreview--rendered-mode": [
+      {
+        "name": "source-tooltip",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Hide preview"
+          },
+          {
+            "action": "visible",
+            "role": "button",
+            "name": "Preview"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const e=document.querySelector('.monaco-editor .view-lines');return e&&e.textContent.trim().length>0;}"
+          },
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Preview"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const root=document.documentElement,wanted=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],b=document.querySelector(\"button[aria-label=\\\"Preview\\\"]\"),p=document.querySelector(\"div[data-base-ui-focusable][data-side]:not([role])\");if(!b||!p||root.classList.contains('dark')!==(wanted==='dark')||b.getAttribute('aria-pressed')!==\"false\")return false;const c=getComputedStyle(p),r=p.getBoundingClientRect();return p.textContent===\"Preview\"&&c.fontSize==='12px'&&c.lineHeight==='16px'&&c.opacity==='1'&&!p.hasAttribute('data-starting-style')&&!p.hasAttribute('data-ending-style')&&r.width>0&&r.height>0&&r.left>=-.01&&r.right<=innerWidth+.01&&r.top>=-.01&&r.bottom<=innerHeight+.01&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "rendered-reopened-tooltip",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Preview"
+          },
+          {
+            "action": "visible",
+            "role": "button",
+            "name": "Hide preview"
+          },
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Hide preview"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const root=document.documentElement,wanted=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],b=document.querySelector(\"button[aria-label=\\\"Hide preview\\\"]\"),p=document.querySelector(\"div[data-base-ui-focusable][data-side]:not([role])\");if(!b||!p||root.classList.contains('dark')!==(wanted==='dark')||b.getAttribute('aria-pressed')!==\"true\")return false;const c=getComputedStyle(p),r=p.getBoundingClientRect();return p.textContent===\"Hide preview\"&&c.fontSize==='12px'&&c.lineHeight==='16px'&&c.opacity==='1'&&!p.hasAttribute('data-starting-style')&&!p.hasAttribute('data-ending-style')&&r.width>0&&r.height>0&&r.left>=-.01&&r.right<=innerWidth+.01&&r.top>=-.01&&r.bottom<=innerHeight+.01&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "sessions-codecollabhtmlpreview--rendered-mode": [
+      {
+        "name": "source-tooltip",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Hide preview"
+          },
+          {
+            "action": "visible",
+            "role": "button",
+            "name": "Preview HTML (runs scripts)"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const e=document.querySelector('.monaco-editor .view-lines');return e&&e.textContent.trim().length>0;}"
+          },
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Preview HTML (runs scripts)"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const root=document.documentElement,wanted=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],b=document.querySelector(\"button[aria-label=\\\"Preview HTML (runs scripts)\\\"]\"),p=document.querySelector(\"div[data-base-ui-focusable][data-side]:not([role])\");if(!b||!p||root.classList.contains('dark')!==(wanted==='dark')||b.getAttribute('aria-pressed')!==\"false\")return false;const c=getComputedStyle(p),r=p.getBoundingClientRect();return p.textContent===\"Preview HTML (runs scripts)\"&&c.fontSize==='12px'&&c.lineHeight==='16px'&&c.opacity==='1'&&!p.hasAttribute('data-starting-style')&&!p.hasAttribute('data-ending-style')&&r.width>0&&r.height>0&&r.left>=-.01&&r.right<=innerWidth+.01&&r.top>=-.01&&r.bottom<=innerHeight+.01&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "rendered-reopened-tooltip",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Preview HTML (runs scripts)"
+          },
+          {
+            "action": "visible",
+            "role": "button",
+            "name": "Hide preview"
+          },
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Hide preview"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const root=document.documentElement,wanted=new URL(location.href).searchParams.get('globals')?.match(/theme:(light|dark)/)?.[1],b=document.querySelector(\"button[aria-label=\\\"Hide preview\\\"]\"),p=document.querySelector(\"div[data-base-ui-focusable][data-side]:not([role])\");if(!b||!p||root.classList.contains('dark')!==(wanted==='dark')||b.getAttribute('aria-pressed')!==\"true\")return false;const c=getComputedStyle(p),r=p.getBoundingClientRect();return p.textContent===\"Hide preview\"&&c.fontSize==='12px'&&c.lineHeight==='16px'&&c.opacity==='1'&&!p.hasAttribute('data-starting-style')&&!p.hasAttribute('data-ending-style')&&r.width>0&&r.height>0&&r.left>=-.01&&r.right<=innerWidth+.01&&r.top>=-.01&&r.bottom<=innerHeight+.01&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ]
+  }
+}

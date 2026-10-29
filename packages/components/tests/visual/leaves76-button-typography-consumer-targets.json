@@ -1,0 +1,221 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone SE",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "sessions-codecollabfilestates--too-large-with-local-host-actions",
+    "sessions-sessionfilebinarypreview--native-sharing",
+    "settings-bubinstallguidemigration--copy-success",
+    "migration-ownedmermaidcontrols--default",
+    "migration-ownedprivatebuttonlayout--operation-scoped",
+    "workspace-stuckconnectionbanner--observed-actions"
+  ],
+  "ready": {
+    "sessions-codecollabfilestates--too-large-with-local-host-actions": [
+      {
+        "action": "waitForFunction",
+        "expression": "()=>(function gate(count,sharing,focusId){const card=document.querySelector('[data-testid=\"session-file-error-state\"]');if(!card)return false;const buttons=[...card.querySelectorAll('button')];if(buttons.length!==count)return false;for(const button of buttons){const c=getComputedStyle(button),r=button.getBoundingClientRect(),parent=button.parentElement.getBoundingClientRect();if(c.height!=='32px'||Math.abs(r.width-parent.width)>1e-5||c.justifyContent!=='flex-start'||c.gap!=='8px'||c.paddingLeft!=='10px'||c.paddingRight!=='10px'||c.fontSize!=='12px'||c.fontWeight!=='400'||c.lineHeight!=='16px'||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||r.width<=0||r.height<=0)return false;}const share=buttons.find(e=>!e.hasAttribute('data-testid'));if(sharing&&(!share||!share.disabled||getComputedStyle(share).opacity!=='.45'&&getComputedStyle(share).opacity!=='0.45'||!share.querySelector('svg')))return false;if(!sharing&&buttons.some(e=>e.disabled))return false;if(focusId){const target=focusId==='share'?share:card.querySelector('[data-testid=\"'+focusId+'\"]');if(!target||document.activeElement!==target||!target.matches(':focus-visible'))return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));})(3,false,null)"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const els=[...document.querySelectorAll(\"button[data-size=small][class*=\\\"justify-start\\\"]\")];return els.length>0&&els.every(e=>{const s=getComputedStyle(e),v=s.getPropertyValue('--spacing').trim(),u=parseFloat(v)*(v.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),r=e.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight&&Math.abs(parseFloat(s.paddingInlineStart)-u*2.5)<.02&&Math.abs(parseFloat(s.paddingInlineEnd)-u*2.5)<.02&&Math.abs(parseFloat(s.columnGap)-u*2)<.02;})&&document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const els=[...document.querySelectorAll(\"[data-testid=\\\"session-file-error-state\\\"] button\")];return els.length>0&&els.every(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect();return c.fontSize==='12px'&&c.lineHeight==='16px'&&r.width>0&&r.height>0&&r.left>=-.1&&r.right<=innerWidth+.1&&r.top>=-.1&&r.bottom<=innerHeight+.1})}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "sessions-sessionfilebinarypreview--native-sharing": [
+      {
+        "action": "waitForFunction",
+        "expression": "()=>(function gate(count,sharing,focusId){const card=document.querySelector('[data-testid=\"session-file-error-state\"]');if(!card)return false;const buttons=[...card.querySelectorAll('button')];if(buttons.length!==count)return false;for(const button of buttons){const c=getComputedStyle(button),r=button.getBoundingClientRect(),parent=button.parentElement.getBoundingClientRect();if(c.height!=='32px'||Math.abs(r.width-parent.width)>1e-5||c.justifyContent!=='flex-start'||c.gap!=='8px'||c.paddingLeft!=='10px'||c.paddingRight!=='10px'||c.fontSize!=='12px'||c.fontWeight!=='400'||c.lineHeight!=='16px'||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||r.width<=0||r.height<=0)return false;}const share=buttons.find(e=>!e.hasAttribute('data-testid'));if(sharing&&(!share||!share.disabled||getComputedStyle(share).opacity!=='.45'&&getComputedStyle(share).opacity!=='0.45'||!share.querySelector('svg')))return false;if(!sharing&&buttons.some(e=>e.disabled))return false;if(focusId){const target=focusId==='share'?share:card.querySelector('[data-testid=\"'+focusId+'\"]');if(!target||document.activeElement!==target||!target.matches(':focus-visible'))return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));})(2,true,null)"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const els=[...document.querySelectorAll(\"button[data-size=small][class*=\\\"justify-start\\\"]\")];return els.length>0&&els.every(e=>{const s=getComputedStyle(e),v=s.getPropertyValue('--spacing').trim(),u=parseFloat(v)*(v.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),r=e.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight&&Math.abs(parseFloat(s.paddingInlineStart)-u*2.5)<.02&&Math.abs(parseFloat(s.paddingInlineEnd)-u*2.5)<.02&&Math.abs(parseFloat(s.columnGap)-u*2)<.02;})&&document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const els=[...document.querySelectorAll(\"[data-testid=\\\"session-file-error-state\\\"] button\")];return els.length>0&&els.every(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect();return c.fontSize==='12px'&&c.lineHeight==='16px'&&r.width>0&&r.height>0&&r.left>=-.1&&r.right<=innerWidth+.1&&r.top>=-.1&&r.bottom<=innerHeight+.1})}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "settings-bubinstallguidemigration--copy-success": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-bub-ports-ready]')?.dataset.bubPortsReady==='true'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\"[data-bub-guide] button[aria-label]\")];return marks.length===1&&marks.every(m=>{const c=getComputedStyle(m),v=c.getPropertyValue('--spacing').trim(),unit=parseFloat(v)*(v.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);const r=m.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&Number(c.opacity)>0&&Math.abs(parseFloat(c.height)-unit*7)<0.02;});}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const b=[...document.querySelectorAll('[data-bub-guide] button')];return b.length===2&&b[1].getBoundingClientRect().height>0;}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const els=[...document.querySelectorAll(\"[data-bub-guide] button[aria-label]\")];return els.length>0&&els.every(e=>{const s=getComputedStyle(e),v=s.getPropertyValue('--spacing').trim(),u=parseFloat(v)*(v.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),r=e.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight&&Math.abs(parseFloat(s.paddingInlineStart)-u*2)<.02&&Math.abs(parseFloat(s.paddingInlineEnd)-u*2)<.02&&Math.abs(parseFloat(s.columnGap)-u*1)<.02;})&&document.getAnimations().every(a=>a.effect.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const els=[...document.querySelectorAll(\"[data-bub-guide] button\")];return els.length>0&&els.every(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect();return c.fontSize==='12px'&&c.lineHeight==='16px'&&r.width>0&&r.height>0&&r.left>=-.1&&r.right<=innerWidth+.1&&r.top>=-.1&&r.bottom<=innerHeight+.1})}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "migration-ownedprivatebuttonlayout--operation-scoped": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const b=document.querySelector('[data-operation-reply-card] button[data-variant=ghost]');return b&&!b.disabled&&getComputedStyle(b).gap==='5px'&&getComputedStyle(b).paddingLeft==='10px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const els=[...document.querySelectorAll(\"[data-operation-reply-card] button[data-variant=ghost]\")];return els.length>0&&els.every(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect();return c.fontSize==='12px'&&c.lineHeight==='16px'&&r.width>0&&r.height>0&&r.left>=-.1&&r.right<=innerWidth+.1&&r.top>=-.1&&r.bottom<=innerHeight+.1})}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "migration-ownedmermaidcontrols--default": [
+      {
+        "action": "visible",
+        "selector": "[data-testid=mermaid-diagram-viewer] button[aria-label=\"Reset zoom\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-testid=mermaid-diagram-viewer] button[aria-label=\\\"Reset zoom\\\"]')?.textContent.includes('%')"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const els=[...document.querySelectorAll(\"[data-testid=\\\"mermaid-diagram-viewer\\\"] button[aria-label=\\\"Reset zoom\\\"]\")];return els.length>0&&els.every(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect();return c.fontSize==='12px'&&c.lineHeight==='16px'&&r.width>0&&r.height>0&&r.left>=-.1&&r.right<=innerWidth+.1&&r.top>=-.1&&r.bottom<=innerHeight+.1})}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ],
+    "workspace-stuckconnectionbanner--observed-actions": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-stuck-banner-ready]')?.dataset.stuckBannerReady==='true'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const els=[...document.querySelectorAll(\"[data-stuck-banner-observed] button[data-size=small]\")];return els.length>0&&els.every(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect();return c.fontSize==='12px'&&c.lineHeight==='16px'&&r.width>0&&r.height>0&&r.left>=-.1&&r.right<=innerWidth+.1&&r.top>=-.1&&r.bottom<=innerHeight+.1})}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      }
+    ]
+  },
+  "states": {
+    "settings-bubinstallguidemigration--copy-success": [
+      {
+        "name": "copied",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-bub-guide] button[aria-label=\"Copy\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-bub-copy-state]')?.getAttribute('data-bub-copy-state')==='success'"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const els=[...document.querySelectorAll(\"[data-bub-guide] button\")];return els.length>0&&els.every(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect();return c.fontSize==='12px'&&c.lineHeight==='16px'&&r.width>0&&r.height>0&&r.left>=-.1&&r.right<=innerWidth+.1&&r.top>=-.1&&r.bottom<=innerHeight+.1})}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmermaidcontrols--default": [
+      {
+        "name": "zoomed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zoom in"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const els=[...document.querySelectorAll(\"[data-testid=\\\"mermaid-diagram-viewer\\\"] button[aria-label=\\\"Reset zoom\\\"]\")];return els.length>0&&els.every(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect();return c.fontSize==='12px'&&c.lineHeight==='16px'&&r.width>0&&r.height>0&&r.left>=-.1&&r.right<=innerWidth+.1&&r.top>=-.1&&r.bottom<=innerHeight+.1})}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "reset",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Reset zoom"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const els=[...document.querySelectorAll(\"[data-testid=\\\"mermaid-diagram-viewer\\\"] button[aria-label=\\\"Reset zoom\\\"]\")];return els.length>0&&els.every(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect();return c.fontSize==='12px'&&c.lineHeight==='16px'&&r.width>0&&r.height>0&&r.left>=-.1&&r.right<=innerWidth+.1&&r.top>=-.1&&r.bottom<=innerHeight+.1})}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "migration-ownedprivatebuttonlayout--operation-scoped": [
+      {
+        "name": "reply-dialog",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button[title=\"View full reply\"]"
+          },
+          {
+            "action": "visible",
+            "role": "dialog"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const els=[...document.querySelectorAll(\"[role=dialog] button[data-variant=secondary]\")];return els.length>0&&els.every(e=>{const c=getComputedStyle(e),r=e.getBoundingClientRect();return c.fontSize==='12px'&&c.lineHeight==='16px'&&r.width>0&&r.height>0&&r.left>=-.1&&r.right<=innerWidth+.1&&r.top>=-.1&&r.bottom<=innerHeight+.1})}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -174,7 +174,9 @@ export function StuckConnectionBanner({
           <Button
             size="small"
             height="calc(var(--spacing) * 7)"
-            className="rounded-full px-3 text-xs"
+            fontSize="var(--text-xs)"
+            lineHeight="var(--tw-leading, var(--text-xs--line-height))"
+            className="rounded-full px-3"
             onClick={onRecover}
           >
             {labels.recover}

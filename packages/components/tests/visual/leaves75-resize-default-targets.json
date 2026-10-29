@@ -1,0 +1,127 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "ui-roundlayoutmigration--horizontal",
+    "ui-roundlayoutmigration--vertical",
+    "ui-roundlayoutmigration--disabled"
+  ],
+  "ready": {
+    "ui-roundlayoutmigration--horizontal": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded' && document.getAnimations().every(a => a.effect?.getTiming().iterations===Infinity || (!a.pending && a.playState!=='running'))"
+      }
+    ],
+    "ui-roundlayoutmigration--vertical": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded' && document.getAnimations().every(a => a.effect?.getTiming().iterations===Infinity || (!a.pending && a.playState!=='running'))"
+      }
+    ],
+    "ui-roundlayoutmigration--disabled": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.fonts.status==='loaded' && document.getAnimations().every(a => a.effect?.getTiming().iterations===Infinity || (!a.pending && a.playState!=='running'))"
+      }
+    ]
+  },
+  "states": {
+    "ui-roundlayoutmigration--horizontal": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "#layout-handle"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded' && document.getAnimations().every(a => a.effect?.getTiming().iterations===Infinity || (!a.pending && a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "keyboard",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#layout-handle"
+          },
+          {
+            "action": "press",
+            "selector": "#layout-handle",
+            "key": "ArrowRight"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement?.id==='layout-handle'"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded' && document.getAnimations().every(a => a.effect?.getTiming().iterations===Infinity || (!a.pending && a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "ui-roundlayoutmigration--vertical": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "#layout-handle"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded' && document.getAnimations().every(a => a.effect?.getTiming().iterations===Infinity || (!a.pending && a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "keyboard",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#layout-handle"
+          },
+          {
+            "action": "press",
+            "selector": "#layout-handle",
+            "key": "ArrowDown"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement?.id==='layout-handle'"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded' && document.getAnimations().every(a => a.effect?.getTiming().iterations===Infinity || (!a.pending && a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "ui-roundlayoutmigration--disabled": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "#layout-handle"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.fonts.status==='loaded' && document.getAnimations().every(a => a.effect?.getTiming().iterations===Infinity || (!a.pending && a.playState!=='running'))"
+          }
+        ]
+      }
+    ]
+  }
+}
