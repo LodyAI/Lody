@@ -396,6 +396,66 @@ describe('ManagedAgentRuntimeManager', () => {
   });
 
   it.each([true, false])(
+    'reuses a concurrent publisher only when complete=%s without modifying its files',
+    async (complete) => {
+      const { archiveBytes, definition, originalArchive } =
+        await installTinyCodexArchiveDefinition('concurrent.tar.zst');
+      const started = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<Response>();
+      const options = {
+        rootDir,
+        platform: 'linux' as const,
+        arch: 'x64',
+        runtimeBaseUrl: 'https://runtime.example.test',
+      };
+      const progress: ManagedRuntimeProgressEvent[] = [];
+      const manager = new ManagedAgentRuntimeManager({
+        ...options,
+        fetchImpl: async () => {
+          started.resolve();
+          return release.promise;
+        },
+      });
+      const installing = manager
+        .ensureCurrentRuntime('codex', { onProgress: (event) => progress.push(event) })
+        .then(
+          (value) => ({ value }),
+          (error: unknown) => ({ error })
+        );
+      try {
+        await started.promise;
+        const peer = await new ManagedAgentRuntimeManager({
+          ...options,
+          fetchImpl: async () => new Response(archiveBytes),
+        }).ensureCurrentRuntime('codex');
+        const dir = dirname(dirname(peer.command));
+        const metadata = await readFile(join(dir, 'metadata.json'), 'utf8');
+        await writeFile(join(dir, 'peer-resource.txt'), 'peer-owned');
+        if (complete) await writeFile(join(dir, '.lody-complete'), 'peer-marker');
+        else await rm(join(dir, '.lody-complete'));
+        release.resolve(new Response(archiveBytes));
+        const result = await installing;
+        if (complete) {
+          expect(result).toMatchObject({ value: { command: peer.command } });
+          expect(progress.at(-1)?.phase).toBe('complete');
+          expect(await readFile(join(dir, '.lody-complete'), 'utf8')).toBe('peer-marker');
+        } else {
+          expect(result).toMatchObject({ error: expect.any(ManagedRuntimeError) });
+          expect(existsSync(join(dir, '.lody-complete'))).toBe(false);
+        }
+        expect(await readFile(join(dir, 'metadata.json'), 'utf8')).toBe(metadata);
+        expect(await readFile(join(dir, 'peer-resource.txt'), 'utf8')).toBe('peer-owned');
+        expect(await readFile(peer.command, 'utf8')).toBe('tiny-codex');
+        expect((await readdir(rootDir)).filter((name) => name.startsWith('tmp-'))).toEqual([]);
+      } finally {
+        release.resolve(new Response(null, { status: 503 }));
+        await installing;
+        definition.platforms['linux-x64'] = originalArchive;
+      }
+    }
+  );
+
+  it.each([true, false])(
     'keeps a resident resource reader alive through repair, download succeeds=%s',
     async (succeeds) => {
       const { archiveBytes, definition, originalArchive } =

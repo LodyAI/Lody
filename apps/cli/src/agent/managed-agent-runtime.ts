@@ -1349,8 +1349,30 @@ export class ManagedAgentRuntimeManager {
         totalBytes: archive.size,
         percent: 100,
       });
-      await this.publish(unpackDir, dir);
+      const published = await this.publish(unpackDir, dir);
       signal.throwIfAborted();
+      if (!published) {
+        const existing = await this.readCurrentInstallation(
+          name,
+          definition,
+          platformArch,
+          archive
+        );
+        if (!existing)
+          throw new ManagedRuntimeError(
+            'Concurrent runtime installation does not match the current definition'
+          );
+        this.emitProgress(progressKey, {
+          runtimeName: name,
+          version: definition.version,
+          platformArch,
+          phase: 'complete',
+          downloadedBytes: archive.size,
+          totalBytes: archive.size,
+          percent: 100,
+        });
+        return existing;
+      }
       await writeFile(
         join(dir, 'metadata.json'),
         JSON.stringify(
@@ -1725,11 +1747,18 @@ export class ManagedAgentRuntimeManager {
     }
   }
 
-  private async publish(unpackDir: string, dir: string): Promise<void> {
+  private async publish(unpackDir: string, dir: string): Promise<boolean> {
     await mkdir(dirname(dir), { recursive: true });
-    // A concurrent installer may have published since acquisition. A conflict
-    // rejects this attempt instead of deleting or writing into its installation.
-    await rename(unpackDir, dir);
+    try {
+      await rename(unpackDir, dir);
+      return true;
+    } catch (error) {
+      if (!existsSync(join(dir, COMPLETE_MARKER))) throw error;
+      // Another process won publication. Release only our own unpacked tree;
+      // the caller must return before writing metadata or markers into theirs.
+      await rm(unpackDir, { recursive: true, force: true });
+      return false;
+    }
   }
 }
 
