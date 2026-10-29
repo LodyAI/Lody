@@ -9860,16 +9860,23 @@ export class MessageHandler {
         ? await this.workspaceDocument.getAgentConfigById(meta.agentConfigId, this.machineId)
         : null;
       if (meta?.agentConfigId && !provider) return null;
+      const profileStore = getCodexProfileStore();
       if (
         provider &&
         !provider.codexAuth &&
-        (await getCodexProfileStore().list(this.workspaceId)).some(
-          (profile) => profile.configId === provider.id && profile.machineId === this.machineId
-        )
-      )
+        (await profileStore.isAccountBound({
+          workspaceId: this.workspaceId,
+          machineId: this.machineId,
+          configId: provider.id,
+        }))
+      ) {
+        this.logger.debug(
+          `[${sessionId}] Skipping session title generation: Codex account reference is missing`
+        );
         return null;
+      }
       const codexProfile = provider?.codexAuth
-        ? await getCodexProfileStore().resolve(this.workspaceId, provider)
+        ? await profileStore.resolve(this.workspaceId, provider)
         : undefined;
       const title = await generateTitleIsolated({
         agentConfigId: provider?.id,

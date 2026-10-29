@@ -322,7 +322,14 @@ export class CodexProfileStore {
     });
   }
 
-  async hasBinding(owner: CodexProfileOwner): Promise<boolean> {
+  async isAccountBound(owner: CodexProfileOwner): Promise<boolean> {
+    if (await this.hasBinding(owner)) return true;
+    return (await this.list(owner.workspaceId)).some(
+      (profile) => profile.configId === owner.configId && profile.machineId === owner.machineId
+    );
+  }
+
+  private async hasBinding(owner: CodexProfileOwner): Promise<boolean> {
     try {
       await lstat(path.join(this.root, `binding-${identity(owner)}.json`));
       return true;

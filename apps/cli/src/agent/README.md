@@ -357,6 +357,10 @@ the isolated session selects `gpt-5.6-luna`, low reasoning, and full access. Uns
 requested options fail to the existing prompt-derived fallback. The bundled adapter
 has no automatic generator, so neither the main nor title session starts an extra
 naming turn. Main conversation settings and Provider authentication are preserved.
+When a Provider loses its account reference, session startup and isolated titles use
+`CodexProfileStore.isAccountBound`: the durable binding marker precedes the legacy
+profile scan. Bound titles skip with a debug message, preserving the draft without
+sending task text through native default credentials.
 
 Other isolated title sessions retain the Provider's current model unless a title model
 was explicitly saved. Catalog order does not define a model preference; inferred safe
