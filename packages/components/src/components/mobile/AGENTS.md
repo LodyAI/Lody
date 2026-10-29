@@ -61,7 +61,9 @@ before touching gestures.
   ancestor's bucket: the ancestor's project, or the date of the tree's freshest
   member. A bucket's project heading comes only from its own rows. Its
   leading slot owns ONE node — chevron, ├/└, or status indicator, status
-  winning; never draw both. A top-level row keeps flat geometry (`px-4`, `w-4`);
+  winning; never draw both. A status mark fills a 16px node box at the slot's
+  start, so widening the slot never moves the 8px unread dot off the node centre.
+  A top-level row keeps flat geometry (`px-4`, `w-4`);
   only an opened Session widens the slot (`w-8 justify-start`, CONTENT indented
   16px, background unchanged), and its chevron is a SIBLING of the row
   `<button>` needing `MobileSwipeableRow liftAboveEdgeSwipeZone` — pass that

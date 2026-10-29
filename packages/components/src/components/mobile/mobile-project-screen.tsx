@@ -304,8 +304,15 @@ function StatusIndicator({
     return <Spinner className="h-4 w-4 shrink-0 text-primary" aria-label="running" />;
   }
   if (hasUnreadMessages) {
+    /* The 8px dot lives in a 16px node box, like the spinner and the hand.
+       Without the box it is 8px wide, so a widened child slot (`w-8
+       justify-start`) left-aligns it 4px off the tree node while the 16px
+       marks stay centered. Keeping the node box the same width for every
+       status keeps the dot on the trunk and in line with the top-level rows. */
     return (
-      <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-primary" aria-label="unread" />
+      <span className="flex h-4 w-4 shrink-0 items-center justify-center" aria-label="unread">
+        <span className="h-2 w-2 rounded-full bg-primary" />
+      </span>
     );
   }
   return null;
