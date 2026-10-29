@@ -1,3 +1,4 @@
+import { reportMcpDefaultsBlocked } from '../chat/mcp-defaults-recovery';
 import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
 import { useHorizontalFoldLayout } from '../mobile/use-horizontal-fold-layout';
 import { WorkspaceFeatureReasonText } from '@/components/workspace-feature-notice';
@@ -2382,6 +2383,7 @@ export type DispatchInputBlocksOptions = {
   agentRole?: SessionTurnAgentRoleSelection;
   /** The MCP selection captured when the user pressed send. */
   mcpServerIds?: readonly McpServerId[];
+  skipMcpOnce?: boolean;
 };
 
 function buildEditedMessageQueueItem(
@@ -3178,7 +3180,7 @@ export const SessionChatInterface = memo(
       scopeKey: session.id,
       defaultsTarget: { project: session.project, machineId: session.machineId },
     });
-    const acceptMcpSend = mcpSelection.acceptSend;
+    const { send: sendWithMcpSelection, retryDefaults: retryMcpDefaults } = mcpSelection;
     const executionTurnConfigOverrides = useMemo(
       () =>
         buildExecutionTurnConfigOverrides({
@@ -4744,7 +4746,7 @@ export const SessionChatInterface = memo(
       [configOptionValues, enqueueInputBlocks]
     );
 
-    const dispatchInputBlocks = useCallback(
+    const dispatchInputBlocksUnchecked = useCallback(
       async (
         inputBlocks: SessionInputBlock[],
         options?: DispatchInputBlocksOptions
@@ -4901,6 +4903,36 @@ export const SessionChatInterface = memo(
       ]
     );
 
+    const dispatchInputBlocks = useCallback(
+      async function dispatchWithMcpGuard(
+        inputBlocks: SessionInputBlock[],
+        options?: DispatchInputBlocksOptions
+      ): Promise<boolean> {
+        return await sendWithMcpSelection(
+          session.id,
+          options,
+          (ids) => dispatchInputBlocksUnchecked(inputBlocks, { ...options, mcpServerIds: ids }),
+          (failed) =>
+            reportMcpDefaultsBlocked(
+              t,
+              failed,
+              retryMcpDefaults,
+              () => {
+                void dispatchWithMcpGuard(inputBlocks, {
+                  ...options,
+                  mcpServerIds: [],
+                  skipMcpOnce: true,
+                });
+              },
+              session.id
+            )
+        );
+      },
+      [dispatchInputBlocksUnchecked, retryMcpDefaults, sendWithMcpSelection, session.id, t]
+    );
+
+    useEffect(() => () => toast.dismiss(`mcp-defaults:${session.id}`), [session.id]);
+
     const dispatchPrompt = useCallback(
       async (prompt: string, options?: DispatchInputBlocksOptions): Promise<boolean> => {
         const inputArea = inputAreaRef.current;
@@ -4936,13 +4968,11 @@ export const SessionChatInterface = memo(
       async (
         inputBlocks: SessionInputBlock[],
         agentRole?: SessionTurnAgentRoleSelection,
-        options?: Omit<DispatchInputBlocksOptions, 'agentRole'> & { skipMcpOnce?: boolean }
+        options?: Omit<DispatchInputBlocksOptions, 'agentRole'>
       ): Promise<boolean> => {
-        const accepted = await dispatchInputBlocks(inputBlocks, { ...options, agentRole });
-        if (accepted) acceptMcpSend(session.id, options?.skipMcpOnce);
-        return accepted;
+        return await dispatchInputBlocks(inputBlocks, { ...options, agentRole });
       },
-      [dispatchInputBlocks, acceptMcpSend, session.id]
+      [dispatchInputBlocks]
     );
 
     const capacityRetry = useCapacityAutoRetry({

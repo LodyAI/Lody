@@ -35,8 +35,10 @@ snapshots stay errors. The shared room retries with capped backoff while borrowe
 and the notice offers retry or an explicit one-send `[]` without changing defaults.
 Successful one-send opt-out keeps a renderer-local recovery entry scoped to runtime
 and session, so a promoted composer ignores that turn's `[]` and resumes its project
-defaults once readable. An ordinary accepted send consumes the entry; explicit menu
-`[]` remains a normal durable selection. No extra history field, schema version or
+defaults once readable. The common new-turn sender gates implicit selections while defaults are unread,
+reports loading/read failure with recovery actions, and consumes recovery after
+acceptance for both shortcuts and the composer. Explicit ids, including `[]`,
+bypass default resolution. Explicit menu `[]` remains a normal durable selection. No extra history field, schema version or
 daemon capability is introduced. Recovery does not cross renderer reload, runtime
 replacement or devices; those readers retain the historical `[]` behavior.
 Existing conversations remain usable. See the

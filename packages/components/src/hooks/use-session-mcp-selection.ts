@@ -21,7 +21,7 @@ export type SessionMcpSelection = {
   /** Ready to hand to `AttachmentAddMenu`; undefined when the catalog is empty. */
   menu: AttachmentAddMenuMcp | undefined;
   /**
-   * Whether `selectedIds` can be sent. False only while a new conversation's
+   * Whether `selectedIds` can be sent. False only while its
    * selection still comes from a local catalog that has not been read: sending
    * then would silently author a turn with no MCP servers.
    */
@@ -31,6 +31,12 @@ export type SessionMcpSelection = {
   retryDefaults: () => void;
   /** Renderer-local recovery, recorded only after a send is accepted. */
   acceptSend: (sessionId: string, skipMcpOnce?: boolean) => void;
+  send: (
+    sessionId: string,
+    options: { mcpServerIds?: readonly McpServerId[]; skipMcpOnce?: boolean } | undefined,
+    dispatch: (ids: readonly McpServerId[]) => Promise<boolean>,
+    onBlocked: (failed: boolean) => void
+  ) => Promise<boolean>;
 };
 
 /** The project a NEW conversation is created in; its defaults preselect servers. */
@@ -164,6 +170,19 @@ export function useSessionMcpSelection(
     [runtime]
   );
 
+  const send: SessionMcpSelection['send'] = useCallback(
+    async (sessionId, sendOptions, dispatch, onBlocked) => {
+      if (sendOptions?.mcpServerIds === undefined && !ready) {
+        onBlocked(dependsOnDefaults && failed);
+        return false;
+      }
+      const accepted = await dispatch(sendOptions?.mcpServerIds ?? selectedIds);
+      if (accepted) acceptSend(sessionId, sendOptions?.skipMcpOnce);
+      return accepted;
+    },
+    [acceptSend, dependsOnDefaults, failed, ready, selectedIds]
+  );
+
   return {
     servers,
     selectedIds,
@@ -173,5 +192,6 @@ export function useSessionMcpSelection(
     defaultsFailed: dependsOnDefaults && failed,
     retryDefaults,
     acceptSend,
+    send,
   };
 }

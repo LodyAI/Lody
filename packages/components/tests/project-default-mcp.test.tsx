@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 import { act } from 'react';
+import i18next from 'i18next';
+import { Toast } from '@lody/ui';
+import { toastManager, toast } from '../src/lib/toast';
 import { createLoroSessionData } from '@lody/shared/session-data';
 import { buildSessionDoc, reimport, FIXTURE_SESSION_ID } from './conversation-view-fixtures';
 import { PlatformContext } from '@lody/platform/react';
@@ -29,7 +32,10 @@ import {
   type SessionMcpDefaultsTarget,
   type SessionMcpSelection,
 } from '../src/hooks/use-session-mcp-selection';
-import { McpDefaultsRecovery } from '../src/components/chat/mcp-defaults-recovery';
+import {
+  reportMcpDefaultsBlocked,
+  McpDefaultsRecovery,
+} from '../src/components/chat/mcp-defaults-recovery';
 import { initI18n } from '../src/i18n';
 import type {
   ProjectMcpDefaultAccess,
@@ -151,6 +157,22 @@ const catalogRows = (): Array<[readonly string[], unknown]> => [
   ],
 ];
 
+function appendMcpTurn(
+  writer: ReturnType<typeof createHistoryWriter>,
+  id: string,
+  inputConfig: ReturnType<typeof buildSessionTurnInputConfig>
+) {
+  writer.append({
+    id,
+    ...buildPendingUserHistoryEntry({
+      userId: 'user-1',
+      inputBlocks: inputConfig.inputBlocks ?? [],
+      inputConfig,
+      timestamp: '2026-10-30T00:00:00.000Z',
+    })!,
+  });
+}
+
 /** Renders the composer hook and records the selection of EVERY render. */
 function renderSelection(props: {
   persistedIds?: readonly McpServerId[];
@@ -158,6 +180,7 @@ function renderSelection(props: {
   scopeKey?: string;
   defaultsTarget?: SessionMcpDefaultsTarget;
   syncMode?: PlatformSyncMode;
+  executePlan?: (selection: SessionMcpSelection) => Promise<void>;
 }) {
   const renders: SessionMcpSelection[] = [];
   let latest!: SessionMcpSelection;
@@ -168,9 +191,17 @@ function renderSelection(props: {
       defaultsTarget: current.defaultsTarget,
     });
     renders.push(latest);
-    return latest.defaultsFailed ? (
-      <McpDefaultsRecovery onRetry={latest.retryDefaults} onSendWithoutMcp={() => {}} />
-    ) : null;
+    return (
+      <>
+        <Toast.Provider manager={toastManager} />
+        {current.executePlan ? (
+          <button onClick={() => void current.executePlan!(latest)}>Execute plan</button>
+        ) : null}
+        {latest.defaultsFailed && !current.executePlan ? (
+          <McpDefaultsRecovery onRetry={latest.retryDefaults} onSendWithoutMcp={() => {}} />
+        ) : null}
+      </>
+    );
   }
   const render = (next: typeof props) =>
     act(() =>
@@ -285,6 +316,95 @@ describe('composer MCP selection', () => {
     error.mockRestore();
   });
 
+  it.each([false, true])(
+    'guards plan execution during default recovery and consumes recovery after acceptance (failed=%s)',
+    async (failed) => {
+      const workspace = createWorkspace('shortcut-workspace', catalogRows());
+      store.set(runtimeAtom, workspace.runtime);
+      const view = renderSelection({});
+      act(() => view.current().acceptSend('shortcut-session', true));
+      const doc = buildSessionDoc([]);
+      const writer = createHistoryWriter(doc);
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      if (failed) workspace.fail(new Error('storage unavailable'));
+      await settle();
+      const executePlan = async (selection: SessionMcpSelection) => {
+        await selection.send(
+          'shortcut-session',
+          undefined,
+          async (ids) => {
+            const blocks = [{ type: 'text' as const, text: 'Implement the plan' }];
+            appendMcpTurn(
+              writer,
+              'plan-turn',
+              buildSessionTurnInputConfig({
+                inputBlocks: blocks,
+                cliType: 'builtin',
+                agentType: 'codex',
+                mcpServerIds: ids,
+              })
+            );
+            return true;
+          },
+          (blockedFailed) =>
+            reportMcpDefaultsBlocked(
+              i18next.t,
+              blockedFailed,
+              selection.retryDefaults,
+              () => {},
+              'shortcut-session'
+            )
+        );
+      };
+      const props = {
+        existingSession: true,
+        scopeKey: 'shortcut-session',
+        persistedIds: [] as McpServerId[],
+        executePlan,
+      };
+      view.render(props);
+      const button = (label: string) =>
+        [...document.body.querySelectorAll('button')].find((node) => node.textContent === label)!;
+      await act(async () => button('Execute plan').click());
+      expect(writer.readStored()).toEqual([]);
+      expect(document.body.textContent).toContain(
+        failed
+          ? 'Default MCP servers couldn’t be read'
+          : 'Loading this project’s default MCP servers…'
+      );
+      if (failed) expect(document.body.textContent).toContain('Send without MCP');
+      let explicitIds: readonly McpServerId[] | undefined;
+      await act(async () => {
+        await view.current().send(
+          'shortcut-session',
+          { mcpServerIds: [] },
+          async (ids) => {
+            explicitIds = ids;
+            return false;
+          },
+          () => {
+            throw new Error('explicit selection was blocked');
+          }
+        );
+      });
+      expect(explicitIds).toEqual([]);
+      expect(view.current().ready).toBe(false);
+      workspace.recover();
+      if (failed) await act(async () => button('Retry').click());
+      else workspace.open();
+      await settle();
+      await act(async () => button('Execute plan').click());
+      expect(writer.readStored()).toHaveLength(1);
+      expect(writer.readStored()[0].inputConfig?.mcpServerIds).toEqual(['db', 'files']);
+      // The accepted shortcut consumes recovery: subsequent catalog edits cannot
+      // replace the accepted baseline with newly changed project/workspace defaults.
+      view.render({ ...props, persistedIds: ['search' as McpServerId] });
+      expect(view.current().selectedIds).toEqual(['search']);
+      act(() => toast.dismiss('mcp-defaults:shortcut-session'));
+      log.mockRestore();
+    }
+  );
+
   it.each([true, false])(
     'restores defaults after an accepted temporary opt-out, but preserves menu [] (temporary=%s)',
     async (temporary) => {
@@ -308,15 +428,7 @@ describe('composer MCP selection', () => {
         mcpServerIds: [],
       });
       const doc = buildSessionDoc([]);
-      createHistoryWriter(doc).append({
-        id: 'first',
-        ...buildPendingUserHistoryEntry({
-          userId: 'user-1',
-          inputBlocks: blocks,
-          inputConfig: first,
-          timestamp: '2026-10-30T00:00:00.000Z',
-        })!,
-      });
+      appendMcpTurn(createHistoryWriter(doc), 'first', first);
       const accepted = reimport(doc);
       const writer = createHistoryWriter(accepted);
       const data = createLoroSessionData({ sessionId: FIXTURE_SESSION_ID, doc: accepted });
@@ -351,15 +463,7 @@ describe('composer MCP selection', () => {
           agentType: 'codex',
           mcpServerIds: view.current().selectedIds,
         });
-        writer.append({
-          id: 'second',
-          ...buildPendingUserHistoryEntry({
-            userId: 'user-1',
-            inputBlocks: blocks,
-            inputConfig: second,
-            timestamp: '2026-10-30T00:00:01.000Z',
-          })!,
-        });
+        appendMcpTurn(writer, 'second', second);
         expect(writer.readStored()[1].inputConfig?.mcpServerIds).toEqual(
           temporary ? ['search'] : []
         );

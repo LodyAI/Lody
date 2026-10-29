@@ -3,6 +3,7 @@ import * as stylex from '@stylexjs/stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { Button } from '@lody/ui/button';
+import { toast } from '@/lib/toast';
 
 const styles = stylex.create({
   notice: { padding: space[2], color: colors.label, fontSize: text.footnoteSize, lineHeight: 1.5 },
@@ -33,5 +34,39 @@ export function McpDefaultsRecovery({
         </Button>
       </div>
     </div>
+  );
+}
+
+/** A blocked shortcut retains only an explicit retry/opt-out action, never an automatic send. */
+export function reportMcpDefaultsBlocked(
+  t: (key: string) => string,
+  failed: boolean,
+  retry: () => void,
+  sendWithoutMcp: () => void,
+  sessionId: string
+): void {
+  const id = `mcp-defaults:${sessionId}`;
+  toast.error(
+    t(failed ? 'chat.validation.mcpDefaultsFailed' : 'chat.validation.mcpDefaultsLoading'),
+    {
+      id,
+      duration: 10_000,
+      ...(failed
+        ? {
+            description: (
+              <Button variant="ghost" size="small" onClick={retry}>
+                {t('common.retry')}
+              </Button>
+            ),
+            action: {
+              label: t('chat.sendWithoutMcp'),
+              onClick: () => {
+                toast.dismiss(id);
+                sendWithoutMcp();
+              },
+            },
+          }
+        : {}),
+    }
   );
 }
