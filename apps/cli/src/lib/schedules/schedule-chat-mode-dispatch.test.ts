@@ -16,7 +16,6 @@ import {
   type SessionMeta,
 } from '@lody/shared';
 import type { LoroDocumentManager } from '../loro/doc';
-import { AgentExecutionSlots } from '../agent-execution-slots';
 import {
   commitPreparedSessionDispatch,
   isPreparedSessionDispatched,
@@ -123,7 +122,6 @@ describe('Chat-only schedule handoff', () => {
       machineId: 'machine',
       userId: 'owner',
       store,
-      slots: new AgentExecutionSlots(),
       now: () => 60_000,
       ready: () => true,
       disabled: () => false,
@@ -296,7 +294,6 @@ describe('Owned-chat schedule handoff', () => {
       machineId: 'machine',
       userId: 'owner',
       store,
-      slots: new AgentExecutionSlots(),
       now: () => 60_000,
       ready: () => true,
       disabled: () => false,

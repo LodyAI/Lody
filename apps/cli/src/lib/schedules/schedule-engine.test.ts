@@ -12,7 +12,6 @@ import {
   type ScheduleDocument,
 } from '@lody/shared';
 import { findNextDispatchableUserTurn } from '@/session/session-dispatch-logic';
-import { AgentExecutionSlots } from '../agent-execution-slots';
 import { ScheduleStore } from './schedule-store';
 import {
   ScheduleConfigurationError,
@@ -56,13 +55,11 @@ function harness(d = document()) {
   let disabled = false;
   let accepted = false;
   let finished = false;
-  const slots = new AgentExecutionSlots();
   const ports: ScheduleEnginePorts<{ prompt: string }> = {
     workspaceId: 'workspace',
     machineId: 'machine',
     userId: 'owner',
     store,
-    slots,
     now: () => now,
     ready: () => ready,
     disabled: () => disabled,
@@ -82,7 +79,6 @@ function harness(d = document()) {
   const engine = new ScheduleEngine(ports);
   return {
     store,
-    slots,
     d,
     ports,
     engine,
@@ -126,7 +122,6 @@ describe('Schedule worker handoff', () => {
     ]);
     h.time(Date.parse('2026-10-01T09:22:00Z'));
     const restarted = new ScheduleEngine(h.ports);
-    restarted.restoreOccupancy();
     await restarted.evaluate();
     expect(h.store.history('workspace', 'schedule')).toHaveLength(1);
     expect(h.store.history('workspace', 'schedule')[0]?.scheduledFor).toBe(instant);
@@ -146,7 +141,6 @@ describe('Schedule worker handoff', () => {
     h.finished();
     await h.engine.evaluate();
     expect(h.store.unfinished('workspace')).toEqual([]);
-    expect(h.slots.isBusy('agent')).toBe(false);
   });
   it('keeps prepared history inert if paused before the pointer handoff', async () => {
     const h = harness();
@@ -180,14 +174,13 @@ describe('Schedule worker handoff', () => {
     expect(h.ports.dispatch).toHaveBeenCalledTimes(1);
     expect(h.store.unfinished('workspace')[0]?.state).toBe('dispatched');
   });
-  it('retries frozen preparation, releases failed reservation, and preserves attempt age', async () => {
+  it('retries frozen preparation and preserves attempt age', async () => {
     const h = harness();
     h.ports.materialize = vi
       .fn()
       .mockRejectedValueOnce(new Error('temporary storage failure'))
       .mockResolvedValue(undefined);
     await h.engine.evaluate();
-    expect(h.slots.isBusy('agent')).toBe(false);
     const run = h.store.unfinished('workspace')[0]!;
     expect(run.state).toBe('retry_wait');
     expect(run.retryAt).toBe(90_000);
@@ -199,35 +192,47 @@ describe('Schedule worker handoff', () => {
     expect(h.ports.dispatch).toHaveBeenCalledWith({ prompt: 'original' });
     expect(h.store.get(run.runKey)?.plannedAt).toBe(60_000);
   });
-  it('retains only the newest unprepared run and waits for another slot occupant', async () => {
+  it('dispatches later rounds while earlier rounds are still running, including after restart', async () => {
     const h = harness();
-    expect(h.slots.reserve('agent', 'other-work')).toBe(true);
     await h.engine.evaluate();
-    h.time(180_000);
-    await h.engine.evaluate();
-    expect(h.ports.prepare).not.toHaveBeenCalled();
-    expect(h.store.unfinished('workspace')).toHaveLength(1);
-    expect(h.store.unfinished('workspace')[0]?.scheduledFor).toBe(180_000);
-    expect(
-      h.store.history('workspace', 'schedule').find((run) => run.scheduledFor === 60_000)?.errorCode
-    ).toBe('SUPERSEDED');
-    h.slots.release('agent', 'other-work');
-    await h.engine.evaluate();
-    expect(h.ports.dispatch).toHaveBeenCalledTimes(1);
+    h.time(120_000);
+    const restarted = new ScheduleEngine(h.ports);
+    await restarted.evaluate();
+    const runs = h.store.history('workspace', 'schedule');
+    expect(runs.map((run) => run.state)).toEqual(['dispatched', 'dispatched']);
+    expect(new Set(runs.map((run) => run.sessionId)).size).toBe(2);
+    expect(runs.map((run) => run.scheduledFor).sort((a, b) => a - b)).toEqual([60_000, 120_000]);
+    await restarted.evaluate();
+    expect(h.store.history('workspace', 'schedule')).toHaveLength(2);
   });
 
-  it('releases a restored preparation reservation when scheduling is disabled, retaining the input', async () => {
+  it('supersedes only unprepared pending runs when planning catches up', async () => {
+    const h = harness();
+    const fingerprint = buildScheduleRegistryRow(h.d).definitionFingerprint;
+    h.store.plan('workspace', h.d, fingerprint, 60_000);
+    h.store.plan('workspace', h.d, fingerprint, 180_000);
+    expect(h.store.unfinished('workspace')).toMatchObject([
+      { scheduledFor: 180_000, state: 'pending' },
+    ]);
+    expect(
+      h.store.history('workspace', 'schedule').find((run) => run.scheduledFor === 60_000)
+    ).toMatchObject({ state: 'skipped', errorCode: 'SUPERSEDED' });
+    h.time(180_000);
+    await h.engine.evaluate();
+    expect(h.store.unfinished('workspace')).toMatchObject([
+      { scheduledFor: 180_000, state: 'dispatched' },
+    ]);
+  });
+
+  it('retains prepared input when scheduling is disabled', async () => {
     const h = harness();
     h.ports.materialize = async () => {
       h.ready(false);
     };
     await h.engine.evaluate();
-    h.engine.restoreOccupancy();
-    expect(h.slots.isBusy('agent')).toBe(true);
     h.ready(true);
     h.disabled(true);
     await h.engine.evaluate();
-    expect(h.slots.reserve('agent', 'task:other')).toBe(true);
     expect(h.store.unfinished('workspace')[0]).toMatchObject({
       state: 'session_prepared',
       prepared: { prompt: 'original' },
@@ -264,7 +269,6 @@ describe('Schedule worker handoff', () => {
       attempts: 0,
       errorCode: 'PROJECT_UNAVAILABLE',
     });
-    expect(h.slots.isBusy('agent')).toBe(false);
     expect(h.ports.publish).toHaveBeenLastCalledWith(
       expect.objectContaining({ queueState: 'blocked', blockedCode: 'PROJECT_UNAVAILABLE' })
     );
@@ -285,7 +289,6 @@ describe('Schedule worker handoff', () => {
   });
   it('publishes one complete projection and settles its own subscription wake', async () => {
     const h = harness();
-    h.slots.restore('agent', 'another');
     let last = '';
     h.ports.publish = vi.fn(async (runtime) => {
       const value = JSON.stringify(runtime);
@@ -297,7 +300,7 @@ describe('Schedule worker handoff', () => {
     await h.engine.evaluate();
     expect(h.ports.publish).toHaveBeenCalledTimes(2);
     expect(JSON.parse(last)).toMatchObject({
-      queueState: 'waiting_for_agent',
+      lastDispatch: { scheduledFor: 60_000 },
       nextScheduledAt: 120_000,
     });
   });
@@ -345,6 +348,7 @@ describe('One-time complete messages', () => {
     return d;
   }
   it.each([
+    ['task', 'task'],
     ['message', 'message'],
     ['task', 'message'],
     ['message', 'task'],
@@ -370,11 +374,8 @@ describe('One-time complete messages', () => {
       expect(sent).toEqual(['schedule']);
       expect(h.store.history('workspace', 'schedule')[0]?.state).toBe('dispatched');
       // Restart while the first conversation is still running. Its delivery must
-      // neither repeat nor occupy another conversation's message admission.
-      h.ports.slots = new AgentExecutionSlots();
+      // neither repeat nor block another conversation's admission.
       const restarted = new ScheduleEngine(h.ports);
-      restarted.restoreOccupancy();
-      expect(h.ports.slots.isBusy('agent')).toBe(firstKind === 'task');
       documents.push(next);
       h.time(60_001);
       await restarted.evaluate();
@@ -386,9 +387,8 @@ describe('One-time complete messages', () => {
     }
   );
 
-  it('waits for its own busy chat and sends once after it becomes idle, regardless of another agent slot', async () => {
+  it('waits for its own busy chat and sends once after it becomes idle', async () => {
     const h = harness(message());
-    h.slots.reserve('agent', 'unrelated-task');
     let busy = true;
     const sent: string[] = [];
     h.ports.validateTarget = async () => {
@@ -411,7 +411,6 @@ describe('One-time complete messages', () => {
     await h.engine.evaluate();
     expect(sent).toEqual(['Frozen message']);
     expect(h.store.history('workspace', 'schedule')[0]?.state).toBe('dispatched');
-    expect(h.slots.isBusy('agent')).toBe(true);
   });
 
   it('retains frozen blocks in the ledger and restores sent status without sending again', async () => {
