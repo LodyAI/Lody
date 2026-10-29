@@ -599,6 +599,85 @@ it('fences the preallocated control reader before a cold open settles', async ()
   expect(closes.at(-1)).toEqual([workspaceId, 'account', pendingReader]);
 });
 
+it.each(['describe', 'history'] as const)(
+  'reopens a confirmed closed reader before obsolete public %s returns',
+  async (paused) => {
+    fixture.port = displayPort(async () => [] as never);
+    delete fixture.port.memberProfiles;
+    const descriptor = await fixture.port.describe({ workspaceId });
+    const page = await fixture.port.history({ workspaceId });
+    const described = Promise.withResolvers<typeof descriptor>();
+    const historical = Promise.withResolvers<typeof page>();
+    const entered = Promise.withResolvers<void>();
+    const closed = Promise.withResolvers<void>();
+    const readers = new Set<string>();
+    const ingested: unknown[] = [];
+    let descriptions = 0,
+      histories = 0;
+    fixture.port.describe = async () => {
+      if (++descriptions === 1 && paused === 'describe') {
+        entered.resolve();
+        return described.promise;
+      }
+      return descriptor;
+    };
+    fixture.port.history = async () => {
+      if (++histories === 1 && paused === 'history') {
+        entered.resolve();
+        return historical.promise;
+      }
+      return page;
+    };
+    fixture.port.runtime = {
+      readerLeases: 'preallocated-v1',
+      recordCreated: async () => {},
+      open: async (_id, _checkpoint, expected, requested) => {
+        expect(expected).toBe('account');
+        readers.add(requested!);
+        return { ...local.status, readerOwner: requested };
+      },
+      close: async (_id, expected, reader) => {
+        expect(expected).toBe('account');
+        readers.delete(reader!);
+        closed.resolve();
+      },
+      ledgerView: async () => local,
+      ingestLedgerRecords: async (_id, received) => {
+        ingested.push(received);
+        return local.status;
+      },
+    } as NonNullable<PlatformE2eeWorkspaces['runtime']>;
+    const Component = Route.options.component as () => ReturnType<typeof createElement>;
+    try {
+      await act(async () => root.render(createElement(Component)));
+      await entered.promise;
+      expect(container.querySelector('[data-control-state]')?.textContent).toBe('1');
+      await act(async () => root.unmount());
+      await closed.promise;
+      expect(readers.size).toBe(0);
+      root = createRoot(container);
+      await act(async () => root.render(createElement(Component)));
+      expect(container.querySelector('[data-control-state]')?.textContent).toBe('1');
+      expect(readers.size).toBe(1);
+      const current = [...readers];
+      const received = [...ingested];
+      // Late, conflicting public results belong only to the disposed lifetime.
+      await act(async () => {
+        described.resolve({ ...descriptor, genesisHash: 'ff'.repeat(32) } as typeof descriptor);
+        historical.resolve({ ...page, recordsHex: ['00'] });
+      });
+      expect(container.querySelector('[data-control-state]')?.textContent).toBe('1');
+      expect([...readers]).toEqual(current);
+      expect(ingested).toEqual(received);
+    } finally {
+      await act(async () => {
+        described.resolve(descriptor);
+        historical.resolve(page);
+      });
+    }
+  }
+);
+
 it('does not let an old public-directory read block a newly available protected host', async () => {
   const described =
     Promise.withResolvers<Awaited<ReturnType<PlatformE2eeWorkspaces['describe']>>>();

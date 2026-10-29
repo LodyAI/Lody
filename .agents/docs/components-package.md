@@ -69,6 +69,10 @@ content readiness in RuntimeProvider. Control reads capture account and reader
 labels, fence preallocated cold opens and retain incomplete closes across route
 changes. Unknown-genesis cold readers block only the same account/workspace until
 their actual close finishes; independent workspaces remain usable.
+Retirement joins native acquisition and confirmed close, never the subsequent
+public describe/history refresh. A closed reader can reopen while an obsolete
+public request remains pending; disposed results cannot ingest records, publish
+a view or update observed checkpoints.
 
 The onboarding tour uses the real session composer. Scheduled-message draft atoms
 keep their identity while React reattaches subscriptions, and across simultaneous

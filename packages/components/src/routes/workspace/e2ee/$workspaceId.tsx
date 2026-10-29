@@ -94,6 +94,7 @@ function WorkspaceControlRoute() {
     let disposed = false;
     let hostAccessStarted = false;
     let hostOpened = false;
+    let nativeAcquisition: Promise<E2eeRuntimeStatus | undefined> | undefined;
     let readerOwner: string | undefined;
     let readerGenesis: string | undefined;
     let cleanup: E2eeLocalDataScope | null = null;
@@ -108,7 +109,12 @@ function WorkspaceControlRoute() {
       async () => {
         // Fence a preallocated cold open before joining its actual settlement.
         if (hostOpened) await port!.runtime!.close(workspaceId, accountId!, readerOwner);
-        await initialization;
+        // Join only actual native acquisition. Public describe/history can stay
+        // offline after this reader is confirmed closed; they own no host lease.
+        await nativeAcquisition?.then(
+          () => undefined,
+          () => undefined
+        );
         if (hostOpened) await port!.runtime!.close(workspaceId, accountId!, readerOwner);
         hostOpened = false;
       }
@@ -132,7 +138,7 @@ function WorkspaceControlRoute() {
     if (!port || !accountId) return undefined;
     const owner = {};
     readOwner.current = owner;
-    const initialization = (async () => {
+    void (async () => {
       try {
         const retained = readEncryptedLocalIdentity(accountId, workspaceId);
         if (retained) cleanup = { ...retained, windowId: desktopWindowId() };
@@ -158,30 +164,34 @@ function WorkspaceControlRoute() {
           hostAccessStarted = true;
           let status;
           try {
-            if (pin) {
-              try {
-                await runtime.recordCreated({ workspaceId, genesisHash: pin });
-              } catch (error) {
-                // Portable read-open does not implement desktop creation repair.
-                // All binding/custody failures still stop this read.
-                if (personalHostFailureCode(error) !== 'unsupported') throw error;
+            nativeAcquisition = (async () => {
+              if (pin) {
+                try {
+                  await runtime.recordCreated({ workspaceId, genesisHash: pin });
+                } catch (error) {
+                  // Portable read-open does not implement desktop creation repair.
+                  // All binding/custody failures still stop this read.
+                  if (personalHostFailureCode(error) !== 'unsupported') throw error;
+                }
               }
-            }
-            if (disposed) return;
-            readerOwner =
-              runtime.readerLeases === 'preallocated-v1' ? crypto.randomUUID() : undefined;
-            if (readerOwner) hostOpened = true;
-            status = await runtime.open(
-              workspaceId,
-              readObservedLedgerCheckpoint(localStorage, accountId, workspaceId) ?? undefined,
-              accountId,
-              readerOwner
-            );
-            hostOpened = true;
-            if (readerOwner && status.readerOwner !== readerOwner)
-              throw new Error('e2ee_reader_owner_mismatch');
-            readerOwner = status.readerOwner;
-            readerGenesis = status.genesisHash;
+              if (disposed) return;
+              readerOwner =
+                runtime.readerLeases === 'preallocated-v1' ? crypto.randomUUID() : undefined;
+              if (readerOwner) hostOpened = true;
+              const opened = await runtime.open(
+                workspaceId,
+                readObservedLedgerCheckpoint(localStorage, accountId, workspaceId) ?? undefined,
+                accountId,
+                readerOwner
+              );
+              hostOpened = true;
+              if (readerOwner && opened.readerOwner !== readerOwner)
+                throw new Error('e2ee_reader_owner_mismatch');
+              readerOwner = opened.readerOwner;
+              readerGenesis = opened.genesisHash;
+              return opened;
+            })();
+            status = await nativeAcquisition;
           } catch (error) {
             // Availability failures retain the original read-only verification path,
             // including its genesis pin and observed-checkpoint checks.
@@ -208,7 +218,9 @@ function WorkspaceControlRoute() {
               cryptoOrgId: status.genesisHash,
             };
             const publish = async () => {
+              if (disposed) return;
               const exported = await runtime.ledgerView(workspaceId);
+              if (disposed) return;
               const history = hostLedgerHistory(exported);
               if (!history.continuityPending)
                 retainObservedLedgerCheckpoint(localStorage, accountId, workspaceId, history);
@@ -242,6 +254,7 @@ function WorkspaceControlRoute() {
               for (;;) {
                 if (disposed) break;
                 status = await runtime.ingestLedgerRecords(workspaceId, page);
+                if (disposed) break;
                 if (page.nextCursor === null || status.upgradeRequiredAt !== undefined) {
                   await publish();
                   break;
@@ -314,7 +327,6 @@ function WorkspaceControlRoute() {
           } catch {
             /* Native receipt still retries local cleanup on the next open. */
           }
-          // Joining this initialization here would deadlock its own retirement.
           try {
             if (hostOpened) await port!.runtime!.close(workspaceId, accountId!, readerOwner);
           } catch (closeError) {

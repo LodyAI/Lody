@@ -1642,6 +1642,12 @@ importers:
       oxfmt:
         specifier: ^0.65.0
         version: 0.65.0
+      react:
+        specifier: 'catalog:'
+        version: 19.2.0
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.2.0(react@19.2.0)
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
