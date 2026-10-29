@@ -197,7 +197,10 @@ export function DeviceAuthPage({
           <Button type="submit" size="large" disabled={!canSubmit || isVerifying}>
             {isVerifying ? (
               <>
-                <Spinner className={`h-4 w-4 ${stylex.props(surface.spinnerMargin).className}`} />
+                <Spinner
+                  diameter="calc(var(--spacing) * 4)"
+                  className={stylex.props(surface.spinnerMargin).className}
+                />
                 {t('device.verifying')}
               </>
             ) : (

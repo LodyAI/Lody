@@ -6,6 +6,11 @@ import * as stylex from '@stylexjs/stylex';
 
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import { Button } from '@lody/ui/button';
+import { cn } from '@/lib/utils';
+import {
+  messageActionLabelTheme,
+  messageActionInkTheme,
+} from '../../style/message-action-button.stylex';
 import { Dialog } from '@/ui/dialog';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
@@ -38,7 +43,8 @@ const styles = stylex.create({
     textAlign: 'left',
     fontSize: themeFontSize.xs,
     lineHeight: themeSpace[5],
-    transitionProperty: 'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionProperty:
+      'color, background-color, border-color, text-decoration-color, fill, stroke',
     transitionDuration: '150ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
     color: {
@@ -222,7 +228,11 @@ export function OperationReplyCard(props: OperationReplyCardProps) {
         type="button"
         variant="ghost"
         size="small"
-        className="h-7 shrink-0 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
+        height="calc(var(--spacing) * 7)"
+        className={cn(
+          stylex.props(messageActionLabelTheme, messageActionInkTheme).className,
+          'gap-1 px-2 text-xs'
+        )}
         disabled={!navigate}
         onClick={navigate}
       >
@@ -247,7 +257,8 @@ export function OperationReplyCard(props: OperationReplyCardProps) {
                   type="button"
                   variant="secondary"
                   size="small"
-                  className="h-7 shrink-0 gap-1 px-2.5 text-xs"
+                  height="calc(var(--spacing) * 7)"
+                  className="gap-1 px-2.5 text-xs"
                   onClick={() => {
                     setOpen(false);
                     navigate();

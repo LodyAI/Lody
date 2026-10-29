@@ -32,12 +32,34 @@ the confirmation still overlays the end slot. Removing that compatibility can
 shrink the title column even when a short-title screenshot looks identical.
 Compare slot geometry and a clipped long title as well as pixels.
 
-Inspect compiled custom-property declarations as well as ordinary properties.
-The current plugin emitted a migrated CollapsibleCard `--tw-shadow` declaration
-outside the StyleX layer, overriding a caller's utilities-layer arbitrary shadow.
-That card retains its paired `shadow-none ring-0` compatibility classes so `cn`
-can resolve caller overrides. Moving only the visible `boxShadow` or only its
-variables does not preserve that composition contract.
+Inspect custom-property declarations in the complete application build as well
+as ordinary properties. The locked StyleX compiler groups variable rules with
+root/theme declarations; that group can be emitted outside CSS layers even when
+an isolated component probe puts the same writer inside `stylex`. This changed
+both a CollapsibleCard `--tw-shadow` override and the private message content's
+`--tw-space-y-reverse` override. The rejected spacing candidate changed a real
+utilities-layer reverse writer from start/end margins `12px / 0` to `0 / 12px`.
+Those utilities remain until their complete writer/reader cascade can be preserved.
+The card likewise retains its paired `shadow-none ring-0` compatibility classes
+so `cn` can resolve caller overrides. Moving only the visible property or only
+its variables does not preserve that composition contract.
+
+When a repeated override is owned by a primitive, migrate through its explicit
+API. Spinner's `diameter` sizes its turning wrapper while keeping SVG attributes
+and named sizes separate. Pass the original local spacing expression when the
+utility read it there; replacing it with an equal-default inherited alias changes
+subtree behavior. Verify explicit zero and removal of the override on the same
+mounted control, as well as its actual animation and rendered pixels.
+
+Local primitive themes need their own inheritance check. `createTheme` also
+applies the variable group's defaults: a partial Button theme reset an inherited
+23px gap and 3px orange focus ring. The message-action themes explicitly inherit
+every non-target Button/semantic token, with complete typed key maps. Their
+semantic label override is limited to the reviewed fixed glyph subtrees; a child
+that explicitly reads that semantic label would also change. A direct inline
+write to the old primitive color tokens changes precedence after migration, so
+that negative control is retained rather than claimed equivalent. Apply these
+themes to the actual Button; arbitrary local themes do not travel across portals.
 
 A component's styles live with its implementation; area-wide repeated styles
 live in its `surface.ts`. Import tokens using relative `.stylex` paths. The shared
@@ -119,8 +141,14 @@ re-read a descendant override. For a migrated declaration that previously read
 `--spacing`, a radius or an ink variable on its own element, preserve that local
 expression when the component supports scoped overrides. Compare both root and
 subtree variable changes: a root-only custom-theme test cannot detect this
-difference. Portalled content needs its own scope probe. Keep shared-token
-changes separate until their consumers have equivalent before/after evidence.
+difference. A host that owns a complete isolated palette or spacing boundary can
+instead apply `scopedThemeColors` / `scopedThemeSpace` at the element carrying
+those CSS variables. These themes share the group's complete canonical defaults;
+a partial replacement may reset omitted values. The share card uses this boundary
+alongside its UI and conversation themes. Descendant overrides below that element
+still require a local expression or another verified scope. Portalled content
+needs its own scope probe. Keep shared-token changes separate until their consumers
+have equivalent before/after evidence.
 
 Type and spacing stay on their original rem scale. Moving them to `em` or
 `--ui-font-size` changes interface font-size behavior. Preserve existing `em`
@@ -128,7 +156,11 @@ styles where the component already follows the interface size.
 
 For `space-y-*`, inspect computed margins before converting. A sibling's `mb-4`
 can override `space-y-1`; replacing that relationship with `gap: 4px` changes the
-page. Use the existing child structure and reproduce its actual spacing.
+page. Preserve the nonlast-child writer and the actual margin winners, including
+inherited, child-utility and inline reverse values. The current compiler lowers
+camel-case `marginBlockStart` / `marginBlockEnd` to physical margins; quoted
+`'margin-block-start'` / `'margin-block-end'` retain the logical axes. Verify the
+emitted application CSS rather than assuming either spelling's output.
 
 ### Focus, ring and shadow
 
@@ -161,10 +193,15 @@ and `outlineOffset`; verify the real forced-colors viewport and focused input.
 ### Ancestor and theme states
 
 Semantic theme variables already follow light/dark mode and VS Code themes.
-A hard-coded `dark:text-emerald-300` needs an explicit equivalent theme/selector
-contract before removal. Keep such compatibility classes while that contract is
-unimplemented; the limitation is in this migration's coverage, not an absolute
-lack of relational selectors in StyleX.
+A hard-coded dark variant needs the app's exact selector contract before removal.
+The current Tailwind variant matches `.dark` and `.dark-scope`, including descendants,
+and excludes `.light-scope` and its descendants even beneath another dark scope.
+For owned elements, the filter pill uses that complete self-element predicate in
+its local StyleX property conditions. Preserve the compiler's fallback colours and
+`@supports` values together, including local `--color-white` overrides. A light
+`:hover` rule must not outrank the dark resting fill on a touch device: retain
+dark 10% there and the original 14% only under `(hover: hover)`. Verify resting,
+hovered and held states on actual fine/coarse browser descriptors.
 
 The installed StyleX supports [`stylex.when` and markers](https://stylexjs.com/docs/learn/thinking-in-stylex/)
 for observing an owned ancestor's state. Use that API when both marker and child
@@ -181,8 +218,12 @@ and focus as well as the component's own hover and focus.
 
 1. Record the remaining usage with `node scripts/tailwind-usage.mjs --json`.
    It uses the locked Tailwind compiler to validate AST-discovered candidates.
-   Counts describe source occurrences; unresolved dynamic classes are reported
-   separately, and are not evidence of zero usage.
+   Scanner version 2 also follows direct `element.className = …` writes,
+   including literal bracket access. Version 1 omitted the iframe's five
+   utilities, so its frozen inventory fell by 21 while that batch migrated 26.
+   Keep historical method/count records and compare versions on the same source
+   snapshot. Counts are source occurrences; unresolved dynamic/compound writes
+   are reported separately and are not evidence of zero usage.
 2. Capture the unchanged component before editing. Prefer a fixed Storybook
    build. Include its important states, both themes, narrow/desktop widths and
    exact breakpoint boundaries. New stories render production components with
@@ -193,6 +234,10 @@ and focus as well as the component's own hover and focus.
 4. Capture after with the same targets and Chromium. The harness waits for
    Storybook completion, fonts, finite animations and stable geometry. Capture
    rendering failures and fail the command instead of silently omitting them.
+   Input selection and mirror state can commit separately: await selected-chip
+   removal and matching scroll positions as well as the native caret. A Framer
+   Motion panel can keep stable geometry at initial opacity zero; require its
+   actual visible state before accepting an expanded frame.
    Use a real mobile device descriptor when device detection depends on UA or
    touch support; a narrow desktop window exercises compact desktop layout.
    Record explicit asset readiness and network conditions on both sides. An

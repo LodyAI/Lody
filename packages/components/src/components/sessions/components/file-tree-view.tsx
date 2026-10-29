@@ -546,7 +546,7 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger>{rowButton}</ContextMenu.Trigger>
-      <ContextMenu.Content className="min-w-[190px]">
+      <ContextMenu.Content minWidth={190}>
         {visibleMenuItems.map((menuItem) => {
           const ItemIcon = menuItem.icon;
           return (

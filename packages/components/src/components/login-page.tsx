@@ -1641,13 +1641,16 @@ export function LoginPage({
           <Button
             type="submit"
             aria-label={submitLabel}
-            className="mt-1 h-10 w-full"
+            height="calc(var(--spacing) * 10)"
+            width="100%"
+            className="mt-1"
             disabled={isButtonsDisabled}
           >
             {isEmailSubmitting ? (
               <>
                 <Spinner
-                  className={cn(stylex.props(styles.pendingSpinnerSpacing).className, 'h-4 w-4')}
+                  diameter="calc(var(--spacing) * 4)"
+                  className={stylex.props(styles.pendingSpinnerSpacing).className}
                 />
                 {submitLabel}
               </>
@@ -1717,7 +1720,8 @@ export function LoginPage({
     <div {...stylex.props(styles.electronPanel)}>
       <Button
         onClick={() => void handleElectronBrowserLogin()}
-        className="h-10 w-full"
+        height="calc(var(--spacing) * 10)"
+        width="100%"
         disabled={isButtonsDisabled}
       >
         <SocialLoginButtonContent
@@ -1790,13 +1794,15 @@ export function LoginPage({
         <Button
           type="button"
           onClick={() => void handleElectronSessionTransfer()}
-          className="h-10 w-full"
+          height="calc(var(--spacing) * 10)"
+          width="100%"
           disabled={isButtonsDisabled || hasFailedElectronAccountSwitch}
         >
           {isPreparingElectronHandoff ? (
             <>
               <Spinner
-                className={cn(stylex.props(styles.pendingSpinnerSpacing).className, 'h-4 w-4')}
+                diameter="calc(var(--spacing) * 4)"
+                className={stylex.props(styles.pendingSpinnerSpacing).className}
               />
               {t('login.desktopHandoff.preparing', 'Preparing desktop sign-in...')}
             </>
@@ -1817,7 +1823,8 @@ export function LoginPage({
         type="button"
         variant="secondary"
         onClick={() => void handleSwitchElectronAccount()}
-        className="h-10 w-full"
+        height="calc(var(--spacing) * 10)"
+        width="100%"
         disabled={isSwitchingElectronAccount}
       >
         {isSwitchingElectronAccount

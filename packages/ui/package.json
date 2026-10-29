@@ -14,6 +14,7 @@
     "./badge": "./src/badge/badge.tsx",
     "./badge/badge.tokens.stylex": "./src/badge/badge.tokens.stylex.ts",
     "./button": "./src/button/button.tsx",
+    "./button/button.tokens.stylex": "./src/button/button.tokens.stylex.ts",
     "./card": "./src/card/card.tsx",
     "./checkbox": "./src/field/checkbox.tsx",
     "./collapsible": "./src/disclosure/collapsible.tsx",

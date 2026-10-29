@@ -280,7 +280,8 @@ export function CreateWorkspacePage({
                 {creating ? (
                   <span {...stylex.props(surface.row)}>
                     <Spinner
-                      className={`h-4 w-4 ${stylex.props(surface.spinnerMargin).className}`}
+                      diameter="calc(var(--spacing) * 4)"
+                      className={stylex.props(surface.spinnerMargin).className}
                     />
                     {paidRequired
                       ? t('billing.startingCheckout', 'Starting checkout...')

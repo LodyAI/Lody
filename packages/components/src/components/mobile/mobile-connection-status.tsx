@@ -181,7 +181,7 @@ function contentFor(
        both at once would be visual noise. */
     return {
       key: 'refreshing',
-      icon: <Spinner className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />,
+      icon: <Spinner diameter="calc(var(--spacing) * 3.5)" aria-hidden="true" />,
       label: labels.refreshing ?? '刷新中…',
       textStyle: styles.muted,
     };
@@ -197,7 +197,7 @@ function contentFor(
   if (state === 'reconnecting') {
     return {
       key: 'reconnecting',
-      icon: <Spinner className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />,
+      icon: <Spinner diameter="calc(var(--spacing) * 3.5)" aria-hidden="true" />,
       label: labels.reconnecting ?? '正在重连…',
       textStyle: styles.muted,
     };
@@ -205,7 +205,7 @@ function contentFor(
   if (state === 'loading') {
     return {
       key: 'loading',
-      icon: <Spinner className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />,
+      icon: <Spinner diameter="calc(var(--spacing) * 3.5)" aria-hidden="true" />,
       label: labels.loading ?? '连接中…',
       textStyle: styles.muted,
     };

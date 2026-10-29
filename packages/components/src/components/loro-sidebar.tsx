@@ -991,7 +991,9 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconB
       size="small"
       aria-label={label}
       aria-current={active ? 'page' : undefined}
-      className={cn('h-12 w-12', className)}
+      height="calc(var(--spacing) * 12)"
+      width="calc(var(--spacing) * 12)"
+      className={className}
       {...buttonProps}
     >
       <span {...stylex.props(shellStyles.glyphBox20)}>{children}</span>
@@ -1485,9 +1487,10 @@ export const LoroSidebar = memo(function LoroSidebar({
           type="button"
           variant="secondary"
           size="small"
+          height="calc(var(--spacing) * 7)"
           className={cn(
             SIDEBAR_HELPER_TEXT_CLASS,
-            'mt-3 h-7 rounded-full border-sidebar-border bg-sidebar px-3 font-medium text-sidebar-foreground shadow-none hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
+            'mt-3 rounded-full border-sidebar-border bg-sidebar px-3 font-medium text-sidebar-foreground shadow-none hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
           )}
           onClick={() => onChatScopeChange('team')}
         >

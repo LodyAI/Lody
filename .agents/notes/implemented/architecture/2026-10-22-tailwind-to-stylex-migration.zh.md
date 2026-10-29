@@ -715,56 +715,488 @@ light／320px／reduced-motion 的 state 1，Before 无动画，After 记录一�
 和外部请求为零。真实 Electron 于
 `2026-10-27T13:31:23.380Z` 通过四个界面，图片仅为 after-only，不构成应用配对像素结论。
 
+Skills sheet 续迁把六处 Spinner 尺寸类与一处 label clamp 移入局部 StyleX，并删除
+一处冗余 shrink，共从 `mobile-project-skills-sheet.tsx` 移除八处工具类。
+AdaptiveTabStrip 保留全部 13 处：公开的不透明 StyleX 调用方必须维持原 utilities 层
+的胜出规则。72 对主要截图逐字节一致，6,612 个节点的报告字段相同，无采集失败。
+详情另采 18 次，其中六次为重复静止状态；组装为 84 个不同 key，不能称 90 个独特状态。
+四帧详情保留 25 raw／0 threshold 像素差异，布局相同；`leaves5-acceptance.html`
+保留这些 OPEN。另八对独立运行时变量／正常动效截图逐字节一致，514 个节点和
+804,683 项 CSS 记录相同。
+类型、49 项归属测试及格式检查通过；局部 lint 为六项既有 warning、零错误。
+本批只处理 UI，未重跑根检查，不关闭既有 CLI Git 身份失败、历史 OPEN 或整体 PARTIAL。
+
+Filter／Queue／Mention 续迁减少 29 处：FilterPillBar 6→0、MessageQueueRow 8→2、
+MentionHighlighter 22→5。Filter 保留元素自身的完整 dark/light-scope 条件、局部
+`--color-white`、静态 alpha fallback 及 color-mix 支持分支。触控仿真的 hover 保持
+暗色静止填充，只有支持 hover 的设备使用 14% 填充；Queue 用自有行 marker 切换，
+Mention 镜像保留内联几何和控件 API。
+验收审查发现旧工具将箭头函数字符串当作真值，没有调用就绪谓词；现在实际调用同步
+谓词。未改动的历史 PNG 不能证明这些函数字符串门禁曾执行。相同 Before 的真实 trace
+观察到 accordion 几何已稳定但 opacity 仍为 0，随后变为 1；当前采集明确等待可见
+opacity 和关闭后的卸载完成。旧报告及所有历史 OPEN 证据保持原样。
+修复工具后 178 个不同正式配对（182 次执行、四个重复 rest）逐字节一致，
+12,428 个节点的报告字段一致；六项 capture 反例和 63 项归属测试通过。另 16 对独立
+native 截图的 1,276 个节点、2,013,732 项属性记录一致；`leaves6-acceptance.html`
+内嵌原图和诊断限制。
+
+Home／Project／Recurrence 续迁实际移除 22 处：Home 24→13、Project 16→7、
+RecurrenceEditor 2→0，保留局部作用域、alpha fallback 及输入反馈。
+`leaves7-acceptance.html` 收录 192 对正式截图，180 对 PNG 字节一致；12 个 Home 帧
+虽记录的布局／字体相同，仍保留 50 个阈值像素并列为 OPEN。另 24 对 native PNG 全部
+字节一致；类型及 47 项归属测试通过，故事纯类型修正保留相同 emitted JavaScript。
+
+Editor／Terminal／Warning／Merge 再移除九处：Editor 5→2、Terminal 2→0、view 127→125、
+Merge 19→17，保留局部变量及主题／焦点条件。178 对正式 PNG 全部字节一致，4,090 个节点
+的记录字段相同；20 对 native 中 18 对字节一致，两个编辑器失焦帧仍有 90 raw／15 阈值
+像素，虽记录字段相同，仍保持 OPEN。未修改 Before 的控制现分别复现原亮色、暗色
+After 完整 PNG。限定为 16 张图的诊断有八对相同步骤 PNG 字节一致，包含真实 Send 的
+11 节点卡片子树完整 CSS／几何相同；同页连续截图在没有活跃动画时也出现另六／七像素
+变化。这没有证明原 36／54 像素差异的精确绘制触发，也不关闭两个 OPEN。
+类型及 70 项归属测试通过；`leaves8-acceptance.html` 保留原图、控制及历史限制。
+
+Composer／fallback／Sidebar 续迁实际移除 21 处：Composer 83→81、LandingView 4→2、
+公开旧 Sidebar 324→307。警告颜色读取准确的元素局部 amber 变量及 dark／light-scope
+条件；Sidebar 保留局部背景／前景变量、断点和私有 transition writer。公开调用方、
+primitive 覆盖和 group／peer 状态仍作为兼容项保留。真实 selector 渲染失败进入生产
+composer 边界，编辑及显式重试保留草稿；Sidebar 夹具验证公开适配层，不代表活跃应用
+消费者。140 对正式截图覆盖 4,332 节点，139 对 PNG 字节一致；一个窄屏 palette 帧在
+未修改的 composer 卡片左下 border／shadow 保留两个 raw 像素，零阈值像素。记录字段相同，
+但精确绘制触发仍为 OPEN。四次限定对照在两端都复现原 Before 完整 PNG，56 节点的
+完整 CSS／伪元素／几何相同，没有复现正式 After 变体。Playwright 隐藏光标在两端的
+textarea 都留下相同空 style 属性，计算值不变。完整 Sidebar native 记录也相同；另四对
+正常动效将真实 200ms 线性 gap／left 过渡暂停于 100／200ms，PNG 字节一致，截图前后
+动画时间相同。四个归属套件 24 项测试、组件类型、局部 lint 和格式通过，未重跑根检查。`leaves9-acceptance.html` 保留原差异帧和历史 OPEN，
+与正式计数分别展示。
+
+Composer 表面／分享布局续迁移走八处编译器已计数工具类，以及 22 处此前未解析的
+`LAYOUT` 字面量工具类。Composer 保留暗色边框 60%／70%、oklab fill 90%、完整 HSL
+fallback 与 supports 条件。mention 的不透明遮罩单独保留 sRGB input／background mix
+和 input fallback，定义在实际绘制 wrapper 上。完整拖入颜色状态保留暗色原静止 fill／
+边框，同时叠加 ring。分享布局保留固定圆角、标题尺寸和元素局部 spacing，五个 ring／
+shadow 兼容类不动。共享 Token、公开 composer surface 字符串、DOM 和事件均不变。
+
+`leaves10-acceptance.html` 包含 124 对正式截图、7,796 个节点，记录字段相同且无缺失／
+采集失败，122 对 PNG 字节一致。两个原 Composer 帧保持 OPEN：未修改 fixture 按钮上
+123 raw 像素；另一帧 531 raw 像素，包含迁移卡片角部两个阈值像素及 fixture 按钮
+529 raw 像素。独立 native 12 对中 11 对字节一致，742 节点相同，截图前后共 712,320
+普通 CSS 值及 1,424,640 伪元素 CSS 值一致。其 531 像素例外是同一原状态，不能另计
+独特故障。一张未修改 Before 控制复现该完整 After PNG，但未证明具体绘制触发。
+真实 150ms session 颜色过渡暂停于 75／150ms 时 PNG 字节一致。fixture 控件向生产
+handler 派发浏览器 Files 事件，不代表 OS 拖放或上传服务验收。类型、20 项归属测试、
+局部 lint 和格式通过，未重跑根检查。
+
+像素一致也暴露既有验收缺口：分享卡片七个产品色 alias 在 app 根解析，背景／标题／
+metadata 会跟随 app 而非所选卡片调色板。32 对布局字节一致只是保留该回归，不证明
+调色板隔离正确；下述独立修复使用完整局部主题，并与迁移前源码参考对照。
+Composer 的局部浅色 mention 遮罩也可能与继承的 frame alias 不一致，此状况在 Before
+已存在，本批保留。无 chip 的 dialog 仍使用 MentionInput，不证明 plain textarea 分支。
+历史 OPEN 和原始截图保持不变。
+
+分享卡片修复在实际卡片作用域上，沿用既有 product／conversation 调色板，并绑定完整
+`scopedThemeColors` 与 `scopedThemeSpace`。两组与 `defineVars` 共享未变的 canonical
+默认值，在卡片颜色及 spacing 变量处重新解析 alias。caption 同时恢复原四边 border
+color fallback 与 supports 内 70% oklab mix。这修复调色板、logo 尺寸和间距泄漏，
+不逐元素硬写七种颜色，也不改变全局默认值。
+
+`leaves11-12-acceptance.html` 的 72 对正式截图中，32 对以真实迁移前 Tailwind 源码
+`b84e18308^` 为参考：PNG 全部字节一致，覆盖 1,672 个记录节点。native 参考比较的
+384 个角色节点、11,136 个 CSS 字段及 2,304 个变量值也精确相同，252 项语义检查通过，
+document 根状态不变。与紧邻的错误 Before 对比则有 26 帧按预期修复、六帧相同；
+它们属于修复证据，不是迁移等价失败。另八个未改消费者控制的 348 节点记录字段一致，
+但仅七张 PNG 字节一致，剩余 scoped-palette 帧有两个 raw／零阈值像素，精确栅格原因
+未证，保持 OPEN。被拒的调色板／spacing／
+border 候选和历史差异均单独保留。
+
+Spinner 续迁使用 primitive 自有 `diameter` prop，避免调用方 StyleX 宽高类竞争。
+数字是像素，CSS 长度可读取局部 spacing；显式零生效，省略恢复命名尺寸，SVG 宽高
+属性仍属于 glyph。真实保存中编辑器及合并中控件删除四个尺寸工具类。
+合并报告中 Spinner 正式 40 对 PNG 字节一致，覆盖 1,116 个记录节点；另 12 对
+native PNG 字节一致，176 节点的 168,960 个普通 CSS 值及 337,920 个伪元素 CSS 值在
+截图前后相同。DPR 1／2 将真实 900ms 旋转暂停于 400ms，验证 3／6px spacing 作用域，
+以及 16→0→命名 24→14 更新时同一 SVG、wrapper 和 animation 对象。34 条新增内联
+变量／空 style 记录明确保留，不称原始 DOM 完全相同。浏览器身份检查针对真实 SVG，
+forwarded-ref 回调由行为测试覆盖。UI 归属 38 项、调用方 31 项测试及两个包类型检查通过，
+未重跑根检查；这些矩阵不关闭历史 OPEN。
+合并 HTML 在明确标注的缩略预览后按 SHA 内嵌未改的完整 PNG。独立素材解码及两个
+连续的真实 Chrome UI 循环通过；CLI 控制器重置／卡住及一张未稳定 UI 绘制变体保留为
+诊断证据，精确原因未证，不归因为 OOM。
+
+后续 Spinner 调用方批次在认证、移动控件与其他加载界面的 17 个生产文件移除
+48 处已计数宽高工具类。各处通过 primitive 自有 `diameter` 表达式读取实际局部 spacing；
+margin、shrink、颜色和交互类保持原所有权。132 对正式截图全部 PNG 字节一致，覆盖
+6,848 个记录节点：认证 40／2,692、移动端 48／2,964、杂项 44／1,192。
+42 项归属测试、组件类型及局部 lint 通过（227 warnings，零 errors）。长 reconnect
+故事的八帧裁剪标记作为夹具限制保留，不计可见状态覆盖；独立 ActualControlsReconnect
+夹具在可见区域挂载生产第三分支。合成 pending 回调不调用账户或认证服务。
+
+密码／账户续迁在三个生产文件再移除 20 处 Spinner 尺寸工具类。密码提交状态
+16 对正式 PNG 与 576 个记录节点全部一致；账户状态 44 对与 4,660 节点一致。
+另八对账户关闭动效保留真实暂停的 WAAPI 动画状态与 pending 标记；两对删除画面
+通过合成 Capacitor iOS 身份挂载实际生产分支。十对补充截图均 PNG 字节一致，但身份
+仿真不代表物理 iOS、WebKit 或原生壳验收。两项账户归属测试与组件类型通过。
+
+Monaco wrapper 的两处自有尺寸工具类迁入局部 StyleX。八对正式截图的 PNG 字节及
+2,342 个记录节点均相同；门禁针对实际正面积主滚动条，先通过真实 editor hover 观测
+可见，再 hover 外部行号锚点，等待 hidden class／opacity／无运行 transition 连续四次
+新采样稳定。原 280 个变化像素精确符合实测 slider 颜色的物理像素叠加，残差为零。
+原始与 settled 差异仍展示为诊断；拒绝的 SHOW 门禁每侧零帧／四次失败也保留，原因是
+它错误包含零尺寸 hover-widget 滚动条。没有修改产品 CSS 满足门禁。故事在两种 app
+主题下均使用 light editor，不声称覆盖真正暗色编辑器语法。
+
+`leaves13-14-acceptance.html` 合并 200 对 PNG 字节一致的正式截图与 14,426 个记录节点，
+跨 20 个不同生产文件移除 70 处已计数工具类。40 对补充包含 27 对原历史 OPEN、十对
+账户动效／平台身份、两对早期 Monaco 差异及一对被拒门禁错误截图，与正式结果分开。
+历史 OPEN 原图保留来源哈希及尺寸；新批次相同不将其关闭。离线 HTML 使用有明确说明的
+有界预览，并保留未改动的完整原图供检查。
+
+Popover 续迁在实际 Popup 的 panel StyleX 规则之后增加有限 `padding`／`gap`
+选择（`default` 或 `none`）。Positioner 的 ref、style、事件和定位契约仍属于外层节点。
+五个生产调用文件的七处 Popup 迁移八处零内边距／间距工具类，保留宽度、shadow、
+overflow 和非零 padding。`leaves15-acceptance.html` 的 68 对正式 PNG 与 4,416 个
+记录节点全部一致：primitive 40／1,272，实际消费者 28／3,144。浏览器覆盖默认、零值、
+同节点恢复、container／强制主题及真实内容控件。另四张仅 After 的 Gallery 图验证
+实测布局读数；其 36 条 SSR styleq 警告在两侧源码基线均存在，仍未修复。
+UI／Gallery 28 项测试、消费者 60 项测试、包类型通过；typed lint 299 warnings／零 errors，
+九个变更文件格式检查通过。
+
+消费者主题限制明确：五个故事遵循两种请求主题，SenderProfile 固定亮色，桌面回合配置
+固定暗色。初轮资料卡故事的 play 最终留下关闭状态，导致四次门禁失败；正式 profile
+通过真实 Escape 与头像点击建立打开状态，拒绝证据保留。14 项实际调色板／padding／gap
+观测在两侧一致。独立诊断在最后观测后没有完成 cleanup，被中断；原因未证，不声称
+浏览器清理通过或归因 OOM。正式截图采集完整成功。报告保留 27 对原历史 OPEN 及其原图。
+
+后续 Spinner／Popover 批次移除 24 处已计数工具类：Spinner 尺寸 18、Popup 尺寸六，
+涉及十个不同生产调用文件及共享 Popover API。`width`、`minWidth`、`maxWidth`、
+`maxHeight` 通过受 guard 的 StyleX 动态值作用于实际 Popup；零生效、省略恢复默认，
+Positioner 的 style／ref／事件归属不变。另删除早期 `b84e183084` 迁移引入的十处重复
+静态 StyleX spread，保留完全相同的显式合成 className，归属构建已无这些重复属性警告。
+
+`leaves16-17-acceptance.html` 包含 144 对正式截图与 9,348 个一致的记录节点：
+History 48／2,776、Session Spinner 36／2,584、Popup API 32／844、消费者 28／3,144。
+其中 143 对 PNG 字节相同；一张实际强制暗色的消费者原帧在未改的顶部 tab 边缘保留
+五个 raw、零 threshold 像素。有限诊断中 329 个实际后代的 157,920 普通及 315,840
+伪元素 CSS 字段一致，1,016,441 个变量字段的并集仅新增预期的 Popup width 变量。
+一次未改源码的 Before 控制截图精确复现 After。这些证据缩小范围，但没有证明精确
+栅格触发原因，原差异仍 OPEN。另 27 对历史原 OPEN 与被拒门禁原图、仅 After 的 Gallery
+证据分别保留。
+
+被拒门禁明确记录：resolve 确认在 pending 回调完成前关闭父 History Drawer，须实际
+重新打开；unknown-sharing 有两个真实 Spinner；`.25rem` 不是 `.25px`；block 的
+作者态 auto min-width 计算为 0px。修正就绪条件保留这些产品行为。Header／side-panel
+窄故事保持固定最小宽度，不代表完整产品响应式验收；身份卡使用合成回调，不调用后台。
+UI 类型及 28 项 UI／Gallery 测试通过；主归属测试 49 项、最终 typed lint 276 warnings／
+零 errors。独立 Session 归属验证 121 项、History 六项通过，范围有重叠，不相加为唯一
+测试总数。Gallery SSR 警告保持原数量，未重跑根检查。
+
+Project／About／Menu 续迁在六个调用文件移除 21 处已计数工具类：Spinner 尺寸 12、
+Menu bounds 九。Menu 为实际 Popup 增加 `minWidth`／`maxWidth`／`maxHeight`，支持
+px 数字、CSS 字符串、显式零及省略恢复，保留命名 regular／compact 宽度与 Positioner
+ref／style／事件。覆盖六个实际菜单节点；Header Opened sessions 子菜单三处 bounds
+保留，等待实际生产组件夹具。
+
+`leaves18-19-acceptance.html` 保留 164 对正式截图／11,688 一致记录节点：Project
+56／3,032、About 32／3,024、Menu API 44／1,432、消费者 32／4,200。其中 162 对
+PNG 字节相同；两张强制暗色 Owner 窄帧共享父 Change owner 高亮行的四个 raw、零
+threshold 像素。281 后代诊断的 134,880 普通及 269,760 伪元素 CSS 字段一致，
+869,974 变量字段仅五个预期 bounds 变量有意不同。一次未改源码 Before 控制精确复现
+After，但精确栅格触发未证，两张原帧仍 OPEN。此前 28 张原 OPEN 对照（含五像素 tab
+帧）另行保留。
+
+Fork 原焦点 Tooltip 遮挡其他菜单行；正式 profile 真实聚焦末行保证完整可见，原图保留。
+初始错误故事 ID 仅选择 20 帧，正式完整选择为 32。About 原 0／24 次不支持 native-theme
+订阅失败保留，只补合成 bridge 后重建 Before。About updater IPC 和 Project CloudApi
+均为合成边界，不声称真实安装、后台、worktree RPC 或 GitHub 授权；Community 窄行原有
+拥挤保持。两张 Gallery 及四页实际 OSS Electron smoke 为独立仅 After 证据。当前 UI
+构建通过、复用已有 CLI 产物，隔离 smoke 清理完成。UI 53 项、主归属 34 项、包类型及
+七文件 lint（164 warnings／零 errors）通过；独立 About 23／Project 16 项不相加为
+唯一测试总数，未重跑根检查。
+
+Integrations／Ceremony 在两个生产文件移除 11 处已计数工具类：六处 Spinner 尺寸
+通过 `diameter`，Ceremony 根五处 fixed／inset／z-index／overflow／slate ink
+通过局部 StyleX。Storybook 显式使用 `VITE_LODY_PLATFORM=cloud` 与合成 public
+Auth／org／CloudApi 数据，OSS composition 及真实 auth／network 行为不变。实际
+onboarding 路由拥有 light 主题，dark host 属压力覆盖，原低对比保留。
+
+`leaves20-acceptance.html` 记录 96 对正式截图／4,344 一致节点：Integrations
+56／3,392，Ceremony 40／952。仅 94 对 PNG 字节一致；两张 narrow-dark Ceremony
+共享同一差异图对，各 379 raw／42 threshold 像素，精确绘制触发仍 OPEN。有限
+17 节点诊断的每快照 77,232 个 CSS／变量／双伪元素记录、几何、hit stack、ink 及
+动画状态一致，前后稳定；图片 bytes 相同，唯一未改源码控制复现原 Before 而非 After。
+这些观测不能证明视觉等价。此前 30 对原 OPEN 另行保留，不用 CSS 补丁或 antialiasing
+假设关闭。
+
+Ceremony 夹具以 reduced-motion 暂停电影、排除音频；实际 Skip／Configure 控件及
+480ms 完成回调被观察，不代表完整 normal-motion 时间线。Integrations 初轮 40 帧／
+16 次 resolved 门禁失败保留：英文 Manage 被误认成 Connect，仅修 profile。
+Integrations 11 项缓存测试／类型，以及 Ceremony 两项主题生命周期测试／类型／
+零警告局部 lint 通过。所有正式捕获保留原 harness 哈希及源码副本；后续可选 click
+按钮参数不追溯改变来源，未重跑根检查。
+
+ContextMenu 为实际 Popup 增加受 guard 的 `minWidth`／`maxWidth`／`maxHeight`，
+支持 px／CSS 值、零和省略恢复，保留 Positioner 的 ref／style／事件。六个私有行菜单
+移除六处最小宽度工具类。56 对真实右键截图全部 PNG 字节一致，覆盖 10,212 记录节点：
+primitive 32／1,040，消费者 24／9,172。另两张 Gallery 图通过实际鼠标右键验证 light／
+Vesper bounds，仅为 After。UI 54 项、归属 34 项、包类型及八文件 typed lint
+（170 warnings／零 errors）通过。harness 仅新增可选 `click.button`，默认 left，
+以派生哈希识别本批，不重写早期保留源码。历史 OPEN 不关闭。
+
+Button 在命名 size／variant 之后增加自有 `width`／`height`，支持数字 px、
+元素局部 CSS 表达式、零及省略恢复。移除 38 处：十个 mobile／leaf／auth 文件 30 处，
+三个私有文件八处。后者是五个 JSX 调用点、四个实际 Button 节点：一个 Header 触发器、
+Reply 卡片／Dialog 及 Plan Copy。Search 四处、Finished Copy 两处、未挂载 Login
+四处与 opaque 公开调用方保持原样。
+
+`leaves21-22-acceptance.html` 合并 228 对正式 PNG 字节一致截图及 18,056 一致记录节点：
+ContextMenu 56、Button API 40、mobile／leaf／auth 100、私有调用方 32。另四对真实
+按住鼠标 active 截图，在 reduced-motion 下完整 CSS、双伪元素、焦点、几何和动画记录
+一致；新增 16 条私有尺寸变量记录及八条 root class／style 差异属于明确保留的变化，
+不代表 normal-motion 时间线覆盖。32 对历史原 OPEN 独立保留，仍未解决。
+
+私有 Before 是逐项审计的 32 帧原成功截图子集，没有重采。初始 52 帧计划的八次门禁失败
+与六处延期工具类保留：Search 需要 searchbox 门禁，Footer 原故事从未显示 hover 控件。
+此前语法／portal／祖先门禁和本地导航失败均保留；仅修 profile、以未改源码的新浏览器
+重采建立接受矩阵，不声称已证明 OS／browser 原因。Gallery 仅 After；首版 Button
+读数触边候选明确拒绝，与既有 Sample 列布局修正分开。完整组件回归通过 620 文件／
+6,207 测试，UI 25 文件／302 测试；包类型与归属检查通过，未重跑根检查。
+
+随后两个调用方批次通过既有 Menu／ContextMenu 与 Button API 再移除 32 处，
+没有新增 primitive API。六处剩余右键菜单 bounds，以及现在真正可见的 Opened／Search／
+finished-footer 控件占 15 处；消息动作与 Mermaid／MobileAdd／UsageClose／Loro 恢复
+占 17 处。Mermaid 四个控件一起迁移，reset 在原 min-width 之上保持自动宽度，高度读取
+元素局部 spacing。Loro 方形默认值属于模块私有 helper，其四个内部调用点验证与迁移见后文；
+其他 opaque 公开兼容边界仍保留。
+
+`leaves23-24-acceptance.html` 记录 **176／176 对 PNG 字节一致**，以及
+**19,996 对节点记录：19,993 一致、三条不同**；仅 173 帧原始记录完全一致。三条原差异
+是空且 `visibility: hidden` 的 xterm 辅助节点高度 0↔300，其他字段相同。有限 48 次
+观测在两构建都复现两种高度，可见 viewport／scroll range 不变；另四对真实截图一致。
+原始记录不改写，32 对历史原 OPEN 仍未关闭。
+
+另八对实际 Chromium 触控／复制反馈截图一致，涉及 292 节点、1,371,394 CSS 记录；40 条私有尺寸
+变量及 24 条 root 属性变化明确保留。接收器是合成实现，不是 OS 剪贴板；受控
+1199／1200ms 边界属于 reduced-motion 证据。Mermaid 以真实 SVG 克隆驱动生产 Viewer，
+不代表 parser／native 手势验收。原有窄屏 Usage 裁剪和侧栏故事拥挤保留。拒绝的选择器、
+加载及导航候选与接受阶段分开；未冻结的 23 批初始 profile 只重建语义，不追认原 bytes。
+24 批接受捕获 bytes 与格式化 profile 有哈希追踪且语义一致。包类型与局部 53／39／68 项
+测试检查通过；各范围重叠，68 项由三套初轮通过加移除两条旧 Tailwind 类断言后的
+Mermaid 重跑组成，未重跑根检查。
+
+primitive invariant／私有 Fork 批次在十个产品文件再移除 18 处：16 处重复了
+primitive 已拥有的声明；两处是仅有两个内部调用点的模块私有 Fork helper 默认尺寸。
+后者使用既有 Button 尺寸 API，保留调用方覆盖，没有增加通用样式逃逸接口。
+
+`leaves25-acceptance.html` 独立记录 **72 对 PNG 字节一致、4,222 对节点记录一致**：
+invariant 40／2,658，私有 Fork 32／1,564。另 **44 根／68,837 属性值只是 computed
+证明，不增加 PNG 配对**；computed、几何、raw style、disabled／text 及匹配 primitive
+声明一致，raw class 仅有预期 16 处移除。四套归属测试／62 项通过，不代表 Fork helper
+全 CSS 覆盖，也没有新的 Electron／Gallery 截图。
+
+helper 原始 23 成功／九失败保留：八次用了错误的 legacy Spinner 选择器，一次在
+Storybook 就绪前超时。computed 两轮早期尝试也保留，包括已有 22 条记录后的 timeout；
+精确 browser 原因尚未证明。接受阶段以明确门禁及未改产品构建完成，没有 CSS／timer
+补丁。32 对历史 OPEN 和更早冻结报告仍未关闭、未改写；未重跑根检查。
+
+随后 invariant／私有页脚批次在八个产品文件移除 14 个已计数 utility：十个重复
+Spinner 声明、两个 Loro 尺寸，以及消息行的原生操作隐藏／Avatar 默认值。Loro 的
+`IconButton` 仅供模块内四个调用点使用，先前“公开 helper”的分类错误；公开
+`SidebarChatRow` 兼容边界保持不变。
+
+五个私有内容间距 utility 保留在 `ai-gui/view.tsx:8495`、`:8500`、`:9325`、`:9341`、
+`:9390`。被拒候选输出的逻辑方向 margin 正确，但完整构建将 reverse writer 与
+priority-zero 根变量归组，最终输出为无层级规则，导致实际子元素 utilities 层 writer
+失去胜出权，起始 12／9px 变为末尾 12／9px。独立 writer-only 编译探针缺少该归组，
+因此结论误导。局部 layer 条件嵌套在自动 StyleX 层内，不能复现原 root layer。
+五处已恢复，原真实浏览器探针的字段与 PNG 再次一致。共享归组／层级行为需作为独立
+单元评估并广泛回归消费者，没有宣称上游官方确认缺陷。
+
+`leaves26-acceptance.html` 记录 **136 对正式截图：134 对 PNG 字节一致，9,782 对
+节点记录一致**。Spinner 占 48／3,042，消息控件 40／2,616，Loro 48／4,124；矩阵包含
+未改动的间距控制组。另四对正常动效将真实 CSS animation 暂停在 400ms，6,270 个
+Spinner 与 150,288 个 Button／伪元素属性值一致。有限 Owner 菜单复采中，162 节点／
+两个阶段的 1,471,622 个渲染值及 PNG 一致，但没有替换原正式帧。
+
+两对正式 OPEN 保留：原生音频控件 987 raw／567 threshold 像素，Owner 转移处理中
+24／四。32 对历史 OPEN 与另外七个原始诊断也继续保留：Project 头像一对、正常动效
+四对，以及被拒间距候选的音频两对。后续资源／过渡就绪和相同复采不能证明原始绘制触发
+原因。报告保留原图与 raw 差异 mask，没有把 threshold 为零当成通过。Chromium 手机
+模拟和合成产品 props／callbacks 不代表原生设备、播放／后端流程或未访问路由均等价。
+
+精确的 `d951` Before-view 字节来自保存的 `c618` 第25批 Before，加上该批三个已知
+修改重建，SHA 与独立记录的 Before26 指纹一致；这不是采集时保存的原始源码备份。
+被拒的门禁／夹具阶段与资源 deadline 失败均独立保留。各自归属检查通过：view 六套／
+58 测试、Loro 两套／26、Spinner 四套／28，以及包类型、范围内格式与 lint（224／19／
+220 warnings、零 errors）。范围存在重叠，没有累加成独立覆盖数；未宣称新的根检查或
+Electron／Gallery 运行。
+
+随后 Sidebar／ManagedPreview／私有 Card 批次在三个产品文件移除 16 个 utility。
+Sidebar 只移除三个内部普通默认值；原拟十处在真实 DOM prototype 改变外层祖先与
+公开调用方胜出关系后缩小范围，其余七个 gap／border／radius 项和原先已排除的
+floating shadow 继续保留。ManagedPreview 使用既有 Spinner diameter API，并移除
+重复 Cancel shrink。私有 `CollapsibleCard` 仅有三个内部调用点，以私有
+`containerStyles`／`bodyStyles` 在同次 StyleX props 中与 base 显式合并；Worktree
+保留继承的 bottom 间距别名，Tool padding 与 activity radius 保留元素局部变量。
+space-y writer、搜索 ring／shadow 兼容及公开控件 API 不变。
+
+`leaves27-28-acceptance.html` 记录 **192／192 对正式 PNG 字节一致、9,684 对节点
+记录一致**：Sidebar104／6,736，Managed32／904，Card56／2,044。另二十对实际
+Sidebar 调用方截图中，18 对一致、两对原始 OPEN（2／93 raw 像素、summed RGB12
+以上为零），选定的 180 节点 CSS／伪元素／变量记录均一致。更早三个窄范围 prototype
+原始差异也保留 OPEN（5／2／2 像素），新的产品成功截图不能关闭它们。另四对 Managed
+正常动效在真实 animation400ms 一致，涉及 3,840 个普通 CSS 值。prototype 反例、
+错误设备 Before 十二次门禁失败、Managed Cancel／raw spacing 假设，以及初版 Card
+matched-rule reader 漏项均独立记录。
+
+Managed 采集使用真实 credentialless sandbox iframe、产品 inspector 解析、实际目标
+点击、草稿取消／重开和保持 pending 的合成 public writer，不代表 runtime／后端／原生
+设备流程。Card Worktree 仅验收真实终端 step header，没有声称未挂载 output 已覆盖。
+真实直接 ThoughtCard／搜索调用方也不代表 assistant builtin／DeepSeek SessionMeta
+搜索整合完成。Sidebar 九项测试来自相邻 primitive／focus 两套，而非并不存在的直接
+Sidebar 单测；Managed15 和 Card82 归属测试、包类型及范围格式／lint 通过（3／5／224
+warnings、零 errors），没有将重叠范围累加为独立覆盖。
+
+冻结的第26批报告继续保留 32 对历史、两对正式及七对诊断原始 OPEN。该 41 对 compact
+index 不是全项目穷尽清单，早期 main／leaves4 等报告仍未关闭或改写。本批新增五对补充
+原始 OPEN、零正式 OPEN，也没有新的 Electron／Gallery 或根检查声明。
+
+消息动作／Billing 续迁再移除 25 个 utility：七个固定 ghost Button 各三个颜色，
+两个 Billing Spinner 各两个尺寸。Button 既有实现／默认值不变，仅新增标准 token 模块
+导出。完整局部主题显式继承 50 个非目标 Button／语义 token；使用范围只有固定 Lucide
+图标或旧 Spinner wrapper，不含任意子节点。局部 Button 主题曾因重置继承 gap 与焦点
+ring 被拒；新建三颜色角色 API 仍只是研究。最终使用既有 token 组保留 fine／coarse
+hover 胜出关系与元素局部 legacy 变量。
+
+`leaves29-30-acceptance.html` 记录 **168／168 对正式 PNG 字节一致、17,216 对节点
+记录一致**：消息动作 120／13,208，Billing 48／4,008。消息矩阵保留 112 对原始帧，
+另用八对精确状态就绪帧；原有 119 raw／113 threshold 像素的 Copy／Check 差异继续展示：
+pending Fork 门禁遗漏了同级复制反馈重置，未改产品 timer／CSS。另八对 native 默认／
+局部主题帧的普通 CSS、伪元素与图标子孙一致；50 个非目标 token 的 46,800 个记录值
+一致。三个改写输入仍有 1,092 个原始 token 值差异，不声称所有变量相等。
+
+四对同元素原 token inline 压力帧各有 673 raw／672 threshold 像素差异。Before 物理
+Tailwind 颜色压过 primitive 输入，After 局部主题允许更强 inline 输入影响颜色；这是
+真实 CSS 不等价。当前七个源节点不开放 style／token／child props，私有 Fork 两个
+调用方只传 opacity／margin 类；支持的祖先主题合同另行保留与验证。该主题不能推广到
+任意 Button 或读取 `colors.label` 的子节点。负控和单幅 compiler／DOM clone 研究图
+均独立于正式产品前后对照。
+
+Billing 使用真实组件预览、取消／重开与保持 pending 的确认操作，provider 为合成公开
+合同，不是 Stripe／认证／后端 E2E。四对正式补充动效在真实 animation 400ms 一致，
+包括 3,840 个普通 CSS 值及明确的 dialog／祖先绘制状态。更早四对字节相同但近透明的
+弹框图被拒，原精确 opacity 未记录。初始可访问名称门禁及 native runner／清理失败
+独立保留。此前 27–28 五对补充 OPEN、第26批非穷尽 41 对 compact index 与更早报告
+均未关闭或改写。
+
+消息动作三套／39 测试、Billing 两套／30 测试，以及范围内类型／lint 通过（224／36
+warnings、零 errors）。components 全量 620 文件／6,207 测试通过，但 view 在运行中从
+pre29 改为候选，明确是 mixed-source，不代表冻结最终29全量覆盖。UI 25 文件／302
+测试在不变的记录源码上通过。提交审计根 `pnpm check` 在 ACP adapter 准备阶段因
+32 个 SDK export 路径解析失败停止，后续步骤未运行，也未扩展无关 ACP 工作。根
+`format:check` 通过但不覆盖 components／UI；另查 313 个改动文件，20 个视觉 JSON
+profile 有格式问题，产品源码无失败；证据 profile 暂保持冻结。隔离 47 文件 manifest／
+patch 树的 offline lockfile-only 验证未改变锁文件，导出不需要依赖变更。检查前 315 个
+dirty 文件哈希全部保持不变。
+
+Panel／iframe／搜索续迁实际移除 26 个 utility：面板 header／rule／title／body
+15 处、managed iframe 五处、两个固定 SearchBar Button 模板的颜色六处。
+面板 Frame／背景／字重兼容项保留；搜索保留 disabled ink `/40`、圆角与过渡。
+值仍在元素局部求值；iframe 除新增样式块与单处 class 赋值外，生命周期、安全属性及
+preload 字节不变，没有新增 primitive 默认行为或 token 组。
+
+`leaves31-33-acceptance.html` 记录 **168／168 对正式 PNG 字节一致、12,024 对
+节点记录一致**：panel 56／2,180，iframe 32／904，search 80／8,940。Panel
+native 另有 216 个角色快照／314,928 值，不是独特 DOM 数或新增截图。Iframe 在
+64 张原始完整 PNG 的 192 个预声明点核验真实白／青色；三对额外 native PNG 与
+8,676 个 CSS／伪元素／运行时值一致。接受的透明 synthetic 文档匹配 child scheme；
+原 dark v1 虽 computed cyan 却实际绘成白色。同一 frame 仅改 child scheme 的诊断
+使白→青，此实验和失败 v1 原图与正式产品 Before／After 分开。
+
+搜索覆盖真实输入／前后循环／清空／Escape、Close 卸载／重开、键盘焦点、按住鼠标后
+移出释放及 coarse sticky hover。States 标题 42／128 实际被 clamp 为 5／5，完整
+故事确达 128／128。八对支持范围内 native PNG、181,640 个普通 CSS 及 72,656 个
+根伪元素值一致，包含实际图标子树。十二场景的 50 个非目标 token 保留 28,500 值相同，
+三个目标输入仍有 940 个原始字符串变化。四对同元素旧 token inline 负控各变
+392 raw／392 threshold 像素，合计 1,480 普通 CSS／1,156 伪元素字段变化，属于
+真实 CSS 不等价。当前 SearchBar 不转发视觉／style／任意子节点，三个生产调用方仅传
+height-only rootFill；该私有主题不能推广成任意 Button／祖先覆盖合同。
+
+人工祖先 prototype 仍非正式证据：fine computed ink 改变但两对 PNG 一致；coarse
+选定 ink 相同而一个 phone-light 原图对有两个 raw 像素，未推断绘制原因。Panel 三个
+谓词失败、iframe v1 和搜索已存截图／cleanup 挂起均保留。最终 native 数据完成后才
+停止两个清理进程，不声称正常退出。局部检查通过：panel 26 测试、iframe 15、search
+30，以及类型和格式；lint 为 7／1／120 warnings、零 errors，重叠范围不构成新全量／
+根检查。离线报告完成所有原图／预览解码及连续两轮 1280／390 Chrome 交互 QA。
+更早冻结 29–30／27–28 的负控与 OPEN 索引不变、并非穷尽；没有新增 Electron／Gallery
+验收声明。
+
+固定 ink／项目选择器续迁移动十个源码 utility：Operation reply／Header More 三处
+颜色，以及七处 group 图标声明。颜色主题只改 `ghostLabel` 与语义 `colors.label`，
+其余 51 个 token（含 `ghostHover`）继续继承；背景与控件默认行为不重设计。被 render
+合并丢弃的第二个 More JSX 子节点仍保留旧 class。Group 图标保持元素局部 spacing／
+opacity、自有 shrink0／fallback shrink1、fallback 的 16px flex 槽及真实公开调用方覆盖。
+
+`leaves34-35-acceptance.html` 为**视觉部分验收：108 对正式 PNG 中 105 对字节一致，
+三对当前 OPEN；5,264 对标准节点记录全部相同**。Ink 占 48／2,992，selector
+60／2,272。Selector 最终逐行引用 48 对未变的原 closed 状态及十二对真实已绘制菜单，
+保留原 manifest／key／PNG／layout 来源，不伪造 capture manifest。四对 natural 菜单
+保持实际 70% opacity，不用 caller 遮蔽该迁移值。原门禁在 popup opacity0／
+translateY(-4px) 时接受已挂载几何；只修 readiness 要求实际 opacity1／identity／
+无生命周期标记或 pending 有限过渡，没有产品 CSS 补丁。
+
+三对当前 focus-ring 角部仍有 14 raw／零 threshold 像素；六对原始菜单另有
+24 raw／零 threshold 像素，两组均 OPEN。像素在迁移 glyph 之外；限定八张 PNG／
+197,883 值的 ring 探针保留三个 desktop 截图前 transition 声明差异，同源重复稳定，
+截图后 map 与完整几何相同。这不证明精确绘制原因，也不关闭原始或当前差异。Selector
+还验证 disabled 可聚焦但不激活、键盘选择、移除 caller 和 44 个 SVG 快照，不另计正式图。
+
+八对支持范围内 ink native PNG、160,608 普通 CSS 与 68,832 根伪元素值一致。
+十二场景的 51 个非目标 token 保留 25,704 值相同，两个目标输入有 456 个原始值差异。
+四对同元素旧 token inline 负控真实变色（按调色板为 975／966 raw、744／740 threshold），
+背景与原 token 输入仍相同。当前固定子节点且不转发 style／token 的边界限制采用范围，
+不能推广为通用 Button skin。两端 native checkpoint 完整后清理挂起，精确工具原因未证，
+不声称正常进程退出。
+
+Ink 16 项、selector 14 项归属测试、类型与范围格式通过；lint 为 3／5 warnings、零错误。
+报告保留 raw 差异及派生 mask 标签，独立核验原图来源／哈希／解码，完成连续两轮
+1280／390 Chrome UI QA。更早冻结报告哈希、全部历史 OPEN 和负控不变；合成 public
+组件夹具不代表完整后台／runtime／原生设备，也没有新增整个项目、根检查、Electron 或
+Gallery 通过声明。随后稳定源码 UI 回归通过 components 620 文件／6,207 测试及 UI
+25 文件／302 测试。2,364 文件快照在启动后记录，全部产品 owner 已提前冻结；快照后无
+源码变化，但启动至快照的间隔仍是明确限制。此后续证据不关闭像素 OPEN 或无关的根 ACP
+准备阶段失败。
+
 ## 后续工作
 
 基于编译器的[用量统计](../../../../packages/components/scripts/tailwind-usage.mjs)
-替换了会漏掉单个 utility 和多种值的旧正则。工具扫描 JSX、类名 helper、常量及模板静态
-片段，以锁定编译器验证候选，并单列动态未解析表达式。计数是源码出现次数的下界，不是
-运行时覆盖率或生成 CSS 体积。
+用锁定 Tailwind 编译器验证 AST 中发现的候选。数字是源码出现次数下界，不是运行时覆盖率、
+生成 CSS 体积或完成率；未解析表达式保留为独立工作清单。
 
-此前九文件续迁使 components 用量从 2,377 处降至 2,100 处，审计下界为 3,093 处，
-component 扫描另列 605 个未解析表达式。后续七文件再将 components 从 2,100 处降至 1,907 处。
-共享适配层批次再将 `src/ui` 从 992 处降至 742 处。Emoji Picker / Drawer 批次将 `src/ui` 进一步降至 626 处。Diff Viewer 批次进一步将 `src/ui` 降至 518 处。合入前透明度续迁后的审计下界
-为 2,421 处：components 1,902、`src/ui` 518、routes 1，共 188 个仍含 utility 的文件。
-扫描器另列 690 个未解析表达式：components 600 个、`src/ui` 90 个。
-合入上游新增代码后为 2,572 处、188 个文件；本批状态/项目入口/重命名续迁后为 2,497 处、184 个文件。
-后续再合入上游后，扫描为 2,501 处（components 2,009、`src/ui` 487、routes 5），
-共 185 个文件；另有 692 个未解析表达式（components 611、`src/ui` 81）。
-属性行/指引/Chip 批次后为 2,428 处（components 1,936、`src/ui` 487、routes 5），
-共 184 个文件，692 个未解析表达式不变。旧列表批次后为 2,284 处
-（components 1,792、`src/ui` 487、routes 5），仍为 184 个文件及 692 个未解析表达式。
-活跃列表/登录页批次后为 2,174 处（components 1,682、`src/ui` 487、routes 5），
-仍为 184 个文件及 692 个未解析表达式；这些历史快照尚未识别 `withClassName` 的类名参数。
+| 源码边界                         | 扫描方法 | 出现次数 | 文件 | 未解析 |
+| -------------------------------- | -------- | -------: | ---: | -----: |
+| 冻结 29–30                       | v1       |    1,736 |  175 |    721 |
+| 冻结 31–33                       | v1       |    1,715 |  175 |    717 |
+| 相同 pre31 源码快照              | v2       |    1,741 |  176 |    725 |
+| 当前截至 35 的源码，视觉限制另列 | v2       |    1,705 |  175 |    721 |
 
-修正后的扫描器仅读取该 helper 第二参数，排除 StyleX props 首参数，继续使用锁定编译器
-验证候选，并记录动态参数。真实编译器探针验证去重、无效类名及动态值。以同一方法重扫四份
-原始源码与最终源码，得到 165→97，实际移除 68；不会把尺寸类移入 helper 误报成迁移。
-修正后基线为 2,208，当前下界为 2,140 处（components 1,648、`src/ui` 487、routes 5），
-共 187 个文件，另有 765 个未解析表达式。新识别的历史 helper 用法解释了基线上调；
-这些数值仍是下界，不是全项目完成百分比。图片／Markdown／侧栏批次以同一方法再减少
-33 处，留下 2,107 处（components 1,615、`src/ui` 487、routes 5），186 文件及 765 个
-未解析表达式。
+更早的方法修正覆盖了单个 utility、`withClassName` 第二参数和受支持的静态类名数组。
+各批历史数字继续留在冻结报告，不能跨方法混合基线。例如四文件 helper 重扫得到 165→97，
+不会把移入 helper 的保留 utility 当作删除；部分已迁移的运行时布局字面量也不在静态计数内。
 
-盘点工具现在先合并纯字面量字符串拼接，再交给编译器验证；不会求值动态或数字操作数。
-独立真实编译器探针检查跨操作数 token、源码位置去重及未解析值。这新识别出 32 处既有
-Markdown 基础类，并解析了一个旧表达式：修正后的基线为 2,139 处、186 文件和 764 个
-未解析表达式。Onboarding／布局／表格批次在同一口径下移除 23 处，留下 **2,116 处**
-（components 1,624、`src/ui` 487、routes 5），仍为 186 文件及 764 个未解析表达式。
-与旧快照 2,107 相比的增加来自盘点修正，没有新增 Tailwind 样式；这些数值都不是完成率。
+扫描器 v2 新增点式／字面量括号式 `className` 直接赋值，修复明确的 iframe 漏项：
+v1 漏记五个真实 utility，因此 31–33 批实际移除 26，而旧下界仅减少 21。原扫描器源码及
+统计保留；v2 在独立的精确 pre31 快照重建 1,741 基线，不改写已冻结的 1,736 报告。
+功能性解析测试覆盖别名、按源码位置去重、直接写入、动态／复合写入，以及比较表达式和
+其他字段中看似有效 utility 的负控。模糊写入继续列为未解析；UI 适配器两处 `className` 写入新增四个未解析表达式，
+因此数量相应增加。
 
-同步 main 后，同口径快照为 2,102 处（components 1,610、`src/ui` 487、routes 5），
-186 个文件及 760 个未解析表达式；该变化包含上游新增和退役 UI，不另计作迁移移除。
-Skeleton／InfoBar／Outline Rail 批次随后以同一方法实际减少 13 处，留下 2,089 处
-（components 1,597、`src/ui` 487、routes 5），185 个文件及 759 个未解析表达式。
-ACP／连接提示／队列滚动续迁按同一方法再减少 14 处，留下 **2,075 处**（components
-1,583、`src/ui` 487、routes 5），仍为 185 个文件及 759 个未解析表达式。这些数值是
-实测下界，不是迁移完成百分比。
+当前 v2 分项为 components 1,250 处／159 文件／628 未解析，旧 UI 450／14／93，
+routes 五处／两文件／零。34–35 批视觉差异与被拒校准保持各自状态，源码统计不构成验收。
 
 WebWorkspaceLayout 仍延期，等待真实 sidebar/runtime/router 组合的
 适度生产组件夹具，避免以替身 UI 声称验收。
 
-未使用的 `src/ui/sidebar.tsx` 保留 324 处，`src/ui/index.ts` 没有重导出它；
-公开通配路径仍可能被外部直接导入。
+未使用的 `src/ui/sidebar.tsx` 保留 304 处，`src/ui/index.ts` 没有重导出它；
+公开通配路径仍可能被外部直接导入。其公开适配层现有真实渲染夹具，包含移动打开及桌面折叠。
 未使用的 `src/components/task-list.tsx` 保留 15 处，
 `src/components/sidebar-updated-task-list.tsx` 保留 23 处；两者现有真实渲染及原生输入夹具。
 `PropertyRowWide` 现有真实渲染夹具，仅保留两个任意子元素选择器。其他未使用界面
@@ -779,12 +1211,12 @@ ThoughtCard 所需的 builtin/DeepSeek SessionMeta，因此这两者未获视觉
 
 原版底角打开的批注卡片可能超出 `overflow: hidden` 画布并裁切底部。触摸 Resolve
 在完整可见的原生卡片上验证，没有通过自动化将裁切卡片静默滚入视野后宣称自然触摸路径
-可用。Recurrence 原有两个 dark 变体、`ghostValueClass` 合同及 PinButton 控件兼容项
-继续保留。trusted Chromium 触摸输入不证明原生 iOS 或 WebKit 行为；自定义 VS Code
+可用。`ghostValueClass` 合同及 PinButton 控件兼容项继续保留。trusted Chromium 触摸输入不证明原生 iOS 或 WebKit 行为；自定义 VS Code
 主题也未全部实测。
 
 继续处理保留的聊天/移动控件覆盖、Emoji Picker / Drawer 遗留兼容类、diff 适配层、其他旧 `src/ui` 包装及第三方后代选择器。侧栏兼容项仍需
-自有祖先 marker 与控件级样式组合。控件兼容应与自有 DOM 样式分开处理。硬编码 dark 变体需要明确的
-marker/主题合同；StyleX 有关系选择器，这属于剩余实现范围而非库的绝对限制。报告记录
+自有祖先 marker 与控件级样式组合。控件兼容应与自有 DOM 样式分开处理。硬编码 dark 变体需要保留
+元素局部的精确主题条件，FilterPillBar 现已如此处理；自有祖先状态使用限定 marker。
+其余变体仍需分别验证调用方和作用域。报告记录
 最终实测清单和未验收状态的准确位置，包括文件/Issue 元数据浮层及原生手势。本次截图
 不证明所有远程/后端流程或每种主题均已覆盖。

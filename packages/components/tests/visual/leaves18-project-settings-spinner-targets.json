@@ -1,0 +1,187 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "device": "iPhone SE",
+      "width": 390,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "migration-ownedmobileprojectcontainerspinner--github-loading",
+    "migration-ownedmobileprojectcontainerspinner--github-root-spacing",
+    "migration-ownedmobileprojectcontainerspinner--local-loading",
+    "migration-ownedmobileprojectcontainerspinner--local-root-spacing",
+    "migration-ownedmobileprojectcontainerspinner--local-sharing",
+    "migration-ownedmobileprojectcontainerspinner--local-sharing-root-spacing"
+  ],
+  "ready": {
+    "migration-ownedmobileprojectcontainerspinner--github-loading": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[data-owned-project-target]'),marks=p?.querySelectorAll('[data-slot=spinner]');if(marks?.length!==1)return false;const m=marks[0],r=m.getBoundingClientRect(),c=getComputedStyle(m);return c.width==='16px'&&c.height==='16px'&&c.opacity==='1'&&r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&document.querySelector('[data-owned-project-spinner]')?.dataset.loaded==='false';}"
+      }
+    ],
+    "migration-ownedmobileprojectcontainerspinner--github-root-spacing": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[data-owned-project-target]'),marks=p?.querySelectorAll('[data-slot=spinner]');if(marks?.length!==1)return false;const m=marks[0],r=m.getBoundingClientRect(),c=getComputedStyle(m);return c.width==='20px'&&c.height==='20px'&&c.opacity==='1'&&r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&document.querySelector('[data-owned-project-spinner]')?.dataset.loaded==='false';}"
+      }
+    ],
+    "migration-ownedmobileprojectcontainerspinner--local-loading": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[data-owned-project-target]'),marks=p?.querySelectorAll('[data-slot=spinner]');if(marks?.length!==1)return false;const m=marks[0],r=m.getBoundingClientRect(),c=getComputedStyle(m);return c.width==='16px'&&c.height==='16px'&&c.opacity==='1'&&r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&document.querySelector('[data-owned-project-spinner]')?.dataset.loaded==='false';}"
+      }
+    ],
+    "migration-ownedmobileprojectcontainerspinner--local-root-spacing": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[data-owned-project-target]'),marks=p?.querySelectorAll('[data-slot=spinner]');if(marks?.length!==1)return false;const m=marks[0],r=m.getBoundingClientRect(),c=getComputedStyle(m);return c.width==='20px'&&c.height==='20px'&&c.opacity==='1'&&r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&document.querySelector('[data-owned-project-spinner]')?.dataset.loaded==='false';}"
+      }
+    ],
+    "migration-ownedmobileprojectcontainerspinner--local-sharing": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[data-owned-project-target]'),s=p?.querySelector('[role=switch]');return !!s&&!s.disabled&&!p.querySelector('[data-slot=spinner]')&&s.getAttribute('aria-checked')==='false';}"
+      }
+    ],
+    "migration-ownedmobileprojectcontainerspinner--local-sharing-root-spacing": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[data-owned-project-target]'),s=p?.querySelector('[role=switch]');return !!s&&!s.disabled&&!p.querySelector('[data-slot=spinner]')&&s.getAttribute('aria-checked')==='false';}"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedmobileprojectcontainerspinner--github-loading": [
+      {
+        "name": "resolved",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Resolve synthetic project data"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-owned-project-target]');return document.querySelector('[data-owned-project-spinner]')?.dataset.loaded==='true'&&!!p&&!p.querySelector('[data-slot=spinner]')&&!!p.querySelector('button');}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmobileprojectcontainerspinner--github-root-spacing": [
+      {
+        "name": "resolved",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Resolve synthetic project data"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-owned-project-target]');return document.querySelector('[data-owned-project-spinner]')?.dataset.loaded==='true'&&!!p&&!p.querySelector('[data-slot=spinner]')&&!!p.querySelector('button');}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmobileprojectcontainerspinner--local-loading": [
+      {
+        "name": "resolved",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Resolve synthetic project data"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-owned-project-target]');return document.querySelector('[data-owned-project-spinner]')?.dataset.loaded==='true'&&!!p&&!p.querySelector('[data-slot=spinner]')&&!!p.querySelector('button');}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmobileprojectcontainerspinner--local-root-spacing": [
+      {
+        "name": "resolved",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Resolve synthetic project data"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-owned-project-target]');return document.querySelector('[data-owned-project-spinner]')?.dataset.loaded==='true'&&!!p&&!p.querySelector('[data-slot=spinner]')&&!!p.querySelector('button');}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmobileprojectcontainerspinner--local-sharing": [
+      {
+        "name": "pending",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-owned-project-target] [role=switch]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-owned-project-target]'),marks=p?.querySelectorAll('[data-slot=spinner]');if(marks?.length!==1)return false;const m=marks[0],r=m.getBoundingClientRect(),c=getComputedStyle(m);return c.width==='16px'&&c.height==='16px'&&c.opacity==='1'&&r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&document.querySelector('[data-owned-project-spinner]')?.dataset.pending==='true'&&p.querySelector('[role=switch]')?.disabled===true;}"
+          }
+        ]
+      },
+      {
+        "name": "completed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Complete synthetic sharing"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-owned-project-target]'),s=p?.querySelector('[role=switch]');return document.querySelector('[data-owned-project-spinner]')?.dataset.pending==='false'&&!!s&&!s.disabled&&!p.querySelector('[data-slot=spinner]')&&s.getAttribute('aria-checked')==='true';}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmobileprojectcontainerspinner--local-sharing-root-spacing": [
+      {
+        "name": "pending",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-owned-project-target] [role=switch]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-owned-project-target]'),marks=p?.querySelectorAll('[data-slot=spinner]');if(marks?.length!==1)return false;const m=marks[0],r=m.getBoundingClientRect(),c=getComputedStyle(m);return c.width==='20px'&&c.height==='20px'&&c.opacity==='1'&&r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&document.querySelector('[data-owned-project-spinner]')?.dataset.pending==='true'&&p.querySelector('[role=switch]')?.disabled===true;}"
+          }
+        ]
+      },
+      {
+        "name": "completed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Complete synthetic sharing"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-owned-project-target]'),s=p?.querySelector('[role=switch]');return document.querySelector('[data-owned-project-spinner]')?.dataset.pending==='false'&&!!s&&!s.disabled&&!p.querySelector('[data-slot=spinner]')&&s.getAttribute('aria-checked')==='true';}"
+          }
+        ]
+      }
+    ]
+  }
+}

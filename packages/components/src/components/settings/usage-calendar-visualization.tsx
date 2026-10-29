@@ -2308,7 +2308,9 @@ function UsageDayDetailPanel({
           icon
           variant="ghost"
           aria-label={t('common.close')}
-          className="absolute right-2 top-2 h-6 w-6 text-muted-foreground"
+          height="calc(var(--spacing) * 6)"
+          width="calc(var(--spacing) * 6)"
+          className="absolute right-2 top-2 text-muted-foreground"
           onClick={onClose}
         >
           <X {...stylex.props(styles.detailCloseIcon)} />

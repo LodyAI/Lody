@@ -1,0 +1,46 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": ["migration-ownedmessagecontentspacing--user-actions"],
+  "ready": {
+    "migration-ownedmessagecontentspacing--user-actions": [
+      {
+        "action": "visible",
+        "selector": "[data-user-spacing-state] button[aria-label^=\"View profile for\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => !document.querySelector('[data-size=xlarge]')"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedmessagecontentspacing--user-actions": [
+      {
+        "name": "sender-profile",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-user-spacing-state] button[aria-label^=\"View profile for\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-size=xlarge]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-size=xlarge]');return e&&getComputedStyle(e).flexShrink==='0'&&document.body.textContent.includes('spacing-fixture@example.com')&&e.parentElement.children.length===2;}"
+          }
+        ]
+      }
+    ]
+  }
+}

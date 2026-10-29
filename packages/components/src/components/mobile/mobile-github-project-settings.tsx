@@ -38,7 +38,7 @@ export function MobileGithubProjectSettings({ repoFullName }: MobileGithubProjec
     return (
       <MobileSettingsSection title={t('workspace.projects.worktreeSetupTitle', 'Worktree')}>
         <div {...stylex.props(mobileSurface.notice)}>
-          <Spinner className="h-4 w-4" />
+          <Spinner diameter="calc(var(--spacing) * 4)" />
           {t('workspace.projects.loading', 'Loading')}
         </div>
       </MobileSettingsSection>

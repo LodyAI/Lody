@@ -1,0 +1,129 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 844,
+      "device": "iPhone SE"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "migration-ownedcomposerfallback--warning",
+    "migration-ownedcomposerfallback--mobile-warning",
+    "migration-ownedcomposerfallback--long-warning",
+    "migration-ownedcomposerfallback--error",
+    "migration-ownedcomposerfallback--info",
+    "migration-ownedcomposerfallback--scoped-palette"
+  ],
+  "ready": {
+    "migration-ownedcomposerfallback--warning": [
+      {
+        "action": "visible",
+        "selector": "[data-composer-fallback-fixture] textarea"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const root=document.querySelector('[data-composer-fallback-fixture]'); const status=root?.querySelector('[role=status]'); const textarea=root?.querySelector('textarea'); return status && textarea?.value==='Preserved draft.' && !textarea.hasAttribute('data-lody-composer-input') && root.textContent.includes('The chat composer failed to render. Your draft is preserved below.') && status.textContent===\"Choose a project before sending.\" && status.getAttribute('aria-live')==='polite' && status.getBoundingClientRect().height>0 && getComputedStyle(status).visibility==='visible' && getComputedStyle(status).color!=='rgba(0, 0, 0, 0)'; }"
+      }
+    ],
+    "migration-ownedcomposerfallback--mobile-warning": [
+      {
+        "action": "visible",
+        "selector": "[data-composer-fallback-fixture] textarea"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const root=document.querySelector('[data-composer-fallback-fixture]'); const status=root?.querySelector('[role=status]'); const textarea=root?.querySelector('textarea'); return status && textarea?.value==='Preserved draft.' && !textarea.hasAttribute('data-lody-composer-input') && root.textContent.includes('The chat composer failed to render. Your draft is preserved below.') && status.textContent===\"Choose a project before sending.\" && status.getAttribute('aria-live')==='polite' && status.getBoundingClientRect().height>0 && getComputedStyle(status).visibility==='visible' && getComputedStyle(status).color!=='rgba(0, 0, 0, 0)'; }"
+      }
+    ],
+    "migration-ownedcomposerfallback--long-warning": [
+      {
+        "action": "visible",
+        "selector": "[data-composer-fallback-fixture] textarea"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const root=document.querySelector('[data-composer-fallback-fixture]'); const status=root?.querySelector('[role=status]'); const textarea=root?.querySelector('textarea'); return status && textarea?.value==='Preserved draft.' && !textarea.hasAttribute('data-lody-composer-input') && root.textContent.includes('The chat composer failed to render. Your draft is preserved below.') && status.textContent===\"Choose a project on the selected machine before sending this message. The current project is unavailable; select another project or reconnect the machine and try again.\" && status.getAttribute('aria-live')==='polite' && status.getBoundingClientRect().height>0 && getComputedStyle(status).visibility==='visible' && getComputedStyle(status).color!=='rgba(0, 0, 0, 0)'; }"
+      }
+    ],
+    "migration-ownedcomposerfallback--error": [
+      {
+        "action": "visible",
+        "selector": "[data-composer-fallback-fixture] textarea"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const root=document.querySelector('[data-composer-fallback-fixture]'); const status=root?.querySelector('[role=alert]'); const textarea=root?.querySelector('textarea'); return status && textarea?.value==='Preserved draft.' && !textarea.hasAttribute('data-lody-composer-input') && root.textContent.includes('The chat composer failed to render. Your draft is preserved below.') && status.textContent===\"A project is required.\" && status.getAttribute('aria-live')==='assertive' && status.getBoundingClientRect().height>0 && getComputedStyle(status).visibility==='visible' && getComputedStyle(status).color!=='rgba(0, 0, 0, 0)'; }"
+      }
+    ],
+    "migration-ownedcomposerfallback--info": [
+      {
+        "action": "visible",
+        "selector": "[data-composer-fallback-fixture] textarea"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const root=document.querySelector('[data-composer-fallback-fixture]'); const status=root?.querySelector('[role=status]'); const textarea=root?.querySelector('textarea'); return status && textarea?.value==='Preserved draft.' && !textarea.hasAttribute('data-lody-composer-input') && root.textContent.includes('The chat composer failed to render. Your draft is preserved below.') && status.textContent===\"Select a project to continue.\" && status.getAttribute('aria-live')==='polite' && status.getBoundingClientRect().height>0 && getComputedStyle(status).visibility==='visible' && getComputedStyle(status).color!=='rgba(0, 0, 0, 0)'; }"
+      }
+    ],
+    "migration-ownedcomposerfallback--scoped-palette": [
+      {
+        "action": "visible",
+        "selector": "[data-fallback-scope=dark] textarea"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => ['dark','light'].every(scope => { const root=document.querySelector('[data-fallback-scope='+scope+']'); const status=root?.querySelector('[role=status]'); const textarea=root?.querySelector('textarea'); return status && textarea?.value==='Preserved draft.' && !textarea.hasAttribute('data-lody-composer-input') && root.textContent.includes('The chat composer failed to render. Your draft is preserved below.') && status.getBoundingClientRect().height>0 && getComputedStyle(status).color===(scope==='dark'?'rgb(34, 91, 173)':'rgb(111, 47, 189)'); })"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedcomposerfallback--warning": [
+      {
+        "name": "edited",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#chat-prompt",
+            "value": "Edited preserved draft."
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('#chat-prompt')?.value==='Edited preserved draft.' && document.querySelector('[data-fallback-result]')?.textContent.includes('Edited preserved draft.') && !document.querySelector('[data-recovered-selector]')"
+          }
+        ]
+      },
+      {
+        "name": "recovered",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Allow retry"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const root=document.querySelector('[data-composer-fallback-fixture]'); return root?.getAttribute('data-selector-failing')==='false' && root.textContent.includes('The chat composer failed to render. Your draft is preserved below.') && !root.querySelector('[data-recovered-selector]') && root.querySelector('textarea')?.value==='Edited preserved draft.'; }"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Try again"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const root=document.querySelector('[data-composer-fallback-fixture]'); return root?.querySelector('[data-recovered-selector]') && root.querySelector('textarea[data-lody-composer-input]')?.value==='Edited preserved draft.' && !root.textContent.includes('The chat composer failed to render. Your draft is preserved below.') && root.querySelector('[role=status]')?.textContent==='Choose a project before sending.'; }"
+          }
+        ]
+      }
+    ]
+  }
+}

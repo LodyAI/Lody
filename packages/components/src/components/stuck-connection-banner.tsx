@@ -156,7 +156,9 @@ export function StuckConnectionBanner({
           <Button
             variant="ghost"
             icon
-            className="-mr-1 h-6 w-6 text-muted-foreground"
+            height="calc(var(--spacing) * 6)"
+            width="calc(var(--spacing) * 6)"
+            className="-mr-1 text-muted-foreground"
             onClick={onDismiss}
             aria-label={labels.dismissAriaLabel}
           >
@@ -167,7 +169,12 @@ export function StuckConnectionBanner({
             left a wide empty gutter. */}
         <div {...stylex.props(styles.reasonRow)}>
           <p {...stylex.props(styles.reason)}>{labels.description}</p>
-          <Button size="small" className="h-7 rounded-full px-3 text-xs" onClick={onRecover}>
+          <Button
+            size="small"
+            height="calc(var(--spacing) * 7)"
+            className="rounded-full px-3 text-xs"
+            onClick={onRecover}
+          >
             {labels.recover}
           </Button>
         </div>

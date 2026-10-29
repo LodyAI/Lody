@@ -1,0 +1,283 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone SE",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "mobile-ownedmobileaccountsettingsmigration--account",
+    "mobile-ownedmobileaccountsettingsmigration--account-subtree-variables",
+    "mobile-ownedmobileaccountsettingsmigration--account-root-variables",
+    "mobile-ownedmobileaccountsettingsmigration--workspace",
+    "mobile-ownedmobileaccountsettingsmigration--workspace-subtree-variables"
+  ],
+  "ready": {
+    "mobile-ownedmobileaccountsettingsmigration--account": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Edit name"
+      },
+      {
+        "action": "fill",
+        "selector": "#profile-name-mobile",
+        "value": "Account migration pending name"
+      },
+      {
+        "action": "press",
+        "selector": "#profile-name-mobile",
+        "key": "Enter"
+      },
+      {
+        "action": "disabled",
+        "role": "button",
+        "name": "Edit name"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const marks=[...document.querySelectorAll(\"button[aria-label=\\\"Edit name\\\"] [data-slot=spinner]\")];return marks.length===1&&marks.every(mark=>{const css=getComputedStyle(mark),unit=css.getPropertyValue('--spacing').trim(),step=parseFloat(unit)*(unit.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),expected=step*3.5,r=mark.getBoundingClientRect();let node=mark;while(node&&node!==document.body){if(Number(getComputedStyle(node).opacity)<=0)return false;node=node.parentElement;}return Math.abs(parseFloat(css.width)-expected)<0.01&&Math.abs(parseFloat(css.height)-expected)<0.01&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth;}); }"
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--account-subtree-variables": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Edit name"
+      },
+      {
+        "action": "fill",
+        "selector": "#profile-name-mobile",
+        "value": "Account migration pending name"
+      },
+      {
+        "action": "press",
+        "selector": "#profile-name-mobile",
+        "key": "Enter"
+      },
+      {
+        "action": "disabled",
+        "role": "button",
+        "name": "Edit name"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const marks=[...document.querySelectorAll(\"button[aria-label=\\\"Edit name\\\"] [data-slot=spinner]\")];return marks.length===1&&marks.every(mark=>{const css=getComputedStyle(mark),unit=css.getPropertyValue('--spacing').trim(),step=parseFloat(unit)*(unit.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),expected=step*3.5,r=mark.getBoundingClientRect();let node=mark;while(node&&node!==document.body){if(Number(getComputedStyle(node).opacity)<=0)return false;node=node.parentElement;}return Math.abs(parseFloat(css.width)-expected)<0.01&&Math.abs(parseFloat(css.height)-expected)<0.01&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth;}); }"
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--account-root-variables": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Revoke",
+        "index": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const d=document.querySelector('[role=alertdialog]');return !!d&&getComputedStyle(d).opacity==='1';}"
+      },
+      {
+        "action": "click",
+        "selector": "[role=alertdialog] button:text-is(\"Revoke token\")"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => !document.querySelector('[role=alertdialog]')&&!!document.querySelector('[data-mobile-account-pending^=\"Revoke key\"]')"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const marks=[...document.querySelectorAll(\"[data-mobile-account-fixture] button [data-slot=spinner]\")];return marks.length===1&&marks.every(mark=>{const css=getComputedStyle(mark),unit=css.getPropertyValue('--spacing').trim(),step=parseFloat(unit)*(unit.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),expected=step*3.5,r=mark.getBoundingClientRect();let node=mark;while(node&&node!==document.body){if(Number(getComputedStyle(node).opacity)<=0)return false;node=node.parentElement;}return Math.abs(parseFloat(css.width)-expected)<0.01&&Math.abs(parseFloat(css.height)-expected)<0.01&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth;}); }"
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--workspace": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Rename workspace"
+      },
+      {
+        "action": "fill",
+        "selector": "#workspace-name-mobile",
+        "value": "Account migration pending workspace"
+      },
+      {
+        "action": "press",
+        "selector": "#workspace-name-mobile",
+        "key": "Enter"
+      },
+      {
+        "action": "disabled",
+        "role": "button",
+        "name": "Rename workspace"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const marks=[...document.querySelectorAll(\"button[aria-label=\\\"Rename workspace\\\"] [data-slot=spinner]\")];return marks.length===1&&marks.every(mark=>{const css=getComputedStyle(mark),unit=css.getPropertyValue('--spacing').trim(),step=parseFloat(unit)*(unit.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),expected=step*3.5,r=mark.getBoundingClientRect();let node=mark;while(node&&node!==document.body){if(Number(getComputedStyle(node).opacity)<=0)return false;node=node.parentElement;}return Math.abs(parseFloat(css.width)-expected)<0.01&&Math.abs(parseFloat(css.height)-expected)<0.01&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth;}); }"
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--workspace-subtree-variables": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Rename workspace"
+      },
+      {
+        "action": "fill",
+        "selector": "#workspace-name-mobile",
+        "value": "Account migration pending workspace"
+      },
+      {
+        "action": "press",
+        "selector": "#workspace-name-mobile",
+        "key": "Enter"
+      },
+      {
+        "action": "disabled",
+        "role": "button",
+        "name": "Rename workspace"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const marks=[...document.querySelectorAll(\"button[aria-label=\\\"Rename workspace\\\"] [data-slot=spinner]\")];return marks.length===1&&marks.every(mark=>{const css=getComputedStyle(mark),unit=css.getPropertyValue('--spacing').trim(),step=parseFloat(unit)*(unit.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),expected=step*3.5,r=mark.getBoundingClientRect();let node=mark;while(node&&node!==document.body){if(Number(getComputedStyle(node).opacity)<=0)return false;node=node.parentElement;}return Math.abs(parseFloat(css.width)-expected)<0.01&&Math.abs(parseFloat(css.height)-expected)<0.01&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth;}); }"
+      }
+    ]
+  },
+  "states": {
+    "mobile-ownedmobileaccountsettingsmigration--account": [
+      {
+        "name": "name-completed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-complete-operation]"
+          },
+          {
+            "action": "enabled",
+            "role": "button",
+            "name": "Edit name"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-mobile-account-pending]')&&!document.querySelector('button[aria-label='+JSON.stringify(\"Edit name\")+'] [data-slot=spinner]')"
+          }
+        ]
+      },
+      {
+        "name": "key-create-pending",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Create token"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const d=document.querySelector('[role=dialog]');return !!d&&getComputedStyle(d).opacity==='1'&&d.getBoundingClientRect().height>0;}"
+          },
+          {
+            "action": "fill",
+            "selector": "#cli-api-key-note",
+            "value": "Migration pending synthetic key"
+          },
+          {
+            "action": "click",
+            "selector": "[role=dialog] button:text-is(\"Create token\")"
+          },
+          {
+            "action": "disabled",
+            "selector": "[role=dialog] button:text-is(\"Create token\")"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const marks=[...document.querySelectorAll(\"[role=dialog] button [data-slot=spinner]\")];return marks.length===1&&marks.every(mark=>{const css=getComputedStyle(mark),unit=css.getPropertyValue('--spacing').trim(),step=parseFloat(unit)*(unit.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),expected=step*3.5,r=mark.getBoundingClientRect();let node=mark;while(node&&node!==document.body){if(Number(getComputedStyle(node).opacity)<=0)return false;node=node.parentElement;}return Math.abs(parseFloat(css.width)-expected)<0.01&&Math.abs(parseFloat(css.height)-expected)<0.01&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth;}); }"
+          }
+        ]
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--workspace": [
+      {
+        "name": "name-completed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-complete-operation]"
+          },
+          {
+            "action": "enabled",
+            "role": "button",
+            "name": "Rename workspace"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-mobile-account-pending]')&&!document.querySelector('button[aria-label='+JSON.stringify(\"Rename workspace\")+'] [data-slot=spinner]')"
+          }
+        ]
+      },
+      {
+        "name": "invitation-cancel-pending",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Cancel"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-mobile-account-pending^=\"Cancel invitation\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const marks=[...document.querySelectorAll(\"button[aria-label=\\\"Cancel\\\"] [data-slot=spinner]\")];return marks.length===1&&marks.every(mark=>{const css=getComputedStyle(mark),unit=css.getPropertyValue('--spacing').trim(),step=parseFloat(unit)*(unit.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),expected=step*3.5,r=mark.getBoundingClientRect();let node=mark;while(node&&node!==document.body){if(Number(getComputedStyle(node).opacity)<=0)return false;node=node.parentElement;}return Math.abs(parseFloat(css.width)-expected)<0.01&&Math.abs(parseFloat(css.height)-expected)<0.01&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth;}); }"
+          }
+        ]
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--workspace-subtree-variables": [
+      {
+        "name": "name-completed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-complete-operation]"
+          },
+          {
+            "action": "enabled",
+            "role": "button",
+            "name": "Rename workspace"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-mobile-account-pending]')&&!document.querySelector('button[aria-label='+JSON.stringify(\"Rename workspace\")+'] [data-slot=spinner]')"
+          }
+        ]
+      },
+      {
+        "name": "invitation-cancel-pending",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Cancel"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-mobile-account-pending^=\"Cancel invitation\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const marks=[...document.querySelectorAll(\"button[aria-label=\\\"Cancel\\\"] [data-slot=spinner]\")];return marks.length===1&&marks.every(mark=>{const css=getComputedStyle(mark),unit=css.getPropertyValue('--spacing').trim(),step=parseFloat(unit)*(unit.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1),expected=step*3.5,r=mark.getBoundingClientRect();let node=mark;while(node&&node!==document.body){if(Number(getComputedStyle(node).opacity)<=0)return false;node=node.parentElement;}return Math.abs(parseFloat(css.width)-expected)<0.01&&Math.abs(parseFloat(css.height)-expected)<0.01&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth;}); }"
+          }
+        ]
+      }
+    ]
+  }
+}

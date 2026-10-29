@@ -66,8 +66,18 @@ export interface MenuContentProps extends Omit<
   finalFocus?: PopupBaseProps['finalFocus'];
   /** Use the 180px width floor for short, two-choice menus. */
   width?: 'regular' | 'compact';
+  /** Popup bounds: numbers are pixels; strings are CSS lengths. Omission restores defaults. */
+  minWidth?: string | number;
+  maxWidth?: string | number;
+  maxHeight?: string | number;
   className?: string;
 }
+
+const dimensions = stylex.create({
+  minWidth: (value: string | number) => ({ minWidth: value }),
+  maxWidth: (value: string | number) => ({ maxWidth: value }),
+  maxHeight: (value: string | number) => ({ maxHeight: value }),
+});
 
 /**
  * What opens the menu. It is Base UI's trigger unchanged, because a menu is
@@ -245,6 +255,9 @@ export const MenuContent = forwardRef<HTMLDivElement, MenuContentProps>(function
     container,
     finalFocus,
     width = 'regular',
+    minWidth,
+    maxWidth,
+    maxHeight,
     sideOffset = POPUP_GAP,
     ...rest
   },
@@ -263,6 +276,11 @@ export const MenuContent = forwardRef<HTMLDivElement, MenuContentProps>(function
   // viewport relative to that panel instead. The absolute strategy resolves
   // against the offset parent, which is the panel, so the two agree again.
   const strategy = rest.positionMethod ?? (mountPoint != null ? 'absolute' : undefined);
+  const bounds = [
+    minWidth != null && dimensions.minWidth(minWidth),
+    maxWidth != null && dimensions.maxWidth(maxWidth),
+    maxHeight != null && dimensions.maxHeight(maxHeight),
+  ] as const;
   return (
     <BaseMenu.Portal container={mountPoint} className={portalClassName}>
       <BaseMenu.Positioner
@@ -276,6 +294,7 @@ export const MenuContent = forwardRef<HTMLDivElement, MenuContentProps>(function
       >
         <BaseMenu.Popup
           finalFocus={finalFocus}
+          style={stylex.props(...bounds).style}
           className={(state) => {
             // StyleX cannot express `[data-starting-style]`, so the two ends of
             // the rise are read off Base UI's transition status here, and the
@@ -288,6 +307,7 @@ export const MenuContent = forwardRef<HTMLDivElement, MenuContentProps>(function
                 nativeScrollbar,
                 surface.popupMenu,
                 width === 'compact' && surface.popupMenuCompact,
+                ...bounds,
                 hidden && hiddenSurfaceForSide(state.side)
               ).className,
               className

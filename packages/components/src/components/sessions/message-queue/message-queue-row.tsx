@@ -107,8 +107,27 @@ export const queueRowStyles = stylex.create({
       '@media (hover: hover)': { ':hover': 'hsl(var(--foreground) / 1)' },
     },
   },
-  indexGlyph: { display: 'block' },
-  gripGlyph: { display: 'none', height: themeSpace[3], width: themeSpace[3] },
+  indexGlyph: {
+    display: {
+      default: 'block',
+      '@media (hover: hover)': {
+        [stylex.when.ancestor(':is([data-message-queue-row]):hover')]: 'none',
+      },
+      [stylex.when.ancestor(':is([data-message-queue-row]):focus-within')]: 'none',
+    },
+  },
+  gripGlyph: {
+    display: {
+      default: 'none',
+      '@media (hover: hover)': {
+        [stylex.when.ancestor(':is([data-message-queue-row]):hover')]: 'block',
+      },
+      [stylex.when.ancestor(':is([data-message-queue-row]):focus-within')]: 'block',
+    },
+    height: themeSpace[3],
+    width: themeSpace[3],
+  },
+  footerBody: { minWidth: 'calc(var(--spacing) * 0)', flex: 1 },
   editorBody: { minWidth: 0, flexGrow: 1, flexShrink: 1, flexBasis: '0%' },
   editorShell: {
     borderRadius: themeRadius.md,
@@ -323,6 +342,7 @@ export function MessageQueueRow(props: MessageQueueRowProps) {
   }, [isEditing, isPending]);
 
   const rowProps = stylex.props(
+    stylex.defaultMarker(),
     queueSurface.row,
     !props.roomy && queueRowStyles.row,
     props.roomy && queueRowStyles.roomyPosition,
@@ -336,11 +356,12 @@ export function MessageQueueRow(props: MessageQueueRowProps) {
   return (
     <div
       ref={sortable.setNodeRef}
+      data-message-queue-row=""
       {...rowProps}
       style={style}
       className={clsx(
         rowProps.className,
-        // The group's own marker: the index swaps for the grip on row hover.
+        // Keep the CSS hook; the StyleX marker limits the swap to this row.
         'group/row',
         // Dividers go between rows only. (`divide-y` on the list also lined the
         // last row, because dnd-kit appends hidden nodes after it, and that
@@ -359,7 +380,7 @@ export function MessageQueueRow(props: MessageQueueRowProps) {
         <div {...stylex.props(queueSurface.inlineMeta)}>{props.footer}</div>
       ) : null}
       {props.footer && (!props.footerPosition || props.footerPosition === 'below') ? (
-        <div className="min-w-0 flex-1">
+        <div {...stylex.props(queueRowStyles.footerBody)}>
           <RowBody {...props} imageBlocks={imageBlocks} onCommitEdit={commitEdit} />
           {props.footer}
         </div>
@@ -398,9 +419,6 @@ function LeadingHandle({
     );
   }
 
-  const indexProps = stylex.props(queueRowStyles.indexGlyph);
-  const gripProps = stylex.props(queueRowStyles.gripGlyph);
-
   return (
     <Tooltip.Root>
       <Tooltip.Trigger
@@ -420,24 +438,8 @@ function LeadingHandle({
             {...sortable.attributes}
             {...sortable.listeners}
           >
-            {/* The group's hover states live in Tailwind: StyleX has no
-                group selector, so the swap is still the group's. */}
-            <span
-              {...indexProps}
-              className={clsx(
-                indexProps.className,
-                'group-hover/row:hidden group-focus-within/row:hidden'
-              )}
-            >
-              {index + 1}
-            </span>
-            <GripVertical
-              {...gripProps}
-              className={clsx(
-                gripProps.className,
-                'group-hover/row:block group-focus-within/row:block'
-              )}
-            />
+            <span {...stylex.props(queueRowStyles.indexGlyph)}>{index + 1}</span>
+            <GripVertical {...stylex.props(queueRowStyles.gripGlyph)} />
           </button>
         }
       />

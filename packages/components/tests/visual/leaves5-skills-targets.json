@@ -1,0 +1,105 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844,
+      "device": "iPhone 13"
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 720,
+      "device": "iPhone SE"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "ids": [
+    "mobile-mobileprojectskills--long-description",
+    "mobile-mobileprojectskills--absent-description",
+    "mobile-mobileprojectskills--subtree-spacing",
+    "mobile-mobileprojectskills--owned-loading",
+    "mobile-mobileprojectskills--loaded",
+    "mobile-mobileprojectskills--refreshing",
+    "mobile-mobileprojectskills--loading",
+    "mobile-mobileprojectskills--empty",
+    "mobile-mobileprojectskills--error-no-data",
+    "mobile-mobileprojectskills--stale-after-failed-refresh"
+  ],
+  "ready": {
+    "mobile-mobileprojectskills--long-description": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-skills-fixture]"
+      }
+    ],
+    "mobile-mobileprojectskills--absent-description": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-skills-fixture]"
+      }
+    ],
+    "mobile-mobileprojectskills--subtree-spacing": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-skills-fixture]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const root = document.querySelector('[data-owned-skills-fixture]'); if (getComputedStyle(root).getPropertyValue('--spacing').trim() !== '0.3125rem') return false; const sizes = [...root.querySelectorAll('span.animate-spin')].map(e => [getComputedStyle(e).width, getComputedStyle(e).height]).sort(); return JSON.stringify(sizes) === JSON.stringify([['17.5px', '17.5px'], ['20px', '20px']]); }"
+      },
+      {
+        "action": "disabled",
+        "selector": "[data-owned-skills-fixture] button[aria-label=\"Refresh\"]"
+      }
+    ],
+    "mobile-mobileprojectskills--owned-loading": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-skills-fixture]"
+      }
+    ]
+  },
+  "states": {
+    "mobile-mobileprojectskills--long-description": [
+      {
+        "name": "refresh-pointer",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-owned-skills-fixture] button[aria-label=\"Refresh\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-owned-skills-action=\"Refresh\"][data-owned-skills-refresh-count=\"1\"]"
+          }
+        ]
+      },
+      {
+        "name": "refresh-keyboard",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-owned-skills-fixture] button[aria-label=\"Refresh\"]"
+          },
+          {
+            "action": "press",
+            "selector": "[data-owned-skills-fixture] button[aria-label=\"Refresh\"]",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-owned-skills-action=\"Refresh\"][data-owned-skills-refresh-count=\"2\"]"
+          }
+        ]
+      }
+    ]
+  }
+}

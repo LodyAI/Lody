@@ -1,0 +1,292 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "device": "iPhone SE",
+      "width": 320,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": ["mobile-mobileprojectscreen--owned-controls", "mobile-mobileprojectscreen--owned-scopes"],
+  "ready": {
+    "mobile-mobileprojectscreen--owned-controls": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const root = document.querySelector('[data-owned-project-fixture]'); const shell = root?.querySelector('.mobile-home-shell'); if (!shell || !root.querySelector('button[aria-label=\"Show project filters\"]')) return false; const style = getComputedStyle(shell); const matrix = new DOMMatrixReadOnly(style.transform); return style.opacity === '1' && matrix.m41 === 0 && matrix.m42 === 0 && shell.getBoundingClientRect().width > 0; }"
+      }
+    ],
+    "mobile-mobileprojectscreen--owned-scopes": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const root = document.querySelector('[data-owned-project-fixture]'); const shell = root?.querySelector('.mobile-home-shell'); if (!shell || !root.querySelector('button[aria-label=\"Show project filters\"]')) return false; const style = getComputedStyle(shell); const matrix = new DOMMatrixReadOnly(style.transform); return style.opacity === '1' && matrix.m41 === 0 && matrix.m42 === 0 && shell.getBoundingClientRect().width > 0; }"
+      }
+    ]
+  },
+  "states": {
+    "mobile-mobileprojectscreen--owned-controls": [
+      {
+        "name": "search-focused",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "searchbox",
+            "name": "Search conversations"
+          }
+        ]
+      },
+      {
+        "name": "search-filtered",
+        "steps": [
+          {
+            "action": "fill",
+            "role": "searchbox",
+            "name": "Search conversations",
+            "value": "Alpha"
+          },
+          {
+            "action": "visible",
+            "role": "button",
+            "name": "Clear project search"
+          }
+        ]
+      },
+      {
+        "name": "search-cleared",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Clear project search"
+          },
+          {
+            "action": "hidden",
+            "role": "button",
+            "name": "Clear project search"
+          }
+        ]
+      },
+      {
+        "name": "archive-active",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Archived conversations"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-owned-project-archived=\"true\"] button[aria-label=\"Archived conversations\"][aria-pressed=\"true\"]"
+          }
+        ]
+      },
+      {
+        "name": "archive-restored",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Archived conversations"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-owned-project-archived=\"false\"] button[aria-label=\"Archived conversations\"][aria-pressed=\"false\"]"
+          }
+        ]
+      },
+      {
+        "name": "filter-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Show project filters"
+          }
+        ]
+      },
+      {
+        "name": "filter-open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Show project filters"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const bar = document.querySelector('[data-owned-project-fixture] .mobile-filter-pill-bar'); const accordion = bar?.parentElement; return !!bar && getComputedStyle(accordion).opacity === '1' && accordion.getBoundingClientRect().height > 0; }"
+          }
+        ]
+      },
+      {
+        "name": "filter-options-open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "All messages"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const toolbar = document.querySelector('[data-owned-project-fixture] .mobile-filter-pill-bar [role=toolbar]'); const panel = toolbar?.nextElementSibling; return !!panel && getComputedStyle(panel).opacity === '1' && panel.getBoundingClientRect().height > 0; }"
+          }
+        ]
+      },
+      {
+        "name": "filter-applied",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Alpha only"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-owned-project-filter=\"alpha\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const toolbar = document.querySelector('[data-owned-project-fixture] .mobile-filter-pill-bar [role=toolbar]'); return !!toolbar && !toolbar.nextElementSibling; }"
+          }
+        ]
+      },
+      {
+        "name": "filter-closed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Show project filters"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-owned-project-fixture] .mobile-filter-pill-bar')"
+          }
+        ]
+      },
+      {
+        "name": "plain-settings-header",
+        "steps": [
+          {
+            "action": "click",
+            "role": "tab",
+            "name": "Settings"
+          },
+          {
+            "action": "hidden",
+            "role": "searchbox",
+            "name": "Search conversations"
+          }
+        ]
+      },
+      {
+        "name": "back-keyboard-callback",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Back to projects"
+          },
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Back to projects",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-owned-project-back-count=\"1\"]"
+          }
+        ]
+      }
+    ],
+    "mobile-mobileprojectscreen--owned-scopes": [
+      {
+        "name": "local-light",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Change local theme scope"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-owned-project-scope=\"light-scope\"]"
+          }
+        ]
+      },
+      {
+        "name": "nested-light-exclusion",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Change local theme scope"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-owned-project-scope=\"nested-light-exclusion\"]"
+          }
+        ]
+      },
+      {
+        "name": "local-dark-restored",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Change local theme scope"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-owned-project-scope=\"dark-scope\"]"
+          }
+        ]
+      },
+      {
+        "name": "scoped-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "searchbox",
+            "name": "Search conversations"
+          }
+        ]
+      },
+      {
+        "name": "scoped-filter-open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Show project filters"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const bar = document.querySelector('[data-owned-project-fixture] .mobile-filter-pill-bar'); const accordion = bar?.parentElement; return !!bar && getComputedStyle(accordion).opacity === '1' && accordion.getBoundingClientRect().height > 0; }"
+          }
+        ]
+      },
+      {
+        "name": "scoped-filter-closed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Show project filters"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-owned-project-fixture] .mobile-filter-pill-bar')"
+          }
+        ]
+      }
+    ]
+  }
+}

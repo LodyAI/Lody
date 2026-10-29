@@ -1,0 +1,462 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1100
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 1100,
+      "device": "iPhone 13"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "migration-ownedmessageactionbuttoncolors--default",
+    "migration-ownedmessageactionbuttoncolors--scoped"
+  ],
+  "ready": {
+    "migration-ownedmessageactionbuttoncolors--default": [
+      {
+        "action": "visible",
+        "selector": "[data-color-ready=true]"
+      },
+      {
+        "action": "click",
+        "selector": "[data-color-case=user] [data-testid=user-message-metadata]"
+      },
+      {
+        "action": "hover",
+        "selector": "[data-color-case=user] [data-testid=user-message-metadata]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const r=document.querySelector('[data-message-action-colors]');if(!r||r.dataset.colorReady!=='true')return false;const checks=[{\"selector\": \"[data-color-case=user] button[aria-label=\\\"Edit message\\\"]\", \"size\": 28}, {\"selector\": \"[data-color-case=user] button[aria-label=\\\"Pin this message\\\"]\", \"size\": 28}, {\"selector\": \"[data-color-case=user] button[aria-label=\\\"Copy message\\\"]\", \"size\": 28}, {\"selector\": \"[data-color-case=streaming] button[aria-label=\\\"Copy context as Markdown\\\"]\", \"size\": 28}, {\"selector\": \"[data-color-case=finished] button[aria-label=\\\"Copy response\\\"]\", \"size\": 28}, {\"selector\": \"[data-color-case=finished] button[aria-label=\\\"Fork session\\\"]\", \"size\": 28}, {\"selector\": \"[data-color-case=plan] button[aria-label=\\\"Copy plan\\\"]\", \"size\": 24}];for(const c of checks){const all=document.querySelectorAll(c.selector);if(all.length!==1)return false;const e=all[0],s=getComputedStyle(e);if(s.width!==c.size+'px'||s.height!==c.size+'px'||s.opacity!=='1')return false;}const dark=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');return document.documentElement.classList.contains(dark?'dark':'light')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+      }
+    ],
+    "migration-ownedmessageactionbuttoncolors--scoped": [
+      {
+        "action": "visible",
+        "selector": "[data-color-ready=true]"
+      },
+      {
+        "action": "click",
+        "selector": "[data-color-case=user] [data-testid=user-message-metadata]"
+      },
+      {
+        "action": "hover",
+        "selector": "[data-color-case=user] [data-testid=user-message-metadata]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const r=document.querySelector('[data-message-action-colors]');if(!r||r.dataset.colorReady!=='true')return false;const checks=[{\"selector\": \"[data-color-case=user] button[aria-label=\\\"Edit message\\\"]\", \"size\": 35}, {\"selector\": \"[data-color-case=user] button[aria-label=\\\"Pin this message\\\"]\", \"size\": 35}, {\"selector\": \"[data-color-case=user] button[aria-label=\\\"Copy message\\\"]\", \"size\": 35}, {\"selector\": \"[data-color-case=streaming] button[aria-label=\\\"Copy context as Markdown\\\"]\", \"size\": 35}, {\"selector\": \"[data-color-case=finished] button[aria-label=\\\"Copy response\\\"]\", \"size\": 35}, {\"selector\": \"[data-color-case=finished] button[aria-label=\\\"Fork session\\\"]\", \"size\": 35}, {\"selector\": \"[data-color-case=plan] button[aria-label=\\\"Copy plan\\\"]\", \"size\": 30}];for(const c of checks){const all=document.querySelectorAll(c.selector);if(all.length!==1)return false;const e=all[0],s=getComputedStyle(e);if(s.width!==c.size+'px'||s.height!==c.size+'px'||s.opacity!=='1')return false;if(e.dataset.elementColorScope!=='ready'||s.getPropertyValue('--muted-foreground')!=='190 90% 25%'||s.getPropertyValue('--foreground')!=='300 75% 45%'||s.getPropertyValue('--hover')!=='40 100% 60%')return false;}const dark=new URL(location.href).searchParams.get('globals')?.includes('theme:dark');return document.documentElement.classList.contains(dark?'dark':'light')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedmessageactionbuttoncolors--default": [
+      {
+        "name": "edit-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-color-case=user] button[aria-label=\"Edit message\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-color-case=user] button[aria-label=\\\"Edit message\\\"]\");return e&&e.matches(':hover')&&getComputedStyle(e).opacity==='1'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "edit-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          },
+          {
+            "action": "press",
+            "selector": "[data-color-case=user] button[aria-label=\"Fork session\"]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-color-case=user] button[aria-label=\\\"Edit message\\\"]\");return e&&e.matches(':focus-visible')&&getComputedStyle(e).opacity==='1'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "pin-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-color-case=user] button[aria-label=\"Pin this message\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-color-case=user] button[aria-label=\\\"Pin this message\\\"]\");return e&&e.matches(':hover')&&getComputedStyle(e).opacity==='1'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "pinned",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-color-case=user] button[aria-label=\"Pin this message\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-message-action-colors]')?.dataset.pinned==='message-colors-user'&&!!document.querySelector('[data-color-case=user] button[aria-label=\"Unpin message\"]')"
+          }
+        ]
+      },
+      {
+        "name": "user-copy-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-color-case=user] button[aria-label=\"Copy message\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-color-case=user] button[aria-label=\\\"Copy message\\\"]\");return e&&e.matches(':hover')&&getComputedStyle(e).opacity==='1'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "stream-context-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-color-case=streaming] button[aria-label=\"Copy context as Markdown\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-color-case=streaming] button[aria-label=\\\"Copy context as Markdown\\\"]\");return e&&e.matches(':hover')&&getComputedStyle(e).opacity==='1'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "context-callback",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-color-case=streaming] button[aria-label=\"Copy context as Markdown\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-message-action-colors]')?.dataset.context==='message-colors-streaming'"
+          }
+        ]
+      },
+      {
+        "name": "finished-copy-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-color-case=finished] button[aria-label=\"Copy response\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-color-case=finished] button[aria-label=\\\"Copy response\\\"]\");return e&&e.matches(':hover')&&getComputedStyle(e).opacity==='1'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "finished-copied",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-color-case=finished] button[aria-label=\"Copy response\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-message-action-colors]')?.dataset.copy.includes('Synthetic response')&&!!document.querySelector('[data-color-case=finished] button[aria-label=\"Copy response\"] svg.lucide-check')"
+          }
+        ]
+      },
+      {
+        "name": "fork-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-color-case=finished] button[aria-label=\"Fork session\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-color-case=finished] button[aria-label=\\\"Fork session\\\"]\");return e&&e.matches(':hover')&&getComputedStyle(e).opacity==='1'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "fork-menu-open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-color-case=finished] button[aria-label=\"Fork session\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Fork to new tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[role=menu]');return e&&getComputedStyle(e).opacity==='1'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "fork-pending",
+        "steps": [
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Fork to new tab"
+          },
+          {
+            "action": "hidden",
+            "role": "menu"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-message-action-colors]')?.dataset.fork==='message-colors-assistant:shared'&&!!document.querySelector('[data-color-case=finished] button[aria-label=\"Fork session\"] span.animate-spin')"
+          }
+        ]
+      },
+      {
+        "name": "plan-copy-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-color-case=plan] button[aria-label=\"Copy plan\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-color-case=plan] button[aria-label=\\\"Copy plan\\\"]\");return e&&e.matches(':hover')&&getComputedStyle(e).opacity==='1'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "plan-copied",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-color-case=plan] button[aria-label=\"Copy plan\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-message-action-colors]')?.dataset.copy.includes('Keep existing message action colors')&&!!document.querySelector('[data-color-case=plan] button[aria-label=\"Copy plan\"] svg.lucide-check')"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmessageactionbuttoncolors--scoped": [
+      {
+        "name": "edit-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-color-case=user] button[aria-label=\"Edit message\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-color-case=user] button[aria-label=\\\"Edit message\\\"]\");return e&&e.matches(':hover')&&getComputedStyle(e).opacity==='1'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "edit-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          },
+          {
+            "action": "press",
+            "selector": "[data-color-case=user] button[aria-label=\"Fork session\"]",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-color-case=user] button[aria-label=\\\"Edit message\\\"]\");return e&&e.matches(':focus-visible')&&getComputedStyle(e).opacity==='1'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "pin-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-color-case=user] button[aria-label=\"Pin this message\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-color-case=user] button[aria-label=\\\"Pin this message\\\"]\");return e&&e.matches(':hover')&&getComputedStyle(e).opacity==='1'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "pinned",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-color-case=user] button[aria-label=\"Pin this message\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-message-action-colors]')?.dataset.pinned==='message-colors-user'&&!!document.querySelector('[data-color-case=user] button[aria-label=\"Unpin message\"]')"
+          }
+        ]
+      },
+      {
+        "name": "user-copy-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-color-case=user] button[aria-label=\"Copy message\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-color-case=user] button[aria-label=\\\"Copy message\\\"]\");return e&&e.matches(':hover')&&getComputedStyle(e).opacity==='1'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "stream-context-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-color-case=streaming] button[aria-label=\"Copy context as Markdown\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-color-case=streaming] button[aria-label=\\\"Copy context as Markdown\\\"]\");return e&&e.matches(':hover')&&getComputedStyle(e).opacity==='1'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "context-callback",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-color-case=streaming] button[aria-label=\"Copy context as Markdown\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-message-action-colors]')?.dataset.context==='message-colors-streaming'"
+          }
+        ]
+      },
+      {
+        "name": "finished-copy-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-color-case=finished] button[aria-label=\"Copy response\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-color-case=finished] button[aria-label=\\\"Copy response\\\"]\");return e&&e.matches(':hover')&&getComputedStyle(e).opacity==='1'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "finished-copied",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-color-case=finished] button[aria-label=\"Copy response\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-message-action-colors]')?.dataset.copy.includes('Synthetic response')&&!!document.querySelector('[data-color-case=finished] button[aria-label=\"Copy response\"] svg.lucide-check')"
+          }
+        ]
+      },
+      {
+        "name": "fork-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-color-case=finished] button[aria-label=\"Fork session\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-color-case=finished] button[aria-label=\\\"Fork session\\\"]\");return e&&e.matches(':hover')&&getComputedStyle(e).opacity==='1'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "fork-menu-open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-color-case=finished] button[aria-label=\"Fork session\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Fork to new tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[role=menu]');return e&&getComputedStyle(e).opacity==='1'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "fork-pending",
+        "steps": [
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Fork to new tab"
+          },
+          {
+            "action": "hidden",
+            "role": "menu"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-message-action-colors]')?.dataset.fork==='message-colors-assistant:shared'&&!!document.querySelector('[data-color-case=finished] button[aria-label=\"Fork session\"] span.animate-spin')"
+          }
+        ]
+      },
+      {
+        "name": "plan-copy-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-color-case=plan] button[aria-label=\"Copy plan\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector(\"[data-color-case=plan] button[aria-label=\\\"Copy plan\\\"]\");return e&&e.matches(':hover')&&getComputedStyle(e).opacity==='1'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "plan-copied",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-color-case=plan] button[aria-label=\"Copy plan\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-message-action-colors]')?.dataset.copy.includes('Keep existing message action colors')&&!!document.querySelector('[data-color-case=plan] button[aria-label=\"Copy plan\"] svg.lucide-check')"
+          }
+        ]
+      }
+    ]
+  }
+}

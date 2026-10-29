@@ -1,0 +1,252 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 1000,
+      "device": "iPhone 13"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "migration-ownednobackgroundactioncolors--default",
+    "migration-ownednobackgroundactioncolors--scoped"
+  ],
+  "ready": {
+    "migration-ownednobackgroundactioncolors--default": [
+      {
+        "action": "visible",
+        "selector": "[data-no-bg-ready=true]"
+      },
+      {
+        "action": "disabled",
+        "selector": "[data-no-bg-case=disabled] button[data-variant=ghost]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const r=document.querySelector('[data-no-bg-colors=default]');if(!r||r.dataset.noBgReady!=='true')return false;const enabled=document.querySelector(\"[data-no-bg-case=operation] button[data-variant=ghost]\"),disabled=document.querySelector(\"[data-no-bg-case=disabled] button[data-variant=ghost]\"),more=document.querySelector(\"[data-no-bg-case=more] button[aria-label=\\\"More actions\\\"]\");if(!enabled||!disabled||!more||enabled.disabled||!disabled.disabled||more.disabled||document.querySelectorAll(\"[data-no-bg-case=more] button[aria-label=\\\"More actions\\\"]\").length!==1)return false;for(const e of [enabled,disabled,more]){const s=getComputedStyle(e);if(s.height!=='28px')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+      }
+    ],
+    "migration-ownednobackgroundactioncolors--scoped": [
+      {
+        "action": "visible",
+        "selector": "[data-no-bg-ready=true]"
+      },
+      {
+        "action": "disabled",
+        "selector": "[data-no-bg-case=disabled] button[data-variant=ghost]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const r=document.querySelector('[data-no-bg-colors=scoped]');if(!r||r.dataset.noBgReady!=='true')return false;const enabled=document.querySelector(\"[data-no-bg-case=operation] button[data-variant=ghost]\"),disabled=document.querySelector(\"[data-no-bg-case=disabled] button[data-variant=ghost]\"),more=document.querySelector(\"[data-no-bg-case=more] button[aria-label=\\\"More actions\\\"]\");if(!enabled||!disabled||!more||enabled.disabled||!disabled.disabled||more.disabled||document.querySelectorAll(\"[data-no-bg-case=more] button[aria-label=\\\"More actions\\\"]\").length!==1)return false;for(const e of [enabled,disabled,more]){const s=getComputedStyle(e);if(s.height!=='35px')return false;if(e.dataset.localInk!=='ready'||s.getPropertyValue('--muted-foreground')!=='190 90% 25%'||s.getPropertyValue('--foreground')!=='300 75% 45%')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownednobackgroundactioncolors--default": [
+      {
+        "name": "operation-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-no-bg-case=operation] button[data-variant=ghost]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"[data-no-bg-case=operation] button[data-variant=ghost]\").matches(':hover')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          }
+        ]
+      },
+      {
+        "name": "operation-keyboard-navigation",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          },
+          {
+            "action": "press",
+            "selector": "[data-no-bg-case=more] button[aria-label=\"More actions\"]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement===document.querySelector(\"[data-no-bg-case=operation] button[data-variant=ghost]\")&&document.activeElement.matches(':focus-visible')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-no-bg-case=operation] button[data-variant=ghost]",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-no-bg-navigation=\"no-background-action-session\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement===document.querySelector(\"[data-no-bg-case=operation] button[data-variant=ghost]\")&&document.activeElement.matches(':focus-visible')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          }
+        ]
+      },
+      {
+        "name": "more-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-no-bg-case=more] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"[data-no-bg-case=more] button[aria-label=\\\"More actions\\\"]\").matches(':hover')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          }
+        ]
+      },
+      {
+        "name": "more-menu-open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-no-bg-case=more] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menu"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"[data-no-bg-case=more] button[aria-label=\\\"More actions\\\"]\").getAttribute('aria-expanded')==='true'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          }
+        ]
+      },
+      {
+        "name": "more-rename-selected",
+        "steps": [
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Rename Chat"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-no-bg-menu-action=rename]"
+          },
+          {
+            "action": "hidden",
+            "role": "menu"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"[data-no-bg-case=more] button[aria-label=\\\"More actions\\\"]\").getAttribute('aria-expanded')==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          }
+        ]
+      }
+    ],
+    "migration-ownednobackgroundactioncolors--scoped": [
+      {
+        "name": "operation-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-no-bg-case=operation] button[data-variant=ghost]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"[data-no-bg-case=operation] button[data-variant=ghost]\").matches(':hover')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          }
+        ]
+      },
+      {
+        "name": "operation-keyboard-navigation",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          },
+          {
+            "action": "press",
+            "selector": "[data-no-bg-case=more] button[aria-label=\"More actions\"]",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement===document.querySelector(\"[data-no-bg-case=operation] button[data-variant=ghost]\")&&document.activeElement.matches(':focus-visible')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          },
+          {
+            "action": "press",
+            "selector": "[data-no-bg-case=operation] button[data-variant=ghost]",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-no-bg-navigation=\"no-background-action-session\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement===document.querySelector(\"[data-no-bg-case=operation] button[data-variant=ghost]\")&&document.activeElement.matches(':focus-visible')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          }
+        ]
+      },
+      {
+        "name": "more-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-no-bg-case=more] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"[data-no-bg-case=more] button[aria-label=\\\"More actions\\\"]\").matches(':hover')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          }
+        ]
+      },
+      {
+        "name": "more-menu-open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-no-bg-case=more] button[aria-label=\"More actions\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menu"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"[data-no-bg-case=more] button[aria-label=\\\"More actions\\\"]\").getAttribute('aria-expanded')==='true'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          }
+        ]
+      },
+      {
+        "name": "more-rename-selected",
+        "steps": [
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Rename Chat"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-no-bg-menu-action=rename]"
+          },
+          {
+            "action": "hidden",
+            "role": "menu"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector(\"[data-no-bg-case=more] button[aria-label=\\\"More actions\\\"]\").getAttribute('aria-expanded')==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          }
+        ]
+      }
+    ]
+  }
+}

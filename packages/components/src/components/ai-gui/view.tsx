@@ -3,6 +3,10 @@ import type { AgentRoleProposalMeta } from '@lody/shared';
 import { MessageAuthorIdentity } from './message-author-identity';
 import * as stylex from '@stylexjs/stylex';
 import { space, text as textScale } from '@lody/ui/tokens/scales.stylex';
+import {
+  messageActionButtonTheme,
+  messageActionInkTheme,
+} from '../../style/message-action-button.stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
   themeDuration,
@@ -204,11 +208,10 @@ import {
   resolvePlanExitMarkdown,
 } from './plan-surface';
 import {
-  CONVERSATION_PANEL_BODY_CLASS,
   CONVERSATION_PANEL_FRAME_CLASS,
   CONVERSATION_PANEL_HEADER_CLASS,
-  CONVERSATION_PANEL_HEADER_RULE_CLASS,
   CONVERSATION_PANEL_TITLE_CLASS,
+  conversationPanelStyles,
 } from './conversation-panel';
 import { TerminalComponent } from './terminal-component';
 import { prepareTerminalOutputBlocksPreview } from './terminal-preview';
@@ -1343,6 +1346,19 @@ const viewStyles = stylex.create({
   collapsibleBody: {
     paddingInline: themeSpace[2],
     paddingBottom: themeSpace[1],
+  },
+  worktreeScriptContainer: { width: '100%', maxWidth: '760px' },
+  collapsibleBodyFlushInline: { paddingInline: 0 },
+  activityToolContainer: { borderRadius: 'var(--radius-md)' },
+  activityToolBody: {
+    paddingInline: 0,
+    paddingBottom: 'calc(var(--spacing) * 1.5)',
+    paddingTop: 'calc(var(--spacing) * 1)',
+  },
+  toolBody: {
+    paddingInline: 0,
+    paddingBottom: 'calc(var(--spacing) * 1)',
+    paddingTop: 'calc(var(--spacing) * 1.5)',
   },
 
   /* ── The thought card ─────────────────────────────────────────────────── */
@@ -4144,7 +4160,16 @@ const DashedNoticeRule = () => (
   />
 );
 
+const NOTICE_DARK_SCOPE =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+
 const noticeStyles = stylex.create({
+  warningAccent: {
+    color: {
+      default: 'var(--color-amber-600)',
+      [NOTICE_DARK_SCOPE]: 'var(--color-amber-400)',
+    },
+  },
   // Copy shares the title row unless retry already occupies its trailing edge.
   row: {
     display: 'flex',
@@ -4235,14 +4260,11 @@ const AgentNoticeBanner = ({
   // `--status-warning` resolves to a brown (24.9 58.9% 41%) in this theme and
   // reads as neither warning nor anything else at 14px, so warning uses amber —
   // the convention; failure keeps the semantic `--destructive`.
-  // The amber pair stays a Tailwind class: StyleX cannot select a `.dark`
-  // ancestor, and the warning tone is a hard-coded colour.
-  const accentClass = tone === 'warning' ? 'text-amber-600 dark:text-amber-400' : undefined;
   const accentStyle =
     tone === 'error'
       ? viewStyles.destructive
       : tone === 'warning'
-        ? false
+        ? noticeStyles.warningAccent
         : viewStyles.mutedForeground;
 
   // The surface keeps the tone but at a fraction of its saturation: the colour
@@ -4271,13 +4293,8 @@ const AgentNoticeBanner = ({
       {...stylex.props(viewStyles.noticeFrame)}
     >
       <div {...stylex.props(noticeStyles.row)}>
-        <Icon
-          {...withClassName(stylex.props(viewStyles.iconSm, accentStyle), accentClass)}
-          aria-hidden="true"
-        />
-        <span {...withClassName(stylex.props(noticeStyles.label, accentStyle), accentClass)}>
-          {label}
-        </span>
+        <Icon {...stylex.props(viewStyles.iconSm, accentStyle)} aria-hidden="true" />
+        <span {...stylex.props(noticeStyles.label, accentStyle)}>{label}</span>
         {action ? <div {...stylex.props(noticeStyles.action)}>{action}</div> : null}
         {detail ? (
           <div
@@ -4770,8 +4787,8 @@ const WorktreeScriptNoticeView = ({
       showDisclosureIcon
       expanded={canToggle ? isOutputOpen : undefined}
       onExpandedChange={setIsOutputOpen}
-      containerClassName="w-full max-w-[760px]"
-      bodyClassName="px-0"
+      containerStyles={viewStyles.worktreeScriptContainer}
+      bodyStyles={viewStyles.collapsibleBodyFlushInline}
       left={
         <Fragment>
           <PhaseIcon
@@ -5151,10 +5168,10 @@ const UserMessageRowView = ({
             the editor's Cancel / Save & resend — hide them until it closes. */}
         {(hasTextContent || copyContext) && !isEditing ? (
           <div
-            {...withClassName(
-              stylex.props(conversationSurface.userActions),
+            {...stylex.props(
+              conversationSurface.userActions,
               /* Touch has no hover: a tap on the message reveals its actions. */
-              isMobile && !mobileActionsRevealed ? 'invisible' : undefined
+              isMobile && !mobileActionsRevealed && viewStyles.invisible
             )}
             data-user-message-actions=""
             data-mobile-actions-hidden={isMobile && !mobileActionsRevealed ? '' : undefined}
@@ -5180,8 +5197,11 @@ const UserMessageRowView = ({
                         type="button"
                         variant="ghost"
                         icon
+                        height="calc(var(--spacing) * 7)"
+                        width="calc(var(--spacing) * 7)"
                         className={cn(
-                          'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground transition-opacity',
+                          stylex.props(messageActionButtonTheme, messageActionInkTheme).className,
+                          'transition-opacity',
                           !isMobile &&
                             'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
                         )}
@@ -5209,8 +5229,11 @@ const UserMessageRowView = ({
                         type="button"
                         variant="ghost"
                         icon
+                        height="calc(var(--spacing) * 7)"
+                        width="calc(var(--spacing) * 7)"
                         className={cn(
-                          'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground transition-opacity',
+                          stylex.props(messageActionButtonTheme, messageActionInkTheme).className,
+                          'transition-opacity',
                           !isMobile &&
                             'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
                         )}
@@ -5246,8 +5269,11 @@ const UserMessageRowView = ({
                       type="button"
                       variant="ghost"
                       icon
+                      height="calc(var(--spacing) * 7)"
+                      width="calc(var(--spacing) * 7)"
                       className={cn(
-                        'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground transition-opacity',
+                        stylex.props(messageActionButtonTheme, messageActionInkTheme).className,
+                        'transition-opacity',
                         !isMobile &&
                           'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
                       )}
@@ -5323,11 +5349,13 @@ function UserMessageAuthorAvatar({
         side="left"
         align="start"
         sideOffset={10}
-        className="w-72 overflow-hidden p-0"
+        padding="none"
+        width="calc(var(--spacing) * 72)"
+        className="overflow-hidden"
         aria-label={t('sessions.senderProfile', 'Sender profile')}
       >
         <div {...stylex.props(viewStyles.profileBody)}>
-          <UserAvatar user={user} size="xlarge" className="shrink-0" />
+          <UserAvatar user={user} size="xlarge" />
           <div {...stylex.props(viewStyles.profileColumn)}>
             <div {...stylex.props(activityTypography.body, viewStyles.profileName)}>
               {user?.name?.trim() || displayName}
@@ -5734,7 +5762,14 @@ const AssistantTurnConfigInfoButton = ({
           ) : null}
         </Tooltip.Root>
       </Tooltip.Provider>
-      <Popover.Content align="start" side="bottom" sideOffset={6} className="w-64 gap-0 p-0">
+      <Popover.Content
+        align="start"
+        side="bottom"
+        sideOffset={6}
+        padding="none"
+        gap="none"
+        width="calc(var(--spacing) * 64)"
+      >
         <div {...stylex.props(viewStyles.turnMetaHeadingBorder)}>
           <div
             {...stylex.props(
@@ -6390,8 +6425,10 @@ const AssistantForkButton = ({
       type="button"
       variant="ghost"
       icon
+      height="calc(var(--spacing) * 7)"
+      width="calc(var(--spacing) * 7)"
       className={cn(
-        'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground',
+        stylex.props(messageActionButtonTheme, messageActionInkTheme).className,
         className
       )}
       aria-label={t('sessions.forkSession', 'Fork session')}
@@ -6600,7 +6637,11 @@ export const AssistantTurnFooter = ({
                           type="button"
                           variant="ghost"
                           icon
-                          className="h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground"
+                          height="calc(var(--spacing) * 7)"
+                          width="calc(var(--spacing) * 7)"
+                          className={
+                            stylex.props(messageActionButtonTheme, messageActionInkTheme).className
+                          }
                           onClick={() => copyContext?.(message.id)}
                           aria-label={t('sessions.copyContextMarkdown', 'Copy context as Markdown')}
                         >
@@ -6623,7 +6664,11 @@ export const AssistantTurnFooter = ({
                           type="button"
                           variant="ghost"
                           icon
-                          className="h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground"
+                          height="calc(var(--spacing) * 7)"
+                          width="calc(var(--spacing) * 7)"
+                          className={
+                            stylex.props(messageActionButtonTheme, messageActionInkTheme).className
+                          }
                           onClick={() => {
                             void handleCopy();
                           }}
@@ -6689,10 +6734,11 @@ export const AssistantTurnFooter = ({
                 type="button"
                 variant={isAccent ? 'primary' : 'secondary'}
                 size="small"
+                height="calc(var(--spacing) * 8)"
                 className={cn(
                   cn(
                     stylex.props(activityTypography.footnote).className,
-                    'h-8 gap-1.5 rounded-md px-3 font-medium transition-colors'
+                    'gap-1.5 rounded-md px-3 font-medium transition-colors'
                   ),
                   isAccent
                     ? 'border border-primary/40 bg-primary/[0.12] text-primary shadow-xs hover:bg-primary/[0.18] hover:text-primary disabled:opacity-60'
@@ -8302,9 +8348,10 @@ const UserPlainTextBlock = ({
               type="button"
               variant="ghost"
               size="small"
+              height="calc(var(--spacing) * 7)"
               className={cn(
                 stylex.props(activityTypography.footnote).className,
-                'h-7 px-2 text-muted-foreground hover:text-foreground'
+                'px-2 text-muted-foreground hover:text-foreground'
               )}
               onClick={() => setIsExpanded((prev) => !prev)}
             >
@@ -8327,10 +8374,12 @@ const CollapsibleCard = ({
   onExpandedChange,
   showDisclosureIcon = false,
   containerClassName,
+  containerStyles,
   containerProps,
   buttonClassName,
   buttonStyles,
   bodyClassName,
+  bodyStyles,
   onActivate,
 }: {
   left: ReactNode;
@@ -8342,10 +8391,12 @@ const CollapsibleCard = ({
   onExpandedChange?: (expanded: boolean) => void;
   showDisclosureIcon?: boolean;
   containerClassName?: string;
+  containerStyles?: stylex.StyleXStyles;
   containerProps?: SearchContainerProps;
   buttonClassName?: string;
   buttonStyles?: stylex.StyleXStyles;
   bodyClassName?: string;
+  bodyStyles?: stylex.StyleXStyles;
   /** What pressing the header does when there is no body to open. */
   onActivate?: () => void;
 }) => {
@@ -8366,10 +8417,9 @@ const CollapsibleCard = ({
   return (
     <div
       {...containerProps}
-      className={cn(
-        stylex.props(viewStyles.collapsibleContainer).className,
-        containerClassName,
-        containerProps?.className
+      {...withClassName(
+        stylex.props(viewStyles.collapsibleContainer, containerStyles),
+        cn(containerClassName, containerProps?.className)
       )}
     >
       <button
@@ -8406,7 +8456,7 @@ const CollapsibleCard = ({
       {shouldRenderBody ? (
         <div
           {...withClassName(
-            stylex.props(viewStyles.collapsibleBody),
+            stylex.props(viewStyles.collapsibleBody, bodyStyles),
             cn('space-y-2', bodyClassName)
           )}
         >
@@ -8601,7 +8651,12 @@ const PlanPanel = ({
      turn already shows (a drafting plan is visibly still growing). */
   return (
     <div className={CONVERSATION_PANEL_FRAME_CLASS}>
-      <div className={cn(CONVERSATION_PANEL_HEADER_CLASS, CONVERSATION_PANEL_HEADER_RULE_CLASS)}>
+      <div
+        {...withClassName(
+          stylex.props(conversationPanelStyles.header, conversationPanelStyles.headerRule),
+          CONVERSATION_PANEL_HEADER_CLASS
+        )}
+      >
         {/* The whole header toggles, matching `TerminalComponent`. The chevron is
             the affordance; it only exists when the body is actually clipped. */}
         <button
@@ -8621,7 +8676,14 @@ const PlanPanel = ({
           ) : (
             <FileText {...stylex.props(viewStyles.iconSm, viewStyles.mutedForeground)} />
           )}
-          <span className={CONVERSATION_PANEL_TITLE_CLASS}>Proposed Plan</span>
+          <span
+            {...withClassName(
+              stylex.props(conversationPanelStyles.title),
+              CONVERSATION_PANEL_TITLE_CLASS
+            )}
+          >
+            Proposed Plan
+          </span>
         </button>
         <Tooltip.Provider>
           <Tooltip.Root>
@@ -8632,7 +8694,12 @@ const PlanPanel = ({
                   type="button"
                   variant="ghost"
                   icon
-                  className="-mr-1 h-6 w-6 shrink-0 text-muted-foreground hover:bg-hover hover:text-foreground"
+                  height="calc(var(--spacing) * 6)"
+                  width="calc(var(--spacing) * 6)"
+                  className={cn(
+                    stylex.props(messageActionButtonTheme, messageActionInkTheme).className,
+                    '-mr-1'
+                  )}
                   onClick={() => {
                     void handleCopy();
                   }}
@@ -8653,10 +8720,7 @@ const PlanPanel = ({
       <div {...stylex.props(viewStyles.relative)}>
         <div
           ref={bodyRef}
-          {...withClassName(
-            stylex.props(!isOpen && viewStyles.planPanelBody),
-            CONVERSATION_PANEL_BODY_CLASS
-          )}
+          {...stylex.props(conversationPanelStyles.body, !isOpen && viewStyles.planPanelBody)}
         >
           <MarkdownRenderer
             text={plan.markdown}
@@ -9093,16 +9157,15 @@ const ToolCallCard = memo(function ToolCallCard({
       defaultExpanded={isRunning || hasTerminalContent || isFailed || hasPermission}
       expanded={expanded}
       onExpandedChange={onExpandedChange}
-      containerClassName={cn(isActivityRow && 'rounded-md')}
+      containerStyles={isActivityRow ? viewStyles.activityToolContainer : undefined}
       buttonClassName={isActivityRow ? ACTIVITY_PROCESS_TEXT_CLASS : undefined}
       // Top-level tool cards share the turn rail, without the step's inset.
       buttonStyles={isActivityRow ? conversationSurface.step : conversationSurface.flushCollapsible}
-      bodyClassName={cn(
-        /* An expanded body starts on the rail, like every other collapsible
-           region in a turn. It still needs air under the title — they were 0px
-           apart — but not an indent. */
-        isActivityRow ? 'space-y-1.5 px-0 pb-1.5 pt-1' : 'space-y-2.5 px-0 pb-1 pt-1.5'
-      )}
+      bodyClassName={isActivityRow ? 'space-y-1.5' : 'space-y-2.5'}
+      /* An expanded body starts on the rail, like every other collapsible
+         region in a turn. It still needs air under the title — they were 0px
+         apart — but not an indent. */
+      bodyStyles={isActivityRow ? viewStyles.activityToolBody : viewStyles.toolBody}
       right={runningIndicator}
       /* A file step with nothing to open (a read) is the file: pressing the
          row opens it. A step that unfolds keeps the row for that, and its

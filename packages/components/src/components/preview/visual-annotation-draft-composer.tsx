@@ -59,7 +59,8 @@ export function VisualAnnotationDraftComposer({
           type="button"
           variant="ghost"
           icon
-          className="h-6 w-6 shrink-0"
+          height="calc(var(--spacing) * 6)"
+          width="calc(var(--spacing) * 6)"
           aria-label={t('common.cancel', 'Cancel')}
           onClick={onCancel}
         >

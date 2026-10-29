@@ -373,8 +373,6 @@ describe('mermaid full-screen viewer', () => {
     // The OS draws the Windows caption buttons above every web layer, so the
     // bar starts below that strip too (0 wherever there is none).
     expect(controlBar?.style.paddingTop).toContain('--window-caption-height');
-    expect(close?.className).toContain('h-11');
-    expect(close?.className).toContain('w-11');
     // Above dialogs and popovers, on the app's z-index scale.
     expect(viewer()?.getAttribute('style')).toContain('--z-image-viewer');
   });

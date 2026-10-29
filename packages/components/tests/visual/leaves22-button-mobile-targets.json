@@ -1,0 +1,115 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone SE",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "mobile-ownedmobileaccountsettingsmigration--account",
+    "mobile-ownedmobileaccountsettingsmigration--account-root-variables",
+    "mobile-ownedmobileaccountsettingsmigration--workspace",
+    "migration-ownedmobilehistoryspinner--import",
+    "migration-ownedmobilehistoryspinner--import-root-spacing",
+    "mobile-appiconsettings--default",
+    "mobile-appiconsettings--change-pending"
+  ],
+  "ready": {
+    "mobile-ownedmobileaccountsettingsmigration--account": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Create token"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\"[data-mobile-account-fixture] button:has(svg.lucide-key-round)\")];return marks.length===1&&marks.every(m=>{const c=getComputedStyle(m),v=c.getPropertyValue('--spacing').trim(),unit=parseFloat(v)*(v.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);const r=m.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&Number(c.opacity)>0&&Math.abs(parseFloat(c.height)-unit*8)<0.02;});}"
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--account-root-variables": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Create token"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\"[data-mobile-account-fixture] button:has(svg.lucide-key-round)\")];return marks.length===1&&marks.every(m=>{const c=getComputedStyle(m),v=c.getPropertyValue('--spacing').trim(),unit=parseFloat(v)*(v.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);const r=m.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&Number(c.opacity)>0&&Math.abs(parseFloat(c.height)-unit*8)<0.02;});}"
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--workspace": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Invite Member"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\"[data-mobile-account-fixture] button:has(svg.lucide-user-plus)\")];return marks.length===1&&marks.every(m=>{const c=getComputedStyle(m),v=c.getPropertyValue('--spacing').trim(),unit=parseFloat(v)*(v.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);const r=m.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&Number(c.opacity)>0&&Math.abs(parseFloat(c.height)-unit*8)<0.02;});}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\"[data-mobile-account-fixture] button[aria-label=\\\"Remove Member\\\"], [data-mobile-account-fixture] button[aria-label=\\\"Copy Link\\\"], [data-mobile-account-fixture] button[aria-label=\\\"Cancel\\\"]\")];return marks.length===3&&marks.every(m=>{const c=getComputedStyle(m),v=c.getPropertyValue('--spacing').trim(),unit=parseFloat(v)*(v.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);const r=m.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&Number(c.opacity)>0&&Math.abs(parseFloat(c.height)-unit*9)<0.02&&Math.abs(parseFloat(c.width)-unit*9)<0.02;});}"
+      }
+    ],
+    "migration-ownedmobilehistoryspinner--import": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('.mobile-acp-history-sheet');return p&&getComputedStyle(p).opacity==='1'&&p.getBoundingClientRect().height>0;}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\".mobile-acp-history-sheet button:has(svg.lucide-download)\")];return marks.length===1&&marks.every(m=>{const pc=getComputedStyle(m.parentElement),expected=m.parentElement.clientWidth-parseFloat(pc.paddingLeft)-parseFloat(pc.paddingRight);const r=m.getBoundingClientRect(),c=getComputedStyle(m);return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&Number(c.opacity)>0&&Math.abs(r.width-expected)<0.1;});}"
+      }
+    ],
+    "migration-ownedmobilehistoryspinner--import-root-spacing": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('.mobile-acp-history-sheet');return p&&getComputedStyle(p).opacity==='1'&&p.getBoundingClientRect().height>0;}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\".mobile-acp-history-sheet button:has(svg.lucide-download)\")];return marks.length===1&&marks.every(m=>{const pc=getComputedStyle(m.parentElement),expected=m.parentElement.clientWidth-parseFloat(pc.paddingLeft)-parseFloat(pc.paddingRight);const r=m.getBoundingClientRect(),c=getComputedStyle(m);return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&Number(c.opacity)>0&&Math.abs(r.width-expected)<0.1;});}"
+      }
+    ],
+    "mobile-appiconsettings--default": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const b=[...document.querySelectorAll('button[aria-pressed]')];return b.length===2&&b.every(m=>{const r=m.getBoundingClientRect();return !m.disabled&&r.height>0&&r.top>=0&&r.bottom<=innerHeight;})&&b.some(m=>m.getAttribute('aria-pressed')==='true');}"
+      }
+    ],
+    "mobile-appiconsettings--change-pending": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const b=[...document.querySelectorAll('button[aria-pressed]')];return b.length===2&&b.every(m=>{const r=m.getBoundingClientRect();return !m.disabled&&r.height>0&&r.top>=0&&r.bottom<=innerHeight;})&&b.some(m=>m.getAttribute('aria-pressed')==='true');}"
+      }
+    ]
+  },
+  "states": {
+    "mobile-appiconsettings--change-pending": [
+      {
+        "name": "pending",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Icon 2"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const b=[...document.querySelectorAll('button[aria-pressed]')];return b.length===2&&b.every(m=>m.disabled&&m.getBoundingClientRect().height>0)&&document.querySelector('[aria-busy=true]')!==null;}"
+          }
+        ]
+      }
+    ]
+  }
+}

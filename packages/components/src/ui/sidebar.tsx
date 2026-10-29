@@ -2,6 +2,7 @@ import * as React from 'react';
 import { Slot } from '@radix-ui/react-slot';
 import { cva, VariantProps } from 'class-variance-authority';
 import { PanelLeftIcon } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
@@ -17,6 +18,43 @@ const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 const SIDEBAR_WIDTH = '16rem';
 const SIDEBAR_WIDTH_MOBILE = '18rem';
 const SIDEBAR_WIDTH_ICON = '3rem';
+
+const styles = stylex.create({
+  mobileColumn: { display: 'flex', height: '100%', width: '100%', flexDirection: 'column' },
+  desktopFrame: {
+    color: 'hsl(var(--sidebar-foreground) / 1)',
+    display: { default: 'none', '@media (width >= 48rem)': 'block' },
+  },
+  gap: {
+    position: 'relative',
+    backgroundColor: 'transparent',
+    width: 'var(--sidebar-width)',
+    transitionProperty: 'width',
+    '--tw-duration': '.2s',
+    transitionDuration: '.2s',
+    '--tw-ease': 'linear',
+    transitionTimingFunction: 'linear',
+  },
+  triggerGlyph: { width: 'calc(var(--spacing) * 4)', height: 'calc(var(--spacing) * 4)' },
+  accessibleLabel: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clipPath: 'inset(50%)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+  inner: {
+    backgroundColor: 'hsl(var(--sidebar-background) / 1)',
+    display: 'flex',
+    height: '100%',
+    width: '100%',
+    flexDirection: 'column',
+  },
+});
 
 type SidebarContextProps = {
   state: 'expanded' | 'collapsed';
@@ -185,7 +223,7 @@ function Sidebar({
             <Drawer.Title>Sidebar</Drawer.Title>
             <Drawer.Description>Displays the mobile sidebar.</Drawer.Description>
           </Drawer.Header>
-          <div className="flex h-full w-full flex-col">{children}</div>
+          <div {...stylex.props(styles.mobileColumn)}>{children}</div>
         </Drawer.Content>
       </Drawer.Root>
     );
@@ -193,7 +231,7 @@ function Sidebar({
 
   return (
     <div
-      className="group peer text-sidebar-foreground hidden md:block"
+      className={cn('group peer', stylex.props(styles.desktopFrame).className)}
       data-state={state}
       data-collapsible={state === 'collapsed' ? collapsible : ''}
       data-variant={variant}
@@ -204,7 +242,7 @@ function Sidebar({
       <div
         data-slot="sidebar-gap"
         className={cn(
-          'relative w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-linear',
+          stylex.props(styles.gap).className,
           'group-data-[collapsible=offcanvas]:w-0',
           'group-data-[side=right]:rotate-180',
           variant === 'floating' || variant === 'inset'
@@ -230,7 +268,10 @@ function Sidebar({
         <div
           data-sidebar="sidebar"
           data-slot="sidebar-inner"
-          className="bg-sidebar group-data-[variant=floating]:border-sidebar-border flex h-full w-full flex-col group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:shadow-xs"
+          className={cn(
+            stylex.props(styles.inner).className,
+            'group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:shadow-xs'
+          )}
         >
           {children}
         </div>
@@ -256,8 +297,8 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<t
       }}
       {...props}
     >
-      <PanelLeftIcon className="size-4" />
-      <span className="sr-only">Toggle Sidebar</span>
+      <PanelLeftIcon {...stylex.props(styles.triggerGlyph)} />
+      <span {...stylex.props(styles.accessibleLabel)}>Toggle Sidebar</span>
     </Button>
   );
 }

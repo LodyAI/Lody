@@ -285,7 +285,16 @@ async function applySteps(page, steps = []) {
     if (step.action === 'waitForFunction') {
       if (typeof step.expression !== 'string' || !step.expression.trim())
         throw new Error('waitForFunction requires a nonempty expression');
-      await page.waitForFunction(step.expression, undefined, { timeout: step.timeout ?? 15_000 });
+      // Playwright treats a string arrow function as a truthy value; invoke it
+      // explicitly so a false predicate cannot silently pass the readiness gate.
+      const expression = `(() => {
+        const predicate = (${step.expression});
+        const result = typeof predicate === 'function' ? predicate() : predicate;
+        if (result != null && typeof result.then === 'function')
+          throw new Error('waitForFunction expressions must be synchronous; Promise results are unsupported');
+        return result;
+      })()`;
+      await page.waitForFunction(expression, undefined, { timeout: step.timeout ?? 15_000 });
       continue;
     }
     if (step.action === 'movePointer') {
@@ -298,7 +307,7 @@ async function applySteps(page, steps = []) {
         ? page.getByText(step.text, { exact: step.exact ?? true })
         : page.locator(step.selector);
     const locator = step.index === undefined ? target : target.nth(step.index);
-    if (step.action === 'click') await locator.click();
+    if (step.action === 'click') await locator.click({ button: step.button ?? 'left' });
     else if (step.action === 'tap') await locator.tap();
     else if (step.action === 'hover') await locator.hover();
     else if (step.action === 'focus') await locator.focus();

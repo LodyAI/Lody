@@ -1,7 +1,14 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, test } from 'vitest';
+import { act, createRef, useState } from 'react';
+import { afterEach, describe, expect, test } from 'vitest';
 import { Button } from '../src/button/button';
-import { forcedThemeClassNames } from '../src/theme/theme';
+import { mount, type Mounted } from './dom';
+
+let mounted: Mounted | undefined;
+afterEach(async () => {
+  await mounted?.unmount();
+  mounted = undefined;
+});
 
 describe('Button', () => {
   test('renders a native button with variant and size data attributes', () => {
@@ -10,17 +17,6 @@ describe('Button', () => {
     expect(html).toContain('data-variant="primary"');
     expect(html).toContain('data-size="medium"');
     expect(html).toContain('type="button"');
-  });
-
-  test('appends a caller className after the compiled classes', () => {
-    const html = renderToStaticMarkup(
-      <Button variant="ghost" size="small" className="w-full">
-        Go
-      </Button>
-    );
-    const cls = /class="([^"]*)"/.exec(html)?.[1] ?? '';
-    expect(cls.endsWith(' w-full')).toBe(true);
-    expect(cls.split(' ').length).toBeGreaterThan(5);
   });
 
   test('an icon-only button gives what it holds a box, and a text one does not', () => {
@@ -38,16 +34,102 @@ describe('Button', () => {
     expect(text).toMatch(/<button[^>]*>Save<\/button>/);
   });
 
-  test('render swaps the element', () => {
-    const html = renderToStaticMarkup(<Button render={<a href="/x" />}>Link</Button>);
-    expect(html).toMatch(/^<a /);
-    expect(html).toContain('href="/x"');
+  test('box updates preserve the button, glyph, focus, caller class and native disabled behavior', async () => {
+    const ref = createRef<HTMLElement>();
+    function Example() {
+      const [box, setBox] = useState<{ width?: number; height?: number }>({
+        width: 96,
+        height: 28,
+      });
+      const [disabled, setDisabled] = useState(false);
+      const [clicks, setClicks] = useState(0);
+      return (
+        <>
+          <button data-zero onClick={() => setBox({ width: 0, height: 0 })}>
+            Zero
+          </button>
+          <button data-omit onClick={() => setBox({})}>
+            Omit
+          </button>
+          <button data-disable onClick={() => setDisabled(true)}>
+            Disable
+          </button>
+          <Button
+            ref={ref}
+            icon
+            width={box.width}
+            height={box.height}
+            disabled={disabled}
+            className="caller-owned"
+            style={{ width: 999, height: 999 }}
+            data-target
+            onClick={() => setClicks((n) => n + 1)}
+            aria-label="Target"
+          >
+            <svg />
+          </Button>
+          <output>{clicks}</output>
+        </>
+      );
+    }
+    mounted = await mount(<Example />);
+    const target = mounted.container.querySelector<HTMLButtonElement>('[data-target]')!;
+    const glyph = target.firstElementChild;
+    target.focus();
+    expect(ref.current).toBe(target);
+    for (const action of ['zero', 'omit']) {
+      await act(async () =>
+        mounted!.container.querySelector<HTMLButtonElement>(`[data-${action}]`)!.click()
+      );
+      expect(ref.current).toBe(target);
+      expect(target.firstElementChild).toBe(glyph);
+      expect(document.activeElement).toBe(target);
+      expect(target.classList.contains('caller-owned')).toBe(true);
+      expect(target.hasAttribute('width')).toBe(false);
+      expect(target.hasAttribute('height')).toBe(false);
+      expect(target.style.width).toBe('');
+      expect(target.style.height).toBe('');
+      await act(async () => target.click());
+    }
+    expect(mounted.container.querySelector('output')?.textContent).toBe('2');
+    await act(async () =>
+      mounted!.container.querySelector<HTMLButtonElement>('[data-disable]')!.click()
+    );
+    expect(target.disabled).toBe(true);
+    await act(async () => target.click());
+    expect(mounted.container.querySelector('output')?.textContent).toBe('2');
   });
 
-  test('forced theme class names exist for light and dark, none for system', () => {
-    expect(forcedThemeClassNames('dark').length).toBeGreaterThan(0);
-    expect(forcedThemeClassNames('light').length).toBeGreaterThan(0);
-    expect(forcedThemeClassNames('dark')).not.toEqual(forcedThemeClassNames('light'));
-    expect(forcedThemeClassNames('system')).toEqual([]);
+  test('a rendered anchor keeps its ref, inline dimensions and actual click state', async () => {
+    const ref = createRef<HTMLElement>();
+    function Example() {
+      const [clicks, setClicks] = useState(0);
+      return (
+        <Button
+          ref={ref}
+          nativeButton={false}
+          width={96}
+          height={28}
+          render={<a href="/x" style={{ width: 105, height: 31 }} />}
+          onClick={(event) => {
+            event.preventDefault();
+            setClicks((n) => n + 1);
+          }}
+        >
+          Clicks: {clicks}
+        </Button>
+      );
+    }
+    mounted = await mount(<Example />);
+    const anchor = mounted.container.querySelector('a')!;
+    expect(ref.current).toBe(anchor);
+    expect(anchor.getAttribute('href')).toBe('/x');
+    expect(anchor.style.width).toBe('105px');
+    expect(anchor.style.height).toBe('31px');
+    await act(async () => anchor.click());
+    expect(ref.current).toBe(anchor);
+    expect(anchor.textContent).toBe('Clicks: 1');
+    expect(anchor.hasAttribute('width')).toBe(false);
+    expect(anchor.hasAttribute('height')).toBe(false);
   });
 });

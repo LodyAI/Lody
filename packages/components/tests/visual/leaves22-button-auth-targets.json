@@ -1,0 +1,230 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone SE",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "components-ownedloginmigration--email-pending",
+    "components-ownedloginmigration--scoped-email-pending",
+    "components-ownedloginmigration--handoff-pending",
+    "components-loginpage--electron-renderer"
+  ],
+  "ready": {
+    "components-ownedloginmigration--email-pending": [
+      {
+        "action": "visible",
+        "selector": "#login-title"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {\n  const stage = document.querySelector('[data-login-stage]');\n  const rows = [...document.querySelectorAll('[data-login-row]')];\n  const panel = stage?.querySelector('[data-login-panel=\"' + stage.dataset.loginActive + '\"]');\n  return (!stage || (panel && stage.dataset.loginPhase === 'visible' && Math.abs(stage.getBoundingClientRect().height - panel.getBoundingClientRect().height) < 0.1)) && rows.every(row => row.dataset.loginRow === 'visible' && Math.abs(row.getBoundingClientRect().height - (row.inert ? 0 : row.firstElementChild.getBoundingClientRect().height)) < 0.1);\n}"
+      },
+      {
+        "action": "fill",
+        "selector": "#email-auth-email",
+        "value": "fixture@example.com"
+      },
+      {
+        "action": "fill",
+        "selector": "input[type=\"password\"]",
+        "value": "synthetic-password"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {\n  const stage = document.querySelector('[data-login-stage]');\n  const rows = [...document.querySelectorAll('[data-login-row]')];\n  const panel = stage?.querySelector('[data-login-panel=\"' + stage.dataset.loginActive + '\"]');\n  return (!stage || (panel && stage.dataset.loginPhase === 'visible' && Math.abs(stage.getBoundingClientRect().height - panel.getBoundingClientRect().height) < 0.1)) && rows.every(row => row.dataset.loginRow === 'visible' && Math.abs(row.getBoundingClientRect().height - (row.inert ? 0 : row.firstElementChild.getBoundingClientRect().height)) < 0.1);\n}"
+      },
+      {
+        "action": "click",
+        "selector": "button[type=\"submit\"]"
+      },
+      {
+        "action": "visible",
+        "selector": "button[type=\"submit\"] [data-slot=\"spinner\"]"
+      },
+      {
+        "action": "disabled",
+        "selector": "button[type=\"submit\"]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-owned-login-intent]:text-is(\"Synthetic email requested\")"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {\n  const stage = document.querySelector('[data-login-stage]');\n  const rows = [...document.querySelectorAll('[data-login-row]')];\n  const panel = stage?.querySelector('[data-login-panel=\"' + stage.dataset.loginActive + '\"]');\n  return (!stage || (panel && stage.dataset.loginPhase === 'visible' && Math.abs(stage.getBoundingClientRect().height - panel.getBoundingClientRect().height) < 0.1)) && rows.every(row => row.dataset.loginRow === 'visible' && Math.abs(row.getBoundingClientRect().height - (row.inert ? 0 : row.firstElementChild.getBoundingClientRect().height)) < 0.1);\n}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const box=document.querySelector('[data-slot=spinner]'),button=box?.closest('button');return box&&button?.disabled&&getComputedStyle(box).width==='16px'&&getComputedStyle(box).height==='16px'&&getComputedStyle(box).marginRight==='8px'&&document.querySelector('[data-owned-login-intent]')?.textContent==='Synthetic email requested'&&box.firstElementChild?.getAttribute('aria-label')==='Loading';}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\"button[type=submit]\")];return marks.length===1&&marks.every(m=>{const pc=getComputedStyle(m.parentElement),expected=m.parentElement.clientWidth-parseFloat(pc.paddingLeft)-parseFloat(pc.paddingRight);const r=m.getBoundingClientRect(),c=getComputedStyle(m);return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&Number(c.opacity)>0&&Math.abs(r.width-expected)<0.1&&Math.abs(parseFloat(c.height)-40)<0.02;});}"
+      }
+    ],
+    "components-ownedloginmigration--scoped-email-pending": [
+      {
+        "action": "visible",
+        "selector": "#login-title"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {\n  const stage = document.querySelector('[data-login-stage]');\n  const rows = [...document.querySelectorAll('[data-login-row]')];\n  const panel = stage?.querySelector('[data-login-panel=\"' + stage.dataset.loginActive + '\"]');\n  return (!stage || (panel && stage.dataset.loginPhase === 'visible' && Math.abs(stage.getBoundingClientRect().height - panel.getBoundingClientRect().height) < 0.1)) && rows.every(row => row.dataset.loginRow === 'visible' && Math.abs(row.getBoundingClientRect().height - (row.inert ? 0 : row.firstElementChild.getBoundingClientRect().height)) < 0.1);\n}"
+      },
+      {
+        "action": "fill",
+        "selector": "#email-auth-email",
+        "value": "fixture@example.com"
+      },
+      {
+        "action": "fill",
+        "selector": "input[type=\"password\"]",
+        "value": "synthetic-password"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {\n  const stage = document.querySelector('[data-login-stage]');\n  const rows = [...document.querySelectorAll('[data-login-row]')];\n  const panel = stage?.querySelector('[data-login-panel=\"' + stage.dataset.loginActive + '\"]');\n  return (!stage || (panel && stage.dataset.loginPhase === 'visible' && Math.abs(stage.getBoundingClientRect().height - panel.getBoundingClientRect().height) < 0.1)) && rows.every(row => row.dataset.loginRow === 'visible' && Math.abs(row.getBoundingClientRect().height - (row.inert ? 0 : row.firstElementChild.getBoundingClientRect().height)) < 0.1);\n}"
+      },
+      {
+        "action": "click",
+        "selector": "button[type=\"submit\"]"
+      },
+      {
+        "action": "visible",
+        "selector": "button[type=\"submit\"] [data-slot=\"spinner\"]"
+      },
+      {
+        "action": "disabled",
+        "selector": "button[type=\"submit\"]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-owned-login-intent]:text-is(\"Synthetic email requested\")"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {\n  const stage = document.querySelector('[data-login-stage]');\n  const rows = [...document.querySelectorAll('[data-login-row]')];\n  const panel = stage?.querySelector('[data-login-panel=\"' + stage.dataset.loginActive + '\"]');\n  return (!stage || (panel && stage.dataset.loginPhase === 'visible' && Math.abs(stage.getBoundingClientRect().height - panel.getBoundingClientRect().height) < 0.1)) && rows.every(row => row.dataset.loginRow === 'visible' && Math.abs(row.getBoundingClientRect().height - (row.inert ? 0 : row.firstElementChild.getBoundingClientRect().height)) < 0.1);\n}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const box=document.querySelector('[data-slot=spinner]'),button=box?.closest('button');return box&&button?.disabled&&getComputedStyle(box).width==='20px'&&getComputedStyle(box).height==='20px'&&getComputedStyle(box).marginRight==='10px'&&document.querySelector('[data-owned-login-intent]')?.textContent==='Synthetic email requested'&&box.firstElementChild?.getAttribute('aria-label')==='Loading';}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\"button[type=submit]\")];return marks.length===1&&marks.every(m=>{const pc=getComputedStyle(m.parentElement),expected=m.parentElement.clientWidth-parseFloat(pc.paddingLeft)-parseFloat(pc.paddingRight);const r=m.getBoundingClientRect(),c=getComputedStyle(m);return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&Number(c.opacity)>0&&Math.abs(r.width-expected)<0.1&&Math.abs(parseFloat(c.height)-50)<0.02;});}"
+      }
+    ],
+    "components-ownedloginmigration--handoff-pending": [
+      {
+        "action": "visible",
+        "selector": "#login-title"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {\n  const stage = document.querySelector('[data-login-stage]');\n  const rows = [...document.querySelectorAll('[data-login-row]')];\n  const panel = stage?.querySelector('[data-login-panel=\"' + stage.dataset.loginActive + '\"]');\n  return (!stage || (panel && stage.dataset.loginPhase === 'visible' && Math.abs(stage.getBoundingClientRect().height - panel.getBoundingClientRect().height) < 0.1)) && rows.every(row => row.dataset.loginRow === 'visible' && Math.abs(row.getBoundingClientRect().height - (row.inert ? 0 : row.firstElementChild.getBoundingClientRect().height)) < 0.1);\n}"
+      },
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Continue with this account",
+        "exact": true
+      },
+      {
+        "action": "visible",
+        "selector": "button [data-slot=\"spinner\"]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-owned-login-intent]:text-is(\"Synthetic handoff requested\")"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {\n  const stage = document.querySelector('[data-login-stage]');\n  const rows = [...document.querySelectorAll('[data-login-row]')];\n  const panel = stage?.querySelector('[data-login-panel=\"' + stage.dataset.loginActive + '\"]');\n  return (!stage || (panel && stage.dataset.loginPhase === 'visible' && Math.abs(stage.getBoundingClientRect().height - panel.getBoundingClientRect().height) < 0.1)) && rows.every(row => row.dataset.loginRow === 'visible' && Math.abs(row.getBoundingClientRect().height - (row.inert ? 0 : row.firstElementChild.getBoundingClientRect().height)) < 0.1);\n}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const box=document.querySelector('[data-slot=spinner]'),button=box?.closest('button');return box&&button?.disabled&&getComputedStyle(box).width==='16px'&&getComputedStyle(box).height==='16px'&&getComputedStyle(box).marginRight==='8px'&&document.querySelector('[data-owned-login-intent]')?.textContent==='Synthetic handoff requested'&&box.firstElementChild?.getAttribute('aria-label')==='Loading';}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\"button:has([data-slot=spinner])\")];return marks.length===1&&marks.every(m=>{const pc=getComputedStyle(m.parentElement),expected=m.parentElement.clientWidth-parseFloat(pc.paddingLeft)-parseFloat(pc.paddingRight);const r=m.getBoundingClientRect(),c=getComputedStyle(m);return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&Number(c.opacity)>0&&Math.abs(r.width-expected)<0.1&&Math.abs(parseFloat(c.height)-40)<0.02;});}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const b=[...document.querySelectorAll('button')].find(e=>e.textContent==='Use a different account');return !!b&&getComputedStyle(b).height==='40px'&&b.getBoundingClientRect().width>0;}"
+      }
+    ],
+    "components-loginpage--electron-renderer": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Open browser to sign in"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\"[data-login-panel] button:has(svg):not([aria-label])\")];return marks.length===1&&marks.every(m=>{const pc=getComputedStyle(m.parentElement),expected=m.parentElement.clientWidth-parseFloat(pc.paddingLeft)-parseFloat(pc.paddingRight);const r=m.getBoundingClientRect(),c=getComputedStyle(m);return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&Number(c.opacity)>0&&Math.abs(r.width-expected)<0.1&&Math.abs(parseFloat(c.height)-40)<0.02;});}"
+      }
+    ]
+  },
+  "states": {
+    "components-ownedloginmigration--email-pending": [
+      {
+        "name": "pending-pointer-away",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const box=document.querySelector('[data-slot=spinner]'),button=box?.closest('button');return box&&button?.disabled&&getComputedStyle(box).width==='16px'&&getComputedStyle(box).height==='16px'&&getComputedStyle(box).marginRight==='8px'&&document.querySelector('[data-owned-login-intent]')?.textContent==='Synthetic email requested'&&box.firstElementChild?.getAttribute('aria-label')==='Loading';}"
+          }
+        ]
+      }
+    ],
+    "components-ownedloginmigration--scoped-email-pending": [
+      {
+        "name": "pending-pointer-away",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const box=document.querySelector('[data-slot=spinner]'),button=box?.closest('button');return box&&button?.disabled&&getComputedStyle(box).width==='20px'&&getComputedStyle(box).height==='20px'&&getComputedStyle(box).marginRight==='10px'&&document.querySelector('[data-owned-login-intent]')?.textContent==='Synthetic email requested'&&box.firstElementChild?.getAttribute('aria-label')==='Loading';}"
+          }
+        ]
+      }
+    ],
+    "components-ownedloginmigration--handoff-pending": [
+      {
+        "name": "pending-pointer-away",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const box=document.querySelector('[data-slot=spinner]'),button=box?.closest('button');return box&&button?.disabled&&getComputedStyle(box).width==='16px'&&getComputedStyle(box).height==='16px'&&getComputedStyle(box).marginRight==='8px'&&document.querySelector('[data-owned-login-intent]')?.textContent==='Synthetic handoff requested'&&box.firstElementChild?.getAttribute('aria-label')==='Loading';}"
+          }
+        ]
+      }
+    ]
+  }
+}

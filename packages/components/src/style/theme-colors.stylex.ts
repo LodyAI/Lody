@@ -7,12 +7,12 @@ import * as stylex from '@stylexjs/stylex';
  * Tailwind's preset maps every colour utility to `hsl(var(--token))`, and the
  * theme writes those variables on the document root — from the bundled Lody
  * Light palette, from the `.dark` block, and at runtime from the active VS Code
- * theme (`lib/vscode-theme/vscode-theme-css.ts`). A token here is that same
- * expression, so a surface that moves from a Tailwind class to a StyleX style
- * keeps the colour it had, in both themes, in every theme variant, and inside a
- * portal — a portal renders outside the subtree that carries the `@lody/ui`
- * palette, so `@lody/ui`'s `colors` are not the safe reference for a product
- * surface; these are.
+ * theme (`lib/vscode-theme/vscode-theme-css.ts`). The aliases resolve those
+ * expressions where their group is declared. A surface that pins a subtree
+ * palette must also apply `scopedThemeColors` there; inherited aliases otherwise
+ * retain the app root's resolved colours. A portal renders outside the subtree
+ * that carries the `@lody/ui` palette, so product surfaces read the app's CSS
+ * variables through these aliases instead of that separate palette.
  *
  * `@lody/ui`'s own primitives keep reading `colors` — that is the design
  * system's palette, and a primitive is not a product surface.
@@ -21,7 +21,7 @@ import * as stylex from '@stylexjs/stylex';
  * compiler's exact HSL or color-mix expression; README.md#alpha owns that mapping.
  * Matching percentages alone do not establish identical browser pixels.
  */
-export const themeColors = stylex.defineVars({
+const themeColorDefaults = {
   /* Surfaces */
   background: 'hsl(var(--background))',
   foreground: 'hsl(var(--foreground))',
@@ -123,4 +123,9 @@ export const themeColors = stylex.defineVars({
   chart3: 'hsl(var(--chart-3))',
   chart4: 'hsl(var(--chart-4))',
   chart5: 'hsl(var(--chart-5))',
-});
+};
+
+export const themeColors = stylex.defineVars(themeColorDefaults);
+
+/** Re-evaluate the semantic aliases where a surface pins its own CSS palette. */
+export const scopedThemeColors = stylex.createTheme(themeColors, themeColorDefaults);

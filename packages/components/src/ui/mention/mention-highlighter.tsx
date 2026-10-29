@@ -1,10 +1,46 @@
 import { useCallbackRef, useComposedRefs } from '@diceui/shared';
 import * as React from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { cn } from '@/lib/utils';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { type Mention, type MentionChip, useMentionContext } from './mention-root';
 
 const HIGHLIGHTER_NAME = 'MentionHighlighter';
+
+const styles = stylex.create({
+  hidden: { visibility: 'hidden' },
+  iconSlot: { position: 'relative' },
+  icon: {
+    visibility: 'visible',
+    position: 'absolute',
+    insetBlock: 'calc(var(--spacing) * 0)',
+    left: 'calc(var(--spacing) * 0)',
+    right: '1px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  pastedHighlight: {
+    borderRadius: 'var(--radius-md)',
+    backgroundColor: {
+      default: 'hsl(var(--foreground) / 1)',
+      '@supports (color:color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--foreground) / 1) 10%, transparent)',
+    },
+    WebkitBoxDecorationBreak: 'clone',
+    boxDecorationBreak: 'clone',
+  },
+  highlight: {
+    borderRadius: 'var(--radius-sm)',
+    backgroundColor: {
+      default: 'hsl(var(--primary))',
+      '@supports (color:color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--primary)) 15%, transparent)',
+    },
+    WebkitBoxDecorationBreak: 'clone',
+    boxDecorationBreak: 'clone',
+  },
+});
 
 type HighlighterElement = HTMLDivElement;
 
@@ -194,7 +230,7 @@ function MentionChipContent({ chip, text }: { chip: MentionChip; text: string })
   return (
     <>
       {iconText ? (
-        <span className="invisible relative">
+        <span {...stylex.props(styles.hidden, styles.iconSlot)}>
           {iconText}
           {chip.icon ? (
             <span
@@ -205,7 +241,7 @@ function MentionChipContent({ chip, text }: { chip: MentionChip; text: string })
               // mention can wrap to the start of a line, where the space that
               // was supposed to absorb the overflow has been eaten by the break.
               // Neither is visible to CSS, so the icon simply stays inside.
-              className="visible absolute inset-y-0 left-0 right-px flex items-center justify-end [&>*]:max-w-full"
+              className={cn(stylex.props(styles.icon).className, '[&>*]:max-w-full')}
             >
               {chip.icon}
             </span>
@@ -213,7 +249,7 @@ function MentionChipContent({ chip, text }: { chip: MentionChip; text: string })
         </span>
       ) : null}
       {labelText ? <span>{labelText}</span> : null}
-      {trailingText ? <span className="invisible">{trailingText}</span> : null}
+      {trailingText ? <span {...stylex.props(styles.hidden)}>{trailingText}</span> : null}
     </>
   );
 }
@@ -387,11 +423,9 @@ const MentionHighlighter = React.memo(
               key={segment.key}
               data-tag=""
               {...rangeProps}
-              className={
-                segment.mention.kind === 'pasted_text'
-                  ? 'rounded-md bg-foreground/10 box-decoration-clone'
-                  : 'rounded-sm bg-primary/15 box-decoration-clone'
-              }
+              {...stylex.props(
+                segment.mention.kind === 'pasted_text' ? styles.pastedHighlight : styles.highlight
+              )}
             >
               {segment.text}
             </span>

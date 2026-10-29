@@ -94,6 +94,24 @@ const TRANSITION_TRANSFORM = {
 /* `motion-safe:` — the scale only happens when motion is welcome. */
 const MOTION_SAFE = '@media (prefers-reduced-motion: no-preference)';
 
+const DARK_SCOPE =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+const DARK_WHITE_12 = {
+  default: '#ffffff1f',
+  '@supports (color: color-mix(in lab, red, red))':
+    'color-mix(in oklab, var(--color-white) 12%, transparent)',
+} as const;
+const DARK_WHITE_10 = {
+  default: '#ffffff1a',
+  '@supports (color: color-mix(in lab, red, red))':
+    'color-mix(in oklab, var(--color-white) 10%, transparent)',
+} as const;
+const DARK_WHITE_14 = {
+  default: '#ffffff24',
+  '@supports (color: color-mix(in lab, red, red))':
+    'color-mix(in oklab, var(--color-white) 14%, transparent)',
+} as const;
+
 const styles = stylex.create({
   /* The Material-icon wrapper: a sized box the icon fills. */
   reactIconGlyph: { width: '100%', height: '100%' },
@@ -146,13 +164,17 @@ const styles = stylex.create({
     borderRadius: themeRadius.full,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: 'hsl(var(--border) / 0.5)',
+    borderColor: { default: 'hsl(var(--border) / 0.5)', [DARK_SCOPE]: DARK_WHITE_12 },
     backgroundColor: themeColors.muted,
     color: themeColors.foreground,
     ...TRANSITION_COLORS,
   },
   pillActive: {
-    backgroundColor: { default: themeColors.muted, ':active': 'hsl(var(--muted) / 0.8)' },
+    backgroundColor: {
+      default: themeColors.muted,
+      ':active': 'hsl(var(--muted) / 0.8)',
+      [DARK_SCOPE]: { ...DARK_WHITE_10, ':active': DARK_WHITE_14 },
+    },
     transform: { default: 'none', ':active': 'scale(0.97)' },
   },
 
@@ -288,10 +310,11 @@ const styles = stylex.create({
     borderRadius: themeRadius.full,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: 'hsl(var(--border) / 0.5)',
+    borderColor: { default: 'hsl(var(--border) / 0.5)', [DARK_SCOPE]: DARK_WHITE_12 },
     backgroundColor: {
       default: themeColors.muted,
       ':focus-within': 'hsl(var(--muted) / 0.8)',
+      [DARK_SCOPE]: { ...DARK_WHITE_10, ':focus-within': DARK_WHITE_14 },
     },
     paddingInline: themeSpace[3],
     color: themeColors.foreground,
@@ -343,10 +366,17 @@ const styles = stylex.create({
     borderRadius: themeRadius.full,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: 'hsl(var(--border) / 0.5)',
+    borderColor: { default: 'hsl(var(--border) / 0.5)', [DARK_SCOPE]: DARK_WHITE_12 },
     backgroundColor: {
       default: themeColors.muted,
       ':hover': 'hsl(var(--muted) / 0.8)',
+      [DARK_SCOPE]: {
+        ...DARK_WHITE_10,
+        ':hover': {
+          ...DARK_WHITE_10,
+          '@media (hover: hover)': DARK_WHITE_14,
+        },
+      },
     },
     color: {
       default: themeColors.mutedForeground,
@@ -360,12 +390,19 @@ const styles = stylex.create({
     ...TRANSITION_COLORS,
   },
   filterToggleOpen: {
-    borderColor: 'hsl(var(--primary) / 0.4)',
+    borderColor: { default: 'hsl(var(--primary) / 0.4)', [DARK_SCOPE]: DARK_WHITE_12 },
     /* The open state replaces the resting fill, but the hover fill still
        applies on top of it — the same order the Tailwind classes had. */
     backgroundColor: {
       default: 'hsl(var(--primary) / 0.15)',
       ':hover': 'hsl(var(--muted) / 0.8)',
+      [DARK_SCOPE]: {
+        ...DARK_WHITE_10,
+        ':hover': {
+          ...DARK_WHITE_10,
+          '@media (hover: hover)': DARK_WHITE_14,
+        },
+      },
     },
     color: {
       default: themeColors.primary,
@@ -694,8 +731,8 @@ const styles = stylex.create({
     borderRadius: themeRadius.full,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: 'hsl(var(--border) / 0.5)',
-    backgroundColor: themeColors.muted,
+    borderColor: { default: 'hsl(var(--border) / 0.5)', [DARK_SCOPE]: DARK_WHITE_12 },
+    backgroundColor: { default: themeColors.muted, [DARK_SCOPE]: DARK_WHITE_10 },
     color: themeColors.foreground,
   },
   searchSlot: {
@@ -1682,7 +1719,6 @@ const FloatingPill = forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HT
         type={type}
         className={[
           stylex.props(styles.pill, styles.pillActive, styles.workspacePill).className,
-          'dark:border-white/12 dark:bg-white/10 dark:active:bg-white/14',
           className,
         ]
           .filter(Boolean)
@@ -1886,7 +1922,6 @@ function HeaderSearchInput({
       className={[
         'mobile-home-header-search',
         stylex.props(styles.searchField).className,
-        'dark:border-white/12 dark:bg-white/10 dark:focus-within:bg-white/14',
         className,
       ]
         .filter(Boolean)
@@ -1946,12 +1981,7 @@ function ChatListFilterToggle({
       onClick={onToggle}
       aria-label={ariaLabel}
       aria-pressed={open}
-      className={[
-        stylex.props(styles.filterToggle, open && styles.filterToggleOpen).className,
-        'dark:border-white/12 dark:bg-white/10 dark:hover:bg-white/14',
-      ]
-        .filter(Boolean)
-        .join(' ')}
+      {...stylex.props(styles.filterToggle, open && styles.filterToggleOpen)}
     >
       <SlidersHorizontal
         className={stylex.props(styles.icon4Current).className}
@@ -2602,13 +2632,7 @@ export function MobileHomeScreen({
                   <HomeWorkspaceAvatar workspace={workspace} />
                 </FloatingPill>
               ) : (
-                <div
-                  {...withClassName(
-                    stylex.props(styles.workspaceIdentity),
-                    'dark:border-white/12 dark:bg-white/10'
-                  )}
-                  data-workspace-identity
-                >
+                <div {...stylex.props(styles.workspaceIdentity)} data-workspace-identity>
                   <HomeWorkspaceAvatar workspace={workspace} />
                 </div>
               )}

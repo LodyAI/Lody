@@ -1,0 +1,268 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "device": "iPhone SE",
+      "width": 320,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "migration-ownedmergecontrol--ready",
+    "migration-ownedmergecontrol--conflict",
+    "migration-ownedmergecontrol--neutral",
+    "migration-ownedmergecontrol--disabled",
+    "migration-ownedmergecontrol--merging",
+    "migration-ownedmergecontrol--missing-handlers"
+  ],
+  "ready": {
+    "migration-ownedmergecontrol--ready": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-merge-fixture] [data-pr-merge-control]"
+      }
+    ],
+    "migration-ownedmergecontrol--conflict": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-merge-fixture] [data-pr-merge-control]"
+      }
+    ],
+    "migration-ownedmergecontrol--neutral": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-merge-fixture] [data-pr-merge-control]"
+      }
+    ],
+    "migration-ownedmergecontrol--disabled": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-merge-fixture] [data-pr-merge-control]"
+      }
+    ],
+    "migration-ownedmergecontrol--merging": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-merge-fixture] [data-pr-merge-control]"
+      }
+    ],
+    "migration-ownedmergecontrol--missing-handlers": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-merge-fixture] [data-pr-merge-control]"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedmergecontrol--ready": [
+      {
+        "name": "main-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Merge pull request"
+          }
+        ]
+      },
+      {
+        "name": "main-focused",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Merge pull request"
+          }
+        ]
+      },
+      {
+        "name": "trigger-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Choose merge method"
+          }
+        ]
+      },
+      {
+        "name": "menu-open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Choose merge method"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const menu=document.querySelector('[role=menu]'); if(!menu)return false; const styles=getComputedStyle(menu);return styles.opacity==='1'&&menu.getBoundingClientRect().height>0; }"
+          }
+        ]
+      },
+      {
+        "name": "method-selected",
+        "steps": [
+          {
+            "action": "click",
+            "role": "menuitemradio",
+            "name": "Squash and merge"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-owned-merge-method=\"squash\"][data-owned-merge-selected-count=\"1\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[role=menu]')"
+          }
+        ]
+      },
+      {
+        "name": "merge-callback",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Squash and merge"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-owned-merge-count=\"1\"][data-owned-merge-last-method=\"squash\"]"
+          }
+        ]
+      },
+      {
+        "name": "menu-keyboard-open",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Choose merge method"
+          },
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Choose merge method",
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const menu=document.querySelector('[role=menu]'); if(!menu)return false; const styles=getComputedStyle(menu);return styles.opacity==='1'&&menu.getBoundingClientRect().height>0; }"
+          }
+        ]
+      },
+      {
+        "name": "menu-escaped",
+        "steps": [
+          {
+            "action": "press",
+            "role": "menuitemradio",
+            "name": "Squash and merge",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[role=menu]')"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmergecontrol--disabled": [
+      {
+        "name": "disabled-main-hover",
+        "steps": [
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Merge pull request"
+          },
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Merge pull request"
+          }
+        ]
+      },
+      {
+        "name": "enabled-trigger-hover",
+        "steps": [
+          {
+            "action": "enabled",
+            "role": "button",
+            "name": "Choose merge method"
+          },
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Choose merge method"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmergecontrol--merging": [
+      {
+        "name": "disabled-trigger-hover",
+        "steps": [
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Choose merge method"
+          },
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Choose merge method"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmergecontrol--missing-handlers": [
+      {
+        "name": "disabled-main-hover",
+        "steps": [
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Merge pull request"
+          },
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Merge pull request"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmergecontrol--conflict": [
+      {
+        "name": "main-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Merge pull request"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmergecontrol--neutral": [
+      {
+        "name": "main-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Merge pull request"
+          }
+        ]
+      }
+    ]
+  }
+}

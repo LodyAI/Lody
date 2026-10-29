@@ -3,8 +3,10 @@
  *
  * node scripts/tailwind-usage.mjs [--files | --json] [--root <file-or-directory>]
  *
- * Reads JSX class attributes, cn/clsx/cva/twMerge/withClassName calls, local class constants,
- * pure literal string concatenations, and complete static template tokens.
+ * Reads JSX class attributes, imperative className assignments,
+ * cn/clsx/cva/twMerge/withClassName calls, local class constants,
+ * pure literal string concatenations, space-joined literal class arrays (optionally
+ * filtered with Boolean), and complete static template tokens.
  * Each source token is counted once, even
  * if a constant has several consumers. Runtime values remain unresolved. CSS
  * hooks and group/peer markers emit no utilities and are excluded. Counts measure
@@ -98,6 +100,27 @@ function inspect(file, source) {
       if (candidates.length) literals.set(node.pos, { line: location(node), candidates });
     }
   }
+  function joinedClassArray(node) {
+    if (
+      !ts.isPropertyAccessExpression(node.expression) ||
+      node.expression.name.text !== 'join' ||
+      node.arguments.length !== 1 ||
+      !ts.isStringLiteralLike(node.arguments[0]) ||
+      node.arguments[0].text !== ' '
+    )
+      return undefined;
+    let array = node.expression.expression;
+    if (
+      ts.isCallExpression(array) &&
+      ts.isPropertyAccessExpression(array.expression) &&
+      array.expression.name.text === 'filter' &&
+      array.arguments.length === 1 &&
+      ts.isIdentifier(array.arguments[0]) &&
+      array.arguments[0].text === 'Boolean'
+    )
+      array = array.expression.expression;
+    return ts.isArrayLiteralExpression(array) ? array : undefined;
+  }
   function collect(node, objectKeys = false) {
     if (!node || active.has(node)) return;
     active.add(node);
@@ -160,7 +183,11 @@ function inspect(file, source) {
         collect(node.arguments[1]);
       } else if (classHelpers.has(helper)) {
         node.arguments.forEach((argument) => collect(argument, helper !== 'cva'));
-      } else if (!helper.startsWith('stylex.')) unknown(node, 'Runtime helper output.');
+      } else {
+        const array = joinedClassArray(node);
+        if (array) collect(array, objectKeys);
+        else if (!helper.startsWith('stylex.')) unknown(node, 'Runtime helper output.');
+      }
     } else if (
       ts.isParenthesizedExpression(node) ||
       ts.isAsExpression(node) ||
@@ -180,6 +207,21 @@ function inspect(file, source) {
     if (ts.isCallExpression(node) && classHelpers.has(node.expression.getText(ast))) collect(node);
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && className(node.name.text)) {
       collect(node.initializer);
+    }
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+      node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+    ) {
+      const name = ts.isPropertyAccessExpression(node.left)
+        ? node.left.name.text
+        : ts.isElementAccessExpression(node.left) && node.left.argumentExpression
+          ? literalString(node.left.argumentExpression)
+          : undefined;
+      if (name === 'className') {
+        if (node.operatorToken.kind === ts.SyntaxKind.EqualsToken) collect(node.right);
+        else unknown(node, 'Compound class assignments may join tokens across boundaries.');
+      }
     }
   });
   const entries = [...literals.values()].sort((a, b) => a.line - b.line);
@@ -215,6 +257,7 @@ if (args.includes('--json')) {
   console.log(
     JSON.stringify(
       {
+        scannerVersion: 2,
         root: path.relative(packageRoot, sourceRoot) || '.',
         method:
           'Static source-token occurrences accepted by the installed project Tailwind compiler; deduplicated by source location.',

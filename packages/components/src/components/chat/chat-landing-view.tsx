@@ -143,6 +143,13 @@ const styles = stylex.create({
     lineHeight: '1.375',
   },
   fallbackStatusMuted: { color: themeColors.mutedForeground },
+  fallbackStatusWarning: {
+    color: {
+      default: 'var(--color-amber-600)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'var(--color-amber-400)',
+    },
+  },
   fallbackStatusError: { color: themeColors.destructive },
   fallbackActions: {
     marginTop: themeSpace[3],
@@ -522,7 +529,7 @@ export function ChatLandingView({
         aria-label={submissionPending ? submittingLabel : submitLabel}
       >
         {submissionPending ? (
-          <Spinner className="h-4 w-4" />
+          <Spinner diameter="calc(var(--spacing) * 4)" />
         ) : (
           <ArrowUp {...stylex.props(styles.glyph16)} />
         )}
@@ -530,21 +537,14 @@ export function ChatLandingView({
     </ErrorBoundary>
   );
 
-  // The amber tone is a hard-coded pair, and its dark step needs the `.dark`
-  // ancestor StyleX cannot select, so that one stays a Tailwind class.
-  const composerStatusStyle =
+  const composerStatusStyle = stylex.props(
+    styles.fallbackStatus,
     composerStatusTone === 'warning'
-      ? stylex.props(styles.fallbackStatus)
-      : stylex.props(
-          styles.fallbackStatus,
-          composerStatusTone === 'error' ? styles.fallbackStatusError : styles.fallbackStatusMuted
-        );
-  const composerStatusClassName =
-    composerStatusTone === 'warning'
-      ? ['text-amber-600 dark:text-amber-400', composerStatusStyle.className]
-          .filter(Boolean)
-          .join(' ')
-      : composerStatusStyle.className;
+      ? styles.fallbackStatusWarning
+      : composerStatusTone === 'error'
+        ? styles.fallbackStatusError
+        : styles.fallbackStatusMuted
+  );
 
   const fallbackRender = ({ resetErrorBoundary }: { resetErrorBoundary: () => void }) => (
     <div {...stylex.props(styles.fallback)}>
@@ -570,7 +570,7 @@ export function ChatLandingView({
         <div
           role={composerStatusTone === 'error' ? 'alert' : 'status'}
           aria-live={composerStatusTone === 'error' ? 'assertive' : 'polite'}
-          className={composerStatusClassName}
+          className={composerStatusStyle.className}
           style={composerStatusStyle.style}
         >
           {composerStatusMessage}

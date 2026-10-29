@@ -1,0 +1,335 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 900,
+      "device": "iPhone SE"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "migration-ownedcomposersurface--landing",
+    "migration-ownedcomposersurface--session",
+    "migration-ownedcomposersurface--dialog",
+    "migration-ownedcomposersurface--dialog-without-chips",
+    "migration-ownedcomposersurface--disabled",
+    "migration-ownedcomposersurface--scoped-landing",
+    "migration-ownedcomposersurface--scoped-session",
+    "migration-ownedcomposersurface--scoped-dialog"
+  ],
+  "ready": {
+    "migration-ownedcomposersurface--landing": [
+      {
+        "action": "visible",
+        "selector": "#surface-prompt"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {\n const roots=[...document.querySelectorAll('[data-composer-surface-fixture]')];\n if(roots.length!==1)return false;\n const records=window.__ownedComposerSurfaceRest??={};\n const result=roots.every(root=>{\n  const textarea=root.querySelector('textarea');const box=root.querySelector('[data-lody-composer-box]')??textarea?.parentElement;\n  const chipNodes=[...root.querySelectorAll('[data-mention-layer=chip] [data-mention-kind]')];\n  if(!textarea||!box||textarea.value.length===0||!root.querySelector('[data-mention-highlighter]')||chipNodes.length!==2)return false;\n  if(chipNodes.some(chip=>getComputedStyle(chip).backgroundColor==='rgba(0, 0, 0, 0)'||chip.getBoundingClientRect().height<=0))return false;\n  if(box.getBoundingClientRect().height<=0||getComputedStyle(box).visibility!=='visible')return false;\n  if(false&&(!box.hasAttribute('data-surface-local-palette')||getComputedStyle(box).getPropertyValue('--input').trim()!=='260 50% 40%'||getComputedStyle(box).getPropertyValue('--input-border').trim()!=='24 80% 56%'))return false;\n  const css=getComputedStyle(box);records[root.dataset.composerSurfaceFixture]={background:css.backgroundColor,border:css.borderTopColor,shadow:css.boxShadow,mentionSurface:css.getPropertyValue('--mention-chip-surface'),cover:chipNodes.map(n=>getComputedStyle(n).backgroundColor)};\n  return true;\n });return result;\n} "
+      }
+    ],
+    "migration-ownedcomposersurface--session": [
+      {
+        "action": "visible",
+        "selector": "#surface-prompt"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {\n const roots=[...document.querySelectorAll('[data-composer-surface-fixture]')];\n if(roots.length!==1)return false;\n const records=window.__ownedComposerSurfaceRest??={};\n const result=roots.every(root=>{\n  const textarea=root.querySelector('textarea');const box=root.querySelector('[data-lody-composer-box]')??textarea?.parentElement;\n  const chipNodes=[...root.querySelectorAll('[data-mention-layer=chip] [data-mention-kind]')];\n  if(!textarea||!box||textarea.value.length===0||!root.querySelector('[data-mention-highlighter]')||chipNodes.length!==2)return false;\n  if(chipNodes.some(chip=>getComputedStyle(chip).backgroundColor==='rgba(0, 0, 0, 0)'||chip.getBoundingClientRect().height<=0))return false;\n  if(box.getBoundingClientRect().height<=0||getComputedStyle(box).visibility!=='visible')return false;\n  if(false&&(!box.hasAttribute('data-surface-local-palette')||getComputedStyle(box).getPropertyValue('--input').trim()!=='260 50% 40%'||getComputedStyle(box).getPropertyValue('--input-border').trim()!=='24 80% 56%'))return false;\n  const css=getComputedStyle(box);records[root.dataset.composerSurfaceFixture]={background:css.backgroundColor,border:css.borderTopColor,shadow:css.boxShadow,mentionSurface:css.getPropertyValue('--mention-chip-surface'),cover:chipNodes.map(n=>getComputedStyle(n).backgroundColor)};\n  return true;\n });return result;\n} "
+      }
+    ],
+    "migration-ownedcomposersurface--dialog": [
+      {
+        "action": "visible",
+        "selector": "#surface-prompt"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {\n const roots=[...document.querySelectorAll('[data-composer-surface-fixture]')];\n if(roots.length!==1)return false;\n const records=window.__ownedComposerSurfaceRest??={};\n const result=roots.every(root=>{\n  const textarea=root.querySelector('textarea');const box=root.querySelector('[data-lody-composer-box]')??textarea?.parentElement;\n  const chipNodes=[...root.querySelectorAll('[data-mention-layer=chip] [data-mention-kind]')];\n  if(!textarea||!box||textarea.value.length===0||!root.querySelector('[data-mention-highlighter]')||chipNodes.length!==2)return false;\n  if(chipNodes.some(chip=>getComputedStyle(chip).backgroundColor==='rgba(0, 0, 0, 0)'||chip.getBoundingClientRect().height<=0))return false;\n  if(box.getBoundingClientRect().height<=0||getComputedStyle(box).visibility!=='visible')return false;\n  if(false&&(!box.hasAttribute('data-surface-local-palette')||getComputedStyle(box).getPropertyValue('--input').trim()!=='260 50% 40%'||getComputedStyle(box).getPropertyValue('--input-border').trim()!=='24 80% 56%'))return false;\n  const css=getComputedStyle(box);records[root.dataset.composerSurfaceFixture]={background:css.backgroundColor,border:css.borderTopColor,shadow:css.boxShadow,mentionSurface:css.getPropertyValue('--mention-chip-surface'),cover:chipNodes.map(n=>getComputedStyle(n).backgroundColor)};\n  return true;\n });return result;\n} "
+      }
+    ],
+    "migration-ownedcomposersurface--dialog-without-chips": [
+      {
+        "action": "visible",
+        "selector": "#surface-prompt"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {\n const roots=[...document.querySelectorAll('[data-composer-surface-fixture]')];\n if(roots.length!==1)return false;\n const records=window.__ownedComposerSurfaceRest??={};\n const result=roots.every(root=>{\n  const textarea=root.querySelector('textarea');const box=root.querySelector('[data-lody-composer-box]')??textarea?.parentElement;\n  const chipNodes=[...root.querySelectorAll('[data-mention-layer=chip] [data-mention-kind]')];\n  if(!textarea||!box||textarea.value.length===0||!root.querySelector('[data-mention-highlighter]')||chipNodes.length!==0)return false;\n  if(chipNodes.some(chip=>getComputedStyle(chip).backgroundColor==='rgba(0, 0, 0, 0)'||chip.getBoundingClientRect().height<=0))return false;\n  if(box.getBoundingClientRect().height<=0||getComputedStyle(box).visibility!=='visible')return false;\n  if(false&&(!box.hasAttribute('data-surface-local-palette')||getComputedStyle(box).getPropertyValue('--input').trim()!=='260 50% 40%'||getComputedStyle(box).getPropertyValue('--input-border').trim()!=='24 80% 56%'))return false;\n  const css=getComputedStyle(box);records[root.dataset.composerSurfaceFixture]={background:css.backgroundColor,border:css.borderTopColor,shadow:css.boxShadow,mentionSurface:css.getPropertyValue('--mention-chip-surface'),cover:chipNodes.map(n=>getComputedStyle(n).backgroundColor)};\n  return true;\n });return result;\n} "
+      }
+    ],
+    "migration-ownedcomposersurface--disabled": [
+      {
+        "action": "visible",
+        "selector": "#surface-prompt"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {\n const roots=[...document.querySelectorAll('[data-composer-surface-fixture]')];\n if(roots.length!==1)return false;\n const records=window.__ownedComposerSurfaceRest??={};\n const result=roots.every(root=>{\n  const textarea=root.querySelector('textarea');const box=root.querySelector('[data-lody-composer-box]')??textarea?.parentElement;\n  const chipNodes=[...root.querySelectorAll('[data-mention-layer=chip] [data-mention-kind]')];\n  if(!textarea||!box||textarea.value.length===0||!root.querySelector('[data-mention-highlighter]')||chipNodes.length!==2)return false;\n  if(chipNodes.some(chip=>getComputedStyle(chip).backgroundColor==='rgba(0, 0, 0, 0)'||chip.getBoundingClientRect().height<=0))return false;\n  if(box.getBoundingClientRect().height<=0||getComputedStyle(box).visibility!=='visible')return false;\n  if(false&&(!box.hasAttribute('data-surface-local-palette')||getComputedStyle(box).getPropertyValue('--input').trim()!=='260 50% 40%'||getComputedStyle(box).getPropertyValue('--input-border').trim()!=='24 80% 56%'))return false;\n  const css=getComputedStyle(box);records[root.dataset.composerSurfaceFixture]={background:css.backgroundColor,border:css.borderTopColor,shadow:css.boxShadow,mentionSurface:css.getPropertyValue('--mention-chip-surface'),cover:chipNodes.map(n=>getComputedStyle(n).backgroundColor)};\n  return true;\n });return result;\n} "
+      }
+    ],
+    "migration-ownedcomposersurface--scoped-landing": [
+      {
+        "action": "visible",
+        "selector": "#surface-dark-prompt"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {\n const roots=[...document.querySelectorAll('[data-composer-surface-fixture]')];\n if(roots.length!==2)return false;\n const records=window.__ownedComposerSurfaceRest??={};\n const result=roots.every(root=>{\n  const textarea=root.querySelector('textarea');const box=root.querySelector('[data-lody-composer-box]')??textarea?.parentElement;\n  const chipNodes=[...root.querySelectorAll('[data-mention-layer=chip] [data-mention-kind]')];\n  if(!textarea||!box||textarea.value.length===0||!root.querySelector('[data-mention-highlighter]')||chipNodes.length!==2)return false;\n  if(chipNodes.some(chip=>getComputedStyle(chip).backgroundColor==='rgba(0, 0, 0, 0)'||chip.getBoundingClientRect().height<=0))return false;\n  if(box.getBoundingClientRect().height<=0||getComputedStyle(box).visibility!=='visible')return false;\n  if(true&&(!box.hasAttribute('data-surface-local-palette')||getComputedStyle(box).getPropertyValue('--input').trim()!=='260 50% 40%'||getComputedStyle(box).getPropertyValue('--input-border').trim()!=='24 80% 56%'))return false;\n  const css=getComputedStyle(box);records[root.dataset.composerSurfaceFixture]={background:css.backgroundColor,border:css.borderTopColor,shadow:css.boxShadow,mentionSurface:css.getPropertyValue('--mention-chip-surface'),cover:chipNodes.map(n=>getComputedStyle(n).backgroundColor)};\n  return true;\n });return result;\n} "
+      }
+    ],
+    "migration-ownedcomposersurface--scoped-session": [
+      {
+        "action": "visible",
+        "selector": "#surface-dark-prompt"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {\n const roots=[...document.querySelectorAll('[data-composer-surface-fixture]')];\n if(roots.length!==2)return false;\n const records=window.__ownedComposerSurfaceRest??={};\n const result=roots.every(root=>{\n  const textarea=root.querySelector('textarea');const box=root.querySelector('[data-lody-composer-box]')??textarea?.parentElement;\n  const chipNodes=[...root.querySelectorAll('[data-mention-layer=chip] [data-mention-kind]')];\n  if(!textarea||!box||textarea.value.length===0||!root.querySelector('[data-mention-highlighter]')||chipNodes.length!==2)return false;\n  if(chipNodes.some(chip=>getComputedStyle(chip).backgroundColor==='rgba(0, 0, 0, 0)'||chip.getBoundingClientRect().height<=0))return false;\n  if(box.getBoundingClientRect().height<=0||getComputedStyle(box).visibility!=='visible')return false;\n  if(true&&(!box.hasAttribute('data-surface-local-palette')||getComputedStyle(box).getPropertyValue('--input').trim()!=='260 50% 40%'||getComputedStyle(box).getPropertyValue('--input-border').trim()!=='24 80% 56%'))return false;\n  const css=getComputedStyle(box);records[root.dataset.composerSurfaceFixture]={background:css.backgroundColor,border:css.borderTopColor,shadow:css.boxShadow,mentionSurface:css.getPropertyValue('--mention-chip-surface'),cover:chipNodes.map(n=>getComputedStyle(n).backgroundColor)};\n  return true;\n });return result;\n} "
+      }
+    ],
+    "migration-ownedcomposersurface--scoped-dialog": [
+      {
+        "action": "visible",
+        "selector": "#surface-dark-prompt"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {\n const roots=[...document.querySelectorAll('[data-composer-surface-fixture]')];\n if(roots.length!==2)return false;\n const records=window.__ownedComposerSurfaceRest??={};\n const result=roots.every(root=>{\n  const textarea=root.querySelector('textarea');const box=root.querySelector('[data-lody-composer-box]')??textarea?.parentElement;\n  const chipNodes=[...root.querySelectorAll('[data-mention-layer=chip] [data-mention-kind]')];\n  if(!textarea||!box||textarea.value.length===0||!root.querySelector('[data-mention-highlighter]')||chipNodes.length!==2)return false;\n  if(chipNodes.some(chip=>getComputedStyle(chip).backgroundColor==='rgba(0, 0, 0, 0)'||chip.getBoundingClientRect().height<=0))return false;\n  if(box.getBoundingClientRect().height<=0||getComputedStyle(box).visibility!=='visible')return false;\n  if(true&&(!box.hasAttribute('data-surface-local-palette')||getComputedStyle(box).getPropertyValue('--input').trim()!=='260 50% 40%'||getComputedStyle(box).getPropertyValue('--input-border').trim()!=='24 80% 56%'))return false;\n  const css=getComputedStyle(box);records[root.dataset.composerSurfaceFixture]={background:css.backgroundColor,border:css.borderTopColor,shadow:css.boxShadow,mentionSurface:css.getPropertyValue('--mention-chip-surface'),cover:chipNodes.map(n=>getComputedStyle(n).backgroundColor)};\n  return true;\n });return result;\n} "
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedcomposersurface--landing": [
+      {
+        "name": "focused",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#surface-prompt"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement===document.querySelector('#surface-prompt') && [...document.querySelectorAll('[data-mention-highlighter]')].every(m=>m.scrollTop===document.querySelector('#surface-prompt').scrollTop)"
+          }
+        ]
+      },
+      {
+        "name": "file-enter",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-surface-enter]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {\n  const root=document.querySelector(\"[data-composer-surface-fixture=surface]\"),textarea=root?.querySelector('textarea'),box=root?.querySelector('[data-lody-composer-box]')??textarea?.parentElement;\n  if(!box||root.dataset.surfaceEvent!==\"dragenter\"||root.dataset.surfacePrevented!==\"true\"||root.dataset.surfaceReceived!==\"\")return false;\n  const rest=window.__ownedComposerSurfaceRest?.[root.dataset.composerSurfaceFixture];if(!rest)return false;\n  const css=getComputedStyle(box),dark=box.matches(':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))');\n  const active=true;\n  if(active&&!false){if(dark?(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border):(css.backgroundColor===rest.background||css.borderTopColor===rest.border))return false;if(css.boxShadow===rest.shadow)return false;}\n  else if(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border||css.boxShadow!==rest.shadow)return false;\n  const chips=[...root.querySelectorAll('[data-mention-layer=chip] [data-mention-kind]')];\n  return chips.length===2&&css.getPropertyValue('--mention-chip-surface')===rest.mentionSurface&&chips.every((chip,i)=>getComputedStyle(chip).backgroundColor===rest.cover[i])&&(!false||textarea.disabled);\n }"
+          }
+        ]
+      },
+      {
+        "name": "file-leave",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-surface-leave]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {\n  const root=document.querySelector(\"[data-composer-surface-fixture=surface]\"),textarea=root?.querySelector('textarea'),box=root?.querySelector('[data-lody-composer-box]')??textarea?.parentElement;\n  if(!box||root.dataset.surfaceEvent!==\"dragleave\"||root.dataset.surfacePrevented!==\"true\"||root.dataset.surfaceReceived!==\"\")return false;\n  const rest=window.__ownedComposerSurfaceRest?.[root.dataset.composerSurfaceFixture];if(!rest)return false;\n  const css=getComputedStyle(box),dark=box.matches(':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))');\n  const active=false;\n  if(active&&!false){if(dark?(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border):(css.backgroundColor===rest.background||css.borderTopColor===rest.border))return false;if(css.boxShadow===rest.shadow)return false;}\n  else if(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border||css.boxShadow!==rest.shadow)return false;\n  const chips=[...root.querySelectorAll('[data-mention-layer=chip] [data-mention-kind]')];\n  return chips.length===2&&css.getPropertyValue('--mention-chip-surface')===rest.mentionSurface&&chips.every((chip,i)=>getComputedStyle(chip).backgroundColor===rest.cover[i])&&(!false||textarea.disabled);\n }"
+          }
+        ]
+      },
+      {
+        "name": "file-drop",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-surface-enter]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {\n  const root=document.querySelector(\"[data-composer-surface-fixture=surface]\"),textarea=root?.querySelector('textarea'),box=root?.querySelector('[data-lody-composer-box]')??textarea?.parentElement;\n  if(!box||root.dataset.surfaceEvent!==\"dragenter\"||root.dataset.surfacePrevented!==\"true\"||root.dataset.surfaceReceived!==\"\")return false;\n  const rest=window.__ownedComposerSurfaceRest?.[root.dataset.composerSurfaceFixture];if(!rest)return false;\n  const css=getComputedStyle(box),dark=box.matches(':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))');\n  const active=true;\n  if(active&&!false){if(dark?(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border):(css.backgroundColor===rest.background||css.borderTopColor===rest.border))return false;if(css.boxShadow===rest.shadow)return false;}\n  else if(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border||css.boxShadow!==rest.shadow)return false;\n  const chips=[...root.querySelectorAll('[data-mention-layer=chip] [data-mention-kind]')];\n  return chips.length===2&&css.getPropertyValue('--mention-chip-surface')===rest.mentionSurface&&chips.every((chip,i)=>getComputedStyle(chip).backgroundColor===rest.cover[i])&&(!false||textarea.disabled);\n }"
+          },
+          {
+            "action": "click",
+            "selector": "[data-surface-drop]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {\n  const root=document.querySelector(\"[data-composer-surface-fixture=surface]\"),textarea=root?.querySelector('textarea'),box=root?.querySelector('[data-lody-composer-box]')??textarea?.parentElement;\n  if(!box||root.dataset.surfaceEvent!==\"drop\"||root.dataset.surfacePrevented!==\"true\"||root.dataset.surfaceReceived!==\"surface.png\")return false;\n  const rest=window.__ownedComposerSurfaceRest?.[root.dataset.composerSurfaceFixture];if(!rest)return false;\n  const css=getComputedStyle(box),dark=box.matches(':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))');\n  const active=false;\n  if(active&&!false){if(dark?(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border):(css.backgroundColor===rest.background||css.borderTopColor===rest.border))return false;if(css.boxShadow===rest.shadow)return false;}\n  else if(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border||css.boxShadow!==rest.shadow)return false;\n  const chips=[...root.querySelectorAll('[data-mention-layer=chip] [data-mention-kind]')];\n  return chips.length===2&&css.getPropertyValue('--mention-chip-surface')===rest.mentionSurface&&chips.every((chip,i)=>getComputedStyle(chip).backgroundColor===rest.cover[i])&&(!false||textarea.disabled);\n }"
+          }
+        ]
+      }
+    ],
+    "migration-ownedcomposersurface--session": [
+      {
+        "name": "focused",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#surface-prompt"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement===document.querySelector('#surface-prompt') && [...document.querySelectorAll('[data-mention-highlighter]')].every(m=>m.scrollTop===document.querySelector('#surface-prompt').scrollTop)"
+          }
+        ]
+      },
+      {
+        "name": "file-enter",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-surface-enter]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {\n  const root=document.querySelector(\"[data-composer-surface-fixture=surface]\"),textarea=root?.querySelector('textarea'),box=root?.querySelector('[data-lody-composer-box]')??textarea?.parentElement;\n  if(!box||root.dataset.surfaceEvent!==\"dragenter\"||root.dataset.surfacePrevented!==\"true\"||root.dataset.surfaceReceived!==\"\")return false;\n  const rest=window.__ownedComposerSurfaceRest?.[root.dataset.composerSurfaceFixture];if(!rest)return false;\n  const css=getComputedStyle(box),dark=box.matches(':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))');\n  const active=true;\n  if(active&&!false){if(dark?(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border):(css.backgroundColor===rest.background||css.borderTopColor===rest.border))return false;if(css.boxShadow===rest.shadow)return false;}\n  else if(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border||css.boxShadow!==rest.shadow)return false;\n  const chips=[...root.querySelectorAll('[data-mention-layer=chip] [data-mention-kind]')];\n  return chips.length===2&&css.getPropertyValue('--mention-chip-surface')===rest.mentionSurface&&chips.every((chip,i)=>getComputedStyle(chip).backgroundColor===rest.cover[i])&&(!false||textarea.disabled);\n }"
+          }
+        ]
+      },
+      {
+        "name": "file-leave",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-surface-leave]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {\n  const root=document.querySelector(\"[data-composer-surface-fixture=surface]\"),textarea=root?.querySelector('textarea'),box=root?.querySelector('[data-lody-composer-box]')??textarea?.parentElement;\n  if(!box||root.dataset.surfaceEvent!==\"dragleave\"||root.dataset.surfacePrevented!==\"true\"||root.dataset.surfaceReceived!==\"\")return false;\n  const rest=window.__ownedComposerSurfaceRest?.[root.dataset.composerSurfaceFixture];if(!rest)return false;\n  const css=getComputedStyle(box),dark=box.matches(':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))');\n  const active=false;\n  if(active&&!false){if(dark?(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border):(css.backgroundColor===rest.background||css.borderTopColor===rest.border))return false;if(css.boxShadow===rest.shadow)return false;}\n  else if(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border||css.boxShadow!==rest.shadow)return false;\n  const chips=[...root.querySelectorAll('[data-mention-layer=chip] [data-mention-kind]')];\n  return chips.length===2&&css.getPropertyValue('--mention-chip-surface')===rest.mentionSurface&&chips.every((chip,i)=>getComputedStyle(chip).backgroundColor===rest.cover[i])&&(!false||textarea.disabled);\n }"
+          }
+        ]
+      },
+      {
+        "name": "file-drop",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-surface-enter]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {\n  const root=document.querySelector(\"[data-composer-surface-fixture=surface]\"),textarea=root?.querySelector('textarea'),box=root?.querySelector('[data-lody-composer-box]')??textarea?.parentElement;\n  if(!box||root.dataset.surfaceEvent!==\"dragenter\"||root.dataset.surfacePrevented!==\"true\"||root.dataset.surfaceReceived!==\"\")return false;\n  const rest=window.__ownedComposerSurfaceRest?.[root.dataset.composerSurfaceFixture];if(!rest)return false;\n  const css=getComputedStyle(box),dark=box.matches(':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))');\n  const active=true;\n  if(active&&!false){if(dark?(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border):(css.backgroundColor===rest.background||css.borderTopColor===rest.border))return false;if(css.boxShadow===rest.shadow)return false;}\n  else if(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border||css.boxShadow!==rest.shadow)return false;\n  const chips=[...root.querySelectorAll('[data-mention-layer=chip] [data-mention-kind]')];\n  return chips.length===2&&css.getPropertyValue('--mention-chip-surface')===rest.mentionSurface&&chips.every((chip,i)=>getComputedStyle(chip).backgroundColor===rest.cover[i])&&(!false||textarea.disabled);\n }"
+          },
+          {
+            "action": "click",
+            "selector": "[data-surface-drop]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {\n  const root=document.querySelector(\"[data-composer-surface-fixture=surface]\"),textarea=root?.querySelector('textarea'),box=root?.querySelector('[data-lody-composer-box]')??textarea?.parentElement;\n  if(!box||root.dataset.surfaceEvent!==\"drop\"||root.dataset.surfacePrevented!==\"true\"||root.dataset.surfaceReceived!==\"surface.png\")return false;\n  const rest=window.__ownedComposerSurfaceRest?.[root.dataset.composerSurfaceFixture];if(!rest)return false;\n  const css=getComputedStyle(box),dark=box.matches(':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))');\n  const active=false;\n  if(active&&!false){if(dark?(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border):(css.backgroundColor===rest.background||css.borderTopColor===rest.border))return false;if(css.boxShadow===rest.shadow)return false;}\n  else if(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border||css.boxShadow!==rest.shadow)return false;\n  const chips=[...root.querySelectorAll('[data-mention-layer=chip] [data-mention-kind]')];\n  return chips.length===2&&css.getPropertyValue('--mention-chip-surface')===rest.mentionSurface&&chips.every((chip,i)=>getComputedStyle(chip).backgroundColor===rest.cover[i])&&(!false||textarea.disabled);\n }"
+          }
+        ]
+      }
+    ],
+    "migration-ownedcomposersurface--dialog": [
+      {
+        "name": "focused",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#surface-prompt"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement===document.querySelector('#surface-prompt')"
+          }
+        ]
+      },
+      {
+        "name": "file-ignored",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-surface-enter]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {\n  const root=document.querySelector(\"[data-composer-surface-fixture=surface]\"),textarea=root?.querySelector('textarea'),box=root?.querySelector('[data-lody-composer-box]')??textarea?.parentElement;\n  if(!box||root.dataset.surfaceEvent!==\"dragenter\"||root.dataset.surfacePrevented!==\"false\"||root.dataset.surfaceReceived!==\"\")return false;\n  const rest=window.__ownedComposerSurfaceRest?.[root.dataset.composerSurfaceFixture];if(!rest)return false;\n  const css=getComputedStyle(box),dark=box.matches(':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))');\n  const active=true;\n  if(active&&!true){if(dark?(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border):(css.backgroundColor===rest.background||css.borderTopColor===rest.border))return false;if(css.boxShadow===rest.shadow)return false;}\n  else if(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border||css.boxShadow!==rest.shadow)return false;\n  const chips=[...root.querySelectorAll('[data-mention-layer=chip] [data-mention-kind]')];\n  return chips.length===2&&css.getPropertyValue('--mention-chip-surface')===rest.mentionSurface&&chips.every((chip,i)=>getComputedStyle(chip).backgroundColor===rest.cover[i])&&true;\n }"
+          }
+        ]
+      }
+    ],
+    "migration-ownedcomposersurface--disabled": [
+      {
+        "name": "file-ignored",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-surface-enter]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {\n  const root=document.querySelector(\"[data-composer-surface-fixture=surface]\"),textarea=root?.querySelector('textarea'),box=root?.querySelector('[data-lody-composer-box]')??textarea?.parentElement;\n  if(!box||root.dataset.surfaceEvent!==\"dragenter\"||root.dataset.surfacePrevented!==\"false\"||root.dataset.surfaceReceived!==\"\")return false;\n  const rest=window.__ownedComposerSurfaceRest?.[root.dataset.composerSurfaceFixture];if(!rest)return false;\n  const css=getComputedStyle(box),dark=box.matches(':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))');\n  const active=true;\n  if(active&&!true){if(dark?(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border):(css.backgroundColor===rest.background||css.borderTopColor===rest.border))return false;if(css.boxShadow===rest.shadow)return false;}\n  else if(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border||css.boxShadow!==rest.shadow)return false;\n  const chips=[...root.querySelectorAll('[data-mention-layer=chip] [data-mention-kind]')];\n  return chips.length===2&&css.getPropertyValue('--mention-chip-surface')===rest.mentionSurface&&chips.every((chip,i)=>getComputedStyle(chip).backgroundColor===rest.cover[i])&&(!true||textarea.disabled);\n }"
+          }
+        ]
+      }
+    ],
+    "migration-ownedcomposersurface--scoped-landing": [
+      {
+        "name": "dark-file-enter",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-composer-surface-fixture=surface-dark] [data-surface-enter]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {\n  const root=document.querySelector(\"[data-composer-surface-fixture=surface-dark]\"),textarea=root?.querySelector('textarea'),box=root?.querySelector('[data-lody-composer-box]')??textarea?.parentElement;\n  if(!box||root.dataset.surfaceEvent!==\"dragenter\"||root.dataset.surfacePrevented!==\"true\"||root.dataset.surfaceReceived!==\"\")return false;\n  const rest=window.__ownedComposerSurfaceRest?.[root.dataset.composerSurfaceFixture];if(!rest)return false;\n  const css=getComputedStyle(box),dark=box.matches(':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))');\n  const active=true;\n  if(active&&!false){if(dark?(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border):(css.backgroundColor===rest.background||css.borderTopColor===rest.border))return false;if(css.boxShadow===rest.shadow)return false;}\n  else if(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border||css.boxShadow!==rest.shadow)return false;\n  const chips=[...root.querySelectorAll('[data-mention-layer=chip] [data-mention-kind]')];\n  return chips.length===2&&css.getPropertyValue('--mention-chip-surface')===rest.mentionSurface&&chips.every((chip,i)=>getComputedStyle(chip).backgroundColor===rest.cover[i])&&(!false||textarea.disabled);\n }"
+          }
+        ]
+      },
+      {
+        "name": "dark-file-drop",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-composer-surface-fixture=surface-dark] [data-surface-drop]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {\n  const root=document.querySelector(\"[data-composer-surface-fixture=surface-dark]\"),textarea=root?.querySelector('textarea'),box=root?.querySelector('[data-lody-composer-box]')??textarea?.parentElement;\n  if(!box||root.dataset.surfaceEvent!==\"drop\"||root.dataset.surfacePrevented!==\"true\"||root.dataset.surfaceReceived!==\"surface.png\")return false;\n  const rest=window.__ownedComposerSurfaceRest?.[root.dataset.composerSurfaceFixture];if(!rest)return false;\n  const css=getComputedStyle(box),dark=box.matches(':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))');\n  const active=false;\n  if(active&&!false){if(dark?(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border):(css.backgroundColor===rest.background||css.borderTopColor===rest.border))return false;if(css.boxShadow===rest.shadow)return false;}\n  else if(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border||css.boxShadow!==rest.shadow)return false;\n  const chips=[...root.querySelectorAll('[data-mention-layer=chip] [data-mention-kind]')];\n  return chips.length===2&&css.getPropertyValue('--mention-chip-surface')===rest.mentionSurface&&chips.every((chip,i)=>getComputedStyle(chip).backgroundColor===rest.cover[i])&&(!false||textarea.disabled);\n }"
+          }
+        ]
+      }
+    ],
+    "migration-ownedcomposersurface--scoped-session": [
+      {
+        "name": "dark-file-enter",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-composer-surface-fixture=surface-dark] [data-surface-enter]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {\n  const root=document.querySelector(\"[data-composer-surface-fixture=surface-dark]\"),textarea=root?.querySelector('textarea'),box=root?.querySelector('[data-lody-composer-box]')??textarea?.parentElement;\n  if(!box||root.dataset.surfaceEvent!==\"dragenter\"||root.dataset.surfacePrevented!==\"true\"||root.dataset.surfaceReceived!==\"\")return false;\n  const rest=window.__ownedComposerSurfaceRest?.[root.dataset.composerSurfaceFixture];if(!rest)return false;\n  const css=getComputedStyle(box),dark=box.matches(':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))');\n  const active=true;\n  if(active&&!false){if(dark?(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border):(css.backgroundColor===rest.background||css.borderTopColor===rest.border))return false;if(css.boxShadow===rest.shadow)return false;}\n  else if(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border||css.boxShadow!==rest.shadow)return false;\n  const chips=[...root.querySelectorAll('[data-mention-layer=chip] [data-mention-kind]')];\n  return chips.length===2&&css.getPropertyValue('--mention-chip-surface')===rest.mentionSurface&&chips.every((chip,i)=>getComputedStyle(chip).backgroundColor===rest.cover[i])&&(!false||textarea.disabled);\n }"
+          }
+        ]
+      },
+      {
+        "name": "dark-file-drop",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-composer-surface-fixture=surface-dark] [data-surface-drop]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {\n  const root=document.querySelector(\"[data-composer-surface-fixture=surface-dark]\"),textarea=root?.querySelector('textarea'),box=root?.querySelector('[data-lody-composer-box]')??textarea?.parentElement;\n  if(!box||root.dataset.surfaceEvent!==\"drop\"||root.dataset.surfacePrevented!==\"true\"||root.dataset.surfaceReceived!==\"surface.png\")return false;\n  const rest=window.__ownedComposerSurfaceRest?.[root.dataset.composerSurfaceFixture];if(!rest)return false;\n  const css=getComputedStyle(box),dark=box.matches(':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))');\n  const active=false;\n  if(active&&!false){if(dark?(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border):(css.backgroundColor===rest.background||css.borderTopColor===rest.border))return false;if(css.boxShadow===rest.shadow)return false;}\n  else if(css.backgroundColor!==rest.background||css.borderTopColor!==rest.border||css.boxShadow!==rest.shadow)return false;\n  const chips=[...root.querySelectorAll('[data-mention-layer=chip] [data-mention-kind]')];\n  return chips.length===2&&css.getPropertyValue('--mention-chip-surface')===rest.mentionSurface&&chips.every((chip,i)=>getComputedStyle(chip).backgroundColor===rest.cover[i])&&(!false||textarea.disabled);\n }"
+          }
+        ]
+      }
+    ]
+  }
+}

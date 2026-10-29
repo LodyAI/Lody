@@ -1,0 +1,83 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844,
+      "device": "iPhone 13"
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 720,
+      "device": "iPhone SE"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "ids": ["mobile-mobileprojectskills--long-description"],
+  "ready": {
+    "mobile-mobileprojectskills--long-description": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-skills-fixture]"
+      }
+    ]
+  },
+  "states": {
+    "mobile-mobileprojectskills--long-description": [
+      {
+        "name": "detail-open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-owned-skills-fixture] button:has-text(\"code-review\")"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-owned-skills-action=\"Detail .agents/skills/code-review\"]"
+          },
+          {
+            "action": "visible",
+            "role": "heading",
+            "name": "When to use",
+            "exact": true
+          },
+          {
+            "action": "visible",
+            "selector": "[data-owned-skills-fixture] > div > header > button"
+          }
+        ]
+      },
+      {
+        "name": "detail-back",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-owned-skills-fixture] > div > header > button"
+          },
+          {
+            "action": "hidden",
+            "role": "heading",
+            "name": "When to use",
+            "exact": true
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-owned-skills-fixture] > div > header > button"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-owned-skills-fixture] button:has-text(\"code-review\")"
+          }
+        ]
+      }
+    ]
+  }
+}

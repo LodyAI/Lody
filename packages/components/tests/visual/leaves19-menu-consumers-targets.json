@@ -1,0 +1,178 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "narrow",
+      "width": 390,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "sessions-sessionheadermenu--git-hub-worktree",
+    "sessions-sessionheadermenu--owner-transfer-pending",
+    "sessions-sessionsidepaneltabbar--unified-tabs",
+    "sessions-sessionfileactionsmenu--local-machine",
+    "sessions-sessionfileactionsmenu--remote-machine"
+  ],
+  "ready": {
+    "sessions-sessionheadermenu--git-hub-worktree": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "More actions"
+      },
+      {
+        "action": "visible",
+        "role": "menu"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const menus=[...document.querySelectorAll('[role=menu]')].filter(e=>e.getBoundingClientRect().width>0&&getComputedStyle(e).opacity==='1');if(menus.length!==1)return false;const p=menus.at(-1),s=getComputedStyle(p);if(s.minWidth!==\"200px\")return false;if(s.maxWidth!==\"290px\")return false;  if(!p.textContent.includes(\"Copy\"))return false; const finite=p.getAnimations({subtree:true}).filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running')||p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style')||document.fonts.status!=='loaded'||[...p.querySelectorAll('img')].some(i=>!i.complete))return false;const signature=JSON.stringify(menus.flatMap(p=>[p,...p.querySelectorAll('*')].map(e=>{const r=e.getBoundingClientRect();return[r.x,r.y,r.width,r.height]})));const state=window.__leaves19MenuReady??={last:'',stable:0};state.stable=state.last===signature?state.stable+1:0;state.last=signature;window.__leaves19MenuReady=state;return state.stable>=3;}"
+      }
+    ],
+    "sessions-sessionheadermenu--owner-transfer-pending": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "More actions"
+      },
+      {
+        "action": "visible",
+        "role": "menu"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const menus=[...document.querySelectorAll('[role=menu]')].filter(e=>e.getBoundingClientRect().width>0&&getComputedStyle(e).opacity==='1');if(menus.length!==1)return false;const p=menus.at(-1),s=getComputedStyle(p);if(s.minWidth!==\"200px\")return false;if(s.maxWidth!==\"290px\")return false;  if(!p.textContent.includes(\"Copy\"))return false; const finite=p.getAnimations({subtree:true}).filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running')||p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style')||document.fonts.status!=='loaded'||[...p.querySelectorAll('img')].some(i=>!i.complete))return false;const signature=JSON.stringify(menus.flatMap(p=>[p,...p.querySelectorAll('*')].map(e=>{const r=e.getBoundingClientRect();return[r.x,r.y,r.width,r.height]})));const state=window.__leaves19MenuReady??={last:'',stable:0};state.stable=state.last===signature?state.stable+1:0;state.last=signature;window.__leaves19MenuReady=state;return state.stable>=3;}"
+      }
+    ],
+    "sessions-sessionsidepaneltabbar--unified-tabs": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Add panel"
+      },
+      {
+        "action": "visible",
+        "role": "menu"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const menus=[...document.querySelectorAll('[role=menu]')].filter(e=>e.getBoundingClientRect().width>0&&getComputedStyle(e).opacity==='1');if(menus.length!==1)return false;const p=menus.at(-1),s=getComputedStyle(p);if(s.minWidth!==\"160px\")return false;  if(!p.textContent.includes(\"Side Chat\"))return false; const finite=p.getAnimations({subtree:true}).filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running')||p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style')||document.fonts.status!=='loaded'||[...p.querySelectorAll('img')].some(i=>!i.complete))return false;const signature=JSON.stringify(menus.flatMap(p=>[p,...p.querySelectorAll('*')].map(e=>{const r=e.getBoundingClientRect();return[r.x,r.y,r.width,r.height]})));const state=window.__leaves19MenuReady??={last:'',stable:0};state.stable=state.last===signature?state.stable+1:0;state.last=signature;window.__leaves19MenuReady=state;return state.stable>=3;}"
+      }
+    ],
+    "sessions-sessionfileactionsmenu--local-machine": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "File actions"
+      },
+      {
+        "action": "visible",
+        "role": "menu"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const menus=[...document.querySelectorAll('[role=menu]')].filter(e=>e.getBoundingClientRect().width>0&&getComputedStyle(e).opacity==='1');if(menus.length!==1)return false;const p=menus.at(-1),s=getComputedStyle(p);if(s.minWidth!==\"190px\")return false;  if(!p.textContent.includes(\"Show in Finder\"))return false; const finite=p.getAnimations({subtree:true}).filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running')||p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style')||document.fonts.status!=='loaded'||[...p.querySelectorAll('img')].some(i=>!i.complete))return false;const signature=JSON.stringify(menus.flatMap(p=>[p,...p.querySelectorAll('*')].map(e=>{const r=e.getBoundingClientRect();return[r.x,r.y,r.width,r.height]})));const state=window.__leaves19MenuReady??={last:'',stable:0};state.stable=state.last===signature?state.stable+1:0;state.last=signature;window.__leaves19MenuReady=state;return state.stable>=3;}"
+      }
+    ],
+    "sessions-sessionfileactionsmenu--remote-machine": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "File actions"
+      },
+      {
+        "action": "visible",
+        "role": "menu"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const menus=[...document.querySelectorAll('[role=menu]')].filter(e=>e.getBoundingClientRect().width>0&&getComputedStyle(e).opacity==='1');if(menus.length!==1)return false;const p=menus.at(-1),s=getComputedStyle(p);if(s.minWidth!==\"190px\")return false;  if(!p.textContent.includes(\"Download file\"))return false; const finite=p.getAnimations({subtree:true}).filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running')||p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style')||document.fonts.status!=='loaded'||[...p.querySelectorAll('img')].some(i=>!i.complete))return false;const signature=JSON.stringify(menus.flatMap(p=>[p,...p.querySelectorAll('*')].map(e=>{const r=e.getBoundingClientRect();return[r.x,r.y,r.width,r.height]})));const state=window.__leaves19MenuReady??={last:'',stable:0};state.stable=state.last===signature?state.stable+1:0;state.last=signature;window.__leaves19MenuReady=state;return state.stable>=3;}"
+      }
+    ]
+  },
+  "states": {
+    "sessions-sessionheadermenu--git-hub-worktree": [
+      {
+        "name": "copy-submenu",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "menuitem",
+            "name": "Copy"
+          },
+          {
+            "action": "press",
+            "role": "menuitem",
+            "name": "Copy",
+            "key": "ArrowRight"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const menus=[...document.querySelectorAll('[role=menu]')].filter(e=>e.getBoundingClientRect().width>0&&getComputedStyle(e).opacity==='1');if(menus.length!==2)return false;const p=menus.at(-1),s=getComputedStyle(p);if(s.minWidth!==\"200px\")return false;  if(!p.textContent.includes(\"Copy base branch\"))return false; const finite=p.getAnimations({subtree:true}).filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running')||p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style')||document.fonts.status!=='loaded'||[...p.querySelectorAll('img')].some(i=>!i.complete))return false;const signature=JSON.stringify(menus.flatMap(p=>[p,...p.querySelectorAll('*')].map(e=>{const r=e.getBoundingClientRect();return[r.x,r.y,r.width,r.height]})));const state=window.__leaves19MenuReady??={last:'',stable:0};state.stable=state.last===signature?state.stable+1:0;state.last=signature;window.__leaves19MenuReady=state;return state.stable>=3;}"
+          }
+        ]
+      },
+      {
+        "name": "fork-submenu",
+        "steps": [
+          {
+            "action": "press",
+            "role": "menuitem",
+            "name": "Copy base branch",
+            "key": "Escape"
+          },
+          {
+            "action": "focus",
+            "role": "menuitem",
+            "name": "Fork session"
+          },
+          {
+            "action": "press",
+            "role": "menuitem",
+            "name": "Fork session",
+            "key": "ArrowRight"
+          },
+          {
+            "action": "focus",
+            "role": "menuitem",
+            "name": "Copy context as Markdown"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const menus=[...document.querySelectorAll('[role=menu]')].filter(e=>e.getBoundingClientRect().width>0&&getComputedStyle(e).opacity==='1');if(menus.length!==2)return false;const p=menus.at(-1),s=getComputedStyle(p);if(s.minWidth!==\"208px\")return false;  if(!p.textContent.includes(\"worktree\"))return false; if([...document.querySelectorAll('body *')].some(e=>!e.childElementCount&&e.textContent.startsWith('Opens a new tab in this session')&&e.getBoundingClientRect().width>0&&getComputedStyle(e).opacity!=='0'&&getComputedStyle(e).visibility!=='hidden'))return false;const finite=p.getAnimations({subtree:true}).filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running')||p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style')||document.fonts.status!=='loaded'||[...p.querySelectorAll('img')].some(i=>!i.complete))return false;const signature=JSON.stringify(menus.flatMap(p=>[p,...p.querySelectorAll('*')].map(e=>{const r=e.getBoundingClientRect();return[r.x,r.y,r.width,r.height]})));const state=window.__leaves19MenuReady??={last:'',stable:0};state.stable=state.last===signature?state.stable+1:0;state.last=signature;window.__leaves19MenuReady=state;return state.stable>=3;}"
+          }
+        ]
+      }
+    ],
+    "sessions-sessionheadermenu--owner-transfer-pending": [
+      {
+        "name": "owner-submenu",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "menuitem",
+            "name": "Change owner"
+          },
+          {
+            "action": "press",
+            "role": "menuitem",
+            "name": "Change owner",
+            "key": "ArrowRight"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const menus=[...document.querySelectorAll('[role=menu]')].filter(e=>e.getBoundingClientRect().width>0&&getComputedStyle(e).opacity==='1');if(menus.length!==2)return false;const p=menus.at(-1),s=getComputedStyle(p);if(s.minWidth!==\"200px\")return false;if(s.maxWidth!==\"280px\")return false; if(s.maxHeight!==\"288px\")return false; if(!p.textContent.includes(\"Ada Lovelace\"))return false; const finite=p.getAnimations({subtree:true}).filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running')||p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style')||document.fonts.status!=='loaded'||[...p.querySelectorAll('img')].some(i=>!i.complete))return false;const signature=JSON.stringify(menus.flatMap(p=>[p,...p.querySelectorAll('*')].map(e=>{const r=e.getBoundingClientRect();return[r.x,r.y,r.width,r.height]})));const state=window.__leaves19MenuReady??={last:'',stable:0};state.stable=state.last===signature?state.stable+1:0;state.last=signature;window.__leaves19MenuReady=state;return state.stable>=3;}"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -27,6 +27,14 @@ product surface).
 `@lody/ui`'s primitives keep reading `colors`: that is the design system's
 palette, and a primitive is not a product surface.
 
+`themeColors` aliases resolve where their group is declared. A surface that pins
+its own CSS palette, such as a share card, applies the complete `scopedThemeColors`
+on that same scope alongside its UI/conversation themes. An isolated spacing
+scope likewise applies `scopedThemeSpace`. Both reuse their original defaults;
+they re-evaluate dependencies locally instead of changing the app palette or scale.
+Further descendant overrides still need their own scope or an element-local
+expression; a parent theme does not re-read them automatically.
+
 ## Colour map
 
 | Tailwind                                     | StyleX                                                      |
@@ -118,6 +126,14 @@ class the winner and the migration invisible.
 `className` stays available on a migrated component for layout and interaction
 constraints from a caller. It is not a place to re-state the component's own
 visual design.
+
+[`message-action-button.stylex.ts`](message-action-button.stylex.ts) owns the
+local palette for the reviewed message action Buttons. Its complete typed
+`inherit` maps preserve parent layout, material and focus tokens while changing
+only the existing color roles. These themes assume the fixed `currentColor`
+glyph/label subtrees audited by their callers; they are not a general Button skin.
+The [migration guide](MIGRATION.md#ownership-and-cascade) records the same-element
+inline token and portal limits.
 
 ## What a migration produces
 

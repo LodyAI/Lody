@@ -31,6 +31,9 @@ import {
   themeSpace,
 } from '../../style/theme-scale.stylex';
 
+const DARK_SCOPE =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+
 const styles = stylex.create({
   card: {
     display: 'flex',
@@ -43,8 +46,21 @@ const styles = stylex.create({
     borderColor: {
       default: 'hsl(var(--foreground) / 0.1)',
       ':focus-within': 'hsl(var(--foreground) / 0.25)',
+      [DARK_SCOPE]: {
+        default: 'hsl(var(--input-border) / 1)',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in oklab, hsl(var(--input-border) / 1) 70%, transparent)',
+        ':focus-within': 'hsl(var(--input-border) / 1)',
+      },
     },
-    backgroundColor: themeColors.background,
+    backgroundColor: {
+      default: themeColors.background,
+      [DARK_SCOPE]: {
+        default: 'hsl(var(--input) / 1)',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in oklab, hsl(var(--input) / 1) 90%, transparent)',
+      },
+    },
     paddingInline: themeSpace[3],
     paddingBlock: themeSpace[2.5],
     boxShadow: '0 1px 2px hsl(0 0% 0%/0.04), 0 8px 24px -16px hsl(0 0% 0%/0.12)',
@@ -164,17 +180,7 @@ function UserMessageEditorContent({
   }, [canSave, expandMentions, onSave, value]);
 
   return (
-    <div
-      className={clsx(
-        // The dark half of the card has no StyleX equivalent, so it stays a
-        // Tailwind class on this element.
-        'dark:border-input-border/70',
-        'dark:bg-input/90',
-        'dark:focus-within:border-input-border',
-        stylex.props(styles.card).className
-      )}
-      aria-busy={isSaving || undefined}
-    >
+    <div {...stylex.props(styles.card)} aria-busy={isSaving || undefined}>
       <CombinedMentionTextarea
         ref={focusAtEnd}
         // Bare textarea inside the editor card — the card is the well.
@@ -241,7 +247,7 @@ function UserMessageEditorContent({
           disabled={!canSave}
           onClick={handleSave}
         >
-          {isSaving ? <Spinner className="h-3.5 w-3.5" /> : null}
+          {isSaving ? <Spinner diameter="calc(var(--spacing) * 3.5)" /> : null}
           {t('sessions.send', 'Send')}
         </Button>
       </div>

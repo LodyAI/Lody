@@ -427,7 +427,9 @@ function MobileCloudIntegrationsSettings() {
                 }}
                 disabled={showGitHubConnectSpinner || !workspaceAuthReady}
               >
-                {showGitHubConnectSpinner ? <Spinner className="h-3.5 w-3.5" /> : null}
+                {showGitHubConnectSpinner ? (
+                  <Spinner diameter="calc(var(--spacing) * 3.5)" />
+                ) : null}
                 {t('settings.integrations.github.connect')}
                 {!showGitHubConnectSpinner ? (
                   <ArrowUpRight {...stylex.props(styles.buttonArrow)} />
@@ -458,7 +460,7 @@ function MobileCloudIntegrationsSettings() {
             )}
           >
             {updatingPersonalPreference ? (
-              <Spinner className="h-4 w-4 text-muted-foreground" />
+              <Spinner diameter="calc(var(--spacing) * 4)" className="text-muted-foreground" />
             ) : (
               <Switch
                 checked={personalIdentityEnabled}
@@ -534,7 +536,7 @@ function MobileCloudIntegrationsSettings() {
         ) : null}
         {workspaceReposLoading ? (
           <div {...stylex.props(styles.notice)}>
-            <Spinner className="h-4 w-4" />
+            <Spinner diameter="calc(var(--spacing) * 4)" />
             {t('settings.integrations.github.loading')}
           </div>
         ) : repos.length === 0 ? (

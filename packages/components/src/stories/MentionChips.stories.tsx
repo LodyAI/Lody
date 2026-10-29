@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 
 import {
   getComposerMentionChip,
@@ -7,7 +7,7 @@ import {
 } from '@/components/mentions/mention-chips';
 import { cn } from '@/lib/utils';
 import { Mention, MentionInput, MentionLabel } from '@/ui/mention';
-import type { Mention as MentionRange } from '@/ui/mention/index';
+import { Root as MentionRoot, type Mention as MentionRange } from '@/ui/mention/index';
 
 /**
  * Prototype for icon chips in the plain-textarea composer.
@@ -70,18 +70,21 @@ function ComposerBox({
   label,
   fixture: initial,
   chips,
+  unwrapped = false,
 }: {
   label: string;
   fixture: Fixture;
   chips: boolean;
+  unwrapped?: boolean;
 }) {
   const [value, setValue] = useState(initial.text);
   const [mentions, setMentions] = useState(initial.mentions);
+  const Root = unwrapped ? MentionRoot : Mention;
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-1.5" data-mention-fixture-box={label}>
       <div className="font-medium text-muted-foreground text-xs">{label}</div>
-      <Mention
+      <Root
         inputValue={value}
         onInputValueChange={setValue}
         mentions={mentions}
@@ -105,18 +108,28 @@ function ComposerBox({
           rows={3}
           className="resize-none border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0"
         />
-      </Mention>
+      </Root>
     </div>
   );
 }
 
-function Board({ chips }: { chips: boolean }) {
+function Board({ chips, unwrapped = false }: { chips: boolean; unwrapped?: boolean }) {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6 bg-background p-8">
-      <ComposerBox label="Mixed kinds" fixture={MIXED} chips={chips} />
-      <ComposerBox label="Short paths" fixture={SHORT} chips={chips} />
-      <ComposerBox label="Long paths (a chip has to wrap)" fixture={WRAPPING} chips={chips} />
-      <ComposerBox label="Slash command at offset 0" fixture={SLASH} chips={chips} />
+      <ComposerBox label="Mixed kinds" fixture={MIXED} chips={chips} unwrapped={unwrapped} />
+      <ComposerBox label="Short paths" fixture={SHORT} chips={chips} unwrapped={unwrapped} />
+      <ComposerBox
+        label="Long paths (a chip has to wrap)"
+        fixture={WRAPPING}
+        chips={chips}
+        unwrapped={unwrapped}
+      />
+      <ComposerBox
+        label="Slash command at offset 0"
+        fixture={SLASH}
+        chips={chips}
+        unwrapped={unwrapped}
+      />
     </div>
   );
 }
@@ -143,4 +156,23 @@ export const IconChips: Story = {
 export const IconChipsDark: Story = {
   args: { chips: true },
   globals: { theme: 'dark' },
+};
+
+export const ScopeTokens: Story = {
+  args: { chips: false, unwrapped: true },
+  render: (args) => (
+    <div
+      data-mention-token-scope=""
+      style={
+        {
+          '--foreground': '153 43% 26%',
+          '--primary': '277 64% 41%',
+          '--radius-md': '13px',
+          '--radius-sm': '7px',
+        } as CSSProperties
+      }
+    >
+      <Board {...args} />
+    </div>
+  ),
 };

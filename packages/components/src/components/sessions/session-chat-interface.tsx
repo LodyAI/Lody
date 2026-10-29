@@ -211,6 +211,12 @@ import {
 import { withClassName } from '@/lib/stylex';
 import { cn } from '@/lib/utils';
 import { colors } from '@lody/ui/tokens/colors.stylex';
+import {
+  messageActionButtonTheme,
+  messageActionInkTheme,
+  messageActionLabelTheme,
+  messageActionMutedInkTheme,
+} from '../../style/message-action-button.stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontSize, themeLineHeight, themeSpace } from '../../style/theme-scale.stylex';
 import * as stylex from '@stylexjs/stylex';
@@ -1318,8 +1324,7 @@ export type SessionOpenedByMenuState = {
   onOpenSession: (target: SessionNavigationTarget) => void;
 };
 
-const SESSION_HEADER_MENU_CONTENT_CLASS =
-  'min-w-[200px] max-w-[290px] [&_[role=menuitem]]:min-h-8 [&_[role=menuitem]]:py-1.5';
+const SESSION_HEADER_MENU_CONTENT_CLASS = '[&_[role=menuitem]]:min-h-8 [&_[role=menuitem]]:py-1.5';
 /** Session header "···" menu — context, visibility, sharing, and session actions. */
 export function SessionHeaderMenu({
   session,
@@ -1438,7 +1443,12 @@ export function SessionHeaderMenu({
             <Menu.SubmenuTrigger icon={GitBranchPlus}>
               {t('sessions.openedBy.openedSessions', 'Opened sessions')} ({openedSessions.length})
             </Menu.SubmenuTrigger>
-            <Menu.Content className="max-h-72 min-w-[200px] max-w-[280px] overflow-y-auto">
+            <Menu.Content
+              maxHeight="calc(var(--spacing) * 72)"
+              minWidth={200}
+              maxWidth={280}
+              className="overflow-y-auto"
+            >
               {openedSessions.map((opened) => (
                 <Menu.Item
                   key={opened.sessionId}
@@ -1529,7 +1539,11 @@ export function SessionHeaderMenu({
             <Button
               variant="ghost"
               icon
-              className="h-7 w-7 shrink-0 text-muted-foreground"
+              height="calc(var(--spacing) * 7)"
+              width="calc(var(--spacing) * 7)"
+              className={
+                stylex.props(messageActionLabelTheme, messageActionMutedInkTheme).className
+              }
               aria-label={t('sessions.moreActions', 'More actions')}
             >
               <Ellipsis {...stylex.props(styles.historyTriggerIcon)} />
@@ -1539,13 +1553,20 @@ export function SessionHeaderMenu({
           <Button
             variant="ghost"
             icon
-            className="h-7 w-7 shrink-0 text-muted-foreground"
+            height="calc(var(--spacing) * 7)"
+            width="calc(var(--spacing) * 7)"
+            className="shrink-0 text-muted-foreground"
             aria-label={t('sessions.moreActions', 'More actions')}
           >
             <Ellipsis {...stylex.props(styles.historyTriggerIcon)} />
           </Button>
         </Menu.Trigger>
-        <Menu.Content align="end" className={SESSION_HEADER_MENU_CONTENT_CLASS}>
+        <Menu.Content
+          align="end"
+          minWidth={200}
+          maxWidth={290}
+          className={SESSION_HEADER_MENU_CONTENT_CLASS}
+        >
           <SessionWindowMenuItem sessionId={session.id} dropdown />
           {/* Identity stays inline: a group label wastes a row, and a submenu hides
               repo/branch/machine behind another step. */}
@@ -1669,7 +1690,10 @@ export function SessionHeaderMenu({
                             )}
                           />
                         ) : (
-                          <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                          <Spinner
+                            diameter="calc(var(--spacing) * 3.5)"
+                            className="text-muted-foreground"
+                          />
                         )}
                         <span
                           {...stylex.props(
@@ -1746,7 +1770,7 @@ export function SessionHeaderMenu({
               >
                 {t('sessions.forkSession', 'Fork session')}
               </Menu.SubmenuTrigger>
-              <Menu.Content className="min-w-[13rem]">
+              <Menu.Content minWidth="13rem">
                 {onFork &&
                   !isArchived &&
                   getSessionForkDestinationOptions(t, forkWorktreeAvailability).map((option) => {
@@ -1818,7 +1842,12 @@ export function SessionHeaderMenu({
               <Menu.SubmenuTrigger icon={UserRoundCog}>
                 {t('sessions.owner.change', 'Change owner')}
               </Menu.SubmenuTrigger>
-              <Menu.Content className="max-h-72 min-w-[200px] max-w-[280px] overflow-y-auto">
+              <Menu.Content
+                maxHeight="calc(var(--spacing) * 72)"
+                minWidth={200}
+                maxWidth={280}
+                className="overflow-y-auto"
+              >
                 <Menu.RadioGroup
                   value={owner.ownerUserId}
                   onValueChange={(userId) => {
@@ -1839,7 +1868,7 @@ export function SessionHeaderMenu({
                         indicator="check"
                         indicatorSide="end"
                         endContent={
-                          isPending ? <Spinner className="h-3.5 w-3.5 shrink-0" /> : undefined
+                          isPending ? <Spinner diameter="calc(var(--spacing) * 3.5)" /> : undefined
                         }
                       >
                         <UserAvatar
@@ -1892,7 +1921,7 @@ export function SessionHeaderMenu({
 
           <Menu.Submenu>
             <Menu.SubmenuTrigger icon={Copy}>{t('sessions.copy', 'Copy')}</Menu.SubmenuTrigger>
-            <Menu.Content className="min-w-[200px]">
+            <Menu.Content minWidth={200}>
               {showBaseBranchContext ? (
                 <>
                   <Menu.Item
@@ -2056,7 +2085,12 @@ export function SessionSearchBar({
         type="button"
         variant="ghost"
         icon
-        className="h-6 w-6 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:pointer-events-none disabled:text-muted-foreground/40"
+        height="calc(var(--spacing) * 6)"
+        width="calc(var(--spacing) * 6)"
+        className={cn(
+          stylex.props(messageActionButtonTheme, messageActionInkTheme).className,
+          'rounded-md transition-colors disabled:pointer-events-none disabled:text-muted-foreground/40'
+        )}
         disabled={!hasResults}
         onClick={onClick}
         aria-label={label}
@@ -2166,7 +2200,12 @@ export function SessionSearchBar({
                   type="button"
                   variant="ghost"
                   icon
-                  className="h-6 w-6 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+                  height="calc(var(--spacing) * 6)"
+                  width="calc(var(--spacing) * 6)"
+                  className={cn(
+                    stylex.props(messageActionButtonTheme, messageActionInkTheme).className,
+                    'rounded-md transition-colors'
+                  )}
                   onClick={onClose}
                   aria-label={t('common.close', 'Close')}
                 >

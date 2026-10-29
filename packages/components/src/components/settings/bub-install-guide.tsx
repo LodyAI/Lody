@@ -56,7 +56,8 @@ export function BubInstallGuide() {
           type="button"
           variant="ghost"
           size="small"
-          className="h-7 shrink-0 gap-1 px-2 text-xs"
+          height="calc(var(--spacing) * 7)"
+          className="gap-1 px-2 text-xs"
           aria-label={copied ? t('common.copied', 'Copied') : t('common.copy', 'Copy')}
           onClick={() => {
             void writeTextToClipboard(BUB_ACP_INSTALL_COMMAND).then((success) => {
@@ -76,7 +77,8 @@ export function BubInstallGuide() {
         type="button"
         variant="link"
         size="small"
-        className="h-auto p-0 text-xs"
+        height="auto"
+        className="p-0 text-xs"
         onClick={() => {
           void openExternalUrl(BUB_ACP_INSTALL_DOCS_URL);
         }}

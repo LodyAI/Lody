@@ -33,7 +33,7 @@ export function SessionSyncingIndicator({
 
   return (
     <span {...stylex.props(styles.root)} role="status" data-sync-indicator={variant}>
-      <Spinner className="h-3 w-3" aria-hidden="true" />
+      <Spinner diameter="calc(var(--spacing) * 3)" aria-hidden="true" />
       <span className={labelClassName}>
         {variant === 'updating'
           ? t('sessions.contentSync.updating', 'Updating')

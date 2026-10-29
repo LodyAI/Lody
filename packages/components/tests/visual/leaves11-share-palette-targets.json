@@ -1,0 +1,117 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1100
+    },
+    {
+      "name": "phone",
+      "device": "iPhone SE",
+      "width": 390,
+      "height": 1100
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "migration-ownedsharecardlayout--chat-light",
+    "migration-ownedsharecardlayout--chat-dark",
+    "migration-ownedsharecardlayout--post-light",
+    "migration-ownedsharecardlayout--post-dark",
+    "migration-ownedsharecardlayout--flush-untitled",
+    "migration-ownedsharecardlayout--empty-no-backdrop",
+    "migration-ownedsharecardlayout--long-title-wide-mat",
+    "migration-ownedsharecardlayout--local-spacing"
+  ],
+  "ready": {
+    "migration-ownedsharecardlayout--chat-light": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const fixture=document.querySelector('[data-owned-share-layout]');const root=fixture?.firstElementChild;const card=root?.querySelector('div[style*=\"width\"]');if(!fixture||!root||!card)return false;const expected=fixture.dataset.shareDestination==='chat'?360:560;const rect=card.getBoundingClientRect();return rect.width===expected&&rect.height>0&&root.classList.contains(fixture.dataset.sharePalette+'-scope')&&[...root.querySelectorAll('img')].every(img=>img.complete&&img.naturalWidth>0); }"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.querySelector('[data-owned-share-layout]')?.firstElementChild;if(!root)return false;const rect=root.getBoundingClientRect();return innerWidth<1000||(rect.top>=0&&rect.bottom<=innerHeight&&rect.right<=innerWidth);}"
+      }
+    ],
+    "migration-ownedsharecardlayout--chat-dark": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const fixture=document.querySelector('[data-owned-share-layout]');const root=fixture?.firstElementChild;const card=root?.querySelector('div[style*=\"width\"]');if(!fixture||!root||!card)return false;const expected=fixture.dataset.shareDestination==='chat'?360:560;const rect=card.getBoundingClientRect();return rect.width===expected&&rect.height>0&&root.classList.contains(fixture.dataset.sharePalette+'-scope')&&[...root.querySelectorAll('img')].every(img=>img.complete&&img.naturalWidth>0); }"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.querySelector('[data-owned-share-layout]')?.firstElementChild;if(!root)return false;const rect=root.getBoundingClientRect();return innerWidth<1000||(rect.top>=0&&rect.bottom<=innerHeight&&rect.right<=innerWidth);}"
+      }
+    ],
+    "migration-ownedsharecardlayout--post-light": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const fixture=document.querySelector('[data-owned-share-layout]');const root=fixture?.firstElementChild;const card=root?.querySelector('div[style*=\"width\"]');if(!fixture||!root||!card)return false;const expected=fixture.dataset.shareDestination==='chat'?360:560;const rect=card.getBoundingClientRect();return rect.width===expected&&rect.height>0&&root.classList.contains(fixture.dataset.sharePalette+'-scope')&&[...root.querySelectorAll('img')].every(img=>img.complete&&img.naturalWidth>0); }"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.querySelector('[data-owned-share-layout]')?.firstElementChild;if(!root)return false;const rect=root.getBoundingClientRect();return innerWidth<1000||(rect.top>=0&&rect.bottom<=innerHeight&&rect.right<=innerWidth);}"
+      }
+    ],
+    "migration-ownedsharecardlayout--post-dark": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const fixture=document.querySelector('[data-owned-share-layout]');const root=fixture?.firstElementChild;const card=root?.querySelector('div[style*=\"width\"]');if(!fixture||!root||!card)return false;const expected=fixture.dataset.shareDestination==='chat'?360:560;const rect=card.getBoundingClientRect();return rect.width===expected&&rect.height>0&&root.classList.contains(fixture.dataset.sharePalette+'-scope')&&[...root.querySelectorAll('img')].every(img=>img.complete&&img.naturalWidth>0); }"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.querySelector('[data-owned-share-layout]')?.firstElementChild;if(!root)return false;const rect=root.getBoundingClientRect();return innerWidth<1000||(rect.top>=0&&rect.bottom<=innerHeight&&rect.right<=innerWidth);}"
+      }
+    ],
+    "migration-ownedsharecardlayout--flush-untitled": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const fixture=document.querySelector('[data-owned-share-layout]');const root=fixture?.firstElementChild;const card=root?.querySelector('div[style*=\"width\"]');if(!fixture||!root||!card)return false;const expected=fixture.dataset.shareDestination==='chat'?360:560;const rect=card.getBoundingClientRect();return rect.width===expected&&rect.height>0&&root.classList.contains(fixture.dataset.sharePalette+'-scope')&&[...root.querySelectorAll('img')].every(img=>img.complete&&img.naturalWidth>0); }"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.querySelector('[data-owned-share-layout]')?.firstElementChild;if(!root)return false;const rect=root.getBoundingClientRect();return innerWidth<1000||(rect.top>=0&&rect.bottom<=innerHeight&&rect.right<=innerWidth);}"
+      }
+    ],
+    "migration-ownedsharecardlayout--empty-no-backdrop": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const fixture=document.querySelector('[data-owned-share-layout]');const root=fixture?.firstElementChild;const card=root?.querySelector('div[style*=\"width\"]');if(!fixture||!root||!card)return false;const expected=fixture.dataset.shareDestination==='chat'?360:560;const rect=card.getBoundingClientRect();return rect.width===expected&&rect.height>0&&root.classList.contains(fixture.dataset.sharePalette+'-scope')&&[...root.querySelectorAll('img')].every(img=>img.complete&&img.naturalWidth>0); }"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.querySelector('[data-owned-share-layout]')?.firstElementChild;if(!root)return false;const rect=root.getBoundingClientRect();return innerWidth<1000||(rect.top>=0&&rect.bottom<=innerHeight&&rect.right<=innerWidth);}"
+      }
+    ],
+    "migration-ownedsharecardlayout--long-title-wide-mat": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const fixture=document.querySelector('[data-owned-share-layout]');const root=fixture?.firstElementChild;const card=root?.querySelector('div[style*=\"width\"]');if(!fixture||!root||!card)return false;const expected=fixture.dataset.shareDestination==='chat'?360:560;const rect=card.getBoundingClientRect();return rect.width===expected&&rect.height>0&&root.classList.contains(fixture.dataset.sharePalette+'-scope')&&[...root.querySelectorAll('img')].every(img=>img.complete&&img.naturalWidth>0); }"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.querySelector('[data-owned-share-layout]')?.firstElementChild;if(!root)return false;const rect=root.getBoundingClientRect();return innerWidth<1000||(rect.top>=0&&rect.bottom<=innerHeight&&rect.right<=innerWidth);}"
+      }
+    ],
+    "migration-ownedsharecardlayout--local-spacing": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const fixture=document.querySelector('[data-owned-share-layout]');const root=fixture?.firstElementChild;const card=root?.querySelector('div[style*=\"width\"]');if(!fixture||!root||!card)return false;const expected=fixture.dataset.shareDestination==='chat'?360:560;const rect=card.getBoundingClientRect();return rect.width===expected&&rect.height>0&&root.classList.contains(fixture.dataset.sharePalette+'-scope')&&[...root.querySelectorAll('img')].every(img=>img.complete&&img.naturalWidth>0); }"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.querySelector('[data-owned-share-layout]')?.firstElementChild;const card=root?.querySelector('div[style*=\"width\"]');return !!card&&getComputedStyle(card).getPropertyValue('--spacing').trim()==='6px';}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.querySelector('[data-owned-share-layout]')?.firstElementChild;if(!root)return false;const rect=root.getBoundingClientRect();return innerWidth<1000||(rect.top>=0&&rect.bottom<=innerHeight&&rect.right<=innerWidth);}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.querySelector('[data-owned-share-layout]')?.firstElementChild;const card=root?.querySelector('div[style*=\"width\"]');const titleBand=card?.firstElementChild;const promptText=[...card?.querySelectorAll('div[style*=\"font-size\"]')??[]][0];const prompt=promptText?.parentElement;return !!titleBand&&!!prompt&&getComputedStyle(titleBand).paddingInlineStart==='30px'&&getComputedStyle(titleBand).paddingTop==='36px'&&getComputedStyle(prompt).paddingInlineStart==='21px'&&getComputedStyle(prompt).paddingTop==='15px';}"
+      }
+    ]
+  }
+}

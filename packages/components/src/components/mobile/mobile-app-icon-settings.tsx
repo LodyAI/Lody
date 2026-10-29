@@ -126,7 +126,8 @@ export function MobileAppIconSettings({
             <Button
               key={icon.name}
               variant="secondary"
-              className="h-auto min-w-24 flex-col gap-2 p-3"
+              height="auto"
+              className="min-w-24 flex-col gap-2 p-3"
               aria-pressed={selected}
               disabled={!state || pending}
               onClick={() => void selectIcon(icon.name)}

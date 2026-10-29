@@ -1,0 +1,401 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 1000,
+      "device": "iPhone SE"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "migration-ownedmessageactionbuttondimensions--user-actions",
+    "migration-ownedmessageactionbuttondimensions--footer-actions",
+    "migration-ownedmessageactionbuttondimensions--long-user",
+    "migration-ownedmessageactionbuttondimensions--scoped-actions"
+  ],
+  "ready": {
+    "migration-ownedmessageactionbuttondimensions--user-actions": [
+      {
+        "action": "visible",
+        "selector": "[data-clipboard-ready=true]"
+      },
+      {
+        "action": "click",
+        "selector": "[data-user-case=ordinary] [data-testid=user-message-metadata]"
+      },
+      {
+        "action": "hover",
+        "selector": "[data-user-case=ordinary] [data-testid=user-message-metadata]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const c=document.querySelector('[data-user-case=ordinary] [data-user-message-actions]');const b=c?[...c.querySelectorAll('button')]:[];return c&&getComputedStyle(c).visibility==='visible'&&b.length===3&&b.every(e=>getComputedStyle(e).opacity==='1')&&!document.querySelector('[data-message-button-dimensions] button[data-popup-open]');}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const b=[...document.querySelectorAll('[data-user-case=ordinary] [data-user-message-actions] button')];return b.length===3&&b.every(e=>getComputedStyle(e).width==='28px'&&getComputedStyle(e).height==='28px');}"
+      }
+    ],
+    "migration-ownedmessageactionbuttondimensions--footer-actions": [
+      {
+        "action": "visible",
+        "selector": "[data-clipboard-ready=true]"
+      },
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Copy context as Markdown",
+        "exact": true
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const a=[...document.querySelectorAll('[data-footer-case=actions] button')].filter(b=>b.textContent.includes('synthetic action'));const c=document.querySelector('[data-footer-case=streaming] button[aria-label]');return a.length===2&&a.every(b=>!b.disabled&&getComputedStyle(b).height==='32px')&&getComputedStyle(c).width==='28px'&&getComputedStyle(c).height==='28px';}"
+      },
+      {
+        "action": "movePointer",
+        "x": 1,
+        "y": 1
+      }
+    ],
+    "migration-ownedmessageactionbuttondimensions--long-user": [
+      {
+        "action": "visible",
+        "selector": "[data-clipboard-ready=true]"
+      },
+      {
+        "action": "click",
+        "selector": "[data-user-case=long] [data-testid=user-message-metadata]"
+      },
+      {
+        "action": "hover",
+        "selector": "[data-user-case=long] [data-testid=user-message-metadata]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const c=document.querySelector('[data-user-case=long] [data-user-message-actions]');const b=c?[...c.querySelectorAll('button')]:[];return c&&getComputedStyle(c).visibility==='visible'&&b.length===3&&b.every(e=>getComputedStyle(e).opacity==='1')&&!document.querySelector('[data-message-button-dimensions] button[data-popup-open]');}"
+      },
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Show more",
+        "exact": true
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const b=[...document.querySelectorAll('[data-user-case=long] button')].find(b=>b.textContent==='Show more');return b&&getComputedStyle(b).height==='28px'&&!document.querySelector('[data-user-case=long]').textContent.includes('Line 22:');}"
+      }
+    ],
+    "migration-ownedmessageactionbuttondimensions--scoped-actions": [
+      {
+        "action": "visible",
+        "selector": "[data-clipboard-ready=true]"
+      },
+      {
+        "action": "click",
+        "selector": "[data-user-case=outer] [data-testid=user-message-metadata]"
+      },
+      {
+        "action": "hover",
+        "selector": "[data-user-case=outer] [data-testid=user-message-metadata]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const c=document.querySelector('[data-user-case=outer] [data-user-message-actions]');const b=c?[...c.querySelectorAll('button')]:[];return c&&getComputedStyle(c).visibility==='visible'&&b.length===3&&b.every(e=>getComputedStyle(e).opacity==='1')&&!document.querySelector('[data-message-button-dimensions] button[data-popup-open]');}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const b=[...document.querySelectorAll('[data-user-case=outer] [data-user-message-actions] button')];return b.length===3&&b.every(e=>getComputedStyle(e).width==='42px'&&getComputedStyle(e).height==='42px');}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const b=[...document.querySelectorAll('[data-user-case=inner] [data-user-message-actions] button')];return b.length===3&&b.every(e=>getComputedStyle(e).width==='21px'&&getComputedStyle(e).height==='21px');}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const b=[...document.querySelectorAll('[data-user-case=element] [data-user-message-actions] button')];return b.length===3&&b.every(e=>getComputedStyle(e).width==='35px'&&getComputedStyle(e).height==='35px');}"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedmessageactionbuttondimensions--user-actions": [
+      {
+        "name": "pinned",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Pin this message",
+            "exact": true
+          },
+          {
+            "action": "hover",
+            "selector": "[data-user-case=ordinary] [data-testid=user-message-metadata]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const c=document.querySelector('[data-user-case=ordinary] [data-user-message-actions]');const b=c?[...c.querySelectorAll('button')]:[];return c&&getComputedStyle(c).visibility==='visible'&&b.length===3&&b.every(e=>getComputedStyle(e).opacity==='1')&&!document.querySelector('[data-message-button-dimensions] button[data-popup-open]');}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-user-case=ordinary]')?.dataset.pinned==='message-dimensions-ordinary'&&document.querySelector('button[aria-label=\"Unpin message\"]')"
+          }
+        ]
+      },
+      {
+        "name": "editing",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Edit message",
+            "exact": true
+          },
+          {
+            "action": "visible",
+            "selector": "textarea"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const t=document.querySelector('textarea');return t?.value==='Synthetic instruction for message button dimensions.'&&!document.querySelector('[data-user-message-actions]')&&[...document.querySelectorAll('button')].some(b=>b.textContent==='Send'&&!b.disabled);}"
+          }
+        ]
+      },
+      {
+        "name": "cancelled-edit",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "textarea",
+            "value": "Discarded synthetic draft"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Cancel",
+            "exact": true
+          },
+          {
+            "action": "hover",
+            "selector": "[data-user-case=ordinary] [data-testid=user-message-metadata]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const c=document.querySelector('[data-user-case=ordinary] [data-user-message-actions]');const b=c?[...c.querySelectorAll('button')]:[];return c&&getComputedStyle(c).visibility==='visible'&&b.length===3&&b.every(e=>getComputedStyle(e).opacity==='1')&&!document.querySelector('[data-message-button-dimensions] button[data-popup-open]');}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('textarea')&&document.querySelector('[data-user-case=ordinary]').dataset.saved===''&&!document.querySelector('[data-user-case=ordinary]').textContent.includes('Discarded synthetic draft')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const b=[...document.querySelectorAll('[data-user-case=ordinary] [data-user-message-actions] button')];return b.length===3&&b.every(e=>getComputedStyle(e).width==='28px'&&getComputedStyle(e).height==='28px');}"
+          }
+        ]
+      },
+      {
+        "name": "saved-edit",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Edit message",
+            "exact": true
+          },
+          {
+            "action": "fill",
+            "selector": "textarea",
+            "value": "Edited synthetic instruction."
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Send",
+            "exact": true
+          },
+          {
+            "action": "hover",
+            "selector": "[data-user-case=ordinary] [data-testid=user-message-metadata]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const c=document.querySelector('[data-user-case=ordinary] [data-user-message-actions]');const b=c?[...c.querySelectorAll('button')]:[];return c&&getComputedStyle(c).visibility==='visible'&&b.length===3&&b.every(e=>getComputedStyle(e).opacity==='1')&&!document.querySelector('[data-message-button-dimensions] button[data-popup-open]');}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('textarea')&&document.querySelector('[data-user-case=ordinary]').dataset.saved==='Edited synthetic instruction.'&&document.querySelector('[data-user-case=ordinary]').textContent.includes('Edited synthetic instruction.')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const b=[...document.querySelectorAll('[data-user-case=ordinary] [data-user-message-actions] button')];return b.length===3&&b.every(e=>getComputedStyle(e).width==='28px'&&getComputedStyle(e).height==='28px');}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmessageactionbuttondimensions--footer-actions": [
+      {
+        "name": "context-callback",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Copy context as Markdown",
+            "exact": true
+          },
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-footer-fixture]')?.dataset.contextReceipt==='message-dimensions-streaming'&&document.querySelector('[data-synthetic-clipboard]')?.dataset.syntheticClipboard===''&&!document.querySelector('[data-message-button-dimensions] button[data-popup-open]')"
+          }
+        ]
+      },
+      {
+        "name": "accent-action-disabled",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Apply synthetic action",
+            "exact": true
+          },
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const b=[...document.querySelectorAll('button')].find(b=>b.textContent==='Apply synthetic action');return b?.disabled&&getComputedStyle(b).height==='32px'&&document.querySelector('[data-footer-fixture]')?.dataset.accentClicks==='1';}"
+          }
+        ]
+      },
+      {
+        "name": "neutral-action-disabled",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Review synthetic action",
+            "exact": true
+          },
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const b=[...document.querySelectorAll('button')].find(b=>b.textContent==='Review synthetic action');return b?.disabled&&getComputedStyle(b).height==='32px'&&document.querySelector('[data-footer-fixture]')?.dataset.neutralClicks==='1';}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmessageactionbuttondimensions--long-user": [
+      {
+        "name": "expanded",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Show more",
+            "exact": true
+          },
+          {
+            "action": "visible",
+            "role": "button",
+            "name": "Show less",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-user-case=long]').textContent.includes('Line 22:')"
+          },
+          {
+            "action": "hover",
+            "selector": "[data-user-case=long] [data-testid=user-message-metadata]"
+          }
+        ]
+      },
+      {
+        "name": "collapsed-again",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Show less",
+            "exact": true
+          },
+          {
+            "action": "visible",
+            "role": "button",
+            "name": "Show more",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[data-user-case=long]').textContent.includes('Line 22:')"
+          },
+          {
+            "action": "hover",
+            "selector": "[data-user-case=long] [data-testid=user-message-metadata]"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmessageactionbuttondimensions--scoped-actions": [
+      {
+        "name": "inner-spacing",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-user-case=inner] [data-testid=user-message-metadata]"
+          },
+          {
+            "action": "hover",
+            "selector": "[data-user-case=inner] [data-testid=user-message-metadata]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const c=document.querySelector('[data-user-case=inner] [data-user-message-actions]');const b=c?[...c.querySelectorAll('button')]:[];return c&&getComputedStyle(c).visibility==='visible'&&b.length===3&&b.every(e=>getComputedStyle(e).opacity==='1')&&!document.querySelector('[data-message-button-dimensions] button[data-popup-open]');}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const b=[...document.querySelectorAll('[data-user-case=inner] [data-user-message-actions] button')];return b.length===3&&b.every(e=>getComputedStyle(e).width==='21px'&&getComputedStyle(e).height==='21px');}"
+          }
+        ]
+      },
+      {
+        "name": "element-spacing",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-user-case=element] [data-testid=user-message-metadata]"
+          },
+          {
+            "action": "hover",
+            "selector": "[data-user-case=element] [data-testid=user-message-metadata]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const c=document.querySelector('[data-user-case=element] [data-user-message-actions]');const b=c?[...c.querySelectorAll('button')]:[];return c&&getComputedStyle(c).visibility==='visible'&&b.length===3&&b.every(e=>getComputedStyle(e).opacity==='1')&&!document.querySelector('[data-message-button-dimensions] button[data-popup-open]');}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const b=[...document.querySelectorAll('[data-user-case=element] [data-user-message-actions] button')];return b.length===3&&b.every(e=>getComputedStyle(e).width==='35px'&&getComputedStyle(e).height==='35px');}"
+          }
+        ]
+      }
+    ]
+  }
+}

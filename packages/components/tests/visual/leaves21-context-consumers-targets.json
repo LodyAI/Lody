@@ -1,0 +1,93 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "compact-desktop",
+      "width": 900,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "blockedHosts": ["github.com", "avatars.githubusercontent.com"],
+  "ids": [
+    "components-sessionlist--row-context-menu",
+    "components-owned-session-list-migration--project-groups",
+    "components-owned-session-list-migration--selected-project-group",
+    "components-legacy-task-list-migration--anchors",
+    "components-legacyupdatedtasklistmigration--anchor-rows",
+    "components-lodysidebar--updated-mode"
+  ],
+  "ready": {
+    "components-sessionlist--row-context-menu": [
+      {
+        "action": "click",
+        "selector": "a[aria-label=\"Browser notifications\"]",
+        "button": "right"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const menus=[...document.querySelectorAll('[role=menu]')].filter(e=>e.getBoundingClientRect().width>0&&getComputedStyle(e).opacity==='1');if(menus.length!==1)return false;const m=menus[0],r=m.getBoundingClientRect(),c=getComputedStyle(m);return c.minWidth==='180px'&&r.width>=180&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&m.querySelectorAll('[role=menuitem]').length>=2;}"
+      }
+    ],
+    "components-owned-session-list-migration--project-groups": [
+      {
+        "action": "click",
+        "selector": "[role=button][aria-label=\"Alpha project group with a very long name \u591a\u4ed3\u5e93\u9879\u76ee\"]",
+        "button": "right"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const menus=[...document.querySelectorAll('[role=menu]')].filter(e=>e.getBoundingClientRect().width>0&&getComputedStyle(e).opacity==='1');if(menus.length!==1)return false;const m=menus[0],r=m.getBoundingClientRect(),c=getComputedStyle(m);return c.minWidth==='180px'&&r.width>=180&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&m.querySelectorAll('[role=menuitem]').length>=2;}"
+      }
+    ],
+    "components-owned-session-list-migration--selected-project-group": [
+      {
+        "action": "click",
+        "text": "migration-fixture/owned-session",
+        "button": "right"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const menus=[...document.querySelectorAll('[role=menu]')].filter(e=>e.getBoundingClientRect().width>0&&getComputedStyle(e).opacity==='1');if(menus.length!==1)return false;const m=menus[0],r=m.getBoundingClientRect(),c=getComputedStyle(m);return c.minWidth==='180px'&&r.width>=180&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&m.querySelectorAll('[role=menuitem]').length>=2;}"
+      }
+    ],
+    "components-legacy-task-list-migration--anchors": [
+      {
+        "action": "click",
+        "selector": "a[href=\"#synthetic-session-alpha-pinned\"]",
+        "button": "right"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const menus=[...document.querySelectorAll('[role=menu]')].filter(e=>e.getBoundingClientRect().width>0&&getComputedStyle(e).opacity==='1');if(menus.length!==1)return false;const m=menus[0],r=m.getBoundingClientRect(),c=getComputedStyle(m);return c.minWidth==='180px'&&r.width>=180&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&m.querySelectorAll('[role=menuitem]').length>=2;}"
+      }
+    ],
+    "components-legacyupdatedtasklistmigration--anchor-rows": [
+      {
+        "action": "click",
+        "selector": "a[href=\"/synthetic/sessions/long\"]",
+        "button": "right"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const menus=[...document.querySelectorAll('[role=menu]')].filter(e=>e.getBoundingClientRect().width>0&&getComputedStyle(e).opacity==='1');if(menus.length!==1)return false;const m=menus[0],r=m.getBoundingClientRect(),c=getComputedStyle(m);return c.minWidth==='180px'&&r.width>=180&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&m.querySelectorAll('[role=menuitem]').length>=2;}"
+      }
+    ],
+    "components-lodysidebar--updated-mode": [
+      {
+        "action": "click",
+        "selector": "[data-sidebar-updated-id=\"task-1\"]",
+        "button": "right"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const menus=[...document.querySelectorAll('[role=menu]')].filter(e=>e.getBoundingClientRect().width>0&&getComputedStyle(e).opacity==='1');if(menus.length!==1)return false;const m=menus[0],r=m.getBoundingClientRect(),c=getComputedStyle(m);return c.minWidth==='180px'&&r.width>=180&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&m.querySelectorAll('[role=menuitem]').length>=2;}"
+      }
+    ]
+  }
+}

@@ -1,0 +1,215 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 900,
+      "device": "iPhone SE"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "migration-ownedpopoverlayout--default-panel",
+    "migration-ownedpopoverlayout--zero-padding",
+    "migration-ownedpopoverlayout--zero-gap",
+    "migration-ownedpopoverlayout--zero-both",
+    "migration-ownedpopoverlayout--update-cycle",
+    "migration-ownedpopoverlayout--forced-dark",
+    "migration-ownedpopoverlayout--contained"
+  ],
+  "ready": {
+    "migration-ownedpopoverlayout--default-panel": [
+      {
+        "action": "visible",
+        "selector": "[role=dialog]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const root=document.querySelector('[data-popover-layout-fixture]'),popup=document.querySelector('[role=dialog]'),positioner=document.querySelector('[data-layout-positioner]');if(!root||!popup||!positioner)return false;const css=getComputedStyle(popup);return root.dataset.layoutOpen==='true'&&root.dataset.layoutRefReady==='true'&&positioner.contains(popup)&&positioner.style.minWidth==='240px'&&!popup.hasAttribute('data-layout-positioner')&&popup.getBoundingClientRect().height>0&&css.opacity==='1'&&css.paddingTop==='12px'&&css.paddingRight==='12px'&&css.paddingBottom==='12px'&&css.paddingLeft==='12px'&&css.rowGap==='8px'&&css.columnGap==='8px';}"
+      }
+    ],
+    "migration-ownedpopoverlayout--zero-padding": [
+      {
+        "action": "visible",
+        "selector": "[role=dialog]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const root=document.querySelector('[data-popover-layout-fixture]'),popup=document.querySelector('[role=dialog]'),positioner=document.querySelector('[data-layout-positioner]');if(!root||!popup||!positioner)return false;const css=getComputedStyle(popup);return root.dataset.layoutOpen==='true'&&root.dataset.layoutRefReady==='true'&&positioner.contains(popup)&&positioner.style.minWidth==='240px'&&!popup.hasAttribute('data-layout-positioner')&&popup.getBoundingClientRect().height>0&&css.opacity==='1'&&css.paddingTop==='0px'&&css.paddingRight==='0px'&&css.paddingBottom==='0px'&&css.paddingLeft==='0px'&&css.rowGap==='8px'&&css.columnGap==='8px';}"
+      }
+    ],
+    "migration-ownedpopoverlayout--zero-gap": [
+      {
+        "action": "visible",
+        "selector": "[role=dialog]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const root=document.querySelector('[data-popover-layout-fixture]'),popup=document.querySelector('[role=dialog]'),positioner=document.querySelector('[data-layout-positioner]');if(!root||!popup||!positioner)return false;const css=getComputedStyle(popup);return root.dataset.layoutOpen==='true'&&root.dataset.layoutRefReady==='true'&&positioner.contains(popup)&&positioner.style.minWidth==='240px'&&!popup.hasAttribute('data-layout-positioner')&&popup.getBoundingClientRect().height>0&&css.opacity==='1'&&css.paddingTop==='12px'&&css.paddingRight==='12px'&&css.paddingBottom==='12px'&&css.paddingLeft==='12px'&&css.rowGap==='0px'&&css.columnGap==='0px';}"
+      }
+    ],
+    "migration-ownedpopoverlayout--zero-both": [
+      {
+        "action": "visible",
+        "selector": "[role=dialog]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const root=document.querySelector('[data-popover-layout-fixture]'),popup=document.querySelector('[role=dialog]'),positioner=document.querySelector('[data-layout-positioner]');if(!root||!popup||!positioner)return false;const css=getComputedStyle(popup);return root.dataset.layoutOpen==='true'&&root.dataset.layoutRefReady==='true'&&positioner.contains(popup)&&positioner.style.minWidth==='240px'&&!popup.hasAttribute('data-layout-positioner')&&popup.getBoundingClientRect().height>0&&css.opacity==='1'&&css.paddingTop==='0px'&&css.paddingRight==='0px'&&css.paddingBottom==='0px'&&css.paddingLeft==='0px'&&css.rowGap==='0px'&&css.columnGap==='0px';}"
+      },
+      {
+        "action": "fill",
+        "selector": "input[aria-label=\"Preserved value\"]",
+        "value": "Applied before capture"
+      },
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Apply value",
+        "exact": true
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-popover-layout-fixture]')?.dataset.layoutApplied==='1'&&document.querySelector('[data-layout-result]')?.textContent==='Applied 1; Applied before capture'"
+      },
+      {
+        "action": "press",
+        "selector": "input[aria-label=\"Preserved value\"]",
+        "key": "Escape"
+      },
+      {
+        "action": "hidden",
+        "selector": "[role=dialog]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-popover-layout-fixture]')?.dataset.layoutOpen==='false'&&document.activeElement?.textContent==='Open layout panel'"
+      },
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Open layout panel",
+        "exact": true
+      },
+      {
+        "action": "visible",
+        "selector": "[role=dialog]"
+      },
+      {
+        "action": "hover",
+        "selector": "input[aria-label=\"Preserved value\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-popover-layout-fixture]')?.dataset.layoutEvent==='positioner-enter'&&document.querySelector('input[aria-label=\"Preserved value\"]')?.value==='Applied before capture'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const root=document.querySelector('[data-popover-layout-fixture]'),popup=document.querySelector('[role=dialog]'),positioner=document.querySelector('[data-layout-positioner]');if(!root||!popup||!positioner)return false;const css=getComputedStyle(popup);return root.dataset.layoutOpen==='true'&&root.dataset.layoutRefReady==='true'&&positioner.contains(popup)&&positioner.style.minWidth==='240px'&&!popup.hasAttribute('data-layout-positioner')&&popup.getBoundingClientRect().height>0&&css.opacity==='1'&&css.paddingTop==='0px'&&css.paddingRight==='0px'&&css.paddingBottom==='0px'&&css.paddingLeft==='0px'&&css.rowGap==='0px'&&css.columnGap==='0px';}"
+      }
+    ],
+    "migration-ownedpopoverlayout--update-cycle": [
+      {
+        "action": "visible",
+        "selector": "[role=dialog]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const root=document.querySelector('[data-popover-layout-fixture]'),popup=document.querySelector('[role=dialog]'),positioner=document.querySelector('[data-layout-positioner]');if(!root||!popup||!positioner)return false;const css=getComputedStyle(popup);return root.dataset.layoutOpen==='true'&&root.dataset.layoutRefReady==='true'&&positioner.contains(popup)&&positioner.style.minWidth==='240px'&&!popup.hasAttribute('data-layout-positioner')&&popup.getBoundingClientRect().height>0&&css.opacity==='1'&&css.paddingTop==='0px'&&css.paddingRight==='0px'&&css.paddingBottom==='0px'&&css.paddingLeft==='0px'&&css.rowGap==='0px'&&css.columnGap==='0px';}"
+      },
+      {
+        "action": "fill",
+        "selector": "input[aria-label=\"Preserved value\"]",
+        "value": "Edited popover value"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const input=document.querySelector('input[aria-label=\"Preserved value\"]');if(input?.value!=='Edited popover value')return false;window.__layoutInputNode=input;window.__layoutPopupNode=document.querySelector('[role=dialog]');window.__layoutPositionerNode=document.querySelector('[data-layout-positioner]');return document.querySelector('[data-popover-layout-fixture]')?.dataset.layoutValue==='Edited popover value'; }"
+      }
+    ],
+    "migration-ownedpopoverlayout--forced-dark": [
+      {
+        "action": "visible",
+        "selector": "[role=dialog]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const root=document.querySelector('[data-popover-layout-fixture]'),popup=document.querySelector('[role=dialog]'),positioner=document.querySelector('[data-layout-positioner]');if(!root||!popup||!positioner)return false;const css=getComputedStyle(popup);return root.dataset.layoutOpen==='true'&&root.dataset.layoutRefReady==='true'&&positioner.contains(popup)&&positioner.style.minWidth==='240px'&&!popup.hasAttribute('data-layout-positioner')&&popup.getBoundingClientRect().height>0&&css.opacity==='1'&&css.paddingTop==='0px'&&css.paddingRight==='0px'&&css.paddingBottom==='0px'&&css.paddingLeft==='0px'&&css.rowGap==='0px'&&css.columnGap==='0px';}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => getComputedStyle(document.querySelector('[role=dialog]')).colorScheme==='dark'"
+      }
+    ],
+    "migration-ownedpopoverlayout--contained": [
+      {
+        "action": "visible",
+        "selector": "[role=dialog]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const root=document.querySelector('[data-popover-layout-fixture]'),popup=document.querySelector('[role=dialog]'),positioner=document.querySelector('[data-layout-positioner]');if(!root||!popup||!positioner)return false;const css=getComputedStyle(popup);return root.dataset.layoutOpen==='true'&&root.dataset.layoutRefReady==='true'&&positioner.contains(popup)&&positioner.style.minWidth==='240px'&&!popup.hasAttribute('data-layout-positioner')&&popup.getBoundingClientRect().height>0&&css.opacity==='1'&&css.paddingTop==='0px'&&css.paddingRight==='0px'&&css.paddingBottom==='0px'&&css.paddingLeft==='0px'&&css.rowGap==='0px'&&css.columnGap==='0px';}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[role=dialog]')?.closest('[data-layout-container]') && getComputedStyle(document.querySelector('[data-layout-positioner]')).position==='absolute'"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedpopoverlayout--update-cycle": [
+      {
+        "name": "zero-padding",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zero padding",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const root=document.querySelector('[data-popover-layout-fixture]'),popup=document.querySelector('[role=dialog]'),positioner=document.querySelector('[data-layout-positioner]');if(!root||!popup||!positioner)return false;const css=getComputedStyle(popup);return root.dataset.layoutOpen==='true'&&root.dataset.layoutRefReady==='true'&&positioner.contains(popup)&&positioner.style.minWidth==='240px'&&!popup.hasAttribute('data-layout-positioner')&&popup.getBoundingClientRect().height>0&&css.opacity==='1'&&css.paddingTop==='0px'&&css.paddingRight==='0px'&&css.paddingBottom==='0px'&&css.paddingLeft==='0px'&&css.rowGap==='8px'&&css.columnGap==='8px'&&root.dataset.layout==='padding'&&document.querySelector('[role=dialog]')===window.__layoutPopupNode&&document.querySelector('input[aria-label=\\\"Preserved value\\\"]')===window.__layoutInputNode&&positioner===window.__layoutPositionerNode&&root.dataset.layoutValue==='Edited popover value';}"
+          }
+        ]
+      },
+      {
+        "name": "zero-gap",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zero gap",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const root=document.querySelector('[data-popover-layout-fixture]'),popup=document.querySelector('[role=dialog]'),positioner=document.querySelector('[data-layout-positioner]');if(!root||!popup||!positioner)return false;const css=getComputedStyle(popup);return root.dataset.layoutOpen==='true'&&root.dataset.layoutRefReady==='true'&&positioner.contains(popup)&&positioner.style.minWidth==='240px'&&!popup.hasAttribute('data-layout-positioner')&&popup.getBoundingClientRect().height>0&&css.opacity==='1'&&css.paddingTop==='12px'&&css.paddingRight==='12px'&&css.paddingBottom==='12px'&&css.paddingLeft==='12px'&&css.rowGap==='0px'&&css.columnGap==='0px'&&root.dataset.layout==='gap'&&document.querySelector('[role=dialog]')===window.__layoutPopupNode&&document.querySelector('input[aria-label=\\\"Preserved value\\\"]')===window.__layoutInputNode&&positioner===window.__layoutPositionerNode&&root.dataset.layoutValue==='Edited popover value';}"
+          }
+        ]
+      },
+      {
+        "name": "default",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Default layout",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const root=document.querySelector('[data-popover-layout-fixture]'),popup=document.querySelector('[role=dialog]'),positioner=document.querySelector('[data-layout-positioner]');if(!root||!popup||!positioner)return false;const css=getComputedStyle(popup);return root.dataset.layoutOpen==='true'&&root.dataset.layoutRefReady==='true'&&positioner.contains(popup)&&positioner.style.minWidth==='240px'&&!popup.hasAttribute('data-layout-positioner')&&popup.getBoundingClientRect().height>0&&css.opacity==='1'&&css.paddingTop==='12px'&&css.paddingRight==='12px'&&css.paddingBottom==='12px'&&css.paddingLeft==='12px'&&css.rowGap==='8px'&&css.columnGap==='8px'&&root.dataset.layout==='default'&&document.querySelector('[role=dialog]')===window.__layoutPopupNode&&document.querySelector('input[aria-label=\\\"Preserved value\\\"]')===window.__layoutInputNode&&positioner===window.__layoutPositionerNode&&root.dataset.layoutValue==='Edited popover value';}"
+          }
+        ]
+      }
+    ]
+  }
+}

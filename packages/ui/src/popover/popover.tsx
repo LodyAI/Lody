@@ -16,6 +16,18 @@ type TriggerBaseProps = ComponentProps<typeof BasePopover.Trigger>;
 type TitleBaseProps = ComponentProps<typeof BasePopover.Title>;
 type DescriptionBaseProps = ComponentProps<typeof BasePopover.Description>;
 
+const layout = stylex.create({
+  noPadding: { padding: 0 },
+  noGap: { gap: 0 },
+});
+
+const dimensions = stylex.create({
+  width: (value: string | number) => ({ width: value }),
+  minWidth: (value: string | number) => ({ minWidth: value }),
+  maxWidth: (value: string | number) => ({ maxWidth: value }),
+  maxHeight: (value: string | number) => ({ maxHeight: value }),
+});
+
 export interface PopoverContentProps extends Omit<
   PositionerBaseProps,
   'className' | 'children' | 'render'
@@ -27,6 +39,15 @@ export interface PopoverContentProps extends Omit<
   initialFocus?: PopupBaseProps['initialFocus'];
   /** Where focus goes when it closes; the product's policy, not this package's. */
   finalFocus?: PopupBaseProps['finalFocus'];
+  /** Keep the prose inset, or let embedded content reach the panel's edges. */
+  padding?: 'default' | 'none';
+  /** Space direct content blocks, or let embedded content own their spacing. */
+  gap?: 'default' | 'none';
+  /** Panel dimensions: numbers are pixels; strings are CSS lengths. Omission restores its defaults. */
+  width?: string | number;
+  minWidth?: string | number;
+  maxWidth?: string | number;
+  maxHeight?: string | number;
   className?: string;
 }
 
@@ -58,7 +79,21 @@ export interface PopoverHeaderProps {
  */
 export const PopoverContent = forwardRef<HTMLDivElement, PopoverContentProps>(
   function PopoverContent(
-    { className, children, container, initialFocus, finalFocus, sideOffset = POPUP_GAP, ...rest },
+    {
+      className,
+      children,
+      container,
+      initialFocus,
+      finalFocus,
+      padding = 'default',
+      gap = 'default',
+      width,
+      minWidth,
+      maxWidth,
+      maxHeight,
+      sideOffset = POPUP_GAP,
+      ...rest
+    },
     ref
   ) {
     const inheritedContainer = usePopupContainer();
@@ -74,6 +109,12 @@ export const PopoverContent = forwardRef<HTMLDivElement, PopoverContentProps>(
     // viewport relative to that panel instead. The absolute strategy resolves
     // against the offset parent, which is the panel, so the two agree again.
     const strategy = rest.positionMethod ?? (mountPoint != null ? 'absolute' : undefined);
+    const panelDimensions = [
+      width != null && dimensions.width(width),
+      minWidth != null && dimensions.minWidth(minWidth),
+      maxWidth != null && dimensions.maxWidth(maxWidth),
+      maxHeight != null && dimensions.maxHeight(maxHeight),
+    ] as const;
     return (
       <BasePopover.Portal container={mountPoint} className={portalClassName}>
         <BasePopover.Positioner
@@ -88,6 +129,7 @@ export const PopoverContent = forwardRef<HTMLDivElement, PopoverContentProps>(
           <BasePopover.Popup
             initialFocus={initialFocus}
             finalFocus={finalFocus}
+            style={stylex.props(...panelDimensions).style}
             className={(state) => {
               // StyleX cannot express `[data-starting-style]`, so the two ends
               // of the rise are read off Base UI's transition status here, and
@@ -99,6 +141,9 @@ export const PopoverContent = forwardRef<HTMLDivElement, PopoverContentProps>(
                   surface.popup,
                   nativeScrollbar,
                   surface.popupPanel,
+                  padding === 'none' && layout.noPadding,
+                  gap === 'none' && layout.noGap,
+                  ...panelDimensions,
                   hidden && hiddenSurfaceForSide(state.side)
                 ).className,
                 className

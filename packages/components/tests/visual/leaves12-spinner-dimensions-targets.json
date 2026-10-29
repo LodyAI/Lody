@@ -1,0 +1,172 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 900,
+      "device": "iPhone SE"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "migration-ownedspinnerdimensions--named-sizes",
+    "migration-ownedspinnerdimensions--overrides",
+    "migration-ownedspinnerdimensions--scoped-spacing",
+    "migration-ownedspinnerdimensions--update-cycle",
+    "migration-ownedspinnerdimensions--production-scopes",
+    "ai-gui-usermessageeditor--saving",
+    "migration-ownedmergecontrol--merging"
+  ],
+  "ready": {
+    "migration-ownedspinnerdimensions--named-sizes": [
+      {
+        "action": "visible",
+        "selector": "[data-slot=spinner]",
+        "index": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const boxes=[...document.querySelectorAll('[data-slot=spinner]')];return boxes.length>0 && boxes.every(box=>box.tagName==='SPAN'&&box.firstElementChild?.tagName==='svg'&&getComputedStyle(box).width===getComputedStyle(box).height&&getComputedStyle(box).animationDuration==='1e-05s'&&getComputedStyle(box.firstElementChild).color===getComputedStyle(box).color); }"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => Object.entries({default:20,small:16,medium:20,large:24,silent:20}).every(([name,size])=>{const box=document.querySelector('[data-spinner-sample='+name+'] [data-slot=spinner]');return box&&parseFloat(getComputedStyle(box).width)===size&&parseFloat(getComputedStyle(box).height)===size&&(name!=='silent'||box.firstElementChild.getAttribute('aria-hidden')==='true');})"
+      }
+    ],
+    "migration-ownedspinnerdimensions--overrides": [
+      {
+        "action": "visible",
+        "selector": "[data-slot=spinner]",
+        "index": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const boxes=[...document.querySelectorAll('[data-slot=spinner]')];return boxes.length>0 && boxes.every(box=>box.tagName==='SPAN'&&box.firstElementChild?.tagName==='svg'&&getComputedStyle(box).width===getComputedStyle(box).height&&getComputedStyle(box).animationDuration==='1e-05s'&&getComputedStyle(box.firstElementChild).color===getComputedStyle(box).color); }"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => Object.entries({sixteen:16,fourteen:14,twentyfour:24}).every(([name,size])=>{const box=document.querySelector('[data-spinner-sample='+name+'] [data-slot=spinner]');return box&&parseFloat(getComputedStyle(box).width)===size&&parseFloat(getComputedStyle(box).height)===size;}) && document.querySelector('[data-svg-probe=sixteen]')?.getAttribute('width')==='37' && document.querySelector('[data-svg-probe=sixteen]')?.getAttribute('height')==='31'"
+      }
+    ],
+    "migration-ownedspinnerdimensions--scoped-spacing": [
+      {
+        "action": "visible",
+        "selector": "[data-slot=spinner]",
+        "index": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const boxes=[...document.querySelectorAll('[data-slot=spinner]')];return boxes.length>0 && boxes.every(box=>box.tagName==='SPAN'&&box.firstElementChild?.tagName==='svg'&&getComputedStyle(box).width===getComputedStyle(box).height&&getComputedStyle(box).animationDuration==='1e-05s'&&getComputedStyle(box.firstElementChild).color===getComputedStyle(box).color); }"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => ['root','subtree'].every(scope=>{const root=document.querySelector('[data-spinner-spacing='+scope+']');const row=root?.querySelector('[data-spinner-dimensions=overrides]');const spacing=scope==='root'?6:3;return row&&Object.entries({sixteen:4,fourteen:3.5,twentyfour:6}).every(([name,n])=>{const box=row.querySelector('[data-spinner-sample='+name+'] [data-slot=spinner]');return box&&parseFloat(getComputedStyle(box).width)===spacing*n&&parseFloat(getComputedStyle(box).height)===spacing*n;});})"
+      }
+    ],
+    "migration-ownedspinnerdimensions--update-cycle": [
+      {
+        "action": "visible",
+        "selector": "[data-slot=spinner]",
+        "index": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const boxes=[...document.querySelectorAll('[data-slot=spinner]')];return boxes.length>0 && boxes.every(box=>box.tagName==='SPAN'&&box.firstElementChild?.tagName==='svg'&&getComputedStyle(box).width===getComputedStyle(box).height&&getComputedStyle(box).animationDuration==='1e-05s'&&getComputedStyle(box.firstElementChild).color===getComputedStyle(box).color); }"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const box=document.querySelector('[data-mounted-spinner]')?.parentElement;return document.querySelector('[data-spinner-update]')?.getAttribute('data-spinner-update')==='sixteen'&&(box&&parseFloat(getComputedStyle(box).width))===16&&(box&&parseFloat(getComputedStyle(box).height))===16;}"
+      }
+    ],
+    "migration-ownedspinnerdimensions--production-scopes": [
+      {
+        "action": "visible",
+        "selector": "[data-slot=spinner]",
+        "index": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const boxes=[...document.querySelectorAll('[data-slot=spinner]')];return boxes.length>0 && boxes.every(box=>box.tagName==='SPAN'&&box.firstElementChild?.tagName==='svg'&&getComputedStyle(box).width===getComputedStyle(box).height&&getComputedStyle(box).animationDuration==='1e-05s'&&getComputedStyle(box.firstElementChild).color===getComputedStyle(box).color); }"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => ['root','subtree'].every(scope=>{const root=document.querySelector('[data-spinner-production-scope='+scope+']');const controls=root?.querySelector(':scope > div');const boxes=[...controls?.querySelectorAll('[data-slot=spinner]')??[]];const n=scope==='root'?21:10.5;return boxes.length===3&&boxes.every(box=>parseFloat(getComputedStyle(box).width)===n&&parseFloat(getComputedStyle(box).height)===n)&&controls.querySelector('textarea')?.readOnly&&[...controls.querySelectorAll('[data-pr-merge-control] button')].every(button=>button.disabled);})"
+      }
+    ],
+    "ai-gui-usermessageeditor--saving": [
+      {
+        "action": "visible",
+        "selector": "[data-slot=spinner]",
+        "index": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const boxes=[...document.querySelectorAll('[data-slot=spinner]')];return boxes.length>0 && boxes.every(box=>box.tagName==='SPAN'&&box.firstElementChild?.tagName==='svg'&&getComputedStyle(box).width===getComputedStyle(box).height&&getComputedStyle(box).animationDuration==='1e-05s'&&getComputedStyle(box.firstElementChild).color===getComputedStyle(box).color); }"
+      }
+    ],
+    "migration-ownedmergecontrol--merging": [
+      {
+        "action": "visible",
+        "selector": "[data-slot=spinner]",
+        "index": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const boxes=[...document.querySelectorAll('[data-slot=spinner]')];return boxes.length>0 && boxes.every(box=>box.tagName==='SPAN'&&box.firstElementChild?.tagName==='svg'&&getComputedStyle(box).width===getComputedStyle(box).height&&getComputedStyle(box).animationDuration==='1e-05s'&&getComputedStyle(box.firstElementChild).color===getComputedStyle(box).color); }"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedspinnerdimensions--update-cycle": [
+      {
+        "name": "zero",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zero diameter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const box=document.querySelector('[data-mounted-spinner]')?.parentElement;return document.querySelector('[data-spinner-update]')?.getAttribute('data-spinner-update')==='zero'&&(box&&parseFloat(getComputedStyle(box).width))===0&&(box&&parseFloat(getComputedStyle(box).height))===0&&box.firstElementChild.getAttribute('aria-label')==='Loading';}"
+          }
+        ]
+      },
+      {
+        "name": "named",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Named size"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const box=document.querySelector('[data-mounted-spinner]')?.parentElement;return document.querySelector('[data-spinner-update]')?.getAttribute('data-spinner-update')==='named'&&(box&&parseFloat(getComputedStyle(box).width))===24&&(box&&parseFloat(getComputedStyle(box).height))===24&&box.firstElementChild.getAttribute('aria-label')==='Loading';}"
+          }
+        ]
+      },
+      {
+        "name": "fourteen",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Fourteen diameter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const box=document.querySelector('[data-mounted-spinner]')?.parentElement;return document.querySelector('[data-spinner-update]')?.getAttribute('data-spinner-update')==='fourteen'&&(box&&parseFloat(getComputedStyle(box).width))===14&&(box&&parseFloat(getComputedStyle(box).height))===14&&box.firstElementChild.getAttribute('aria-label')==='Loading';}"
+          }
+        ]
+      }
+    ]
+  }
+}

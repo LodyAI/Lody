@@ -27,6 +27,9 @@ import {
   themeSpace,
 } from '../../style/theme-scale.stylex';
 
+const DARK_SCOPE =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+
 const styles = stylex.create({
   days: { display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: themeSpace[1] },
   dateGrid: {
@@ -52,6 +55,21 @@ const styles = stylex.create({
     backgroundColor: {
       default: 'hsl(var(--foreground) / 0.04)',
       '@media (hover: hover)': { ':hover': 'hsl(var(--foreground) / 0.08)' },
+      [DARK_SCOPE]: {
+        default: '#ffffff0d',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in oklab, var(--color-white) 5%, transparent)',
+        ':hover': {
+          default: '#ffffff0d',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, var(--color-white) 5%, transparent)',
+          '@media (hover: hover)': {
+            default: '#ffffff1a',
+            '@supports (color: color-mix(in lab, red, red))':
+              'color-mix(in oklab, var(--color-white) 10%, transparent)',
+          },
+        },
+      },
     },
     color: {
       default: themeColors.mutedForeground,
@@ -117,10 +135,7 @@ function DayToggles({
                   : [...values, option.value].sort((a, b) => a - b)
               )
             }
-            className={cn(
-              stylex.props(styles.day, on ? styles.selectedDay : styles.unselectedDay).className,
-              !on && 'dark:bg-white/[0.05] dark:hover:bg-white/[0.10]'
-            )}
+            {...stylex.props(styles.day, on ? styles.selectedDay : styles.unselectedDay)}
           >
             {option.short}
           </button>

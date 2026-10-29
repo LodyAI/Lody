@@ -1,0 +1,44 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 844,
+      "device": "iPhone SE"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "migration-ownedcomposerstatus--landing-warning",
+    "migration-ownedcomposerstatus--scoped-palette"
+  ],
+  "ready": {
+    "migration-ownedcomposerstatus--landing-warning": [
+      {
+        "action": "visible",
+        "selector": "[data-composer-status-fixture] textarea"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const element=document.querySelector('[data-composer-status-fixture] [role=status]'); const textarea=document.querySelector('[data-composer-status-fixture] textarea'); return element && textarea && textarea.value==='Review the current changes.' && element.textContent===\"Choose a project before sending.\" && element.getAttribute('aria-live')==='polite' && element.getBoundingClientRect().height>0 && getComputedStyle(element).visibility==='visible' && getComputedStyle(element).color!=='rgba(0, 0, 0, 0)'; }"
+      }
+    ],
+    "migration-ownedcomposerstatus--scoped-palette": [
+      {
+        "action": "visible",
+        "selector": "#status-dark"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => ['dark','light','self'].every(scope => { const element=document.querySelector('[data-status-scope='+scope+'] [role=status]'); return element && element.getAttribute('aria-live')==='polite' && element.textContent==='Choose a project before sending.' && element.getBoundingClientRect().height>0 && getComputedStyle(element).color===({dark:'rgb(20, 142, 107)',light:'rgb(111, 47, 189)',self:'rgb(34, 91, 173)'})[scope]; })"
+      }
+    ]
+  }
+}

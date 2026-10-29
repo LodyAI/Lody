@@ -1,4 +1,3 @@
-import { withClassName } from '@/lib/stylex';
 import { ChevronDown, GitMerge } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import * as stylex from '@stylexjs/stylex';
@@ -45,7 +44,6 @@ const styles = stylex.create({
       'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
-    ':focus-visible': { backgroundColor: 'hsl(var(--status-success) / 0.12)' },
     ':disabled': { opacity: 0.5 },
   },
   compactTrigger: {
@@ -67,8 +65,20 @@ const styles = stylex.create({
       width: '1px',
       backgroundColor: 'hsl(var(--status-success) / 0.25)',
     },
-    ':focus-visible': { backgroundColor: 'hsl(var(--status-success) / 0.12)' },
     ':disabled': { opacity: 0.5 },
+  },
+  compactFeedback: {
+    backgroundColor: {
+      default: null,
+      ':focus-visible': 'hsl(var(--status-success) / 0.12)',
+      '@media (hover: hover)': {
+        ':enabled:hover': {
+          default: 'hsl(var(--status-success) / 1)',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, hsl(var(--status-success) / 1) 10%, transparent)',
+        },
+      },
+    },
   },
   icon: {
     width: themeSpace[3.5],
@@ -146,7 +156,7 @@ export function PrMergeButton({
   const mainContent = (
     <>
       {isMerging ? (
-        <Spinner className="h-3.5 w-3.5" />
+        <Spinner diameter="calc(var(--spacing) * 3.5)" />
       ) : (
         <GitMerge {...stylex.props(styles.icon)} />
       )}
@@ -163,10 +173,7 @@ export function PrMergeButton({
           type="button"
           disabled={isDisabled}
           onClick={() => void onMerge?.(method)}
-          {...withClassName(
-            stylex.props(styles.compactMain),
-            'enabled:hover:bg-status-success/[0.10]'
-          )}
+          {...stylex.props(styles.compactMain, styles.compactFeedback)}
         >
           {mainContent}
         </button>
@@ -174,11 +181,12 @@ export function PrMergeButton({
         <Button
           type="button"
           size="small"
+          height="calc(var(--spacing) * 8)"
           variant={buttonVariant}
           disabled={isDisabled}
           onClick={() => void onMerge?.(method)}
           className={cn(
-            'h-8 gap-1 rounded-r-none',
+            'gap-1 rounded-r-none',
             buttonVariant === 'secondary' ? 'border-r-0' : 'border-transparent',
             readyGreen && greenClasses
           )}
@@ -194,10 +202,7 @@ export function PrMergeButton({
                 type="button"
                 disabled={isMerging || !onSelectMethod}
                 aria-label={t('sessions.prTab.chooseMergeMethod', 'Choose merge method')}
-                {...withClassName(
-                  stylex.props(styles.compactTrigger),
-                  'enabled:hover:bg-status-success/[0.10]'
-                )}
+                {...stylex.props(styles.compactTrigger, styles.compactFeedback)}
               >
                 <ChevronDown {...stylex.props(styles.icon)} />
               </button>
@@ -205,11 +210,12 @@ export function PrMergeButton({
               <Button
                 type="button"
                 size="small"
+                height="calc(var(--spacing) * 8)"
                 variant={buttonVariant}
                 disabled={isMerging || !onSelectMethod}
                 aria-label={t('sessions.prTab.chooseMergeMethod', 'Choose merge method')}
                 className={cn(
-                  'h-8 rounded-l-none border-l border-black/10 px-1.5',
+                  'rounded-l-none border-l border-black/10 px-1.5',
                   readyGreen && cn(greenClasses, 'border-l-white/25')
                 )}
               >

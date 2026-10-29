@@ -1,0 +1,123 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844,
+      "device": "iPhone 13"
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 720,
+      "device": "iPhone SE"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "ids": [
+    "sessions-messagequeuedisplay--owned-row-footer",
+    "sessions-messagequeuedisplay--editing-first-item",
+    "sessions-messagequeuedisplay--single-item"
+  ],
+  "ready": {
+    "sessions-messagequeuedisplay--owned-row-footer": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-queue-row-footer]",
+        "index": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const b=document.querySelector(\"[data-owned-queue-fixture] button[aria-label=\\\"Drag to reorder\\\"]\");if(!b)return false;const i=b.querySelector(\"span\"),g=b.querySelector(\"svg\");return getComputedStyle(i).display===\"block\" && getComputedStyle(g).display===\"none\";}"
+      }
+    ]
+  },
+  "states": {
+    "sessions-messagequeuedisplay--owned-row-footer": [
+      {
+        "name": "outer-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-unrelated-queue-control]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const b=document.querySelector(\"[data-owned-queue-fixture] button[aria-label=\\\"Drag to reorder\\\"]\");if(!b)return false;const i=b.querySelector(\"span\"),g=b.querySelector(\"svg\");return getComputedStyle(i).display===\"block\" && getComputedStyle(g).display===\"none\";}"
+          }
+        ]
+      },
+      {
+        "name": "outer-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": "[data-unrelated-queue-control]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const b=document.querySelector(\"[data-owned-queue-fixture] button[aria-label=\\\"Drag to reorder\\\"]\");if(!b)return false;const i=b.querySelector(\"span\"),g=b.querySelector(\"svg\");return getComputedStyle(i).display===\"block\" && getComputedStyle(g).display===\"none\";}"
+          }
+        ]
+      },
+      {
+        "name": "row-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-owned-queue-row-footer]",
+            "index": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const b=document.querySelector(\"[data-owned-queue-fixture] button[aria-label=\\\"Drag to reorder\\\"]\");if(!b)return false;const i=b.querySelector(\"span\"),g=b.querySelector(\"svg\");const h=matchMedia(\"(hover:hover)\").matches;return getComputedStyle(i).display===(h?\"none\":\"block\")&&getComputedStyle(g).display===(h?\"block\":\"none\");}"
+          }
+        ]
+      },
+      {
+        "name": "row-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": "[data-owned-queue-row-footer]",
+            "index": 0
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const b=document.querySelector(\"[data-owned-queue-fixture] button[aria-label=\\\"Drag to reorder\\\"]\");if(!b)return false;const i=b.querySelector(\"span\"),g=b.querySelector(\"svg\");return getComputedStyle(i).display===\"none\"&&getComputedStyle(g).display===\"block\";}"
+          }
+        ]
+      },
+      {
+        "name": "row-blur",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-unrelated-queue-control]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const b=document.querySelector(\"[data-owned-queue-fixture] button[aria-label=\\\"Drag to reorder\\\"]\");if(!b)return false;const i=b.querySelector(\"span\"),g=b.querySelector(\"svg\");return getComputedStyle(i).display===\"block\" && getComputedStyle(g).display===\"none\";}"
+          }
+        ]
+      }
+    ]
+  }
+}

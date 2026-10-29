@@ -232,7 +232,7 @@ export const GoalActionButton = ({
       )}
     >
       {loading ? (
-        <Spinner className="h-3.5 w-3.5" aria-hidden="true" />
+        <Spinner diameter="calc(var(--spacing) * 3.5)" aria-hidden="true" />
       ) : (
         <Icon {...stylex.props(styles.actionGlyph)} aria-hidden="true" />
       )}
@@ -472,7 +472,6 @@ export const SessionGoalBanner = memo(function SessionGoalBanner({
                 onClick={() => onDismiss(goal)}
                 aria-label={t('sessions.goal.actions.dismiss', 'Dismiss goal banner')}
                 title={t('sessions.goal.actions.dismiss', 'Dismiss goal banner')}
-                className="shrink-0"
               >
                 <X {...stylex.props(styles.actionGlyph)} aria-hidden="true" />
               </Button>

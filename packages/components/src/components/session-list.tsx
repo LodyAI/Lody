@@ -1667,7 +1667,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
   const menuRow = hasMenuActions ? (
     <ContextMenu.Root key={session.sessionId}>
       <ContextMenu.Trigger>{row}</ContextMenu.Trigger>
-      <ContextMenu.Content className="min-w-[180px]">
+      <ContextMenu.Content minWidth={180}>
         <SessionRowOpenedByMenuItems
           opener={openedByOpener}
           goToOpenerLabel={contextMenuLabels.goToOpenerSession}
@@ -2045,7 +2045,7 @@ function ProjectGroupHeaderRow({
       {showMenu ? (
         <ContextMenu.Root onOpenChange={setMenuOpen}>
           <ContextMenu.Trigger render={row} />
-          <ContextMenu.Content className="min-w-[180px]">
+          <ContextMenu.Content minWidth={180}>
             {onOpenSettings ? (
               <ContextMenu.Item icon={Folders} onClick={onOpenSettings}>
                 {t('sidebar.projectGroups.settings', 'Edit project group')}
@@ -2409,7 +2409,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
             return (
               <ContextMenu.Root onOpenChange={setRepoMenuOpen}>
                 <ContextMenu.Trigger render={headerRow} />
-                <ContextMenu.Content className="min-w-[180px]">
+                <ContextMenu.Content minWidth={180}>
                   {onEditRepoProject ? (
                     <ContextMenu.Item
                       icon={Folders}

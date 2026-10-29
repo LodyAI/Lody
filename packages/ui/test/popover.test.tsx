@@ -1,10 +1,21 @@
-import { useState } from 'react';
+import { createRef, useState } from 'react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { Button } from '../src/button/button';
-import { Popover } from '../src/popover/popover';
+import { Popover, type PopoverContentProps } from '../src/popover/popover';
 import { PopupContainerProvider } from '../src/popup/portal-container';
 import { ThemeRoot, forcedThemeClassNames } from '../src/theme/theme';
-import { all, classesOf, click, mount, one, press, type Mounted } from './dom';
+import {
+  all,
+  classesOf,
+  click,
+  mount,
+  one,
+  press,
+  step,
+  typeInto,
+  until,
+  type Mounted,
+} from './dom';
 
 let mounted: Mounted | undefined;
 afterEach(async () => {
@@ -138,5 +149,104 @@ describe('Popover', () => {
     for (const className of forcedThemeClassNames('dark')) {
       expect(classesOf(positioner as Element)).toContain(className);
     }
+  });
+
+  test('layout changes preserve content and the positioner ref, style and events', async () => {
+    const positionerRef = createRef<HTMLDivElement>();
+    function Subject({
+      padding,
+      gap,
+      ...dimensions
+    }: Pick<
+      PopoverContentProps,
+      'padding' | 'gap' | 'width' | 'minWidth' | 'maxWidth' | 'maxHeight'
+    >) {
+      const [open, setOpen] = useState(true);
+      const [value, setValue] = useState('Original value');
+      const [pointerOwner, setPointerOwner] = useState('none');
+      return (
+        <>
+          <output data-observed>{`${String(open)}; ${pointerOwner}`}</output>
+          <Popover.Root open={open} onOpenChange={setOpen}>
+            <Popover.Trigger>Layout</Popover.Trigger>
+            <Popover.Content
+              ref={positionerRef}
+              data-positioner=""
+              style={{ minWidth: 333 }}
+              padding={padding}
+              gap={gap}
+              {...dimensions}
+              onPointerEnter={(event) =>
+                setPointerOwner(
+                  event.currentTarget === positionerRef.current ? 'positioner' : 'other'
+                )
+              }
+            >
+              <Popover.Title>Layout panel</Popover.Title>
+              <input
+                aria-label="Value"
+                value={value}
+                onChange={(event) => setValue(event.target.value)}
+              />
+              <Popover.Close>Done</Popover.Close>
+            </Popover.Content>
+          </Popover.Root>
+        </>
+      );
+    }
+    mounted = await mount(
+      <Subject
+        padding="default"
+        gap="none"
+        width={280}
+        minWidth={100}
+        maxWidth={300}
+        maxHeight={180}
+      />
+    );
+    const popup = panel();
+    const positioner = positionerRef.current!;
+    const input = popup.querySelector('input')!;
+    await typeInto(input, 'Edited value');
+    await step(() => {
+      positioner.dispatchEvent(
+        new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' })
+      );
+    });
+    expect(one('[data-observed]').textContent).toBe('true; positioner');
+
+    await step(() =>
+      mounted!.root.render(
+        <Subject padding="none" gap="default" width={0} minWidth={0} maxWidth={0} maxHeight={0} />
+      )
+    );
+
+    expect(panel()).toBe(popup);
+    expect(panel().querySelector('input')).toBe(input);
+    expect(input.value).toBe('Edited value');
+    expect(positionerRef.current).toBe(positioner);
+    expect(positioner.contains(popup)).toBe(true);
+    expect(positioner.style.minWidth).toBe('333px');
+    expect(popup.style.minWidth).toBe('');
+    for (const node of [positioner, popup]) {
+      for (const name of ['padding', 'gap', 'width', 'minwidth', 'maxwidth', 'maxheight']) {
+        expect(node.hasAttribute(name)).toBe(false);
+      }
+    }
+    expect(document.getElementById(popup.getAttribute('aria-labelledby')!)?.textContent).toBe(
+      'Layout panel'
+    );
+
+    await step(() => mounted!.root.render(<Subject padding="default" gap="default" />));
+    expect(panel()).toBe(popup);
+    expect(panel().querySelector('input')).toBe(input);
+    expect(input.value).toBe('Edited value');
+
+    await click(one('[role="dialog"] button'));
+    await until(() => panels().length === 0, 'the layout panel to close');
+    expect(one('[data-observed]').textContent).toBe('false; positioner');
+    await click(trigger());
+    await until(() => panels().length === 1, 'the layout panel to reopen');
+    expect(panel().querySelector('input')?.value).toBe('Edited value');
   });
 });

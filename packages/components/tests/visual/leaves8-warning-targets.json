@@ -1,0 +1,81 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 320,
+      "height": 844,
+      "device": "iPhone SE"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "sessions-agentwarningnotice--short",
+    "sessions-agentwarningnotice--long-single-line",
+    "sessions-agentwarningnotice--multi-line",
+    "sessions-agentwarningnotice--scoped-palette",
+    "sessions-agentwarningnotice--neutral"
+  ],
+  "ready": {
+    "sessions-agentwarningnotice--short": [
+      {
+        "action": "visible",
+        "selector": "[role=alert]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => [...document.querySelectorAll('[role=alert]')].every(root => root.getBoundingClientRect().width > 0 && root.textContent.trim().length > 0)"
+      }
+    ],
+    "sessions-agentwarningnotice--long-single-line": [
+      {
+        "action": "visible",
+        "selector": "[role=alert]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => [...document.querySelectorAll('[role=alert]')].every(root => root.getBoundingClientRect().width > 0 && root.textContent.trim().length > 0)"
+      }
+    ],
+    "sessions-agentwarningnotice--multi-line": [
+      {
+        "action": "visible",
+        "selector": "[role=alert]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => [...document.querySelectorAll('[role=alert]')].every(root => root.getBoundingClientRect().width > 0 && root.textContent.trim().length > 0)"
+      }
+    ],
+    "sessions-agentwarningnotice--scoped-palette": [
+      {
+        "action": "visible",
+        "selector": "[data-warning-scope=dark] [role=alert]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => [...document.querySelectorAll('[role=alert]')].every(root => root.getBoundingClientRect().width > 0 && root.textContent.trim().length > 0)"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => ['dark', 'light'].every(scope => { const root=document.querySelector('[data-warning-scope='+scope+']'); const glyph=root?.querySelector('[role=alert] svg'); return glyph && getComputedStyle(glyph).color === (scope === 'dark' ? 'rgb(20, 142, 107)' : 'rgb(111, 47, 189)') && getComputedStyle(glyph.nextElementSibling).color === getComputedStyle(glyph).color; })"
+      }
+    ],
+    "sessions-agentwarningnotice--neutral": [
+      {
+        "action": "visible",
+        "selector": "[role=alert]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => [...document.querySelectorAll('[role=alert]')].every(root => root.getBoundingClientRect().width > 0 && root.textContent.trim().length > 0)"
+      }
+    ]
+  }
+}

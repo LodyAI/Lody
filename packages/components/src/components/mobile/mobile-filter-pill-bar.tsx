@@ -108,6 +108,9 @@ const TRANSITION_COLORS = {
   transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
 } as const;
 
+const DARK_SCOPE =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+
 const styles = stylex.create({
   root: { position: 'relative' },
   toolbar: {
@@ -155,8 +158,35 @@ const styles = stylex.create({
   },
   /** A chip at rest. */
   pillIdle: {
-    borderColor: 'hsl(var(--border) / 0.5)',
-    backgroundColor: { default: themeColors.muted, ':hover': 'hsl(var(--muted) / 0.8)' },
+    borderColor: {
+      default: 'hsl(var(--border) / 0.5)',
+      [DARK_SCOPE]: {
+        default: '#ffffff1f',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in oklab, var(--color-white) 12%, transparent)',
+      },
+    },
+    backgroundColor: {
+      default: themeColors.muted,
+      ':hover': 'hsl(var(--muted) / 0.8)',
+      [DARK_SCOPE]: {
+        default: '#ffffff1a',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in oklab, var(--color-white) 10%, transparent)',
+        // A touch-emulated hover keeps the dark resting fill; the light hover
+        // must not outrank it when this media condition is false.
+        ':hover': {
+          default: '#ffffff1a',
+          '@supports (color: color-mix(in lab, red, red))':
+            'color-mix(in oklab, var(--color-white) 10%, transparent)',
+          '@media (hover: hover)': {
+            default: '#ffffff24',
+            '@supports (color: color-mix(in lab, red, red))':
+              'color-mix(in oklab, var(--color-white) 14%, transparent)',
+          },
+        },
+      },
+    },
     color: themeColors.foreground,
   },
   /** A chip that is open, or carries a filter. */
@@ -346,15 +376,10 @@ function FilterPillButton({
         onClick={onToggle}
         aria-expanded={isOpen}
         aria-haspopup="dialog"
-        /* The dark-mode fills are hard-coded colours, so they stay
-           Tailwind classes on this element. */
-        {...withClassName(
-          stylex.props(
-            styles.pill,
-            styles.pillAggregate,
-            engaged ? styles.pillActive : styles.pillIdle
-          ),
-          engaged ? undefined : 'dark:border-white/12 dark:bg-white/10 dark:hover:bg-white/14'
+        {...stylex.props(
+          styles.pill,
+          styles.pillAggregate,
+          engaged ? styles.pillActive : styles.pillIdle
         )}
       >
         <span {...stylex.props(styles.pillLabel)}>{pill.label}</span>
@@ -387,11 +412,10 @@ function FilterPillButton({
       onClick={onToggle}
       aria-expanded={isOpen}
       aria-haspopup="listbox"
-      /* The dark-mode fills are hard-coded colours, so they stay
-         Tailwind classes on this element. */
-      {...withClassName(
-        stylex.props(styles.pill, styles.pillSingle, isOpen ? styles.pillActive : styles.pillIdle),
-        isOpen ? undefined : 'dark:border-white/12 dark:bg-white/10 dark:hover:bg-white/14'
+      {...stylex.props(
+        styles.pill,
+        styles.pillSingle,
+        isOpen ? styles.pillActive : styles.pillIdle
       )}
     >
       <span {...stylex.props(styles.pillLabel)}>{label}</span>

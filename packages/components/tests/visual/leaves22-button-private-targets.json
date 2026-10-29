@@ -1,0 +1,167 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "narrow",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "ids": [
+    "sessions-sessionheadermenu--git-hub-worktree",
+    "sessions-sessionrelationcard--operation-reply-in-stream",
+    "ai-gui-proposedplanblock--ready"
+  ],
+  "ready": {
+    "sessions-sessionheadermenu--git-hub-worktree": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "More actions"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const specs=[{\"selector\":\"button[aria-label=\\\"More actions\\\"]\",\"count\":1,\"height\":28,\"width\":28,\"disabled\":false}];for(const spec of specs){const boxes=[...document.querySelectorAll(spec.selector)];if(boxes.length!==spec.count)return false;for(const e of boxes){const s=getComputedStyle(e),r=e.getBoundingClientRect();if(s.height!==spec.height+'px'||(spec.width!=null&&s.width!==spec.width+'px')||r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight||e.disabled!==!!spec.disabled)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}}}  if(document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);return finite.every(a=>!a.pending&&a.playState!=='running');}"
+      }
+    ],
+    "sessions-sessionrelationcard--operation-reply-in-stream": [
+      {
+        "action": "visible",
+        "selector": "[data-operation-reply-card=succeeded]"
+      },
+      {
+        "action": "hover",
+        "selector": "[data-operation-reply-card=succeeded] > button"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const specs=[{\"selector\":\"[data-operation-reply-card=succeeded] > button\",\"count\":1,\"height\":28,\"width\":null,\"disabled\":false}];for(const spec of specs){const boxes=[...document.querySelectorAll(spec.selector)];if(boxes.length!==spec.count)return false;for(const e of boxes){const s=getComputedStyle(e),r=e.getBoundingClientRect();if(s.height!==spec.height+'px'||(spec.width!=null&&s.width!==spec.width+'px')||r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight||e.disabled!==!!spec.disabled)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}}}  if(document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);return finite.every(a=>!a.pending&&a.playState!=='running');}"
+      }
+    ],
+    "ai-gui-proposedplanblock--ready": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Copy plan"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const specs=[{\"selector\":\"button[aria-label=\\\"Copy plan\\\"]\",\"count\":1,\"height\":24,\"width\":24,\"disabled\":false}];for(const spec of specs){const boxes=[...document.querySelectorAll(spec.selector)];if(boxes.length!==spec.count)return false;for(const e of boxes){const s=getComputedStyle(e),r=e.getBoundingClientRect();if(s.height!==spec.height+'px'||(spec.width!=null&&s.width!==spec.width+'px')||r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight||e.disabled!==!!spec.disabled)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}}}  if(document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);return finite.every(a=>!a.pending&&a.playState!=='running');}"
+      }
+    ]
+  },
+  "states": {
+    "sessions-sessionheadermenu--git-hub-worktree": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "More actions"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const specs=[{\"selector\":\"button[aria-label=\\\"More actions\\\"]\",\"count\":1,\"height\":28,\"width\":28,\"disabled\":false}];for(const spec of specs){const boxes=[...document.querySelectorAll(spec.selector)];if(boxes.length!==spec.count)return false;for(const e of boxes){const s=getComputedStyle(e),r=e.getBoundingClientRect();if(s.height!==spec.height+'px'||(spec.width!=null&&s.width!==spec.width+'px')||r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight||e.disabled!==!!spec.disabled)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}}}  if(document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);return finite.every(a=>!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "More actions"
+          },
+          {
+            "action": "press",
+            "role": "button",
+            "name": "More actions",
+            "key": "ArrowLeft"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const specs=[{\"selector\":\"button[aria-label=\\\"More actions\\\"]\",\"count\":1,\"height\":28,\"width\":28,\"disabled\":false}];for(const spec of specs){const boxes=[...document.querySelectorAll(spec.selector)];if(boxes.length!==spec.count)return false;for(const e of boxes){const s=getComputedStyle(e),r=e.getBoundingClientRect();if(s.height!==spec.height+'px'||(spec.width!=null&&s.width!==spec.width+'px')||r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight||e.disabled!==!!spec.disabled)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}}} if(!document.querySelector('button[aria-label=\"More actions\"]')?.matches(':focus-visible'))return false; if(document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);return finite.every(a=>!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      }
+    ],
+    "sessions-sessionrelationcard--operation-reply-in-stream": [
+      {
+        "name": "reply-dialog",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-operation-reply-card=succeeded] button[title=\"View full reply\"]"
+          },
+          {
+            "action": "visible",
+            "role": "dialog"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const specs=[{\"selector\":\"[role=dialog] button:has(svg.lucide-arrow-up-right)\",\"count\":1,\"height\":28,\"width\":null,\"disabled\":false}];for(const spec of specs){const boxes=[...document.querySelectorAll(spec.selector)];if(boxes.length!==spec.count)return false;for(const e of boxes){const s=getComputedStyle(e),r=e.getBoundingClientRect();if(s.height!==spec.height+'px'||(spec.width!=null&&s.width!==spec.width+'px')||r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight||e.disabled!==!!spec.disabled)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}}}  if(document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);return finite.every(a=>!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      }
+    ],
+    "ai-gui-proposedplanblock--ready": [
+      {
+        "name": "copy-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Copy plan"
+          },
+          {
+            "action": "visible",
+            "text": "Copy plan"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const specs=[{\"selector\":\"button[aria-label=\\\"Copy plan\\\"]\",\"count\":1,\"height\":24,\"width\":24,\"disabled\":false}];for(const spec of specs){const boxes=[...document.querySelectorAll(spec.selector)];if(boxes.length!==spec.count)return false;for(const e of boxes){const s=getComputedStyle(e),r=e.getBoundingClientRect();if(s.height!==spec.height+'px'||(spec.width!=null&&s.width!==spec.width+'px')||r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight||e.disabled!==!!spec.disabled)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}}}  if(document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);return finite.every(a=>!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "copy-focused",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Copy plan"
+          },
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Copy plan",
+            "key": "ArrowLeft"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const specs=[{\"selector\":\"button[aria-label=\\\"Copy plan\\\"]\",\"count\":1,\"height\":24,\"width\":24,\"disabled\":false}];for(const spec of specs){const boxes=[...document.querySelectorAll(spec.selector)];if(boxes.length!==spec.count)return false;for(const e of boxes){const s=getComputedStyle(e),r=e.getBoundingClientRect();if(s.height!==spec.height+'px'||(spec.width!=null&&s.width!==spec.width+'px')||r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight||e.disabled!==!!spec.disabled)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}}} if(!document.querySelector('button[aria-label=\"Copy plan\"]')?.matches(':focus-visible'))return false; if(document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);return finite.every(a=>!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      }
+    ]
+  }
+}

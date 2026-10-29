@@ -1,0 +1,236 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 900,
+      "device": "iPhone SE"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "migration-mobileaboutupdaterspinner--checking",
+    "migration-mobileaboutupdaterspinner--downloading",
+    "migration-mobileaboutupdaterspinner--installing",
+    "migration-mobileaboutupdaterspinner--scoped-checking",
+    "migration-mobileaboutupdaterspinner--scoped-downloading",
+    "migration-mobileaboutupdaterspinner--scoped-installing"
+  ],
+  "ready": {
+    "migration-mobileaboutupdaterspinner--checking": [
+      {
+        "action": "visible",
+        "selector": "[data-about-updater-fixture]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-about-updater-fixture]')?.dataset.ipcReceipt==='updater.getState'"
+      },
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Check for Updates",
+        "exact": true
+      },
+      {
+        "action": "visible",
+        "selector": "[data-about-updater-fixture] [data-slot=spinner]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const r=document.querySelector('[data-about-updater-fixture]');const s=r?.querySelector('[data-slot=spinner]');const b=[...r.querySelectorAll('button')].find(b=>b.textContent.includes('Check for Updates'));return r.dataset.phase==='checking'&&r.dataset.ipcReceipt==='updater.checkForUpdates'&&s?.firstElementChild?.tagName==='svg'&&getComputedStyle(s).width==='14px'&&getComputedStyle(s).height==='14px'&&b?.disabled;}"
+      },
+      {
+        "action": "movePointer",
+        "x": 1,
+        "y": 1
+      }
+    ],
+    "migration-mobileaboutupdaterspinner--downloading": [
+      {
+        "action": "visible",
+        "selector": "[data-about-updater-fixture]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-about-updater-fixture]')?.dataset.ipcReceipt==='updater.getState'"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-about-updater-fixture] [data-slot=spinner]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const r=document.querySelector('[data-about-updater-fixture]');const s=r?.querySelector('[data-slot=spinner]');const b=[...r.querySelectorAll('button')].find(b=>b.textContent.includes('Check for Updates'));return r.dataset.phase==='downloading'&&r.dataset.ipcReceipt==='updater.getState'&&s?.firstElementChild?.tagName==='svg'&&getComputedStyle(s).width==='14px'&&getComputedStyle(s).height==='14px'&&b?.disabled&&r.textContent.includes('37%');}"
+      },
+      {
+        "action": "movePointer",
+        "x": 1,
+        "y": 1
+      }
+    ],
+    "migration-mobileaboutupdaterspinner--installing": [
+      {
+        "action": "visible",
+        "selector": "[data-about-updater-fixture]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-about-updater-fixture]')?.dataset.ipcReceipt==='updater.getState'"
+      },
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Update & Restart",
+        "exact": true
+      },
+      {
+        "action": "visible",
+        "selector": "[data-about-updater-fixture] [data-slot=spinner]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const r=document.querySelector('[data-about-updater-fixture]');const s=r?.querySelector('[data-slot=spinner]');const b=[...r.querySelectorAll('button')].find(b=>b.textContent.includes('Update & Restart'));return r.dataset.phase==='downloaded'&&r.dataset.ipcReceipt==='updater.quitAndInstall'&&s?.firstElementChild?.tagName==='svg'&&getComputedStyle(s).width==='14px'&&getComputedStyle(s).height==='14px'&&b?.disabled;}"
+      },
+      {
+        "action": "movePointer",
+        "x": 1,
+        "y": 1
+      }
+    ],
+    "migration-mobileaboutupdaterspinner--scoped-checking": [
+      {
+        "action": "visible",
+        "selector": "[data-about-updater-fixture]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-about-updater-fixture]')?.dataset.ipcReceipt==='updater.getState'"
+      },
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Check for Updates",
+        "exact": true
+      },
+      {
+        "action": "visible",
+        "selector": "[data-about-updater-fixture] [data-slot=spinner]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const r=document.querySelector('[data-about-updater-fixture]');const s=r?.querySelector('[data-slot=spinner]');const b=[...r.querySelectorAll('button')].find(b=>b.textContent.includes('Check for Updates'));return r.dataset.phase==='checking'&&r.dataset.ipcReceipt==='updater.checkForUpdates'&&s?.firstElementChild?.tagName==='svg'&&getComputedStyle(s).width==='10.5px'&&getComputedStyle(s).height==='10.5px'&&b?.disabled&&getComputedStyle(document.documentElement).getPropertyValue('--spacing').trim()==='6px'&&getComputedStyle(s).getPropertyValue('--spacing').trim()==='3px';}"
+      },
+      {
+        "action": "movePointer",
+        "x": 1,
+        "y": 1
+      }
+    ],
+    "migration-mobileaboutupdaterspinner--scoped-downloading": [
+      {
+        "action": "visible",
+        "selector": "[data-about-updater-fixture]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-about-updater-fixture]')?.dataset.ipcReceipt==='updater.getState'"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-about-updater-fixture] [data-slot=spinner]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const r=document.querySelector('[data-about-updater-fixture]');const s=r?.querySelector('[data-slot=spinner]');const b=[...r.querySelectorAll('button')].find(b=>b.textContent.includes('Check for Updates'));return r.dataset.phase==='downloading'&&r.dataset.ipcReceipt==='updater.getState'&&s?.firstElementChild?.tagName==='svg'&&getComputedStyle(s).width==='10.5px'&&getComputedStyle(s).height==='10.5px'&&b?.disabled&&getComputedStyle(document.documentElement).getPropertyValue('--spacing').trim()==='6px'&&getComputedStyle(s).getPropertyValue('--spacing').trim()==='3px'&&r.textContent.includes('37%');}"
+      },
+      {
+        "action": "movePointer",
+        "x": 1,
+        "y": 1
+      }
+    ],
+    "migration-mobileaboutupdaterspinner--scoped-installing": [
+      {
+        "action": "visible",
+        "selector": "[data-about-updater-fixture]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-about-updater-fixture]')?.dataset.ipcReceipt==='updater.getState'"
+      },
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Update & Restart",
+        "exact": true
+      },
+      {
+        "action": "visible",
+        "selector": "[data-about-updater-fixture] [data-slot=spinner]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const r=document.querySelector('[data-about-updater-fixture]');const s=r?.querySelector('[data-slot=spinner]');const b=[...r.querySelectorAll('button')].find(b=>b.textContent.includes('Update & Restart'));return r.dataset.phase==='downloaded'&&r.dataset.ipcReceipt==='updater.quitAndInstall'&&s?.firstElementChild?.tagName==='svg'&&getComputedStyle(s).width==='10.5px'&&getComputedStyle(s).height==='10.5px'&&b?.disabled&&getComputedStyle(document.documentElement).getPropertyValue('--spacing').trim()==='6px'&&getComputedStyle(s).getPropertyValue('--spacing').trim()==='3px';}"
+      },
+      {
+        "action": "movePointer",
+        "x": 1,
+        "y": 1
+      }
+    ]
+  },
+  "states": {
+    "migration-mobileaboutupdaterspinner--downloading": [
+      {
+        "name": "download-progress",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Advance download to 68%",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const r=document.querySelector('[data-about-updater-fixture]');const s=r?.querySelector('[data-slot=spinner]');return r?.textContent.includes('68%')&&getComputedStyle(s).width==='14px';}"
+          },
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          }
+        ]
+      }
+    ],
+    "migration-mobileaboutupdaterspinner--installing": [
+      {
+        "name": "failed-install-recovers",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Return failed install response",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const r=document.querySelector('[data-about-updater-fixture]');const b=[...r.querySelectorAll('button')].find(b=>b.textContent.includes('Update & Restart'));return r?.dataset.ipcReceipt==='updater.quitAndInstall:failed'&&!r.querySelector('[data-slot=spinner]')&&b&&!b.disabled&&b.querySelector('svg');}"
+          },
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          }
+        ]
+      }
+    ]
+  }
+}

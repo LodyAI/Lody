@@ -664,7 +664,7 @@ function ScheduleListRow({
                   icon
                   // Visible by default; only a device that actually has hover is
                   // allowed to hide it until the row is hovered or focused.
-                  className="shrink-0 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:focus-visible:opacity-100 [@media(hover:hover)]:group-hover:opacity-100"
+                  className="[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:focus-visible:opacity-100 [@media(hover:hover)]:group-hover:opacity-100"
                   onClick={() => onOpenSession(runtime.lastDispatch!.sessionId)}
                   aria-label={t('schedules.lastRun', 'Last run')}
                 >

@@ -53,7 +53,10 @@ export function CompleteEmailPage({
             >
               {signingOut ? (
                 <>
-                  <Spinner className={`h-4 w-4 ${stylex.props(surface.spinnerMargin).className}`} />
+                  <Spinner
+                    diameter="calc(var(--spacing) * 4)"
+                    className={stylex.props(surface.spinnerMargin).className}
+                  />
                   {t('completeEmail.loggingOut', 'Logging out')}
                 </>
               ) : (
@@ -118,7 +121,10 @@ export function CompleteEmailPage({
             >
               {submitting ? (
                 <>
-                  <Spinner className={`h-4 w-4 ${stylex.props(surface.spinnerMargin).className}`} />
+                  <Spinner
+                    diameter="calc(var(--spacing) * 4)"
+                    className={stylex.props(surface.spinnerMargin).className}
+                  />
                   {t('completeEmail.saving', 'Saving email')}
                 </>
               ) : (

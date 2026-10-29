@@ -149,7 +149,7 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
             >
               {isContextCompacting ? (
                 <>
-                  <Spinner className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <Spinner diameter="calc(var(--spacing) * 3.5)" aria-hidden="true" />
                   <span {...stylex.props(styles.tiny)}>
                     {t('sessions.usage.compacting', 'Compacting')}
                   </span>
@@ -176,7 +176,7 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
                 {t('sessions.usage.context', 'Context')}
               </div>
               <div {...stylex.props(styles.compacting)}>
-                <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <Spinner diameter="calc(var(--spacing) * 3.5)" className="text-muted-foreground" />
                 <span>{t('sessions.usage.compactingContext', 'Compacting context')}</span>
               </div>
             </div>

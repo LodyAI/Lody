@@ -1047,7 +1047,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   const menuRow = hasMenuActions ? (
     <ContextMenu.Root onOpenChange={setRowMenuOpen}>
       <ContextMenu.Trigger>{row}</ContextMenu.Trigger>
-      <ContextMenu.Content className="min-w-[180px]">
+      <ContextMenu.Content minWidth={180}>
         {handlePrOpen ? (
           <ContextMenu.Item
             icon={GitPullRequest}

@@ -1,0 +1,270 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1100
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 1400,
+      "device": "iPhone 13"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "migration-ownedcollapsiblecardlayout--worktree-layout",
+    "migration-ownedcollapsiblecardlayout--normal-media",
+    "migration-ownedcollapsiblecardlayout--activity-media",
+    "migration-ownedcollapsiblecardlayout--readonly-tool",
+    "migration-ownedcollapsiblecardlayout--scoped-layout",
+    "migration-ownedcollapsiblecardlayout--search-compatibility"
+  ],
+  "ready": {
+    "migration-ownedcollapsiblecardlayout--worktree-layout": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "worktree setup",
+        "exact": true
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const button=(name,title)=>[...document.querySelectorAll('[data-collapsible-case='+name+'] button')].find(e=>e.textContent.trim()===title&&e.firstElementChild?.tagName==='DIV');const css=e=>getComputedStyle(e);const padding=(body,top,bottom)=>body&&css(body).paddingInlineStart==='0px'&&css(body).paddingInlineEnd==='0px'&&css(body).paddingTop===top+'px'&&css(body).paddingBottom===bottom+'px';const decoded=r=>[...r.querySelectorAll('img')].every(i=>i.complete&&i.naturalWidth===160);const b=button('worktree','worktree setup');return b?.getAttribute('aria-expanded')==='false'&&!b.nextElementSibling;}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const button=(name,title)=>[...document.querySelectorAll('[data-collapsible-case='+name+'] button')].find(e=>e.textContent.trim()===title&&e.firstElementChild?.tagName==='DIV');const css=e=>getComputedStyle(e);const padding=(body,top,bottom)=>body&&css(body).paddingInlineStart==='0px'&&css(body).paddingInlineEnd==='0px'&&css(body).paddingTop===top+'px'&&css(body).paddingBottom===bottom+'px';const decoded=r=>[...r.querySelectorAll('img')].every(i=>i.complete&&i.naturalWidth===160);const b=button('worktree','worktree setup');const c=b?.parentElement;if(!c)return false;return css(c).maxWidth==='760px'&&Math.abs(c.getBoundingClientRect().width-Math.min(760,c.parentElement.getBoundingClientRect().width))<0.01;}"
+      }
+    ],
+    "migration-ownedcollapsiblecardlayout--normal-media": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Synthetic normal media",
+        "exact": true
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const button=(name,title)=>[...document.querySelectorAll('[data-collapsible-case='+name+'] button')].find(e=>e.textContent.trim()===title&&e.firstElementChild?.tagName==='DIV');const css=e=>getComputedStyle(e);const padding=(body,top,bottom)=>body&&css(body).paddingInlineStart==='0px'&&css(body).paddingInlineEnd==='0px'&&css(body).paddingTop===top+'px'&&css(body).paddingBottom===bottom+'px';const decoded=r=>[...r.querySelectorAll('img')].every(i=>i.complete&&i.naturalWidth===160);const b=button('normal','Synthetic normal media');return b?.getAttribute('aria-expanded')==='false'&&!b.nextElementSibling;}"
+      }
+    ],
+    "migration-ownedcollapsiblecardlayout--activity-media": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Synthetic activity media",
+        "exact": true
+      },
+      {
+        "action": "visible",
+        "selector": "[data-collapsible-case=activity] img"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const button=(name,title)=>[...document.querySelectorAll('[data-collapsible-case='+name+'] button')].find(e=>e.textContent.trim()===title&&e.firstElementChild?.tagName==='DIV');const css=e=>getComputedStyle(e);const padding=(body,top,bottom)=>body&&css(body).paddingInlineStart==='0px'&&css(body).paddingInlineEnd==='0px'&&css(body).paddingTop===top+'px'&&css(body).paddingBottom===bottom+'px';const decoded=r=>[...r.querySelectorAll('img')].every(i=>i.complete&&i.naturalWidth===160);const b=button('activity','Synthetic activity media');return b?.getAttribute('aria-expanded')==='true'&&padding(b.nextElementSibling,4,6)&&decoded(b.nextElementSibling)&&css(b.parentElement).borderRadius==='6px';}"
+      }
+    ],
+    "migration-ownedcollapsiblecardlayout--readonly-tool": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Synthetic read-only media",
+        "exact": true
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const button=(name,title)=>[...document.querySelectorAll('[data-collapsible-case='+name+'] button')].find(e=>e.textContent.trim()===title&&e.firstElementChild?.tagName==='DIV');const css=e=>getComputedStyle(e);const padding=(body,top,bottom)=>body&&css(body).paddingInlineStart==='0px'&&css(body).paddingInlineEnd==='0px'&&css(body).paddingTop===top+'px'&&css(body).paddingBottom===bottom+'px';const decoded=r=>[...r.querySelectorAll('img')].every(i=>i.complete&&i.naturalWidth===160);const b=button('readonly','Synthetic read-only media');return b&&!b.hasAttribute('aria-expanded')&&!b.nextElementSibling&&!document.querySelector('[data-collapsible-case=readonly] img');}"
+      }
+    ],
+    "migration-ownedcollapsiblecardlayout--scoped-layout": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "worktree setup",
+        "exact": true
+      },
+      {
+        "action": "click",
+        "role": "button",
+        "name": "worktree setup",
+        "exact": true
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const button=(name,title)=>[...document.querySelectorAll('[data-collapsible-case='+name+'] button')].find(e=>e.textContent.trim()===title&&e.firstElementChild?.tagName==='DIV');const css=e=>getComputedStyle(e);const padding=(body,top,bottom)=>body&&css(body).paddingInlineStart==='0px'&&css(body).paddingInlineEnd==='0px'&&css(body).paddingTop===top+'px'&&css(body).paddingBottom===bottom+'px';const decoded=r=>[...r.querySelectorAll('img')].every(i=>i.complete&&i.naturalWidth===160);const w=button('scoped-worktree','worktree setup'),n=button('scoped-normal','Synthetic scoped normal'),a=button('scoped-activity','Synthetic scoped activity');return w&&n&&a&&document.querySelector('[data-collapsible-scopes]').dataset.writersReady==='true'&&padding(w.nextElementSibling,0,4)&&padding(n.nextElementSibling,4.5,3)&&padding(a.nextElementSibling,5,7.5)&&css(a.parentElement).borderRadius==='13px'&&css(n.nextElementSibling).getPropertyValue('--spacing').trim()==='3px'&&css(a.nextElementSibling).getPropertyValue('--spacing').trim()==='5px'&&css(w.parentElement).maxWidth==='760px'&&[n,a].every(b=>b.getAttribute('aria-expanded')==='true'&&b.nextElementSibling.querySelector('img')&&decoded(b.nextElementSibling));}"
+      }
+    ],
+    "migration-ownedcollapsiblecardlayout--search-compatibility": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Agent thinking",
+        "exact": true
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const button=(name,title)=>[...document.querySelectorAll('[data-collapsible-case='+name+'] button')].find(e=>e.textContent.trim()===title&&e.firstElementChild?.tagName==='DIV');const css=e=>getComputedStyle(e);const padding=(body,top,bottom)=>body&&css(body).paddingInlineStart==='0px'&&css(body).paddingInlineEnd==='0px'&&css(body).paddingTop===top+'px'&&css(body).paddingBottom===bottom+'px';const decoded=r=>[...r.querySelectorAll('img')].every(i=>i.complete&&i.naturalWidth===160);const b=button('search','Agent thinking'),body=b?.nextElementSibling;return b?.getAttribute('aria-expanded')==='true'&&body&&css(body).paddingInlineStart==='8px'&&css(body).paddingInlineEnd==='8px'&&css(body).paddingTop==='0px'&&css(body).paddingBottom==='4px';}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const button=(name,title)=>[...document.querySelectorAll('[data-collapsible-case='+name+'] button')].find(e=>e.textContent.trim()===title&&e.firstElementChild?.tagName==='DIV');const css=e=>getComputedStyle(e);const padding=(body,top,bottom)=>body&&css(body).paddingInlineStart==='0px'&&css(body).paddingInlineEnd==='0px'&&css(body).paddingTop===top+'px'&&css(body).paddingBottom===bottom+'px';const decoded=r=>[...r.querySelectorAll('img')].every(i=>i.complete&&i.naturalWidth===160);const b=button('search','Agent thinking');return b&&b.parentElement.classList.contains('ring-1')&&b.parentElement.getAttribute('data-search-block-id')==='message:collapsible-thought-search:item:0:thought'&&document.querySelector('[data-collapsible-case=search]').dataset.searchActive==='true'&&b.nextElementSibling.querySelector('mark');}"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedcollapsiblecardlayout--worktree-layout": [
+      {
+        "name": "expanded",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "worktree setup",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const button=(name,title)=>[...document.querySelectorAll('[data-collapsible-case='+name+'] button')].find(e=>e.textContent.trim()===title&&e.firstElementChild?.tagName==='DIV');const css=e=>getComputedStyle(e);const padding=(body,top,bottom)=>body&&css(body).paddingInlineStart==='0px'&&css(body).paddingInlineEnd==='0px'&&css(body).paddingTop===top+'px'&&css(body).paddingBottom===bottom+'px';const decoded=r=>[...r.querySelectorAll('img')].every(i=>i.complete&&i.naturalWidth===160);const b=button('worktree','worktree setup');return b?.getAttribute('aria-expanded')==='true'&&padding(b.nextElementSibling,0,4)&&decoded(b.nextElementSibling);}"
+          },
+          {
+            "action": "visible",
+            "role": "button",
+            "name": "printf synthetic-worktree-output",
+            "exact": true
+          }
+        ]
+      },
+      {
+        "name": "collapsed-again",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "worktree setup",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const button=(name,title)=>[...document.querySelectorAll('[data-collapsible-case='+name+'] button')].find(e=>e.textContent.trim()===title&&e.firstElementChild?.tagName==='DIV');const css=e=>getComputedStyle(e);const padding=(body,top,bottom)=>body&&css(body).paddingInlineStart==='0px'&&css(body).paddingInlineEnd==='0px'&&css(body).paddingTop===top+'px'&&css(body).paddingBottom===bottom+'px';const decoded=r=>[...r.querySelectorAll('img')].every(i=>i.complete&&i.naturalWidth===160);const b=button('worktree','worktree setup');return b?.getAttribute('aria-expanded')==='false'&&!b.nextElementSibling;}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedcollapsiblecardlayout--normal-media": [
+      {
+        "name": "expanded",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Synthetic normal media",
+            "exact": true
+          },
+          {
+            "action": "visible",
+            "selector": "[data-collapsible-case=normal] img"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const button=(name,title)=>[...document.querySelectorAll('[data-collapsible-case='+name+'] button')].find(e=>e.textContent.trim()===title&&e.firstElementChild?.tagName==='DIV');const css=e=>getComputedStyle(e);const padding=(body,top,bottom)=>body&&css(body).paddingInlineStart==='0px'&&css(body).paddingInlineEnd==='0px'&&css(body).paddingTop===top+'px'&&css(body).paddingBottom===bottom+'px';const decoded=r=>[...r.querySelectorAll('img')].every(i=>i.complete&&i.naturalWidth===160);const b=button('normal','Synthetic normal media');return b?.getAttribute('aria-expanded')==='true'&&padding(b.nextElementSibling,6,4)&&decoded(b.nextElementSibling);}"
+          }
+        ]
+      },
+      {
+        "name": "collapsed-again",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Synthetic normal media",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const button=(name,title)=>[...document.querySelectorAll('[data-collapsible-case='+name+'] button')].find(e=>e.textContent.trim()===title&&e.firstElementChild?.tagName==='DIV');const css=e=>getComputedStyle(e);const padding=(body,top,bottom)=>body&&css(body).paddingInlineStart==='0px'&&css(body).paddingInlineEnd==='0px'&&css(body).paddingTop===top+'px'&&css(body).paddingBottom===bottom+'px';const decoded=r=>[...r.querySelectorAll('img')].every(i=>i.complete&&i.naturalWidth===160);const b=button('normal','Synthetic normal media');return b?.getAttribute('aria-expanded')==='false'&&!b.nextElementSibling;}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedcollapsiblecardlayout--activity-media": [
+      {
+        "name": "collapsed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Synthetic activity media",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const button=(name,title)=>[...document.querySelectorAll('[data-collapsible-case='+name+'] button')].find(e=>e.textContent.trim()===title&&e.firstElementChild?.tagName==='DIV');const css=e=>getComputedStyle(e);const padding=(body,top,bottom)=>body&&css(body).paddingInlineStart==='0px'&&css(body).paddingInlineEnd==='0px'&&css(body).paddingTop===top+'px'&&css(body).paddingBottom===bottom+'px';const decoded=r=>[...r.querySelectorAll('img')].every(i=>i.complete&&i.naturalWidth===160);const b=button('activity','Synthetic activity media');return b?.getAttribute('aria-expanded')==='false'&&!b.nextElementSibling;}"
+          }
+        ]
+      },
+      {
+        "name": "reopened",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Synthetic activity media",
+            "exact": true
+          },
+          {
+            "action": "visible",
+            "selector": "[data-collapsible-case=activity] img"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const button=(name,title)=>[...document.querySelectorAll('[data-collapsible-case='+name+'] button')].find(e=>e.textContent.trim()===title&&e.firstElementChild?.tagName==='DIV');const css=e=>getComputedStyle(e);const padding=(body,top,bottom)=>body&&css(body).paddingInlineStart==='0px'&&css(body).paddingInlineEnd==='0px'&&css(body).paddingTop===top+'px'&&css(body).paddingBottom===bottom+'px';const decoded=r=>[...r.querySelectorAll('img')].every(i=>i.complete&&i.naturalWidth===160);const b=button('activity','Synthetic activity media');return b?.getAttribute('aria-expanded')==='true'&&padding(b.nextElementSibling,4,6)&&decoded(b.nextElementSibling)&&css(b.parentElement).borderRadius==='6px';}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedcollapsiblecardlayout--search-compatibility": [
+      {
+        "name": "search-cleared",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Clear synthetic search",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const button=(name,title)=>[...document.querySelectorAll('[data-collapsible-case='+name+'] button')].find(e=>e.textContent.trim()===title&&e.firstElementChild?.tagName==='DIV');const css=e=>getComputedStyle(e);const padding=(body,top,bottom)=>body&&css(body).paddingInlineStart==='0px'&&css(body).paddingInlineEnd==='0px'&&css(body).paddingTop===top+'px'&&css(body).paddingBottom===bottom+'px';const decoded=r=>[...r.querySelectorAll('img')].every(i=>i.complete&&i.naturalWidth===160);const b=button('search','Agent thinking');return b?.getAttribute('aria-expanded')==='false'&&!b.nextElementSibling;}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-collapsible-case=search]').dataset.searchActive==='false'"
+          }
+        ]
+      },
+      {
+        "name": "thought-reopened",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Agent thinking",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const button=(name,title)=>[...document.querySelectorAll('[data-collapsible-case='+name+'] button')].find(e=>e.textContent.trim()===title&&e.firstElementChild?.tagName==='DIV');const css=e=>getComputedStyle(e);const padding=(body,top,bottom)=>body&&css(body).paddingInlineStart==='0px'&&css(body).paddingInlineEnd==='0px'&&css(body).paddingTop===top+'px'&&css(body).paddingBottom===bottom+'px';const decoded=r=>[...r.querySelectorAll('img')].every(i=>i.complete&&i.naturalWidth===160);const b=button('search','Agent thinking'),body=b?.nextElementSibling;return b?.getAttribute('aria-expanded')==='true'&&body&&css(body).paddingInlineStart==='8px'&&css(body).paddingInlineEnd==='8px'&&css(body).paddingTop==='0px'&&css(body).paddingBottom==='4px';}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const button=(name,title)=>[...document.querySelectorAll('[data-collapsible-case='+name+'] button')].find(e=>e.textContent.trim()===title&&e.firstElementChild?.tagName==='DIV');const css=e=>getComputedStyle(e);const padding=(body,top,bottom)=>body&&css(body).paddingInlineStart==='0px'&&css(body).paddingInlineEnd==='0px'&&css(body).paddingTop===top+'px'&&css(body).paddingBottom===bottom+'px';const decoded=r=>[...r.querySelectorAll('img')].every(i=>i.complete&&i.naturalWidth===160);const b=button('search','Agent thinking');return !b.parentElement.classList.contains('ring-1');}"
+          }
+        ]
+      }
+    ]
+  }
+}

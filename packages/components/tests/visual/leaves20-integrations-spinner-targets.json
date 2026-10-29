@@ -1,0 +1,188 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "device": "iPhone SE",
+      "width": 390,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "blockedHosts": ["github.com", "avatars.githubusercontent.com"],
+  "ids": [
+    "migration-ownedmobileintegrationsspinner--auth-recovery",
+    "migration-ownedmobileintegrationsspinner--auth-recovery-root-spacing",
+    "migration-ownedmobileintegrationsspinner--repos-loading",
+    "migration-ownedmobileintegrationsspinner--repos-loading-root-spacing",
+    "migration-ownedmobileintegrationsspinner--preference",
+    "migration-ownedmobileintegrationsspinner--preference-root-spacing"
+  ],
+  "ready": {
+    "migration-ownedmobileintegrationsspinner--auth-recovery": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[data-owned-integrations-target]'),marks=[...p.querySelectorAll('[data-slot=spinner]')];if(marks.length!==2)return false;return marks.every(m=>{const c=getComputedStyle(m),r=m.getBoundingClientRect(),n=m.closest('button')?14.0:16;return c.width===n+'px'&&c.height===n+'px'&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight;})&&marks.some(m=>m.closest('button')?.disabled===true);}"
+      }
+    ],
+    "migration-ownedmobileintegrationsspinner--auth-recovery-root-spacing": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[data-owned-integrations-target]'),marks=[...p.querySelectorAll('[data-slot=spinner]')];if(marks.length!==2)return false;return marks.every(m=>{const c=getComputedStyle(m),r=m.getBoundingClientRect(),n=m.closest('button')?17.5:20;return c.width===n+'px'&&c.height===n+'px'&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight;})&&marks.some(m=>m.closest('button')?.disabled===true);}"
+      }
+    ],
+    "migration-ownedmobileintegrationsspinner--repos-loading": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[data-owned-integrations-target]'),marks=p?.querySelectorAll('[data-slot=spinner]');if(marks?.length!==1)return false;const m=marks[0],c=getComputedStyle(m),r=m.getBoundingClientRect();return !m.closest('button')&&c.width==='16px'&&c.height==='16px'&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight;}"
+      }
+    ],
+    "migration-ownedmobileintegrationsspinner--repos-loading-root-spacing": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[data-owned-integrations-target]'),marks=p?.querySelectorAll('[data-slot=spinner]');if(marks?.length!==1)return false;const m=marks[0],c=getComputedStyle(m),r=m.getBoundingClientRect();return !m.closest('button')&&c.width==='20px'&&c.height==='20px'&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight;}"
+      }
+    ],
+    "migration-ownedmobileintegrationsspinner--preference": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[data-owned-integrations-target]'),s=p?.querySelector('[role=switch]');return !!s&&!s.disabled&&s.getAttribute('aria-checked')==='false'&&!p.querySelector('[data-slot=spinner]');}"
+      }
+    ],
+    "migration-ownedmobileintegrationsspinner--preference-root-spacing": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=document.querySelector('[data-owned-integrations-target]'),s=p?.querySelector('[role=switch]');return !!s&&!s.disabled&&s.getAttribute('aria-checked')==='false'&&!p.querySelector('[data-slot=spinner]');}"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedmobileintegrationsspinner--auth-recovery": [
+      {
+        "name": "resolved",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Resolve synthetic integration state"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-owned-integrations-target]');return document.querySelector('[data-owned-integrations-spinner]')?.dataset.resolved==='true'&&!!p.querySelector('#github')&&!p.querySelector('[data-slot=spinner]')&&!!p.querySelector('#github button')&&!p.querySelector('#github button').disabled;}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmobileintegrationsspinner--auth-recovery-root-spacing": [
+      {
+        "name": "resolved",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Resolve synthetic integration state"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-owned-integrations-target]');return document.querySelector('[data-owned-integrations-spinner]')?.dataset.resolved==='true'&&!!p.querySelector('#github')&&!p.querySelector('[data-slot=spinner]')&&!!p.querySelector('#github button')&&!p.querySelector('#github button').disabled;}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmobileintegrationsspinner--repos-loading": [
+      {
+        "name": "resolved",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Resolve synthetic integration state"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-owned-integrations-target]');return document.querySelector('[data-owned-integrations-spinner]')?.dataset.resolved==='true'&&!!p.querySelector('#github')&&!p.querySelector('[data-slot=spinner]')&&!!p.querySelector('#github button')&&!p.querySelector('#github button').disabled;}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmobileintegrationsspinner--repos-loading-root-spacing": [
+      {
+        "name": "resolved",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Resolve synthetic integration state"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-owned-integrations-target]');return document.querySelector('[data-owned-integrations-spinner]')?.dataset.resolved==='true'&&!!p.querySelector('#github')&&!p.querySelector('[data-slot=spinner]')&&!!p.querySelector('#github button')&&!p.querySelector('#github button').disabled;}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmobileintegrationsspinner--preference": [
+      {
+        "name": "pending",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-owned-integrations-target] [role=switch]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-owned-integrations-target]'),marks=p?.querySelectorAll('[data-slot=spinner]');if(marks?.length!==1)return false;const m=marks[0],c=getComputedStyle(m),r=m.getBoundingClientRect();return document.querySelector('[data-owned-integrations-spinner]')?.dataset.pending==='true'&&!p.querySelector('[role=switch]')&&c.width==='16px'&&c.height==='16px'&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight;}"
+          }
+        ]
+      },
+      {
+        "name": "completed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Complete synthetic preference"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-owned-integrations-target]'),s=p?.querySelector('[role=switch]');return document.querySelector('[data-owned-integrations-spinner]')?.dataset.pending==='false'&&!!s&&!s.disabled&&s.getAttribute('aria-checked')==='true'&&!p.querySelector('[data-slot=spinner]');}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmobileintegrationsspinner--preference-root-spacing": [
+      {
+        "name": "pending",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-owned-integrations-target] [role=switch]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-owned-integrations-target]'),marks=p?.querySelectorAll('[data-slot=spinner]');if(marks?.length!==1)return false;const m=marks[0],c=getComputedStyle(m),r=m.getBoundingClientRect();return document.querySelector('[data-owned-integrations-spinner]')?.dataset.pending==='true'&&!p.querySelector('[role=switch]')&&c.width==='20px'&&c.height==='20px'&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight;}"
+          }
+        ]
+      },
+      {
+        "name": "completed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Complete synthetic preference"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('[data-owned-integrations-target]'),s=p?.querySelector('[role=switch]');return document.querySelector('[data-owned-integrations-spinner]')?.dataset.pending==='false'&&!!s&&!s.disabled&&s.getAttribute('aria-checked')==='true'&&!p.querySelector('[data-slot=spinner]');}"
+          }
+        ]
+      }
+    ]
+  }
+}

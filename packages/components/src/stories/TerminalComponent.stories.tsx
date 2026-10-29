@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { type CSSProperties } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { TerminalComponent } from '@/components/ai-gui/terminal-component';
 
@@ -78,4 +78,13 @@ export const EmptyOutput: Story = {
     command: sampleCommand,
     output: '',
   },
+};
+
+export const OwnedBorderScope: Story = {
+  args: Basic.args,
+  render: (args) => (
+    <div data-owned-terminal-border="" style={{ '--border': '310 75% 50%' } as CSSProperties}>
+      <TerminalComponent {...args} />
+    </div>
+  ),
 };

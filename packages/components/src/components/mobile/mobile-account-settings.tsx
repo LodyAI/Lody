@@ -613,9 +613,8 @@ export function MobileAccountSettings({
                   </span>
                   {isSavingUserName ? (
                     <Spinner
-                      className={
-                        withClassName(stylex.props(styles.pendingNameInk), 'h-3.5 w-3.5').className
-                      }
+                      diameter="calc(var(--spacing) * 3.5)"
+                      className={stylex.props(styles.pendingNameInk).className}
                     />
                   ) : (
                     <Pencil {...stylex.props(styles.namePencil)} />
@@ -719,9 +718,8 @@ export function MobileAccountSettings({
                   <span {...stylex.props(styles.nameValue)}>{workspaceNameBaseline}</span>
                   {isRenamingOrganization ? (
                     <Spinner
-                      className={
-                        withClassName(stylex.props(styles.pendingNameInk), 'h-3.5 w-3.5').className
-                      }
+                      diameter="calc(var(--spacing) * 3.5)"
+                      className={stylex.props(styles.pendingNameInk).className}
                     />
                   ) : (
                     <Pencil {...stylex.props(styles.namePencil)} />
@@ -752,7 +750,8 @@ export function MobileAccountSettings({
               <Button
                 size="small"
                 variant="secondary"
-                className="h-8 px-2.5"
+                height="calc(var(--spacing) * 8)"
+                className="px-2.5"
                 onClick={() => setInviteDialogOpen(true)}
               >
                 <UserPlus {...stylex.props(styles.buttonIcon)} />
@@ -817,7 +816,9 @@ export function MobileAccountSettings({
                       variant="ghost"
                       icon
                       aria-label={t('workspace.removeMember.title')}
-                      className="h-9 w-9 text-muted-foreground hover:text-destructive"
+                      height="calc(var(--spacing) * 9)"
+                      width="calc(var(--spacing) * 9)"
+                      className="text-muted-foreground hover:text-destructive"
                       onClick={() => {
                         setUserToDelete(member.id);
                         setDeleteUserDialogOpen(true);
@@ -861,7 +862,9 @@ export function MobileAccountSettings({
                     variant="ghost"
                     icon
                     aria-label={t('workspace.invitations.copyLink')}
-                    className="h-9 w-9 text-muted-foreground hover:text-foreground"
+                    height="calc(var(--spacing) * 9)"
+                    width="calc(var(--spacing) * 9)"
+                    className="text-muted-foreground hover:text-foreground"
                     onClick={() => {
                       void onCopyInviteLink(getInviteLink(invitation));
                     }}
@@ -873,7 +876,9 @@ export function MobileAccountSettings({
                       variant="ghost"
                       icon
                       aria-label={t('common.cancel')}
-                      className="h-9 w-9 text-muted-foreground hover:text-destructive"
+                      height="calc(var(--spacing) * 9)"
+                      width="calc(var(--spacing) * 9)"
+                      className="text-muted-foreground hover:text-destructive"
                       disabled={cancellingInvitationIds.has(invitation.id)}
                       onClick={() => {
                         void (async () => {
@@ -900,7 +905,7 @@ export function MobileAccountSettings({
                       }}
                     >
                       {cancellingInvitationIds.has(invitation.id) ? (
-                        <Spinner className="h-3.5 w-3.5" />
+                        <Spinner diameter="calc(var(--spacing) * 3.5)" />
                       ) : (
                         <X {...stylex.props(styles.smallIcon)} />
                       )}
@@ -926,7 +931,8 @@ export function MobileAccountSettings({
           actions={
             <Button
               size="small"
-              className="h-8 px-2.5"
+              height="calc(var(--spacing) * 8)"
+              className="px-2.5"
               onClick={() => {
                 setCliApiKeyDialogOpen(true);
               }}
@@ -939,7 +945,7 @@ export function MobileAccountSettings({
         >
           {isLoadingCliApiKeys ? (
             <div {...stylex.props(styles.keyRow)}>
-              <Spinner className="h-3.5 w-3.5" />
+              <Spinner diameter="calc(var(--spacing) * 3.5)" />
               {t('settings.account.cliAuth.loadingRecords')}
             </div>
           ) : cliApiKeys.length === 0 ? (
@@ -995,10 +1001,8 @@ export function MobileAccountSettings({
                     >
                       {revokingCliApiKeyId === apiKey.id ? (
                         <Spinner
-                          className={
-                            withClassName(stylex.props(styles.pendingActionSpacing), 'h-3.5 w-3.5')
-                              .className
-                          }
+                          diameter="calc(var(--spacing) * 3.5)"
+                          className={stylex.props(styles.pendingActionSpacing).className}
                         />
                       ) : (
                         <Trash2 {...stylex.props(styles.buttonIcon)} />
@@ -1147,10 +1151,8 @@ export function MobileAccountSettings({
                 >
                   {isCreatingCliApiKey && (
                     <Spinner
-                      className={
-                        withClassName(stylex.props(styles.pendingActionSpacing), 'h-3.5 w-3.5')
-                          .className
-                      }
+                      diameter="calc(var(--spacing) * 3.5)"
+                      className={stylex.props(styles.pendingActionSpacing).className}
                     />
                   )}
                   {t('settings.account.cliAuth.createConfirmButton')}
@@ -1195,7 +1197,7 @@ export function MobileAccountSettings({
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               >
                 {revokingCliApiKeyId ? (
-                  <Spinner className="mr-1.5 h-3.5 w-3.5" />
+                  <Spinner diameter="calc(var(--spacing) * 3.5)" className="mr-1.5" />
                 ) : (
                   <Trash2 {...stylex.props(styles.buttonIcon)} />
                 )}
@@ -1279,7 +1281,7 @@ export function MobileAccountSettings({
             >
               {isLeaving ? (
                 <>
-                  <Spinner className="mr-2 h-4 w-4" />
+                  <Spinner diameter="calc(var(--spacing) * 4)" className="mr-2" />
                   {t('common.processing')}
                 </>
               ) : (
@@ -1398,10 +1400,8 @@ export function MobileAccountSettings({
               {isDeletingAccount ? (
                 <>
                   <Spinner
-                    className={
-                      withClassName(stylex.props(styles.pendingAccountDeletionSpacing), 'h-4 w-4')
-                        .className
-                    }
+                    diameter="calc(var(--spacing) * 4)"
+                    className={stylex.props(styles.pendingAccountDeletionSpacing).className}
                   />
                   {t('common.processing')}
                 </>

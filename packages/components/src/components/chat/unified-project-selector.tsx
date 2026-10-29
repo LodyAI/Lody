@@ -35,6 +35,12 @@ import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
 
 const styles = stylex.create({
+  groupGlyph: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+    opacity: 0.7,
+  },
+  groupOwnerGlyph: { flexShrink: 0 },
   /* The owner mark beside a project name. */
   ownerGlyph: { width: themeSpace[4], height: themeSpace[4], flexShrink: 0, opacity: 0.7 },
   ownerAvatar: {
@@ -653,7 +659,7 @@ export function UnifiedProjectSelectorView({
           ]
             .filter(Boolean)
             .join(' · '),
-        icon: <Folders className="h-4 w-4 shrink-0 opacity-70" />,
+        icon: <Folders {...stylex.props(styles.groupGlyph, styles.groupOwnerGlyph)} />,
         selection: { kind: 'group', projectId: group.projectId },
         lastUsedAt: group.lastUsedAt,
         disabledReason: group.disabledReason,
@@ -703,7 +709,7 @@ export function UnifiedProjectSelectorView({
     (value.kind === 'github' ? (
       <GitHubOwnerAvatarIcon repoFullName={value.repoFullName} />
     ) : value.kind === 'group' ? (
-      <Folders className="h-4 w-4 opacity-70" />
+      <Folders {...stylex.props(styles.groupGlyph)} />
     ) : (
       <FolderOpen {...stylex.props(styles.folderGlyph)} />
     ));

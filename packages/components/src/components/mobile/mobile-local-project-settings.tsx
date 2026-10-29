@@ -134,7 +134,7 @@ export function MobileLocalProjectSettings({
     return (
       <MobileSettingsSection title={t('workspace.projects.title', 'Project')}>
         <div {...stylex.props(mobileSurface.notice)}>
-          <Spinner className="h-4 w-4" />
+          <Spinner diameter="calc(var(--spacing) * 4)" />
           {t('workspace.projects.loading', 'Loading local projects')}
         </div>
       </MobileSettingsSection>
@@ -179,7 +179,9 @@ export function MobileLocalProjectSettings({
         >
           <MobileSettingsRow label={t('workspace.projects.shareToggle', '与团队共享')}>
             <div {...stylex.props(styles.shareControl)}>
-              {row.isUpdating ? <Spinner className="h-4 w-4 text-muted-foreground" /> : null}
+              {row.isUpdating ? (
+                <Spinner diameter="calc(var(--spacing) * 4)" className="text-muted-foreground" />
+              ) : null}
               <Switch
                 checked={row.sharedWithTeam}
                 disabled={row.isUpdating || !row.canUpdateSharing || !onSharedWithTeamChange}

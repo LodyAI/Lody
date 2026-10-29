@@ -1,0 +1,41 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone SE",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "ids": ["chat-unifiedprojectselector--owned-group-selection"],
+  "ready": {
+    "chat-unifiedprojectselector--owned-group-selection": [
+      {
+        "action": "waitForFunction",
+        "expression": "()=>(function gate(scoped,override,selected,menu,propertyRow,keyboard,hover){const host=document.querySelector('[data-group-selector-fixture]'),button=document.querySelector('[data-unified-project-row] button[aria-haspopup=\"menu\"]'),receipt=document.querySelector('[data-group-selection]');if(!host||!button||host.dataset.localSpacing!==String(scoped)||host.dataset.callerOverride!==String(override)||receipt?.textContent!==selected)return false;const s=scoped?5:4,fallback=selected==='missing-synthetic-group',glyph=button.querySelector('svg.lucide-folders');if(!glyph)return false;const c=getComputedStyle(glyph),r=glyph.getBoundingClientRect(),expectedWidth=(override?7:4)*s,triggerWidth=fallback?16:expectedWidth;if(c.width!==triggerWidth+'px'||c.height!==4*s+'px'||c.opacity!==String(override?.4:propertyRow?.7:1)||c.flexShrink!==(fallback?'1':'0')||c.getPropertyValue('--spacing').trim()!==(scoped?'5px':'.25rem')||r.width<=0||r.height<=0)return false;const menus=[...document.querySelectorAll('[role=\"menu\"]')].filter(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0;});if(menu){if(menus.length!==1)return false;const rows=[...menus[0].querySelectorAll('[role=\"menuitemradio\"]')];if(rows.length!==3||rows.filter(e=>e.getAttribute('aria-disabled')==='true').length!==1)return false;for(const row of rows){const icon=row.querySelector('svg.lucide-folders');if(!icon)return false;const x=getComputedStyle(icon);if(x.width!==expectedWidth+'px'||x.height!==4*s+'px'||x.opacity!==String(override?.4:.7)||x.flexShrink!=='0'||x.getPropertyValue('--spacing').trim()!==(scoped?'5px':'.25rem'))return false;}}else if(menus.length)return false;if(hover&&getComputedStyle(glyph.parentElement).opacity!==(propertyRow||!matchMedia('(hover: hover)').matches?'1':'0'))return false;if(keyboard){const a=document.activeElement?.closest('[role=\"menuitemradio\"]');if(keyboard==='disabled'){if(!a?.textContent.includes('Unavailable synthetic group')||a.getAttribute('aria-disabled')!=='true')return false;}else if(!a?.textContent.includes('Another synthetic group')||a.getAttribute('aria-disabled')==='true')return false;}if(!menu&&selected==='synthetic-group-primary'){const label=[...button.querySelectorAll(':scope>span')].find(e=>e.textContent==='Synthetic workspace group with repositories and an intentionally long display name');if(!label||getComputedStyle(label).textOverflow!=='ellipsis'||label.scrollWidth<=label.clientWidth)return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));})(false,false,\"synthetic-group-primary\",false,true,false,false)"
+      },
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Use local spacing"
+      },
+      {
+        "action": "click",
+        "selector": "[data-unified-project-row] button[aria-haspopup=\"menu\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>(function gate(scoped,override,selected,menu,propertyRow,keyboard,hover){const host=document.querySelector('[data-group-selector-fixture]'),button=document.querySelector('[data-unified-project-row] button[aria-haspopup=\"menu\"]'),receipt=document.querySelector('[data-group-selection]');if(!host||!button||host.dataset.localSpacing!==String(scoped)||host.dataset.callerOverride!==String(override)||receipt?.textContent!==selected)return false;const s=scoped?5:4,fallback=selected==='missing-synthetic-group',glyph=button.querySelector('svg.lucide-folders');if(!glyph)return false;const c=getComputedStyle(glyph),r=glyph.getBoundingClientRect(),expectedWidth=(override?7:4)*s,triggerWidth=fallback?16:expectedWidth;if(c.width!==triggerWidth+'px'||c.height!==4*s+'px'||c.opacity!==String(override?.4:propertyRow?.7:1)||c.flexShrink!==(fallback?'1':'0')||c.getPropertyValue('--spacing').trim()!==(scoped?'5px':'.25rem')||r.width<=0||r.height<=0)return false;const menus=[...document.querySelectorAll('[role=\"menu\"]')].filter(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0;});if(menu){if(menus.length!==1)return false;const rows=[...menus[0].querySelectorAll('[role=\"menuitemradio\"]')];if(rows.length!==3||rows.filter(e=>e.getAttribute('aria-disabled')==='true').length!==1)return false;for(const row of rows){const icon=row.querySelector('svg.lucide-folders');if(!icon)return false;const x=getComputedStyle(icon);if(x.width!==expectedWidth+'px'||x.height!==4*s+'px'||x.opacity!==String(override?.4:.7)||x.flexShrink!=='0'||x.getPropertyValue('--spacing').trim()!==(scoped?'5px':'.25rem'))return false;}}else if(menus.length)return false;if(hover&&getComputedStyle(glyph.parentElement).opacity!==(propertyRow||!matchMedia('(hover: hover)').matches?'1':'0'))return false;if(keyboard){const a=document.activeElement?.closest('[role=\"menuitemradio\"]');if(keyboard==='disabled'){if(!a?.textContent.includes('Unavailable synthetic group')||a.getAttribute('aria-disabled')!=='true')return false;}else if(!a?.textContent.includes('Another synthetic group')||a.getAttribute('aria-disabled')==='true')return false;}if(!menu&&selected==='synthetic-group-primary'){const label=[...button.querySelectorAll(':scope>span')].find(e=>e.textContent==='Synthetic workspace group with repositories and an intentionally long display name');if(!label||getComputedStyle(label).textOverflow!=='ellipsis'||label.scrollWidth<=label.clientWidth)return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));})(true,false,\"synthetic-group-primary\",true,true,false,false)"
+      }
+    ]
+  },
+  "states": {}
+}

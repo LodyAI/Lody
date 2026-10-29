@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import type { ScheduleRecurrence } from '@lody/shared';
 import { ScheduleRecurrenceEditor } from '../components/schedules/schedule-recurrence-editor';
@@ -16,6 +16,7 @@ const styles = stylex.create({
   },
   card: { width: 480, maxWidth: '100%' },
   large: { fontSize: 18 },
+  compact: { minHeight: 0 },
 });
 const meta = {
   title: 'Schedules/RecurrenceMigration',
@@ -28,14 +29,19 @@ function Fixture({
   initial,
   disabled = false,
   large = false,
+  compact = false,
 }: {
   initial: ScheduleRecurrence;
   disabled?: boolean;
   large?: boolean;
+  compact?: boolean;
 }) {
   const [value, setValue] = useState(initial);
   return (
-    <div {...stylex.props(styles.canvas, large && styles.large)} data-settings-surface>
+    <div
+      {...stylex.props(styles.canvas, large && styles.large, compact && styles.compact)}
+      data-settings-surface
+    >
       <div {...scheduleCardProps(stylex.props(styles.card).className)}>
         <ScheduleRecurrenceEditor
           value={value}
@@ -70,6 +76,20 @@ export const Monthly: Story = { render: () => <Fixture initial={monthly} /> };
 export const LargeMonthly: Story = { render: () => <Fixture initial={monthly} large /> };
 export const DisabledWeekly: Story = { render: () => <Fixture initial={weekly} disabled /> };
 export const DisabledMonthly: Story = { render: () => <Fixture initial={monthly} disabled /> };
+export const ScopeThemes: Story = {
+  render: () => (
+    <div data-recurrence-theme-fixture="" style={{ '--color-white': '#74c9bb' } as CSSProperties}>
+      <div className="dark-scope" data-recurrence-scope="dark">
+        <Fixture initial={weekly} compact />
+      </div>
+      <div className="dark-scope">
+        <div className="light-scope" data-recurrence-scope="light">
+          <Fixture initial={weekly} compact />
+        </div>
+      </div>
+    </div>
+  ),
+};
 export const Once: Story = {
   render: () => <Fixture initial={{ kind: 'once', at: '2026-10-23T01:30:00.000Z' }} />,
 };

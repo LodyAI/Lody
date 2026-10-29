@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import type { CSSProperties } from 'react';
 import type { SessionHistoryParsed, SessionId } from '@lody/shared';
 
 import { MessageRowView } from '@/components/ai-gui/view';
@@ -8,11 +9,8 @@ import { ConversationColumn } from '@/components/shared/conversation-column';
  * The `agent_warning` system notice, rendered through the real `MessageRowView`
  * system-message path inside the shared conversation column.
  *
- * It sits among prose and tool rows, so it follows the conversation's compact
- * transparent language rather than painting a filled card: the triangle carries
- * the status colour and the text stays on the normal prose ramp. The long and
- * multi-line cases are here because an agent warning is arbitrary runtime text —
- * it wraps rather than clipping, and it must not stretch the column.
+ * The real always-open banner colors its triangle and title. Agent-provided
+ * detail wraps inside the conversation column, including explicit newlines.
  */
 const meta = {
   title: 'Sessions/AgentWarningNotice',
@@ -74,5 +72,47 @@ export const MultiLine: Story = {
       'Two problems were found:\n  1. `pnpm-lock.yaml` is out of date\n  2. the managed runtime checksum does not match\n\nThe turn continued with the cached runtime.'
     ),
     sessionId,
+  },
+};
+
+export const ScopedPalette: StoryObj = {
+  render: () => (
+    <div
+      data-warning-palette=""
+      style={
+        {
+          '--color-amber-600': 'rgb(111 47 189)',
+          '--color-amber-400': 'rgb(20 142 107)',
+        } as CSSProperties
+      }
+    >
+      <div className="dark-scope" data-warning-scope="dark">
+        <MessageRowView message={warningMessage('Scoped warning text.')} sessionId={sessionId} />
+      </div>
+      <div className="dark-scope">
+        <div className="light-scope" data-warning-scope="light">
+          <MessageRowView message={warningMessage('Scoped warning text.')} sessionId={sessionId} />
+        </div>
+      </div>
+    </div>
+  ),
+};
+
+export const Neutral: Story = {
+  args: {
+    sessionId,
+    message: {
+      ...warningMessage('Provider is currently at capacity.'),
+      items: [
+        {
+          type: 'system_notice',
+          name: 'chat_failed',
+          meta: {
+            reason: 'acp_provider_overloaded',
+            message: 'Provider is currently at capacity.',
+          },
+        },
+      ],
+    },
   },
 };

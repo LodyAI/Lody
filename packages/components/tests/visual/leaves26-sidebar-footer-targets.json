@@ -1,0 +1,184 @@
+{
+  "viewports": [
+    {
+      "name": "phone390",
+      "device": "iPhone SE",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "rotated768",
+      "device": "iPhone SE",
+      "width": 768,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "migration-ownedsidebarfooterdimensions--default",
+    "migration-ownedsidebarfooterdimensions--scoped"
+  ],
+  "ready": {
+    "migration-ownedsidebarfooterdimensions--default": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const host=document.querySelector('[data-owned-footer-dimensions]'); const footer=host?.querySelector('[data-sidebar-footer]'); if(!footer)return false;const buttons=[...footer.querySelectorAll('button')].filter(e=>['Help','Archive','Settings','Leave Archive'].includes(e.getAttribute('aria-label')));if(buttons.length!==3)return false; const mobile=navigator.userAgent.includes('iPhone')&&innerWidth<768; return buttons.every(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&(!mobile||(r.width===48&&r.height===48));})&&document.querySelector('[data-footer-fixture-state]')?.dataset.footerFixtureState==='home:none';}"
+      }
+    ],
+    "migration-ownedsidebarfooterdimensions--scoped": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const host=document.querySelector('[data-owned-footer-dimensions]'); const footer=host?.querySelector('[data-sidebar-footer]'); if(!footer)return false;const buttons=[...footer.querySelectorAll('button')].filter(e=>['Help','Archive','Settings','Leave Archive'].includes(e.getAttribute('aria-label')));if(buttons.length!==3)return false; const mobile=navigator.userAgent.includes('iPhone')&&innerWidth<768; return buttons.every(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&(!mobile||(r.width===60&&r.height===60));})&&document.querySelector('[data-footer-fixture-state]')?.dataset.footerFixtureState==='home:none';}"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedsidebarfooterdimensions--default": [
+      {
+        "name": "help-open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-footer] button[aria-label=\"Help\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Docs"
+          }
+        ]
+      },
+      {
+        "name": "docs-action",
+        "steps": [
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Docs"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-footer-fixture-state]')?.dataset.footerFixtureState==='home:docs'"
+          }
+        ]
+      },
+      {
+        "name": "archive-active",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-footer] button[aria-label=\"Archive\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-footer-fixture-state]')?.dataset.footerFixtureState==='archive:docs'"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-footer] button[aria-label=\"Leave Archive\"]"
+          }
+        ]
+      },
+      {
+        "name": "returned-home",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-footer] button[aria-label=\"Leave Archive\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-footer-fixture-state]')?.dataset.footerFixtureState==='home:docs'"
+          }
+        ]
+      },
+      {
+        "name": "settings-action",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-footer] button[aria-label=\"Settings\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-footer-fixture-state]')?.dataset.footerFixtureState==='home:settings'"
+          }
+        ]
+      }
+    ],
+    "migration-ownedsidebarfooterdimensions--scoped": [
+      {
+        "name": "help-open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-footer] button[aria-label=\"Help\"]"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Docs"
+          }
+        ]
+      },
+      {
+        "name": "docs-action",
+        "steps": [
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Docs"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-footer-fixture-state]')?.dataset.footerFixtureState==='home:docs'"
+          }
+        ]
+      },
+      {
+        "name": "archive-active",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-footer] button[aria-label=\"Archive\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-footer-fixture-state]')?.dataset.footerFixtureState==='archive:docs'"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-footer] button[aria-label=\"Leave Archive\"]"
+          }
+        ]
+      },
+      {
+        "name": "returned-home",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-footer] button[aria-label=\"Leave Archive\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-footer-fixture-state]')?.dataset.footerFixtureState==='home:docs'"
+          }
+        ]
+      },
+      {
+        "name": "settings-action",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-footer] button[aria-label=\"Settings\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-footer-fixture-state]')?.dataset.footerFixtureState==='home:settings'"
+          }
+        ]
+      }
+    ]
+  }
+}

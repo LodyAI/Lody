@@ -1,0 +1,221 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 900,
+      "device": "iPhone SE"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "sessions-sessiontabbar--spinner-busy-history",
+    "sessions-sessionsidepaneltabbar--pending-tab",
+    "sessions-sessionchatinputarea--external-history-refreshing",
+    "sessions-sessionheadermenu--sharing-unknown",
+    "sessions-sessionheadermenu--owner-transfer-pending",
+    "migration-githubpersonalidentityspinner--authorizing",
+    "migration-githubpersonalidentityspinner--scoped-authorizing"
+  ],
+  "ready": {
+    "sessions-sessiontabbar--spinner-busy-history": [
+      {
+        "action": "visible",
+        "selector": "[data-slot=spinner]",
+        "index": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => [...document.querySelectorAll('[data-slot=spinner]')].some(b=>getComputedStyle(b).width==='12px')"
+      },
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Closed conversations",
+        "exact": false
+      },
+      {
+        "action": "visible",
+        "selector": "[role=dialog] [data-slot=spinner]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const panel=document.querySelector('[role=dialog]');const box=panel?.querySelector('[data-slot=spinner]');return panel?.textContent.includes('Closed running conversation')&&box&&getComputedStyle(box).width==='12px'&&getComputedStyle(panel).opacity==='1';}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const boxes=[...document.querySelectorAll('[data-slot=spinner]')].filter(b=>b.getBoundingClientRect().height>0);return boxes.length>0&&boxes.every(b=>b.firstElementChild?.tagName==='svg'&&getComputedStyle(b).width===getComputedStyle(b).height);}"
+      }
+    ],
+    "sessions-sessionsidepaneltabbar--pending-tab": [
+      {
+        "action": "visible",
+        "selector": "[data-slot=spinner]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const box=document.querySelector('[data-slot=spinner]');return box&&getComputedStyle(box).width==='14px'&&getComputedStyle(box).opacity==='0.7';}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const boxes=[...document.querySelectorAll('[data-slot=spinner]')].filter(b=>b.getBoundingClientRect().height>0);return boxes.length>0&&boxes.every(b=>b.firstElementChild?.tagName==='svg'&&getComputedStyle(b).width===getComputedStyle(b).height);}"
+      }
+    ],
+    "sessions-sessionchatinputarea--external-history-refreshing": [
+      {
+        "action": "visible",
+        "selector": "[data-slot=spinner]",
+        "index": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const boxes=[...document.querySelectorAll('[data-slot=spinner]')];return boxes.length>=2&&boxes.some(box=>box.parentElement?.textContent==='Refreshing external history'&&getComputedStyle(box).width==='14px')&&document.querySelector('textarea')?.value==='Preserved history draft.'&&document.querySelector('button[aria-label=\"Refreshing external history\"]')?.disabled;}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const boxes=[...document.querySelectorAll('[data-slot=spinner]')].filter(b=>b.getBoundingClientRect().height>0);return boxes.length>0&&boxes.every(b=>b.firstElementChild?.tagName==='svg'&&getComputedStyle(b).width===getComputedStyle(b).height);}"
+      }
+    ],
+    "sessions-sessionheadermenu--sharing-unknown": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "More actions",
+        "exact": true
+      },
+      {
+        "action": "visible",
+        "selector": "[role=menu] [data-slot=spinner]",
+        "index": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const box=document.querySelector('[role=menu] [data-slot=spinner]');return box&&getComputedStyle(box).width==='14px'&&document.querySelector('[role=menu]')?.textContent.includes('Checking sharing');}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const boxes=[...document.querySelectorAll('[data-slot=spinner]')].filter(b=>b.getBoundingClientRect().height>0);return boxes.length>0&&boxes.every(b=>b.firstElementChild?.tagName==='svg'&&getComputedStyle(b).width===getComputedStyle(b).height);}"
+      }
+    ],
+    "sessions-sessionheadermenu--owner-transfer-pending": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "More actions",
+        "exact": true
+      },
+      {
+        "action": "visible",
+        "role": "menuitem",
+        "name": "Change owner",
+        "exact": true
+      },
+      {
+        "action": "focus",
+        "role": "menuitem",
+        "name": "Change owner",
+        "exact": true
+      },
+      {
+        "action": "press",
+        "role": "menuitem",
+        "name": "Change owner",
+        "exact": true,
+        "key": "ArrowRight"
+      },
+      {
+        "action": "visible",
+        "selector": "[role=menuitemradio] [data-slot=spinner]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const target=[...document.querySelectorAll('[role=menuitemradio]')].find(e=>e.textContent.includes('Ada Lovelace'));const box=target?.querySelector('[data-slot=spinner]');return box&&getComputedStyle(box).width==='14px'&&target.getAttribute('aria-disabled')==='true'&&[...document.querySelectorAll('[role=menuitemradio]')].every(e=>e.getAttribute('aria-disabled')==='true');}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const boxes=[...document.querySelectorAll('[data-slot=spinner]')].filter(b=>b.getBoundingClientRect().height>0);return boxes.length>0&&boxes.every(b=>b.firstElementChild?.tagName==='svg'&&getComputedStyle(b).width===getComputedStyle(b).height);}"
+      }
+    ],
+    "migration-githubpersonalidentityspinner--authorizing": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Authorize",
+        "exact": true
+      },
+      {
+        "action": "visible",
+        "selector": "[data-slot=spinner]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.querySelector('[data-personal-identity-spinner]');const box=root?.querySelector('[data-slot=spinner]');return root?.dataset.authorizing==='true'&&root.textContent.includes('Synthetic authorization requested')&&box?.closest('button')?.disabled&&getComputedStyle(box).width==='14px';}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const boxes=[...document.querySelectorAll('[data-slot=spinner]')].filter(b=>b.getBoundingClientRect().height>0);return boxes.length>0&&boxes.every(b=>b.firstElementChild?.tagName==='svg'&&getComputedStyle(b).width===getComputedStyle(b).height);}"
+      }
+    ],
+    "migration-githubpersonalidentityspinner--scoped-authorizing": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Authorize",
+        "exact": true
+      },
+      {
+        "action": "visible",
+        "selector": "[data-slot=spinner]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.querySelector('[data-personal-identity-spinner]');const box=root?.querySelector('[data-slot=spinner]');return root?.dataset.authorizing==='true'&&root.textContent.includes('Synthetic authorization requested')&&box?.closest('button')?.disabled&&getComputedStyle(box).width==='21px';}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const boxes=[...document.querySelectorAll('[data-slot=spinner]')].filter(b=>b.getBoundingClientRect().height>0);return boxes.length>0&&boxes.every(b=>b.firstElementChild?.tagName==='svg'&&getComputedStyle(b).width===getComputedStyle(b).height);}"
+      }
+    ]
+  },
+  "states": {
+    "migration-githubpersonalidentityspinner--authorizing": [
+      {
+        "name": "pointer-away",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const boxes=[...document.querySelectorAll('[data-slot=spinner]')].filter(b=>b.getBoundingClientRect().height>0);return boxes.length>0&&boxes.every(b=>b.firstElementChild?.tagName==='svg'&&getComputedStyle(b).width===getComputedStyle(b).height);}"
+          }
+        ]
+      }
+    ],
+    "migration-githubpersonalidentityspinner--scoped-authorizing": [
+      {
+        "name": "pointer-away",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const boxes=[...document.querySelectorAll('[data-slot=spinner]')].filter(b=>b.getBoundingClientRect().height>0);return boxes.length>0&&boxes.every(b=>b.firstElementChild?.tagName==='svg'&&getComputedStyle(b).width===getComputedStyle(b).height);}"
+          }
+        ]
+      }
+    ]
+  }
+}

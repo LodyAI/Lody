@@ -1,4 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import { useState, type CSSProperties } from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { Button } from '@lody/ui/button';
 import { fn, userEvent, within } from 'storybook/test';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 
@@ -6,6 +9,8 @@ import {
   UNIFIED_PROJECT_OPTION_RENDER_LIMIT,
   UnifiedProjectSelectorView,
   type UnifiedLocalProjectOption,
+  type UnifiedProjectSelectorViewProps,
+  type UnifiedProjectGroupOption,
 } from '@/components/chat/unified-project-selector';
 import { Tooltip } from '@lody/ui/tooltip';
 
@@ -225,4 +230,95 @@ export const ShareConfirmation: Story = {
   play: async ({ canvasElement }) => {
     await userEvent.click(within(canvasElement).getByRole('button', { name: /Share project/ }));
   },
+};
+
+const groupFixtureStyles = stylex.create({
+  canvas: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 12,
+    width: 'min(340px, calc(100vw - 32px))',
+  },
+  controls: { display: 'flex', flexWrap: 'wrap', gap: 8 },
+});
+const syntheticGroups = [
+  {
+    projectId: 'synthetic-group-primary',
+    name: 'Synthetic workspace group with repositories and an intentionally long display name',
+    memberCount: 12,
+    lastUsedAt: 3,
+  },
+  {
+    projectId: 'synthetic-group-disabled',
+    name: 'Unavailable synthetic group',
+    memberCount: 4,
+    lastUsedAt: 2,
+    disabledReason: 'Synthetic machine has no matching repositories',
+  },
+  {
+    projectId: 'synthetic-group-secondary',
+    name: 'Another synthetic group',
+    memberCount: 2,
+    lastUsedAt: 1,
+  },
+] satisfies UnifiedProjectGroupOption[];
+
+function GroupMigrationFixture(args: UnifiedProjectSelectorViewProps) {
+  const [value, setValue] = useState(args.value);
+  const [scoped, setScoped] = useState(false);
+  const [override, setOverride] = useState(false);
+  const callerClass = override
+    ? '[&_.lucide-folders]:w-7 [&_.lucide-folders]:opacity-40'
+    : undefined;
+  const scopeStyle = scoped ? ({ '--spacing': '5px' } as CSSProperties) : undefined;
+  return (
+    <div
+      {...stylex.props(groupFixtureStyles.canvas)}
+      data-group-selector-fixture=""
+      data-local-spacing={scoped}
+      data-caller-override={override}
+      style={scopeStyle}
+    >
+      <div {...stylex.props(groupFixtureStyles.controls)}>
+        <Button size="small" aria-pressed={scoped} onClick={() => setScoped((next) => !next)}>
+          Use local spacing
+        </Button>
+        <Button size="small" aria-pressed={override} onClick={() => setOverride((next) => !next)}>
+          Override folder glyphs
+        </Button>
+      </div>
+      <UnifiedProjectSelectorView
+        {...args}
+        value={value}
+        onChange={setValue}
+        className={[args.className, callerClass].filter(Boolean).join(' ')}
+        contentClassName={[args.contentClassName, callerClass].filter(Boolean).join(' ')}
+        contentStyle={{ ...args.contentStyle, ...scopeStyle }}
+      />
+      <output data-group-selection="">
+        {value.kind === 'group' ? value.projectId : value.kind}
+      </output>
+    </div>
+  );
+}
+
+export const OwnedGroupSelection: Story = {
+  args: {
+    value: { kind: 'group', projectId: 'synthetic-group-primary' },
+    localProjects: [],
+    repositories: [],
+    projectGroups: syntheticGroups,
+    triggerVariant: 'property-row',
+  },
+  render: (args) => <GroupMigrationFixture {...args} />,
+};
+
+export const OwnedGroupFallback: Story = {
+  args: {
+    value: { kind: 'group', projectId: 'missing-synthetic-group' },
+    localProjects: [],
+    repositories: [],
+    projectGroups: syntheticGroups,
+  },
+  render: (args) => <GroupMigrationFixture {...args} />,
 };

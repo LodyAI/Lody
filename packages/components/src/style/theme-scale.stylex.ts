@@ -6,14 +6,15 @@ import * as stylex from '@stylexjs/stylex';
  *
  * A migrated surface keeps the size it had: every step here is the same
  * expression Tailwind's utility resolved to, so nothing moves by a pixel.
- * Spacing keeps reading `--spacing` (the theme's one spacing unit) rather than
- * a frozen pixel value, so the two systems stay coupled the way they are
- * today. Type sizes keep Tailwind's rem scale and its paired line height —
- * `text-sm` sets both, and a surface that kept only the size would re-wrap.
+ * Spacing aliases read `--spacing` where their group is declared. A surface
+ * that overrides that unit locally also applies `scopedThemeSpace` there, so
+ * its descendants resolve the local scale. Type sizes keep Tailwind's rem
+ * scale and its paired line height — `text-sm` sets both, and a surface that
+ * kept only the size would re-wrap.
  */
 
 /** Tailwind's spacing scale: `--spacing` times the step. */
-export const themeSpace = stylex.defineVars({
+const themeSpaceDefaults = {
   0: '0px',
   0.5: 'calc(var(--spacing) * 0.5)',
   1: 'calc(var(--spacing) * 1)',
@@ -35,7 +36,12 @@ export const themeSpace = stylex.defineVars({
   16: 'calc(var(--spacing) * 16)',
   20: 'calc(var(--spacing) * 20)',
   24: 'calc(var(--spacing) * 24)',
-});
+};
+
+export const themeSpace = stylex.defineVars(themeSpaceDefaults);
+
+/** Re-evaluate spacing aliases at a surface with its own spacing unit. */
+export const scopedThemeSpace = stylex.createTheme(themeSpace, themeSpaceDefaults);
 
 /**
  * Corner radii. `sm`, `md` and `lg` read the theme's radius variables because

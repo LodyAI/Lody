@@ -1,0 +1,211 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 900,
+      "device": "iPhone SE"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "migration-ownedbuttondimensions--matrix",
+    "migration-ownedbuttondimensions--scoped-lengths",
+    "migration-ownedbuttondimensions--mounted-updates",
+    "migration-ownedbuttondimensions--caller-styles"
+  ],
+  "ready": {
+    "migration-ownedbuttondimensions--matrix": [
+      {
+        "action": "visible",
+        "selector": "[data-layout-action]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const dims=(e,w,h)=>e&&getComputedStyle(e).width===w&&getComputedStyle(e).height===h;return [...document.querySelectorAll('[data-named-size]')].every(e=>getComputedStyle(e).height===({mini:'24px',small:'28px',medium:'32px',large:'36px'})[e.dataset.namedSize])&&[...document.querySelectorAll('[data-dimension-variant]')].length===5&&[...document.querySelectorAll('[data-dimension-variant]')].every(e=>dims(e,'112px','28px'))&&dims(document.querySelector('[data-custom-icon]'),'24px','24px')&&dims(document.querySelector('[data-custom-pill]'),'112px','28px')&&document.querySelector('[data-disabled-box]')?.disabled&&document.querySelector('[data-button-dimensions]').dataset.activations==='0';}"
+      },
+      {
+        "action": "movePointer",
+        "x": 1,
+        "y": 1
+      }
+    ],
+    "migration-ownedbuttondimensions--scoped-lengths": [
+      {
+        "action": "visible",
+        "selector": "[data-spacing-case=outer]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const cases={outer:['144px','42px','6px'],inner:['72px','21px','3px'],element:['120px','35px','5px']};return Object.entries(cases).every(([n,[w,h,s]])=>{const e=document.querySelector('[data-spacing-case='+n+']');const c=e&&getComputedStyle(e);return c?.width===w&&c.height===h&&c.getPropertyValue('--spacing').trim()===s;});}"
+      },
+      {
+        "action": "movePointer",
+        "x": 1,
+        "y": 1
+      }
+    ],
+    "migration-ownedbuttondimensions--mounted-updates": [
+      {
+        "action": "visible",
+        "selector": "[data-dimension-target]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-dimension-target]');if(!e)return false;window.__buttonDimensionsNode=e;window.__buttonDimensionsGlyph=e.firstElementChild;return getComputedStyle(e).width==='28px'&&getComputedStyle(e).height==='28px'&&!e.disabled;}"
+      },
+      {
+        "action": "movePointer",
+        "x": 1,
+        "y": 1
+      }
+    ],
+    "migration-ownedbuttondimensions--caller-styles": [
+      {
+        "action": "visible",
+        "selector": "[data-render-style]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const f=document.querySelector('[data-button-dimensions=caller]');const r=document.querySelector('[data-rest-style]');const a=document.querySelector('[data-render-style]');return f?.dataset.refTag==='A'&&getComputedStyle(r).width==='96px'&&getComputedStyle(r).height==='28px'&&getComputedStyle(a).width==='105px'&&getComputedStyle(a).height==='31px'&&a.tagName==='A';}"
+      },
+      {
+        "action": "click",
+        "selector": "[data-render-style]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-button-dimensions=caller]')?.dataset.clicks==='1'"
+      },
+      {
+        "action": "movePointer",
+        "x": 1,
+        "y": 1
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedbuttondimensions--matrix": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-layout-action]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-layout-action]').matches(':hover')"
+          }
+        ]
+      },
+      {
+        "name": "focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          },
+          {
+            "action": "focus",
+            "selector": "[data-layout-action]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement===document.querySelector('[data-layout-action]')"
+          }
+        ]
+      }
+    ],
+    "migration-ownedbuttondimensions--mounted-updates": [
+      {
+        "name": "zero",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zero box",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-dimension-target]');return e===window.__buttonDimensionsNode&&e.firstElementChild===window.__buttonDimensionsGlyph&&getComputedStyle(e).width==='0px'&&getComputedStyle(e).height==='0px'&&e.disabled===false&&document.querySelector('[data-button-dimensions=updates]').dataset.stage==='zero';}"
+          },
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          }
+        ]
+      },
+      {
+        "name": "named",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Named box",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-dimension-target]');return e===window.__buttonDimensionsNode&&e.firstElementChild===window.__buttonDimensionsGlyph&&getComputedStyle(e).width==='32px'&&getComputedStyle(e).height==='32px'&&e.disabled===false&&document.querySelector('[data-button-dimensions=updates]').dataset.stage==='named';}"
+          },
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          }
+        ]
+      },
+      {
+        "name": "rectangular",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Rectangular box",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-dimension-target]');return e===window.__buttonDimensionsNode&&e.firstElementChild===window.__buttonDimensionsGlyph&&getComputedStyle(e).width==='96px'&&getComputedStyle(e).height==='28px'&&e.disabled===false&&document.querySelector('[data-button-dimensions=updates]').dataset.stage==='rectangular';}"
+          },
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          }
+        ]
+      },
+      {
+        "name": "disabled",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Disabled box",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const e=document.querySelector('[data-dimension-target]');return e===window.__buttonDimensionsNode&&e.firstElementChild===window.__buttonDimensionsGlyph&&getComputedStyle(e).width==='96px'&&getComputedStyle(e).height==='28px'&&e.disabled===true&&document.querySelector('[data-button-dimensions=updates]').dataset.stage==='disabled';}"
+          },
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          }
+        ]
+      }
+    ]
+  }
+}

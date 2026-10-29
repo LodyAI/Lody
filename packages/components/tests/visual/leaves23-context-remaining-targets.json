@@ -1,0 +1,201 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "compact-desktop",
+      "width": 900,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "blockedHosts": ["github.com", "avatars.githubusercontent.com"],
+  "ids": [
+    "components-ownedmarkdownlinksmigration--context-menus",
+    "components-lodysidebar--with-projects",
+    "terminal-migration--row-states",
+    "migration-ownedfiletreecontextmenu--default",
+    "migration-ownedfiletreecontextmenu--root-spacing"
+  ],
+  "ready": {
+    "components-ownedmarkdownlinksmigration--context-menus": [
+      {
+        "action": "hover",
+        "selector": ".markdown-renderer button[title=\"./body.tsx#L8\"]"
+      },
+      {
+        "action": "click",
+        "selector": ".markdown-renderer button[title=\"./body.tsx#L8\"]",
+        "button": "right"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const menus=[...document.querySelectorAll('[role=menu]')].filter(m=>{const r=m.getBoundingClientRect();return r.width>0&&getComputedStyle(m).opacity==='1';});return menus.length===1&&menus.every(m=>{const r=m.getBoundingClientRect(),c=getComputedStyle(m);return c.minWidth==='190px'&&r.width>=190&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&m.querySelectorAll('[role=menuitem]').length>=1;});}"
+      }
+    ],
+    "components-lodysidebar--with-projects": [
+      {
+        "action": "click",
+        "selector": "[data-sidebar-project-key=\"machine-demo:proj-lody\"]",
+        "button": "right"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const menus=[...document.querySelectorAll('[role=menu]')].filter(m=>{const r=m.getBoundingClientRect();return r.width>0&&getComputedStyle(m).opacity==='1';});return menus.length===1&&menus.every(m=>{const r=m.getBoundingClientRect(),c=getComputedStyle(m);return c.minWidth==='180px'&&r.width>=180&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&m.querySelectorAll('[role=menuitem]').length>=1;});}"
+      }
+    ],
+    "terminal-migration--row-states": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const host=document.querySelector('.lody-terminal-panel .xterm-screen');return !!host&&document.querySelector('.lody-terminal-panel .xterm-rows')?.textContent?.includes('Synthetic local shellMigration fixture: production xterm renderer$')&&host.getBoundingClientRect().width>0&&host.getBoundingClientRect().height>0;}"
+      },
+      {
+        "action": "click",
+        "selector": ".lody-terminal-panel:visible",
+        "button": "right"
+      },
+      {
+        "action": "press",
+        "role": "menu",
+        "key": "ArrowDown"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const menus=[...document.querySelectorAll('[role=menu]')].filter(m=>{const r=m.getBoundingClientRect();return r.width>0&&getComputedStyle(m).opacity==='1';});return menus.length===1&&menus.every(m=>{const r=m.getBoundingClientRect(),c=getComputedStyle(m);return c.minWidth==='160px'&&r.width>=160&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&m.querySelectorAll('[role=menuitem]').length>=1;});}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => !!document.activeElement?.closest('[role=menu]')&&!document.querySelector('.lody-terminal-panel .xterm.focus')&&document.querySelector('[role=menuitem][aria-disabled=true]')?.textContent?.startsWith('Copy')"
+      }
+    ],
+    "migration-ownedfiletreecontextmenu--default": [
+      {
+        "action": "click",
+        "role": "treeitem",
+        "name": "README.md",
+        "button": "right"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const menus=[...document.querySelectorAll('[role=menu]')].filter(m=>{const r=m.getBoundingClientRect();return r.width>0&&getComputedStyle(m).opacity==='1';});return menus.length===1&&menus.every(m=>{const r=m.getBoundingClientRect(),c=getComputedStyle(m);return c.minWidth==='190px'&&r.width>=190&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&m.querySelectorAll('[role=menuitem]').length>=1;});}"
+      }
+    ],
+    "migration-ownedfiletreecontextmenu--root-spacing": [
+      {
+        "action": "click",
+        "role": "treeitem",
+        "name": "README.md",
+        "button": "right"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const menus=[...document.querySelectorAll('[role=menu]')].filter(m=>{const r=m.getBoundingClientRect();return r.width>0&&getComputedStyle(m).opacity==='1';});return menus.length===1&&menus.every(m=>{const r=m.getBoundingClientRect(),c=getComputedStyle(m);return c.minWidth==='190px'&&r.width>=190&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&m.querySelectorAll('[role=menuitem]').length>=1;});}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => getComputedStyle(document.documentElement).getPropertyValue('--spacing').trim()==='5px'&&getComputedStyle(document.querySelector('[role=menu]')).minWidth==='190px'"
+      }
+    ]
+  },
+  "states": {
+    "components-ownedmarkdownlinksmigration--context-menus": [
+      {
+        "name": "submenu",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "menuitem",
+            "name": "Open using"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const menus=[...document.querySelectorAll('[role=menu]')].filter(m=>{const r=m.getBoundingClientRect();return r.width>0&&getComputedStyle(m).opacity==='1';});return menus.length===2&&menus.every(m=>{const r=m.getBoundingClientRect(),c=getComputedStyle(m);return c.minWidth==='190px'&&r.width>=190&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&m.querySelectorAll('[role=menuitem]').length>=1;});}"
+          }
+        ]
+      },
+      {
+        "name": "editor-action",
+        "steps": [
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Synthetic editor"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[role=menu]')&&document.querySelector('[data-markdown-links-result]')?.textContent==='Editor: ./body.tsx#L8'"
+          }
+        ]
+      }
+    ],
+    "components-lodysidebar--with-projects": [
+      {
+        "name": "local-session-menu",
+        "steps": [
+          {
+            "action": "press",
+            "role": "menu",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[role=menu]')"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-project-key=\"machine-demo:proj-lody\"] button[aria-label=\"Toggle\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-sidebar-session-id=\"local-sess-worktree\"]"
+          },
+          {
+            "action": "click",
+            "selector": "[data-sidebar-session-id=\"local-sess-worktree\"]",
+            "button": "right"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const menus=[...document.querySelectorAll('[role=menu]')].filter(m=>{const r=m.getBoundingClientRect();return r.width>0&&getComputedStyle(m).opacity==='1';});return menus.length===1&&menus.every(m=>{const r=m.getBoundingClientRect(),c=getComputedStyle(m);return c.minWidth==='180px'&&r.width>=180&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&m.querySelectorAll('[role=menuitem]').length>=1;});}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedfiletreecontextmenu--default": [
+      {
+        "name": "record-action",
+        "steps": [
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Record relative path"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[role=menu]')&&document.querySelector('[data-owned-file-context-result]')?.textContent==='Recorded README.md'"
+          }
+        ]
+      }
+    ],
+    "migration-ownedfiletreecontextmenu--root-spacing": [
+      {
+        "name": "record-action",
+        "steps": [
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Record relative path"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[role=menu]')&&document.querySelector('[data-owned-file-context-result]')?.textContent==='Recorded README.md'"
+          }
+        ]
+      }
+    ]
+  }
+}

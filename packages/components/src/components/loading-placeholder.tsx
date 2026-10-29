@@ -106,7 +106,7 @@ export function LoadingPlaceholder({
   return (
     <div {...stylex.props(styles.viewport)} data-loading-placeholder-scope={variant}>
       <div {...stylex.props(styles.column)} role="status" aria-live="polite">
-        <Spinner className="h-5 w-5" aria-hidden />
+        <Spinner diameter="calc(var(--spacing) * 5)" aria-hidden />
         <div>
           <div {...stylex.props(styles.title)}>{title}</div>
           {description ? <div {...stylex.props(styles.description)}>{description}</div> : null}

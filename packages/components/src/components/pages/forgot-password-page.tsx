@@ -101,7 +101,10 @@ export function ForgotPasswordPage({
             <Button type="submit" {...stylex.props(surface.fullWidth)} disabled={submitting}>
               {submitting ? (
                 <>
-                  <Spinner className={`h-4 w-4 ${stylex.props(surface.spinnerMargin).className}`} />
+                  <Spinner
+                    diameter="calc(var(--spacing) * 4)"
+                    className={stylex.props(surface.spinnerMargin).className}
+                  />
                   {t('forgotPassword.sending', 'Sending reset link...')}
                 </>
               ) : (

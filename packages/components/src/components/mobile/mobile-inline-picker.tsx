@@ -765,7 +765,11 @@ export function MobileInlinePicker<T extends string = string>({
       <span {...stylex.props(styles.triggerBody)}>
         {loading ? (
           <>
-            <Spinner className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
+            <Spinner
+              diameter="calc(var(--spacing) * 3.5)"
+              className="opacity-70"
+              aria-hidden="true"
+            />
             {loadingText ? (
               <span {...stylex.props(styles.truncate)}>{loadingText}</span>
             ) : (

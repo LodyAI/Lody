@@ -1,0 +1,347 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 1000,
+      "device": "iPhone 13"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "ids": ["sessions-sessionchatsearch--states", "sessions-searchmigration--many-matches"],
+  "ready": {
+    "sessions-sessionchatsearch--states": [
+      {
+        "action": "visible",
+        "role": "searchbox",
+        "name": "Find in session",
+        "index": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const rows=[...document.querySelectorAll('[role=search]')];if(rows.length!==4)return false;const values=['','search','search','quantumfizzbuzz'];for(const [i,r]of rows.entries()){if(r.querySelector('input')?.value!==values[i])return false;const bs=[...r.querySelectorAll('button')];if(bs.length!==3||bs.some(b=>getComputedStyle(b).width!=='24px'||getComputedStyle(b).height!=='24px'))return false;const disabled=i===0||i===3;if(bs[0].disabled!==disabled||bs[1].disabled!==disabled||bs[2].disabled)return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+      }
+    ],
+    "sessions-searchmigration--many-matches": [
+      {
+        "action": "visible",
+        "role": "searchbox",
+        "name": "Find in session"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const r=document.querySelector('[role=search]');return r&&r.querySelector('input').value==='needle'&&r.querySelector('[aria-live]')?.textContent.trim()==='128 / 128'&&[...r.querySelectorAll('button')].every(b=>getComputedStyle(b).width==='24px'&&getComputedStyle(b).height==='24px');}"
+      }
+    ]
+  },
+  "states": {
+    "sessions-sessionchatsearch--states": [
+      {
+        "name": "previous-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Previous result",
+            "index": 1
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const b=document.querySelectorAll('button[aria-label=\"Previous result\"]')[1];return b&&b.matches(':'+\"hover\")&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "next-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Next result",
+            "index": 1
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const b=document.querySelectorAll('button[aria-label=\"Next result\"]')[1];return b&&b.matches(':'+\"hover\")&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "close-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Close",
+            "index": 1
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const b=document.querySelectorAll('button[aria-label=\"Close\"]')[1];return b&&b.matches(':'+\"hover\")&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "next-keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          },
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Previous result",
+            "index": 1,
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const b=document.querySelectorAll('button[aria-label=\"Next result\"]')[1];return b&&b.matches(':'+\"focus-visible\")&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "previous-click",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Previous result",
+            "index": 1
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const r=document.querySelectorAll('[role=search]')[1];return r&&r.querySelector('[aria-live]')?.textContent.trim()===\"1 / 5\"&&r.querySelector('input').value===\"search\"&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "next-click",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Next result",
+            "index": 1
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const r=document.querySelectorAll('[role=search]')[1];return r&&r.querySelector('[aria-live]')?.textContent.trim()===\"2 / 5\"&&r.querySelector('input').value===\"search\"&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "typing-rg",
+        "steps": [
+          {
+            "action": "fill",
+            "role": "searchbox",
+            "name": "Find in session",
+            "index": 1,
+            "value": "rg"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const r=document.querySelectorAll('[role=search]')[1];return r&&r.querySelector('[aria-live]')?.textContent.trim()===\"1 / 3\"&&r.querySelector('input').value===\"rg\"&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "enter-next",
+        "steps": [
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "index": 1,
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const r=document.querySelectorAll('[role=search]')[1];return r&&r.querySelector('[aria-live]')?.textContent.trim()===\"2 / 3\"&&r.querySelector('input').value===\"rg\"&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "shift-enter-previous",
+        "steps": [
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "index": 1,
+            "key": "Shift+Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const r=document.querySelectorAll('[role=search]')[1];return r&&r.querySelector('[aria-live]')?.textContent.trim()===\"1 / 3\"&&r.querySelector('input').value===\"rg\"&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "no-results",
+        "steps": [
+          {
+            "action": "fill",
+            "role": "searchbox",
+            "name": "Find in session",
+            "index": 1,
+            "value": "unmatched-synthetic-query"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const r=document.querySelectorAll('[role=search]')[1];return r&&r.querySelector('[aria-live]')?.textContent.trim()===\"0 / 0\"&&r.querySelector('input').value===\"unmatched-synthetic-query\"&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Previous result",
+            "index": 1
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Next result",
+            "index": 1
+          }
+        ]
+      },
+      {
+        "name": "escape-clears",
+        "steps": [
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "index": 1,
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const r=document.querySelectorAll('[role=search]')[1];return r&&r.querySelector('input').value===''&&!r.querySelector('[aria-live]')&&[...r.querySelectorAll('button')].slice(0,2).every(b=>b.disabled);}"
+          }
+        ]
+      },
+      {
+        "name": "query-restored",
+        "steps": [
+          {
+            "action": "fill",
+            "role": "searchbox",
+            "name": "Find in session",
+            "index": 1,
+            "value": "search"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const r=document.querySelectorAll('[role=search]')[1];return r&&r.querySelector('[aria-live]')?.textContent.trim()===\"1 / 5\"&&r.querySelector('input').value===\"search\"&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "close-callback-clears",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Close",
+            "index": 1
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const r=document.querySelectorAll('[role=search]')[1];return r&&r.querySelector('input').value===''&&!r.querySelector('[aria-live]')&&[...r.querySelectorAll('button')].slice(0,2).every(b=>b.disabled);}"
+          }
+        ]
+      },
+      {
+        "name": "last-next-wraps",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Next result",
+            "index": 2
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const r=document.querySelectorAll('[role=search]')[2];return r&&r.querySelector('[aria-live]')?.textContent.trim()===\"1 / 5\"&&r.querySelector('input').value===\"search\"&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      }
+    ],
+    "sessions-searchmigration--many-matches": [
+      {
+        "name": "escape-clears-query",
+        "steps": [
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const r=document.querySelector('[role=search]');return r&&r.querySelector('input').value===''&&!r.querySelector('[aria-live]')&&[...r.querySelectorAll('button')].slice(0,2).every(b=>b.disabled);}"
+          }
+        ]
+      },
+      {
+        "name": "escape-closes-search",
+        "steps": [
+          {
+            "action": "press",
+            "role": "searchbox",
+            "name": "Find in session",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "search"
+          }
+        ]
+      },
+      {
+        "name": "real-reopen",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open search"
+          },
+          {
+            "action": "visible",
+            "role": "searchbox",
+            "name": "Find in session"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const r=document.querySelector('[role=search]');return r&&r.querySelector('input').value===''&&r.querySelector('button[aria-label=\"Previous result\"]').disabled&&r.querySelector('button[aria-label=\"Next result\"]').disabled;}"
+          }
+        ]
+      },
+      {
+        "name": "close-unmounts",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Close"
+          },
+          {
+            "action": "hidden",
+            "role": "search"
+          }
+        ]
+      }
+    ]
+  }
+}

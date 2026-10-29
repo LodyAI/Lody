@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type CSSProperties } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
 import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
@@ -178,6 +178,31 @@ type Story = StoryObj<typeof UserMessageEditor>;
 
 export const ShortMessage: Story = {
   render: () => <EditorHarness initialValue={SHORT_TEXT} />,
+};
+
+export const OwnedThemeScopes: Story = {
+  render: () => (
+    <div
+      data-owned-editor-scopes=""
+      style={
+        {
+          width: 'min(42rem, calc(100vw - 32px))',
+          '--input': '220 25% 26%',
+          '--input-border': '24 80% 56%',
+        } as CSSProperties
+      }
+    >
+      <button type="button" data-editor-blur-target="">
+        Outside editor focus target
+      </button>
+      <div className="dark-scope" data-owned-editor-scope="dark">
+        <EditorHarness initialValue={SHORT_TEXT} />
+      </div>
+      <div className="dark-scope light-scope" data-owned-editor-scope="light">
+        <EditorHarness initialValue={SHORT_TEXT} />
+      </div>
+    </div>
+  ),
 };
 
 function FromMessageEditHarness() {

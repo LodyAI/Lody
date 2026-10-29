@@ -1,0 +1,126 @@
+{
+  "viewports": [
+    {
+      "name": "phone",
+      "device": "iPhone SE",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "mobile767",
+      "device": "iPhone SE",
+      "width": 767,
+      "height": 900
+    },
+    {
+      "name": "desktop768",
+      "width": 768,
+      "height": 900
+    },
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "migration-ownedlegacysidebar--offcanvas-left",
+    "migration-ownedlegacysidebar--icon-left",
+    "migration-ownedlegacysidebar--floating-right",
+    "migration-ownedlegacysidebar--scoped-inset"
+  ],
+  "ready": {
+    "migration-ownedlegacysidebar--offcanvas-left": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const p=document.querySelector('[data-sidebar-fixture-state]');if(!p)return false; const mobile=p.dataset.sidebarFixtureMobile==='true';if(mobile)return !document.querySelector('[data-mobile=true]');const outer=document.querySelector('[data-slot=sidebar][data-state]');return outer?.dataset.state==='expanded'&&outer.getBoundingClientRect().width>0; }"
+      }
+    ],
+    "migration-ownedlegacysidebar--icon-left": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const p=document.querySelector('[data-sidebar-fixture-state]');if(!p)return false; const mobile=p.dataset.sidebarFixtureMobile==='true';if(mobile)return !document.querySelector('[data-mobile=true]');const outer=document.querySelector('[data-slot=sidebar][data-state]');return outer?.dataset.state==='expanded'&&outer.getBoundingClientRect().width>0; }"
+      }
+    ],
+    "migration-ownedlegacysidebar--floating-right": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const p=document.querySelector('[data-sidebar-fixture-state]');if(!p)return false; const mobile=p.dataset.sidebarFixtureMobile==='true';if(mobile)return !document.querySelector('[data-mobile=true]');const outer=document.querySelector('[data-slot=sidebar][data-state]');return outer?.dataset.state==='expanded'&&outer.getBoundingClientRect().width>0; }"
+      }
+    ],
+    "migration-ownedlegacysidebar--scoped-inset": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const p=document.querySelector('[data-sidebar-fixture-state]');if(!p)return false; const mobile=p.dataset.sidebarFixtureMobile==='true';if(mobile)return !document.querySelector('[data-mobile=true]');const outer=document.querySelector('[data-slot=sidebar][data-state]');return outer?.dataset.state==='expanded'&&outer.getBoundingClientRect().width>0; }"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const probe=document.querySelector('[data-sidebar-fixture-state]');const scope=document.querySelector('[data-owned-sidebar-fixture]');if(!probe||!scope||getComputedStyle(scope).getPropertyValue('--sidebar-background').trim()!=='203 45% 87%')return false;if(probe.dataset.sidebarFixtureMobile==='true')return true;const outer=document.querySelector('[data-slot=sidebar][data-state]'),inner=document.querySelector('[data-slot=sidebar-inner]');return !!outer&&!!inner&&getComputedStyle(outer).color==='rgb(57, 21, 101)'&&getComputedStyle(inner).backgroundColor==='rgb(207, 225, 237)'; }"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedlegacysidebar--offcanvas-left": [
+      {
+        "name": "toggled",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-fixture-toggle]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const p=document.querySelector('[data-sidebar-fixture-state]');if(!p)return false; if(p.dataset.sidebarFixtureMobile!=='true')return p.dataset.sidebarFixtureState==='collapsed'; const panel=document.querySelector('[data-mobile=true]');if(!panel||p.dataset.sidebarFixtureOpen!=='true')return false;const r=panel.getBoundingClientRect(),s=getComputedStyle(panel);return s.opacity==='1'&&r.width>0&&r.height>0&&r.left>=-1&&r.right<=innerWidth+1; }"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebar--icon-left": [
+      {
+        "name": "toggled",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-fixture-toggle]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const p=document.querySelector('[data-sidebar-fixture-state]');if(!p)return false; if(p.dataset.sidebarFixtureMobile!=='true')return p.dataset.sidebarFixtureState==='collapsed'; const panel=document.querySelector('[data-mobile=true]');if(!panel||p.dataset.sidebarFixtureOpen!=='true')return false;const r=panel.getBoundingClientRect(),s=getComputedStyle(panel);return s.opacity==='1'&&r.width>0&&r.height>0&&r.left>=-1&&r.right<=innerWidth+1; }"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebar--floating-right": [
+      {
+        "name": "toggled",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-fixture-toggle]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const p=document.querySelector('[data-sidebar-fixture-state]');if(!p)return false; if(p.dataset.sidebarFixtureMobile!=='true')return p.dataset.sidebarFixtureState==='collapsed'; const panel=document.querySelector('[data-mobile=true]');if(!panel||p.dataset.sidebarFixtureOpen!=='true')return false;const r=panel.getBoundingClientRect(),s=getComputedStyle(panel);return s.opacity==='1'&&r.width>0&&r.height>0&&r.left>=-1&&r.right<=innerWidth+1; }"
+          }
+        ]
+      }
+    ],
+    "migration-ownedlegacysidebar--scoped-inset": [
+      {
+        "name": "toggled",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-sidebar-fixture-toggle]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const p=document.querySelector('[data-sidebar-fixture-state]');if(!p)return false; if(p.dataset.sidebarFixtureMobile!=='true')return p.dataset.sidebarFixtureState==='collapsed'; const panel=document.querySelector('[data-mobile=true]');if(!panel||p.dataset.sidebarFixtureOpen!=='true')return false;const r=panel.getBoundingClientRect(),s=getComputedStyle(panel);return s.opacity==='1'&&r.width>0&&r.height>0&&r.left>=-1&&r.right<=innerWidth+1; }"
+          }
+        ]
+      }
+    ]
+  }
+}

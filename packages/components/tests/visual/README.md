@@ -68,7 +68,14 @@ original screenshot, and a derived diff mask is labelled separately.
 
 Each capture waits for Storybook completion, visible content, fonts, visible
 image loading/decoding, finite animations and stable geometry throughout the body,
-including portal positioners that resize after their trigger has settled. `allowBlankIds`
+including portal positioners that resize after their trigger has settled. Stable
+geometry and identical pixels alone do not establish the intended state: constrain
+sibling copy-feedback icons when a timer can reset them, and record actual popup
+and ancestor opacity/visibility before accepting dialog captures. Keep byte-equal
+but unpainted calibration frames separate from painted acceptance. Element-local
+original-token stress can expose real CSS differences even when the current fixed
+component props cannot produce those writers; report that contract boundary
+without presenting DOM injection as an observed application caller. `allowBlankIds`
 permits deliberately blank or textless skeleton roots and portal-only stories;
 skeleton profiles require a visible painted placeholder, and portal-only profiles
 require a visible actual portalled control through `ready`. It never exempts that
@@ -84,12 +91,31 @@ parallel browser pages. `--resume` requires the original static build, exact tar
 and the same capture script; use a new phase after changing any of them. Successful
 screenshots are retained in a manifest, and failures include diagnostic screenshots.
 
+For native browser controls, a decoded media source and `readyState` do not establish
+that the browser's internal controls painted the same state. Preserve original
+frames and inspect the user-agent shadow controls when ordinary DOM records agree
+but duration labels or control positions differ. A later settled capture cannot
+retroactively prove the original state or close its unexplained pixels.
+
+Check migrated custom-property writers in the complete built CSS, including their
+layer ancestors. A writer-only compiler probe can omit priority-zero root/theme
+rules and produce a different grouping result. Pair inherited, inline and real
+caller-layer overrides on the actual child; do not infer cascade equivalence from
+matching default screenshots.
+
 Capture defaults to reduced motion. A target can set `reducedMotion` to
 `no-preference`; `svgTime` on a target or viewport pauses real SVG SMIL at that
 time in seconds, since Playwright's animation switch does not synchronize SMIL.
 A viewport's `device` names a Playwright device descriptor, including its UA,
 touch support and mobile mode. Width alone does not exercise mobile device
 detection. These are Chromium device emulations, not native iOS/WebKit runs.
+
+`waitForFunction` expressions must synchronously return a condition; function
+expressions are invoked and Promise results are rejected. Run
+`node tests/visual/readiness-check.mjs --storybook http://127.0.0.1:6127` against
+a fixed build to verify that false gates prevent captures, true gates allow them,
+and async conditions fail explicitly. Earlier captures retain real PNGs but cannot
+establish that JSON arrow-function gates ran before this runner correction.
 
 `ready[storyId]` contains observable steps required before the first screenshot.
 Use it to await a fixture's known logo: Base UI can preload an image before
@@ -108,49 +134,92 @@ It applies the same predicate after view changes on both immutable builds.
 
 ## Target profiles and interaction coverage
 
-| Profile                                                             | Coverage                                                                                                                    |
-| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `continuation-targets.json`                                         | Auth/workspace pages, mentions, mobile files and annotation stories at 390/768/1280px in both themes.                       |
-| `files-targets.json`                                                | Real desktop file browser, folder/text/binary/error states and 767/768px boundaries.                                        |
-| `draft-targets.json`                                                | Empty, ready and submitting drafts, typing, hover, keyboard focus and disabled controls.                                    |
-| `interaction-targets.json`                                          | Mobile drill/Markdown/HTML, annotation collapse/hover/independent keyboard peek, textarea focus and disabled state.         |
-| `session-leaf-targets.json`                                         | Usage variants, relation trees/confirmation and the delayed notification prompt.                                            |
-| `usage-portal-targets.json`                                         | Actually opened usage portals across seven variants.                                                                        |
-| `regression-targets.json`                                           | Additional information-bar and onboarding checks; historical missing baselines remain explicit.                             |
-| `status-targets.json`                                               | Working grids, unread/collapse states and spinner callers in both themes, including reduced motion.                         |
-| `project-edit-targets.json`                                         | Actual project-editor entry, translations, truncation, keyboard/pointer activation and responsive boundaries.               |
-| `rename-targets.json`                                               | Actual rename dialog, title wrapping, disabled/pending save, failure/retry, focus and 639/640/641px boundaries.             |
-| `schedule-style-targets.json`                                       | Wide schedule rows, child-width precedence, issue tooltips, caller overrides and 639/640px boundaries.                      |
-| `bub-style-targets.json`                                            | Install guide copy success/failure, long translation, code overflow and keyboard/pointer states.                            |
-| `info-chip-style-targets.json`                                      | Production action/cluster/stage chips, context actions, CI portals and 419/420/421px container boundaries.                  |
-| `usage-skeleton-targets.json`, `usage-skeleton-narrow-targets.json` | Actual day/week/year placeholders, root/subtree spacing, 671/672/673px heatmap containers and 320px layouts.                |
-| `leaves3-info-bar-targets.json`                                     | Actual privacy/preview actions, compact and empty states, palette scopes and nested light/dark exclusions.                  |
-| `outline-rail-targets.json`                                         | Actual rail, overflow, portal and caller precedence at 927/928/929px container widths.                                      |
-| `skeleton-sizing-targets.json`                                      | Optional width/height, explicit zero and actual sizing changes on the shared Skeleton primitive.                            |
-| `acp-select-targets.json`                                           | Actual ACP selection variants, disabled/empty options, menus, caller overrides and local scale variables.                   |
-| `leaves4-stuck-banner-targets.json`                                 | Recovery/dismiss callbacks, long translated copy and narrow connection banners.                                             |
-| `leaves4-queue-display-targets.json`                                | Real queue disclosure, utility/opaque callers, folding and root/subtree theme observations.                                 |
-| `legacy-task-targets.json`                                          | Actual legacy TaskList rows, caller/root/subtree variable overrides, loading/empty/overflow and desktop pointer states.     |
-| `legacy-updated-task-targets.json`                                  | Actual legacy flat Updated list, status/anchor rows, rename, archive, show all/less and scoped variables.                   |
-| `owned-session-list-targets.json`                                   | Active SessionList project groups, selection, caller/root/subtree overrides, menus, folding and empty/loading states.       |
-| `owned-updated-session-targets.json`                                | Active Updated list trees, precise openers, project groups, caller overrides, read-only/overflow and archive/rename states. |
-| `owned-login-targets.json`                                          | Login providers, email/handoff pending states, scoped spacing and actual 860/861px layout boundary.                         |
-| `mobile-project-settings-targets.json`                              | Production project settings with multiple machines, long labels, local editors, loading and read-only states.               |
-| `mobile-account-settings-targets.json`                              | Production account/workspace settings, editable names, deferred token/invitation actions and scoped variables.              |
-| `mobile-workspace-sheets-targets.json`                              | Actual create/delete drawers, validation, pending deletion, long translations and 320/390/768px layouts.                    |
-| `file-image-targets.json`                                           | Actual fitted raster/SVG previews, null-source cases, constrained hosts, modal focus and close.                             |
-| `markdown-links-targets.json`                                       | Actual prose/table file links, GitHub references, clipboard outcomes, caller overrides and read-only safety.                |
-| `workspace-shell-targets.json`                                      | Actual sidebar empty states, menus, tooltips, keyboard focus, resize and root/subtree variables.                            |
-| `sidebar-targets.json`                                              | Sidebar layouts, row parts, loading/empty/overflow and archive/menu states; narrow widths use a desktop UA.                 |
-| `sidebar-mobile-targets.json`                                       | iPhone/Android descriptors, known-logo readiness and real touch menu/archive actions in both themes.                        |
-| `sidebar-updated-interaction-targets.json`                          | Show all/less, selection, collapse/expand and focus/hover on the production Updated list.                                   |
-| `sidebar-archive-long-targets.json`                                 | Long-title clipping and slot geometry during archive confirmation and commit.                                               |
-| `sidebar-send-motion-targets.json`                                  | Normal-motion send rings at SMIL times 0 and 0.6 seconds.                                                                   |
-| `chat-targets.json`                                                 | Composer/landing, selector menus, disabled-context hover/keyboard actions and connection-state transitions.                 |
-| `chat-mobile-targets.json`                                          | Real iPhone/Android descriptors, touch actions, keyboard tooltip control and pasted-text layouts.                           |
-| `chat-mobile-home-targets.json`                                     | Mobile home headers, workspace logos, onboarding, crowded status and reconnect/offline states.                              |
-| `chat-boundary-targets.json`                                        | 311/312, 639/640 and 671/672px widths for compact composer and disabled-context styling.                                    |
-| `chat-context-targets.json`, `chat-mobile-context-targets.json`     | Independent corrected context-action/tooltip captures; retain invalid initial selector diagnostics.                         |
+| Profile                                                                                                                                                                                  | Coverage                                                                                                                                                                                                                     |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `continuation-targets.json`                                                                                                                                                              | Auth/workspace pages, mentions, mobile files and annotation stories at 390/768/1280px in both themes.                                                                                                                        |
+| `files-targets.json`                                                                                                                                                                     | Real desktop file browser, folder/text/binary/error states and 767/768px boundaries.                                                                                                                                         |
+| `draft-targets.json`                                                                                                                                                                     | Empty, ready and submitting drafts, typing, hover, keyboard focus and disabled controls.                                                                                                                                     |
+| `interaction-targets.json`                                                                                                                                                               | Mobile drill/Markdown/HTML, annotation collapse/hover/independent keyboard peek, textarea focus and disabled state.                                                                                                          |
+| `session-leaf-targets.json`                                                                                                                                                              | Usage variants, relation trees/confirmation and the delayed notification prompt.                                                                                                                                             |
+| `usage-portal-targets.json`                                                                                                                                                              | Actually opened usage portals across seven variants.                                                                                                                                                                         |
+| `regression-targets.json`                                                                                                                                                                | Additional information-bar and onboarding checks; historical missing baselines remain explicit.                                                                                                                              |
+| `status-targets.json`                                                                                                                                                                    | Working grids, unread/collapse states and spinner callers in both themes, including reduced motion.                                                                                                                          |
+| `project-edit-targets.json`                                                                                                                                                              | Actual project-editor entry, translations, truncation, keyboard/pointer activation and responsive boundaries.                                                                                                                |
+| `rename-targets.json`                                                                                                                                                                    | Actual rename dialog, title wrapping, disabled/pending save, failure/retry, focus and 639/640/641px boundaries.                                                                                                              |
+| `schedule-style-targets.json`                                                                                                                                                            | Wide schedule rows, child-width precedence, issue tooltips, caller overrides and 639/640px boundaries.                                                                                                                       |
+| `bub-style-targets.json`                                                                                                                                                                 | Install guide copy success/failure, long translation, code overflow and keyboard/pointer states.                                                                                                                             |
+| `info-chip-style-targets.json`                                                                                                                                                           | Production action/cluster/stage chips, context actions, CI portals and 419/420/421px container boundaries.                                                                                                                   |
+| `usage-skeleton-targets.json`, `usage-skeleton-narrow-targets.json`                                                                                                                      | Actual day/week/year placeholders, root/subtree spacing, 671/672/673px heatmap containers and 320px layouts.                                                                                                                 |
+| `leaves3-info-bar-targets.json`                                                                                                                                                          | Actual privacy/preview actions, compact and empty states, palette scopes and nested light/dark exclusions.                                                                                                                   |
+| `outline-rail-targets.json`                                                                                                                                                              | Actual rail, overflow, portal and caller precedence at 927/928/929px container widths.                                                                                                                                       |
+| `skeleton-sizing-targets.json`                                                                                                                                                           | Optional width/height, explicit zero and actual sizing changes on the shared Skeleton primitive.                                                                                                                             |
+| `acp-select-targets.json`                                                                                                                                                                | Actual ACP selection variants, disabled/empty options, menus, caller overrides and local scale variables.                                                                                                                    |
+| `leaves4-stuck-banner-targets.json`                                                                                                                                                      | Recovery/dismiss callbacks, long translated copy and narrow connection banners.                                                                                                                                              |
+| `leaves4-queue-display-targets.json`                                                                                                                                                     | Real queue disclosure, utility/opaque callers, folding and root/subtree theme observations.                                                                                                                                  |
+| `leaves5-skills-targets.json`, `leaves5-skills-detail-targets.json`                                                                                                                      | Production skills Body states, runtime spacing, long/absent descriptions, refresh callbacks and detail/back; the story shell is not the product Drawer.                                                                      |
+| `leaves6-mention-targets.json`, `leaves6-queue-row-targets.json`, `leaves6-filter-pill-targets.json`                                                                                     | Mention selection/scroll readiness, owned row hover/focus and filter theme scopes/visible open/close states.                                                                                                                 |
+| `leaves7-home-targets.json`, `leaves7-project-screen-targets.json`, `leaves7-recurrence-targets.json`                                                                                    | Actual home/project headers and recurrence controls, search/filter/archive feedback, disabled days and scoped theme values.                                                                                                  |
+| `leaves8-editor-terminal-targets.json`, `leaves8-warning-targets.json`, `leaves8-merge-targets.json`                                                                                     | Production message editor, command divider, warning palette and compact merge control states, including local variable scopes and callbacks.                                                                                 |
+| `leaves9-composer-status-targets.json`, `leaves9-composer-fallback-targets.json`                                                                                                         | Production composer warning/error/info/absent status, actual render-failure fallback, preserved draft editing/retry and element-local palette scopes.                                                                        |
+| `leaves9-sidebar-targets.json`                                                                                                                                                           | Exported legacy Sidebar adapter, mobile opening, desktop collapse, floating/inset layout, 767/768px boundary and local theme variables; no active app consumer is claimed.                                                   |
+| `leaves10-composer-surface-targets.json`                                                                                                                                                 | Real Composer frames and mention covers, local palettes, file drag enter/leave/drop, disabled/dialog ignore paths and actual selected chips.                                                                                 |
+| `leaves10-share-card-targets.json`                                                                                                                                                       | Fixed share-card layout across sizes, backdrops, mat, titles, empty content and local spacing; pixel equality alone does not establish selected-palette isolation.                                                           |
+| `leaves11-share-palette-targets.json`                                                                                                                                                    | Actual share-card palette/spacing isolation and layout against pre-migration source, kept separate from buggy-Before repair witnesses.                                                                                       |
+| `leaves12-spinner-dimensions-targets.json`                                                                                                                                               | Named and explicit Spinner dimensions, SVG attributes, local spacing, mounted zero/omit/update and real saving/merging consumers.                                                                                            |
+| `leaves13-spinner-auth-targets.json`, `leaves13-spinner-mobile-targets.json`, `leaves13-spinner-misc-targets.json`                                                                       | Actual authentication/mobile/loading Spinner callers, local spacing and observable pending controls.                                                                                                                         |
+| `leaves14-spinner-password-targets.json`, `leaves14-spinner-account-targets.json`                                                                                                        | Password/account pending controls and local spacing, with closing-motion and synthetic Capacitor identity probes recorded separately.                                                                                        |
+| `leaves14-monaco-targets.json`                                                                                                                                                           | Actual Monaco viewer wrapper and editor, with scrollbar class/transition readiness separate from wrapper geometry.                                                                                                           |
+| `leaves15-popover-layout-targets.json`                                                                                                                                                   | Actual Popup zero/default padding and gap, same-node updates, contained and forced theme, focus/ref/positioner contracts.                                                                                                    |
+| `leaves15-popover-consumers-targets.json`                                                                                                                                                | Seven production popups: anchored/stage/CI, closed tabs, Share, sender profile and turn configuration; actual themes recorded separately.                                                                                    |
+| `leaves16-history-spinner-targets.json`, `leaves16-spinner-session-targets.json`                                                                                                         | Real history import/resolve pending and reopen, Session/loading/settings Spinner consumers and local spacing.                                                                                                                |
+| `leaves17-popover-dimensions-targets.json`                                                                                                                                               | Actual Popup dimensions, zero/default updates, local spacing, contained and forced theme; positioner ownership remains separate.                                                                                             |
+| `leaves18-project-settings-spinner-targets.json`, `leaves18-spinner-about-targets.json`                                                                                                  | Actual project loading/sharing and About updater components, synthetic public CloudApi/IPC boundaries, local spacing and recovery.                                                                                           |
+| `leaves19-menu-dimensions-targets.json`, `leaves19-menu-consumers-targets.json`                                                                                                          | Actual Menu popup bounds, zero/reset/container/compact, Header Copy/Fork/Owner, Side Add and local/remote file menus; Opened sessions remains uncovered.                                                                     |
+| `leaves20-integrations-spinner-targets.json`, `leaves20-ceremony-targets.json`                                                                                                           | Public cloud-shaped Integrations loading/preference/auth recovery and actual paused Ceremony, scope palettes, real skip/finish controls; dark host stress differs from route light ownership.                                |
+| `leaves21-context-menu-dimensions-targets.json`, `leaves21-context-consumers-targets.json`                                                                                               | Actual ContextMenu bounds/zero/reset/container and six real row menus opened with browser right-click; Gallery remains After-only.                                                                                           |
+| `leaves22-button-dimensions-targets.json`                                                                                                                                                | Button box dimensions, zero/omit and same-node updates, caller contracts and local spacing; held active captures are a separate reduced-motion native probe.                                                                 |
+| `leaves22-button-mobile-targets.json`, `leaves22-button-leaf-targets.json`, `leaves22-button-auth-targets.json`                                                                          | Actual mobile/leaf/auth callers, portal pairing and handoff states; unmounted login controls stay deferred.                                                                                                                  |
+| `leaves22-button-private-targets.json`                                                                                                                                                   | Header trigger, reply card/dialog and Plan Copy hover/focus; audited successful Before subset covers eight migrated utilities, with failed Search/hidden Footer states retained separately.                                  |
+| `leaves23-context-remaining-targets.json`, `leaves23-owned-controls-targets.json`                                                                                                        | Real Markdown/local-project/file-tree/terminal menus and visible Opened/Search/Footer controls; three original hidden xterm helper geometry records remain explicit.                                                         |
+| `leaves24-message-action-button-targets.json`                                                                                                                                            | Actual message-action Button dimensions, hover/focus and scoped spacing; physical touch and controlled clipboard feedback are separate reduced-motion native captures.                                                       |
+| `leaves24-button-small-callers-targets.json`                                                                                                                                             | Mermaid min/max/reset and actual portal spacing; MobileAdd directory navigation, Usage detail close and Loro empty-view recovery. Rejected gates and local navigation failures stay separate.                                |
+| `leaves25-button-invariants-desktop-targets.json`, `leaves25-button-invariants-phone-targets.json`                                                                                       | Actual primitive-owned declarations: 40 PNG pairs; 44-root computed proof is separate and adds no PNGs. Original readiness failures remain diagnostic.                                                                       |
+| `leaves25-private-fork-button-targets.json`                                                                                                                                              | Closed two-caller Fork helper defaults, caller overrides, real menus and legacy Spinner pending states; rejected selector/ready phases remain separate.                                                                      |
+| `leaves26-spinner-invariants-targets.json`, `leaves26-spinner-sharing-targets.json`, `leaves26-spinner-project-ready-targets.json`, `leaves26-spinner-project-after-repair-targets.json` | Real Spinner invariant states; cached-avatar and Sharing readiness have separate source phases. Normal-motion supplements and original OPEN frames stay separate.                                                            |
+| `leaves26-message-content-spacing-targets.json`, `leaves26-sender-avatar-targets.json`                                                                                                   | Actual message action reveal/edit/cancel and sender profile, plus retained plan/media spacing controls; rejected writer-layer candidate and native audio OPEN remain explicit.                                               |
+| `leaves26-sidebar-footer-targets.json`                                                                                                                                                   | Four internal callers of the module-private Loro footer helper, actual menus/actions and scoped dimensions; desktop remains an unchanged control.                                                                            |
+| `leaves27-sidebar-desktop-targets.json`, `leaves27-sidebar-phone-targets.json`                                                                                                           | Real public Sidebar adapters; desktop and explicit-phone profiles preserve caller variants. Rejected ancestor/caller prototypes and five supplemental OPEN pairs remain separate.                                            |
+| `leaves27-managed-preview-spinner-targets.json`                                                                                                                                          | Actual sandbox inspector target resolution, draft Cancel/reopen/pending and element-local Spinner dimensions; four real animation samples are separate.                                                                      |
+| `leaves28-collapsible-layout-targets.json`                                                                                                                                               | Three private CollapsibleCard callers, owned width/radius/padding composition, actual normal/activity media, kind=read, local variables and direct Thought search compatibility.                                             |
+| `leaves29-message-action-colors-targets.json`                                                                                                                                            | Seven fixed ghost-action Button sites, both Fork callers, fine/coarse color states and scoped tokens. Accepted120 includes112 original plus8 exact-state-ready pending pairs; direct inline token negatives remain separate. |
+| `leaves30-billing-container-spinner-targets.json`                                                                                                                                        | Actual Billing preview/Cancel/reopen/pending-confirmation flows with synthetic public providers. Accepted normal-motion screenshots additionally require painted dialogs; no Stripe/auth E2E claim.                          |
+| `leaves31-conversation-panel-targets.json`                                                                                                                                               | Actual Terminal and Plan header/body layout, collapse/Space reopen, approval/drafting/local variables; 216 native role snapshots add no PNGs.                                                                                |
+| `leaves32-managed-frame-targets.json`                                                                                                                                                    | Actual credentialless inspector iframe, transparent synthetic child paint, Cancel/reopen/pending and local white variable; v1 paint failure and scheme experiment stay diagnostic.                                           |
+| `leaves33-search-action-colors-targets.json`                                                                                                                                             | Actual SearchBar typing/navigation/wrap/clear/Escape/Close and 128-result search; native fine/coarse glyph/token controls and genuine inline negatives remain separate.                                                      |
+| `leaves34-no-background-colors-targets.json`                                                                                                                                             | Actual fixed Operation/Header More ink; inherited hover backgrounds, focus, disabled state and two target tokens. Four inline negatives are genuine color differences.                                                       |
+| `leaves35-project-group-icons-targets.json`, `leaves35-project-group-natural-menu-targets.json`                                                                                          | Actual group resolved/fallback glyphs, caller precedence and natural 70% opacity; original six raster OPENs remain explicit.                                                                                                 |
+| `leaves35-project-group-menu-painted-targets.json`, `leaves35-project-group-natural-menu-painted-targets.json`                                                                           | Genuine painted-menu readiness; final48closed+12painted source rows retain three current raster OPENs and exact source provenance.                                                                                           |
+| `legacy-task-targets.json`                                                                                                                                                               | Actual legacy TaskList rows, caller/root/subtree variable overrides, loading/empty/overflow and desktop pointer states.                                                                                                      |
+| `legacy-updated-task-targets.json`                                                                                                                                                       | Actual legacy flat Updated list, status/anchor rows, rename, archive, show all/less and scoped variables.                                                                                                                    |
+| `owned-session-list-targets.json`                                                                                                                                                        | Active SessionList project groups, selection, caller/root/subtree overrides, menus, folding and empty/loading states.                                                                                                        |
+| `owned-updated-session-targets.json`                                                                                                                                                     | Active Updated list trees, precise openers, project groups, caller overrides, read-only/overflow and archive/rename states.                                                                                                  |
+| `owned-login-targets.json`                                                                                                                                                               | Login providers, email/handoff pending states, scoped spacing and actual 860/861px layout boundary.                                                                                                                          |
+| `mobile-project-settings-targets.json`                                                                                                                                                   | Production project settings with multiple machines, long labels, local editors, loading and read-only states.                                                                                                                |
+| `mobile-account-settings-targets.json`                                                                                                                                                   | Production account/workspace settings, editable names, deferred token/invitation actions and scoped variables.                                                                                                               |
+| `mobile-workspace-sheets-targets.json`                                                                                                                                                   | Actual create/delete drawers, validation, pending deletion, long translations and 320/390/768px layouts.                                                                                                                     |
+| `file-image-targets.json`                                                                                                                                                                | Actual fitted raster/SVG previews, null-source cases, constrained hosts, modal focus and close.                                                                                                                              |
+| `markdown-links-targets.json`                                                                                                                                                            | Actual prose/table file links, GitHub references, clipboard outcomes, caller overrides and read-only safety.                                                                                                                 |
+| `workspace-shell-targets.json`                                                                                                                                                           | Actual sidebar empty states, menus, tooltips, keyboard focus, resize and root/subtree variables.                                                                                                                             |
+| `sidebar-targets.json`                                                                                                                                                                   | Sidebar layouts, row parts, loading/empty/overflow and archive/menu states; narrow widths use a desktop UA.                                                                                                                  |
+| `sidebar-mobile-targets.json`                                                                                                                                                            | iPhone/Android descriptors, known-logo readiness and real touch menu/archive actions in both themes.                                                                                                                         |
+| `sidebar-updated-interaction-targets.json`                                                                                                                                               | Show all/less, selection, collapse/expand and focus/hover on the production Updated list.                                                                                                                                    |
+| `sidebar-archive-long-targets.json`                                                                                                                                                      | Long-title clipping and slot geometry during archive confirmation and commit.                                                                                                                                                |
+| `sidebar-send-motion-targets.json`                                                                                                                                                       | Normal-motion send rings at SMIL times 0 and 0.6 seconds.                                                                                                                                                                    |
+| `chat-targets.json`                                                                                                                                                                      | Composer/landing, selector menus, disabled-context hover/keyboard actions and connection-state transitions.                                                                                                                  |
+| `chat-mobile-targets.json`                                                                                                                                                               | Real iPhone/Android descriptors, touch actions, keyboard tooltip control and pasted-text layouts.                                                                                                                            |
+| `chat-mobile-home-targets.json`                                                                                                                                                          | Mobile home headers, workspace logos, onboarding, crowded status and reconnect/offline states.                                                                                                                               |
+| `chat-boundary-targets.json`                                                                                                                                                             | 311/312, 639/640 and 671/672px widths for compact composer and disabled-context styling.                                                                                                                                     |
+| `chat-context-targets.json`, `chat-mobile-context-targets.json`                                                                                                                          | Independent corrected context-action/tooltip captures; retain invalid initial selector diagnostics.                                                                                                                          |
 
 `schedule-style-native.mjs`, `bub-style-native.mjs` and `info-chip-style-native.mjs`
 take `--phase <name> --storybook <immutable-url>`. They supplement screenshots
@@ -168,6 +237,102 @@ descendant ink must retain its original priority relative to named hover/focus
 variants. Native frames are separate executions; overlapping states do not imply
 additional distinct UI coverage. Full-field observations supplement the report's
 smaller layout view without replacing the original screenshots.
+
+Composer fallback readiness requires the production failure text, preserved draft
+and fallback textarea marker, rather than a hand-rendered substitute. A changing
+reset key must leave the captured failure visible; only the actual retry action
+restores the normal composer with the edited draft. Palette probes assert resolved
+status ink, including an element-local writer and nested light-scope exclusion.
+
+Composer surface checks distinguish the frame's translucent oklab fill from the
+mention cover's opaque sRGB mix. Compare both actual backgrounds and the raw
+custom property, after local variables and mirror selection/scroll have committed.
+File-event controls use real browser DataTransfer/File objects with production
+handlers; record their synthetic dispatch boundary. For normal-motion session
+colours, pause the actual CSS transitions and screenshot with animations allowed;
+record pre/post current times rather than treating disabled animation as a midpoint.
+
+Popover readiness measures the actual `role=dialog` popup after its finite
+transition, fonts/images and complete content have committed. Keep its layout
+props distinct from positioner `style` and ref ownership. Story globals can force
+a theme despite the requested URL: the sender profile is light and the desktop
+turn-configuration story is dark. Record actual palette observations rather than
+counting each requested theme as distinct rendered coverage. A story play action
+may leave a popup closed; establish the required state with explicit user input
+and retain the rejected capture.
+Dimension gates must resolve CSS units at the element instead of parsing `.25rem`
+as a pixel step. A computed `min-width` can be `0px` when the authored default is
+`auto`; assert actual layout and keep failed assumptions as diagnostics. History
+confirmation can close its parent Drawer while a callback remains pending; use
+real reopen controls for that state rather than assuming it remains on screen.
+Submenu keyboard focus can open a tooltip over other rows. Preserve that feedback
+frame, then focus an actual non-tooltip row for an additional complete-content
+state. Check requested IDs against the built Storybook index: a misspelled ID can
+otherwise leave a smaller successful selection. Synthetic IPC fixtures must
+implement the existing theme subscription boundary before their component renders;
+keep unsupported-event failures separate from product style acceptance.
+A route that owns light theme can still have a dark-host stress fixture, but label
+that boundary. Paused/reduced-motion frames do not establish the full motion or
+audio timeline. Keep above-threshold paints OPEN even when inherited CSS, image
+bytes, hit stacks and animation records match. Original capture harnesses remain
+hash-identified when later batches extend optional interaction arguments.
+
+For managed iframe backgrounds, computed color does not establish child-composited
+paint. Decode original full screenshots at declared points and keep source-document
+scheme, transparency and security attributes. A same-frame child-scheme mutation
+can diagnose a white/cyan mismatch, but accepted product comparisons must use
+independently built matching fixture documents without that runtime mutation.
+
+`leaves31-33-acceptance.html` separates 168 exact formal pairs/12,024 records from
+20 supplemental pairs and four original failed-calibration images. Eight supported
+search native pairs agree in ordinary CSS, pseudos and actual SVG descendants;
+four manual inline original-token pairs genuinely differ by 392 raw/392 threshold
+pixels each. The reviewed SearchBar has fixed children and no style/visual props;
+its three production callers supply only height-only rootFill. The local theme
+is not an arbitrary Button/ancestor API. Preserve raw token inputs, disabled `/40`
+and artificial ancestor counterexamples; identical default screenshots cannot
+justify expanding that contract. Prototype computed ink and screenshot changes
+are reported independently, without inferring unproved paint causes. Saved native
+screenshots and complete checkpoints do not establish successful cleanup if the
+process subsequently stalls. Frozen older reports and non-exhaustive OPEN indices
+remain unchanged; current report QA covers full payload decode and two continuous
+1280/390 Chrome interaction cycles.
+
+`leaves34-35-acceptance.html` remains **partial visual acceptance**: 105/108
+formal PNG pairs exact, three current focus-ring OPENs/14raw pixels, with all
+5,264 standard node records equal. Six original pairs/24raw pixels stay separate.
+Zero threshold pixels does not close these differences. Its selector matrix is
+an explicit reference assembly of48original closed-state pairs plus12real
+painted-menu captures, not a fabricated capture manifest. Actual popup paint
+requires opacity1, identity transform and no pending lifecycle/finite transition;
+mounted geometry alone previously accepted opacity0. Natural menu controls keep
+real70% glyph opacity without caller masks. Bound ring CSS/repeat diagnostics do
+not prove exact raster causes. Fixed no-background color themes target only two
+tokens and retain all51others, including ghostHover; four manual same-element
+inline token cases truly change colors and stay negative contracts. Native data
+completion and stalled cleanup are separately reported. Original image/source
+hashes, all payload decode and two continuous1280/390 report UI cycles qualify
+this batch without changing prior frozen reports or inventory-method baselines.
+
+A repair's immediate Before may already contain a migration bug. Keep that
+Before→Final witness, but establish restoration against a separately built,
+hash-identified original-source reference. A matching buggy layout screenshot
+cannot certify an isolated card's selected palette. Compare actual element
+colours, local spacing and unchanged outer-root values with the reference.
+
+Spinner motion probes pause the actual infinite wrapper animation at 400ms of
+its 900ms cycle with screenshots allowing animations. Reduced-motion profiles
+assert the app's actual shortened duration; they do not require the normal-motion
+value. Record DPR, SVG attributes, computed dimensions and same-instance updates. Newly introduced dynamic inline
+variables are expected source differences; preserve them separately from exact
+ordinary CSS/pseudo fields and PNG comparisons. Read-only saving textareas and
+disabled action buttons are different states and need their actual contracts.
+Long-label reconnect fixtures can clip the loading mark outside their narrow
+column. Record that limit and use the separate visible production-controls branch
+for coverage. Monaco readiness must account for scrollbar visibility classes and
+actual transitions: an opacity snapshot alone can precede the screenshot's
+animation endpoint. Preserve failed gates and original changed frames when
+collecting a matrix with corrected readiness.
 
 Theme initialization can replace a story's early root palette override. Record
 the actual element variables after initialization; a story's name is not scope
@@ -223,6 +388,13 @@ and cannot establish the current batch's removal count. Pure literal string
 concatenations are joined before tokenization, including tokens split across
 operands. Mixed runtime or numeric operands remain unresolved; the scanner never
 evaluates expressions. Recount the baseline when this recognition changes.
+
+Literal class arrays joined with one space are supported, optionally through an
+exact `.filter(Boolean)`. Other join separators, arbitrary filters and array
+variables remain unresolved. Verify this boundary with
+`node --test scripts/tailwind-usage.test.mjs` from this package; it runs the actual
+scanner and locked Tailwind compiler on synthetic JSX. Compare both sources with
+the same scanner when correcting an earlier undercount.
 
 `session-layout-native.mjs`, `search-table-native.mjs` and
 `onboarding-surface-native.mjs` capture the owned layout, table and onboarding

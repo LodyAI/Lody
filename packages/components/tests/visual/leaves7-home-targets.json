@@ -1,0 +1,161 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844,
+      "device": "iPhone 13"
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 720,
+      "device": "iPhone SE"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "blockedHosts": ["avatars.githubusercontent.com"],
+  "ids": ["mobile-mobilehomescreen--ios", "mobile-mobilehomescreen--owned-header-controls"],
+  "ready": {
+    "mobile-mobilehomescreen--ios": [
+      {
+        "action": "visible",
+        "selector": ".mobile-home-header-search input"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const field=document.querySelector(\".mobile-home-header-search\");return !!field && field.getBoundingClientRect().height>0 && getComputedStyle(field).opacity===\"1\" && getComputedStyle(field.parentElement).opacity===\"1\"; }"
+      }
+    ],
+    "mobile-mobilehomescreen--owned-header-controls": [
+      {
+        "action": "visible",
+        "selector": ".mobile-home-header-search input"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const field=document.querySelector(\".mobile-home-header-search\");return !!field && field.getBoundingClientRect().height>0 && getComputedStyle(field).opacity===\"1\" && getComputedStyle(field.parentElement).opacity===\"1\"; }"
+      },
+      {
+        "action": "visible",
+        "selector": "button[aria-label=\"过滤器\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => (getComputedStyle(document.querySelector(\"[data-owned-home-controls]\")).getPropertyValue(\"--color-white\").trim() === \"#93c5fd\")"
+      }
+    ]
+  },
+  "states": {
+    "mobile-mobilehomescreen--ios": [
+      {
+        "name": "search-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": ".mobile-home-header-search input"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => (document.activeElement === document.querySelector(\".mobile-home-header-search input\"))"
+          }
+        ]
+      }
+    ],
+    "mobile-mobilehomescreen--owned-header-controls": [
+      {
+        "name": "workspace-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "切换 workspace: Lody"
+          }
+        ]
+      },
+      {
+        "name": "search-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": ".mobile-home-header-search input"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => (document.activeElement === document.querySelector(\".mobile-home-header-search input\"))"
+          }
+        ]
+      },
+      {
+        "name": "search-value",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": ".mobile-home-header-search input",
+            "value": "Chat"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => (document.querySelector(\".mobile-home-header-search input\").value === \"Chat\")"
+          }
+        ]
+      },
+      {
+        "name": "search-cleared",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Clear search"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => (document.querySelector(\".mobile-home-header-search input\").value === \"\")"
+          }
+        ]
+      },
+      {
+        "name": "filter-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "button[aria-label=\"过滤器\"]"
+          }
+        ]
+      },
+      {
+        "name": "filter-open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"过滤器\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const toggle=document.querySelector('button[aria-label=\"过滤器\"]');const bar=document.querySelector(\"[data-owned-home-controls] .mobile-filter-pill-bar\");return toggle?.getAttribute(\"aria-pressed\")===\"true\" && !!bar && bar.parentElement.getBoundingClientRect().height>0 && getComputedStyle(bar.parentElement).opacity===\"1\"; }"
+          }
+        ]
+      },
+      {
+        "name": "filter-closed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"过滤器\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('button[aria-label=\"过滤器\"]')?.getAttribute(\"aria-pressed\")===\"false\" && !document.querySelector(\"[data-owned-home-controls] .mobile-filter-pill-bar\")"
+          }
+        ]
+      }
+    ]
+  }
+}

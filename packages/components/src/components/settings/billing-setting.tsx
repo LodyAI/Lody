@@ -887,7 +887,7 @@ function CloudBillingSettings() {
           </AlertDialog.Header>
           {intervalPreview === undefined ? (
             <div {...stylex.props(styles.loading)}>
-              <Spinner className="h-4 w-4" />
+              <Spinner diameter="calc(var(--spacing) * 4)" />
               {t('billing.historyLoading')}
             </div>
           ) : intervalPreview === null ? (
@@ -976,7 +976,9 @@ function CloudBillingSettings() {
                 void handleSwitchInterval();
               }}
             >
-              {switchIntervalPending ? <Spinner className="mr-2 h-4 w-4" /> : null}
+              {switchIntervalPending ? (
+                <Spinner diameter="calc(var(--spacing) * 4)" className="mr-2" />
+              ) : null}
               {t('billing.switchIntervalConfirm')}
             </Button>
           </AlertDialog.Footer>

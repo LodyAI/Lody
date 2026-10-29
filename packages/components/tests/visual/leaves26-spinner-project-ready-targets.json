@@ -1,0 +1,36 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone SE",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "ids": ["mobile-mobileprojectscreen--ios-git-hub"],
+  "ready": {
+    "mobile-mobileprojectscreen--ios-git-hub": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const marks=[...document.querySelectorAll(\"[data-slot=spinner]:has(svg[aria-label=running])\")];return marks.length===1&&marks.every(mark=>{let node=mark;while(node&&node!==document.body){if(getComputedStyle(node).opacity!=='1')return false;node=node.parentElement;}const r=mark.getBoundingClientRect();return Math.abs(r.width-16)<0.01&&Math.abs(r.height-16)<0.01&&r.top>=0&&r.bottom<=innerHeight&&r.right>0&&r.left<innerWidth;}); }"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => (function invariant(specs){\n const rules=[];\n function visit(list){for(const rule of list){if(rule.media&&!matchMedia(rule.conditionText).matches)continue;if(rule.constructor.name==='CSSSupportsRule'&&!CSS.supports(rule.conditionText))continue;if(rule.selectorText&&rule.style)rules.push(rule);if(rule.cssRules)visit(rule.cssRules);}}\n for(const sheet of document.styleSheets){try{visit(sheet.cssRules);}catch{return false;}}\n for(const spec of specs){let marks=[...document.querySelectorAll(spec.selector)];if(spec.parentText)marks=marks.filter(m=>m.parentElement?.textContent===spec.parentText);if(marks.length!==spec.count)return false;if(spec.indices)marks=spec.indices.map(i=>marks[i]);\n for(const mark of marks){const c=getComputedStyle(mark),r=mark.getBoundingClientRect();if(!mark.isConnected||mark.tagName!=='SPAN'||mark.dataset.slot!=='spinner'||mark.firstElementChild?.tagName!=='svg'||r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight||c.flexShrink!=='0'||c.width!==spec.diameter+'px'||c.height!==spec.diameter+'px')return false;\n let parent=mark.parentElement;while(parent&&getComputedStyle(parent).display==='contents')parent=parent.parentElement;const pd=parent&&getComputedStyle(parent).display;const blockified=['flex','inline-flex','grid','inline-grid'].includes(pd)||['absolute','fixed'].includes(c.position)||c.cssFloat!=='none';if(c.display!==(blockified?'flex':'inline-flex'))return false;\n for(let p=mark;p;p=p.parentElement){const cs=getComputedStyle(p);if(cs.display==='none'||cs.visibility==='hidden'||Number(cs.opacity)===0)return false;if(p!==mark){const pr=p.getBoundingClientRect();if(['hidden','clip','auto','scroll'].includes(cs.overflowX)&&(r.left<pr.left-.5||r.right>pr.right+.5))return false;if(['hidden','clip','auto','scroll'].includes(cs.overflowY)&&(r.top<pr.top-.5||r.bottom>pr.bottom+.5))return false;}}\n for(const [property,value]of [['display','inline-flex'],['flex-shrink','0']])if(!rules.some(rule=>/\\.x[\\w-]+/.test(rule.selectorText)&&rule.style.getPropertyValue(property).trim()===value&&mark.matches(rule.selectorText)))return false;\n const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;if(c.animationName==='none'||c.animationIterationCount!==(reduced?'1':'infinite')||c.animationDuration!==(reduced?'1e-05s':'0.9s')||c.animationTimingFunction!=='linear')return false;\n }}\n return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));\n})([{\"selector\":\"[data-slot=spinner]:has(svg[aria-label=running])\",\"count\":1,\"diameter\":16}])"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const images=[...document.querySelectorAll('header img')];if(images.length!==1)return false;const image=images[0],src=image.src;if(!src.startsWith('blob:')||image.currentSrc!==src||!image.complete||image.naturalWidth!==80||image.naturalHeight!==80)return false;return image.isConnected&&image.src===src&&image.currentSrc===src&&image.complete&&image.naturalWidth===80&&image.naturalHeight===80;}"
+      }
+    ]
+  },
+  "states": {}
+}

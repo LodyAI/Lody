@@ -57,6 +57,15 @@ const TRANSITION_COLORS = {
 } as const;
 
 const styles = stylex.create({
+  spinner: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+  },
+  spinnerSmall: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+  },
   /** The title, clipped so a long name cannot push the chips away. */
   title: { maxWidth: '68%' },
   /** The pane the skill detail slides over. */
@@ -328,6 +337,10 @@ const styles = stylex.create({
     gap: themeSpace[0.5],
   },
   skillDescription: {
+    overflow: 'hidden',
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 2,
     fontSize: '0.78rem',
     lineHeight: 1.375,
     color: themeColors.mutedForeground,
@@ -533,7 +546,7 @@ export function MobileProjectSkillsBody({
   if (isInitialLoading) {
     return (
       <div {...stylex.props(styles.loading)}>
-        <Spinner className="h-4 w-4" />
+        <Spinner {...stylex.props(styles.spinner)} />
         {t('workspace.projects.skills.loading', 'Loading skills')}
       </div>
     );
@@ -580,7 +593,7 @@ export function MobileProjectSkillsBody({
         <div {...stylex.props(styles.summary)}>
           {isRefreshing ? (
             <>
-              <Spinner className="h-3.5 w-3.5 shrink-0" />
+              <Spinner {...stylex.props(styles.spinnerSmall)} />
               <span>{t('workspace.projects.skills.refreshing', 'Refreshing…')}</span>
             </>
           ) : status === 'error' && stale ? (
@@ -618,7 +631,7 @@ export function MobileProjectSkillsBody({
           aria-label={t('workspace.projects.skills.refresh', 'Refresh')}
           {...stylex.props(styles.refresh)}
         >
-          <Spinner icon={RefreshCw} spinning={isRefreshing} className="h-4 w-4" />
+          <Spinner icon={RefreshCw} spinning={isRefreshing} {...stylex.props(styles.spinner)} />
         </button>
       </div>
 
@@ -695,9 +708,7 @@ function SkillHelper({ skill }: { skill: ProjectSkill }) {
   return (
     <div {...stylex.props(styles.skillHelper)}>
       {skill.description ? (
-        <span {...withClassName(stylex.props(styles.skillDescription), 'line-clamp-2')}>
-          {skill.description}
-        </span>
+        <span {...stylex.props(styles.skillDescription)}>{skill.description}</span>
       ) : null}
       <span {...stylex.props(styles.skillMeta)}>
         {skill.author ? (

@@ -119,7 +119,7 @@ function UpdateStatusText({
     const p = percent != null ? Math.round(percent) : 0;
     return (
       <span {...stylex.props(styles.status)}>
-        <Spinner className="h-3.5 w-3.5" />
+        <Spinner diameter="calc(var(--spacing) * 3.5)" />
         {t('settings.about.downloading', { percent: String(p) })}
       </span>
     );
@@ -274,7 +274,7 @@ export function MobileAboutSettings() {
                 disabled={isInstalling}
               >
                 {isInstalling ? (
-                  <Spinner className="mr-1 h-3.5 w-3.5" />
+                  <Spinner diameter="calc(var(--spacing) * 3.5)" className="mr-1" />
                 ) : (
                   <Download {...stylex.props(styles.buttonIcon)} />
                 )}
@@ -289,7 +289,9 @@ export function MobileAboutSettings() {
                 }}
                 disabled={isChecking || phase === 'downloading'}
               >
-                {isChecking ? <Spinner className="mr-1 h-3.5 w-3.5" /> : null}
+                {isChecking ? (
+                  <Spinner diameter="calc(var(--spacing) * 3.5)" className="mr-1" />
+                ) : null}
                 {t('settings.about.checkForUpdates')}
               </Button>
             )}

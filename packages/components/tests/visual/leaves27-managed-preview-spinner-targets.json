@@ -1,0 +1,184 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone SE",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "ids": [
+    "migration-managedpreviewdraftspinner--default",
+    "migration-managedpreviewdraftspinner--scoped-spacing"
+  ],
+  "ready": {
+    "migration-managedpreviewdraftspinner--default": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => (function draftReady(state,spacing,body){\n const receipt=document.querySelector('[data-managed-draft-status]'),frame=document.querySelector('[data-managed-draft-frame] iframe'),draft=document.querySelector('[data-lody-visual-comment-draft]');\n if(!receipt||receipt.dataset.available!=='true'||receipt.dataset.loading!=='false'||receipt.dataset.runtimeError!==''||!frame||frame.getAttribute('sandbox')!=='allow-scripts'||!frame.hasAttribute('credentialless')||!frame.srcdoc.includes('data-lody-visual-annotation-runtime'))return false;\n if(state==='frame')return !draft&&receipt.dataset.pending==='false'&&document.fonts.status==='loaded';\n if(state==='cancelled')return !draft&&receipt.dataset.pending==='false';\n if(!draft||!receipt.dataset.resolvedSelector.includes('synthetic-preview-target')||!draft.textContent.includes('button#synthetic-preview-target')||!draft.textContent.includes('Preview action'))return false;\n const r=draft.getBoundingClientRect(),textarea=draft.querySelector('textarea'),cancel=draft.querySelector('button[aria-label=Cancel]'),send=[...draft.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send');\n if(!textarea||!cancel||!send||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||cancel.disabled)return false;\n const c=getComputedStyle(cancel);if(c.width!=='24px'||c.height!=='24px'||c.flexShrink!=='0')return false;\n const marks=[...draft.querySelectorAll('[data-slot=spinner]')];\n if(state==='empty'&&(textarea.value!==''||!send.disabled||marks.length||receipt.dataset.pending!=='false'))return false;\n if(state==='filled'&&(textarea.value!==body||send.disabled||marks.length||receipt.dataset.pending!=='false'))return false;\n if(state==='pending'){\n  if(textarea.value!==body||!send.disabled||marks.length!==1||receipt.dataset.pending!=='true'||document.querySelector('[data-managed-draft-requested-body]')?.textContent!==body)return false;\n  const mark=marks[0],s=getComputedStyle(mark),mr=mark.getBoundingClientRect(),diameter=spacing*3.5;\n  if(s.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||s.width!==diameter+'px'||s.height!==diameter+'px'||s.flexShrink!=='0'||mark.firstElementChild?.tagName!=='svg'||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight)return false;\n }\n for(let p=draft;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0)return false;}\n return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));\n})(\"frame\",4,\"Please review this synthetic preview target.\")"
+      },
+      {
+        "action": "click",
+        "selector": "[data-managed-draft-frame] iframe[data-lody-managed-preview-frame]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-lody-visual-comment-draft]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => (function draftReady(state,spacing,body){\n const receipt=document.querySelector('[data-managed-draft-status]'),frame=document.querySelector('[data-managed-draft-frame] iframe'),draft=document.querySelector('[data-lody-visual-comment-draft]');\n if(!receipt||receipt.dataset.available!=='true'||receipt.dataset.loading!=='false'||receipt.dataset.runtimeError!==''||!frame||frame.getAttribute('sandbox')!=='allow-scripts'||!frame.hasAttribute('credentialless')||!frame.srcdoc.includes('data-lody-visual-annotation-runtime'))return false;\n if(state==='frame')return !draft&&receipt.dataset.pending==='false'&&document.fonts.status==='loaded';\n if(state==='cancelled')return !draft&&receipt.dataset.pending==='false';\n if(!draft||!receipt.dataset.resolvedSelector.includes('synthetic-preview-target')||!draft.textContent.includes('button#synthetic-preview-target')||!draft.textContent.includes('Preview action'))return false;\n const r=draft.getBoundingClientRect(),textarea=draft.querySelector('textarea'),cancel=draft.querySelector('button[aria-label=Cancel]'),send=[...draft.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send');\n if(!textarea||!cancel||!send||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||cancel.disabled)return false;\n const c=getComputedStyle(cancel);if(c.width!=='24px'||c.height!=='24px'||c.flexShrink!=='0')return false;\n const marks=[...draft.querySelectorAll('[data-slot=spinner]')];\n if(state==='empty'&&(textarea.value!==''||!send.disabled||marks.length||receipt.dataset.pending!=='false'))return false;\n if(state==='filled'&&(textarea.value!==body||send.disabled||marks.length||receipt.dataset.pending!=='false'))return false;\n if(state==='pending'){\n  if(textarea.value!==body||!send.disabled||marks.length!==1||receipt.dataset.pending!=='true'||document.querySelector('[data-managed-draft-requested-body]')?.textContent!==body)return false;\n  const mark=marks[0],s=getComputedStyle(mark),mr=mark.getBoundingClientRect(),diameter=spacing*3.5;\n  if(s.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||s.width!==diameter+'px'||s.height!==diameter+'px'||s.flexShrink!=='0'||mark.firstElementChild?.tagName!=='svg'||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight)return false;\n }\n for(let p=draft;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0)return false;}\n return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));\n})(\"empty\",4,\"Please review this synthetic preview target.\")"
+      }
+    ],
+    "migration-managedpreviewdraftspinner--scoped-spacing": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => (function draftReady(state,spacing,body){\n const receipt=document.querySelector('[data-managed-draft-status]'),frame=document.querySelector('[data-managed-draft-frame] iframe'),draft=document.querySelector('[data-lody-visual-comment-draft]');\n if(!receipt||receipt.dataset.available!=='true'||receipt.dataset.loading!=='false'||receipt.dataset.runtimeError!==''||!frame||frame.getAttribute('sandbox')!=='allow-scripts'||!frame.hasAttribute('credentialless')||!frame.srcdoc.includes('data-lody-visual-annotation-runtime'))return false;\n if(state==='frame')return !draft&&receipt.dataset.pending==='false'&&document.fonts.status==='loaded';\n if(state==='cancelled')return !draft&&receipt.dataset.pending==='false';\n if(!draft||!receipt.dataset.resolvedSelector.includes('synthetic-preview-target')||!draft.textContent.includes('button#synthetic-preview-target')||!draft.textContent.includes('Preview action'))return false;\n const r=draft.getBoundingClientRect(),textarea=draft.querySelector('textarea'),cancel=draft.querySelector('button[aria-label=Cancel]'),send=[...draft.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send');\n if(!textarea||!cancel||!send||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||cancel.disabled)return false;\n const c=getComputedStyle(cancel);if(c.width!=='24px'||c.height!=='24px'||c.flexShrink!=='0')return false;\n const marks=[...draft.querySelectorAll('[data-slot=spinner]')];\n if(state==='empty'&&(textarea.value!==''||!send.disabled||marks.length||receipt.dataset.pending!=='false'))return false;\n if(state==='filled'&&(textarea.value!==body||send.disabled||marks.length||receipt.dataset.pending!=='false'))return false;\n if(state==='pending'){\n  if(textarea.value!==body||!send.disabled||marks.length!==1||receipt.dataset.pending!=='true'||document.querySelector('[data-managed-draft-requested-body]')?.textContent!==body)return false;\n  const mark=marks[0],s=getComputedStyle(mark),mr=mark.getBoundingClientRect(),diameter=spacing*3.5;\n  if(s.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||s.width!==diameter+'px'||s.height!==diameter+'px'||s.flexShrink!=='0'||mark.firstElementChild?.tagName!=='svg'||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight)return false;\n }\n for(let p=draft;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0)return false;}\n return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));\n})(\"frame\",5,\"Please review this synthetic preview target.\")"
+      },
+      {
+        "action": "click",
+        "selector": "[data-managed-draft-frame] iframe[data-lody-managed-preview-frame]"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-lody-visual-comment-draft]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => (function draftReady(state,spacing,body){\n const receipt=document.querySelector('[data-managed-draft-status]'),frame=document.querySelector('[data-managed-draft-frame] iframe'),draft=document.querySelector('[data-lody-visual-comment-draft]');\n if(!receipt||receipt.dataset.available!=='true'||receipt.dataset.loading!=='false'||receipt.dataset.runtimeError!==''||!frame||frame.getAttribute('sandbox')!=='allow-scripts'||!frame.hasAttribute('credentialless')||!frame.srcdoc.includes('data-lody-visual-annotation-runtime'))return false;\n if(state==='frame')return !draft&&receipt.dataset.pending==='false'&&document.fonts.status==='loaded';\n if(state==='cancelled')return !draft&&receipt.dataset.pending==='false';\n if(!draft||!receipt.dataset.resolvedSelector.includes('synthetic-preview-target')||!draft.textContent.includes('button#synthetic-preview-target')||!draft.textContent.includes('Preview action'))return false;\n const r=draft.getBoundingClientRect(),textarea=draft.querySelector('textarea'),cancel=draft.querySelector('button[aria-label=Cancel]'),send=[...draft.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send');\n if(!textarea||!cancel||!send||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||cancel.disabled)return false;\n const c=getComputedStyle(cancel);if(c.width!=='24px'||c.height!=='24px'||c.flexShrink!=='0')return false;\n const marks=[...draft.querySelectorAll('[data-slot=spinner]')];\n if(state==='empty'&&(textarea.value!==''||!send.disabled||marks.length||receipt.dataset.pending!=='false'))return false;\n if(state==='filled'&&(textarea.value!==body||send.disabled||marks.length||receipt.dataset.pending!=='false'))return false;\n if(state==='pending'){\n  if(textarea.value!==body||!send.disabled||marks.length!==1||receipt.dataset.pending!=='true'||document.querySelector('[data-managed-draft-requested-body]')?.textContent!==body)return false;\n  const mark=marks[0],s=getComputedStyle(mark),mr=mark.getBoundingClientRect(),diameter=spacing*3.5;\n  if(s.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||s.width!==diameter+'px'||s.height!==diameter+'px'||s.flexShrink!=='0'||mark.firstElementChild?.tagName!=='svg'||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight)return false;\n }\n for(let p=draft;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0)return false;}\n return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));\n})(\"empty\",5,\"Please review this synthetic preview target.\")"
+      }
+    ]
+  },
+  "states": {
+    "migration-managedpreviewdraftspinner--default": [
+      {
+        "name": "filled",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "[data-lody-visual-comment-draft] textarea",
+            "value": "Please review this synthetic preview target."
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => (function draftReady(state,spacing,body){\n const receipt=document.querySelector('[data-managed-draft-status]'),frame=document.querySelector('[data-managed-draft-frame] iframe'),draft=document.querySelector('[data-lody-visual-comment-draft]');\n if(!receipt||receipt.dataset.available!=='true'||receipt.dataset.loading!=='false'||receipt.dataset.runtimeError!==''||!frame||frame.getAttribute('sandbox')!=='allow-scripts'||!frame.hasAttribute('credentialless')||!frame.srcdoc.includes('data-lody-visual-annotation-runtime'))return false;\n if(state==='frame')return !draft&&receipt.dataset.pending==='false'&&document.fonts.status==='loaded';\n if(state==='cancelled')return !draft&&receipt.dataset.pending==='false';\n if(!draft||!receipt.dataset.resolvedSelector.includes('synthetic-preview-target')||!draft.textContent.includes('button#synthetic-preview-target')||!draft.textContent.includes('Preview action'))return false;\n const r=draft.getBoundingClientRect(),textarea=draft.querySelector('textarea'),cancel=draft.querySelector('button[aria-label=Cancel]'),send=[...draft.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send');\n if(!textarea||!cancel||!send||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||cancel.disabled)return false;\n const c=getComputedStyle(cancel);if(c.width!=='24px'||c.height!=='24px'||c.flexShrink!=='0')return false;\n const marks=[...draft.querySelectorAll('[data-slot=spinner]')];\n if(state==='empty'&&(textarea.value!==''||!send.disabled||marks.length||receipt.dataset.pending!=='false'))return false;\n if(state==='filled'&&(textarea.value!==body||send.disabled||marks.length||receipt.dataset.pending!=='false'))return false;\n if(state==='pending'){\n  if(textarea.value!==body||!send.disabled||marks.length!==1||receipt.dataset.pending!=='true'||document.querySelector('[data-managed-draft-requested-body]')?.textContent!==body)return false;\n  const mark=marks[0],s=getComputedStyle(mark),mr=mark.getBoundingClientRect(),diameter=spacing*3.5;\n  if(s.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||s.width!==diameter+'px'||s.height!==diameter+'px'||s.flexShrink!=='0'||mark.firstElementChild?.tagName!=='svg'||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight)return false;\n }\n for(let p=draft;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0)return false;}\n return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));\n})(\"filled\",4,\"Please review this synthetic preview target.\")"
+          }
+        ]
+      },
+      {
+        "name": "cancelled",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Cancel"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => (function draftReady(state,spacing,body){\n const receipt=document.querySelector('[data-managed-draft-status]'),frame=document.querySelector('[data-managed-draft-frame] iframe'),draft=document.querySelector('[data-lody-visual-comment-draft]');\n if(!receipt||receipt.dataset.available!=='true'||receipt.dataset.loading!=='false'||receipt.dataset.runtimeError!==''||!frame||frame.getAttribute('sandbox')!=='allow-scripts'||!frame.hasAttribute('credentialless')||!frame.srcdoc.includes('data-lody-visual-annotation-runtime'))return false;\n if(state==='frame')return !draft&&receipt.dataset.pending==='false'&&document.fonts.status==='loaded';\n if(state==='cancelled')return !draft&&receipt.dataset.pending==='false';\n if(!draft||!receipt.dataset.resolvedSelector.includes('synthetic-preview-target')||!draft.textContent.includes('button#synthetic-preview-target')||!draft.textContent.includes('Preview action'))return false;\n const r=draft.getBoundingClientRect(),textarea=draft.querySelector('textarea'),cancel=draft.querySelector('button[aria-label=Cancel]'),send=[...draft.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send');\n if(!textarea||!cancel||!send||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||cancel.disabled)return false;\n const c=getComputedStyle(cancel);if(c.width!=='24px'||c.height!=='24px'||c.flexShrink!=='0')return false;\n const marks=[...draft.querySelectorAll('[data-slot=spinner]')];\n if(state==='empty'&&(textarea.value!==''||!send.disabled||marks.length||receipt.dataset.pending!=='false'))return false;\n if(state==='filled'&&(textarea.value!==body||send.disabled||marks.length||receipt.dataset.pending!=='false'))return false;\n if(state==='pending'){\n  if(textarea.value!==body||!send.disabled||marks.length!==1||receipt.dataset.pending!=='true'||document.querySelector('[data-managed-draft-requested-body]')?.textContent!==body)return false;\n  const mark=marks[0],s=getComputedStyle(mark),mr=mark.getBoundingClientRect(),diameter=spacing*3.5;\n  if(s.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||s.width!==diameter+'px'||s.height!==diameter+'px'||s.flexShrink!=='0'||mark.firstElementChild?.tagName!=='svg'||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight)return false;\n }\n for(let p=draft;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0)return false;}\n return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));\n})(\"cancelled\",4,\"Please review this synthetic preview target.\")"
+          }
+        ]
+      },
+      {
+        "name": "pending",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-managed-draft-frame] iframe[data-lody-managed-preview-frame]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-lody-visual-comment-draft]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => (function draftReady(state,spacing,body){\n const receipt=document.querySelector('[data-managed-draft-status]'),frame=document.querySelector('[data-managed-draft-frame] iframe'),draft=document.querySelector('[data-lody-visual-comment-draft]');\n if(!receipt||receipt.dataset.available!=='true'||receipt.dataset.loading!=='false'||receipt.dataset.runtimeError!==''||!frame||frame.getAttribute('sandbox')!=='allow-scripts'||!frame.hasAttribute('credentialless')||!frame.srcdoc.includes('data-lody-visual-annotation-runtime'))return false;\n if(state==='frame')return !draft&&receipt.dataset.pending==='false'&&document.fonts.status==='loaded';\n if(state==='cancelled')return !draft&&receipt.dataset.pending==='false';\n if(!draft||!receipt.dataset.resolvedSelector.includes('synthetic-preview-target')||!draft.textContent.includes('button#synthetic-preview-target')||!draft.textContent.includes('Preview action'))return false;\n const r=draft.getBoundingClientRect(),textarea=draft.querySelector('textarea'),cancel=draft.querySelector('button[aria-label=Cancel]'),send=[...draft.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send');\n if(!textarea||!cancel||!send||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||cancel.disabled)return false;\n const c=getComputedStyle(cancel);if(c.width!=='24px'||c.height!=='24px'||c.flexShrink!=='0')return false;\n const marks=[...draft.querySelectorAll('[data-slot=spinner]')];\n if(state==='empty'&&(textarea.value!==''||!send.disabled||marks.length||receipt.dataset.pending!=='false'))return false;\n if(state==='filled'&&(textarea.value!==body||send.disabled||marks.length||receipt.dataset.pending!=='false'))return false;\n if(state==='pending'){\n  if(textarea.value!==body||!send.disabled||marks.length!==1||receipt.dataset.pending!=='true'||document.querySelector('[data-managed-draft-requested-body]')?.textContent!==body)return false;\n  const mark=marks[0],s=getComputedStyle(mark),mr=mark.getBoundingClientRect(),diameter=spacing*3.5;\n  if(s.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||s.width!==diameter+'px'||s.height!==diameter+'px'||s.flexShrink!=='0'||mark.firstElementChild?.tagName!=='svg'||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight)return false;\n }\n for(let p=draft;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0)return false;}\n return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));\n})(\"empty\",4,\"Please review this synthetic preview target.\")"
+          },
+          {
+            "action": "fill",
+            "selector": "[data-lody-visual-comment-draft] textarea",
+            "value": "Please review this synthetic preview target."
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Send"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => (function draftReady(state,spacing,body){\n const receipt=document.querySelector('[data-managed-draft-status]'),frame=document.querySelector('[data-managed-draft-frame] iframe'),draft=document.querySelector('[data-lody-visual-comment-draft]');\n if(!receipt||receipt.dataset.available!=='true'||receipt.dataset.loading!=='false'||receipt.dataset.runtimeError!==''||!frame||frame.getAttribute('sandbox')!=='allow-scripts'||!frame.hasAttribute('credentialless')||!frame.srcdoc.includes('data-lody-visual-annotation-runtime'))return false;\n if(state==='frame')return !draft&&receipt.dataset.pending==='false'&&document.fonts.status==='loaded';\n if(state==='cancelled')return !draft&&receipt.dataset.pending==='false';\n if(!draft||!receipt.dataset.resolvedSelector.includes('synthetic-preview-target')||!draft.textContent.includes('button#synthetic-preview-target')||!draft.textContent.includes('Preview action'))return false;\n const r=draft.getBoundingClientRect(),textarea=draft.querySelector('textarea'),cancel=draft.querySelector('button[aria-label=Cancel]'),send=[...draft.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send');\n if(!textarea||!cancel||!send||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||cancel.disabled)return false;\n const c=getComputedStyle(cancel);if(c.width!=='24px'||c.height!=='24px'||c.flexShrink!=='0')return false;\n const marks=[...draft.querySelectorAll('[data-slot=spinner]')];\n if(state==='empty'&&(textarea.value!==''||!send.disabled||marks.length||receipt.dataset.pending!=='false'))return false;\n if(state==='filled'&&(textarea.value!==body||send.disabled||marks.length||receipt.dataset.pending!=='false'))return false;\n if(state==='pending'){\n  if(textarea.value!==body||!send.disabled||marks.length!==1||receipt.dataset.pending!=='true'||document.querySelector('[data-managed-draft-requested-body]')?.textContent!==body)return false;\n  const mark=marks[0],s=getComputedStyle(mark),mr=mark.getBoundingClientRect(),diameter=spacing*3.5;\n  if(s.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||s.width!==diameter+'px'||s.height!==diameter+'px'||s.flexShrink!=='0'||mark.firstElementChild?.tagName!=='svg'||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight)return false;\n }\n for(let p=draft;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0)return false;}\n return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));\n})(\"pending\",4,\"Please review this synthetic preview target.\")"
+          }
+        ]
+      }
+    ],
+    "migration-managedpreviewdraftspinner--scoped-spacing": [
+      {
+        "name": "filled",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "[data-lody-visual-comment-draft] textarea",
+            "value": "Please review this synthetic preview target."
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => (function draftReady(state,spacing,body){\n const receipt=document.querySelector('[data-managed-draft-status]'),frame=document.querySelector('[data-managed-draft-frame] iframe'),draft=document.querySelector('[data-lody-visual-comment-draft]');\n if(!receipt||receipt.dataset.available!=='true'||receipt.dataset.loading!=='false'||receipt.dataset.runtimeError!==''||!frame||frame.getAttribute('sandbox')!=='allow-scripts'||!frame.hasAttribute('credentialless')||!frame.srcdoc.includes('data-lody-visual-annotation-runtime'))return false;\n if(state==='frame')return !draft&&receipt.dataset.pending==='false'&&document.fonts.status==='loaded';\n if(state==='cancelled')return !draft&&receipt.dataset.pending==='false';\n if(!draft||!receipt.dataset.resolvedSelector.includes('synthetic-preview-target')||!draft.textContent.includes('button#synthetic-preview-target')||!draft.textContent.includes('Preview action'))return false;\n const r=draft.getBoundingClientRect(),textarea=draft.querySelector('textarea'),cancel=draft.querySelector('button[aria-label=Cancel]'),send=[...draft.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send');\n if(!textarea||!cancel||!send||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||cancel.disabled)return false;\n const c=getComputedStyle(cancel);if(c.width!=='24px'||c.height!=='24px'||c.flexShrink!=='0')return false;\n const marks=[...draft.querySelectorAll('[data-slot=spinner]')];\n if(state==='empty'&&(textarea.value!==''||!send.disabled||marks.length||receipt.dataset.pending!=='false'))return false;\n if(state==='filled'&&(textarea.value!==body||send.disabled||marks.length||receipt.dataset.pending!=='false'))return false;\n if(state==='pending'){\n  if(textarea.value!==body||!send.disabled||marks.length!==1||receipt.dataset.pending!=='true'||document.querySelector('[data-managed-draft-requested-body]')?.textContent!==body)return false;\n  const mark=marks[0],s=getComputedStyle(mark),mr=mark.getBoundingClientRect(),diameter=spacing*3.5;\n  if(s.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||s.width!==diameter+'px'||s.height!==diameter+'px'||s.flexShrink!=='0'||mark.firstElementChild?.tagName!=='svg'||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight)return false;\n }\n for(let p=draft;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0)return false;}\n return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));\n})(\"filled\",5,\"Please review this synthetic preview target.\")"
+          }
+        ]
+      },
+      {
+        "name": "cancelled",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Cancel"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => (function draftReady(state,spacing,body){\n const receipt=document.querySelector('[data-managed-draft-status]'),frame=document.querySelector('[data-managed-draft-frame] iframe'),draft=document.querySelector('[data-lody-visual-comment-draft]');\n if(!receipt||receipt.dataset.available!=='true'||receipt.dataset.loading!=='false'||receipt.dataset.runtimeError!==''||!frame||frame.getAttribute('sandbox')!=='allow-scripts'||!frame.hasAttribute('credentialless')||!frame.srcdoc.includes('data-lody-visual-annotation-runtime'))return false;\n if(state==='frame')return !draft&&receipt.dataset.pending==='false'&&document.fonts.status==='loaded';\n if(state==='cancelled')return !draft&&receipt.dataset.pending==='false';\n if(!draft||!receipt.dataset.resolvedSelector.includes('synthetic-preview-target')||!draft.textContent.includes('button#synthetic-preview-target')||!draft.textContent.includes('Preview action'))return false;\n const r=draft.getBoundingClientRect(),textarea=draft.querySelector('textarea'),cancel=draft.querySelector('button[aria-label=Cancel]'),send=[...draft.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send');\n if(!textarea||!cancel||!send||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||cancel.disabled)return false;\n const c=getComputedStyle(cancel);if(c.width!=='24px'||c.height!=='24px'||c.flexShrink!=='0')return false;\n const marks=[...draft.querySelectorAll('[data-slot=spinner]')];\n if(state==='empty'&&(textarea.value!==''||!send.disabled||marks.length||receipt.dataset.pending!=='false'))return false;\n if(state==='filled'&&(textarea.value!==body||send.disabled||marks.length||receipt.dataset.pending!=='false'))return false;\n if(state==='pending'){\n  if(textarea.value!==body||!send.disabled||marks.length!==1||receipt.dataset.pending!=='true'||document.querySelector('[data-managed-draft-requested-body]')?.textContent!==body)return false;\n  const mark=marks[0],s=getComputedStyle(mark),mr=mark.getBoundingClientRect(),diameter=spacing*3.5;\n  if(s.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||s.width!==diameter+'px'||s.height!==diameter+'px'||s.flexShrink!=='0'||mark.firstElementChild?.tagName!=='svg'||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight)return false;\n }\n for(let p=draft;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0)return false;}\n return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));\n})(\"cancelled\",5,\"Please review this synthetic preview target.\")"
+          }
+        ]
+      },
+      {
+        "name": "pending",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-managed-draft-frame] iframe[data-lody-managed-preview-frame]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-lody-visual-comment-draft]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => (function draftReady(state,spacing,body){\n const receipt=document.querySelector('[data-managed-draft-status]'),frame=document.querySelector('[data-managed-draft-frame] iframe'),draft=document.querySelector('[data-lody-visual-comment-draft]');\n if(!receipt||receipt.dataset.available!=='true'||receipt.dataset.loading!=='false'||receipt.dataset.runtimeError!==''||!frame||frame.getAttribute('sandbox')!=='allow-scripts'||!frame.hasAttribute('credentialless')||!frame.srcdoc.includes('data-lody-visual-annotation-runtime'))return false;\n if(state==='frame')return !draft&&receipt.dataset.pending==='false'&&document.fonts.status==='loaded';\n if(state==='cancelled')return !draft&&receipt.dataset.pending==='false';\n if(!draft||!receipt.dataset.resolvedSelector.includes('synthetic-preview-target')||!draft.textContent.includes('button#synthetic-preview-target')||!draft.textContent.includes('Preview action'))return false;\n const r=draft.getBoundingClientRect(),textarea=draft.querySelector('textarea'),cancel=draft.querySelector('button[aria-label=Cancel]'),send=[...draft.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send');\n if(!textarea||!cancel||!send||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||cancel.disabled)return false;\n const c=getComputedStyle(cancel);if(c.width!=='24px'||c.height!=='24px'||c.flexShrink!=='0')return false;\n const marks=[...draft.querySelectorAll('[data-slot=spinner]')];\n if(state==='empty'&&(textarea.value!==''||!send.disabled||marks.length||receipt.dataset.pending!=='false'))return false;\n if(state==='filled'&&(textarea.value!==body||send.disabled||marks.length||receipt.dataset.pending!=='false'))return false;\n if(state==='pending'){\n  if(textarea.value!==body||!send.disabled||marks.length!==1||receipt.dataset.pending!=='true'||document.querySelector('[data-managed-draft-requested-body]')?.textContent!==body)return false;\n  const mark=marks[0],s=getComputedStyle(mark),mr=mark.getBoundingClientRect(),diameter=spacing*3.5;\n  if(s.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||s.width!==diameter+'px'||s.height!==diameter+'px'||s.flexShrink!=='0'||mark.firstElementChild?.tagName!=='svg'||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight)return false;\n }\n for(let p=draft;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0)return false;}\n return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));\n})(\"empty\",5,\"Please review this synthetic preview target.\")"
+          },
+          {
+            "action": "fill",
+            "selector": "[data-lody-visual-comment-draft] textarea",
+            "value": "Please review this synthetic preview target."
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Send"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => (function draftReady(state,spacing,body){\n const receipt=document.querySelector('[data-managed-draft-status]'),frame=document.querySelector('[data-managed-draft-frame] iframe'),draft=document.querySelector('[data-lody-visual-comment-draft]');\n if(!receipt||receipt.dataset.available!=='true'||receipt.dataset.loading!=='false'||receipt.dataset.runtimeError!==''||!frame||frame.getAttribute('sandbox')!=='allow-scripts'||!frame.hasAttribute('credentialless')||!frame.srcdoc.includes('data-lody-visual-annotation-runtime'))return false;\n if(state==='frame')return !draft&&receipt.dataset.pending==='false'&&document.fonts.status==='loaded';\n if(state==='cancelled')return !draft&&receipt.dataset.pending==='false';\n if(!draft||!receipt.dataset.resolvedSelector.includes('synthetic-preview-target')||!draft.textContent.includes('button#synthetic-preview-target')||!draft.textContent.includes('Preview action'))return false;\n const r=draft.getBoundingClientRect(),textarea=draft.querySelector('textarea'),cancel=draft.querySelector('button[aria-label=Cancel]'),send=[...draft.querySelectorAll('button')].find(b=>b.textContent.trim()==='Send');\n if(!textarea||!cancel||!send||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||cancel.disabled)return false;\n const c=getComputedStyle(cancel);if(c.width!=='24px'||c.height!=='24px'||c.flexShrink!=='0')return false;\n const marks=[...draft.querySelectorAll('[data-slot=spinner]')];\n if(state==='empty'&&(textarea.value!==''||!send.disabled||marks.length||receipt.dataset.pending!=='false'))return false;\n if(state==='filled'&&(textarea.value!==body||send.disabled||marks.length||receipt.dataset.pending!=='false'))return false;\n if(state==='pending'){\n  if(textarea.value!==body||!send.disabled||marks.length!==1||receipt.dataset.pending!=='true'||document.querySelector('[data-managed-draft-requested-body]')?.textContent!==body)return false;\n  const mark=marks[0],s=getComputedStyle(mark),mr=mark.getBoundingClientRect(),diameter=spacing*3.5;\n  if(s.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||s.width!==diameter+'px'||s.height!==diameter+'px'||s.flexShrink!=='0'||mark.firstElementChild?.tagName!=='svg'||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight)return false;\n }\n for(let p=draft;p;p=p.parentElement){const s=getComputedStyle(p);if(s.display==='none'||s.visibility==='hidden'||Number(s.opacity)===0)return false;}\n return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));\n})(\"pending\",5,\"Please review this synthetic preview target.\")"
+          }
+        ]
+      }
+    ]
+  }
+}

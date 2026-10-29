@@ -1,0 +1,153 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone SE",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "chat-migration--connection-states",
+    "chat-migration--connection-large-type",
+    "chat-migration--connection-controls",
+    "mobile-mobileinlinepicker--loading",
+    "mobile-mobileprojectscreen--ios-git-hub",
+    "mobile-mobileprojectscreen--ios-local",
+    "mobile-ownedmobileprojectsettingsmigration--loading",
+    "mobile-ownedmobileprojectsettingsmigration--pending",
+    "mobile-ownedmobileaccountsettingsmigration--loading-keys"
+  ],
+  "ready": {
+    "chat-migration--connection-states": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const marks=[...document.querySelectorAll(\"[role=status] [data-slot=spinner]\")];return marks.length===3&&marks.every(mark=>{let node=mark;while(node&&node!==document.body){if(getComputedStyle(node).opacity!=='1')return false;node=node.parentElement;}const r=mark.getBoundingClientRect();return Math.abs(r.width-14)<0.01&&Math.abs(r.height-14)<0.01&&r.top>=0&&r.bottom<=innerHeight&&(marks.indexOf(mark)===1?r.right<=0:r.right>0&&r.left<innerWidth);}); }"
+      }
+    ],
+    "chat-migration--connection-large-type": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const marks=[...document.querySelectorAll(\"[role=status] [data-slot=spinner]\")];return marks.length===3&&marks.every(mark=>{let node=mark;while(node&&node!==document.body){if(getComputedStyle(node).opacity!=='1')return false;node=node.parentElement;}const r=mark.getBoundingClientRect();return Math.abs(r.width-14)<0.01&&Math.abs(r.height-14)<0.01&&r.top>=0&&r.bottom<=innerHeight&&(marks.indexOf(mark)===1?r.right<=0:r.right>0&&r.left<innerWidth);}); }"
+      }
+    ],
+    "chat-migration--connection-controls": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Reconnect"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const marks=[...document.querySelectorAll(\"[role=status] [data-slot=spinner]\")];return marks.length===1&&marks.every(mark=>{let node=mark;while(node&&node!==document.body){if(getComputedStyle(node).opacity!=='1')return false;node=node.parentElement;}const r=mark.getBoundingClientRect();return Math.abs(r.width-14)<0.01&&Math.abs(r.height-14)<0.01&&r.top>=0&&r.bottom<=innerHeight&&r.right>0&&r.left<innerWidth;}); }"
+      }
+    ],
+    "mobile-mobileinlinepicker--loading": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const marks=[...document.querySelectorAll(\"button[aria-label=Branch] [data-slot=spinner], button[aria-label=Machine] [data-slot=spinner]\")];return marks.length===2&&marks.every(mark=>{let node=mark;while(node&&node!==document.body){const expected=node===mark?'0.7':node.matches('button')?'0.6':'1';if(getComputedStyle(node).opacity!==expected)return false;node=node.parentElement;}const r=mark.getBoundingClientRect();return Math.abs(r.width-14)<0.01&&Math.abs(r.height-14)<0.01&&r.top>=0&&r.bottom<=innerHeight&&r.right>0&&r.left<innerWidth;}); }"
+      },
+      {
+        "action": "disabled",
+        "role": "button",
+        "name": "Branch"
+      },
+      {
+        "action": "disabled",
+        "role": "button",
+        "name": "Machine"
+      }
+    ],
+    "mobile-mobileprojectscreen--ios-git-hub": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const marks=[...document.querySelectorAll(\"[data-slot=spinner]:has(svg[aria-label=running])\")];return marks.length===1&&marks.every(mark=>{let node=mark;while(node&&node!==document.body){if(getComputedStyle(node).opacity!=='1')return false;node=node.parentElement;}const r=mark.getBoundingClientRect();return Math.abs(r.width-16)<0.01&&Math.abs(r.height-16)<0.01&&r.top>=0&&r.bottom<=innerHeight&&r.right>0&&r.left<innerWidth;}); }"
+      }
+    ],
+    "mobile-mobileprojectscreen--ios-local": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const marks=[...document.querySelectorAll(\"[data-slot=spinner]:has(svg[aria-label=running])\")];return marks.length===1&&marks.every(mark=>{let node=mark;while(node&&node!==document.body){if(getComputedStyle(node).opacity!=='1')return false;node=node.parentElement;}const r=mark.getBoundingClientRect();return Math.abs(r.width-16)<0.01&&Math.abs(r.height-16)<0.01&&r.top>=0&&r.bottom<=innerHeight&&r.right>0&&r.left<innerWidth;}); }"
+      }
+    ],
+    "mobile-ownedmobileprojectsettingsmigration--loading": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const marks=[...document.querySelectorAll(\"[data-fixture-mode=loading] [data-slot=spinner]\")];return marks.length===1&&marks.every(mark=>{let node=mark;while(node&&node!==document.body){if(getComputedStyle(node).opacity!=='1')return false;node=node.parentElement;}const r=mark.getBoundingClientRect();return Math.abs(r.width-16)<0.01&&Math.abs(r.height-16)<0.01&&r.top>=0&&r.bottom<=innerHeight&&r.right>0&&r.left<innerWidth;}); }"
+      }
+    ],
+    "mobile-ownedmobileprojectsettingsmigration--pending": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const marks=[...document.querySelectorAll(\"[data-fixture-mode=pending] [data-slot=spinner]:has(+button[role=switch])\")];return marks.length===1&&marks.every(mark=>{let node=mark;while(node&&node!==document.body){if(getComputedStyle(node).opacity!=='1')return false;node=node.parentElement;}const r=mark.getBoundingClientRect();return Math.abs(r.width-14)<0.01&&Math.abs(r.height-14)<0.01&&r.top>=0&&r.bottom<=innerHeight&&r.right>0&&r.left<innerWidth;}); }"
+      }
+    ],
+    "mobile-ownedmobileaccountsettingsmigration--loading-keys": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const marks=[...document.querySelectorAll(\"[data-mobile-account-fixture] [data-slot=spinner]\")];return marks.length===1&&marks.every(mark=>{let node=mark;while(node&&node!==document.body){if(getComputedStyle(node).opacity!=='1')return false;node=node.parentElement;}const r=mark.getBoundingClientRect();return Math.abs(r.width-14)<0.01&&Math.abs(r.height-14)<0.01&&r.top>=0&&r.bottom<=innerHeight&&r.right>0&&r.left<innerWidth;}); }"
+      }
+    ]
+  },
+  "states": {
+    "chat-migration--connection-controls": [
+      {
+        "name": "refreshing",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle refresh"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const marks=[...document.querySelectorAll(\"[role=status] [data-slot=spinner]\")];return marks.length===1&&marks.every(mark=>{let node=mark;while(node&&node!==document.body){if(getComputedStyle(node).opacity!=='1')return false;node=node.parentElement;}const r=mark.getBoundingClientRect();return Math.abs(r.width-14)<0.01&&Math.abs(r.height-14)<0.01&&r.top>=0&&r.bottom<=innerHeight&&r.right>0&&r.left<innerWidth;}); }"
+          },
+          {
+            "action": "visible",
+            "text": "Refreshing"
+          }
+        ]
+      },
+      {
+        "name": "pull-hides-spinner",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle pull"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[role=status] [data-slot=spinner]')&&[...document.querySelectorAll('[role=status]')].some(n=>n.textContent==='Release to refresh'&&getComputedStyle(n).opacity==='1')"
+          }
+        ]
+      },
+      {
+        "name": "restore-refresh",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle pull"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const marks=[...document.querySelectorAll(\"[role=status] [data-slot=spinner]\")];return marks.length===1&&marks.every(mark=>{let node=mark;while(node&&node!==document.body){if(getComputedStyle(node).opacity!=='1')return false;node=node.parentElement;}const r=mark.getBoundingClientRect();return Math.abs(r.width-14)<0.01&&Math.abs(r.height-14)<0.01&&r.top>=0&&r.bottom<=innerHeight&&r.right>0&&r.left<innerWidth;}); }"
+          },
+          {
+            "action": "visible",
+            "text": "Refreshing"
+          }
+        ]
+      }
+    ]
+  }
+}

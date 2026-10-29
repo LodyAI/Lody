@@ -20,7 +20,11 @@ import {
 } from '@lody/shared';
 import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import type { ChatStreamItem, SessionChatStreamViewProps } from '@/components/ai-gui/view';
-import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
+import {
+  AssistantTurnFooter,
+  MessageRowView,
+  SessionChatStreamView,
+} from '@/components/ai-gui/view';
 import { runtimeAtom } from '@/atoms';
 import { CONVERSATION_CONTENT_WIDTH_CLASS } from '@/lib/conversation-layout';
 import { cn } from '@/lib/utils';
@@ -805,6 +809,34 @@ export const DesktopFinishedTurn: Story = {
       />
     </div>
   ),
+};
+
+const footerFixtureStyles = stylex.create({ frame: { padding: 24, minHeight: 300 } });
+
+function InteractiveFinishedFooter() {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <div
+      data-finished-footer-fixture
+      data-hovered={hovered}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+      {...stylex.props(footerFixtureStyles.frame)}
+    >
+      <AssistantTurnFooter
+        message={finishedTurn}
+        sessionId={sessionId}
+        showDuration
+        isTurnHovered={hovered}
+        isLatestTurn
+      />
+    </div>
+  );
+}
+
+export const InteractiveFinishedFooterActions: Story = {
+  args: { sessionId, items: finishedItems, renderMessageRow },
+  render: () => <InteractiveFinishedFooter />,
 };
 
 /**

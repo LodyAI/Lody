@@ -18,6 +18,9 @@ export interface ButtonProps extends Omit<BaseProps, 'className'> {
   tone?: ButtonTone;
   shape?: ButtonShape;
   icon?: boolean;
+  /** Numbers are px; strings are CSS dimension values. Omission keeps size and variant defaults. */
+  width?: string | number;
+  height?: string | number;
   className?: string;
 }
 
@@ -268,6 +271,11 @@ const sizeStyles = {
   large: styles.large,
 };
 
+const dyn = stylex.create({
+  width: (width: string | number) => ({ width }),
+  height: (height: string | number) => ({ height }),
+});
+
 const segmentStyles = {
   mini: styles.segmentMini,
   small: styles.segmentSmall,
@@ -292,6 +300,8 @@ export const Button = forwardRef<HTMLElement, ButtonProps>(function Button(
     tone = 'neutral',
     shape = 'default',
     icon = false,
+    width,
+    height,
     className,
     children,
     ...rest
@@ -309,7 +319,9 @@ export const Button = forwardRef<HTMLElement, ButtonProps>(function Button(
     tone === 'destructive' &&
       variant !== 'primary' &&
       variant !== 'destructive' &&
-      styles.destructiveTone
+      styles.destructiveTone,
+    width != null && dyn.width(width),
+    height != null && dyn.height(height)
   );
   const glyph = stylex.props(styles.glyph);
   return (

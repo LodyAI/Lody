@@ -1,0 +1,171 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1400
+    },
+    {
+      "name": "narrow",
+      "width": 390,
+      "height": 1800,
+      "device": "iPhone 13"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "migration-ownedmessagecontentspacing--plan-counts",
+    "migration-ownedmessagecontentspacing--tool-media",
+    "migration-ownedmessagecontentspacing--scoped-content",
+    "migration-ownedmessagecontentspacing--user-actions"
+  ],
+  "ready": {
+    "migration-ownedmessagecontentspacing--plan-counts": [
+      {
+        "action": "visible",
+        "selector": "[data-spacing-case=multiple]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const label=(r,t)=>[...r.querySelectorAll('div')].find(e=>e.textContent===t&&![...e.children].some(c=>c.tagName==='DIV'&&c.textContent===t));const css=e=>getComputedStyle(e);return ['empty','single','multiple'].every((n,i)=>{const r=document.querySelector('[data-spacing-case='+n+']');if(!r)return false;const h=label(r,'Plan');const b=h?.nextElementSibling;return h&&b&&b.children.length===[0,1,3][i]&&css(h).marginBlockStart==='0px'&&css(h).marginBlockEnd==='8px'&&[...b.children].every((e,j)=>css(e).marginBlockEnd===(j<b.children.length-1?'6px':'0px'));});}"
+      }
+    ],
+    "migration-ownedmessagecontentspacing--tool-media": [
+      {
+        "action": "visible",
+        "selector": "[data-spacing-case=media] button[aria-expanded]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-spacing-case=media] button[aria-expanded]')?.getAttribute('aria-expanded')==='false'&&!document.querySelector('[data-spacing-case=media] img')"
+      }
+    ],
+    "migration-ownedmessagecontentspacing--scoped-content": [
+      {
+        "action": "visible",
+        "selector": "[data-spacing-case=element] img"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const label=(r,t)=>[...r.querySelectorAll('div')].find(e=>e.textContent===t&&![...e.children].some(c=>c.tagName==='DIV'&&c.textContent===t));const css=e=>getComputedStyle(e);return ['outer','inner','element'].every((n,i)=>{const r=document.querySelector('[data-spacing-case='+n+']');if(!r)return false;const h=label(r,'Plan');const image=label(r,'Image');const b=h?.nextElementSibling;const first=b?.firstElementChild;const last=b?.lastElementChild;const img=r.querySelector('img');const gap=[12,6,10][i];const rgap=[9,4.5,7.5][i];return h&&image&&b?.children.length===2&&img?.complete&&img.naturalWidth===160&&[h,image].every(e=>css(e).marginBlockStart===(i===2?gap+'px':'0px')&&css(e).marginBlockEnd===(i===2?'0px':gap+'px')&&css(e).getPropertyValue('--tw-space-y-reverse').trim()===(i===2?'1':'0'))&&css(first).marginBlockStart===(i===2?rgap+'px':'0px')&&css(first).marginBlockEnd===(i===2?'0px':rgap+'px')&&css(last).marginBlockStart==='0px'&&css(last).marginBlockEnd==='0px';})&&document.querySelector('[data-element-writers]').dataset.writersReady==='true';}"
+      }
+    ],
+    "migration-ownedmessagecontentspacing--user-actions": [
+      {
+        "action": "visible",
+        "selector": "[data-user-spacing-state] [data-testid=user-message-metadata]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const e=document.querySelector('[data-user-spacing-state] [data-user-message-actions]');return e&&getComputedStyle(e).visibility===(innerWidth<500?'hidden':'visible')&&e.hasAttribute('data-mobile-actions-hidden')===(innerWidth<500);}"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedmessagecontentspacing--tool-media": [
+      {
+        "name": "expanded",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-spacing-case=media] button[aria-expanded]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-spacing-case=media] img"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const label=(r,t)=>[...r.querySelectorAll('div')].find(e=>e.textContent===t&&![...e.children].some(c=>c.tagName==='DIV'&&c.textContent===t));const css=e=>getComputedStyle(e);const r=document.querySelector('[data-spacing-case=media]');const img=r?.querySelector('img');const a=r?.querySelector('audio');return img?.complete&&img.naturalWidth===160&&a?.readyState>=1&&a.controls&&Number.isFinite(a.duration)&&r.querySelector('a')?.getAttribute('href')==='#synthetic-blob-download'&&['Image','Audio','Resource'].every(t=>{const e=label(r,t);return e&&css(e).marginBlockStart==='0px'&&css(e).marginBlockEnd==='8px';});}"
+          }
+        ]
+      },
+      {
+        "name": "collapsed-again",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-spacing-case=media] button[aria-expanded]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-spacing-case=media] button[aria-expanded]')?.getAttribute('aria-expanded')==='false'&&!document.querySelector('[data-spacing-case=media] img')"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmessagecontentspacing--user-actions": [
+      {
+        "name": "actions-revealed",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-user-spacing-state] [data-testid=user-message-metadata]"
+          },
+          {
+            "action": "hover",
+            "selector": "[data-user-spacing-state] [data-testid=user-message-metadata]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-user-spacing-state] button[aria-label=\"Edit message\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => getComputedStyle(document.querySelector('[data-user-spacing-state] [data-user-message-actions]')).visibility==='visible'"
+          }
+        ]
+      },
+      {
+        "name": "editing",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-user-spacing-state] button[aria-label=\"Edit message\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-user-spacing-state] textarea[aria-label=\"Edit message\"]"
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-user-spacing-state] [data-user-message-actions]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-user-spacing-state] textarea').value==='Synthetic message for the actual hidden actions and edit cancellation.'"
+          }
+        ]
+      },
+      {
+        "name": "cancelled",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Cancel",
+            "exact": true
+          },
+          {
+            "action": "hidden",
+            "selector": "[data-user-spacing-state] textarea"
+          },
+          {
+            "action": "hover",
+            "selector": "[data-user-spacing-state] [data-testid=user-message-metadata]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-user-spacing-state] button[aria-label=\"Edit message\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => getComputedStyle(document.querySelector('[data-user-spacing-state] [data-user-message-actions]')).visibility==='visible'"
+          }
+        ]
+      }
+    ]
+  }
+}

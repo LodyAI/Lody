@@ -236,7 +236,8 @@ export function PopoverActionChip({
           return button?.closest('[data-info-bar-surface]') ?? button;
         }}
         aria-label={label}
-        className={clsx(stylex.props(styles.anchoredPopover).className, 'p-0 shadow-xl')}
+        padding="none"
+        className={clsx(stylex.props(styles.anchoredPopover).className, 'shadow-xl')}
       >
         {typeof content === 'function' ? content(() => setOpen(false)) : content}
       </Popover.Content>
@@ -390,10 +391,9 @@ export function StageChip({
           align="start"
           sideOffset={8}
           aria-label={detail.ariaLabel}
-          className={clsx(
-            stylex.props(styles.stagePopover).className,
-            'max-w-[min(24rem,90vw)] p-0 shadow-xl'
-          )}
+          padding="none"
+          maxWidth="min(24rem, 90vw)"
+          className={clsx(stylex.props(styles.stagePopover).className, 'shadow-xl')}
         >
           {detail.content}
         </Popover.Content>

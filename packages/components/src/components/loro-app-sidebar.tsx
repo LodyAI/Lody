@@ -915,7 +915,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
   const menuRow = hasContextMenuActions ? (
     <ContextMenu.Root onOpenChange={setRowMenuOpen}>
       <ContextMenu.Trigger>{row}</ContextMenu.Trigger>
-      <ContextMenu.Content className="min-w-[180px]">
+      <ContextMenu.Content minWidth={180}>
         <SessionRowOpenedByMenuItems
           opener={openedByOpener}
           goToOpenerLabel={contextMenuLabels.goToOpenerSession}
@@ -1570,7 +1570,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
             ) : null}
           </Tooltip.Root>
           {showProjectMenu ? (
-            <ContextMenu.Content className="min-w-[180px]">
+            <ContextMenu.Content minWidth={180}>
               {onEditProject && projectCanNavigate ? (
                 <ContextMenu.Item
                   icon={Folders}

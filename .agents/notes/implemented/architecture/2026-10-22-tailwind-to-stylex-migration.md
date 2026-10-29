@@ -1018,74 +1018,657 @@ layouts pass with zero page errors or external requests. Actual
 Electron smoke at `2026-10-27T13:31:23.380Z` passes four views with after-only
 images; it supplies no paired application pixel claim.
 
+The skills-sheet continuation moves six Spinner size classes and one label clamp
+into local StyleX, and removes one redundant shrink class; eight utilities leave
+`mobile-project-skills-sheet.tsx`. AdaptiveTabStrip retains all 13 utilities:
+its public opaque StyleX callers must keep the original utilities-layer winners.
+The 72 primary pairs are PNG-byte-exact across 6,612 nodes, with no report-field
+changes or capture failures. Detail capture adds 18 executions, including six
+repeated resting states; assembly therefore has 84 distinct keys, not 90 unique
+states. Four detail frames retain 25 raw pixels, zero threshold pixels and equal
+layout; these differences remain OPEN in `leaves5-acceptance.html`. Eight separate
+runtime-variable/normal-motion pairs are byte-exact across 514 nodes and 804,683
+recorded CSS values. Types, 49 owning
+tests and formatting pass; scoped lint has six existing warnings and zero errors.
+This UI-only batch does not rerun root checks or close the earlier CLI Git-identity
+failure, historical OPEN evidence or the overall PARTIAL verdict.
+
+The filter/queue/mention continuation removes 29 utilities: FilterPillBar 6→0,
+MessageQueueRow 8→2 and MentionHighlighter 22→5. Filter retains the exact element-local
+scope predicate, `--color-white`, static alpha fallbacks and color-mix support branches;
+only hover-capable devices get the 14% dark hover fill. Queue uses an owned-row marker;
+mention mirrors preserve inline geometry and control APIs. Capture review found that
+string arrows were truthy values rather than executed readiness checks. The runner now
+invokes synchronous predicates; historical PNGs do not prove those function gates ran.
+A same-Before trace shows stable accordion geometry at opacity 0 before 1, so current
+captures wait for opacity and completed unmounting. Historical OPEN evidence stays intact.
+The repaired runner verifies 178 distinct formal pairs (182 executions, four duplicate
+rest states) byte-for-byte across 12,428 nodes. Six capture counterexamples and 63
+owning tests pass; 16 separate native pairs match across 1,276 nodes and 2,013,732
+computed values. `leaves6-acceptance.html` embeds the originals and diagnostic limits.
+
+The home/project/recurrence continuation removes 22 utilities: Home 24→13, Project
+16→7 and RecurrenceEditor 2→0, preserving local scopes, alpha fallbacks and input
+feedback. `leaves7-acceptance.html` retains 192 formal pairs: 180 PNGs are byte-exact;
+12 Home frames retain 50 threshold pixels and remain OPEN despite equal recorded
+layout/font fields. All 24 separate native pairs are PNG-byte-exact; types and 47
+owning tests pass, with story type repairs retaining identical emitted JavaScript.
+
+The editor/terminal/warning/merge batch removes nine utilities: Editor 5→2, Terminal
+2→0, view 127→125 and Merge 19→17; local variables and theme/focus predicates stay intact.
+All 178 formal PNG pairs are byte-exact; recorded fields across 4,090 nodes match. Of
+20 native pairs, 18 are byte-exact; two frames with an unfocused editor retain 90 raw / 15
+threshold pixels despite equal recorded fields and remain OPEN. Unchanged Before
+controls reproduce both the original light and dark After whole PNGs. A bounded
+16-image diagnostic has eight byte-exact stage-matched pairs and equal full CSS /
+geometry across the 11-node card subtree, including Send; separate same-page
+6/7-pixel changes also occur without active animations. This does not identify the
+original 36/54-pixel drawing trigger or close either OPEN record. Types and 70
+owning tests pass. `leaves8-acceptance.html` retains originals, controls and historical limits.
+
+The composer/fallback/sidebar continuation removes 21 utilities: Composer 83→81,
+LandingView 4→2 and the exported legacy Sidebar 324→307. Warning ink reads the exact
+element-local amber variables and dark/light-scope predicate; Sidebar preserves
+its local background/foreground inputs, breakpoint and private transition writers.
+Public caller/primitive overrides and group/peer states remain compatibility items.
+Real selector failure enters the production composer boundary; editing and explicit
+retry preserve the draft. Sidebar fixtures exercise its public adapter, not an active
+application consumer. Of 140 formal pairs across 4,332 nodes, 139 PNGs are byte-exact;
+one narrow palette frame retains two raw pixels, zero above the unchanged threshold,
+at the unmodified composer-card bottom-left border/shadow. Recorded fields match, but
+the drawing trigger remains OPEN. Four bounded controls reproduce the original
+Before whole PNG on both sources, with equal full CSS/pseudo/geometry across 56
+nodes; they do not reproduce the formal After variant. Playwright caret hiding
+leaves the same empty textarea style attributes on both sources without a computed
+change. Full native Sidebar observations also match; four separate normal-motion
+pairs pause the real 200ms linear gap/left transitions at 100/200ms and are
+PNG-byte-exact, with equal pre/post animation times. The four owning suites pass
+24 tests; component types, scoped lint and formatting pass. Root checks
+are not rerun. `leaves9-acceptance.html` keeps the original differing frame and
+historical OPEN evidence separate from the formal counts.
+
+The composer-surface/share-layout batch moves eight compiler-counted Composer
+utilities and 22 previously unresolved `LAYOUT` literal utilities. Composer keeps
+the exact dark 60%/70% border and 90% oklab fill, their full-HSL fallbacks and
+supports condition. The opaque mention cover separately keeps its sRGB input /
+background mix and input fallback on the actual painted wrapper. Complete drag
+colour states preserve the original dark resting fill/edge while adding the ring.
+Share layout retains fixed radii, title sizes and element-local spacing; its five
+ring/shadow compatibility classes remain. Shared tokens, exported composer surface
+strings, DOM and events are unchanged.
+
+`leaves10-acceptance.html` has 124 formal pairs across 7,796 nodes, with equal
+recorded fields and no missing/failed captures; 122 PNGs are byte-exact. Two original
+Composer frames remain OPEN: 123 raw pixels on unchanged fixture buttons and 531 raw
+pixels, including two threshold pixels on the migrated card corner and 529 raw
+fixture-button pixels. The separate native 12 pairs have 11 byte-exact PNGs and
+742 matching nodes, including 712,320 ordinary and 1,424,640 pseudo CSS values across
+pre/post observations. Its repeated 531-pixel exception is the same original state,
+not another distinct failure. One unchanged Before control reproduces its complete
+After PNG, but does not prove the exact drawing trigger. Actual 150ms session colour
+transitions paused at 75/150ms are byte-exact. Fixture controls dispatch browser
+Files events to production handlers; these are not OS drag or upload-service tests.
+Types and 20 owning tests pass; scoped lint and formatting pass. Root checks are
+not rerun.
+
+Pixel equality also exposed a pre-existing acceptance gap: the share card's seven
+product-colour aliases resolve at the app root, so its background/title/metadata can
+follow the app instead of the selected card palette. The 32 byte-exact layout pairs
+preserve that regression; they do not certify palette isolation. The separate repair below uses complete local themes and a pre-migration source
+reference.
+Composer's local light mention cover can likewise differ from the inherited frame
+alias in Before; this batch preserves that state. The no-chip dialog still uses
+MentionInput and does not establish the plain-textarea branch. Historical OPEN
+records and original screenshots remain unchanged.
+
+The share-card repair binds complete `scopedThemeColors` and `scopedThemeSpace`
+groups beside the existing product/conversation palette on the card scope. Each
+group shares its unchanged canonical defaults with `defineVars`; the local themes
+re-evaluate those aliases against the card's actual colour and spacing variables.
+The caption also restores the original four-sided border-colour fallback and
+supports-qualified 70% oklab mix. This repairs palette, logo-size and spacing leakage
+without substituting seven per-element colours or changing the global defaults.
+
+Of the 72 formal `leaves11-12-acceptance.html` pairs, 32 compare the final card
+with its real pre-migration Tailwind source at `b84e18308^`: all PNGs are byte-exact
+across 1,672 recorded nodes. Native reference checks also match 384 role nodes, 11,136 CSS fields
+and 2,304 variable values; 252 semantic checks pass and the document root stays
+unchanged. Comparing the buggy immediate Before instead yields 26 intentionally
+changed frames and six identical frames. These are repair witnesses, not failed
+migration-equivalence pairs. Eight separate unchanged-consumer controls match all
+348 recorded nodes, but only seven PNGs are byte-exact; the remaining scoped-palette
+frame has two raw pixels, zero threshold pixels and an unproved raster cause, so it
+stays OPEN. Earlier rejected palette/spacing/border candidates
+and historical differences remain separate evidence.
+
+The Spinner continuation adds a primitive-owned `diameter` prop rather than
+competing caller StyleX width classes. Numbers are pixels; CSS lengths can read
+local spacing. Explicit zero applies, omission restores the named size, and SVG
+width/height attributes still address the glyph. Two real consumers, the saving
+message editor and busy merge control, remove four size utilities. The combined
+report's 40 Spinner formal pairs are PNG-byte-exact across 1,116 recorded nodes.
+Another 12 native pairs are byte-exact across 176 nodes, with 168,960 ordinary and
+337,920 pseudo CSS values matching before/after screenshots. They pause the actual
+900ms rotation at 400ms at DPR 1/2, verify 3/6px spacing scopes and preserve the same
+SVG, wrapper and animation object through 16→0→named 24→14 updates. The 34 new inline
+variable/empty-style records remain explicit, not labelled raw-DOM equality. Browser
+identity checks use the actual SVG; forwarded-ref callbacks remain behavior-test
+coverage. UI owning tests pass 38 cases, caller tests pass 31, and both package typechecks
+pass. Root checks are not rerun; these matrices do not close historical OPEN records.
+The combined HTML keeps unchanged full PNG payloads by SHA behind labelled bounded
+previews. Separate payload decoding and two uninterrupted installed-Chrome UI
+cycles pass. A CLI controller reset/stall and a pre-settle UI paint variation
+remain diagnostic evidence; their exact causes are unproved, with no OOM claim.
+
+The next Spinner caller batch removes 48 counted width/height utilities across
+17 production files in authentication, mobile controls and miscellaneous loading
+surfaces. Each caller uses the primitive-owned `diameter` expression against its
+actual local spacing; margins, shrink, colour and interaction classes retain their
+existing ownership. The 132 formal pairs are PNG-byte-exact across 6,848 recorded
+nodes: authentication 40/2,692, mobile 48/2,964 and miscellaneous 44/1,192. The
+42 owning tests, component types and scoped lint pass (227 warnings, zero errors).
+The long reconnect story's eight clipped marks remain recorded as a fixture limit;
+they are not visible-state coverage. A separate ActualControlsReconnect fixture
+mounts the production third branch visibly. No account or authentication service
+is exercised by the synthetic pending callbacks.
+
+The password/account continuation removes another 20 Spinner size utilities in
+three production files. Password pending states match all 16 formal PNG pairs
+and 576 recorded nodes; account states match all 44 pairs and 4,660 nodes. Eight
+separate account closing pairs retain actual paused WAAPI animation state and
+pending marks; two deletion pairs mount the actual production branch through a
+synthetic Capacitor iOS identity. All ten supplemental pairs are PNG-byte-exact,
+but identity emulation is not physical iOS, WebKit or native-shell acceptance.
+The two account owning tests and component types pass.
+
+The Monaco wrapper moves two owned size utilities to local StyleX. Its eight
+accepted pairs match PNG bytes and all 2,342 recorded nodes only after the gate
+observes the actual positive-size main scrollbar: real editor hover makes it
+visible, outside-anchor hover hides it, and the hidden class/opacity/no-running-
+transition state stays stable for four fresh polls. The original 280 changed
+pixels are exactly the scrollbar slider's measured colour composition, with zero
+residual in the physical-pixel overlay proof. Original and settled differences
+remain visible diagnostics; the rejected SHOW gate's zero captures and four
+failures per side remain retained. That gate incorrectly included zero-size
+hover-widget bars. No product CSS changed to satisfy readiness. The editor fixture
+uses a light editor under both app themes, so it does not cover dark editor syntax.
+
+`leaves13-14-acceptance.html` combines 200 PNG-byte-exact formal pairs and 14,426
+recorded nodes across 20 unique production files, removing 70 counted utilities.
+Its 40 supplemental pairs comprise 27 original historical OPEN pairs, ten account
+motion/platform-identity pairs, two earlier Monaco changed pairs and one rejected-
+gate error pair. These diagnostics remain separate from formal results. Historical
+OPEN images retain their source hashes and dimensions; matching new batches do
+not close them. The offline HTML uses bounded labelled previews while preserving
+unaltered full-resolution originals for inspection.
+
+The Popover continuation adds finite `padding`/`gap` choices (`default` or
+`none`) on the actual Popup after its panel StyleX rules. Positioner ref, style,
+events and positioning contracts stay on that outer node. Five production caller
+files migrate eight zero-padding/gap utilities across seven popup nodes, retaining
+widths, shadow, overflow and nonzero padding. `leaves15-acceptance.html` matches all
+68 formal PNG pairs and 4,416 recorded nodes: primitive 40/1,272 and actual consumers
+28/3,144. Defaults, zero choices, same-node reset, contained/forced themes and real
+content controls have browser coverage. Four separate After-only Gallery frames
+verify actual layout readouts; its 36 SSR styleq warnings are present in both
+source baselines and remain unfixed. UI/gallery tests pass 28 cases, caller tests
+pass 60, package types pass and typed lint reports 299 warnings/zero errors;
+all nine changed files pass formatting checks.
+
+The consumer theme limit is explicit: five stories honour both requested themes;
+sender profile always renders light and desktop turn configuration always dark.
+Initial sender-profile readiness failed four captures because the story's play
+state left it closed; the accepted profile presses Escape and clicks the actual
+avatar. That rejected evidence remains separate. Fourteen actual palette/padding/
+gap observations match across sides. The independent diagnostic did not finish
+cleanup after its final observation and was interrupted; that cause is unproved,
+with no browser-cleanup or OOM claim. The complete formal captures succeeded.
+The report preserves 27 original historical OPEN pairs and their exact images.
+
+The next Spinner/Popover batch removes 24 counted utilities: 18 Spinner dimensions
+and six Popup dimensions across ten distinct production caller files, plus the
+shared Popover API. `width`, `minWidth`, `maxWidth` and `maxHeight` apply to the
+actual Popup through guarded StyleX dynamic values: zero applies and omission
+restores defaults; positioner style/ref/events retain their ownership. Ten
+redundant static StyleX spreads introduced by the earlier `b84e183084` migration
+are removed while retaining their identical explicit composed class names; the
+owning build no longer emits those duplicate-attribute warnings.
+
+`leaves16-17-acceptance.html` contains 144 formal pairs and 9,348 matching recorded
+nodes: History 48/2,776, Session Spinner 36/2,584, Popup API 32/844 and consumers
+28/3,144. Of these, 143 PNGs are byte-exact. One forced-dark consumer frame retains
+five raw pixels, zero threshold pixels, at the unmodified top tab edge. A bounded
+probe matches all 157,920 ordinary and 315,840 pseudo CSS fields across 329 actual
+descendants; the union of 1,016,441 variable fields differs only by the intended
+Popup width variable. One unchanged-source Before control reproduces After exactly.
+These observations narrow the difference without proving its precise raster
+trigger, so the original stays OPEN. The 27 earlier original OPEN pairs remain
+separate, alongside rejected readiness frames and After-only Gallery evidence.
+
+Rejected gates remain explicit: resolve confirmation closes the parent history
+Drawer before its pending callback completes, requiring the real reopen control;
+unknown-sharing contains two actual Spinners; `.25rem` is not `.25px`; and a block's
+authored auto min-width resolves to 0px. Corrected readiness preserves these product
+behaviours. Header and side-panel narrow stories retain their fixed minimum widths,
+so they do not establish complete product responsiveness; the identity card uses a
+synthetic callback rather than a backend integration. UI types and 28 UI/Gallery
+tests pass; main owning tests pass 49 cases and final typed lint reports 276 warnings,
+zero errors. Separate Session owning validation passes 121 cases and History six;
+these scopes are not added as a unique-test total. The retained Gallery SSR warning
+count is unchanged, and root checks are not rerun.
+
+The project/About/Menu continuation removes 21 counted utilities in six caller
+files: 12 Spinner dimensions and nine menu bounds. Menu adds actual-Popup
+`minWidth`/`maxWidth`/`maxHeight` with pixel numbers, CSS strings, explicit zero and
+omission reset, preserving the named regular/compact width and positioner
+ref/style/events. Six actual menu nodes are covered; the Header Opened sessions
+submenu's three bounds remain until it has a production-component fixture.
+
+`leaves18-19-acceptance.html` retains 164 formal pairs/11,688 matching recorded
+nodes: Project 56/3,032, About 32/3,024, Menu API 44/1,432 and consumers 32/4,200.
+Of these, 162 PNGs are byte-exact. Two forced-dark Owner narrow captures share the
+same four raw pixels, zero threshold pixels, on the highlighted parent Change
+owner row. A 281-descendant probe matches 134,880 ordinary and 269,760 pseudo CSS
+fields; 869,974 variable fields differ only by five expected bounds variables.
+One unchanged-source Before control reproduces After exactly, but the raster
+trigger remains unproved and both original frames stay OPEN. The prior 28 original
+OPEN captures, including the earlier five-pixel tab frame, remain separate.
+
+Fork focus feedback originally covered other submenu rows with a tooltip; the
+accepted profile focuses the real last row for full visibility and retains the
+original tooltip frame. An initial wrong story ID selected only 20 frames; the
+complete accepted selection has 32. About's original 0/24 unsupported native-theme
+subscription failures remain: only the synthetic bridge was corrected before
+rebuilding its Before. About updater IPC and project CloudApi are synthetic,
+with no real updater installation, backend, worktree RPC or GitHub authorization
+claim; the original narrow Community-row crowding remains. Two Gallery and four
+actual OSS Electron smoke pages are separate After-only evidence. The current UI
+build passes with existing CLI artifacts; isolated smoke cleanup completes.
+UI 53 and main owning 34 tests, package types and seven-file lint (164 warnings,
+zero errors) pass. Separate About 23/Project 16 test scopes are not added as a
+unique total. Root checks are not rerun.
+
+The Integrations/Ceremony batch removes 11 counted utilities in two production
+files: six Spinner dimensions through `diameter`, and the Ceremony root's five
+fixed/inset/z-index/overflow/slate-ink declarations through local StyleX. The
+explicit `VITE_LODY_PLATFORM=cloud` Storybook build supplies synthetic public
+Auth/org/CloudApi data; OSS composition and real auth/network behavior are unchanged.
+The actual onboarding route owns light theme, so a dark host is stress coverage,
+retaining the original low contrast.
+
+`leaves20-acceptance.html` records 96 formal pairs/4,344 matching nodes: Integrations
+56/3,392 and Ceremony 40/952. Only 94 PNG pairs are byte-exact. Two narrow-dark
+Ceremony captures share the same differing image pair, each with 379 raw and 42
+threshold pixels; their exact paint trigger remains OPEN. A bounded 17-node probe
+matches 77,232 CSS/variable/double-pseudo records per snapshot, geometry, hit stacks,
+ink and animation state, with stable pre/post observations. The image bytes match,
+and the sole unchanged-source control reproduces original Before, not After.
+These observations do not establish visual equality. Thirty earlier original OPEN
+pairs remain separate; no CSS patch or antialiasing assumption closes them.
+
+The Ceremony fixture pauses the film with reduced motion and excludes audio;
+actual Skip/Configure controls and the 480ms completion callback are observed, not
+the full normal-motion timeline. Integrations' original 40 captures/16 failed
+resolved gates remain: English Manage was mistaken for Connect, corrected only in
+the profile. Integrations' 11 cache tests/types and Ceremony's two theme-lifecycle
+tests/types/zero-warning scoped lint pass. All formal captures retain the original
+harness hash and source copy; a later optional click-button argument does not
+retroactively change their provenance. Root checks are not rerun.
+
+The ContextMenu continuation adds actual-Popup `minWidth`/`maxWidth`/`maxHeight`
+with guarded pixel/CSS values, zero and omission reset, retaining positioner
+ref/style/events. Six private row menus remove six minimum-width utilities.
+All 56 real right-click pairs are PNG-byte-exact across 10,212 recorded nodes:
+32 primitive/1,040 nodes and 24 consumer/9,172 nodes. Two Gallery images separately
+verify light and Vesper bounds after opening by actual mouse right-click; they
+are After-only. UI 54 and owning 34 tests, package types and eight-file typed lint
+(170 warnings, zero errors) pass. The capture harness changes only optional
+`click.button`, defaulting to left; its derivative hash identifies these captures
+without rewriting the earlier preserved harness. Historical OPEN remains.
+
+The Button continuation adds owned `width`/`height` after named size and variant,
+with numeric pixels, element-local CSS expressions, zero and omission reset.
+It removes 38 utilities: 30 across ten mobile/leaf/auth files, plus eight across
+three private files. The latter represent five JSX sites but four actual Button
+nodes: one Header trigger, Reply card/dialog and Plan Copy. Search four,
+Finished Copy two, unmounted Login four and opaque public callers stay unchanged.
+
+`leaves21-22-acceptance.html` combines 228 PNG-byte-exact formal pairs and 18,056
+matching recorded nodes: ContextMenu 56, Button API 40, mobile/leaf/auth 100 and
+private callers 32. Four real held-mouse active pairs separately match full CSS,
+double pseudos, focus, geometry and animations under reduced motion; 16 new
+private dimension-variable records and eight root class/style differences are
+intentional. This is not normal-motion timeline coverage. Thirty-two historical
+original OPEN pairs remain separate and unresolved.
+
+The private Before is an audited 32-frame subset of original successful images,
+not a recapture. The initial 52-frame plan's eight failed gates and deferred six
+utilities remain: Search needed a searchbox gate, while Footer's original story
+never made the hovered control visible. Earlier syntax/portal/ancestor gate
+failures and local navigation failures are retained; profile corrections and
+unchanged-source fresh-browser retries establish the accepted matrices without
+claiming an OS/browser cause. Gallery is After-only; the readout-touching first
+Button candidate remains rejected, separate from its Sample-column correction.
+Full component regression passes 620 files/6,207 tests and UI 25 files/302 tests;
+package types and scoped owning checks pass. Root checks are not rerun.
+
+The next two caller batches remove 32 more counted utilities through the existing
+Menu/ContextMenu and Button APIs, without adding a primitive API. Six remaining
+context-menu bounds and the now-visible Opened/Search/finished-footer controls
+account for 15; message actions and Mermaid/MobileAdd/UsageClose/Loro recovery
+account for 17. Mermaid's four controls move together: reset keeps automatic
+width above its existing minimum, while all heights read element-local spacing.
+Loro square defaults belong to a module-private helper; its four-caller verification
+and migration are recorded below. Opaque public compatibility boundaries remain.
+
+`leaves23-24-acceptance.html` records **176/176 byte-exact PNG pairs** and
+**19,996 paired node records: 19,993 identical, three different**. Only 173 frames
+have fully identical raw records. The three original differences are an empty,
+`visibility: hidden` xterm helper's height, 0↔300; all other fields match. Forty-eight
+bounded observations reproduce both heights in both builds with unchanged visible
+viewport/scroll range; four additional genuine image pairs match. Original raw
+records remain unchanged. Thirty-two historical original OPEN pairs remain open.
+
+Eight separate Chromium-touch/clipboard-feedback pairs match, with 292 nodes and
+1,371,394 CSS records, while 40 private dimension-variable and 24 root attribute
+changes remain explicit. The receiver is synthetic, not the OS clipboard; the
+controlled 1199/1200ms boundary is reduced-motion evidence. Mermaid uses a real SVG
+clone as production Viewer input, not parser/native-gesture acceptance. Existing
+narrow Usage clipping and sidebar-story crowding are preserved. Rejected selector,
+loading and navigation candidates remain separate from accepted phases; the
+unfrozen initial batch23 profile has reconstructed semantics, not claimed original
+bytes. The batch24 accepted capture bytes and formatted profile are hash-traced
+and semantically equal. Package types and scoped 53/39/68-test checks pass;
+scopes overlap and the 68 comprises three green suites plus a Mermaid rerun after
+removing two obsolete Tailwind class assertions. Root checks are not rerun.
+
+The primitive-invariant/private-Fork batch removes another 18 occurrences in ten
+product files. Sixteen duplicate declarations already owned by the primitive;
+two are defaults in a module-private Fork helper with exactly two internal
+callers. The latter uses the existing Button dimension API while retaining caller
+overrides, rather than adding a generic style escape.
+
+`leaves25-acceptance.html` independently records **72 byte-exact PNG pairs and
+4,222 identical paired node records**: invariants 40/2,658 and private Fork
+32/1,564. The separate **44-root/68,837-value computed proof supplies no extra
+PNG pairs**. Computed values, geometry, raw style, disabled/text and matched
+primitive declarations agree; raw classes retain only the expected 16 removals.
+Four owning suites/62 tests pass. This does not claim full CSS coverage of the
+private Fork helper or a fresh Electron/Gallery capture.
+
+The helper's original 23 successes/nine failures remain: eight used the wrong
+legacy Spinner selector and one timed out before Storybook readiness. Both early
+computed attempts also remain, including a timeout after 22 records; their exact
+browser cause is unproved. Accepted phases use explicit readiness and unchanged
+product builds without CSS/timer patches. Thirty-two historical OPEN pairs and
+earlier frozen reports remain unresolved and unchanged. Root checks are not rerun.
+
+The following invariant/private-footer batch removes 14 counted utilities in eight
+product files: ten duplicate Spinner declarations, two Loro dimensions and the
+message row's native hidden-actions/Avatar defaults. Loro's `IconButton` is
+module-private with exactly four internal callers; the earlier public-helper
+classification was incorrect. Public `SidebarChatRow` compatibility stays intact.
+
+Five private content-spacing utilities remain at `ai-gui/view.tsx:8495`, `:8500`,
+`:9325`, `:9341` and `:9390`. The rejected candidate emitted the exact logical
+margins, but the complete build grouped reverse writers with priority-zero root
+variables and output them without a layer. A real child utilities-layer writer
+then lost: leading 12/9px became trailing 12/9px. A standalone writer-only compile
+probe had omitted that group and was misleading. A local layer condition nests
+under the automatic StyleX layer and does not reproduce the original root layer.
+The five utilities were restored; the original browser probe's fields and PNG
+match again. Evaluate the shared grouping/layer behavior separately with broad
+consumer regressions; no upstream defect acknowledgement is claimed.
+
+`leaves26-acceptance.html` records **136 formal pairs, with 134 byte-exact PNG pairs and
+9,782 identical paired node records**. Spinner contributes 48/3,042, message
+controls 40/2,616 and Loro 48/4,124; unchanged spacing controls remain in that
+matrix. Four separate normal-motion pairs pause the actual CSS animation at
+400ms: 6,270 Spinner and 150,288 Button/pseudo values agree. A bounded Owner-menu
+repeat matches PNGs and 1,471,622 rendered values across 162 nodes/two stages;
+it does not replace its original formal frame.
+
+Two formal pairs remain OPEN: native audio controls (987 raw/567 threshold pixels)
+and Owner transfer pending (24/four). Thirty-two historical OPEN pairs and seven
+additional original diagnostics also remain: Project avatar one, normal-motion
+four and rejected spacing-candidate audio two. Later asset/transition readiness
+and identical repeats cannot establish their original paint triggers. The report
+keeps originals and raw-difference masks rather than treating a zero threshold
+count as a pass. Chromium phone emulation and synthetic product props/callbacks
+do not establish native devices, playback/backend flows or unvisited routes.
+
+The exact `d951` Before-view bytes were reconstructed from the preserved `c618`
+batch25 Before plus its three known changes and hash-matched to the independently
+recorded Before26 fingerprint; they are not an original capture-time source backup.
+Rejected gate/fixture phases and the failed asset deadline remain separate from
+accepted source phases. Existing owning checks pass in their respective scopes:
+view six suites/58 tests, Loro two/26 and Spinner four/28, with package types and
+scoped formatting/lint (224/19/220 warnings, zero errors). These overlapping
+scopes are not summed as unique coverage; no new root check or Electron/Gallery
+run is claimed.
+
+The next Sidebar/ManagedPreview/private-Card batches remove 16 utilities in three
+product files. Sidebar removes three ordinary internal defaults; a proposed ten
+was narrowed after real DOM prototypes changed outer ancestor and public caller
+winners. Its other seven gap/border/radius utilities and separately excluded
+floating shadow remain. ManagedPreview uses the existing Spinner diameter API and
+removes redundant Cancel shrink. Private `CollapsibleCard` has exactly three
+internal callers; explicit `containerStyles`/`bodyStyles` compose with base styles
+in one StyleX props call. Worktree retains its inherited bottom-spacing alias;
+Tool padding and activity radius keep element-local variables. Space-y writers,
+search ring/shadow compatibility and public primitive APIs stay unchanged.
+
+`leaves27-28-acceptance.html` records **192/192 byte-exact formal PNG pairs and
+9,684 identical paired node records**: Sidebar104/6,736, Managed32/904 and
+Card56/2,044. Twenty separate actual Sidebar-caller pairs have 18 exact PNGs and
+two OPEN originals (2/93 raw pixels, zero above summed RGB12); all selected
+180-node CSS/pseudo/variable records agree. Three earlier narrow-prototype raw
+pairs remain OPEN (5/2/2 pixels); new green product captures cannot close them.
+Four independent Managed normal-motion pairs match at actual animation400ms,
+including 3,840 ordinary CSS values. Prototype counterexamples, wrong-device
+Before12 gate failures, Managed Cancel/raw-spacing assumptions and the initial
+Card matched-rule-reader omission remain documented separately.
+
+Managed captures use the real credentialless sandbox iframe and production
+inspector resolution, a genuine target click, draft cancel/reopen and a held
+synthetic public writer. They do not prove runtime/backend/native-device flows.
+Card Worktree acceptance stops at the actual terminal step header, not its
+unmounted output. The real direct ThoughtCard/search caller does not complete
+assistant builtin/DeepSeek SessionMeta search integration. Sidebar's nine tests
+are two adjacent primitive/focus suites, not a nonexistent direct Sidebar suite;
+Managed15 and Card82 owning tests, package types and scoped format/lint pass
+(3/5/224 warnings, zero errors), without a unique summed coverage claim.
+
+The frozen batch26 report retains its 32 historical, two formal and seven
+diagnostic original OPEN pairs. That 41-pair compact index is not an exhaustive
+project inventory: earlier main/leaves4 and other reports remain unresolved and
+unchanged. This batch adds five supplemental originals, no new formal OPEN,
+and no fresh Electron/Gallery or root-check claim.
+
+The message-action/Billing continuation removes another 25 utilities: three colors
+at seven fixed ghost Button sites and two dimensions at each of two Billing
+Spinners. The existing Button implementation/defaults stay unchanged; its token
+module gains a standard package export. Complete local themes explicitly inherit
+50 non-target Button/semantic tokens. This scope contains only fixed Lucide glyphs
+or the legacy Spinner wrapper, not arbitrary children. A partial Button theme was
+rejected because it reset inherited gap and focus-ring tokens; the proposed new
+three-color-role API remained research. Fine/coarse hover winners and element-local
+legacy variables are preserved through the reviewed existing token groups.
+
+`leaves29-30-acceptance.html` records **168/168 byte-exact formal PNG pairs and
+17,216 identical paired node records**: message actions 120/13,208 and Billing
+48/4,008. The action matrix retains 112 original pairs and eight stronger-state-ready
+pairs. Its original 119-raw/113-threshold Copy/Check mismatch stays visible: the
+pending-Fork gate omitted a sibling copy-feedback reset. No product timer/CSS was
+changed. Eight separate native default/scoped pairs match ordinary CSS, pseudo
+maps and glyph descendants; all 50 non-target tokens retain 46,800 recorded values.
+The three retargeted inputs intentionally differ in 1,092 raw token values.
+
+Four same-element original-token inline stress pairs each differ by 673 raw and
+672 threshold pixels. Before physical Tailwind colors dominate those primitive
+inputs; After the new local theme permits stronger inline inputs to affect ink.
+This is real CSS non-equivalence. Current seven source sites expose no such
+style/token/child props and the two private Fork callers pass only opacity/margin
+classes; supported ancestor themes remain distinct and verified. Do not promote
+this theme to arbitrary Button consumers or descendants reading `colors.label`.
+The negative controls and single-panel compiler/DOM-clone research are separate
+from accepted product screenshot pairs.
+
+Billing uses actual component preview, Cancel/reopen and held confirmation paths
+with synthetic public providers, not real Stripe/auth/backend E2E. Four accepted
+normal-motion pairs agree at actual animation 400ms, including 3,840 ordinary CSS
+values and explicit dialog/ancestor paint state. Four earlier byte-equal but
+near-transparent dialog pairs were rejected; exact original opacity was not
+logged. Initial accessible-name gates and native runner/cleanup failures remain
+separate. Earlier 27–28 five supplemental OPEN pairs and batch26's non-exhaustive
+41-pair compact index remain unchanged, alongside all earlier reports.
+
+Owning checks pass for message actions three suites/39 tests and Billing two/30,
+with scoped types/lint (224/36 warnings, zero errors). Full components pass 620
+files/6,207 tests, but view changed from pre29 to the candidate during that run;
+this is explicitly mixed-source, not frozen-final29 coverage. UI 25 files/302 tests
+pass on unchanged recorded UI source. The submission audit's root `pnpm check`
+fails in ACP adapter preparation on 32 unresolved SDK export paths; subsequent
+stages did not run and no unrelated ACP work was attempted. Root `format:check`
+passes but omits components/UI; a separate read-only check of 313 changed files
+finds 20 visual JSON profiles needing formatting, without product-source failures.
+Profiles remain frozen for evidence. Offline lockfile-only verification in a
+47-file manifest/patch tree leaves the lock hash unchanged; no dependency change
+is required for the export. All 315 precheck dirty-file hashes remain unchanged.
+
+The panel/iframe/search continuation removes 26 actual utilities: 15 panel
+header/rule/title/body occurrences, five managed-iframe declarations and six
+colors at two fixed SearchBar Button templates. Frame/background/font-weight
+compatibility remains in the panel; search keeps its disabled ink `/40`, rounded
+shape and transitions. All values retain element-local reads. Iframe lifecycle,
+security attributes and preload are byte-identical outside the style block and
+single class assignment. No new primitive default or token group is introduced.
+
+`leaves31-33-acceptance.html` records **168/168 byte-exact formal PNG pairs and
+12,024 identical paired node records**: panel 56/2,180, iframe 32/904 and search
+80/8,940. Native panel observations add 314,928 values across 216 role snapshots,
+not unique DOM nodes or more screenshots. Iframe paint is checked at 192 declared
+points in 64 original full PNGs; three extra native pairs agree in pixels and
+8,676 CSS/pseudo/runtime values. The accepted transparent fixture document matches
+the child color scheme. Its original dark v1 really painted white despite computed
+cyan; a same-frame child-scheme-only diagnostic caused white→cyan. That experiment
+and the failed v1 screenshot are separate from accepted product Before/After.
+
+Search exercises real typing/navigation/wrap/clear/Escape, Close unmount/reopen,
+keyboard focus, held mouse release outside and coarse sticky hover. The States
+story labelled 42/128 actually clamps to 5/5; the full story reaches 128/128.
+Eight supported native pairs agree in pixels, 181,640 ordinary CSS and 72,656 root
+pseudo values, including actual glyph descendants. Fifty non-target tokens retain
+28,500 values across all twelve scenes; three changed inputs retain 940 raw
+string differences. Four same-element original-token inline negatives each change
+392 raw/392 threshold pixels, with 1,480 ordinary and 1,156 pseudo differences in
+total. These are real CSS non-equivalences. Current SearchBar forwards no visual,
+style or arbitrary-child props, and its three production callers pass only
+height-only rootFill; the private skin is not a general Button/ancestor contract.
+
+Artificial ancestor prototypes remain non-authoritative: fine computed ink changes
+although both original PNG pairs match; coarse selected ink stays equal while one
+phone-light pair differs by two raw pixels. No paint cause is inferred. Panel's
+three predicate failures, iframe v1 and search's saved-screenshot/cleanup stalls
+remain diagnostic. Final native data completed before two cleanup processes were
+stopped; normal process exit is not claimed. Scoped checks pass: panel 26 tests,
+iframe 15 and search 30, types and format, lint 7/1/120 warnings with zero errors;
+these overlapping scopes do not establish a new full/root suite. Offline report
+QA decodes all originals/previews and passes two continuous 1280/390 Chrome
+interaction cycles. Earlier frozen 29–30/27–28 negatives and OPEN indices remain
+unchanged and are not exhaustive; no new Electron/Gallery acceptance is claimed.
+
+The fixed-ink/project-selector continuation moves ten source utilities: three
+Operation reply/Header More ink declarations and seven group-glyph declarations.
+The ink theme changes only `ghostLabel` and semantic `colors.label`; all 51 other
+tokens, including `ghostHover`, inherit unchanged. Backgrounds and control defaults
+are not restyled. The discarded second More JSX child's old class remains. Group
+glyphs retain element-local spacing/opacity, owned shrink0 and fallback shrink1,
+including the fallback's 16px flex slot and actual public caller overrides.
+
+`leaves34-35-acceptance.html` is **partial visual acceptance: 105/108 formal PNG
+pairs byte-exact, three current OPEN; all 5,264 paired standard node records equal**.
+Ink accounts for 48/2,992; selector 60/2,272. Selector final rows reference 48
+unchanged original closed-state pairs plus twelve real painted-menu captures,
+with original manifest/key/PNG/layout provenance; this is not a synthetic capture
+manifest. Four natural menu pairs preserve real 70% opacity without a caller
+mask. The original gate accepted mounted geometry at popup opacity0/translateY(-4px).
+Only readiness was repaired to require painted opacity1/identity/no lifecycle flags
+or pending finite transitions; no product CSS patch supplied acceptance.
+
+Three current focus-ring corner pairs retain 14 raw/zero threshold pixels; six
+original menu pairs retain 24 raw/zero threshold pixels separately. Both sets
+remain OPEN. The changed pixels lie outside migrated glyphs. A bounded eight-PNG,
+197,883-value ring probe retains three desktop pre-shot transition declaration
+differences and stable same-source repeats; post-shot maps and full boxes agree.
+It does not prove the exact raster cause or retrospectively close either set.
+Selector probes also preserve disabled focus/nonactivation, keyboard selection,
+caller removal and 44 SVG snapshots, not additional formal pairs.
+
+Eight supported ink native pairs agree in pixels, 160,608 ordinary and 68,832 root
+pseudo values. Across twelve scenes, 51 non-target tokens retain 25,704 values;
+two targeted inputs differ in 456 raw values. Four same-element old-token inline
+negatives genuinely change ink (975/966 raw, 744/740 threshold pixels by palette),
+while backgrounds and original input tokens stay equal. Fixed current children
+and no style/token forwarding bound this adoption; it is not a generic Button skin.
+Native checkpoints complete before cleanup stalls on both sources; exact tool
+cause remains unproved and normal process exit is not claimed.
+
+Ink's 16 and selector's 14 owning tests, types and scoped format pass; lint has
+3/5 warnings, zero errors. The report preserves raw differences and derived-mask
+labels, with independent original-source/hash/payload verification and two
+continuous 1280/390 Chrome UI cycles. It references frozen earlier report hashes
+without closing any historical OPEN or negative contracts. These are synthetic
+public component fixtures, not full backend/runtime/native-device coverage; no
+new whole-project, root-suite, Electron or Gallery success is claimed. A later
+stable-source UI regression passes 620 component files/6,207 tests and 25 UI
+files/302 tests. Its 2,364-file snapshot was recorded after launch, with all product
+owners already frozen; no snapshotted source changed, but the launch-to-snapshot
+interval remains a stated limit. This later evidence does not close pixel OPENs
+or the unrelated root ACP preparation failure.
+
 ## Remaining work
 
-Compiler-backed [usage inventory](../../../../packages/components/scripts/tailwind-usage.mjs)
-replaces the old regex, which skipped single utilities and many values. It scans
-JSX, class helpers, constants and static template fragments, validates candidates
-against the locked compiler, and reports unresolved dynamic expressions. Counts
-are source-occurrence lower bounds, not runtime coverage or emitted CSS size.
+The compiler-backed [inventory](../../../../packages/components/scripts/tailwind-usage.mjs)
+validates AST-discovered candidates with the locked Tailwind compiler. Counts
+are source-occurrence lower bounds, not runtime coverage, emitted CSS size or a
+completion percentage. Unresolved expressions remain a separate work list.
 
-Across the preceding nine-file continuation, the component inventory falls from
-2,377 to 2,100 compiler-confirmed occurrences, leaving a lower bound of 3,093
-with 605 unresolved expressions in the component scan. The subsequent seven-file batch reduces
-components from 2,100 to 1,907. The shared-adapter batch reduces `src/ui` from
-992 to 742. The Emoji Picker / Drawer batch reduces `src/ui` further to 626. The Diff Viewer batch reduces `src/ui` further to 518. The pre-integration audited
-lower bound is 2,421 occurrences after the alpha follow-up: components 1,902, `src/ui` 518 and routes 1,
-across 188 affected files. The scanner separately
-reports 690 unresolved expressions: 600 in components and 90 in `src/ui`.
-After integrating upstream additions, the scan reported 2,572 occurrences across
-188 files. The status/project-entry/rename batch left 2,497 occurrences across 184 files.
-Following the later upstream integration, the scan reports 2,501
-(components 2,009, `src/ui` 487, routes 5) across 185 files, with 692 unresolved
-expressions (611 components, 81 `src/ui`). The property/guide/chip batch leaves
-2,428 occurrences (components 1,936, `src/ui` 487, routes 5) across 184 files;
-the 692 unresolved expressions are unchanged. The legacy-list batch leaves
-2,284 occurrences (components 1,792, `src/ui` 487, routes 5) across 184 files,
-with the same 692 unresolved expressions. The active-list/login batch leaves
-2,174 occurrences (components 1,682, `src/ui` 487, routes 5) across the same
-184 files and 692 unresolved expressions. Those snapshots predate recognition of
-`withClassName`'s class argument.
+| Source boundary                                              | Scanner method | Occurrences | Files | Unresolved |
+| ------------------------------------------------------------ | -------------- | ----------: | ----: | ---------: |
+| Frozen 29–30                                                 | v1             |       1,736 |   175 |        721 |
+| Frozen 31–33                                                 | v1             |       1,715 |   175 |        717 |
+| Same pre31 source snapshot                                   | v2             |       1,741 |   176 |        725 |
+| Current source through 35, visual limits recorded separately | v2             |       1,705 |   175 |        721 |
 
-The corrected scanner reads that helper's second argument while excluding its
-StyleX props argument, validates candidates with the same locked compiler, and
-retains unresolved dynamic arguments. A real compiler probe checks deduplication,
-invalid tokens and dynamic values. Rescanning the four original files and final
-files yields 165→97, removing 68; it does not count moving retained size classes
-inside a helper as migration. On the same method, the baseline is 2,208 and the
-current lower bound is 2,140 occurrences (components 1,648, `src/ui` 487, routes 5)
-across 187 files, plus 765 unresolved expressions. Newly visible historical
-helper usages explain the higher corrected baseline; these are lower bounds,
-not a project completion percentage. The image/Markdown/sidebar continuation
-then removes 33 on that same scanner, leaving 2,107 occurrences (components
-1,615, `src/ui` 487, routes 5) across 186 files and 765 unresolved expressions.
-Pure literal string concatenations are now joined before compiler validation,
-without evaluating runtime or numeric operands. An independent real-compiler
-probe verifies split token boundaries, source deduplication and unresolved values.
-This recognizes 32 existing Markdown base-class occurrences and resolves one
-previous expression: the corrected baseline is 2,139 across 186 files with 764
-unresolved expressions. The onboarding/layout/table batch removes 23 on this same
-method, leaving **2,116 occurrences** (components 1,624, `src/ui` 487, routes 5)
-across 186 files and 764 unresolved expressions. The increase from the earlier
-2,107 snapshot is a scanner correction, not added Tailwind styling. Neither count
-is a completion percentage.
+Earlier method changes recognized single utilities, `withClassName`'s second
+argument and supported static class arrays. Historical per-batch counts remain
+in their frozen reports; their baselines must not be combined across methods.
+For example, the four-file helper rescan measured 165→97 rather than treating a
+retained utility moved inside a helper as removed. Some migrated runtime layout
+literals also lay outside the static count.
 
-After reconciling main, the same-method snapshot was 2,102 occurrences
-(components 1,610, `src/ui` 487, routes 5) across 186 files with 760 unresolved
-expressions. That change includes upstream additions and retired UI rather than
-another claimed migration removal. The owned Skeleton/InfoBar/Outline Rail batch
-then removes 13 on the same method, leaving 2,089 occurrences (components
-1,597, `src/ui` 487, routes 5) across 185 files and 759 unresolved expressions.
-The ACP/stuck-banner/queue-scroll continuation removes another 14 on that method,
-leaving **2,075 occurrences** (components 1,583, `src/ui` 487, routes 5), with the
-same 185 files and 759 unresolved expressions. These are measured lower bounds,
-not a completion percentage.
+Scanner v2 additionally follows direct dot/bracket `className` assignments.
+This closes the concrete iframe gap: v1 omitted five real utilities, so batch31–33
+removed 26 source utilities while its old static lower bound fell by 21.
+The original scanner source and inventories are preserved. Re-running v2 on an
+independent exact pre31 source snapshot makes the baseline 1,741 rather than
+rewriting the frozen 1,736 report. Functional parser tests cover aliases,
+source-location deduplication, direct writes, dynamic/compound writes and valid
+utility-looking strings in comparisons or unrelated properties. Ambiguous writes
+remain unresolved. Two adapter `className` writes expose four additional unresolved expressions,
+explaining the corresponding increase in that count.
+
+The current v2 source split is components 1,250 occurrences/159 files/628 unresolved,
+legacy UI 450/14/93 and routes 5/two/zero. Batch34–35 visual differences and rejected
+calibrations retain their own status; this source inventory does not accept them.
 
 WebWorkspaceLayout remains deferred until its actual sidebar/runtime/router
 graph has a bounded production-component fixture.
 
-The unconsumed `src/ui/sidebar.tsx` retains 324 occurrences and is not re-exported
-by `src/ui/index.ts`; direct public wildcard imports remain possible.
+The unconsumed `src/ui/sidebar.tsx` retains 304 occurrences and is not re-exported
+by `src/ui/index.ts`; direct public wildcard imports remain possible. Its public
+adapter now has real rendering fixtures, including mobile open and desktop collapse.
 The unconsumed `src/components/task-list.tsx` retains 15 occurrences,
 `src/components/sidebar-updated-task-list.tsx` retains 23; both now have real
 rendering and native-input fixtures. The unused
@@ -1107,9 +1690,8 @@ accepting those retained rules.
 The original bottom-corner open annotation card can extend past its
 `overflow: hidden` canvas and clip its footer. Touch Resolve is verified on a
 fully visible native card; the screenshot automation does not silently scroll a
-clipped card into view and present that as the natural touch path. Recurrence's
-two original dark variants, the `ghostValueClass` contract and PinButton primitive
-compatibility remain. Trusted Chromium touch input does not establish native iOS
+clipped card into view and present that as the natural touch path. The
+`ghostValueClass` contract and PinButton primitive compatibility remain. Trusted Chromium touch input does not establish native iOS
 or WebKit behavior, and custom VS Code themes have not all been exercised.
 
 Continue with the retained chat/mobile primitive overrides, remaining Emoji
@@ -1117,8 +1699,8 @@ Picker / Drawer compatibility, the diff adapters and other legacy `src/ui` wrapp
 third-party descendant selectors. Sidebar compatibility still needs owned ancestor
 markers and control-level composition.
 Keep primitive compatibility separate from owned DOM work. Hard-coded dark
-variants require an owned marker/theme contract; StyleX relational selectors
-exist, so this is remaining implementation scope rather than an absolute
-library limitation. The report records the final measured inventory and exact
+variants require the exact element-local theme predicate, as FilterPillBar now
+preserves; owned ancestor states use qualified markers. Remaining variants need
+their own caller and scope verification. The report records the final measured inventory and exact
 unverified states, including file/hash metadata popovers and native gestures.
 No screenshot set here establishes full remote/backend or every-theme coverage.

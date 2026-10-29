@@ -143,7 +143,10 @@ export function ResetPasswordPage({
             >
               {submitting ? (
                 <>
-                  <Spinner className={`h-4 w-4 ${stylex.props(surface.spinnerMargin).className}`} />
+                  <Spinner
+                    diameter="calc(var(--spacing) * 4)"
+                    className={stylex.props(surface.spinnerMargin).className}
+                  />
                   {t('resetPassword.saving', 'Saving password...')}
                 </>
               ) : (

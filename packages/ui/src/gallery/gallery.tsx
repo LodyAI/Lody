@@ -1840,17 +1840,36 @@ function SessionMenu() {
   );
 }
 
-function CompactMenu() {
+function CompactMenu({ bounded = false }: { bounded?: boolean }) {
+  const [positioner, setPositioner] = useState<HTMLDivElement | null>(null);
+  const [readout, setReadout] = useState('Open to measure');
+  useEffect(() => {
+    const panel = positioner?.querySelector('[role="menu"]');
+    if (!panel) return;
+    const css = getComputedStyle(panel);
+    setReadout(`min ${css.minWidth} · max ${css.maxWidth} · height ≤ ${css.maxHeight}`);
+  }, [positioner]);
   return (
-    <Menu.Root>
-      <Menu.Trigger render={<Button variant="secondary" />}>Two choices</Menu.Trigger>
-      <Menu.Content width="compact">
-        <Menu.CheckboxItem indicatorSide="end" defaultChecked>
-          Online
-        </Menu.CheckboxItem>
-        <Menu.CheckboxItem indicatorSide="end">My machines</Menu.CheckboxItem>
-      </Menu.Content>
-    </Menu.Root>
+    <div>
+      <Menu.Root>
+        <Menu.Trigger render={<Button variant="secondary" />}>
+          {bounded ? 'Bounded menu' : 'Two choices'}
+        </Menu.Trigger>
+        <Menu.Content
+          ref={setPositioner}
+          width="compact"
+          minWidth={bounded ? 190 : undefined}
+          maxWidth={bounded ? 280 : undefined}
+          maxHeight={bounded ? 128 : undefined}
+        >
+          <Menu.CheckboxItem indicatorSide="end" defaultChecked>
+            Online
+          </Menu.CheckboxItem>
+          <Menu.CheckboxItem indicatorSide="end">My machines</Menu.CheckboxItem>
+        </Menu.Content>
+      </Menu.Root>
+      {bounded ? <span {...stylex.props(styles.readout)}>{readout}</span> : null}
+    </div>
   );
 }
 
@@ -1962,6 +1981,53 @@ function FilterPopover() {
         </Cluster>
       </Popover.Content>
     </Popover.Root>
+  );
+}
+
+function LayoutPopover({
+  padding,
+  gap,
+  sized = false,
+}: {
+  padding: 'default' | 'none';
+  gap: 'default' | 'none';
+  sized?: boolean;
+}) {
+  const [positioner, setPositioner] = useState<HTMLDivElement | null>(null);
+  const [readout, setReadout] = useState('Open to measure');
+  useEffect(() => {
+    const panel = positioner?.querySelector('[role="dialog"]');
+    if (!panel) return;
+    const css = getComputedStyle(panel);
+    setReadout(
+      sized
+        ? `width ${css.width} · min ${css.minWidth} · max ${css.maxWidth} · height ≤ ${css.maxHeight}`
+        : `padding ${css.paddingTop} · gap ${css.rowGap}`
+    );
+  }, [positioner, sized]);
+  return (
+    <div>
+      <Popover.Root>
+        <Popover.Trigger render={<Button variant="secondary" size="small" />}>
+          {sized ? 'Sized popover' : `padding ${padding} · gap ${gap}`}
+        </Popover.Trigger>
+        <Popover.Content
+          ref={setPositioner}
+          padding={padding}
+          gap={gap}
+          width={sized ? 240 : undefined}
+          minWidth={sized ? 200 : undefined}
+          maxWidth={sized ? 280 : undefined}
+          maxHeight={sized ? 160 : undefined}
+        >
+          <Popover.Title>Embedded content</Popover.Title>
+          <span>First content block</span>
+          <span>Second content block</span>
+          <Popover.Close render={<Button size="small" />}>Close</Popover.Close>
+        </Popover.Content>
+      </Popover.Root>
+      <span {...stylex.props(styles.readout)}>{readout}</span>
+    </div>
   );
 }
 
@@ -2614,6 +2680,7 @@ function SpinnerRow() {
         <Spinner size="small" />
         <Spinner size="medium" />
         <Spinner size="large" />
+        <Spinner diameter={14} />
         <Button variant="secondary" size="small">
           <Spinner size="small" label={null} />
           Saving
@@ -3722,6 +3789,30 @@ function ButtonFocusRow() {
   );
 }
 
+function ButtonLayoutSample({ icon = false }: { icon?: boolean }) {
+  const [node, setNode] = useState<HTMLElement | null>(null);
+  const [readout, setReadout] = useState('');
+  useEffect(() => {
+    if (!node) return;
+    const css = getComputedStyle(node);
+    setReadout(`width ${css.width} · height ${css.height}`);
+  }, [node]);
+  return (
+    <Sample name={icon ? 'Icon box' : 'Text box'} measured={readout}>
+      <Button
+        ref={setNode}
+        variant="secondary"
+        icon={icon}
+        width={icon ? 24 : 120}
+        height={icon ? 24 : 28}
+        aria-label={icon ? 'Custom attachment box' : undefined}
+      >
+        {icon ? <PlusGlyph /> : 'Custom box'}
+      </Button>
+    </Sample>
+  );
+}
+
 function FocusRingRow() {
   const { ref, value } = useMeasured<HTMLDivElement>('box-shadow');
   return (
@@ -4072,6 +4163,13 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               </Cluster>
             </Row>
             <ButtonFocusRow />
+            <Row>
+              <LegendKey>layout constraints</LegendKey>
+              <Cluster>
+                <ButtonLayoutSample />
+                <ButtonLayoutSample icon />
+              </Cluster>
+            </Row>
             <Row>
               <LegendKey>render</LegendKey>
               <Cluster>
@@ -4458,6 +4556,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               <Cluster>
                 <SessionMenu />
                 <CompactMenu />
+                <CompactMenu bounded />
               </Cluster>
             </Row>
             <Row>
@@ -4467,7 +4566,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
                   <ContextMenu.Trigger>
                     <div {...stylex.props(styles.contextArea)}>Right-click this area</div>
                   </ContextMenu.Trigger>
-                  <ContextMenu.Content>
+                  <ContextMenu.Content minWidth={180} maxWidth={280} maxHeight={128}>
                     <ContextMenu.Item inset>Rename</ContextMenu.Item>
                     <ContextMenu.Item inset>Duplicate</ContextMenu.Item>
                     <ContextMenu.Separator />
@@ -4514,6 +4613,15 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               <LegendKey>popover</LegendKey>
               <Cluster>
                 <FilterPopover />
+              </Cluster>
+            </Row>
+            <Row>
+              <LegendKey>popover layout</LegendKey>
+              <Cluster>
+                <LayoutPopover padding="none" gap="default" />
+                <LayoutPopover padding="default" gap="none" />
+                <LayoutPopover padding="none" gap="none" />
+                <LayoutPopover padding="default" gap="default" sized />
               </Cluster>
             </Row>
             <Row>

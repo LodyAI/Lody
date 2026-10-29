@@ -393,7 +393,7 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
         <Button
           type="button"
           size="large"
-          className="w-full"
+          width="100%"
           disabled={!c.canAddCurrentFolder}
           onClick={() => void c.addCurrentFolder()}
         >

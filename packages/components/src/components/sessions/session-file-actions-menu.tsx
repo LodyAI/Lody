@@ -77,7 +77,7 @@ export function SessionFileActionsMenu({
           <MoreHorizontal {...glyphProps} />
         </button>
       </Menu.Trigger>
-      <Menu.Content align="end" className="min-w-[190px]">
+      <Menu.Content align="end" minWidth={190}>
         {visibleItems.map((item) => {
           const ItemIcon = item.icon;
           return (

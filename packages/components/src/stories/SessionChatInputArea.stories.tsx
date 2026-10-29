@@ -70,6 +70,7 @@ type StoryShellProps = {
   onSendMessage?: SessionChatInputAreaProps['onSendMessage'];
   disableImageUpload?: boolean;
   claimNavigationFocus?: () => boolean;
+  isExternalHistoryRefreshing?: boolean;
 };
 
 function createStoryStore() {
@@ -89,6 +90,7 @@ function StoryShell({
   onSendMessage = async () => true,
   claimNavigationFocus,
   disableImageUpload = true,
+  isExternalHistoryRefreshing = false,
 }: StoryShellProps) {
   const store = useMemo(() => createStoryStore(), []);
   const session = useMemo<SessionMeta>(
@@ -151,6 +153,10 @@ function StoryShell({
               onRemoveQueueItem={async () => {}}
               initialInputText={initialInputText}
               disableImageUpload={disableImageUpload}
+              isExternalHistoryRefreshing={isExternalHistoryRefreshing}
+              externalHistorySyncLabel={
+                isExternalHistoryRefreshing ? 'Refreshing external history' : undefined
+              }
             />
           </div>
         </div>
@@ -180,6 +186,10 @@ export const IdleDark: Story = {
   globals: {
     theme: 'dark',
   },
+};
+
+export const ExternalHistoryRefreshing: Story = {
+  args: { initialInputText: 'Preserved history draft.', isExternalHistoryRefreshing: true },
 };
 
 export const RunningDark: Story = {

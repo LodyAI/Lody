@@ -6,8 +6,13 @@ import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 import { scopedConversationTheme } from '@/components/ai-gui/conversation.tokens.stylex';
 import { productDarkPalette, productLightPalette } from '@/lib/vscode-theme/lody-ui-palette.stylex';
 import { ensureShareThemeScopes } from '@/components/share-theme-scope';
-import { themeColors } from '../../style/theme-colors.stylex';
-import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
+import { scopedThemeColors, themeColors } from '../../style/theme-colors.stylex';
+import {
+  scopedThemeSpace,
+  themeFontWeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 import lodyLogo from '@/assets/lody-icon.png';
 
 export interface ChatShareCardMessage {
@@ -101,28 +106,28 @@ export interface ChatShareCardProps {
 interface CardLayout {
   /** Card width in CSS pixels; the mat adds to it on every side. */
   width: number;
-  radius: string;
+  radius: stylex.StyleXStyles;
   /**
    * The one horizontal inset every band uses — title, conversation and caption
    * share a left edge, and nothing in the card is allowed a private gutter.
    */
-  gutter: string;
+  gutter: stylex.StyleXStyles;
   /** First band's top inset, whichever band that is. */
-  top: string;
-  titleSize: string;
+  top: stylex.StyleXStyles;
+  titleSize: stylex.StyleXStyles;
   /** Title band to conversation. */
-  afterTitle: string;
+  afterTitle: stylex.StyleXStyles;
   /** Conversation to the caption rule. */
-  bottom: string;
+  bottom: stylex.StyleXStyles;
   /** Between one exchange and the next: the card's largest interior gap. */
   exchangeGap: number;
   /** Between a prompt and the reply it belongs to; half the exchange gap. */
   replyGap: number;
-  promptRadius: string;
-  promptPad: string;
-  captionPad: string;
+  promptRadius: stylex.StyleXStyles;
+  promptPad: stylex.StyleXStyles;
+  captionPad: stylex.StyleXStyles;
   /** Card to the sign-off printed on the backdrop below it. */
-  signature: string;
+  signature: stylex.StyleXStyles;
 }
 
 /**
@@ -136,37 +141,41 @@ interface CardLayout {
  * prompt to its reply, which is what makes a tall card scannable without
  * speaker labels.
  */
+const chatLayoutStyles = stylex.create({
+  radius: { borderRadius: '22px' },
+  gutter: { paddingInline: 'calc(var(--spacing) * 5)' },
+  top: { paddingTop: 'calc(var(--spacing) * 6)' },
+  titleSize: { fontSize: '17px' },
+  afterTitle: { paddingTop: 'calc(var(--spacing) * 4)' },
+  bottom: { paddingBottom: 'calc(var(--spacing) * 5)' },
+  promptRadius: { borderRadius: '14px' },
+  promptPad: {
+    paddingInline: 'calc(var(--spacing) * 3.5)',
+    paddingBlock: 'calc(var(--spacing) * 2.5)',
+  },
+  captionPad: { paddingBlock: 'calc(var(--spacing) * 3.5)' },
+  signature: { marginTop: 'calc(var(--spacing) * 4)' },
+});
+
+const postLayoutStyles = stylex.create({
+  radius: { borderRadius: '26px' },
+  gutter: { paddingInline: 'calc(var(--spacing) * 7)' },
+  top: { paddingTop: 'calc(var(--spacing) * 7)' },
+  titleSize: { fontSize: '20px' },
+  afterTitle: { paddingTop: 'calc(var(--spacing) * 5)' },
+  bottom: { paddingBottom: 'calc(var(--spacing) * 6)' },
+  promptRadius: { borderRadius: '16px' },
+  promptPad: {
+    paddingInline: 'calc(var(--spacing) * 4)',
+    paddingBlock: 'calc(var(--spacing) * 3)',
+  },
+  captionPad: { paddingBlock: 'calc(var(--spacing) * 4)' },
+  signature: { marginTop: 'calc(var(--spacing) * 5)' },
+});
+
 const LAYOUT: Record<ChatShareCardDestination, CardLayout> = {
-  chat: {
-    width: 360,
-    radius: 'rounded-[22px]',
-    gutter: 'px-5',
-    top: 'pt-6',
-    titleSize: 'text-[17px]',
-    afterTitle: 'pt-4',
-    bottom: 'pb-5',
-    exchangeGap: 24,
-    replyGap: 12,
-    promptRadius: 'rounded-[14px]',
-    promptPad: 'px-3.5 py-2.5',
-    captionPad: 'py-3.5',
-    signature: 'mt-4',
-  },
-  post: {
-    width: 560,
-    radius: 'rounded-[26px]',
-    gutter: 'px-7',
-    top: 'pt-7',
-    titleSize: 'text-[20px]',
-    afterTitle: 'pt-5',
-    bottom: 'pb-6',
-    exchangeGap: 28,
-    replyGap: 14,
-    promptRadius: 'rounded-[16px]',
-    promptPad: 'px-4 py-3',
-    captionPad: 'py-4',
-    signature: 'mt-5',
-  },
+  chat: { ...chatLayoutStyles, width: 360, exchangeGap: 24, replyGap: 12 },
+  post: { ...postLayoutStyles, width: 560, exchangeGap: 28, replyGap: 14 },
 };
 
 /**
@@ -314,7 +323,9 @@ export function ChatShareCard({
     theme === 'light' ? 'light-scope' : 'dark-scope',
     stylex.props(
       theme === 'light' ? productLightPalette : productDarkPalette,
-      scopedConversationTheme
+      scopedConversationTheme,
+      scopedThemeColors,
+      scopedThemeSpace
     ).className
   );
   const captionParams = meta?.params?.filter((param) => param.trim().length > 0) ?? [];
@@ -324,8 +335,7 @@ export function ChatShareCard({
       <style>{CODE_CSS}</style>
       <div
         className={cn(
-          stylex.props(styles.card).className,
-          layout.radius,
+          stylex.props(styles.card, layout.radius).className,
           // A drop shadow needs a ground to fall on. Without one — or with a mat
           // too thin to catch it — it would only darken the image's own edge.
           matPx >= MIN_SIGN_OFF_MAT && 'shadow-[0_28px_70px_-20px_rgba(2,10,18,0.6)]',
@@ -334,19 +344,16 @@ export function ChatShareCard({
         style={{ width: layout.width }}
       >
         {title ? (
-          <div className={cn(layout.gutter, layout.top)}>
-            <div className={cn(layout.titleSize, stylex.props(styles.title).className)}>
-              {title}
-            </div>
+          <div {...stylex.props(layout.gutter, layout.top)}>
+            <div {...stylex.props(styles.title, layout.titleSize)}>{title}</div>
           </div>
         ) : null}
 
         <div
-          className={cn(
+          className={clsx(
             CODE_SCOPE,
-            layout.gutter,
-            title ? layout.afterTitle : layout.top,
-            layout.bottom
+            stylex.props(layout.gutter, title ? layout.afterTitle : layout.top, layout.bottom)
+              .className
           )}
         >
           {messages.map((message, index) => {
@@ -362,13 +369,7 @@ export function ChatShareCard({
             return (
               <div key={message.id} style={{ marginTop }}>
                 {message.role === 'user' ? (
-                  <div
-                    className={cn(
-                      layout.promptRadius,
-                      layout.promptPad,
-                      stylex.props(styles.prompt).className
-                    )}
-                  >
+                  <div {...stylex.props(styles.prompt, layout.promptRadius, layout.promptPad)}>
                     <div
                       className={stylex.props(styles.promptText).className}
                       style={{ fontSize: BODY_FONT_SIZE }}
@@ -389,13 +390,7 @@ export function ChatShareCard({
             right. The brand mark is normally the ground's job; a card with no
             ground, or too thin a one to sign, takes the sign-off onto the second
             line of the left column rather than a band of its own. */}
-        <div
-          className={cn(
-            stylex.props(styles.captionBand).className,
-            layout.gutter,
-            layout.captionPad
-          )}
-        >
+        <div {...stylex.props(styles.captionBand, layout.gutter, layout.captionPad)}>
           <div {...stylex.props(styles.captionMark)}>
             {meta?.icon ?? <img src={lodyLogo} alt="" {...stylex.props(styles.captionMarkImage)} />}
           </div>
@@ -431,7 +426,7 @@ export function ChatShareCard({
     >
       {card}
       {!signOffOnMat ? null : (
-        <div className={cn(layout.signature, stylex.props(styles.signOff).className)}>
+        <div {...stylex.props(styles.signOff, layout.signature)}>
           <img src={lodyLogo} alt="" {...stylex.props(styles.signOffMark)} />
           <span
             {...stylex.props(
@@ -474,8 +469,16 @@ const styles = stylex.create({
   prompt: {
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: 'hsl(var(--foreground) / 0.07)',
-    backgroundColor: 'hsl(var(--foreground) / 0.045)',
+    borderColor: {
+      default: 'hsl(var(--foreground) / 1)',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--foreground) / 1) 7.0%, transparent)',
+    },
+    backgroundColor: {
+      default: 'hsl(var(--foreground) / 1)',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--foreground) / 1) 4.5%, transparent)',
+    },
   },
   promptText: {
     whiteSpace: 'pre-wrap',
@@ -491,7 +494,11 @@ const styles = stylex.create({
     gap: themeSpace[2.5],
     borderTopWidth: '1px',
     borderTopStyle: 'solid',
-    borderTopColor: 'hsl(var(--border) / 0.7)',
+    borderColor: {
+      default: 'hsl(var(--border) / 1)',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+    },
   },
   captionMark: { flexShrink: 0 },
   captionMarkImage: {
@@ -553,7 +560,13 @@ const styles = stylex.create({
   /** The ink of the pale ground: the sign-off reads dark there. */
   signOffTextLight: { color: 'rgba(32, 66, 76, 0.78)' },
   /** Every other ground is dark enough to carry white. */
-  signOffTextDark: { color: 'rgba(255, 255, 255, 0.85)' },
+  signOffTextDark: {
+    color: {
+      default: '#ffffffd9',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, var(--color-white) 85%, transparent)',
+    },
+  },
   /** The exported image hugs its content. */
   root: { width: 'fit-content' },
 });

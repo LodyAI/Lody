@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronLeft, X } from 'lucide-react';
 import type { ProjectSkill, ProjectSkillScope } from '@lody/shared';
@@ -102,12 +102,32 @@ const LOADED_GROUPS: ProjectSkillResolvedGroup[] = [
 /* Renders the body inside a phone-width sheet shell + the same in-sheet detail
    slide-over the real sheet uses, so the Info-tap → detail → back flow is
    screenshot-verifiable without standing up the SWR hook. */
-function SheetFrame({ args }: { args: MobileProjectSkillsBodyProps }) {
+function SheetFrame({
+  args,
+  responsive = false,
+  spacing,
+}: {
+  args: MobileProjectSkillsBodyProps;
+  responsive?: boolean;
+  spacing?: string;
+}) {
   const [detail, setDetail] = useState<{ skill: ProjectSkill; scope: ProjectSkillScope } | null>(
     null
   );
+  const [lastAction, setLastAction] = useState('Ready');
+  const [refreshCount, setRefreshCount] = useState(0);
   return (
-    <div className="flex h-[760px] w-[390px] items-end justify-center bg-black/30">
+    <div
+      className="flex h-[760px] w-[390px] items-end justify-center bg-black/30"
+      data-owned-skills-fixture={responsive ? '' : undefined}
+      data-owned-skills-action={responsive ? lastAction : undefined}
+      data-owned-skills-refresh-count={responsive ? refreshCount : undefined}
+      style={
+        responsive
+          ? ({ width: 'min(390px, 100vw)', '--spacing': spacing } as CSSProperties)
+          : undefined
+      }
+    >
       <div className="flex max-h-[88%] w-full flex-col overflow-hidden rounded-t-2xl border border-border/60 bg-background">
         <header className="relative flex shrink-0 items-center px-4 pb-2 pt-2">
           {detail ? (
@@ -130,7 +150,19 @@ function SheetFrame({ args }: { args: MobileProjectSkillsBodyProps }) {
           <div className="min-h-0 flex-1 overflow-y-auto pb-4">
             <MobileProjectSkillsBody
               {...args}
-              onViewDetail={(skill, scope) => setDetail({ skill, scope })}
+              onRefresh={
+                responsive
+                  ? () => {
+                      args.onRefresh();
+                      setLastAction('Refresh');
+                      setRefreshCount((count) => count + 1);
+                    }
+                  : args.onRefresh
+              }
+              onViewDetail={(skill, scope) => {
+                setDetail({ skill, scope });
+                if (responsive) setLastAction(`Detail ${skill.id}`);
+              }}
             />
           </div>
           <AnimatePresence>
@@ -214,4 +246,56 @@ export const ErrorNoData: Story = {
     error: 'Failed to reach the GitHub API (rate limited).',
     onRefresh: noop,
   },
+};
+
+const LONG_GROUPS: ProjectSkillResolvedGroup[] = [
+  {
+    ...LOADED_GROUPS[0]!,
+    skills: [
+      {
+        ...LOADED_GROUPS[0]!.skills[0]!,
+        description:
+          'Review a synthetic change while preserving layout, keyboard focus, local theme values and long descriptions. '.repeat(
+            4
+          ),
+      },
+      {
+        ...LOADED_GROUPS[0]!.skills[1]!,
+        description: '中文描述边界：长段落保持两行截断，作者与路径应继续显示。'.repeat(8),
+      },
+    ],
+  },
+];
+
+const ownedArgs: MobileProjectSkillsBodyProps = {
+  status: 'ready',
+  groups: LONG_GROUPS,
+  stale: false,
+  onRefresh: noop,
+};
+
+export const LongDescription: Story = {
+  args: ownedArgs,
+  render: (args) => <SheetFrame args={args} responsive />,
+};
+
+export const AbsentDescription: Story = {
+  args: {
+    ...ownedArgs,
+    groups: LONG_GROUPS.map((group) => ({
+      ...group,
+      skills: group.skills.map((skill) => ({ ...skill, description: undefined })),
+    })),
+  },
+  render: (args) => <SheetFrame args={args} responsive />,
+};
+
+export const SubtreeSpacing: Story = {
+  args: { ...ownedArgs, status: 'refreshing' },
+  render: (args) => <SheetFrame args={args} responsive spacing="0.3125rem" />,
+};
+
+export const OwnedLoading: Story = {
+  args: { ...ownedArgs, status: 'loading', groups: [] },
+  render: (args) => <SheetFrame args={args} responsive />,
 };

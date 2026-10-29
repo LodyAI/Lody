@@ -422,7 +422,7 @@ export function MobileProjectSettings({
     return (
       <MobileSettingsSection title={fallbackTitle}>
         <div {...stylex.props(styles.loading)}>
-          <Spinner className="h-4 w-4" />
+          <Spinner diameter="calc(var(--spacing) * 4)" />
           {t('workspace.projects.loading', 'Loading projects')}
         </div>
       </MobileSettingsSection>
@@ -622,7 +622,9 @@ function MobileProjectRow({
 
   const shareControl = (
     <div {...stylex.props(styles.shareControl)}>
-      {row.isUpdating ? <Spinner className="h-3.5 w-3.5 text-muted-foreground" /> : null}
+      {row.isUpdating ? (
+        <Spinner diameter="calc(var(--spacing) * 3.5)" className="text-muted-foreground" />
+      ) : null}
       <Switch
         checked={row.sharedWithTeam}
         disabled={row.isUpdating || !row.canUpdateSharing || !onSharedWithTeamChange}

@@ -815,3 +815,24 @@ export const ClosedTabUnread: Story = {
     );
   },
 };
+
+export const SpinnerBusyHistory: Story = {
+  args: {
+    parentSession: screenshotParentSession,
+    childSessions,
+    draftTabs: [],
+    archivedChildSessions: [
+      {
+        ...archivedChildSessions[0]!,
+        id: 'session-closed-running' as SessionId,
+        title: 'Closed running conversation',
+        isTabClosed: true,
+      },
+    ],
+    activeTabSessionId: screenshotParentSession.id,
+    presence: {
+      [childSessions[0]!.id]: 'running',
+      'session-closed-running': 'running',
+    },
+  },
+};

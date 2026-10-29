@@ -151,11 +151,44 @@ describe('Spinner', () => {
     expect(span).toContain('size-6');
     expect(svg).not.toContain('mb-4');
     expect(svg).not.toContain('size-6');
-    for (const name of classesFor(surface.spinnerSpin, surface.spinnerLarge)) {
-      expect(span, `the turning box is missing ${name}`).toContain(name);
-    }
-    for (const name of classesFor(surface.spinner)) {
-      expect(svg, `the glyph is missing ${name}`).toContain(name);
+  });
+
+  test('a changing diameter sizes the same turning box and leaves SVG attributes on the glyph', async () => {
+    const errors: unknown[][] = [];
+    const errorLog = vi.spyOn(console, 'error').mockImplementation((...args) => errors.push(args));
+    let glyph: SVGSVGElement | null = null;
+    const ref = (element: SVGSVGElement | null) => {
+      glyph = element;
+    };
+    try {
+      mounted = await mount(<Spinner ref={ref} diameter={14} width={37} height={31} />);
+      const box = mounted.container.querySelector<HTMLElement>('[data-slot="spinner"]')!;
+      const svg = box.firstElementChild;
+      const sizes = () => Array.from(box.style).map((name) => box.style.getPropertyValue(name));
+      expect(new Set(sizes())).toEqual(new Set(['14px']));
+      expect(glyph).toBe(svg);
+      expect(svg?.getAttribute('width')).toBe('37');
+      expect(svg?.getAttribute('height')).toBe('31');
+      expect(box.hasAttribute('diameter')).toBe(false);
+      expect(svg?.hasAttribute('diameter')).toBe(false);
+
+      await step(() => mounted!.root.render(<Spinner ref={ref} diameter={0} label={null} />));
+      expect(new Set(sizes())).toEqual(new Set(['0px']));
+      expect(glyph).toBe(svg);
+      expect(svg?.getAttribute('aria-hidden')).toBe('true');
+      await step(() => mounted!.root.render(<Spinner ref={ref} size="large" />));
+      expect(box.style.length).toBe(0);
+      expect(glyph).toBe(svg);
+      expect(svg?.getAttribute('aria-label')).toBe('Loading');
+      await step(() =>
+        mounted!.root.render(<Spinner ref={ref} diameter="calc(var(--spacing) * 3.5)" />)
+      );
+      expect(new Set(sizes())).toEqual(new Set(['calc(var(--spacing) * 3.5)']));
+      expect(mounted.container.querySelector('[data-slot="spinner"]')).toBe(box);
+      expect(glyph).toBe(svg);
+      expect(errors).toEqual([]);
+    } finally {
+      errorLog.mockRestore();
     }
   });
 

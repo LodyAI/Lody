@@ -1,0 +1,227 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 1100,
+      "device": "iPhone SE"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "migration-ownedprivateforkbuttondimensions--user-caller",
+    "migration-ownedprivateforkbuttondimensions--footer-caller",
+    "migration-ownedprivateforkbuttondimensions--forking-footer",
+    "migration-ownedprivateforkbuttondimensions--scoped-callers"
+  ],
+  "ready": {
+    "migration-ownedprivateforkbuttondimensions--user-caller": [
+      {
+        "action": "visible",
+        "selector": "[data-fork-instance=primary] [data-testid=user-message-metadata]"
+      },
+      {
+        "action": "click",
+        "selector": "[data-fork-instance=primary] [data-testid=user-message-metadata]"
+      },
+      {
+        "action": "hover",
+        "selector": "[data-fork-instance=primary] [data-testid=user-message-metadata]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const b=document.querySelector('[data-fork-instance=primary] button[aria-label=\"Fork session\"]');return b&&getComputedStyle(b).width==='28px'&&getComputedStyle(b).height==='28px';}"
+      }
+    ],
+    "migration-ownedprivateforkbuttondimensions--footer-caller": [
+      {
+        "action": "visible",
+        "selector": "[data-fork-instance=primary] button[aria-label=\"Fork session\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const b=document.querySelector('[data-fork-instance=primary] button[aria-label=\"Fork session\"]');return b&&getComputedStyle(b).width==='28px'&&getComputedStyle(b).height==='28px';}"
+      },
+      {
+        "action": "movePointer",
+        "x": 1,
+        "y": 1
+      }
+    ],
+    "migration-ownedprivateforkbuttondimensions--forking-footer": [
+      {
+        "action": "visible",
+        "selector": "[data-fork-instance=primary] button[aria-label=\"Fork session\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const b=document.querySelector('[data-fork-instance=primary] button[aria-label=\"Fork session\"]');return b&&getComputedStyle(b).width==='28px'&&getComputedStyle(b).height==='28px';}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const b=document.querySelector('[data-fork-instance=primary] button[aria-label=\"Fork session\"]');const s=b?.querySelector('span.animate-spin');return document.querySelector('[data-fork-instance=primary]').dataset.forking==='true'&&s&&getComputedStyle(s).width===getComputedStyle(s).height;}"
+      },
+      {
+        "action": "movePointer",
+        "x": 1,
+        "y": 1
+      }
+    ],
+    "migration-ownedprivateforkbuttondimensions--scoped-callers": [
+      {
+        "action": "visible",
+        "selector": "[data-fork-instance=inner] [data-testid=user-message-metadata]"
+      },
+      {
+        "action": "click",
+        "selector": "[data-fork-instance=inner] [data-testid=user-message-metadata]"
+      },
+      {
+        "action": "hover",
+        "selector": "[data-fork-instance=inner] [data-testid=user-message-metadata]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const b=document.querySelector('[data-fork-instance=outer] button[aria-label=\"Fork session\"]');return b&&getComputedStyle(b).width==='42px'&&getComputedStyle(b).height==='42px';}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const b=document.querySelector('[data-fork-instance=inner] button[aria-label=\"Fork session\"]');return b&&getComputedStyle(b).width==='21px'&&getComputedStyle(b).height==='21px';}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const b=document.querySelector('[data-fork-instance=element] button[aria-label=\"Fork session\"]');return b&&getComputedStyle(b).width==='35px'&&getComputedStyle(b).height==='35px';}"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedprivateforkbuttondimensions--user-caller": [
+      {
+        "name": "menu-open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-fork-instance=primary] button[aria-label=\"Fork session\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=menu]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-fork-instance=primary] button[aria-label=\"Fork session\"]')?.getAttribute('aria-expanded')==='true'&&getComputedStyle(document.querySelector('[role=menu]')).opacity==='1'"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Copy context as Markdown",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => ![...document.querySelectorAll('[role=menuitem]')].some(e=>e.textContent==='Fork to new tab')"
+          }
+        ]
+      },
+      {
+        "name": "context-callback",
+        "steps": [
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Copy context as Markdown",
+            "exact": true
+          },
+          {
+            "action": "hidden",
+            "selector": "[role=menu]"
+          },
+          {
+            "action": "hover",
+            "selector": "[data-fork-instance=primary] [data-testid=user-message-metadata]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-fork-instance=primary]').dataset.contextId==='private-fork-user'"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const b=document.querySelector('[data-fork-instance=primary] button[aria-label=\"Fork session\"]');return b&&getComputedStyle(b).width==='28px'&&getComputedStyle(b).height==='28px';}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedprivateforkbuttondimensions--footer-caller": [
+      {
+        "name": "menu-open",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-fork-instance=primary] button[aria-label=\"Fork session\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=menu]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-fork-instance=primary] button[aria-label=\"Fork session\"]')?.getAttribute('aria-expanded')==='true'&&getComputedStyle(document.querySelector('[role=menu]')).opacity==='1'"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Fork to new tab",
+            "exact": true
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Fork to new worktree",
+            "exact": true
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Copy context as Markdown",
+            "exact": true
+          }
+        ]
+      },
+      {
+        "name": "fork-requested",
+        "steps": [
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Fork to new tab",
+            "exact": true
+          },
+          {
+            "action": "hidden",
+            "selector": "[role=menu]"
+          },
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const r=document.querySelector('[data-fork-instance=primary]');return r.dataset.forkChoice==='private-fork-footer:shared'&&r.dataset.forking==='true'&&r.querySelector('button[aria-label=\"Fork session\"] span.animate-spin');}"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const b=document.querySelector('[data-fork-instance=primary] button[aria-label=\"Fork session\"]');return b&&getComputedStyle(b).width==='28px'&&getComputedStyle(b).height==='28px';}"
+          }
+        ]
+      }
+    ]
+  }
+}

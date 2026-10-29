@@ -1219,7 +1219,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
               const menuRow = hasMenuActions ? (
                 <ContextMenu.Root key={task.taskId}>
                   <ContextMenu.Trigger>{row}</ContextMenu.Trigger>
-                  <ContextMenu.Content className="min-w-[180px]">
+                  <ContextMenu.Content minWidth={180}>
                     {onOpenPullRequest && prUrl ? (
                       <>
                         <ContextMenu.Item

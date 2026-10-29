@@ -1,0 +1,114 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "narrow",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "ids": [
+    "sessions-sessionchatsearch--default",
+    "sessions-sessionheadermenu--opened-sessions",
+    "sessions-assistantturnalignment--interactive-finished-footer-actions"
+  ],
+  "ready": {
+    "sessions-sessionchatsearch--default": [
+      {
+        "action": "visible",
+        "role": "searchbox",
+        "name": "Find in session"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const specs=[{\"selector\":\"button[aria-label=\\\"Previous result\\\"]\",\"count\":1,\"height\":24,\"width\":24,\"disabled\":false},{\"selector\":\"button[aria-label=\\\"Next result\\\"]\",\"count\":1,\"height\":24,\"width\":24,\"disabled\":false},{\"selector\":\"button[aria-label=\\\"Close\\\"]\",\"count\":1,\"height\":24,\"width\":24,\"disabled\":false}];for(const spec of specs){const boxes=[...document.querySelectorAll(spec.selector)];if(boxes.length!==spec.count)return false;for(const e of boxes){const s=getComputedStyle(e),r=e.getBoundingClientRect();if(s.height!==spec.height+'px'||(spec.width!=null&&s.width!==spec.width+'px')||r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight||e.disabled!==!!spec.disabled)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}}}  if(document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);return finite.every(a=>!a.pending&&a.playState!=='running');}"
+      }
+    ],
+    "sessions-sessionheadermenu--opened-sessions": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "More actions"
+      },
+      {
+        "action": "hover",
+        "role": "menuitem",
+        "name": "Opened sessions",
+        "exact": false
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const menus=[...document.querySelectorAll('[role=menu]')].filter(p=>p.getBoundingClientRect().width>0),p=menus.find(p=>p.textContent.includes('Review the proposed changes')&&p.querySelectorAll('[role=menu]').length===0);if(menus.length!==2||!p)return false;const s=getComputedStyle(p),r=p.getBoundingClientRect();return s.minWidth==='200px'&&s.maxWidth==='280px'&&s.maxHeight==='288px'&&s.opacity==='1'&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight&&p.getAnimations({subtree:true}).every(a=>!a.pending&&a.playState!=='running')&&document.fonts.status==='loaded';}"
+      }
+    ],
+    "sessions-assistantturnalignment--interactive-finished-footer-actions": [
+      {
+        "action": "hover",
+        "selector": "[data-finished-footer-fixture]"
+      },
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Copy response"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const root=document.querySelector('[data-finished-footer-fixture]'),b=document.querySelector('button[aria-label=\"Copy response\"]');if(root?.dataset.hovered!=='true'||!b)return false;const s=getComputedStyle(b),r=b.getBoundingClientRect();for(let p=b;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}return s.width==='28px'&&s.height==='28px'&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))&&document.fonts.status==='loaded';}"
+      }
+    ]
+  },
+  "states": {
+    "sessions-sessionchatsearch--default": [
+      {
+        "name": "previous-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Previous result"
+          },
+          {
+            "action": "visible",
+            "text": "Previous result"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const specs=[{\"selector\":\"button[aria-label=\\\"Previous result\\\"]\",\"count\":1,\"height\":24,\"width\":24,\"disabled\":false},{\"selector\":\"button[aria-label=\\\"Next result\\\"]\",\"count\":1,\"height\":24,\"width\":24,\"disabled\":false},{\"selector\":\"button[aria-label=\\\"Close\\\"]\",\"count\":1,\"height\":24,\"width\":24,\"disabled\":false}];for(const spec of specs){const boxes=[...document.querySelectorAll(spec.selector)];if(boxes.length!==spec.count)return false;for(const e of boxes){const s=getComputedStyle(e),r=e.getBoundingClientRect();if(s.height!==spec.height+'px'||(spec.width!=null&&s.width!==spec.width+'px')||r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight||e.disabled!==!!spec.disabled)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}}}  if(document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);return finite.every(a=>!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      },
+      {
+        "name": "no-results",
+        "steps": [
+          {
+            "action": "fill",
+            "role": "searchbox",
+            "name": "Find in session",
+            "value": "synthetic-no-match-22"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Previous result"
+          },
+          {
+            "action": "disabled",
+            "role": "button",
+            "name": "Next result"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const specs=[{\"selector\":\"button[aria-label=\\\"Previous result\\\"]\",\"count\":1,\"height\":24,\"width\":24,\"disabled\":true},{\"selector\":\"button[aria-label=\\\"Next result\\\"]\",\"count\":1,\"height\":24,\"width\":24,\"disabled\":true},{\"selector\":\"button[aria-label=\\\"Close\\\"]\",\"count\":1,\"height\":24,\"width\":24,\"disabled\":false}];for(const spec of specs){const boxes=[...document.querySelectorAll(spec.selector)];if(boxes.length!==spec.count)return false;for(const e of boxes){const s=getComputedStyle(e),r=e.getBoundingClientRect();if(s.height!==spec.height+'px'||(spec.width!=null&&s.width!==spec.width+'px')||r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight||e.disabled!==!!spec.disabled)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}}}  if(document.fonts.status!=='loaded')return false;const finite=document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity);return finite.every(a=>!a.pending&&a.playState!=='running');}"
+          }
+        ]
+      }
+    ]
+  }
+}

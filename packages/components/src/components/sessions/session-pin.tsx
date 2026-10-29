@@ -97,7 +97,6 @@ export const SessionPin = memo(function SessionPin({
           variant="ghost"
           size="mini"
           icon
-          className="shrink-0"
           onClick={onUnpin}
           aria-label={t('sessions.pin.unpin', 'Unpin message')}
         >

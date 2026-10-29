@@ -1,0 +1,139 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844,
+      "device": "iPhone 13"
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 720,
+      "device": "iPhone SE"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "ai-gui-usermessageeditor--short-message",
+    "ai-gui-usermessageeditor--empty",
+    "ai-gui-usermessageeditor--saving",
+    "ai-gui-usermessageeditor--owned-theme-scopes",
+    "ai-terminalcomponent--basic",
+    "ai-terminalcomponent--empty-output",
+    "ai-terminalcomponent--no-input",
+    "ai-terminalcomponent--owned-border-scope"
+  ],
+  "ready": {
+    "ai-gui-usermessageeditor--short-message": [
+      {
+        "action": "visible",
+        "selector": "textarea[aria-label=\"Edit message\"]"
+      }
+    ],
+    "ai-gui-usermessageeditor--empty": [
+      {
+        "action": "visible",
+        "selector": "textarea[aria-label=\"Edit message\"]"
+      }
+    ],
+    "ai-gui-usermessageeditor--saving": [
+      {
+        "action": "visible",
+        "selector": "textarea[aria-label=\"Edit message\"]"
+      }
+    ],
+    "ai-gui-usermessageeditor--owned-theme-scopes": [
+      {
+        "action": "visible",
+        "selector": "textarea[aria-label=\"Edit message\"]",
+        "index": 0
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const x=document.querySelector(\"[data-owned-editor-scopes]\");return getComputedStyle(x).getPropertyValue(\"--input-border\").trim()===\"24 80% 56%\" && x.querySelectorAll(\"textarea\").length===2;}"
+      }
+    ],
+    "ai-terminalcomponent--owned-border-scope": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-terminal-border]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => getComputedStyle(document.querySelector(\"[data-owned-terminal-border]\")).getPropertyValue(\"--border\").trim()===\"310 75% 50%\""
+      }
+    ]
+  },
+  "states": {
+    "ai-gui-usermessageeditor--short-message": [
+      {
+        "name": "cancel-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Cancel"
+          }
+        ]
+      },
+      {
+        "name": "focused",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "textarea[aria-label=\"Edit message\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement===document.querySelector('textarea[aria-label=\"Edit message\"]')"
+          }
+        ]
+      }
+    ],
+    "ai-gui-usermessageeditor--owned-theme-scopes": [
+      {
+        "name": "outside-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-editor-blur-target]"
+          }
+        ]
+      },
+      {
+        "name": "dark-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-owned-editor-scope=dark] textarea"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement===document.querySelector(\"[data-owned-editor-scope=dark] textarea\")"
+          }
+        ]
+      },
+      {
+        "name": "light-exclusion-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-owned-editor-scope=light] textarea"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement===document.querySelector(\"[data-owned-editor-scope=light] textarea\")"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -44,8 +44,10 @@ const INITIAL_TABS: SessionSidePanelTabItem[] = [
   { id: 'diff:turn-1', label: 'Conversation Diff', kind: 'diff', closeable: true },
 ];
 
-function SidePanelTabBarStory() {
-  const [tabs, setTabs] = useState(INITIAL_TABS);
+function SidePanelTabBarStory({ pending = false }: { pending?: boolean }) {
+  const [tabs, setTabs] = useState(() =>
+    INITIAL_TABS.map((tab, index) => (pending && index === 1 ? { ...tab, pending: true } : tab))
+  );
   const [activeTabId, setActiveTabId] = useState<string | null>('file:src/app.tsx');
   const sideSessionCountRef = useRef(2);
   const openedPanelIds = new Set(tabs.map((tab) => tab.id));
@@ -129,6 +131,8 @@ type Story = StoryObj<typeof meta>;
 export const UnifiedTabs: Story = {
   render: () => <SidePanelTabBarStory />,
 };
+
+export const PendingTab: Story = { render: () => <SidePanelTabBarStory pending /> };
 
 export const EmptyState: Story = {
   render: () => (

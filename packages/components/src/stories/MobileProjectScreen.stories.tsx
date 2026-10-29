@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
+import * as stylex from '@stylexjs/stylex';
+import { Button } from '@lody/ui/button';
 import { ChevronRight, Wrench } from 'lucide-react';
 import type { WorktreeSetupScriptConfig, WorktreeSetupShell } from '@lody/shared';
 
@@ -11,6 +13,8 @@ import {
 } from '@/components/mobile/mobile-project-screen';
 import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
 import { MobileWorktreeConfigSheet } from '@/components/mobile/mobile-worktree-config-sheet';
+import { withClassName } from '@/lib/stylex';
+import { themeColors } from '../style/theme-colors.stylex';
 
 const meta = {
   title: 'Mobile/MobileProjectScreen',
@@ -205,3 +209,108 @@ export const IOSLocal: Story = {
   },
   render: () => <StoryShell project={localProject} />,
 };
+
+const ownedStyles = stylex.create({
+  frame: { maxWidth: 440, backgroundColor: themeColors.background },
+  screen: { width: '100%', height: 'calc(100dvh - 104px)', minHeight: 400, overflow: 'hidden' },
+  scopeControls: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, padding: 8 },
+  result: { display: 'block', padding: 8, fontSize: 12, color: themeColors.mutedForeground },
+});
+
+const ownedConversations: MobileConversationItem[] = [
+  {
+    id: 'alpha',
+    title: 'Alpha: preserve project controls',
+    branchName: 'fix/alpha',
+    ageLabel: '1h',
+  },
+  { id: 'beta', title: 'Beta: review keyboard behavior', branchName: 'fix/beta', ageLabel: '2h' },
+  {
+    id: 'long',
+    title: 'Long project conversation title preserves truncation at narrow widths',
+    ageLabel: '3h',
+  },
+];
+
+function OwnedProjectFixture({ scoped = false }: { scoped?: boolean }) {
+  const [archived, setArchived] = useState(false);
+  const [filter, setFilter] = useState('all');
+  const [backCount, setBackCount] = useState(0);
+  const [scope, setScope] = useState(0);
+  const scopeNames = ['dark-scope', 'light-scope', 'nested-light-exclusion'];
+  const outerScope = scoped ? (scope === 0 ? 'dark-scope' : 'light-scope') : undefined;
+  return (
+    <div
+      {...stylex.props(ownedStyles.frame)}
+      data-owned-project-fixture
+      data-owned-project-back-count={backCount}
+      data-owned-project-filter={filter}
+      data-owned-project-archived={archived}
+      data-owned-project-scope={scoped ? scopeNames[scope] : undefined}
+    >
+      {scoped ? (
+        <div {...stylex.props(ownedStyles.scopeControls)}>
+          <Button size="small" onClick={() => setScope((current) => (current + 1) % 3)}>
+            Change local theme scope
+          </Button>
+          <output>{scopeNames[scope]}</output>
+        </div>
+      ) : null}
+      <div
+        className={outerScope}
+        style={scoped ? ({ '--color-white': '#ffdfc4' } as CSSProperties) : undefined}
+      >
+        <div
+          {...withClassName(
+            stylex.props(ownedStyles.screen),
+            scoped && scope === 2 ? 'dark-scope' : undefined
+          )}
+        >
+          <MobileProjectScreen
+            project={localProject}
+            conversations={filter === 'alpha' ? ownedConversations.slice(0, 1) : ownedConversations}
+            filterPills={[
+              {
+                kind: 'single',
+                id: 'view',
+                fallbackLabel: 'Messages',
+                options: [
+                  { id: 'all', label: 'All messages' },
+                  { id: 'alpha', label: 'Alpha only' },
+                ],
+                selectedId: filter,
+                onSelect: setFilter,
+              },
+            ]}
+            labels={{
+              backAriaLabel: 'Back to projects',
+              archiveToggleLabel: 'Archived conversations',
+              filterBarToggleLabel: 'Show project filters',
+              searchAriaLabel: 'Search conversations',
+              searchPlaceholder: 'Search conversations',
+              clearSearchAriaLabel: 'Clear project search',
+              emptyConversations: 'No matching conversations',
+              archivedConversationsHeading: 'Archived chats',
+              chatTab: 'Chat',
+              filesTab: 'Files',
+              settingsTab: 'Settings',
+            }}
+            filesTabContent={null}
+            onBack={() => setBackCount((count) => count + 1)}
+            onConversationSelect={fn()}
+            showArchived={archived}
+            onShowArchivedToggle={() => setArchived((current) => !current)}
+          />
+        </div>
+      </div>
+      <output {...stylex.props(ownedStyles.result)}>
+        Back {backCount}; filter {filter}; archived {String(archived)}
+      </output>
+    </div>
+  );
+}
+
+type OwnedProjectStory = StoryObj<typeof OwnedProjectFixture>;
+
+export const OwnedControls: OwnedProjectStory = { render: () => <OwnedProjectFixture /> };
+export const OwnedScopes: OwnedProjectStory = { render: () => <OwnedProjectFixture scoped /> };

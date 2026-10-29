@@ -2238,7 +2238,7 @@ export const SessionChatInputArea = memo(
     const externalHistorySyncNode =
       isExternalHistoryRefreshing && externalHistorySyncLabel ? (
         <div {...stylex.props(styles.externalSync)}>
-          <Spinner className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <Spinner diameter="calc(var(--spacing) * 3.5)" aria-hidden="true" />
           <span {...stylex.props(styles.externalSyncLabel)}>{externalHistorySyncLabel}</span>
         </div>
       ) : null;

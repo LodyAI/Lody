@@ -81,6 +81,9 @@ const typography = stylex.create({
   caption: { fontSize: textScale.captionSize, lineHeight: textScale.captionLeading },
 });
 
+const DARK_SCOPE =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+
 const styles = stylex.create({
   /* The composer's own frame. */
   root: { display: 'flex', width: '100%', flexDirection: 'column' },
@@ -118,8 +121,6 @@ const styles = stylex.create({
     paddingInline: themeSpace[4],
     paddingTop: themeSpace[4],
     paddingBottom: themeSpace[3],
-    borderColor: 'hsl(var(--foreground) / 0.1)',
-    backgroundColor: themeColors.composer,
     position: 'relative',
   },
   /* The dialog composer box, which has no container of its own. */
@@ -130,19 +131,91 @@ const styles = stylex.create({
     borderRadius: themeRadius['2xl'],
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: 'hsl(var(--foreground) / 0.1)',
-    backgroundColor: themeColors.composer,
+  },
+  landingColors: {
+    borderColor: {
+      default: 'hsl(var(--foreground) / 0.1)',
+      [DARK_SCOPE]: {
+        default: 'hsl(var(--input-border) / 1)',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in oklab, hsl(var(--input-border) / 1) 60%, transparent)',
+      },
+    },
+    backgroundColor: {
+      default: themeColors.composer,
+      [DARK_SCOPE]: {
+        default: 'hsl(var(--input) / 1)',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in oklab, hsl(var(--input) / 1) 90%, transparent)',
+      },
+    },
+  },
+  sessionColors: {
+    borderColor: {
+      default: 'hsl(var(--foreground) / 0.1)',
+      [DARK_SCOPE]: {
+        default: 'hsl(var(--input-border) / 1)',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in oklab, hsl(var(--input-border) / 1) 70%, transparent)',
+      },
+    },
+    backgroundColor: {
+      default: themeColors.composer,
+      [DARK_SCOPE]: {
+        default: 'hsl(var(--input) / 1)',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in oklab, hsl(var(--input) / 1) 90%, transparent)',
+      },
+    },
+  },
+  // Mention decorations cover native glyphs before repainting their labels.
+  // Keep the original local, opaque sRGB cover separate from the frame's fill.
+  mentionSurface: {
+    '--mention-chip-surface': {
+      default: 'hsl(var(--composer))',
+      [DARK_SCOPE]: {
+        default: 'hsl(var(--input))',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in srgb, hsl(var(--input)) 90%, hsl(var(--background)))',
+      },
+    },
   },
   /* An image dragged over the box: the box takes the accent edge and fill. */
   boxDropping: {
-    borderColor: 'hsl(var(--primary) / 0.5)',
-    backgroundColor: 'hsl(var(--primary) / 0.04)',
+    // Dark keeps its resting edge/fill while the drop ring remains visible.
+    // State composition must retain the complete light and dark contracts.
+    borderColor: {
+      default: 'hsl(var(--primary) / 0.5)',
+      [DARK_SCOPE]: {
+        default: 'hsl(var(--input-border) / 1)',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in oklab, hsl(var(--input-border) / 1) 70%, transparent)',
+      },
+    },
+    backgroundColor: {
+      default: 'hsl(var(--primary) / 0.04)',
+      [DARK_SCOPE]: {
+        default: 'hsl(var(--input) / 1)',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in oklab, hsl(var(--input) / 1) 90%, transparent)',
+      },
+    },
     // The drop ring is composed with the composer's own lift, in Tailwind's
     // order: the ring first, then the shadow. The lift is stated inline: the
     // StyleX compiler evaluates a `stylex.create` argument statically and
     // cannot read an identifier imported from a plain module.
     boxShadow:
       '0 0 0 2px hsl(var(--primary) / 0.25), var(--composer-elevation, 0 10px 28px -14px lch(0% 0 0/0.16), 0 1px 2px lch(0% 0 0/0.05))',
+  },
+  boxDroppingLanding: {
+    borderColor: {
+      default: 'hsl(var(--primary) / 0.5)',
+      [DARK_SCOPE]: {
+        default: 'hsl(var(--input-border) / 1)',
+        '@supports (color: color-mix(in lab, red, red))':
+          'color-mix(in oklab, hsl(var(--input-border) / 1) 60%, transparent)',
+      },
+    },
   },
 
   /* The attachment strips. */
@@ -346,6 +419,13 @@ const styles = stylex.create({
 
   /* The composer's status line. */
   status: { paddingInline: themeSpace[1] },
+  statusWarning: {
+    color: {
+      default: 'var(--color-amber-600)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'var(--color-amber-400)',
+    },
+  },
   statusError: { color: themeColors.destructive },
   statusMuted: { color: themeColors.mutedForeground },
 
@@ -1047,31 +1127,10 @@ export function ChatComposer({
 
   const boxTextareaClassName = getChatComposerTextareaClassName({ tone, variant, isMobile });
 
-  /**
-   * The colour a mention decoration paints to hide the textarea's own glyphs
-   * before redrawing them in the mention colour. It has to equal whatever this
-   * composer paints behind the textarea, or the "invisible" cover shows up as a
-   * rectangle — which is exactly what `--input` did here, since this surface is
-   * deliberately `--composer` rather than the muddy `bg-input`.
-   *
-   * KEEP IN SYNC with the `bg-*` classes below. CSS cannot read an ancestor's
-   * background, so this is a copy, and a copy can drift.
-   */
-  const mentionSurfaceClassName =
-    '[--mention-chip-surface:hsl(var(--composer))] dark:[--mention-chip-surface:color-mix(in_srgb,hsl(var(--input))_90%,hsl(var(--background)))]';
-
   // Light surface: near-white composer on the gray canvas + 1px border.
   // Avoid heavy bg-input fills that read as muddy gray on cool-white themes.
-  // The mention surface is a custom property, which StyleX cannot carry, so it
-  // rides the element as a Tailwind class.
   const mentionContainerClassName = !isLanding
-    ? [
-        stylex.props(styles.dialogBox).className,
-        'dark:border-input-border/70 dark:bg-input/90',
-        mentionSurfaceClassName,
-      ]
-        .filter(Boolean)
-        .join(' ')
+    ? stylex.props(styles.dialogBox, styles.sessionColors, styles.mentionSurface).className
     : undefined;
 
   const dialogTextareaClassName = cn(
@@ -1095,17 +1154,19 @@ export function ChatComposer({
 
   // Focus stays quiet: the caret and placeholder already show where typing
   // goes, so the composer keeps its resting border instead of an accent ring.
-  // The box is the composer's own element, so its look is a StyleX style; the
-  // dark theme's own fill and edge stay Tailwind classes, and the mention
-  // surface is a custom property StyleX cannot carry.
   const boxStyle = isLanding
     ? stylex.props(
         styles.landingBox,
+        styles.landingColors,
+        styles.mentionSurface,
         composerSurfaceStyles.composerElevation,
-        isImageDropActive && styles.boxDropping
+        isImageDropActive && styles.boxDropping,
+        isImageDropActive && styles.boxDroppingLanding
       )
     : stylex.props(
         composerSurfaceStyles.sessionSurface,
+        styles.sessionColors,
+        styles.mentionSurface,
         composerSurfaceStyles.composerElevation,
         isImageDropActive && styles.boxDropping
       );
@@ -1113,10 +1174,6 @@ export function ChatComposer({
     // `group` is the focus hint's anchor: it fades when the box takes focus.
     'group',
     boxStyle.className,
-    isLanding
-      ? 'dark:border-input-border/60 dark:bg-input/90'
-      : 'dark:border-input-border/70 dark:bg-input/90',
-    mentionSurfaceClassName,
   ]
     .filter(Boolean)
     .join(' ');
@@ -1131,20 +1188,15 @@ export function ChatComposer({
   // yet (so the chip never collides with text or thumbnails). focus-within hides it too.
   const showFocusHint =
     focusHintSupported && Boolean(focusHintBinding) && !promptValue && !composerHasAttachments;
-  // The amber tone is a hard-coded pair, and its dark step needs the `.dark`
-  // ancestor StyleX cannot select, so that one stays a Tailwind class.
-  const statusStyle =
+  const statusStyle = stylex.props(
+    styles.status,
+    typography.helper,
     statusTone === 'warning'
-      ? stylex.props(styles.status, typography.helper)
-      : stylex.props(
-          styles.status,
-          typography.helper,
-          statusTone === 'error' ? styles.statusError : styles.statusMuted
-        );
-  const statusClassName =
-    statusTone === 'warning'
-      ? ['text-amber-600 dark:text-amber-400', statusStyle.className].filter(Boolean).join(' ')
-      : statusStyle.className;
+      ? styles.statusWarning
+      : statusTone === 'error'
+        ? styles.statusError
+        : styles.statusMuted
+  );
 
   const secondaryButtonClassName = cn(
     actionBaseClassName,
@@ -1536,7 +1588,7 @@ export function ChatComposer({
                 <div
                   role={statusTone === 'error' ? 'alert' : 'status'}
                   aria-live={statusTone === 'error' ? 'assertive' : 'polite'}
-                  className={statusClassName}
+                  className={statusStyle.className}
                 >
                   {statusMessage}
                 </div>
@@ -1628,7 +1680,7 @@ export function ChatComposer({
               <div
                 role={statusTone === 'error' ? 'alert' : 'status'}
                 aria-live={statusTone === 'error' ? 'assertive' : 'polite'}
-                className={statusClassName}
+                className={statusStyle.className}
               >
                 {statusMessage}
               </div>

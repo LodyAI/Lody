@@ -177,12 +177,12 @@ export function GitHubPersonalIdentitySettingsCard({
         <Button
           size="small"
           variant="ghost"
-          className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap bg-foreground/[0.06] self-start hover:bg-foreground/[0.1] sm:self-auto"
+          className="gap-1 bg-foreground/[0.06] self-start hover:bg-foreground/[0.1] sm:self-auto"
           onClick={onAuthorize}
           disabled={!workspaceReady || authorizing}
         >
           {authorizing ? (
-            <Spinner className="h-3.5 w-3.5" />
+            <Spinner diameter="calc(var(--spacing) * 3.5)" />
           ) : (
             <Github {...stylex.props(styles.authorizeIcon)} />
           )}

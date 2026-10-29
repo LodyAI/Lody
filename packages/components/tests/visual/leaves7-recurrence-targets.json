@@ -1,0 +1,167 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844,
+      "device": "iPhone 13"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "schedules-recurrencemigration--weekly",
+    "schedules-recurrencemigration--monthly",
+    "schedules-recurrencemigration--disabled-weekly",
+    "schedules-recurrencemigration--scope-themes"
+  ],
+  "ready": {
+    "schedules-recurrencemigration--weekly": [
+      {
+        "action": "visible",
+        "selector": "button[aria-label=\"Tuesday\"]"
+      }
+    ],
+    "schedules-recurrencemigration--monthly": [
+      {
+        "action": "visible",
+        "selector": "button[aria-label=\"Day 2\"]"
+      }
+    ],
+    "schedules-recurrencemigration--disabled-weekly": [
+      {
+        "action": "visible",
+        "selector": "button[aria-label=\"Tuesday\"]"
+      }
+    ],
+    "schedules-recurrencemigration--scope-themes": [
+      {
+        "action": "visible",
+        "selector": "[data-recurrence-scope=dark] button[aria-label=\"Tuesday\"]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const scope=document.querySelector('[data-recurrence-theme-fixture]'); return getComputedStyle(scope).getPropertyValue('--color-white').trim() === '#74c9bb' && scope.querySelectorAll('[data-recurrence-scope=dark] button[aria-pressed]').length === 7 && scope.querySelectorAll('[data-recurrence-scope=light] button[aria-pressed]').length === 7; }"
+      }
+    ]
+  },
+  "states": {
+    "schedules-recurrencemigration--weekly": [
+      {
+        "name": "unselected-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "button[aria-label=\"Tuesday\"]"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": -10,
+            "y": -10
+          },
+          {
+            "action": "focus",
+            "selector": "button[aria-label=\"Tuesday\"]"
+          }
+        ]
+      },
+      {
+        "name": "selected-by-keyboard",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "button[aria-label=\"Tuesday\"]",
+            "key": "Space"
+          },
+          {
+            "action": "visible",
+            "selector": "button[aria-label=\"Tuesday\"][aria-pressed=true]"
+          }
+        ]
+      }
+    ],
+    "schedules-recurrencemigration--monthly": [
+      {
+        "name": "unselected-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "button[aria-label=\"Day 2\"]"
+          }
+        ]
+      },
+      {
+        "name": "selected-by-pointer",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "button[aria-label=\"Day 2\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "button[aria-label=\"Day 2\"][aria-pressed=true]"
+          }
+        ]
+      }
+    ],
+    "schedules-recurrencemigration--disabled-weekly": [
+      {
+        "name": "disabled-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "button[aria-label=\"Tuesday\"]"
+          },
+          {
+            "action": "disabled",
+            "selector": "button[aria-label=\"Tuesday\"]"
+          }
+        ]
+      }
+    ],
+    "schedules-recurrencemigration--scope-themes": [
+      {
+        "name": "dark-scope-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-recurrence-scope=dark] button[aria-label=\"Tuesday\"]"
+          }
+        ]
+      },
+      {
+        "name": "nested-light-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-recurrence-scope=light] button[aria-label=\"Tuesday\"]"
+          }
+        ]
+      },
+      {
+        "name": "dark-scope-selected",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-recurrence-scope=dark] button[aria-label=\"Tuesday\"]"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-recurrence-scope=dark] button[aria-label=\"Tuesday\"][aria-pressed=true]"
+          }
+        ]
+      }
+    ]
+  }
+}

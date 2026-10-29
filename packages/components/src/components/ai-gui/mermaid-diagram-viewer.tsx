@@ -98,11 +98,11 @@ function measureTouchGesture(
  * phone screen, where the shared size is under the 44px touch-target floor
  * (iOS HIG / WCAG 2.5.5) that this whole fix is about.
  *
- * These stay Tailwind classes on the `@lody/ui` button: the primitive owns the
- * size, the padding and the ink of its own box, and a StyleX class handed to
- * it would fight the primitive's own styles rather than replace them.
+ * The primitive's dimension props own the box; padding and ink compatibility
+ * classes stay separate. Reset zoom keeps automatic width above its minimum.
  */
-const CONTROL_CLASS_NAME = 'h-11 w-11 shrink-0 text-muted-foreground';
+const CONTROL_SIZE = 'calc(var(--spacing) * 11)';
+const CONTROL_CLASS_NAME = 'text-muted-foreground';
 
 /**
  * Inline rather than a utility class because an inline `padding-left` would
@@ -707,6 +707,8 @@ function OpenMermaidDiagramViewer({
           type="button"
           variant="ghost"
           icon
+          height={CONTROL_SIZE}
+          width={CONTROL_SIZE}
           className={CONTROL_CLASS_NAME}
           onClick={() => zoomBy(1 / MERMAID_DIAGRAM_ZOOM_STEP)}
           disabled={zoom !== null && zoom <= MERMAID_DIAGRAM_MIN_ZOOM}
@@ -719,7 +721,9 @@ function OpenMermaidDiagramViewer({
           type="button"
           variant="ghost"
           icon
-          className={cn(CONTROL_CLASS_NAME, 'w-auto min-w-11 px-2 font-mono text-xs tabular-nums')}
+          height={CONTROL_SIZE}
+          width="auto"
+          className={cn(CONTROL_CLASS_NAME, 'min-w-11 px-2 font-mono text-xs tabular-nums')}
           onClick={resetZoom}
           title={resetZoomLabel}
           aria-label={resetZoomLabel}
@@ -730,6 +734,8 @@ function OpenMermaidDiagramViewer({
           type="button"
           variant="ghost"
           icon
+          height={CONTROL_SIZE}
+          width={CONTROL_SIZE}
           className={CONTROL_CLASS_NAME}
           onClick={() => zoomBy(MERMAID_DIAGRAM_ZOOM_STEP)}
           disabled={zoom !== null && zoom >= MERMAID_DIAGRAM_MAX_ZOOM}
@@ -744,6 +750,8 @@ function OpenMermaidDiagramViewer({
           variant="ghost"
           icon
           data-testid="mermaid-diagram-viewer-close"
+          height={CONTROL_SIZE}
+          width={CONTROL_SIZE}
           className={CONTROL_CLASS_NAME}
           onClick={onClose}
           title={closeLabel}

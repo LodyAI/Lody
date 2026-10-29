@@ -527,7 +527,7 @@ function TabContent({
         {isWaiting ? (
           <Hand {...stylex.props(styles.waitingIcon)} />
         ) : isWorking ? (
-          <Spinner className="h-3 w-3 text-tab-active-accent" />
+          <Spinner diameter="calc(var(--spacing) * 3)" className="text-tab-active-accent" />
         ) : isUnread ? (
           <span
             data-session-tab-unread=""
@@ -1179,7 +1179,7 @@ export function ClosedTabsPopover({
           {t('sessions.tabs.closedTabs', 'Closed conversations')}
         </Tooltip.Content>
       </Tooltip.Root>
-      <Popover.Content align="end" className="w-72 p-0" sideOffset={4}>
+      <Popover.Content align="end" padding="none" width="calc(var(--spacing) * 72)" sideOffset={4}>
         <div {...stylex.props(styles.popoverHeader)}>
           <p {...stylex.props(styles.popoverTitle)}>
             {t('sessions.tabs.closedTabs', 'Closed conversations')}
@@ -1231,7 +1231,7 @@ function ClosedConversationStatus({ session }: { session: SessionMeta }) {
         aria-label={t('sessions.waitingPermission', 'Waiting for permission')}
       />
     );
-  if (status) return <Spinner className="h-3 w-3" />;
+  if (status) return <Spinner diameter="calc(var(--spacing) * 3)" />;
   if (closedSessionHasUnreadMessages(session))
     return (
       <span

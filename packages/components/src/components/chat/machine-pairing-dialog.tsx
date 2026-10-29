@@ -289,7 +289,7 @@ export function MachinePairingDialog({
 
             {creating ? (
               <div {...stylex.props(styles.waiting)}>
-                <Spinner className="h-5 w-5" aria-hidden="true" />
+                <Spinner diameter="calc(var(--spacing) * 5)" aria-hidden="true" />
               </div>
             ) : createError ? (
               <div {...stylex.props(styles.centered)}>
@@ -322,7 +322,7 @@ export function MachinePairingDialog({
                       </p>
                     </div>
                   </div>
-                  <Button className="mt-3 w-full" onClick={downloadDesktop}>
+                  <Button width="100%" className="mt-3" onClick={downloadDesktop}>
                     <Download {...stylex.props(styles.icon16)} aria-hidden="true" />
                     {t('machinePairing.downloadDesktop', 'Download Lody Desktop')}
                   </Button>
@@ -401,7 +401,11 @@ export function MachinePairingDialog({
                     {t('machinePairing.preparingAgents', 'Preparing agent configuration…')}
                   </p>
                 </div>
-                <Spinner className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                <Spinner
+                  diameter="calc(var(--spacing) * 4)"
+                  className="text-muted-foreground"
+                  aria-hidden="true"
+                />
               </div>
             ) : (
               <div {...stylex.props(styles.centered)}>

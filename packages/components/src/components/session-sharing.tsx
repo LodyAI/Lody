@@ -680,7 +680,7 @@ export function SessionAccessControl({
           </button>
         }
       />
-      <Popover.Content align="end" sideOffset={6} className="w-[18.5rem] gap-0 p-2">
+      <Popover.Content align="end" sideOffset={6} gap="none" width="18.5rem" className="p-2">
         <Popover.Title {...stylex.props(shareSurface.visuallyHidden)}>
           {t('sessions.sharing.panelTitle', 'Share this conversation')}
         </Popover.Title>
@@ -820,7 +820,7 @@ function ShareConfirmationDialog({
               onConfirm();
             }}
           >
-            {isSharing ? <Spinner className="mr-1.5 h-4 w-4" /> : null}
+            {isSharing ? <Spinner diameter="calc(var(--spacing) * 4)" className="mr-1.5" /> : null}
             {actionLabel}
           </Button>
         </AlertDialog.Footer>

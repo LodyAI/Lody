@@ -1,0 +1,277 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "device": "iPhone SE",
+      "width": 390,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "migration-ownedmobilehistoryspinner--import",
+    "migration-ownedmobilehistoryspinner--resolve",
+    "migration-ownedmobilehistoryspinner--import-root-spacing",
+    "migration-ownedmobilehistoryspinner--resolve-root-spacing"
+  ],
+  "ready": {
+    "migration-ownedmobilehistoryspinner--import": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const panel=document.querySelector('.mobile-acp-history-sheet');if(!panel||getComputedStyle(panel).opacity!=='1')return false;const r=panel.getBoundingClientRect();return r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight+1&&!document.querySelector('.mobile-acp-history-sheet [data-slot=spinner]'); }"
+      }
+    ],
+    "migration-ownedmobilehistoryspinner--resolve": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const panel=document.querySelector('.mobile-acp-history-sheet');if(!panel||getComputedStyle(panel).opacity!=='1')return false;const r=panel.getBoundingClientRect();return r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight+1&&!document.querySelector('.mobile-acp-history-sheet [data-slot=spinner]'); }"
+      }
+    ],
+    "migration-ownedmobilehistoryspinner--import-root-spacing": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const panel=document.querySelector('.mobile-acp-history-sheet');if(!panel||getComputedStyle(panel).opacity!=='1')return false;const r=panel.getBoundingClientRect();return r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight+1&&!document.querySelector('.mobile-acp-history-sheet [data-slot=spinner]'); }"
+      }
+    ],
+    "migration-ownedmobilehistoryspinner--resolve-root-spacing": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const panel=document.querySelector('.mobile-acp-history-sheet');if(!panel||getComputedStyle(panel).opacity!=='1')return false;const r=panel.getBoundingClientRect();return r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight+1&&!document.querySelector('.mobile-acp-history-sheet [data-slot=spinner]'); }"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedmobilehistoryspinner--import": [
+      {
+        "name": "pending",
+        "steps": [
+          {
+            "action": "click",
+            "selector": ".mobile-acp-history-sheet button:has(svg):text-matches(\"Import\")"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const fixture=document.querySelector('[data-owned-history-fixture]'),panel=document.querySelector('.mobile-acp-history-sheet'),marks=panel?.querySelectorAll('[data-slot=spinner]');if(fixture?.dataset.pending!=='true'||marks?.length!==1)return false;const mark=marks[0],r=mark.getBoundingClientRect(),css=getComputedStyle(mark);return css.width==='16px'&&css.height==='16px'&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&mark.closest('button')?.disabled===true;}"
+          }
+        ]
+      },
+      {
+        "name": "completed-reopened",
+        "steps": [
+          {
+            "action": "click",
+            "selector": ".mobile-acp-history-sheet button[aria-label=\"Close\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('.mobile-acp-history-sheet')"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Complete synthetic history operation"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-owned-history-fixture]')?.dataset.pending==='false'"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open history fixture"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('.mobile-acp-history-sheet');return p&&getComputedStyle(p).opacity==='1'&&p.getBoundingClientRect().height>0&&!p.querySelector('[data-slot=spinner]');}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmobilehistoryspinner--resolve": [
+      {
+        "name": "pending",
+        "steps": [
+          {
+            "action": "click",
+            "selector": ".mobile-acp-history-sheet button:text-is(\"Re-import\")"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const dialog=document.querySelector('[role=alertdialog]');return !!dialog&&getComputedStyle(dialog).opacity==='1';}"
+          },
+          {
+            "action": "click",
+            "selector": "[role=alertdialog] button:text-is(\"Re-import\")"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[role=alertdialog]')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('.mobile-acp-history-sheet')&&document.querySelector('[data-owned-history-fixture]')?.dataset.pending==='true'"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open history fixture"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const fixture=document.querySelector('[data-owned-history-fixture]'),panel=document.querySelector('.mobile-acp-history-sheet'),marks=panel?.querySelectorAll('[data-slot=spinner]');if(fixture?.dataset.pending!=='true'||marks?.length!==1)return false;const mark=marks[0],r=mark.getBoundingClientRect(),css=getComputedStyle(mark);return css.width==='14px'&&css.height==='14px'&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&mark.closest('button')?.disabled===true;}"
+          }
+        ]
+      },
+      {
+        "name": "completed-reopened",
+        "steps": [
+          {
+            "action": "click",
+            "selector": ".mobile-acp-history-sheet button[aria-label=\"Close\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('.mobile-acp-history-sheet')"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Complete synthetic history operation"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-owned-history-fixture]')?.dataset.pending==='false'"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open history fixture"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('.mobile-acp-history-sheet');return p&&getComputedStyle(p).opacity==='1'&&p.getBoundingClientRect().height>0&&!p.querySelector('[data-slot=spinner]');}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmobilehistoryspinner--import-root-spacing": [
+      {
+        "name": "pending",
+        "steps": [
+          {
+            "action": "click",
+            "selector": ".mobile-acp-history-sheet button:has(svg):text-matches(\"Import\")"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const fixture=document.querySelector('[data-owned-history-fixture]'),panel=document.querySelector('.mobile-acp-history-sheet'),marks=panel?.querySelectorAll('[data-slot=spinner]');if(fixture?.dataset.pending!=='true'||marks?.length!==1)return false;const mark=marks[0],r=mark.getBoundingClientRect(),css=getComputedStyle(mark);return css.width==='20px'&&css.height==='20px'&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&mark.closest('button')?.disabled===true;}"
+          }
+        ]
+      },
+      {
+        "name": "completed-reopened",
+        "steps": [
+          {
+            "action": "click",
+            "selector": ".mobile-acp-history-sheet button[aria-label=\"Close\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('.mobile-acp-history-sheet')"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Complete synthetic history operation"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-owned-history-fixture]')?.dataset.pending==='false'"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open history fixture"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('.mobile-acp-history-sheet');return p&&getComputedStyle(p).opacity==='1'&&p.getBoundingClientRect().height>0&&!p.querySelector('[data-slot=spinner]');}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmobilehistoryspinner--resolve-root-spacing": [
+      {
+        "name": "pending",
+        "steps": [
+          {
+            "action": "click",
+            "selector": ".mobile-acp-history-sheet button:text-is(\"Re-import\")"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const dialog=document.querySelector('[role=alertdialog]');return !!dialog&&getComputedStyle(dialog).opacity==='1';}"
+          },
+          {
+            "action": "click",
+            "selector": "[role=alertdialog] button:text-is(\"Re-import\")"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('[role=alertdialog]')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('.mobile-acp-history-sheet')&&document.querySelector('[data-owned-history-fixture]')?.dataset.pending==='true'"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open history fixture"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const fixture=document.querySelector('[data-owned-history-fixture]'),panel=document.querySelector('.mobile-acp-history-sheet'),marks=panel?.querySelectorAll('[data-slot=spinner]');if(fixture?.dataset.pending!=='true'||marks?.length!==1)return false;const mark=marks[0],r=mark.getBoundingClientRect(),css=getComputedStyle(mark);return css.width==='17.5px'&&css.height==='17.5px'&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&mark.closest('button')?.disabled===true;}"
+          }
+        ]
+      },
+      {
+        "name": "completed-reopened",
+        "steps": [
+          {
+            "action": "click",
+            "selector": ".mobile-acp-history-sheet button[aria-label=\"Close\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => !document.querySelector('.mobile-acp-history-sheet')"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Complete synthetic history operation"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-owned-history-fixture]')?.dataset.pending==='false'"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Open history fixture"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const p=document.querySelector('.mobile-acp-history-sheet');return p&&getComputedStyle(p).opacity==='1'&&p.getBoundingClientRect().height>0&&!p.querySelector('[data-slot=spinner]');}"
+          }
+        ]
+      }
+    ]
+  }
+}

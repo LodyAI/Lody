@@ -1,0 +1,137 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "breakpoint900",
+      "width": 900,
+      "height": 900
+    },
+    {
+      "name": "breakpoint899",
+      "width": 899,
+      "height": 900
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 900,
+      "device": "iPhone SE"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "migration-onboardingceremonystyle--paused-opening",
+    "migration-onboardingceremonystyle--scoped-palette"
+  ],
+  "ready": {
+    "migration-onboardingceremonystyle--paused-opening": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Skip intro",
+        "exact": true
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const f=document.querySelector('[data-ceremony-fixture]');const r=f?.firstElementChild;const c=r&&getComputedStyle(r);const art=r?.querySelector('img');return c?.position==='fixed'&&c.top==='0px'&&c.right==='0px'&&c.bottom==='0px'&&c.left==='0px'&&c.zIndex==='10'&&c.overflow==='hidden'&&r.getBoundingClientRect().width===innerWidth&&r.getBoundingClientRect().height===innerHeight&&r.querySelector('h1')?.textContent==='Stay in the flow.'&&art?.complete&&art.naturalWidth>0;}"
+      },
+      {
+        "action": "movePointer",
+        "x": 1,
+        "y": 1
+      }
+    ],
+    "migration-onboardingceremonystyle--scoped-palette": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Skip intro",
+        "exact": true
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const f=document.querySelector('[data-ceremony-fixture]');const r=f?.firstElementChild;const c=r&&getComputedStyle(r);const art=r?.querySelector('img');return c?.position==='fixed'&&c.top==='0px'&&c.right==='0px'&&c.bottom==='0px'&&c.left==='0px'&&c.zIndex==='10'&&c.overflow==='hidden'&&r.getBoundingClientRect().width===innerWidth&&r.getBoundingClientRect().height===innerHeight&&r.querySelector('h1')?.textContent==='Stay in the flow.'&&art?.complete&&art.naturalWidth>0&&c.color==='rgb(20, 40, 60)'&&getComputedStyle(r.querySelector('h1')).color==='rgb(20, 40, 60)';}"
+      },
+      {
+        "action": "movePointer",
+        "x": 1,
+        "y": 1
+      }
+    ]
+  },
+  "states": {
+    "migration-onboardingceremonystyle--paused-opening": [
+      {
+        "name": "skip-focused",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Skip intro",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement?.textContent==='Skip intro'"
+          }
+        ]
+      },
+      {
+        "name": "final-beat",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Skip intro",
+            "exact": true
+          },
+          {
+            "action": "visible",
+            "role": "button",
+            "name": "Configure Lody",
+            "exact": true
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const r=document.querySelector('[data-ceremony-fixture]');return r?.querySelector('[aria-live=polite] h1')?.textContent==='Start exploring!'&&r.querySelectorAll('figure').length===4&&[...r.querySelectorAll('img')].every(i=>i.complete&&i.naturalWidth>0)&&r.dataset.finished==='false';}"
+          },
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          }
+        ]
+      },
+      {
+        "name": "finish-callback",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Configure Lody",
+            "exact": true
+          },
+          {
+            "action": "visible",
+            "selector": "[data-ceremony-fixture] [role=status]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const r=document.querySelector('[data-ceremony-fixture]');return r?.dataset.finished==='true'&&r.querySelector('[role=status]')?.textContent==='Actual ceremony finish callback received.'&&!r.querySelector('.lody-intro-stage');}"
+          },
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          }
+        ]
+      }
+    ]
+  }
+}

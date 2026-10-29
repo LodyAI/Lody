@@ -341,11 +341,15 @@ const callerStyles = stylex.create({
 function OwnedQueueFixture({
   scope = 'default',
   caller = 'none',
+  count = 10,
+  rowFooter = false,
 }: {
   scope?: 'default' | 'root' | 'subtree';
   caller?: 'none' | 'utilities' | 'opaque';
+  count?: number;
+  rowFooter?: boolean;
 }) {
-  const [items, setItems] = useState(() => makeItems(10));
+  const [items, setItems] = useState(() => makeItems(count));
   const [result, setResult] = useState('Ready');
   useLayoutEffect(() => {
     if (scope !== 'root') return undefined;
@@ -372,6 +376,15 @@ function OwnedQueueFixture({
       <MessageQueueDisplay
         {...commonArgs}
         items={items}
+        renderItemFooter={
+          rowFooter
+            ? (item) => (
+                <span data-owned-queue-row-footer="" tabIndex={0}>
+                  Synthetic metadata for {item.$cid}
+                </span>
+              )
+            : undefined
+        }
         className={
           caller === 'utilities'
             ? 'overflow-visible rounded-t-xl rounded-b-md border-2 border-red-500 bg-blue-100 ring-2 ring-green-600 shadow-lg'
@@ -427,4 +440,16 @@ export const OwnedUtilityCaller: OwnedQueueStory = {
 export const OwnedOpaqueCaller: OwnedQueueStory = {
   parameters: ownedParameters,
   render: () => <OwnedQueueFixture caller="opaque" />,
+};
+
+export const OwnedRowFooter: OwnedQueueStory = {
+  parameters: ownedParameters,
+  render: () => (
+    <div {...stylex.props(stylex.defaultMarker())} data-unrelated-queue-marker="">
+      <button type="button" data-unrelated-queue-control="">
+        Unrelated outer marker target
+      </button>
+      <OwnedQueueFixture count={3} rowFooter />
+    </div>
+  ),
 };

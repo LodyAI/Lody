@@ -1212,7 +1212,7 @@ const AgentFileLink = ({
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger>{link}</ContextMenu.Trigger>
-      <ContextMenu.Content className="min-w-[190px]">
+      <ContextMenu.Content minWidth={190}>
         {contextMenuItems.map((item) => {
           const ItemIcon = item.icon;
           if (item.kind === 'submenu') {
@@ -1223,7 +1223,7 @@ const AgentFileLink = ({
                 >
                   {item.label}
                 </ContextMenu.SubmenuTrigger>
-                <ContextMenu.SubmenuContent className="min-w-[190px]">
+                <ContextMenu.SubmenuContent minWidth={190}>
                   {item.items.map((child) => {
                     const ChildIcon = child.icon;
                     return (

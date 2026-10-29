@@ -1,0 +1,155 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 844,
+      "device": "iPhone SE"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "migration-ownedcomposerstatus--landing-warning",
+    "migration-ownedcomposerstatus--session-warning",
+    "migration-ownedcomposerstatus--dialog-warning",
+    "migration-ownedcomposerstatus--long-warning",
+    "migration-ownedcomposerstatus--info",
+    "migration-ownedcomposerstatus--error",
+    "migration-ownedcomposerstatus--absent",
+    "migration-ownedcomposerstatus--scoped-palette"
+  ],
+  "ready": {
+    "migration-ownedcomposerstatus--landing-warning": [
+      {
+        "action": "visible",
+        "selector": "[data-composer-status-fixture] textarea"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const element=document.querySelector('[data-composer-status-fixture] [role=status]'); const textarea=document.querySelector('[data-composer-status-fixture] textarea'); return element && textarea && textarea.value==='Review the current changes.' && element.textContent===\"Choose a project before sending.\" && element.getAttribute('aria-live')==='polite' && element.getBoundingClientRect().height>0 && getComputedStyle(element).visibility==='visible' && getComputedStyle(element).color!=='rgba(0, 0, 0, 0)'; }"
+      }
+    ],
+    "migration-ownedcomposerstatus--session-warning": [
+      {
+        "action": "visible",
+        "selector": "[data-composer-status-fixture] textarea"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const element=document.querySelector('[data-composer-status-fixture] [role=status]'); const textarea=document.querySelector('[data-composer-status-fixture] textarea'); return element && textarea && textarea.value==='Review the current changes.' && element.textContent===\"Choose a project before sending.\" && element.getAttribute('aria-live')==='polite' && element.getBoundingClientRect().height>0 && getComputedStyle(element).visibility==='visible' && getComputedStyle(element).color!=='rgba(0, 0, 0, 0)'; }"
+      }
+    ],
+    "migration-ownedcomposerstatus--dialog-warning": [
+      {
+        "action": "visible",
+        "selector": "[data-composer-status-fixture] textarea"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const element=document.querySelector('[data-composer-status-fixture] [role=status]'); const textarea=document.querySelector('[data-composer-status-fixture] textarea'); return element && textarea && textarea.value==='Review the current changes.' && element.textContent===\"Choose a project before sending.\" && element.getAttribute('aria-live')==='polite' && element.getBoundingClientRect().height>0 && getComputedStyle(element).visibility==='visible' && getComputedStyle(element).color!=='rgba(0, 0, 0, 0)'; }"
+      }
+    ],
+    "migration-ownedcomposerstatus--long-warning": [
+      {
+        "action": "visible",
+        "selector": "[data-composer-status-fixture] textarea"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const element=document.querySelector('[data-composer-status-fixture] [role=status]'); const textarea=document.querySelector('[data-composer-status-fixture] textarea'); return element && textarea && textarea.value==='Review the current changes.' && element.textContent===\"Choose a project on the selected machine before sending this message. The current project is unavailable; select another project or reconnect the machine and try again.\" && element.getAttribute('aria-live')==='polite' && element.getBoundingClientRect().height>0 && getComputedStyle(element).visibility==='visible' && getComputedStyle(element).color!=='rgba(0, 0, 0, 0)'; }"
+      }
+    ],
+    "migration-ownedcomposerstatus--info": [
+      {
+        "action": "visible",
+        "selector": "[data-composer-status-fixture] textarea"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const element=document.querySelector('[data-composer-status-fixture] [role=status]'); const textarea=document.querySelector('[data-composer-status-fixture] textarea'); return element && textarea && textarea.value==='Review the current changes.' && element.textContent===\"Select a project to continue.\" && element.getAttribute('aria-live')==='polite' && element.getBoundingClientRect().height>0 && getComputedStyle(element).visibility==='visible' && getComputedStyle(element).color!=='rgba(0, 0, 0, 0)'; }"
+      }
+    ],
+    "migration-ownedcomposerstatus--error": [
+      {
+        "action": "visible",
+        "selector": "[data-composer-status-fixture] textarea"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const element=document.querySelector('[data-composer-status-fixture] [role=alert]'); const textarea=document.querySelector('[data-composer-status-fixture] textarea'); return element && textarea && textarea.value==='Review the current changes.' && element.textContent===\"A project is required.\" && element.getAttribute('aria-live')==='assertive' && element.getBoundingClientRect().height>0 && getComputedStyle(element).visibility==='visible' && getComputedStyle(element).color!=='rgba(0, 0, 0, 0)'; }"
+      }
+    ],
+    "migration-ownedcomposerstatus--absent": [
+      {
+        "action": "visible",
+        "selector": "[data-composer-status-fixture] textarea"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const root=document.querySelector('[data-composer-status-fixture]'); return root?.querySelector('textarea') && !root.querySelector('[role=status], [role=alert]') && root.querySelector('[data-composer-status-result]')?.textContent.includes('Sent 0'); }"
+      }
+    ],
+    "migration-ownedcomposerstatus--scoped-palette": [
+      {
+        "action": "visible",
+        "selector": "#status-dark"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => ['dark','light','self'].every(scope => { const element=document.querySelector('[data-status-scope='+scope+'] [role=status]'); return element && element.getAttribute('aria-live')==='polite' && element.textContent==='Choose a project before sending.' && element.getBoundingClientRect().height>0 && getComputedStyle(element).color===({dark:'rgb(20, 142, 107)',light:'rgb(111, 47, 189)',self:'rgb(34, 91, 173)'})[scope]; })"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedcomposerstatus--landing-warning": [
+      {
+        "name": "focused",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "#status-prompt"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement===document.querySelector('#status-prompt')"
+          }
+        ]
+      },
+      {
+        "name": "edited",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "#status-prompt",
+            "value": "Updated prompt."
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('#status-prompt')?.value==='Updated prompt.' && document.querySelector('[data-composer-status-result]')?.textContent.includes('Updated prompt.') && document.querySelector('[role=status]')?.textContent==='Choose a project before sending.'"
+          }
+        ]
+      },
+      {
+        "name": "sent",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Send fixture"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-composer-status-result]')?.textContent.includes('Sent 1; Updated prompt.') && document.querySelector('[role=status]')?.getAttribute('aria-live')==='polite'"
+          }
+        ]
+      }
+    ]
+  }
+}

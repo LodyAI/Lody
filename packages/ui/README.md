@@ -31,6 +31,11 @@ Consumers compile this package's source with `@stylexjs/unplugin` and its export
 StyleX options. Visual choices use component props. `className` is available for
 layout and interaction constraints in product surfaces; it must not duplicate a
 primitive's visual rules.
+`Button` accepts `width` and `height` for its outer box: numbers are pixels and
+strings can read local CSS variables. Explicit zero applies; omission restores
+the named size. The icon wrapper, ref, events and disabled behavior retain their
+existing contract. Use these props for owned dimensions; retain compatibility
+classes at public caller boundaries until their precedence is verified.
 
 The existing `text` tokens derive sizes and leading from document `--ui-font-size`
 (14px when unset), so body, controls, hints and headings scale once, including
@@ -175,7 +180,11 @@ Whatever goes there states no edge of its own, because the well rings on
 A `Menu` is that same floating surface with commands on it. It is also the
 dropdown menu: Base UI has no separate part for one, so a second name would be a
 second thing to keep in step. A menu is opened by whatever the surface already
-had there, through Base UI's `render`:
+had there, through Base UI's `render`. `Menu.Content` keeps its named
+`width="regular" | "compact"` choice and accepts `minWidth`, `maxWidth` and
+`maxHeight` for the actual popup. Numbers are pixels, strings are CSS lengths,
+zero applies and omission restores defaults. The outer positioner still owns
+`style`, the forwarded ref and events:
 
 ```tsx
 <Menu.Root>
@@ -214,6 +223,9 @@ them, so a command looks and behaves the same wherever a person meets it. A row
 answers `onClick`; a row that should leave the menu up says `closeOnClick={false}`
 rather than cancelling the event. Where focus goes after a menu closes is the
 product's policy, passed as `finalFocus`.
+`ContextMenu.Content` accepts `minWidth`, `maxWidth` and `maxHeight` for its actual
+popup, with pixel numbers, CSS-length strings, explicit zero and omission reset.
+Its forwarded ref, `style` and events continue to address the positioner.
 
 When a menu row also opens a context menu, put `ContextMenu.Root` inside the
 row's `render` callback, passing the callback's props to the actual row element
@@ -232,6 +244,13 @@ A `Popover` is that same floating surface holding content instead of rows. It
 reads the popup group too, replacing the list's anchor-width and row-bleed inset
 with content layout, and taking body size, leading, weight and tracking rather
 than the command role. Its title and description keep control and footnote roles.
+`Popover.Content` keeps its default prose inset and gap unless `padding="none"`
+or `gap="none"` lets embedded content own them. These choices apply to the actual
+popup. `width`, `minWidth`, `maxWidth` and `maxHeight` also address that popup:
+numbers are pixels, strings are CSS lengths, explicit zero applies, and omission
+restores the default. Its forwarded ref, `style`, event handlers and positioning
+props still belong to the outer positioner. Keep nonzero layout needs explicit rather than
+competing with the primitive through another StyleX class.
 
 ```tsx
 <Popover.Root>
@@ -583,10 +602,16 @@ restores the shape's default sizing.
 A `Spinner` is drawn in `currentColor`, so the one inside a ghost button takes
 the button's ink; it is called a spinner rather than a loading, because it is the
 mark and not the state, and where it goes is the surface's decision.
+Its `size` selects the named 16/20/24px steps. An optional `diameter` overrides
+both dimensions of the turning wrapper: numbers are pixels and strings are CSS
+lengths, including expressions that read the host's local spacing variables.
+An explicit `0` applies; removing the prop restores the named size. SVG `width`
+and `height` attributes still belong to the glyph, which fills that wrapper.
 
 ```tsx
 <Skeleton shape="circle" width={32} height={32} />
 <Skeleton width="60%" />
+<Spinner diameter="calc(var(--spacing) * 3.5)" label={null} />
 <Button variant="secondary" size="small">
   <Spinner size="small" label={null} />
   Saving

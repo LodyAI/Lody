@@ -651,26 +651,16 @@ export function GoalChip({
         kind: 'popover',
         ariaLabel: t('sessions.goal.banner.label', 'Goal'),
         content: (
-          <div
-            {...stylex.props(styles.goalPanel)}
-            className={clsx(stylex.props(styles.goalPanel).className, INFO_BAR_TEXT_CLASS)}
-          >
+          <div className={clsx(stylex.props(styles.goalPanel).className, INFO_BAR_TEXT_CLASS)}>
             <div {...stylex.props(styles.goalHeaderRow)}>
               <Target
-                {...stylex.props(styles.goalGlyph)}
                 className={clsx(stylex.props(styles.goalGlyph).className, meta.textClassName)}
                 aria-hidden="true"
               />
-              <span
-                {...stylex.props(styles.goalLabel)}
-                className={clsx(stylex.props(styles.goalLabel).className, meta.textClassName)}
-              >
+              <span className={clsx(stylex.props(styles.goalLabel).className, meta.textClassName)}>
                 {t('sessions.goal.banner.label', 'Goal')}
               </span>
-              <span
-                {...stylex.props(styles.goalLabel)}
-                className={clsx(stylex.props(styles.goalLabel).className, meta.textClassName)}
-              >
+              <span className={clsx(stylex.props(styles.goalLabel).className, meta.textClassName)}>
                 {statusLabel}
               </span>
               <span {...stylex.props(styles.goalMetrics)}>
@@ -689,7 +679,6 @@ export function GoalChip({
               </span>
             </div>
             <p
-              {...stylex.props(styles.goalObjective)}
               className={clsx(
                 stylex.props(styles.goalObjective).className,
                 'scrollbar-pro',
@@ -812,7 +801,6 @@ export function ScheduleChip({
         content: (
           <div {...stylex.props(styles.schedulePanel)}>
             <div
-              {...stylex.props(styles.scheduleHeaderRow)}
               className={clsx(
                 stylex.props(styles.scheduleHeaderRow).className,
                 INFO_BAR_TEXT_CLASS
@@ -892,7 +880,6 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
         onClick={primaryAction.onClick}
         disabled={primaryAction.disabled}
         title={primaryAction.label}
-        {...stylex.props(styles.actionButton)}
         className={clsx(stylex.props(styles.actionButton).className, INFO_BAR_TEXT_CLASS)}
       >
         <span {...stylex.props(styles.actionLabel)}>{primaryAction.label}</span>
@@ -1126,7 +1113,6 @@ export function ContextChip({
         onClick={onOpenPr}
         aria-label={t('sessions.pr.openTab', 'Open pull request')}
         title={t('sessions.pr.openTab', 'Open pull request')}
-        {...stylex.props(styles.prButton)}
         className={clsx(stylex.props(styles.prButton).className, INFO_BAR_TEXT_CLASS)}
       >
         <SessionPrIcon prStatus={status ?? 'open'} prCiState={compactCiState} />
@@ -1168,7 +1154,6 @@ export function ContextChip({
       disabled={!onOpenAllChanges}
       aria-label={t('sessions.detailTabs.allChanges', 'All Changes')}
       title={t('sessions.detailTabs.allChanges', 'All Changes')}
-      {...stylex.props(styles.diffChip)}
       className={clsx(stylex.props(styles.diffChip).className, INFO_BAR_TEXT_CLASS)}
     >
       <span {...stylex.props(styles.diffAdded)}>+{diffStat.add}</span>
@@ -1316,10 +1301,7 @@ function PrCiPopoverBody({
   const ciRunGlyphProps = stylex.props(styles.ciRunGlyph);
   return (
     <div {...stylex.props(styles.ciPanel)}>
-      <div
-        {...stylex.props(styles.ciHeaderRow)}
-        className={clsx(stylex.props(styles.ciHeaderRow).className, INFO_BAR_TEXT_CLASS)}
-      >
+      <div className={clsx(stylex.props(styles.ciHeaderRow).className, INFO_BAR_TEXT_CLASS)}>
         <span {...ciOverallProps} className={clsx(ciOverallProps.className, toneClassName)}>
           {overallLabel}
         </span>
@@ -1424,10 +1406,9 @@ export function PrCiPill({
         align="start"
         sideOffset={8}
         aria-label={t('sessions.prCi.label', 'CI checks')}
-        className={clsx(
-          stylex.props(styles.ciPopover).className,
-          'max-w-[min(24rem,90vw)] p-0 shadow-xl'
-        )}
+        padding="none"
+        maxWidth="min(24rem, 90vw)"
+        className={clsx(stylex.props(styles.ciPopover).className, 'shadow-xl')}
       >
         <PrCiPopoverBody runs={runs!} onOpenRun={onOpenRun} />
       </Popover.Content>

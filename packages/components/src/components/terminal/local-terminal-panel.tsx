@@ -379,7 +379,7 @@ export function LocalTerminalPanel({
       }}
     >
       <ContextMenu.Trigger>{host}</ContextMenu.Trigger>
-      <ContextMenu.Content className="min-w-40">
+      <ContextMenu.Content minWidth="calc(var(--spacing) * 40)">
         <ContextMenu.Item
           disabled={!hasSelection}
           onClick={copySelection}

@@ -1,0 +1,131 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone SE",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "chat-machinepairingdialog--pending",
+    "migration-ownedspinnerdimensions--production-scopes",
+    "settings-bubinstallguidemigration--copy-success",
+    "settings-bubinstallguidemigration--long-translation",
+    "components-sidebarupdatebanner--downloaded",
+    "components-sidebarupdatebanner--restarting",
+    "workspace-stuckconnectionbanner--observed-actions",
+    "preview-visualannotationdraftcomposer--ready",
+    "preview-visualannotationdraftcomposer--submitting"
+  ],
+  "ready": {
+    "chat-machinepairingdialog--pending": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Download Lody Desktop"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\"[role=dialog] button:has(svg.lucide-download)\")];return marks.length===1&&marks.every(m=>{const pc=getComputedStyle(m.parentElement),expected=m.parentElement.clientWidth-parseFloat(pc.paddingLeft)-parseFloat(pc.paddingRight);const r=m.getBoundingClientRect(),c=getComputedStyle(m);return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&Number(c.opacity)>0&&Math.abs(r.width-expected)<0.1;});}"
+      }
+    ],
+    "migration-ownedspinnerdimensions--production-scopes": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\"[data-spinner-production-scope] > div > [data-pr-merge-control]:last-child > button\")];return marks.length===4&&marks.every(m=>{const c=getComputedStyle(m),v=c.getPropertyValue('--spacing').trim(),unit=parseFloat(v)*(v.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);const r=m.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&Number(c.opacity)>0&&Math.abs(parseFloat(c.height)-unit*8)<0.02;});}"
+      }
+    ],
+    "settings-bubinstallguidemigration--copy-success": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-bub-ports-ready]')?.dataset.bubPortsReady==='true'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\"[data-bub-guide] button[aria-label]\")];return marks.length===1&&marks.every(m=>{const c=getComputedStyle(m),v=c.getPropertyValue('--spacing').trim(),unit=parseFloat(v)*(v.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);const r=m.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&Number(c.opacity)>0&&Math.abs(parseFloat(c.height)-unit*7)<0.02;});}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const b=[...document.querySelectorAll('[data-bub-guide] button')];return b.length===2&&b[1].getBoundingClientRect().height>0;}"
+      }
+    ],
+    "settings-bubinstallguidemigration--long-translation": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-bub-ports-ready]')?.dataset.bubPortsReady==='true'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\"[data-bub-guide] button[aria-label]\")];return marks.length===1&&marks.every(m=>{const c=getComputedStyle(m),v=c.getPropertyValue('--spacing').trim(),unit=parseFloat(v)*(v.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);const r=m.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&Number(c.opacity)>0&&Math.abs(parseFloat(c.height)-unit*7)<0.02;});}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const b=[...document.querySelectorAll('[data-bub-guide] button')];return b.length===2&&b[1].getBoundingClientRect().height>0;}"
+      }
+    ],
+    "components-sidebarupdatebanner--downloaded": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\"#storybook-root button:has(+ button), #storybook-root button:has(+ button) + button\")];return marks.length===2&&marks.every(m=>{const c=getComputedStyle(m),v=c.getPropertyValue('--spacing').trim(),unit=parseFloat(v)*(v.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);const r=m.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&Number(c.opacity)>0&&Math.abs(parseFloat(c.height)-unit*7)<0.02;});}"
+      }
+    ],
+    "components-sidebarupdatebanner--restarting": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\"#storybook-root button:has(+ button), #storybook-root button:has(+ button) + button\")];return marks.length===2&&marks.every(m=>{const c=getComputedStyle(m),v=c.getPropertyValue('--spacing').trim(),unit=parseFloat(v)*(v.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);const r=m.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&Number(c.opacity)>0&&Math.abs(parseFloat(c.height)-unit*7)<0.02;});}"
+      }
+    ],
+    "workspace-stuckconnectionbanner--observed-actions": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelector('[data-stuck-banner-ready]')?.dataset.stuckBannerReady==='true'"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\"button[aria-label=\\\"Dismiss\\\"]\")];return marks.length===1&&marks.every(m=>{const c=getComputedStyle(m),v=c.getPropertyValue('--spacing').trim(),unit=parseFloat(v)*(v.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);const r=m.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&Number(c.opacity)>0&&Math.abs(parseFloat(c.height)-unit*6)<0.02&&Math.abs(parseFloat(c.width)-unit*6)<0.02;});}"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\"[role=status] button:not([aria-label])\")];return marks.length===1&&marks.every(m=>{const c=getComputedStyle(m),v=c.getPropertyValue('--spacing').trim(),unit=parseFloat(v)*(v.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);const r=m.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&Number(c.opacity)>0&&Math.abs(parseFloat(c.height)-unit*7)<0.02;});}"
+      }
+    ],
+    "preview-visualannotationdraftcomposer--ready": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\"[data-lody-visual-comment-draft] button[aria-label=\\\"Cancel\\\"]\")];return marks.length===1&&marks.every(m=>{const c=getComputedStyle(m),v=c.getPropertyValue('--spacing').trim(),unit=parseFloat(v)*(v.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);const r=m.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&Number(c.opacity)>0&&Math.abs(parseFloat(c.height)-unit*6)<0.02&&Math.abs(parseFloat(c.width)-unit*6)<0.02;});}"
+      }
+    ],
+    "preview-visualannotationdraftcomposer--submitting": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const marks=[...document.querySelectorAll(\"[data-lody-visual-comment-draft] button[aria-label=\\\"Cancel\\\"]\")];return marks.length===1&&marks.every(m=>{const c=getComputedStyle(m),v=c.getPropertyValue('--spacing').trim(),unit=parseFloat(v)*(v.endsWith('rem')?parseFloat(getComputedStyle(document.documentElement).fontSize):1);const r=m.getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&Number(c.opacity)>0&&Math.abs(parseFloat(c.height)-unit*6)<0.02&&Math.abs(parseFloat(c.width)-unit*6)<0.02;});}"
+      }
+    ]
+  },
+  "states": {
+    "settings-bubinstallguidemigration--copy-success": [
+      {
+        "name": "copied",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-bub-guide] button[aria-label]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-bub-copy-state]')?.dataset.bubCopyState==='success'"
+          }
+        ]
+      }
+    ]
+  },
+  "allowBlankIds": ["chat-machinepairingdialog--pending"]
+}

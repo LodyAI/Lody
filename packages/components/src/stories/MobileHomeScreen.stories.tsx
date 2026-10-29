@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { fn } from 'storybook/test';
 import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
@@ -363,6 +363,25 @@ export const IOS: Story = {
     chats,
   },
   render: () => <MobileHomeScreenStory theme="ios" />,
+};
+
+export const OwnedHeaderControls: Story = {
+  args: IOS.args,
+  render: () => (
+    <div
+      data-owned-home-controls=""
+      className="dark-scope"
+      style={{ '--color-white': '#93c5fd' } as CSSProperties}
+    >
+      <MobileHomeScreenStory
+        theme="ios"
+        crowdedHeader
+        workspaceSwitcher
+        chats={chats.slice(1, 3)}
+        githubRepositories={[]}
+      />
+    </div>
+  ),
 };
 
 /** A synthetic, non-square logo makes both the cover fit and circular crop visible. */

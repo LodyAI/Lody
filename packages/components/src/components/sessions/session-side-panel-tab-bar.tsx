@@ -453,7 +453,7 @@ const styles = stylex.create({
 
 function SidePanelTabIcon({ tab }: { tab: SessionSidePanelTabItem }) {
   if (tab.pending) {
-    return <Spinner className="h-3.5 w-3.5 opacity-70" />;
+    return <Spinner diameter="calc(var(--spacing) * 3.5)" className="opacity-70" />;
   }
   switch (tab.kind) {
     case 'files':
@@ -656,7 +656,7 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
             <Plus {...stylex.props(styles.addGlyph)} />
           </button>
         </Menu.Trigger>
-        <Menu.Content align="end" className="min-w-40">
+        <Menu.Content align="end" minWidth="calc(var(--spacing) * 40)">
           {availablePanels.map((panel) => (
             <Menu.Item
               key={panel.id}

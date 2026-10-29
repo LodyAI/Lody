@@ -1,0 +1,339 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "narrow",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "blockedHosts": ["github.com", "avatars.githubusercontent.com"],
+  "ids": [
+    "migration-ownedmermaidcontrols--default",
+    "migration-ownedmermaidcontrols--scoped-spacing",
+    "localprojects-addlocalprojectdialog--mobile",
+    "settings-usagecalendarvisualization--last-24-hours-day-selected",
+    "components-lodysidebar--filtered-workspace-empty"
+  ],
+  "ready": {
+    "migration-ownedmermaidcontrols--default": [
+      {
+        "action": "visible",
+        "selector": "[data-testid=mermaid-diagram-viewer]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}return true;};const v=document.querySelector('[data-testid=mermaid-diagram-viewer]');if(!v)return false;const names=['Zoom out','Reset zoom','Zoom in','Close diagram'];const b=names.map(n=>v.querySelector('button[aria-label=\"'+n+'\"]'));if(!b.every(visible))return false;const d=44;if(b.some((e,i)=>{const c=getComputedStyle(e);return c.height!==d+'px'||(i!==1&&c.width!==d+'px')||(i===1&&(e.getBoundingClientRect().width<d||c.minWidth!==d+'px'));}))return false;if(b[1].textContent.trim()!==\"100%\")return false;if(b[0].disabled!==false||b[2].disabled!==false)return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))&&(true);}"
+      }
+    ],
+    "migration-ownedmermaidcontrols--scoped-spacing": [
+      {
+        "action": "visible",
+        "selector": "[data-testid=mermaid-diagram-viewer]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}return true;};const v=document.querySelector('[data-testid=mermaid-diagram-viewer]');if(!v)return false;const names=['Zoom out','Reset zoom','Zoom in','Close diagram'];const b=names.map(n=>v.querySelector('button[aria-label=\"'+n+'\"]'));if(!b.every(visible))return false;const d=55;if(b.some((e,i)=>{const c=getComputedStyle(e);return c.height!==d+'px'||(i!==1&&c.width!==d+'px')||(i===1&&(e.getBoundingClientRect().width<d||c.minWidth!==d+'px'));}))return false;if(b[1].textContent.trim()!==\"100%\")return false;if(b[0].disabled!==false||b[2].disabled!==false)return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))&&(getComputedStyle(v).getPropertyValue('--spacing').trim()==='5px');}"
+      }
+    ],
+    "localprojects-addlocalprojectdialog--mobile": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "MacBook Pro",
+        "exact": false
+      },
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Documents"
+      },
+      {
+        "action": "enabled",
+        "role": "button",
+        "name": "Add"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}return true;};const dialog=document.querySelector('[role=dialog]'),b=[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='Add');if(!dialog||!visible(b)||b.disabled)return false;const c=getComputedStyle(b),p=b.parentElement,pc=getComputedStyle(p),available=p.getBoundingClientRect().width-parseFloat(pc.paddingLeft)-parseFloat(pc.paddingRight)-parseFloat(pc.borderLeftWidth)-parseFloat(pc.borderRightWidth);if(Math.abs(b.getBoundingClientRect().width-available)>.02||c.height!=='36px')return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))&&(true);}"
+      }
+    ],
+    "settings-usagecalendarvisualization--last-24-hours-day-selected": [
+      {
+        "action": "visible",
+        "role": "region",
+        "name": "Day detail"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}return true;};const panel=document.querySelector('section[aria-label=\"Day detail\"]'),b=panel?.querySelector('button[aria-label=Close]');if(!panel||panel.getBoundingClientRect().width<=0||!visible(b)||getComputedStyle(b).width!=='24px'||getComputedStyle(b).height!=='24px')return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))&&(true);}"
+      }
+    ],
+    "components-lodysidebar--filtered-workspace-empty": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Show all tasks"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}return true;};const b=[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='Show all tasks');if(!visible(b)||getComputedStyle(b).height!=='28px')return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))&&(true);}"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedmermaidcontrols--default": [
+      {
+        "name": "minimum-disabled",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zoom out"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zoom out"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zoom out"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zoom out"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zoom out"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zoom out"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zoom out"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}return true;};const v=document.querySelector('[data-testid=mermaid-diagram-viewer]');if(!v)return false;const names=['Zoom out','Reset zoom','Zoom in','Close diagram'];const b=names.map(n=>v.querySelector('button[aria-label=\"'+n+'\"]'));if(!b.every(visible))return false;const d=44;if(b.some((e,i)=>{const c=getComputedStyle(e);return c.height!==d+'px'||(i!==1&&c.width!==d+'px')||(i===1&&(e.getBoundingClientRect().width<d||c.minWidth!==d+'px'));}))return false;if(b[1].textContent.trim()!==\"25%\")return false;if(b[0].disabled!==true||b[2].disabled!==false)return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))&&(true);}"
+          }
+        ]
+      },
+      {
+        "name": "maximum-disabled",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zoom in"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zoom in"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zoom in"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zoom in"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zoom in"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zoom in"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zoom in"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zoom in"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zoom in"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zoom in"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zoom in"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zoom in"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Zoom in"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}return true;};const v=document.querySelector('[data-testid=mermaid-diagram-viewer]');if(!v)return false;const names=['Zoom out','Reset zoom','Zoom in','Close diagram'];const b=names.map(n=>v.querySelector('button[aria-label=\"'+n+'\"]'));if(!b.every(visible))return false;const d=44;if(b.some((e,i)=>{const c=getComputedStyle(e);return c.height!==d+'px'||(i!==1&&c.width!==d+'px')||(i===1&&(e.getBoundingClientRect().width<d||c.minWidth!==d+'px'));}))return false;if(b[1].textContent.trim()!==\"400%\")return false;if(b[0].disabled!==false||b[2].disabled!==true)return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))&&(true);}"
+          }
+        ]
+      },
+      {
+        "name": "reset",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Reset zoom"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}return true;};const v=document.querySelector('[data-testid=mermaid-diagram-viewer]');if(!v)return false;const names=['Zoom out','Reset zoom','Zoom in','Close diagram'];const b=names.map(n=>v.querySelector('button[aria-label=\"'+n+'\"]'));if(!b.every(visible))return false;const d=44;if(b.some((e,i)=>{const c=getComputedStyle(e);return c.height!==d+'px'||(i!==1&&c.width!==d+'px')||(i===1&&(e.getBoundingClientRect().width<d||c.minWidth!==d+'px'));}))return false;if(b[1].textContent.trim()!==\"100%\")return false;if(b[0].disabled!==false||b[2].disabled!==false)return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))&&(true);}"
+          }
+        ]
+      }
+    ],
+    "migration-ownedmermaidcontrols--scoped-spacing": [
+      {
+        "name": "zoom-in-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Zoom in"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}return true;};const v=document.querySelector('[data-testid=mermaid-diagram-viewer]');if(!v)return false;const names=['Zoom out','Reset zoom','Zoom in','Close diagram'];const b=names.map(n=>v.querySelector('button[aria-label=\"'+n+'\"]'));if(!b.every(visible))return false;const d=55;if(b.some((e,i)=>{const c=getComputedStyle(e);return c.height!==d+'px'||(i!==1&&c.width!==d+'px')||(i===1&&(e.getBoundingClientRect().width<d||c.minWidth!==d+'px'));}))return false;if(b[1].textContent.trim()!==\"100%\")return false;if(b[0].disabled!==false||b[2].disabled!==false)return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))&&(b[2].matches(':hover'));}"
+          }
+        ]
+      },
+      {
+        "name": "zoom-in-keyboard-focus",
+        "steps": [
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Close diagram",
+            "key": "Shift+Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}return true;};const v=document.querySelector('[data-testid=mermaid-diagram-viewer]');if(!v)return false;const names=['Zoom out','Reset zoom','Zoom in','Close diagram'];const b=names.map(n=>v.querySelector('button[aria-label=\"'+n+'\"]'));if(!b.every(visible))return false;const d=55;if(b.some((e,i)=>{const c=getComputedStyle(e);return c.height!==d+'px'||(i!==1&&c.width!==d+'px')||(i===1&&(e.getBoundingClientRect().width<d||c.minWidth!==d+'px'));}))return false;if(b[1].textContent.trim()!==\"100%\")return false;if(b[0].disabled!==false||b[2].disabled!==false)return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))&&(document.activeElement===b[2]&&b[2].matches(':focus-visible'));}"
+          }
+        ]
+      }
+    ],
+    "localprojects-addlocalprojectdialog--mobile": [
+      {
+        "name": "add-focused",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Add"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}return true;};const dialog=document.querySelector('[role=dialog]'),b=[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='Add');if(!dialog||!visible(b)||b.disabled)return false;const c=getComputedStyle(b),p=b.parentElement,pc=getComputedStyle(p),available=p.getBoundingClientRect().width-parseFloat(pc.paddingLeft)-parseFloat(pc.paddingRight)-parseFloat(pc.borderLeftWidth)-parseFloat(pc.borderRightWidth);if(Math.abs(b.getBoundingClientRect().width-available)>.02||c.height!=='36px')return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))&&(document.activeElement===b);}"
+          }
+        ]
+      },
+      {
+        "name": "folder-navigation",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Code"
+          },
+          {
+            "action": "visible",
+            "role": "button",
+            "name": "lody"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}return true;};const dialog=document.querySelector('[role=dialog]'),b=[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='Add');if(!dialog||!visible(b)||b.disabled)return false;const c=getComputedStyle(b),p=b.parentElement,pc=getComputedStyle(p),available=p.getBoundingClientRect().width-parseFloat(pc.paddingLeft)-parseFloat(pc.paddingRight)-parseFloat(pc.borderLeftWidth)-parseFloat(pc.borderRightWidth);if(Math.abs(b.getBoundingClientRect().width-available)>.02||c.height!=='36px')return false;return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))&&(true);}"
+          }
+        ]
+      }
+    ],
+    "settings-usagecalendarvisualization--last-24-hours-day-selected": [
+      {
+        "name": "detail-closed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Close"
+          },
+          {
+            "action": "hidden",
+            "role": "region",
+            "name": "Day detail"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}return true;};return !document.querySelector('section[aria-label=\"Day detail\"]')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ],
+    "components-lodysidebar--filtered-workspace-empty": [
+      {
+        "name": "show-all-tasks",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Show all tasks"
+          },
+          {
+            "action": "hidden",
+            "role": "button",
+            "name": "Show all tasks"
+          },
+          {
+            "action": "visible",
+            "text": "No tasks yet"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight)return false;for(let p=e;p&&p!==document.body;p=p.parentElement){const c=getComputedStyle(p);if(c.display==='none'||c.visibility==='hidden'||Number(c.opacity)===0)return false;}return true;};return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ]
+  }
+}

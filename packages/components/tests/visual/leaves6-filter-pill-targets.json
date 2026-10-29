@@ -1,0 +1,280 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "device": "iPhone SE",
+      "width": 320,
+      "height": 844
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "migration-ownedfilterpill--default",
+    "migration-ownedfilterpill--engaged",
+    "migration-ownedfilterpill--aggregate",
+    "migration-ownedfilterpill--scopes"
+  ],
+  "ready": {
+    "migration-ownedfilterpill--default": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-filter-fixture]",
+        "index": 0
+      }
+    ],
+    "migration-ownedfilterpill--engaged": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-filter-fixture]",
+        "index": 0
+      }
+    ],
+    "migration-ownedfilterpill--aggregate": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-filter-fixture]",
+        "index": 0
+      }
+    ],
+    "migration-ownedfilterpill--scopes": [
+      {
+        "action": "visible",
+        "selector": "[data-owned-filter-fixture]",
+        "index": 0
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedfilterpill--default": [
+      {
+        "name": "idle-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "All conversations"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-focus",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "All conversations"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-open",
+        "steps": [
+          {
+            "action": "press",
+            "role": "button",
+            "name": "All conversations",
+            "key": "Enter"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-owned-filter-fixture] button[aria-expanded=\"true\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const toolbar = document.querySelector('[data-owned-filter-fixture] [role=toolbar]'); const panel = toolbar?.nextElementSibling; return !!toolbar?.querySelector('button[aria-expanded=\"true\"]') && !!panel && getComputedStyle(panel).opacity === '1' && panel.getBoundingClientRect().height > 0; }"
+          }
+        ]
+      },
+      {
+        "name": "selection-committed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Team conversations"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-owned-filter-action=\"Scope team\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const toolbar = document.querySelector('[data-owned-filter-fixture] [role=toolbar]'); return !!toolbar && !toolbar.querySelector('button[aria-expanded=\"true\"]') && !toolbar.nextElementSibling; }"
+          }
+        ]
+      },
+      {
+        "name": "multi-open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Machines"
+          },
+          {
+            "action": "visible",
+            "role": "button",
+            "name": "Alpha"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const toolbar = document.querySelector('[data-owned-filter-fixture] [role=toolbar]'); const panel = toolbar?.nextElementSibling; return !!toolbar?.querySelector('button[aria-expanded=\"true\"]') && !!panel && getComputedStyle(panel).opacity === '1' && panel.getBoundingClientRect().height > 0; }"
+          }
+        ]
+      },
+      {
+        "name": "multi-selection",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Alpha"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-owned-filter-action=\"Machines beta\"]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const toolbar = document.querySelector('[data-owned-filter-fixture] [role=toolbar]'); const panel = toolbar?.nextElementSibling; return !!toolbar?.querySelector('button[aria-expanded=\"true\"]') && !!panel && getComputedStyle(panel).opacity === '1' && panel.getBoundingClientRect().height > 0; }"
+          }
+        ]
+      },
+      {
+        "name": "multi-closed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Machines"
+          },
+          {
+            "action": "hidden",
+            "role": "button",
+            "name": "Alpha"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const toolbar = document.querySelector('[data-owned-filter-fixture] [role=toolbar]'); return !!toolbar && !toolbar.querySelector('button[aria-expanded=\"true\"]') && !toolbar.nextElementSibling; }"
+          }
+        ]
+      }
+    ],
+    "migration-ownedfilterpill--scopes": [
+      {
+        "name": "runtime-light",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle local scope"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-owned-filter-dynamic-scope=\"light-scope\"]"
+          }
+        ]
+      },
+      {
+        "name": "runtime-dark",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Toggle local scope"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-owned-filter-dynamic-scope=\"dark-scope\"]"
+          }
+        ]
+      }
+    ],
+    "migration-ownedfilterpill--engaged": [
+      {
+        "name": "idle-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Filter options"
+          }
+        ]
+      },
+      {
+        "name": "drawer-open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Filter options"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"dialog\"]"
+          }
+        ]
+      },
+      {
+        "name": "drawer-closed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Close"
+          },
+          {
+            "action": "hidden",
+            "selector": "[role=\"dialog\"]"
+          }
+        ]
+      }
+    ],
+    "migration-ownedfilterpill--aggregate": [
+      {
+        "name": "idle-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Filter options"
+          }
+        ]
+      },
+      {
+        "name": "drawer-open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Filter options"
+          },
+          {
+            "action": "visible",
+            "selector": "[role=\"dialog\"]"
+          }
+        ]
+      },
+      {
+        "name": "drawer-closed",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Close"
+          },
+          {
+            "action": "hidden",
+            "selector": "[role=\"dialog\"]"
+          }
+        ]
+      }
+    ]
+  }
+}

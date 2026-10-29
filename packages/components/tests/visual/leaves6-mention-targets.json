@@ -1,0 +1,119 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 844,
+      "device": "iPhone 13"
+    },
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 800,
+      "device": "iPhone SE"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "chat-mentionchips--plain-highlight",
+    "chat-mentionchips--icon-chips",
+    "chat-mentionchips--scope-tokens"
+  ],
+  "ready": {
+    "chat-mentionchips--plain-highlight": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelectorAll('textarea').length === 4 && document.querySelectorAll('[data-mention-highlighter]').length === 4 && [...document.querySelectorAll('textarea')].every(e => e.value.length > 0)"
+      }
+    ],
+    "chat-mentionchips--icon-chips": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelectorAll('textarea').length === 4 && document.querySelectorAll('[data-mention-highlighter]').length === 8 && [...document.querySelectorAll('textarea')].every(e => e.value.length > 0)"
+      }
+    ],
+    "chat-mentionchips--scope-tokens": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => document.querySelectorAll('textarea').length === 4 && document.querySelectorAll('[data-mention-highlighter]').length === 4 && [...document.querySelectorAll('textarea')].every(e => e.value.length > 0)"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const scope=document.querySelector('[data-mention-token-scope]'); const p=scope?.querySelector('[data-mention-kind=pasted_text]'); const n=scope?.querySelector('[data-mention-kind=file]'); return !!p && !!n && getComputedStyle(p).borderTopLeftRadius==='13px' && getComputedStyle(n).borderTopLeftRadius==='7px'; }"
+      }
+    ]
+  },
+  "states": {
+    "chat-mentionchips--icon-chips": [
+      {
+        "name": "selection-all",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-mention-fixture-box=\"Mixed kinds\"] textarea"
+          },
+          {
+            "action": "press",
+            "selector": "[data-mention-fixture-box=\"Mixed kinds\"] textarea",
+            "key": "ControlOrMeta+A"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const input=document.querySelector(\"[data-mention-fixture-box=\\\"Mixed kinds\\\"] textarea\"); const mirrors=[...input.parentElement.querySelectorAll(\"[data-mention-highlighter]\")]; const nodes=[input,...input.parentElement.querySelectorAll(\"[data-mention-highlighter], [data-mention-highlighter] *\")]; const pose=JSON.stringify(nodes.map(n=>{const r=n.getBoundingClientRect(),s=getComputedStyle(n);return [r.x,r.y,r.width,r.height,n.scrollTop,n.scrollLeft,n.getAttribute(\"data-selected\"),s.color,s.backgroundColor,s.webkitTextFillColor,s.transform,s.opacity];})); const finiteDone=!document.getAnimations().some(a=>a.effect?.getTiming().iterations!==Infinity&&a.playState===\"running\"); const records=window.__lodyMentionVisualReady ??= {}; const state=records[\"selection-all\"] ??= {previous:\"\",stable:0}; state.stable=(input.parentElement.querySelectorAll(\"[data-mention-layer=chip] [data-selected]\").length === 5 && input.selectionStart === 0 && input.selectionEnd === input.value.length) && finiteDone && pose===state.previous ? state.stable+1 : 0; state.previous=pose; return state.stable>=5; }"
+          }
+        ]
+      },
+      {
+        "name": "caret-at-end",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-mention-fixture-box=\"Mixed kinds\"] textarea",
+            "key": "ArrowRight"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => { const input=document.querySelector(\"[data-mention-fixture-box=\\\"Mixed kinds\\\"] textarea\"); const mirrors=[...input.parentElement.querySelectorAll(\"[data-mention-highlighter]\")]; const nodes=[input,...input.parentElement.querySelectorAll(\"[data-mention-highlighter], [data-mention-highlighter] *\")]; const pose=JSON.stringify(nodes.map(n=>{const r=n.getBoundingClientRect(),s=getComputedStyle(n);return [r.x,r.y,r.width,r.height,n.scrollTop,n.scrollLeft,n.getAttribute(\"data-selected\"),s.color,s.backgroundColor,s.webkitTextFillColor,s.transform,s.opacity];})); const finiteDone=!document.getAnimations().some(a=>a.effect?.getTiming().iterations!==Infinity&&a.playState===\"running\"); const records=window.__lodyMentionVisualReady ??= {}; const state=records[\"caret-at-end\"] ??= {previous:\"\",stable:0}; state.stable=(input.selectionStart === input.value.length && input.selectionEnd === input.value.length && !input.parentElement.querySelector(\"[data-selected]\") && mirrors.every(m => m.scrollTop === input.scrollTop && m.scrollLeft === input.scrollLeft)) && finiteDone && pose===state.previous ? state.stable+1 : 0; state.previous=pose; return state.stable>=5; }"
+          }
+        ]
+      },
+      {
+        "name": "typed-suffix",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-mention-fixture-box=\"Mixed kinds\"] textarea",
+            "key": "!"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[data-mention-fixture-box=\"Mixed kinds\"] textarea').value.endsWith('!')"
+          }
+        ]
+      }
+    ],
+    "chat-mentionchips--plain-highlight": [
+      {
+        "name": "native-selection",
+        "steps": [
+          {
+            "action": "focus",
+            "selector": "[data-mention-fixture-box=\"Mixed kinds\"] textarea"
+          },
+          {
+            "action": "press",
+            "selector": "[data-mention-fixture-box=\"Mixed kinds\"] textarea",
+            "key": "ControlOrMeta+A"
+          }
+        ]
+      }
+    ]
+  }
+}

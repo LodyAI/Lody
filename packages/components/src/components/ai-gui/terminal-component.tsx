@@ -16,7 +16,7 @@ import { cn } from '@/lib/utils';
 import {
   CONVERSATION_PANEL_FRAME_CLASS,
   CONVERSATION_PANEL_HEADER_CLASS,
-  CONVERSATION_PANEL_HEADER_RULE_CLASS,
+  conversationPanelStyles,
 } from './conversation-panel';
 import {
   createVSCodeTerminalTheme,
@@ -77,6 +77,15 @@ const styles = stylex.create({
     paddingInline: themeSpace[3],
     paddingBlock: themeSpace[2],
   },
+  commandRowRule: {
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'var(--tw-border-style)',
+    borderColor: {
+      default: 'hsl(var(--border) / 1)',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--border) / 1) 50%, transparent)',
+    },
+  },
   commandPrompt: { color: themeColors.mutedForeground },
   commandText: {
     minWidth: 0,
@@ -115,8 +124,7 @@ const styles = stylex.create({
     right: 0,
     top: 0,
     height: themeSpace[8],
-    backgroundImage:
-      'linear-gradient(to bottom in oklab, hsl(var(--muted) / 0.9), transparent)',
+    backgroundImage: 'linear-gradient(to bottom in oklab, hsl(var(--muted) / 0.9), transparent)',
   },
 });
 
@@ -281,8 +289,11 @@ export const TerminalComponent = memo(function TerminalComponent({
               type="button"
               className={clsx(
                 CONVERSATION_PANEL_HEADER_CLASS,
-                stylex.props(styles.headerButton).className,
-                bodyVisible ? CONVERSATION_PANEL_HEADER_RULE_CLASS : null
+                stylex.props(
+                  conversationPanelStyles.header,
+                  styles.headerButton,
+                  bodyVisible && conversationPanelStyles.headerRule
+                ).className
               )}
               onClick={onHeaderClick}
               aria-expanded={headerExpanded}
@@ -293,7 +304,10 @@ export const TerminalComponent = memo(function TerminalComponent({
             <div
               className={clsx(
                 CONVERSATION_PANEL_HEADER_CLASS,
-                bodyVisible ? CONVERSATION_PANEL_HEADER_RULE_CLASS : null
+                stylex.props(
+                  conversationPanelStyles.header,
+                  bodyVisible && conversationPanelStyles.headerRule
+                ).className
               )}
             >
               {headerContent}
@@ -307,8 +321,7 @@ export const TerminalComponent = memo(function TerminalComponent({
               <div
                 className={clsx(
                   'font-terminal',
-                  stylex.props(styles.commandRow).className,
-                  hasOutput ? 'border-b border-border/50' : null
+                  stylex.props(styles.commandRow, hasOutput && styles.commandRowRule).className
                 )}
               >
                 <span
@@ -355,10 +368,7 @@ export const TerminalComponent = memo(function TerminalComponent({
                 }}
               >
                 <pre
-                  className={clsx(
-                    'font-terminal',
-                    stylex.props(styles.outputText).className
-                  )}
+                  className={clsx('font-terminal', stylex.props(styles.outputText).className)}
                   style={terminalTextFontSizeStyle(fontSize)}
                 >
                   {renderAnsiToReactNodes({ value: outputTextForDisplay, terminalTheme })}
@@ -371,10 +381,7 @@ export const TerminalComponent = memo(function TerminalComponent({
                     onClick={() => setIsFocused(true)}
                     aria-label="Focus terminal output"
                   >
-                    <div
-                      {...stylex.props(styles.outputFade)}
-                      style={collapsedOutputFadeStyle}
-                    />
+                    <div {...stylex.props(styles.outputFade)} style={collapsedOutputFadeStyle} />
                   </button>
                 ) : null}
               </div>

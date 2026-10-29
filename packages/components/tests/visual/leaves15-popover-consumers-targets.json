@@ -1,0 +1,129 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "narrow",
+      "width": 390,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "sessions-infochipstylemigration--anchored-popover",
+    "sessions-infochipstylemigration--stage-popover",
+    "sessions-infochipstylemigration--ci-details",
+    "sessions-sessiontabbar--closed-tab-unread",
+    "sessions-sessionaccesscontrol--private-project-panel-open",
+    "sessions-sessionconversationpage--desktop-sender-profile-card",
+    "sessions-sessionconversationpage--desktop-idle"
+  ],
+  "ready": {
+    "sessions-infochipstylemigration--anchored-popover": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Related sessions"
+      },
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=[...document.querySelectorAll('[role=\"dialog\"]')].find(e=>e.getBoundingClientRect().width>0&&getComputedStyle(e).opacity==='1');if(!p||!p.textContent.includes(\"Close related sessions\"))return false;const s=getComputedStyle(p),r=p.getBoundingClientRect();if(!['paddingTop','paddingRight','paddingBottom','paddingLeft'].every(k=>s[k]===0+'px')||s.rowGap!==8+'px'||s.columnGap!==8+'px')return false;if(document.fonts.status!=='loaded'||[...p.querySelectorAll('img')].some(e=>!e.complete))return false;const finite=p.getAnimations({subtree:true}).filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running'))return false;if(p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style'))return false;const signature=JSON.stringify([...p.querySelectorAll('*'),p].map(e=>{const r=e.getBoundingClientRect();return[r.x,r.y,r.width,r.height]}));const state=window.__leaves15PopupReady??={last:'',stable:0};state.stable=signature===state.last?state.stable+1:0;state.last=signature;window.__leaves15PopupReady=state;window.__leaves15PopupContract={htmlDark:document.documentElement.classList.contains('dark'),htmlClass:document.documentElement.className,bodyClass:document.body.className,rootBackground:getComputedStyle(document.documentElement).getPropertyValue('--background').trim(),popupBackground:s.backgroundColor,padding:s.padding,gap:s.gap,popupText:p.textContent,rect:[r.x,r.y,r.width,r.height],finiteAnimations:finite.map(a=>({playState:a.playState,pending:a.pending}))};return state.stable>=3;}"
+      }
+    ],
+    "sessions-infochipstylemigration--stage-popover": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Open goal details"
+      },
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=[...document.querySelectorAll('[role=\"dialog\"]')].find(e=>e.getBoundingClientRect().width>0&&getComputedStyle(e).opacity==='1');if(!p||!p.textContent.includes(\"A very long descriptive repository\"))return false;const s=getComputedStyle(p),r=p.getBoundingClientRect();if(!['paddingTop','paddingRight','paddingBottom','paddingLeft'].every(k=>s[k]===0+'px')||s.rowGap!==8+'px'||s.columnGap!==8+'px')return false;if(document.fonts.status!=='loaded'||[...p.querySelectorAll('img')].some(e=>!e.complete))return false;const finite=p.getAnimations({subtree:true}).filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running'))return false;if(p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style'))return false;const signature=JSON.stringify([...p.querySelectorAll('*'),p].map(e=>{const r=e.getBoundingClientRect();return[r.x,r.y,r.width,r.height]}));const state=window.__leaves15PopupReady??={last:'',stable:0};state.stable=signature===state.last?state.stable+1:0;state.last=signature;window.__leaves15PopupReady=state;window.__leaves15PopupContract={htmlDark:document.documentElement.classList.contains('dark'),htmlClass:document.documentElement.className,bodyClass:document.body.className,rootBackground:getComputedStyle(document.documentElement).getPropertyValue('--background').trim(),popupBackground:s.backgroundColor,padding:s.padding,gap:s.gap,popupText:p.textContent,rect:[r.x,r.y,r.width,r.height],finiteAnimations:finite.map(a=>({playState:a.playState,pending:a.pending}))};return state.stable>=3;}"
+      }
+    ],
+    "sessions-infochipstylemigration--ci-details": [
+      {
+        "action": "click",
+        "selector": "#storybook-root button"
+      },
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=[...document.querySelectorAll('[role=\"dialog\"]')].find(e=>e.getBoundingClientRect().width>0&&getComputedStyle(e).opacity==='1');if(!p||!p.textContent.includes(\"Cancelled attempt\"))return false;const s=getComputedStyle(p),r=p.getBoundingClientRect();if(!['paddingTop','paddingRight','paddingBottom','paddingLeft'].every(k=>s[k]===0+'px')||s.rowGap!==8+'px'||s.columnGap!==8+'px')return false;if(document.fonts.status!=='loaded'||[...p.querySelectorAll('img')].some(e=>!e.complete))return false;const finite=p.getAnimations({subtree:true}).filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running'))return false;if(p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style'))return false;const signature=JSON.stringify([...p.querySelectorAll('*'),p].map(e=>{const r=e.getBoundingClientRect();return[r.x,r.y,r.width,r.height]}));const state=window.__leaves15PopupReady??={last:'',stable:0};state.stable=signature===state.last?state.stable+1:0;state.last=signature;window.__leaves15PopupReady=state;window.__leaves15PopupContract={htmlDark:document.documentElement.classList.contains('dark'),htmlClass:document.documentElement.className,bodyClass:document.body.className,rootBackground:getComputedStyle(document.documentElement).getPropertyValue('--background').trim(),popupBackground:s.backgroundColor,padding:s.padding,gap:s.gap,popupText:p.textContent,rect:[r.x,r.y,r.width,r.height],finiteAnimations:finite.map(a=>({playState:a.playState,pending:a.pending}))};return state.stable>=3;}"
+      }
+    ],
+    "sessions-sessiontabbar--closed-tab-unread": [
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=[...document.querySelectorAll('[role=\"dialog\"]')].find(e=>e.getBoundingClientRect().width>0&&getComputedStyle(e).opacity==='1');if(!p||!p.textContent.includes(\"Fix flaky upload test\"))return false;const s=getComputedStyle(p),r=p.getBoundingClientRect();if(!['paddingTop','paddingRight','paddingBottom','paddingLeft'].every(k=>s[k]===0+'px')||s.rowGap!==8+'px'||s.columnGap!==8+'px')return false;if(document.fonts.status!=='loaded'||[...p.querySelectorAll('img')].some(e=>!e.complete))return false;const finite=p.getAnimations({subtree:true}).filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running'))return false;if(p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style'))return false;const signature=JSON.stringify([...p.querySelectorAll('*'),p].map(e=>{const r=e.getBoundingClientRect();return[r.x,r.y,r.width,r.height]}));const state=window.__leaves15PopupReady??={last:'',stable:0};state.stable=signature===state.last?state.stable+1:0;state.last=signature;window.__leaves15PopupReady=state;window.__leaves15PopupContract={htmlDark:document.documentElement.classList.contains('dark'),htmlClass:document.documentElement.className,bodyClass:document.body.className,rootBackground:getComputedStyle(document.documentElement).getPropertyValue('--background').trim(),popupBackground:s.backgroundColor,padding:s.padding,gap:s.gap,popupText:p.textContent,rect:[r.x,r.y,r.width,r.height],finiteAnimations:finite.map(a=>({playState:a.playState,pending:a.pending}))};return state.stable>=3;}"
+      }
+    ],
+    "sessions-sessionaccesscontrol--private-project-panel-open": [
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=[...document.querySelectorAll('[role=\"dialog\"]')].find(e=>e.getBoundingClientRect().width>0&&getComputedStyle(e).opacity==='1');if(!p||!p.textContent.includes(\"Share this conversation\"))return false;const s=getComputedStyle(p),r=p.getBoundingClientRect();if(!['paddingTop','paddingRight','paddingBottom','paddingLeft'].every(k=>s[k]===8+'px')||s.rowGap!==0+'px'||s.columnGap!==0+'px')return false;if(document.fonts.status!=='loaded'||[...p.querySelectorAll('img')].some(e=>!e.complete))return false;const finite=p.getAnimations({subtree:true}).filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running'))return false;if(p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style'))return false;const signature=JSON.stringify([...p.querySelectorAll('*'),p].map(e=>{const r=e.getBoundingClientRect();return[r.x,r.y,r.width,r.height]}));const state=window.__leaves15PopupReady??={last:'',stable:0};state.stable=signature===state.last?state.stable+1:0;state.last=signature;window.__leaves15PopupReady=state;window.__leaves15PopupContract={htmlDark:document.documentElement.classList.contains('dark'),htmlClass:document.documentElement.className,bodyClass:document.body.className,rootBackground:getComputedStyle(document.documentElement).getPropertyValue('--background').trim(),popupBackground:s.backgroundColor,padding:s.padding,gap:s.gap,popupText:p.textContent,rect:[r.x,r.y,r.width,r.height],finiteAnimations:finite.map(a=>({playState:a.playState,pending:a.pending}))};return state.stable>=3;}"
+      }
+    ],
+    "sessions-sessionconversationpage--desktop-sender-profile-card": [
+      {
+        "action": "press",
+        "role": "button",
+        "name": "View profile for Maya Chen",
+        "key": "Escape"
+      },
+      {
+        "action": "click",
+        "role": "button",
+        "name": "View profile for Maya Chen"
+      },
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=[...document.querySelectorAll('[role=\"dialog\"]')].find(e=>e.getBoundingClientRect().width>0&&getComputedStyle(e).opacity==='1');if(!p||!p.textContent.includes(\"Maya Chen\"))return false;const s=getComputedStyle(p),r=p.getBoundingClientRect();if(!['paddingTop','paddingRight','paddingBottom','paddingLeft'].every(k=>s[k]===0+'px')||s.rowGap!==8+'px'||s.columnGap!==8+'px')return false;if(document.fonts.status!=='loaded'||[...p.querySelectorAll('img')].some(e=>!e.complete))return false;const finite=p.getAnimations({subtree:true}).filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running'))return false;if(p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style'))return false;const signature=JSON.stringify([...p.querySelectorAll('*'),p].map(e=>{const r=e.getBoundingClientRect();return[r.x,r.y,r.width,r.height]}));const state=window.__leaves15PopupReady??={last:'',stable:0};state.stable=signature===state.last?state.stable+1:0;state.last=signature;window.__leaves15PopupReady=state;window.__leaves15PopupContract={htmlDark:document.documentElement.classList.contains('dark'),htmlClass:document.documentElement.className,bodyClass:document.body.className,rootBackground:getComputedStyle(document.documentElement).getPropertyValue('--background').trim(),popupBackground:s.backgroundColor,padding:s.padding,gap:s.gap,popupText:p.textContent,rect:[r.x,r.y,r.width,r.height],finiteAnimations:finite.map(a=>({playState:a.playState,pending:a.pending}))};return state.stable>=3;}"
+      }
+    ],
+    "sessions-sessionconversationpage--desktop-idle": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Turn configuration",
+        "index": 0
+      },
+      {
+        "action": "visible",
+        "role": "dialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const p=[...document.querySelectorAll('[role=\"dialog\"]')].find(e=>e.getBoundingClientRect().width>0&&getComputedStyle(e).opacity==='1');if(!p||!p.textContent.includes(\"Turn configuration\"))return false;const s=getComputedStyle(p),r=p.getBoundingClientRect();if(!['paddingTop','paddingRight','paddingBottom','paddingLeft'].every(k=>s[k]===0+'px')||s.rowGap!==0+'px'||s.columnGap!==0+'px')return false;if(document.fonts.status!=='loaded'||[...p.querySelectorAll('img')].some(e=>!e.complete))return false;const finite=p.getAnimations({subtree:true}).filter(a=>a.effect?.getTiming().iterations!==Infinity);if(finite.some(a=>a.pending||a.playState==='running'))return false;if(p.hasAttribute('data-starting-style')||p.hasAttribute('data-ending-style'))return false;const signature=JSON.stringify([...p.querySelectorAll('*'),p].map(e=>{const r=e.getBoundingClientRect();return[r.x,r.y,r.width,r.height]}));const state=window.__leaves15PopupReady??={last:'',stable:0};state.stable=signature===state.last?state.stable+1:0;state.last=signature;window.__leaves15PopupReady=state;window.__leaves15PopupContract={htmlDark:document.documentElement.classList.contains('dark'),htmlClass:document.documentElement.className,bodyClass:document.body.className,rootBackground:getComputedStyle(document.documentElement).getPropertyValue('--background').trim(),popupBackground:s.backgroundColor,padding:s.padding,gap:s.gap,popupText:p.textContent,rect:[r.x,r.y,r.width,r.height],finiteAnimations:finite.map(a=>({playState:a.playState,pending:a.pending}))};return state.stable>=3;}"
+      }
+    ]
+  }
+}

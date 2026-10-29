@@ -1,0 +1,258 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "device": "iPhone SE",
+      "width": 390,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "locale": "en",
+  "reducedMotion": "reduce",
+  "ids": [
+    "migration-billingcontainerspinner--preview-pending",
+    "migration-billingcontainerspinner--switch-pending",
+    "migration-billingcontainerspinner--preview-pending-root-spacing",
+    "migration-billingcontainerspinner--switch-pending-root-spacing"
+  ],
+  "ready": {
+    "migration-billingcontainerspinner--preview-pending": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => (function gate(state,spacing,previewPending){const fixture=document.querySelector('[data-billing-container-spinner]'),dialogs=[...document.querySelectorAll('[role=alertdialog]')];if(!fixture)return false;if(state==='closed')return dialogs.length===0&&[...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='Switch to yearly'&&!e.disabled);if(dialogs.length!==1)return false;const dialog=dialogs[0],r=dialog.getBoundingClientRect(),buttons=[...dialog.querySelectorAll('button')],confirm=buttons.find(e=>e.textContent.trim()==='Confirm switch'),cancel=buttons.find(e=>e.textContent.trim()==='Cancel');if(!confirm||!cancel||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||!dialog.textContent.includes('Change billing interval?'))return false;const marks=[...dialog.querySelectorAll('[data-slot=spinner]')];if(state==='opened'){if(fixture.dataset.stage!=='preview-requested'||cancel.disabled)return false;if(previewPending){if(!confirm.disabled||marks.length!==1||confirm.contains(marks[0]))return false;}else if(confirm.disabled||marks.length)return false;}if(state==='pending'&&(fixture.dataset.stage!=='switch-requested'||!confirm.disabled||!cancel.disabled||marks.length!==1||!confirm.contains(marks[0])))return false;for(const mark of marks){const c=getComputedStyle(mark),mr=mark.getBoundingClientRect();if(c.width!==spacing*4+'px'||c.height!==spacing*4+'px'||c.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight||c.flexShrink!=='0')return false;if(state==='pending'&&c.marginRight!==spacing*2+'px')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));})(\"closed\",4,true)"
+      },
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Switch to yearly"
+      },
+      {
+        "action": "visible",
+        "role": "alertdialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => (function gate(state,spacing,previewPending){const fixture=document.querySelector('[data-billing-container-spinner]'),dialogs=[...document.querySelectorAll('[role=alertdialog]')];if(!fixture)return false;if(state==='closed')return dialogs.length===0&&[...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='Switch to yearly'&&!e.disabled);if(dialogs.length!==1)return false;const dialog=dialogs[0],r=dialog.getBoundingClientRect(),buttons=[...dialog.querySelectorAll('button')],confirm=buttons.find(e=>e.textContent.trim()==='Confirm switch'),cancel=buttons.find(e=>e.textContent.trim()==='Cancel');if(!confirm||!cancel||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||!dialog.textContent.includes('Change billing interval?'))return false;const marks=[...dialog.querySelectorAll('[data-slot=spinner]')];if(state==='opened'){if(fixture.dataset.stage!=='preview-requested'||cancel.disabled)return false;if(previewPending){if(!confirm.disabled||marks.length!==1||confirm.contains(marks[0]))return false;}else if(confirm.disabled||marks.length)return false;}if(state==='pending'&&(fixture.dataset.stage!=='switch-requested'||!confirm.disabled||!cancel.disabled||marks.length!==1||!confirm.contains(marks[0])))return false;for(const mark of marks){const c=getComputedStyle(mark),mr=mark.getBoundingClientRect();if(c.width!==spacing*4+'px'||c.height!==spacing*4+'px'||c.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight||c.flexShrink!=='0')return false;if(state==='pending'&&c.marginRight!==spacing*2+'px')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));})(\"opened\",4,true)"
+      }
+    ],
+    "migration-billingcontainerspinner--switch-pending": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => (function gate(state,spacing,previewPending){const fixture=document.querySelector('[data-billing-container-spinner]'),dialogs=[...document.querySelectorAll('[role=alertdialog]')];if(!fixture)return false;if(state==='closed')return dialogs.length===0&&[...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='Switch to yearly'&&!e.disabled);if(dialogs.length!==1)return false;const dialog=dialogs[0],r=dialog.getBoundingClientRect(),buttons=[...dialog.querySelectorAll('button')],confirm=buttons.find(e=>e.textContent.trim()==='Confirm switch'),cancel=buttons.find(e=>e.textContent.trim()==='Cancel');if(!confirm||!cancel||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||!dialog.textContent.includes('Change billing interval?'))return false;const marks=[...dialog.querySelectorAll('[data-slot=spinner]')];if(state==='opened'){if(fixture.dataset.stage!=='preview-requested'||cancel.disabled)return false;if(previewPending){if(!confirm.disabled||marks.length!==1||confirm.contains(marks[0]))return false;}else if(confirm.disabled||marks.length)return false;}if(state==='pending'&&(fixture.dataset.stage!=='switch-requested'||!confirm.disabled||!cancel.disabled||marks.length!==1||!confirm.contains(marks[0])))return false;for(const mark of marks){const c=getComputedStyle(mark),mr=mark.getBoundingClientRect();if(c.width!==spacing*4+'px'||c.height!==spacing*4+'px'||c.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight||c.flexShrink!=='0')return false;if(state==='pending'&&c.marginRight!==spacing*2+'px')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));})(\"closed\",4,false)"
+      },
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Switch to yearly"
+      },
+      {
+        "action": "visible",
+        "role": "alertdialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => (function gate(state,spacing,previewPending){const fixture=document.querySelector('[data-billing-container-spinner]'),dialogs=[...document.querySelectorAll('[role=alertdialog]')];if(!fixture)return false;if(state==='closed')return dialogs.length===0&&[...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='Switch to yearly'&&!e.disabled);if(dialogs.length!==1)return false;const dialog=dialogs[0],r=dialog.getBoundingClientRect(),buttons=[...dialog.querySelectorAll('button')],confirm=buttons.find(e=>e.textContent.trim()==='Confirm switch'),cancel=buttons.find(e=>e.textContent.trim()==='Cancel');if(!confirm||!cancel||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||!dialog.textContent.includes('Change billing interval?'))return false;const marks=[...dialog.querySelectorAll('[data-slot=spinner]')];if(state==='opened'){if(fixture.dataset.stage!=='preview-requested'||cancel.disabled)return false;if(previewPending){if(!confirm.disabled||marks.length!==1||confirm.contains(marks[0]))return false;}else if(confirm.disabled||marks.length)return false;}if(state==='pending'&&(fixture.dataset.stage!=='switch-requested'||!confirm.disabled||!cancel.disabled||marks.length!==1||!confirm.contains(marks[0])))return false;for(const mark of marks){const c=getComputedStyle(mark),mr=mark.getBoundingClientRect();if(c.width!==spacing*4+'px'||c.height!==spacing*4+'px'||c.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight||c.flexShrink!=='0')return false;if(state==='pending'&&c.marginRight!==spacing*2+'px')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));})(\"opened\",4,false)"
+      }
+    ],
+    "migration-billingcontainerspinner--preview-pending-root-spacing": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => (function gate(state,spacing,previewPending){const fixture=document.querySelector('[data-billing-container-spinner]'),dialogs=[...document.querySelectorAll('[role=alertdialog]')];if(!fixture)return false;if(state==='closed')return dialogs.length===0&&[...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='Switch to yearly'&&!e.disabled);if(dialogs.length!==1)return false;const dialog=dialogs[0],r=dialog.getBoundingClientRect(),buttons=[...dialog.querySelectorAll('button')],confirm=buttons.find(e=>e.textContent.trim()==='Confirm switch'),cancel=buttons.find(e=>e.textContent.trim()==='Cancel');if(!confirm||!cancel||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||!dialog.textContent.includes('Change billing interval?'))return false;const marks=[...dialog.querySelectorAll('[data-slot=spinner]')];if(state==='opened'){if(fixture.dataset.stage!=='preview-requested'||cancel.disabled)return false;if(previewPending){if(!confirm.disabled||marks.length!==1||confirm.contains(marks[0]))return false;}else if(confirm.disabled||marks.length)return false;}if(state==='pending'&&(fixture.dataset.stage!=='switch-requested'||!confirm.disabled||!cancel.disabled||marks.length!==1||!confirm.contains(marks[0])))return false;for(const mark of marks){const c=getComputedStyle(mark),mr=mark.getBoundingClientRect();if(c.width!==spacing*4+'px'||c.height!==spacing*4+'px'||c.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight||c.flexShrink!=='0')return false;if(state==='pending'&&c.marginRight!==spacing*2+'px')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));})(\"closed\",5,true)"
+      },
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Switch to yearly"
+      },
+      {
+        "action": "visible",
+        "role": "alertdialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => (function gate(state,spacing,previewPending){const fixture=document.querySelector('[data-billing-container-spinner]'),dialogs=[...document.querySelectorAll('[role=alertdialog]')];if(!fixture)return false;if(state==='closed')return dialogs.length===0&&[...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='Switch to yearly'&&!e.disabled);if(dialogs.length!==1)return false;const dialog=dialogs[0],r=dialog.getBoundingClientRect(),buttons=[...dialog.querySelectorAll('button')],confirm=buttons.find(e=>e.textContent.trim()==='Confirm switch'),cancel=buttons.find(e=>e.textContent.trim()==='Cancel');if(!confirm||!cancel||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||!dialog.textContent.includes('Change billing interval?'))return false;const marks=[...dialog.querySelectorAll('[data-slot=spinner]')];if(state==='opened'){if(fixture.dataset.stage!=='preview-requested'||cancel.disabled)return false;if(previewPending){if(!confirm.disabled||marks.length!==1||confirm.contains(marks[0]))return false;}else if(confirm.disabled||marks.length)return false;}if(state==='pending'&&(fixture.dataset.stage!=='switch-requested'||!confirm.disabled||!cancel.disabled||marks.length!==1||!confirm.contains(marks[0])))return false;for(const mark of marks){const c=getComputedStyle(mark),mr=mark.getBoundingClientRect();if(c.width!==spacing*4+'px'||c.height!==spacing*4+'px'||c.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight||c.flexShrink!=='0')return false;if(state==='pending'&&c.marginRight!==spacing*2+'px')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));})(\"opened\",5,true)"
+      }
+    ],
+    "migration-billingcontainerspinner--switch-pending-root-spacing": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => (function gate(state,spacing,previewPending){const fixture=document.querySelector('[data-billing-container-spinner]'),dialogs=[...document.querySelectorAll('[role=alertdialog]')];if(!fixture)return false;if(state==='closed')return dialogs.length===0&&[...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='Switch to yearly'&&!e.disabled);if(dialogs.length!==1)return false;const dialog=dialogs[0],r=dialog.getBoundingClientRect(),buttons=[...dialog.querySelectorAll('button')],confirm=buttons.find(e=>e.textContent.trim()==='Confirm switch'),cancel=buttons.find(e=>e.textContent.trim()==='Cancel');if(!confirm||!cancel||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||!dialog.textContent.includes('Change billing interval?'))return false;const marks=[...dialog.querySelectorAll('[data-slot=spinner]')];if(state==='opened'){if(fixture.dataset.stage!=='preview-requested'||cancel.disabled)return false;if(previewPending){if(!confirm.disabled||marks.length!==1||confirm.contains(marks[0]))return false;}else if(confirm.disabled||marks.length)return false;}if(state==='pending'&&(fixture.dataset.stage!=='switch-requested'||!confirm.disabled||!cancel.disabled||marks.length!==1||!confirm.contains(marks[0])))return false;for(const mark of marks){const c=getComputedStyle(mark),mr=mark.getBoundingClientRect();if(c.width!==spacing*4+'px'||c.height!==spacing*4+'px'||c.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight||c.flexShrink!=='0')return false;if(state==='pending'&&c.marginRight!==spacing*2+'px')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));})(\"closed\",5,false)"
+      },
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Switch to yearly"
+      },
+      {
+        "action": "visible",
+        "role": "alertdialog"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => (function gate(state,spacing,previewPending){const fixture=document.querySelector('[data-billing-container-spinner]'),dialogs=[...document.querySelectorAll('[role=alertdialog]')];if(!fixture)return false;if(state==='closed')return dialogs.length===0&&[...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='Switch to yearly'&&!e.disabled);if(dialogs.length!==1)return false;const dialog=dialogs[0],r=dialog.getBoundingClientRect(),buttons=[...dialog.querySelectorAll('button')],confirm=buttons.find(e=>e.textContent.trim()==='Confirm switch'),cancel=buttons.find(e=>e.textContent.trim()==='Cancel');if(!confirm||!cancel||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||!dialog.textContent.includes('Change billing interval?'))return false;const marks=[...dialog.querySelectorAll('[data-slot=spinner]')];if(state==='opened'){if(fixture.dataset.stage!=='preview-requested'||cancel.disabled)return false;if(previewPending){if(!confirm.disabled||marks.length!==1||confirm.contains(marks[0]))return false;}else if(confirm.disabled||marks.length)return false;}if(state==='pending'&&(fixture.dataset.stage!=='switch-requested'||!confirm.disabled||!cancel.disabled||marks.length!==1||!confirm.contains(marks[0])))return false;for(const mark of marks){const c=getComputedStyle(mark),mr=mark.getBoundingClientRect();if(c.width!==spacing*4+'px'||c.height!==spacing*4+'px'||c.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight||c.flexShrink!=='0')return false;if(state==='pending'&&c.marginRight!==spacing*2+'px')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));})(\"opened\",5,false)"
+      }
+    ]
+  },
+  "states": {
+    "migration-billingcontainerspinner--preview-pending": [
+      {
+        "name": "cancelled",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Cancel"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => (function gate(state,spacing,previewPending){const fixture=document.querySelector('[data-billing-container-spinner]'),dialogs=[...document.querySelectorAll('[role=alertdialog]')];if(!fixture)return false;if(state==='closed')return dialogs.length===0&&[...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='Switch to yearly'&&!e.disabled);if(dialogs.length!==1)return false;const dialog=dialogs[0],r=dialog.getBoundingClientRect(),buttons=[...dialog.querySelectorAll('button')],confirm=buttons.find(e=>e.textContent.trim()==='Confirm switch'),cancel=buttons.find(e=>e.textContent.trim()==='Cancel');if(!confirm||!cancel||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||!dialog.textContent.includes('Change billing interval?'))return false;const marks=[...dialog.querySelectorAll('[data-slot=spinner]')];if(state==='opened'){if(fixture.dataset.stage!=='preview-requested'||cancel.disabled)return false;if(previewPending){if(!confirm.disabled||marks.length!==1||confirm.contains(marks[0]))return false;}else if(confirm.disabled||marks.length)return false;}if(state==='pending'&&(fixture.dataset.stage!=='switch-requested'||!confirm.disabled||!cancel.disabled||marks.length!==1||!confirm.contains(marks[0])))return false;for(const mark of marks){const c=getComputedStyle(mark),mr=mark.getBoundingClientRect();if(c.width!==spacing*4+'px'||c.height!==spacing*4+'px'||c.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight||c.flexShrink!=='0')return false;if(state==='pending'&&c.marginRight!==spacing*2+'px')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));})(\"closed\",4,true)"
+          }
+        ]
+      },
+      {
+        "name": "reopened-preview",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Switch to yearly"
+          },
+          {
+            "action": "visible",
+            "role": "alertdialog"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => (function gate(state,spacing,previewPending){const fixture=document.querySelector('[data-billing-container-spinner]'),dialogs=[...document.querySelectorAll('[role=alertdialog]')];if(!fixture)return false;if(state==='closed')return dialogs.length===0&&[...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='Switch to yearly'&&!e.disabled);if(dialogs.length!==1)return false;const dialog=dialogs[0],r=dialog.getBoundingClientRect(),buttons=[...dialog.querySelectorAll('button')],confirm=buttons.find(e=>e.textContent.trim()==='Confirm switch'),cancel=buttons.find(e=>e.textContent.trim()==='Cancel');if(!confirm||!cancel||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||!dialog.textContent.includes('Change billing interval?'))return false;const marks=[...dialog.querySelectorAll('[data-slot=spinner]')];if(state==='opened'){if(fixture.dataset.stage!=='preview-requested'||cancel.disabled)return false;if(previewPending){if(!confirm.disabled||marks.length!==1||confirm.contains(marks[0]))return false;}else if(confirm.disabled||marks.length)return false;}if(state==='pending'&&(fixture.dataset.stage!=='switch-requested'||!confirm.disabled||!cancel.disabled||marks.length!==1||!confirm.contains(marks[0])))return false;for(const mark of marks){const c=getComputedStyle(mark),mr=mark.getBoundingClientRect();if(c.width!==spacing*4+'px'||c.height!==spacing*4+'px'||c.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight||c.flexShrink!=='0')return false;if(state==='pending'&&c.marginRight!==spacing*2+'px')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));})(\"opened\",4,true)"
+          }
+        ]
+      }
+    ],
+    "migration-billingcontainerspinner--switch-pending": [
+      {
+        "name": "cancelled",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Cancel"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => (function gate(state,spacing,previewPending){const fixture=document.querySelector('[data-billing-container-spinner]'),dialogs=[...document.querySelectorAll('[role=alertdialog]')];if(!fixture)return false;if(state==='closed')return dialogs.length===0&&[...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='Switch to yearly'&&!e.disabled);if(dialogs.length!==1)return false;const dialog=dialogs[0],r=dialog.getBoundingClientRect(),buttons=[...dialog.querySelectorAll('button')],confirm=buttons.find(e=>e.textContent.trim()==='Confirm switch'),cancel=buttons.find(e=>e.textContent.trim()==='Cancel');if(!confirm||!cancel||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||!dialog.textContent.includes('Change billing interval?'))return false;const marks=[...dialog.querySelectorAll('[data-slot=spinner]')];if(state==='opened'){if(fixture.dataset.stage!=='preview-requested'||cancel.disabled)return false;if(previewPending){if(!confirm.disabled||marks.length!==1||confirm.contains(marks[0]))return false;}else if(confirm.disabled||marks.length)return false;}if(state==='pending'&&(fixture.dataset.stage!=='switch-requested'||!confirm.disabled||!cancel.disabled||marks.length!==1||!confirm.contains(marks[0])))return false;for(const mark of marks){const c=getComputedStyle(mark),mr=mark.getBoundingClientRect();if(c.width!==spacing*4+'px'||c.height!==spacing*4+'px'||c.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight||c.flexShrink!=='0')return false;if(state==='pending'&&c.marginRight!==spacing*2+'px')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));})(\"closed\",4,false)"
+          }
+        ]
+      },
+      {
+        "name": "confirmed-pending",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Switch to yearly"
+          },
+          {
+            "action": "visible",
+            "role": "alertdialog"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => (function gate(state,spacing,previewPending){const fixture=document.querySelector('[data-billing-container-spinner]'),dialogs=[...document.querySelectorAll('[role=alertdialog]')];if(!fixture)return false;if(state==='closed')return dialogs.length===0&&[...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='Switch to yearly'&&!e.disabled);if(dialogs.length!==1)return false;const dialog=dialogs[0],r=dialog.getBoundingClientRect(),buttons=[...dialog.querySelectorAll('button')],confirm=buttons.find(e=>e.textContent.trim()==='Confirm switch'),cancel=buttons.find(e=>e.textContent.trim()==='Cancel');if(!confirm||!cancel||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||!dialog.textContent.includes('Change billing interval?'))return false;const marks=[...dialog.querySelectorAll('[data-slot=spinner]')];if(state==='opened'){if(fixture.dataset.stage!=='preview-requested'||cancel.disabled)return false;if(previewPending){if(!confirm.disabled||marks.length!==1||confirm.contains(marks[0]))return false;}else if(confirm.disabled||marks.length)return false;}if(state==='pending'&&(fixture.dataset.stage!=='switch-requested'||!confirm.disabled||!cancel.disabled||marks.length!==1||!confirm.contains(marks[0])))return false;for(const mark of marks){const c=getComputedStyle(mark),mr=mark.getBoundingClientRect();if(c.width!==spacing*4+'px'||c.height!==spacing*4+'px'||c.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight||c.flexShrink!=='0')return false;if(state==='pending'&&c.marginRight!==spacing*2+'px')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));})(\"opened\",4,false)"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Confirm switch"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => (function gate(state,spacing,previewPending){const fixture=document.querySelector('[data-billing-container-spinner]'),dialogs=[...document.querySelectorAll('[role=alertdialog]')];if(!fixture)return false;if(state==='closed')return dialogs.length===0&&[...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='Switch to yearly'&&!e.disabled);if(dialogs.length!==1)return false;const dialog=dialogs[0],r=dialog.getBoundingClientRect(),buttons=[...dialog.querySelectorAll('button')],confirm=buttons.find(e=>e.textContent.trim()==='Confirm switch'),cancel=buttons.find(e=>e.textContent.trim()==='Cancel');if(!confirm||!cancel||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||!dialog.textContent.includes('Change billing interval?'))return false;const marks=[...dialog.querySelectorAll('[data-slot=spinner]')];if(state==='opened'){if(fixture.dataset.stage!=='preview-requested'||cancel.disabled)return false;if(previewPending){if(!confirm.disabled||marks.length!==1||confirm.contains(marks[0]))return false;}else if(confirm.disabled||marks.length)return false;}if(state==='pending'&&(fixture.dataset.stage!=='switch-requested'||!confirm.disabled||!cancel.disabled||marks.length!==1||!confirm.contains(marks[0])))return false;for(const mark of marks){const c=getComputedStyle(mark),mr=mark.getBoundingClientRect();if(c.width!==spacing*4+'px'||c.height!==spacing*4+'px'||c.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight||c.flexShrink!=='0')return false;if(state==='pending'&&c.marginRight!==spacing*2+'px')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));})(\"pending\",4,false)"
+          }
+        ]
+      }
+    ],
+    "migration-billingcontainerspinner--preview-pending-root-spacing": [
+      {
+        "name": "cancelled",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Cancel"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => (function gate(state,spacing,previewPending){const fixture=document.querySelector('[data-billing-container-spinner]'),dialogs=[...document.querySelectorAll('[role=alertdialog]')];if(!fixture)return false;if(state==='closed')return dialogs.length===0&&[...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='Switch to yearly'&&!e.disabled);if(dialogs.length!==1)return false;const dialog=dialogs[0],r=dialog.getBoundingClientRect(),buttons=[...dialog.querySelectorAll('button')],confirm=buttons.find(e=>e.textContent.trim()==='Confirm switch'),cancel=buttons.find(e=>e.textContent.trim()==='Cancel');if(!confirm||!cancel||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||!dialog.textContent.includes('Change billing interval?'))return false;const marks=[...dialog.querySelectorAll('[data-slot=spinner]')];if(state==='opened'){if(fixture.dataset.stage!=='preview-requested'||cancel.disabled)return false;if(previewPending){if(!confirm.disabled||marks.length!==1||confirm.contains(marks[0]))return false;}else if(confirm.disabled||marks.length)return false;}if(state==='pending'&&(fixture.dataset.stage!=='switch-requested'||!confirm.disabled||!cancel.disabled||marks.length!==1||!confirm.contains(marks[0])))return false;for(const mark of marks){const c=getComputedStyle(mark),mr=mark.getBoundingClientRect();if(c.width!==spacing*4+'px'||c.height!==spacing*4+'px'||c.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight||c.flexShrink!=='0')return false;if(state==='pending'&&c.marginRight!==spacing*2+'px')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));})(\"closed\",5,true)"
+          }
+        ]
+      },
+      {
+        "name": "reopened-preview",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Switch to yearly"
+          },
+          {
+            "action": "visible",
+            "role": "alertdialog"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => (function gate(state,spacing,previewPending){const fixture=document.querySelector('[data-billing-container-spinner]'),dialogs=[...document.querySelectorAll('[role=alertdialog]')];if(!fixture)return false;if(state==='closed')return dialogs.length===0&&[...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='Switch to yearly'&&!e.disabled);if(dialogs.length!==1)return false;const dialog=dialogs[0],r=dialog.getBoundingClientRect(),buttons=[...dialog.querySelectorAll('button')],confirm=buttons.find(e=>e.textContent.trim()==='Confirm switch'),cancel=buttons.find(e=>e.textContent.trim()==='Cancel');if(!confirm||!cancel||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||!dialog.textContent.includes('Change billing interval?'))return false;const marks=[...dialog.querySelectorAll('[data-slot=spinner]')];if(state==='opened'){if(fixture.dataset.stage!=='preview-requested'||cancel.disabled)return false;if(previewPending){if(!confirm.disabled||marks.length!==1||confirm.contains(marks[0]))return false;}else if(confirm.disabled||marks.length)return false;}if(state==='pending'&&(fixture.dataset.stage!=='switch-requested'||!confirm.disabled||!cancel.disabled||marks.length!==1||!confirm.contains(marks[0])))return false;for(const mark of marks){const c=getComputedStyle(mark),mr=mark.getBoundingClientRect();if(c.width!==spacing*4+'px'||c.height!==spacing*4+'px'||c.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight||c.flexShrink!=='0')return false;if(state==='pending'&&c.marginRight!==spacing*2+'px')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));})(\"opened\",5,true)"
+          }
+        ]
+      }
+    ],
+    "migration-billingcontainerspinner--switch-pending-root-spacing": [
+      {
+        "name": "cancelled",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Cancel"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => (function gate(state,spacing,previewPending){const fixture=document.querySelector('[data-billing-container-spinner]'),dialogs=[...document.querySelectorAll('[role=alertdialog]')];if(!fixture)return false;if(state==='closed')return dialogs.length===0&&[...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='Switch to yearly'&&!e.disabled);if(dialogs.length!==1)return false;const dialog=dialogs[0],r=dialog.getBoundingClientRect(),buttons=[...dialog.querySelectorAll('button')],confirm=buttons.find(e=>e.textContent.trim()==='Confirm switch'),cancel=buttons.find(e=>e.textContent.trim()==='Cancel');if(!confirm||!cancel||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||!dialog.textContent.includes('Change billing interval?'))return false;const marks=[...dialog.querySelectorAll('[data-slot=spinner]')];if(state==='opened'){if(fixture.dataset.stage!=='preview-requested'||cancel.disabled)return false;if(previewPending){if(!confirm.disabled||marks.length!==1||confirm.contains(marks[0]))return false;}else if(confirm.disabled||marks.length)return false;}if(state==='pending'&&(fixture.dataset.stage!=='switch-requested'||!confirm.disabled||!cancel.disabled||marks.length!==1||!confirm.contains(marks[0])))return false;for(const mark of marks){const c=getComputedStyle(mark),mr=mark.getBoundingClientRect();if(c.width!==spacing*4+'px'||c.height!==spacing*4+'px'||c.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight||c.flexShrink!=='0')return false;if(state==='pending'&&c.marginRight!==spacing*2+'px')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));})(\"closed\",5,false)"
+          }
+        ]
+      },
+      {
+        "name": "confirmed-pending",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Switch to yearly"
+          },
+          {
+            "action": "visible",
+            "role": "alertdialog"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => (function gate(state,spacing,previewPending){const fixture=document.querySelector('[data-billing-container-spinner]'),dialogs=[...document.querySelectorAll('[role=alertdialog]')];if(!fixture)return false;if(state==='closed')return dialogs.length===0&&[...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='Switch to yearly'&&!e.disabled);if(dialogs.length!==1)return false;const dialog=dialogs[0],r=dialog.getBoundingClientRect(),buttons=[...dialog.querySelectorAll('button')],confirm=buttons.find(e=>e.textContent.trim()==='Confirm switch'),cancel=buttons.find(e=>e.textContent.trim()==='Cancel');if(!confirm||!cancel||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||!dialog.textContent.includes('Change billing interval?'))return false;const marks=[...dialog.querySelectorAll('[data-slot=spinner]')];if(state==='opened'){if(fixture.dataset.stage!=='preview-requested'||cancel.disabled)return false;if(previewPending){if(!confirm.disabled||marks.length!==1||confirm.contains(marks[0]))return false;}else if(confirm.disabled||marks.length)return false;}if(state==='pending'&&(fixture.dataset.stage!=='switch-requested'||!confirm.disabled||!cancel.disabled||marks.length!==1||!confirm.contains(marks[0])))return false;for(const mark of marks){const c=getComputedStyle(mark),mr=mark.getBoundingClientRect();if(c.width!==spacing*4+'px'||c.height!==spacing*4+'px'||c.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight||c.flexShrink!=='0')return false;if(state==='pending'&&c.marginRight!==spacing*2+'px')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));})(\"opened\",5,false)"
+          },
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Confirm switch"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => (function gate(state,spacing,previewPending){const fixture=document.querySelector('[data-billing-container-spinner]'),dialogs=[...document.querySelectorAll('[role=alertdialog]')];if(!fixture)return false;if(state==='closed')return dialogs.length===0&&[...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='Switch to yearly'&&!e.disabled);if(dialogs.length!==1)return false;const dialog=dialogs[0],r=dialog.getBoundingClientRect(),buttons=[...dialog.querySelectorAll('button')],confirm=buttons.find(e=>e.textContent.trim()==='Confirm switch'),cancel=buttons.find(e=>e.textContent.trim()==='Cancel');if(!confirm||!cancel||r.width<=0||r.height<=0||r.left<0||r.top<0||r.right>innerWidth||r.bottom>innerHeight||!dialog.textContent.includes('Change billing interval?'))return false;const marks=[...dialog.querySelectorAll('[data-slot=spinner]')];if(state==='opened'){if(fixture.dataset.stage!=='preview-requested'||cancel.disabled)return false;if(previewPending){if(!confirm.disabled||marks.length!==1||confirm.contains(marks[0]))return false;}else if(confirm.disabled||marks.length)return false;}if(state==='pending'&&(fixture.dataset.stage!=='switch-requested'||!confirm.disabled||!cancel.disabled||marks.length!==1||!confirm.contains(marks[0])))return false;for(const mark of marks){const c=getComputedStyle(mark),mr=mark.getBoundingClientRect();if(c.width!==spacing*4+'px'||c.height!==spacing*4+'px'||c.getPropertyValue('--spacing').trim()!==(spacing===4?'.25rem':'5px')||mr.left<0||mr.right>innerWidth||mr.top<0||mr.bottom>innerHeight||c.flexShrink!=='0')return false;if(state==='pending'&&c.marginRight!==spacing*2+'px')return false;}return document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));})(\"pending\",5,false)"
+          }
+        ]
+      }
+    ]
+  }
+}

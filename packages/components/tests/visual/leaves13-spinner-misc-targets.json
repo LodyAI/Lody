@@ -1,0 +1,117 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    },
+    {
+      "name": "phone",
+      "device": "iPhone SE",
+      "width": 390,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "chat-chatlandingview--submission-pending-dark",
+    "chat-machinepairingdialog--creating",
+    "chat-machinepairingdialog--claimed",
+    "components-loadingplaceholder--default",
+    "components-loadingplaceholder--with-description",
+    "sessions-sessionsharedialog--sharing",
+    "sessions-sessiongoalbanner--pending-pause",
+    "sessions-sessionsyncingindicator--default",
+    "sessions-sessionusagepopover--compacting",
+    "components-sidebarupdatebanner--restarting"
+  ],
+  "ready": {
+    "chat-chatlandingview--submission-pending-dark": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const items=[...document.querySelectorAll('[data-slot=spinner]')].filter(e=>e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&e.getBoundingClientRect().width>0); return items.length>=1&&items.every(e=>{const s=getComputedStyle(e);return s.width==='16px'&&s.height==='16px'&&e.querySelector('svg')?.getAttribute('aria-label')==='Loading';}); }"
+      }
+    ],
+    "chat-machinepairingdialog--creating": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const items=[...document.querySelectorAll('[data-slot=spinner]')].filter(e=>e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&e.getBoundingClientRect().width>0); return items.length>=1&&items.every(e=>{const s=getComputedStyle(e);return s.width==='20px'&&s.height==='20px'&&e.querySelector('svg')?.getAttribute('aria-label')==='Loading';}); }"
+      }
+    ],
+    "chat-machinepairingdialog--claimed": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const items=[...document.querySelectorAll('[data-slot=spinner]')].filter(e=>e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&e.getBoundingClientRect().width>0); return items.length>=1&&items.every(e=>{const s=getComputedStyle(e);return s.width==='16px'&&s.height==='16px'&&e.querySelector('svg')?.getAttribute('aria-label')==='Loading';}); }"
+      }
+    ],
+    "components-loadingplaceholder--default": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const items=[...document.querySelectorAll('[data-slot=spinner]')].filter(e=>e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&e.getBoundingClientRect().width>0); return items.length>=1&&items.every(e=>{const s=getComputedStyle(e);return s.width==='20px'&&s.height==='20px'&&e.querySelector('svg')?.getAttribute('aria-label')==='Loading';}); }"
+      }
+    ],
+    "components-loadingplaceholder--with-description": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const items=[...document.querySelectorAll('[data-slot=spinner]')].filter(e=>e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&e.getBoundingClientRect().width>0); return items.length>=1&&items.every(e=>{const s=getComputedStyle(e);return s.width==='20px'&&s.height==='20px'&&e.querySelector('svg')?.getAttribute('aria-label')==='Loading';}); }"
+      }
+    ],
+    "sessions-sessionsharedialog--sharing": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const items=[...document.querySelectorAll('[data-slot=spinner]')].filter(e=>e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&e.getBoundingClientRect().width>0); return items.length>=1&&items.every(e=>{const s=getComputedStyle(e);return s.width==='16px'&&s.height==='16px'&&e.querySelector('svg')?.getAttribute('aria-label')==='Loading';}); }"
+      }
+    ],
+    "sessions-sessiongoalbanner--pending-pause": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const items=[...document.querySelectorAll('[data-slot=spinner]')].filter(e=>e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&e.getBoundingClientRect().width>0); return items.length>=1&&items.every(e=>{const s=getComputedStyle(e);return s.width==='14px'&&s.height==='14px'&&e.querySelector('svg')?.getAttribute('aria-label')==='Loading';}); }"
+      }
+    ],
+    "sessions-sessionsyncingindicator--default": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const items=[...document.querySelectorAll('[data-slot=spinner]')].filter(e=>e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&e.getBoundingClientRect().width>0); return items.length>=1&&items.every(e=>{const s=getComputedStyle(e);return s.width==='12px'&&s.height==='12px'&&e.querySelector('svg')?.getAttribute('aria-label')==='Loading';}); }"
+      }
+    ],
+    "sessions-sessionusagepopover--compacting": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const items=[...document.querySelectorAll('[data-slot=spinner]')].filter(e=>e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&e.getBoundingClientRect().width>0); return items.length>=1&&items.every(e=>{const s=getComputedStyle(e);return s.width==='14px'&&s.height==='14px'&&e.querySelector('svg')?.getAttribute('aria-label')==='Loading';}); }"
+      }
+    ],
+    "components-sidebarupdatebanner--restarting": [
+      {
+        "action": "waitForFunction",
+        "expression": "() => { const items=[...document.querySelectorAll('[data-slot=spinner]')].filter(e=>e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&e.getBoundingClientRect().width>0); return items.length>=1&&items.every(e=>{const s=getComputedStyle(e);return s.width==='14px'&&s.height==='14px'&&e.querySelector('svg')?.getAttribute('aria-label')==='Loading';}); }"
+      }
+    ]
+  },
+  "states": {
+    "sessions-sessionusagepopover--compacting": [
+      {
+        "name": "opened",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "#storybook-root button"
+          },
+          {
+            "action": "visible",
+            "role": "dialog"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => {const items=[...document.querySelectorAll('[data-slot=spinner]')].filter(e=>e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&e.getBoundingClientRect().width>0);return items.length===2&&items.every(e=>getComputedStyle(e).width==='14px'&&getComputedStyle(e).height==='14px');}"
+          }
+        ]
+      }
+    ]
+  },
+  "allowBlankIds": [
+    "chat-machinepairingdialog--creating",
+    "chat-machinepairingdialog--claimed",
+    "sessions-sessionsharedialog--sharing"
+  ]
+}

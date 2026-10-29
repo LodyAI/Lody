@@ -36,8 +36,18 @@ export interface ContextMenuContentProps extends Omit<
   container?: PopupContainer;
   /** Where focus goes when the menu closes; Base UI's popup prop. */
   finalFocus?: PopupBaseProps['finalFocus'];
+  /** Popup bounds: numbers are pixels; strings are CSS lengths. Omission restores defaults. */
+  minWidth?: string | number;
+  maxWidth?: string | number;
+  maxHeight?: string | number;
   className?: string;
 }
+
+const dimensions = stylex.create({
+  minWidth: (value: string | number) => ({ minWidth: value }),
+  maxWidth: (value: string | number) => ({ maxWidth: value }),
+  maxHeight: (value: string | number) => ({ maxHeight: value }),
+});
 
 const styles = stylex.create({
   /** The area that answers a right click; it is the caller's own layout. */
@@ -75,10 +85,18 @@ export const ContextMenuTrigger = forwardRef<HTMLDivElement, ContextMenuTriggerP
  * away from the click that asked for it.
  */
 export const ContextMenuContent = forwardRef<HTMLDivElement, ContextMenuContentProps>(
-  function ContextMenuContent({ className, children, container, finalFocus, ...rest }, ref) {
+  function ContextMenuContent(
+    { className, children, container, finalFocus, minWidth, maxWidth, maxHeight, ...rest },
+    ref
+  ) {
     const inheritedContainer = usePopupContainer();
     const palette = useForcedThemeClassNames();
     const mountPoint = container ?? inheritedContainer;
+    const bounds = [
+      minWidth != null && dimensions.minWidth(minWidth),
+      maxWidth != null && dimensions.maxWidth(maxWidth),
+      maxHeight != null && dimensions.maxHeight(maxHeight),
+    ] as const;
     return (
       <BaseContextMenu.Portal container={mountPoint} className={portalClassName}>
         <BaseContextMenu.Positioner
@@ -90,6 +108,7 @@ export const ContextMenuContent = forwardRef<HTMLDivElement, ContextMenuContentP
         >
           <BaseContextMenu.Popup
             finalFocus={finalFocus}
+            style={stylex.props(...bounds).style}
             className={(state) => {
               const hidden =
                 state.transitionStatus === 'starting' || state.transitionStatus === 'ending';
@@ -98,6 +117,7 @@ export const ContextMenuContent = forwardRef<HTMLDivElement, ContextMenuContentP
                   surface.popup,
                   nativeScrollbar,
                   surface.popupMenu,
+                  ...bounds,
                   hidden && hiddenSurfaceForSide(state.side)
                 ).className,
                 className

@@ -1,3 +1,5 @@
+import * as stylex from '@stylexjs/stylex';
+
 /**
  * The ONE panel treatment for framed conversation content: the plan-exit card's
  * command block, the worktree-script terminal, the permission card, and the
@@ -40,14 +42,38 @@ export const CONVERSATION_PANEL_FRAME_CLASS =
  * Measure the COMPOSITED pixel when changing this, never the token name (see
  * `sessions/AGENTS.md` on the surface ladder).
  */
-export const CONVERSATION_PANEL_HEADER_CLASS =
-  'flex items-center gap-2 bg-muted-foreground/[0.09] px-3 py-1.5 text-foreground';
-
-export const CONVERSATION_PANEL_HEADER_RULE_CLASS = 'border-b border-border/60';
+export const CONVERSATION_PANEL_HEADER_CLASS = 'bg-muted-foreground/[0.09]';
 
 /** Header label: quiet next to the content it introduces. */
-export const CONVERSATION_PANEL_TITLE_CLASS =
-  'min-w-0 flex-1 truncate text-[11px] font-medium text-muted-foreground';
+export const CONVERSATION_PANEL_TITLE_CLASS = 'font-medium';
 
-/** Body padding. No fill of its own — the frame already provides the surface. */
-export const CONVERSATION_PANEL_BODY_CLASS = 'px-3 py-2';
+export const conversationPanelStyles = stylex.create({
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 1.5)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  headerRule: {
+    borderBottomStyle: 'var(--tw-border-style)',
+    borderBottomWidth: '1px',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+  },
+  title: {
+    minWidth: 'calc(var(--spacing) * 0)',
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '11px',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  body: {
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+  },
+});

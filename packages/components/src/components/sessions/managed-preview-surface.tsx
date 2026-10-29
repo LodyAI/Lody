@@ -777,7 +777,6 @@ export function ManagedPreviewSurface({
               variant="ghost"
               size="mini"
               icon
-              className="shrink-0"
               aria-label={t('common.cancel', 'Cancel')}
               onClick={() => {
                 setSelectedTarget(null);
@@ -802,7 +801,7 @@ export function ManagedPreviewSurface({
               onClick={() => void submitDraft()}
             >
               {submitting ? (
-                <Spinner className="h-3.5 w-3.5" />
+                <Spinner diameter="calc(var(--spacing) * 3.5)" />
               ) : (
                 <Send {...stylex.props(styles.draftSubmitIcon)} />
               )}

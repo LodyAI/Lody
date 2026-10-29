@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import type { CSSProperties } from 'react';
 import { fn } from 'storybook/test';
 import { ResetPasswordPage } from '@/components/pages/reset-password-page';
 
@@ -23,6 +24,23 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
+
+export const Submitting: Story = {
+  args: {
+    password: 'synthetic-password',
+    confirmPassword: 'synthetic-password',
+    submitting: true,
+  },
+};
+
+export const ScopedSubmitting: Story = {
+  args: Submitting.args,
+  render: (args) => (
+    <div style={{ '--spacing': '6px' } as CSSProperties} data-password-spinner-scope>
+      <ResetPasswordPage {...args} />
+    </div>
+  ),
+};
 
 export const Success: Story = {
   args: {

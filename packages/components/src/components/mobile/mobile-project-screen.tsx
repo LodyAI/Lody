@@ -63,6 +63,27 @@ const TRANSITION_COLORS = {
   transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
 } as const;
 
+const DARK_SCOPE =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+
+const darkColors = {
+  border: {
+    default: '#ffffff1f',
+    '@supports (color: color-mix(in lab, red, red))':
+      'color-mix(in oklab, var(--color-white) 12%, transparent)',
+  },
+  idle: {
+    default: '#ffffff1a',
+    '@supports (color: color-mix(in lab, red, red))':
+      'color-mix(in oklab, var(--color-white) 10%, transparent)',
+  },
+  feedback: {
+    default: '#ffffff24',
+    '@supports (color: color-mix(in lab, red, red))':
+      'color-mix(in oklab, var(--color-white) 14%, transparent)',
+  },
+} as const;
+
 const styles = stylex.create({
   /** A react-icon, sized to fill its box. */
   reactIcon: {
@@ -373,8 +394,12 @@ const styles = stylex.create({
     color: themeColors.primary,
   },
   headerChipIdle: {
-    borderColor: 'hsl(var(--border) / 0.5)',
-    backgroundColor: { default: themeColors.muted, ':active': 'hsl(var(--muted) / 0.8)' },
+    borderColor: { default: 'hsl(var(--border) / 0.5)', [DARK_SCOPE]: darkColors.border },
+    backgroundColor: {
+      default: themeColors.muted,
+      ':active': 'hsl(var(--muted) / 0.8)',
+      [DARK_SCOPE]: { ...darkColors.idle, ':active': darkColors.feedback },
+    },
     color: themeColors.foreground,
   },
 
@@ -390,8 +415,15 @@ const styles = stylex.create({
     borderRadius: themeRadius.full,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: 'hsl(var(--border) / 0.5)',
-    backgroundColor: { default: themeColors.muted, ':hover': 'hsl(var(--muted) / 0.8)' },
+    borderColor: { default: 'hsl(var(--border) / 0.5)', [DARK_SCOPE]: darkColors.border },
+    backgroundColor: {
+      default: themeColors.muted,
+      ':hover': 'hsl(var(--muted) / 0.8)',
+      [DARK_SCOPE]: {
+        ...darkColors.idle,
+        ':hover': { ...darkColors.idle, '@media (hover: hover)': darkColors.feedback },
+      },
+    },
     color: { default: themeColors.mutedForeground, ':hover': themeColors.foreground },
     scale: { default: null, ':active': '0.97' },
     // The global "Pro focus style" paints an inset ring on every focused
@@ -403,8 +435,16 @@ const styles = stylex.create({
   },
   /** The filter chip while the bar is open. */
   filterChipOpen: {
-    borderColor: 'hsl(var(--primary) / 0.4)',
-    backgroundColor: 'hsl(var(--primary) / 0.15)',
+    borderColor: { default: 'hsl(var(--primary) / 0.4)', [DARK_SCOPE]: darkColors.border },
+    // The original dark utilities override the open fill too; composing an
+    // ordinary open color here would erase the base style's dark conditions.
+    backgroundColor: {
+      default: 'hsl(var(--primary) / 0.15)',
+      [DARK_SCOPE]: {
+        ...darkColors.idle,
+        ':hover': { ...darkColors.idle, '@media (hover: hover)': darkColors.feedback },
+      },
+    },
     color: themeColors.primary,
   },
   /** The filter chip's glyph. */
@@ -450,8 +490,12 @@ const styles = stylex.create({
     borderRadius: themeRadius.full,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: 'hsl(var(--border) / 0.5)',
-    backgroundColor: { default: themeColors.muted, ':focus-within': 'hsl(var(--muted) / 0.8)' },
+    borderColor: { default: 'hsl(var(--border) / 0.5)', [DARK_SCOPE]: darkColors.border },
+    backgroundColor: {
+      default: themeColors.muted,
+      ':focus-within': 'hsl(var(--muted) / 0.8)',
+      [DARK_SCOPE]: { ...darkColors.idle, ':focus-within': darkColors.feedback },
+    },
     color: themeColors.foreground,
     ...TRANSITION_COLORS,
   },
@@ -813,7 +857,9 @@ function StatusIndicator({
     );
   }
   if (isWorking) {
-    return <Spinner className="h-4 w-4 shrink-0 text-primary" aria-label="running" />;
+    return (
+      <Spinner diameter="calc(var(--spacing) * 4)" className="text-primary" aria-label="running" />
+    );
   }
   if (hasUnreadMessages) {
     return <span data-unread-dot="" {...stylex.props(styles.unreadDot)} aria-label="unread" />;
@@ -1575,12 +1621,7 @@ function HeaderChip({
       onClick={onClick}
       aria-label={ariaLabel}
       aria-pressed={ariaPressed}
-      /* The dark-mode fills are hard-coded colours, so they stay Tailwind
-         classes on this element. */
-      {...withClassName(
-        stylex.props(styles.headerChip, active ? styles.headerChipActive : styles.headerChipIdle),
-        active ? undefined : 'dark:border-white/12 dark:bg-white/10 dark:active:bg-white/14'
-      )}
+      {...stylex.props(styles.headerChip, active ? styles.headerChipActive : styles.headerChipIdle)}
     >
       {children}
     </button>
@@ -1606,12 +1647,7 @@ function ProjectListFilterToggle({
       onClick={onToggle}
       aria-label={ariaLabel}
       aria-pressed={open}
-      /* The dark-mode fills are hard-coded colours, so they stay Tailwind
-         classes on this element. */
-      {...withClassName(
-        stylex.props(styles.filterChip, open && styles.filterChipOpen),
-        'dark:border-white/12 dark:bg-white/10 dark:hover:bg-white/14'
-      )}
+      {...stylex.props(styles.filterChip, open && styles.filterChipOpen)}
     >
       <SlidersHorizontal
         {...stylex.props(styles.filterChipGlyph)}
@@ -1668,14 +1704,7 @@ function ProjectSearchInput({
   labels: MobileProjectScreenLabels;
 }) {
   return (
-    <label
-      /* The dark-mode fills are hard-coded colours, so they stay Tailwind
-         classes on this element. */
-      {...withClassName(
-        stylex.props(styles.searchPill),
-        'dark:border-white/12 dark:bg-white/10 dark:focus-within:bg-white/14'
-      )}
-    >
+    <label {...stylex.props(styles.searchPill)}>
       <Search {...stylex.props(styles.searchGlyph)} strokeWidth={1.8} aria-hidden="true" />
       <input
         type="search"

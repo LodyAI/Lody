@@ -682,7 +682,11 @@ export function MobileAcpHistorySheet({
                                 }}
                               >
                                 {resolving ? (
-                                  <Spinner className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                                  <Spinner
+                                    diameter="calc(var(--spacing) * 3.5)"
+                                    className="mr-1.5"
+                                    aria-hidden="true"
+                                  />
                                 ) : (
                                   <RefreshCw
                                     {...stylex.props(styles.conflictGlyph)}
@@ -709,14 +713,14 @@ export function MobileAcpHistorySheet({
                 <Button
                   type="button"
                   size="large"
-                  className="w-full"
+                  width="100%"
                   disabled={!importEnabled}
                   onClick={() => {
                     void onImportHistory(row, state.provider);
                   }}
                 >
                   {state.isImporting ? (
-                    <Spinner className="h-4 w-4" aria-hidden="true" />
+                    <Spinner diameter="calc(var(--spacing) * 4)" aria-hidden="true" />
                   ) : (
                     <Download {...stylex.props(styles.importGlyph)} aria-hidden="true" />
                   )}
