@@ -1,4 +1,4 @@
-import { LoroDoc, LoroMap, LoroText, isContainer } from 'loro-crdt';
+import { LoroDoc, LoroMap, LoroText, isContainer, type Change, type OpId } from 'loro-crdt';
 import { z } from 'zod';
 import {
   MEMORY_ENTRY_PATH,
@@ -12,6 +12,7 @@ import {
   MemoryReadInputSchema,
   MemorySearchInputSchema,
   MemoryPathSchema,
+  MemoryIdSchema,
   MemoryDescriptionSchema,
   type MemoryIdentity,
   type MemoryMutationContext,
@@ -32,8 +33,9 @@ import type {
   MemoryReadPage,
   MemorySearchHit,
   MemoryProvenance,
+  MemoryRevision,
 } from './contracts';
-import { inspectMemoryIdentity } from './layout';
+import { commitMemoryChange, inspectMemoryIdentity, MEMORY_CHANGE_MESSAGE_PREFIX } from './layout';
 import { resolveMemoryPath } from './paths';
 import { buildMemorySearchQuery } from './search';
 
@@ -87,6 +89,33 @@ function scalar(value: unknown): unknown {
     throw new Error('Invalid memory document');
   }
   return value;
+}
+
+function bodyAt(doc: LoroDoc, path: string): string | undefined {
+  const documents = doc.getMap('documents');
+  try {
+    const entry = documents.get(path);
+    if (!(entry instanceof LoroMap)) {
+      if (isContainer(entry)) entry.free();
+      return undefined;
+    }
+    try {
+      const body = entry.get('body');
+      if (!(body instanceof LoroText)) {
+        if (isContainer(body)) body.free();
+        return undefined;
+      }
+      try {
+        return body.toString();
+      } finally {
+        body.free();
+      }
+    } finally {
+      entry.free();
+    }
+  } finally {
+    documents.free();
+  }
 }
 
 /** Synchronous operations over borrowed state. The host owns all durability and transport. */
@@ -287,6 +316,33 @@ class LoroMemoryDocument implements MemoryDocument {
       });
     });
   }
+  revision(path: string, changeId: string) {
+    return this.run(() => {
+      const parsedPath = parse(MemoryPathSchema, path);
+      const message = `${MEMORY_CHANGE_MESSAGE_PREFIX}${parse(MemoryIdSchema, changeId)}`;
+      let change: Change | undefined;
+      for (const changes of this.doc.getAllChanges().values()) {
+        change = changes.find((candidate) => candidate.message === message);
+        if (change) break;
+      }
+      // Records written before changes were tagged have no locatable version.
+      if (!change) fail('not_found');
+      const read = (frontiers: OpId[]) => {
+        const fork = this.doc.forkAt(frontiers);
+        try {
+          return bodyAt(fork, parsedPath);
+        } finally {
+          fork.free();
+        }
+      };
+      const before = read(change.deps);
+      const after = read([{ peer: change.peer, counter: change.counter + change.length - 1 }]);
+      return {
+        ...(before === undefined ? {} : { before }),
+        ...(after === undefined ? {} : { after }),
+      } satisfies MemoryRevision;
+    });
+  }
   private capacity(root: LoroMap, newBody: string, oldBody = '') {
     if (bytes(newBody) <= bytes(oldBody)) return;
     let total = 0;
@@ -333,7 +389,7 @@ class LoroMemoryDocument implements MemoryDocument {
       } finally {
         entry.free();
       }
-      this.doc.commit();
+      commitMemoryChange(this.doc, ctx.changeId);
       return { path: parsed.path, changeId: ctx.changeId };
     });
   }
@@ -402,7 +458,7 @@ class LoroMemoryDocument implements MemoryDocument {
           if (parsed.description !== undefined) this.describe(entry, parsed.description);
           this.record(entry, ctx, 'edit');
         }
-        this.doc.commit();
+        commitMemoryChange(this.doc, ctx.changeId);
         return { path, changeId: ctx.changeId };
       });
     });
@@ -418,7 +474,7 @@ class LoroMemoryDocument implements MemoryDocument {
       if (parsed.path === MEMORY_ENTRY_PATH) fail('invalid_input');
       this.entry(root, parsed.path, (entry) => this.record(entry, ctx, 'forget'));
       root.delete(parsed.path);
-      this.doc.commit();
+      commitMemoryChange(this.doc, ctx.changeId);
       return { path: parsed.path, changeId: ctx.changeId };
     });
   }

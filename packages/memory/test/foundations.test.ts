@@ -581,3 +581,34 @@ describe('Lody memory profile and catalog', () => {
     }
   });
 });
+
+describe('memory revisions', () => {
+  it('returns the body before and after each tagged change, including on a synced replica', () => {
+    const doc = fresh();
+    const replica = new LoroDoc();
+    try {
+      const memory = open(doc);
+      value(memory.create({ path: 'style.md', body: 'Use tabs.' }, context('create-style')));
+      value(memory.update({ path: 'style.md', body: 'Use spaces.' }, context('edit-style')));
+      value(memory.forget({ path: 'style.md' }, context('forget-style')));
+      expect(value(memory.revision('style.md', 'create-style'))).toEqual({ after: 'Use tabs.' });
+      expect(value(memory.revision('style.md', 'edit-style'))).toEqual({
+        before: 'Use tabs.',
+        after: 'Use spaces.',
+      });
+      expect(value(memory.revision('style.md', 'forget-style'))).toEqual({ before: 'Use spaces.' });
+      expect(memory.revision('style.md', 'missing')).toEqual({
+        ok: false,
+        error: { code: 'not_found' },
+      });
+      replica.import(doc.export({ mode: 'update' }));
+      expect(value(open(replica).revision('style.md', 'edit-style'))).toEqual({
+        before: 'Use tabs.',
+        after: 'Use spaces.',
+      });
+    } finally {
+      replica.free();
+      doc.free();
+    }
+  });
+});

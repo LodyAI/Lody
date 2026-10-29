@@ -51,6 +51,11 @@ export interface MemoryChange {
 export interface MemoryProvenance extends MemoryChangeRecord {
   readonly changeId: string;
 }
+/** A document's body just before and after one recorded change; absent where it did not exist. */
+export interface MemoryRevision {
+  readonly before?: string;
+  readonly after?: string;
+}
 export interface MemoryStartupContext {
   /** Fixed application instructions, kept separate from reference data. */
   readonly instructions: string;
@@ -74,6 +79,8 @@ export interface MemoryDocument {
   /** Accept a logical path or [[wiki/path]]. */
   resolve(link: string): MemoryResult<MemoryDocumentSummary>;
   provenance(path: string, input: MemoryListInput): MemoryResult<MemoryPage<MemoryProvenance>>;
+  /** Bodies around one change, from tagged Loro history. Untagged older changes: `not_found`. */
+  revision(path: string, changeId: string): MemoryResult<MemoryRevision>;
   /** Ensure a path and write its content; host supplies unique change IDs and provenance. */
   create(input: MemoryCreateInput, context: MemoryMutationContext): MemoryResult<MemoryChange>;
   /** Edit existing live state; newPath migrates content to a new path identity. */

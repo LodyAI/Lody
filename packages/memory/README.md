@@ -105,6 +105,7 @@ format 1, with no migration layer for development iterations.
 | `read`       | Read current body by Unicode code point offset/limit.                                                                           |
 | `search`     | Match path keys in JS and descriptions/bodies with fixed JSONPath; rank path, description, then body matches.                   |
 | `provenance` | Page source records by change ID.                                                                                               |
+| `revision`   | Bodies just before and after one recorded change, from tagged Loro history; untagged older changes return `not_found`.          |
 | `create`     | Ensure the path and write supplied body/description. An existing path is edited, not duplicated. Omitted description clears it. |
 | `update`     | Edit an existing path. Omitted description preserves it; null/empty clears it. Optional `newPath` moves the document.           |
 | `forget`     | Record provenance, then remove the path key. Missing paths return `not_found`.                                                  |
@@ -114,6 +115,13 @@ cursors. Pagination uses numeric `offset/limit` and `nextOffset`; edits between 
 may shift positions. Reads beyond a shortened body return an empty page.
 Text updates use LoroText's native diff. Expected input failures return content-free
 codes; broken internal structure throws a content-free error.
+
+Each mutation commits as its own Loro change with the message `lody-memory:<changeId>`.
+Loro does not merge changes whose messages differ, so a change's `deps` and its last op
+locate the versions around it; `revision` reads both through `forkAt`. Settings shows
+this as a per-topic history: who changed it, when, a link to the Agent's conversation
+when it is on this device, and a Markdown diff. Consecutive edits by the same author and
+turn within two minutes are shown as one entry.
 
 Source records carry actor, session/turn when Agent-authored, timestamp and operation
 kind. They track document edits rather than exact per-sentence attribution.

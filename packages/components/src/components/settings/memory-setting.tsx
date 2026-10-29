@@ -145,7 +145,6 @@ const styles = stylex.create({
     paddingInline: space[4],
     textAlign: 'center',
   },
-  emptyCopy: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: space[1] },
   layout: {
     display: 'flex',
     height: '100%',
@@ -648,14 +647,9 @@ export function LodyMemorySectionView({
             <div {...stylex.props(settingsRecordsCard)}>
               <div {...stylex.props(styles.emptyState)}>
                 <LodyMemoryEmptyIllustration theme={theme} />
-                <div {...stylex.props(styles.emptyCopy)}>
-                  <span {...stylex.props(catalog.name)}>
-                    {t('settings.memory.lody.emptyTitle')}
-                  </span>
-                  <span {...stylex.props(styles.description)}>
-                    {t('settings.memory.lody.emptyHint')}
-                  </span>
-                </div>
+                <span {...stylex.props(styles.description)}>
+                  {t('settings.memory.lody.emptyHint')}
+                </span>
                 <Button type="button" size="small" onClick={onCreate}>
                   <Plus size={14} />
                   {t('settings.memory.lody.create')}

@@ -30,7 +30,11 @@ earlier per-Role identity (`lody/role`, one implicit memory per Role) so that pe
 can name, describe and reuse memories as a provider beside Nowledge. The cost is that
 a copied Role now shares its linked memory instead of starting an empty one. Names
 and descriptions live in each `MEMORY.md` front matter; a per-owner catalog Doc lists
-only IDs, avoiding a second writable copy of the profile. Only personal
+only IDs, avoiding a second writable copy of the profile.
+History diffs reuse Loro history rather than storing body snapshots in source records:
+each mutation's commit message carries its change ID, which keeps it an unmerged change
+whose dependencies and last op bound the versions to compare. Snapshots per record were
+rejected because every keystroke edit would copy up to a 64 KiB body. Only personal
 ownership is implemented; workspace partitions remain distinct. Personal device
 authorization for cloud synchronization remains future work. Role switching, transcript disclosure and host filesystem
 isolation are outside the narrowed package scope.

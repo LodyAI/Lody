@@ -9,6 +9,15 @@ import {
 } from './schema';
 import type { MemoryResult } from './contracts';
 
+/**
+ * Each mutation is its own Loro change, tagged with its change ID, so history can locate the
+ * versions before and after it. Loro keeps changes with distinct messages unmerged.
+ */
+export const MEMORY_CHANGE_MESSAGE_PREFIX = 'lody-memory:';
+export function commitMemoryChange(doc: LoroDoc, changeId: string) {
+  doc.commit({ message: `${MEMORY_CHANGE_MESSAGE_PREFIX}${changeId}` });
+}
+
 /** Borrowed Doc: caller owns persistence, remote imports, subscriptions and disposal. */
 export function initializeMemoryDoc(
   doc: LoroDoc,
@@ -37,7 +46,7 @@ export function initializeMemoryDoc(
     recordedAt: parsedContext.data.recordedAt,
     source: parsedContext.data.source,
   });
-  doc.commit();
+  commitMemoryChange(doc, parsedContext.data.changeId);
   body.free();
   changes.free();
   entry.free();

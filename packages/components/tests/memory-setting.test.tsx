@@ -518,9 +518,9 @@ async function readEntry(repo: PersonalMemoryRepository, memoryId: string) {
 it('places Lody Memory above the machine-bound providers and creates a named memory into MEMORY.md', async () => {
   const repo = await withLodyMemory();
   await renderSetting();
-  await settle(() => container.textContent!.includes('No Lody memories yet'));
+  await settle(() => container.textContent!.includes('Create a memory, then link it to a Role'));
   const text = container.textContent!;
-  expect(text).toContain('No Lody memories yet');
+  expect(text).toContain('Create a memory, then link it to a Role');
   expect(container.querySelector('svg[data-theme]')).not.toBeNull();
   expect(text.indexOf('Lody Memory')).toBeLessThan(text.indexOf('Integrated providers'));
   expect(text.indexOf('Integrated providers')).toBeLessThan(text.indexOf('This Mac'));
@@ -530,7 +530,7 @@ it('places Lody Memory above the machine-bound providers and creates a named mem
   await fill('Name', 'Work');
   await fill('Description (optional)', 'Team conventions');
   await submit();
-  await settle(() => !container.textContent!.includes('No Lody memories yet'));
+  await settle(() => !container.textContent!.includes('Create a memory, then link it to a Role'));
   await settle(() => container.textContent!.includes('Team conventions'));
   expect(container.textContent).toContain('Work');
   expect(container.textContent).toContain('Team conventions');
@@ -541,6 +541,17 @@ it('places Lody Memory above the machine-bound providers and creates a named mem
   expect(await readEntry(repo, created!.memoryId)).toBe(
     '---\nname: Work\ndescription: Team conventions\n---\n'
   );
+
+  await click('Edit Work');
+  await settle(() => document.querySelector('[aria-label="History"]') !== null);
+  await settle(() => !button('History').disabled);
+  await click('History');
+  const dialog = () => document.querySelector('[role="dialog"]')!.textContent!;
+  expect(dialog()).toContain('History of MEMORY.md');
+  expect(dialog()).toContain('You · Created');
+  await click('Back');
+  expect(dialog()).not.toContain('History of MEMORY.md');
+  expect(document.querySelector('[aria-label="Name"]')).not.toBeNull();
   await act(async () => root.unmount());
   root = createRoot(container);
   await repo.close();
