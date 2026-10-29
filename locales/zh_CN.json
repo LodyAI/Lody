@@ -5668,8 +5668,6 @@
   "storageGuard.relaunch": "重新检查并重启",
   "storageGuard.checking": "正在检查…",
   "storageGuard.quit": "退出 Lody",
-  "settings.memory.builtin.saved": "已本地保存",
-  "settings.memory.builtin.saving": "正在本地保存…",
   "settings.memory.builtin.failed": "本地保存失败。请保留此窗口并重试编辑。",
   "settings.memory.builtin.unavailable": "无法在这台设备上打开此记忆体。",
   "settings.memory.builtin.invalid": "路径无效或内容超出记忆限制。",

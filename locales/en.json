@@ -5673,8 +5673,6 @@
   "storageGuard.relaunch": "Check again and restart",
   "storageGuard.checking": "Checking…",
   "storageGuard.quit": "Quit Lody",
-  "settings.memory.builtin.saved": "Saved locally",
-  "settings.memory.builtin.saving": "Saving locally…",
   "settings.memory.builtin.failed": "Local save failed. Keep this window open and retry your edit.",
   "settings.memory.builtin.unavailable": "This memory couldn't be opened on this device.",
   "settings.memory.builtin.invalid": "Invalid path or content exceeds the memory limit.",

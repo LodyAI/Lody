@@ -586,10 +586,11 @@ export function LodyMemoryEditor({ memoryId, onClose }: { memoryId: string; onCl
                 ) : null}
               </div>
               <div {...stylex.props(styles.footer)}>
+                {/* Saving is silent; only a problem with this device's copy is reported. */}
                 <span role="status" {...stylex.props(catalog.meta)}>
-                  {status === 'loading' || status === 'unavailable'
-                    ? null
-                    : t(`settings.memory.builtin.${status}`)}
+                  {status === 'failed' || status === 'invalid'
+                    ? t(`settings.memory.builtin.${status}`)
+                    : null}
                 </span>
                 <Button type="button" variant="secondary" onClick={onClose}>
                   {t('common.done', 'Done')}
