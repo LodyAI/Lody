@@ -25,6 +25,11 @@ remains unverified here.
   non-empty suggestion on an exactly empty, enabled draft renders. Null, empty
   and whitespace-only values render nothing. Disabled, archived and submitting
   composers hide it.
+- IME composition hides the hint. The mention input keeps preedit text local
+  and commits it to `promptValue` only at `compositionend`, so an "empty draft"
+  check alone left the hint over Chinese/Japanese preedit text. The composer
+  tracks `compositionstart`/`compositionend` (and clears the flag on blur); a
+  cancelled composition that leaves the draft empty shows the hint again.
 - Desktop Tab accepts only an unmodified, non-IME Tab whose default is not
   already claimed, and only while the draft is empty. Acceptance writes the full
   text through `onPromptChange`, then focuses the textarea and places the caret

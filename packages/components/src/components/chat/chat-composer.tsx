@@ -599,8 +599,12 @@ export function ChatComposer({
     [getMentionPromptRewrites, mentionRanges, pastedTextDrafts, promptValue]
   );
 
+  // The mention input keeps IME preedit text local and commits it only at
+  // compositionend, so `promptValue` stays empty while the user composes.
+  const [promptComposing, setPromptComposing] = useState(false);
   const visiblePromptSuggestion =
     !promptDisabled &&
+    !promptComposing &&
     promptValue.length === 0 &&
     promptSuggestion !== null &&
     promptSuggestion.trim().length > 0
@@ -692,6 +696,11 @@ export function ChatComposer({
       if (promptDisabled) event.preventDefault();
       else onPromptPaste?.(event);
     },
+    onCompositionStart: () => setPromptComposing(true),
+    onCompositionEnd: () => setPromptComposing(false),
+    // A blur can end the textarea's composition without a compositionend in some
+    // engines; never leave the hint hidden behind a stale flag.
+    onBlur: () => setPromptComposing(false),
   };
 
   const canHandleImageDrop = Boolean(onImageDrop) && !imageDropDisabled && !promptDisabled;

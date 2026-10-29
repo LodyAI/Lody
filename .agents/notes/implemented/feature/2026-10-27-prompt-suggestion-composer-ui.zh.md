@@ -18,6 +18,9 @@ Composer 仍只负责展示：会话级订阅 hook 与工作区传输由本次�
 
 - `ChatComposer` 接收 `promptSuggestion: string | null | undefined`。只有当前草稿严格为空、composer
   可用且建议非空时才显示。null、空字符串和纯空白都不显示；禁用、归档和提交中的 composer 也隐藏。
+- IME 组合输入期间隐藏提示。mention 输入框把预编辑文本留在本地，到 `compositionend` 才写入
+  `promptValue`，只判断“草稿为空”会让提示盖在中文／日文预编辑文本上。composer 跟踪
+  `compositionstart`/`compositionend`（失焦时也清除标记）；取消组合且草稿仍为空时提示重新出现。
 - 桌面端只在草稿为空、未按修饰键、非 IME 组合输入，且 Tab 的默认行为尚未被其他处理器占用时接受。
   接受会通过 `onPromptChange` 写入完整文本，再聚焦输入框并把光标放到末尾；绝不调用发送路径。
 - 提示使用输入框自身的字号和行高，从输入起点开始显示；最多换行三行，超出后省略。`Tab` 键帽或
