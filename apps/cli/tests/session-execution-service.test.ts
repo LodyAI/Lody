@@ -12166,40 +12166,33 @@ describe('Operation Inbox execution boundary', () => {
     };
   }
 
-  it('does not mistake a live admission conflict for blocked recovery', async () => {
+  it('preserves a live execution while a later input waits', async () => {
+    const started = createDeferred<void>();
+    const finish = createDeferred<void>();
     const received: ContentBlock[][] = [];
     const f = inboxExecutionFixture(async (blocks) => {
       received.push(blocks);
+      started.resolve();
+      await finish.promise;
       return { stopReason: 'end_turn' };
     });
+    let running: Promise<unknown> | undefined;
     try {
-      const prior = {
-        workspaceId: 'workspace-1',
-        sessionId: f.message.sessionId,
-        userId: 'user-1',
-        inputId: 'live-input',
-        kind: 'human' as const,
-        config: f.message.acpSessionConfig,
-      };
-      expect(f.store.inbox.accept(prior)).toBe(true);
-      expect(f.store.inbox.begin(prior, 'live-execution')).toBe(true);
-      const unrelated = { ...prior, sessionId: 'different-session' };
-      expect(f.store.inbox.accept(unrelated)).toBe(true);
-      expect(f.store.inbox.begin(unrelated, 'unrelated-blocked-execution')).toBe(true);
-      f.store.inbox.release({
-        ...unrelated,
-        executionId: 'unrelated-blocked-execution',
-        outcome: 'unreleased',
-      });
-      await expect(f.service.continueSession(f.message)).rejects.toBeInstanceOf(
-        InboxExecutionRejected
-      );
+      await f.accept();
+      running = f.service.continueSession(f.message);
+      await started.promise;
+      const before = f.store.inbox.activeExecution('workspace-1', f.message.sessionId);
+      await f.service.continueSession({ ...f.message, userTurnId: 'waiting-input' });
+      expect(f.store.inbox.activeExecution('workspace-1', f.message.sessionId)).toEqual(before);
+      expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(true);
       const notices = (await (await createSessionBackend(f.doc)).readHistory())
         .flatMap((turn) => turn.items ?? [])
         .filter((item) => item.type === 'system_notice' && item.name === 'chat_failed');
       expect(notices).toEqual([]);
-      expect(received).toEqual([]);
+      expect(received).toEqual([[{ type: 'text', text: 'CURRENT_REQUEST' }]]);
     } finally {
+      finish.resolve();
+      await running;
       await f.close();
     }
   });
@@ -12842,6 +12835,71 @@ describe('Operation Inbox execution boundary', () => {
       await f.close();
     }
   });
+
+  it.each(['cleanup-ok', 'cleanup-failed', 'admission-retry', 'persistent'] as const)(
+    'retires a rolled-back release without replaying old input (%s)',
+    async (mode) => {
+      const received: ContentBlock[][] = [];
+      const prompt = async (blocks: ContentBlock[]) => {
+        received.push(structuredClone(blocks));
+        return { stopReason: 'end_turn' };
+      };
+      const f = inboxExecutionFixture(prompt);
+      const db = new Database(f.storePath);
+      const backgroundCanRelease = mode.startsWith('cleanup');
+      if (mode === 'cleanup-failed') f.session.terminate = async () => { throw new Error('terminate failed'); };
+      const replacement = {
+        ...f.session,
+        acpSessionId: 'replacement-acp',
+        agentClient: { ...f.client, isCreated: () => true, prompt: async (_id: unknown, blocks: ContentBlock[]) => prompt(blocks) },
+        createAgent: async () => 'replacement-acp',
+        terminate: async () => {},
+      };
+      Object.assign(f.deps.sessionManager, { createSession: async () => replacement });
+      const send = async (inputId: string) => {
+        const config = { ...f.message.acpSessionConfig, prompt: 'FRESH_REQUEST' };
+        await f.doc.sessionData.commands.applyHistoryAction({ kind: 'upsert-turn', turn: {
+          id: inputId, role: 'user', userId: 'user-1', status: 'pending', inputConfig: config,
+          timestamp: '2026-10-29T00:00:00Z', items: [{ type: 'text', text: config.prompt }], fileDiff: [], finished: true,
+        } });
+        await f.service.acceptInboxHumanInput({ sessionId: f.message.sessionId, inputId, userId: 'user-1', config });
+        return f.service.continueSession({ ...f.message, userTurnId: inputId, acpSessionConfig: config });
+      };
+      try {
+        f.add('captured-before-outage');
+        await f.accept();
+        // ROLLBACK models SQLITE_FULL aborting the whole transaction, not just one statement.
+        db.exec(`CREATE TRIGGER release_outage BEFORE UPDATE ON inbox_sessions
+          WHEN OLD.active_execution='assistant:human-input' AND NEW.active_execution IS NULL
+          ${backgroundCanRelease ? "AND EXISTS(SELECT 1 FROM inbox_releases WHERE execution_id=OLD.active_execution AND outcome='normal')" : ''}
+          BEGIN SELECT RAISE(ROLLBACK,'SQLITE_FULL'); END;`);
+        await f.service.continueSession(f.message);
+        await f.service.drainInboxExecutions();
+        expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
+        const active = () => db.prepare('SELECT active_execution FROM inbox_sessions WHERE session_id=?').get(f.message.sessionId);
+        expect(active()).toEqual({ active_execution: backgroundCanRelease ? null : 'assistant:human-input' });
+        if (mode === 'persistent') {
+          await expect(send('rejected-input')).rejects.toBeInstanceOf(InboxExecutionRejected);
+          const notices = (await (await createSessionBackend(f.doc)).readHistory())
+            .flatMap((turn) => turn.items ?? []).filter((item) => item.type === 'system_notice' && item.name === 'chat_failed');
+          expect(notices).toMatchObject([{ meta: { message: expect.stringContaining('磁盘已满') } }]);
+          expect(received).toHaveLength(1);
+        }
+        db.exec('DROP TRIGGER release_outage');
+        await send('fresh-input');
+        expect(received).toHaveLength(2);
+        expect(received[1]).toEqual([{ type: 'text', text: 'FRESH_REQUEST' }]);
+        expect(active()).toEqual({ active_execution: null });
+        expect(f.store.inbox.inputEnded('workspace-1', f.message.sessionId, f.message.userTurnId)).toBe(true);
+        expect((await (await createSessionBackend(f.doc)).readTurn('fresh-input')).turn).toMatchObject({ status: 'handled' });
+        expect(f.store.inbox.historyReceipts('workspace-1')).toMatchObject([{ state: 'settled', memberCount: 1 }]);
+      } finally {
+        db.exec('DROP TRIGGER IF EXISTS release_outage');
+        db.close();
+        await f.close();
+      }
+    }
+  );
 
   it('detaches a failed Agent, continues with a new ACP and reports cleanup without blocking drain', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });

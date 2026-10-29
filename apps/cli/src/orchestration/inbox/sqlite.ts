@@ -809,6 +809,27 @@ export class InboxSqlite {
       );
     });
   }
+  activeExecution(
+    workspaceId: string,
+    sessionId: string
+  ): (InboxScope & { inputId: string; executionId: string }) | undefined {
+    const row = this.db
+      .prepare(
+        'SELECT user_id,active_input,active_execution FROM inbox_sessions WHERE workspace_id=? AND session_id=? AND active_execution IS NOT NULL'
+      )
+      .get(workspaceId, sessionId) as
+      | { user_id: string; active_input: string | null; active_execution: string }
+      | undefined;
+    return row
+      ? {
+          workspaceId,
+          sessionId,
+          userId: row.user_id,
+          inputId: row.active_input ?? '',
+          executionId: row.active_execution,
+        }
+      : undefined;
+  }
   release(event: InboxRelease): void {
     this.transaction(() => {
       const existing = this.db

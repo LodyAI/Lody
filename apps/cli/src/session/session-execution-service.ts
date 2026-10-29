@@ -996,7 +996,20 @@ export class SessionExecutionService {
         );
         return false;
       })
-      .finally(() => {
+      .finally(async () => {
+        try {
+          const owner = runtime.inboxOwner;
+          if (owner)
+            await this.operationInbox?.release({
+              ...owner.input,
+              executionId: owner.id,
+              outcome: 'failed',
+            });
+        } catch (cause) {
+          this.deps.logger.warn(
+            `[${sessionId}] Retired execution release write failed: ${formatErrorMessage(cause)}`
+          );
+        }
         try {
           runtime.inboxOwner?.detach();
         } catch (cause) {
@@ -4275,9 +4288,33 @@ export class SessionExecutionService {
       releaseConflict();
     }
     let inboxBatch = options.inboxBatch;
+    let releaseRetryFailed = false;
     try {
       if (inboxInput) {
-        runtime.inboxOwner = await inbox!.openExecution(inboxInput, turnId, inboxBatch);
+        try {
+          runtime.inboxOwner = await inbox!.openExecution(inboxInput, turnId, inboxBatch);
+        } catch (cause) {
+          if (!(cause instanceof InboxExecutionRejected)) throw cause;
+          const prior = inbox!.activeExecution(this.deps.workspaceId, sessionId);
+          const live = this.turnRuntimeBySession.get(sessionId);
+          if (
+            !prior ||
+            (live?.inboxOwner?.id === prior.executionId && live.releaseFailure === undefined)
+          )
+            throw cause;
+          // Only retry retirement and admission once; never replay the old input.
+          releaseRetryFailed = true;
+          try {
+            await inbox!.release({ ...prior, kind: 'task', config: {}, outcome: 'failed' });
+            runtime.inboxOwner = await inbox!.openExecution(inboxInput, turnId, inboxBatch);
+            releaseRetryFailed = false;
+          } catch (retryCause) {
+            this.deps.logger.warn(
+              `[${sessionId}] Inbox release/admission retry failed: ${formatErrorMessage(retryCause)}`
+            );
+            throw cause;
+          }
+        }
         inboxBatch = runtime.inboxOwner.batch;
         if (inboxBatch) {
           try {
@@ -4333,6 +4370,23 @@ export class SessionExecutionService {
         await closeLeftoverEntry();
         span.end({ outcome: 'inbox-input-ended' });
         return 'inbox-input-ended';
+      }
+      if (releaseRetryFailed) {
+        await this.recordKnownChatFailure({
+          sessionId,
+          sessionDoc,
+          userTurnId,
+          reason: 'turn_pre_prompt_failed',
+          message: '上一轮的运行状态无法写入本地数据库（可能磁盘已满），请释放空间后重试。',
+        });
+        await inbox!
+          .abandonInput(this.deps.workspaceId, sessionId, inboxInput!.inputId, true)
+          .catch((error: unknown) =>
+            this.deps.logger.warn(
+              `[${sessionId}] Failed to retire rejected input: ${formatErrorMessage(error)}`
+            )
+          );
+        await closeLeftoverEntry();
       }
       span.end({ outcome: 'inbox-prepare-failed' });
       throw cause;

@@ -67,7 +67,10 @@ currently emits a warning rather than a history notice because activation owns S
 
 Unconfirmed release returns the slot, preserves its diagnostic journal and detaches the old
 Agent before waking a successor. Cleanup gets one background attempt with a five-second
-budget; failure is logged and never delays input or shutdown. Cleanup addresses only the
+budget; cleanup failure is logged and cannot gate input or shutdown. Cleanup completion
+always retries the old execution's release write. Admission retries retirement once for a
+slot with no live owner; a persistent write failure emits a disk-space chat notice instead
+of leaving the session dependent on restart. Cleanup addresses only the
 retired execution, so it cannot clear a successor's slot. Failed exits grant no automatic
 intent, but later wakeable receipts can proceed. Resource registration remains unchanged;
 restart orphan-process cleanup is deferred. The offline recovery command and startup PID
