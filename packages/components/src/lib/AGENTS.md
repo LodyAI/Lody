@@ -2,6 +2,7 @@
 
 Rules bind callers too. [Background](../../../../.agents/docs/components-package.md).
 
+- Direct ordinary attachment uploads require trusted mode admission for the current account and workspace before sending source bytes; a provisional runtime is not that proof. Protected attachment failures never enable ordinary HTTP or plaintext local fallback.
 - Send/RPC await local commits, never Repo flush. Save `humanInputReceipts` before activation; RPC is redundant.
 - Retry immutable Roost input; absent receipts stay unknown. Cache/refresh keeps
   all input. Resolve owner routing per call.

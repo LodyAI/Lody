@@ -1,5 +1,7 @@
 import {
   buildSessionFileApiUrl,
+  EncryptedAttachmentSchema,
+  type SessionInputBlock,
   uploadEncryptedAttachment,
   readEncryptedAttachment,
   encryptedAttachmentPath,
@@ -108,4 +110,23 @@ export async function protectedAttachmentBlob(
   for await (const bytes of protectedAttachmentChunks(args))
     parts.push(bytes as Uint8Array<ArrayBuffer>);
   return new Blob(parts, { type: args.encryption.mimeType });
+}
+
+/** Prepared local receipts keep their existing contract. Every relay reference
+ * in protected history must carry a complete, matching secret manifest. */
+export function assertProtectedAttachmentReferences(blocks: readonly SessionInputBlock[]): void {
+  for (const block of blocks) {
+    if (block.type !== 'image' && block.type !== 'file') continue;
+    if (block.type === 'file' && block.transport === 'local') continue;
+    if (!block.encryption) throw new Error('e2ee_attachment_unprotected');
+    const manifest = EncryptedAttachmentSchema.parse(block.encryption);
+    if (
+      manifest.kind !== block.type ||
+      manifest.parts[0] !== (block.type === 'image' ? block.imageId : block.fileId) ||
+      manifest.sizeBytes !== block.sizeBytes ||
+      manifest.fileName !== block.fileName ||
+      manifest.mimeType !== block.mimeType
+    )
+      throw new Error('e2ee_attachment_manifest_mismatch');
+  }
 }

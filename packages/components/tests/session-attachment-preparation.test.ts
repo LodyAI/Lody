@@ -82,7 +82,7 @@ const MACHINE = 'machine' as MachineId;
  * The real workspace pending queue over a runtime whose session documents are
  * real Loro docs: "written" means present in that document's history.
  */
-function fixture() {
+function fixture(encrypted = false) {
   const sessions = new Map<SessionId, ReturnType<typeof createConversationSession>>();
   const docs: LoroDoc[] = [];
   const open = (sessionId: SessionId) => {
@@ -113,6 +113,7 @@ function fixture() {
   const dispatched: string[] = [];
   const dispatchListeners = new Set<() => void>();
   const runtime = {
+    contentMode: encrypted ? 'e2ee' : 'plaintext',
     sendResources: resources,
     repo: {
       getDocMeta: async (roomId: string) =>
@@ -135,6 +136,16 @@ function fixture() {
   } as unknown as SessionSendRuntime;
   const pending = createWorkspacePendingSends({
     runtime,
+    ...(encrypted
+      ? {
+          localIdentity: {
+            accountId: 'attachment-test-account',
+            workspaceId: 'workspace',
+            genesisHash: 'a'.repeat(64),
+            signingPublicKey: 'b'.repeat(64),
+          },
+        }
+      : {}),
     accountId: 'attachment-test-account',
     workspaceId: 'workspace',
     token: () => 'token',
@@ -519,4 +530,39 @@ it('admits an already prepared local file in an encrypted workspace without uplo
       expect.objectContaining({ type: 'file', transport: 'local', fileId: '/local/private.txt' }),
     ])
   );
+});
+
+it('rejects unprotected or mismatched prepared references and keeps the encrypted Roost fence', async () => {
+  const f = fixture(true);
+  const value = send('rejected', ['image.png']);
+  expect(() => f.pending.enqueue({ ...value, historyBackend: 'roost' })).toThrow(
+    'e2ee_feature_unavailable'
+  );
+  expect(() => f.pending.enqueue({ ...value, workspaceId: 'other' })).toThrow(
+    'attachment_workspace_mismatch'
+  );
+  expect(() =>
+    f.pending.enqueue({
+      ...value,
+      attachments: value.attachments.map((item) => ({
+        ...item,
+        ready: { type: 'image', ...ready(new File(['x'], 'image.png')) },
+      })),
+    })
+  ).toThrow('e2ee_attachment_unprotected');
+  expect(f.pending.getSnapshot()).toEqual([]);
+  expect(f.turns()).toEqual([]);
+});
+
+it('refuses an unprotected preparation receipt without losing the draft source', async () => {
+  const f = fixture(true);
+  // An older/miswired preparation adapter returning a plaintext receipt must
+  // never be enough to commit it into encrypted conversation content.
+  upload.run = async (file) => ready(file);
+  f.pending.enqueue(send('unprotected', ['image.png']));
+  const held = await failed(f.pending, 'unprotected');
+  expect(held.error).toBe('e2ee_attachment_unprotected');
+  expect(await held.attachments[0]?.source?.text()).toBe('image.png');
+  expect(f.turns()).toEqual([]);
+  expect(local.files).toEqual([]);
 });

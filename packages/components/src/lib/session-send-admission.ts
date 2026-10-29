@@ -1,3 +1,5 @@
+import { authorizePlaintextAttachmentPreparation } from './attachment-workspace-access';
+import { assertProtectedAttachmentReferences } from './encrypted-session-attachment';
 import { requireWorkspaceFeature } from './workspace-feature';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import {
@@ -44,6 +46,8 @@ export async function acceptSessionUserTurn(
         attachment.ready.transport !== 'local'
     )
   ) {
+    if (runtime.contentMode !== 'e2ee')
+      await authorizePlaintextAttachmentPreparation(runtime.workspaceId, undefined, entry.userId);
     requireWorkspaceFeature(
       { mode: runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
       'attachments'
@@ -51,10 +55,10 @@ export async function acceptSessionUserTurn(
   }
   if (runtime.contentMode === 'e2ee') {
     const blocks = normalizeSessionInputBlocks(entry.inputConfig?.inputBlocks, '');
-    for (const ready of [...blocks, ...(attachments?.flatMap((item) => item.ready ? [item.ready] : []) ?? [])]) {
-      if ((ready.type === 'image' || (ready.type === 'file' && ready.transport !== 'local')) && !ready.encryption)
-        throw new Error('e2ee_attachment_unprotected');
-    }
+    assertProtectedAttachmentReferences([
+      ...blocks,
+      ...(attachments?.flatMap((item) => (item.ready ? [item.ready] : [])) ?? []),
+    ]);
   }
   const pending = runtime.pendingSends;
   const unprepared = attachments?.some((attachment) => !attachment.ready) ?? false;
