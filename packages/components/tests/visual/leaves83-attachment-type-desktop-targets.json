@@ -1,0 +1,174 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": ["chat-attachmentaddmenu--scoped-desktop-with-mcp"],
+  "ready": {
+    "chat-attachmentaddmenu--scoped-desktop-with-mcp": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Add attachment"
+      },
+      {
+        "action": "enabled",
+        "role": "button",
+        "name": "Add attachment"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "() => {const all=document.querySelectorAll('button[aria-label=\"Add attachment\"]');if(all.length!==1)return false;const e=all[0],s=getComputedStyle(e);return e.disabled===false&&s.width==='35px'&&s.height==='35px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running');}"
+      }
+    ]
+  },
+  "states": {
+    "chat-attachmentaddmenu--scoped-desktop-with-mcp": [
+      {
+        "name": "trigger-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Add attachment"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('button[aria-label=\"Add attachment\"]').matches(':hover')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-root-open",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 1,
+            "y": 1
+          },
+          {
+            "action": "press",
+            "role": "button",
+            "name": "Add attachment",
+            "key": "ArrowDown"
+          },
+          {
+            "action": "visible",
+            "role": "menu"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll('[role=menu]').length===1&&getComputedStyle(document.querySelector('[role=menu]')).minWidth==='140px'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.activeElement?.getAttribute('role')==='menuitem'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          }
+        ]
+      },
+      {
+        "name": "mcp-hover-open",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "menuitem",
+            "name": "Load 1 MCP server"
+          },
+          {
+            "action": "visible",
+            "role": "menuitemcheckbox",
+            "name": "Search",
+            "exact": false
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelectorAll('[role=menu]').length===2&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          }
+        ]
+      },
+      {
+        "name": "mcp-select-keeps-open",
+        "steps": [
+          {
+            "action": "click",
+            "role": "menuitemcheckbox",
+            "name": "Search",
+            "exact": false
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('[role=menuitemcheckbox][aria-checked=true]')&&[...document.querySelectorAll('[role=menuitemcheckbox][aria-checked=true]')].length===2&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Load 2 MCP servers"
+          }
+        ]
+      },
+      {
+        "name": "close-root-and-submenu",
+        "steps": [
+          {
+            "action": "press",
+            "role": "menuitemcheckbox",
+            "name": "Search",
+            "exact": false,
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "selector": "[role=\"menu\"][data-nested]"
+          },
+          {
+            "action": "press",
+            "selector": "[role=\"menu\"]:not([data-nested])",
+            "key": "Escape"
+          },
+          {
+            "action": "hidden",
+            "role": "menu"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "() => document.querySelector('button[aria-label=\"Add attachment\"]').getAttribute('aria-expanded')==='false'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||!a.pending&&a.playState!=='running')"
+          }
+        ]
+      },
+      {
+        "name": "attachment-callback",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Add attachment"
+          },
+          {
+            "action": "visible",
+            "role": "menuitem",
+            "name": "Add attachment"
+          },
+          {
+            "action": "click",
+            "role": "menuitem",
+            "name": "Add attachment"
+          },
+          {
+            "action": "hidden",
+            "role": "menu"
+          },
+          {
+            "action": "visible",
+            "selector": "[data-attachment-requests=\"1\"]"
+          }
+        ]
+      }
+    ]
+  }
+}

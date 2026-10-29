@@ -157,7 +157,8 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
            the same offset on this portal'd drawer would stack both offsets and
            push the composer up by roughly two keyboard heights. */}
         <DrawerContent
-          className="safe-areas w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
+          width="full"
+          className="safe-areas inset-0 border-0 border-l-0! rounded-none"
           data-sidebar-swipe-open-disabled
         >
           <DrawerTitle className="sr-only">

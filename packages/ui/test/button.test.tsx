@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { act, createRef, useState } from 'react';
 import { afterEach, describe, expect, test } from 'vitest';
-import { Button } from '../src/button/button';
+import { Button, type ButtonVariant } from '../src/button/button';
 import { mount, type Mounted } from './dom';
 
 let mounted: Mounted | undefined;
@@ -34,7 +34,7 @@ describe('Button', () => {
     expect(text).toMatch(/<button[^>]*>Save<\/button>/);
   });
 
-  test('box and typography updates preserve the button, glyph, focus, caller class and native disabled behavior', async () => {
+  test('box, typography and variant updates preserve the button, glyph, focus, caller class and native disabled behavior', async () => {
     const ref = createRef<HTMLElement>();
     function Example() {
       const [box, setBox] = useState<{
@@ -49,16 +49,26 @@ describe('Button', () => {
         lineHeight: 1.25,
       });
       const [disabled, setDisabled] = useState(false);
+      const [variant, setVariant] = useState<ButtonVariant>('primary');
       const [clicks, setClicks] = useState(0);
       return (
         <>
           <button
             data-zero
-            onClick={() => setBox({ width: 0, height: 0, fontSize: 0, lineHeight: 0 })}
+            onClick={() => {
+              setBox({ width: 0, height: 0, fontSize: 0, lineHeight: 0 });
+              setVariant('solid');
+            }}
           >
             Zero
           </button>
-          <button data-omit onClick={() => setBox({})}>
+          <button
+            data-omit
+            onClick={() => {
+              setBox({});
+              setVariant('ghost');
+            }}
+          >
             Omit
           </button>
           <button data-disable onClick={() => setDisabled(true)}>
@@ -72,6 +82,7 @@ describe('Button', () => {
             fontSize={box.fontSize}
             lineHeight={box.lineHeight}
             disabled={disabled}
+            variant={variant}
             className="caller-owned"
             style={{ width: 999, height: 999 }}
             data-target
@@ -99,6 +110,7 @@ describe('Button', () => {
       expect(target.firstElementChild).toBe(glyph);
       expect(document.activeElement).toBe(target);
       expect(target.classList.contains('caller-owned')).toBe(true);
+      expect(target.getAttribute('data-variant')).toBe(action === 'zero' ? 'solid' : 'ghost');
       expect(target.hasAttribute('width')).toBe(false);
       expect(target.hasAttribute('height')).toBe(false);
       expect(target.hasAttribute('fontSize')).toBe(false);

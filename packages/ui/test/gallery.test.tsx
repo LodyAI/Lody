@@ -66,7 +66,7 @@ describe('UiGallery', () => {
   });
 
   test('shows every Button variant and size', () => {
-    for (const variant of ['primary', 'secondary', 'ghost', 'destructive', 'link']) {
+    for (const variant of ['primary', 'secondary', 'ghost', 'solid', 'destructive', 'link']) {
       expect(board).toContain(`data-variant="${variant}"`);
     }
     for (const size of ['mini', 'small', 'medium', 'large']) {

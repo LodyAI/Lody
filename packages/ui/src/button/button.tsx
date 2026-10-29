@@ -11,7 +11,7 @@ import { colors } from '../tokens/colors.stylex';
 import { corner, duration, ease, radius, text } from '../tokens/scales.stylex';
 import { button } from './button.tokens.stylex';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'destructive' | 'link';
+export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'solid' | 'destructive' | 'link';
 export type ButtonSize = 'mini' | 'small' | 'medium' | 'large';
 export type ButtonTone = 'neutral' | 'destructive';
 export type ButtonShape = 'default' | 'pill';
@@ -151,6 +151,16 @@ const styles = stylex.create({
   ghost: {
     backgroundColor: { default: 'transparent', ':hover': button.ghostHover },
     color: { default: button.ghostLabel, ':hover': colors.label },
+    boxShadow: { default: 'none', ':focus-visible': RING },
+  },
+  solid: {
+    backgroundColor: {
+      default: button.primaryBackground,
+      '@media (hover: hover)': {
+        ':hover': `color-mix(in oklab, ${button.primaryBackground} 90%, transparent)`,
+      },
+    },
+    color: button.primaryLabel,
     boxShadow: { default: 'none', ':focus-visible': RING },
   },
   destructive: {
@@ -329,6 +339,7 @@ export const Button = forwardRef<HTMLElement, ButtonProps>(function Button(
     styles[variant],
     tone === 'destructive' &&
       variant !== 'primary' &&
+      variant !== 'solid' &&
       variant !== 'destructive' &&
       styles.destructiveTone,
     width != null && dyn.width(width),

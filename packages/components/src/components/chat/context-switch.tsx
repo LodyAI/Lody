@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { FolderOpen, FolderPlus, Github, MessageCircle } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { Tabs } from '@lody/ui/tabs';
+import { disclosure } from '@lody/ui/disclosure/disclosure.tokens.stylex';
 import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { themeColors } from '../../style/theme-colors.stylex';
@@ -43,6 +44,14 @@ interface ContextSwitchProps {
 }
 
 const styles = stylex.create({
+  tabTypography: {
+    [disclosure.tabPaddingX]: {
+      default: 'calc(var(--spacing) * 2)',
+      '@media (width >= 40rem)': 'calc(var(--spacing) * 3)',
+    },
+    [disclosure.tabText]: 'var(--text-sm)',
+    lineHeight: 'var(--tw-leading, var(--text-sm--line-height))',
+  },
   disabledTab: {
     display: 'inline-flex',
     flex: '1 1 0%',
@@ -150,11 +159,11 @@ export function ContextSwitch({
   const iconClassName = stylex.props(styles.icon).className;
   const overlayIconClassName = stylex.props(styles.overlayIcon).className;
 
-  // The tabs are `@lody/ui` primitives, so their own face keeps its Tailwind
-  // classes: a StyleX class would compete with the primitive's own styles
-  // inside the `stylex` layer, where the winner is the stylesheet's order.
+  // Padding and text size use the tab's existing tokens. The remaining
+  // physical/state classes preserve their precedence over the primitive.
   const triggerClassName = cn(
-    'flex-1 rounded-md px-2 sm:px-3 py-1.5 text-sm font-medium transition-all',
+    stylex.props(styles.tabTypography).className,
+    'flex-1 rounded-md py-1.5 font-medium transition-all',
     triggerJustifyClassName,
     isDark
       ? 'data-[state=active]:bg-background/95 data-[state=active]:text-foreground data-[state=active]:shadow-xs text-muted-foreground hover:text-foreground'

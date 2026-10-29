@@ -1079,7 +1079,7 @@ const FIELD_SIZES = [
   { name: 'large · 36', size: 'large' as const },
 ];
 
-const BUTTON_VARIANTS = ['primary', 'secondary', 'ghost', 'destructive', 'link'] as const;
+const BUTTON_VARIANTS = ['primary', 'secondary', 'ghost', 'solid', 'destructive', 'link'] as const;
 const BUTTON_SIZES = ['mini', 'small', 'medium', 'large'] as const;
 
 /** A stand-in for a caller's glyph on a row that removes something. */
@@ -4173,7 +4173,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
 
       <Section
         title="Button · states, tone, shape, icons"
-        rule="Disabled is 45% opacity on the whole control, not a colour. Destructive tone tints a quiet variant; the destructive variant fills. The focus ring is a box-shadow composed with the variant's own edge, never an outline."
+        rule="Disabled is 45% opacity on the whole control, not a colour. Destructive tone tints quiet variants; primary and solid keep their ink, while destructive fills. The focus ring is a box-shadow composed with the variant's own edge, never an outline."
       >
         <PaletteSplit palettes={palettes}>
           <Rows>
@@ -4186,6 +4186,9 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
                 </Button>
                 <Button variant="ghost" disabled>
                   Ghost
+                </Button>
+                <Button variant="solid" disabled>
+                  Solid
                 </Button>
                 <Button variant="destructive" disabled>
                   Delete
@@ -4203,6 +4206,9 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
                 </Button>
                 <Button variant="link" tone="destructive">
                   Remove
+                </Button>
+                <Button variant="solid" tone="destructive" data-solid-gallery-tone>
+                  Solid
                 </Button>
                 <Button variant="destructive">Delete session</Button>
               </Cluster>
@@ -4240,6 +4246,14 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
                   <Button variant="secondary">Day</Button>
                   <Button variant="secondary">Week</Button>
                   <Button variant="secondary">Month</Button>
+                </ButtonGroup>
+                <ButtonGroup data-solid-gallery-group>
+                  <Button variant="solid" size="small">
+                    Send
+                  </Button>
+                  <Button variant="solid" size="small" icon aria-label="Solid action options">
+                    <PlusGlyph />
+                  </Button>
                 </ButtonGroup>
               </Cluster>
             </Row>

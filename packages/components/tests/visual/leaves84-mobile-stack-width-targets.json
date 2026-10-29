@@ -1,0 +1,83 @@
+{
+  "viewports": [
+    {
+      "name": "narrow320",
+      "width": 320,
+      "height": 900,
+      "device": "iPhone SE"
+    },
+    {
+      "name": "phone390",
+      "width": 390,
+      "height": 900,
+      "device": "iPhone 13"
+    },
+    {
+      "name": "below-sm",
+      "width": 639,
+      "height": 1000
+    },
+    {
+      "name": "at-sm",
+      "width": 640,
+      "height": 1000
+    },
+    {
+      "name": "above-sm",
+      "width": 641,
+      "height": 1000
+    },
+    {
+      "name": "mobile-maximum",
+      "width": 767,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": ["migration-ownedmobileworkspacestack--loading-session"],
+  "ready": {
+    "migration-ownedmobileworkspacestack--loading-session": [
+      {
+        "action": "visible",
+        "selector": "[data-slot=drawer-content]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const root=document.querySelector('[data-mobile-stack-fixture]'),c=document.querySelector('[data-slot=drawer-content][data-vaul-drawer-direction=right]'),loading=c?.querySelector('[data-loading-placeholder-scope=viewport]'),r=c?.getBoundingClientRect(),s=c&&getComputedStyle(c);return !!root&&root.dataset.fixturePath==='/lody/sessions/visual-loading-session'&&!!loading&&c.textContent.includes('Loading session')&&r.x===0&&r.y===0&&r.width===innerWidth&&r.height===innerHeight&&s.opacity==='1'&&s.visibility==='visible'&&(!s.transform||s.transform==='none'||s.transform==='matrix(1, 0, 0, 1, 0, 0)')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedmobileworkspacestack--loading-session": [
+      {
+        "name": "escape-to-chat",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-slot=drawer-content]",
+            "key": "Escape"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const r=document.querySelector('[data-mobile-stack-fixture]');return r?.dataset.fixturePath==='/lody/chat'&&!document.querySelector('[data-slot=drawer-content]')&&!!document.querySelector('[data-reopen-stack]')&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      },
+      {
+        "name": "reopened-loading-session",
+        "steps": [
+          {
+            "action": "click",
+            "selector": "[data-reopen-stack]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>{const root=document.querySelector('[data-mobile-stack-fixture]'),c=document.querySelector('[data-slot=drawer-content][data-vaul-drawer-direction=right]'),loading=c?.querySelector('[data-loading-placeholder-scope=viewport]'),r=c?.getBoundingClientRect(),s=c&&getComputedStyle(c);return !!root&&root.dataset.fixturePath==='/lody/sessions/visual-loading-session'&&!!loading&&c.textContent.includes('Loading session')&&r.x===0&&r.y===0&&r.width===innerWidth&&r.height===innerHeight&&s.opacity==='1'&&s.visibility==='visible'&&(!s.transform||s.transform==='none'||s.transform==='matrix(1, 0, 0, 1, 0, 0)')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+          }
+        ]
+      }
+    ]
+  }
+}

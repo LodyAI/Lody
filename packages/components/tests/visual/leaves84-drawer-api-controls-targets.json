@@ -1,0 +1,73 @@
+{
+  "viewports": [
+    {
+      "name": "narrow320",
+      "width": 320,
+      "height": 900,
+      "device": "iPhone SE"
+    },
+    {
+      "name": "phone390",
+      "width": 390,
+      "height": 900,
+      "device": "iPhone 13"
+    },
+    {
+      "name": "below-sm",
+      "width": 639,
+      "height": 1000
+    },
+    {
+      "name": "at-sm",
+      "width": 640,
+      "height": 1000
+    },
+    {
+      "name": "above-sm",
+      "width": 641,
+      "height": 1000
+    },
+    {
+      "name": "mobile-maximum",
+      "width": 767,
+      "height": 1000
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": ["ui-drawermigration--right", "ui-drawermigration--fullscreen-right"],
+  "ready": {
+    "ui-drawermigration--right": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Open drawer"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-slot=drawer-content]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const c=document.querySelector('[data-slot=drawer-content][data-vaul-drawer-direction=right]'),r=c?.getBoundingClientRect(),s=c&&getComputedStyle(c);return !!c&&r.width>0&&r.right===innerWidth&&r.width<innerWidth&&s.visibility==='visible'&&s.opacity==='1'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ],
+    "ui-drawermigration--fullscreen-right": [
+      {
+        "action": "click",
+        "role": "button",
+        "name": "Open drawer"
+      },
+      {
+        "action": "visible",
+        "selector": "[data-slot=drawer-content]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const c=document.querySelector('[data-slot=drawer-content][data-vaul-drawer-direction=right]'),r=c?.getBoundingClientRect(),s=c&&getComputedStyle(c);return !!c&&r.width>0&&r.right===innerWidth&&r.width===innerWidth&&s.visibility==='visible'&&s.opacity==='1'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'));}"
+      }
+    ]
+  },
+  "states": {}
+}

@@ -64,6 +64,14 @@ the primitive owner. Its actual horizontal consumer no longer competes through
 external pseudo-element classes. Default handles retain their contract; default
 vertical coverage does not establish the new edge appearance in that orientation.
 
+Use `Button variant="solid"` for an existing flat filled face: it owns background,
+label and fine-hover alpha through the existing primary ink tokens. Preserve
+legacy shadow, transition and active utilities until their own contracts are
+migrated; removing the shadow would expose a previously overridden focus ring.
+Apply the fixed action theme only to reviewed glyph/text subtrees and check all
+non-target inherited tokens. The ordinary primary variant has additional
+appearance and press behavior, so changing to it requires a separate UI decision.
+
 Local primitive themes need their own inheritance check. `createTheme` also
 applies the variable group's defaults: a partial Button theme reset an inherited
 23px gap and 3px orange focus ring. Explicitly inherit every non-target token with
@@ -155,6 +163,11 @@ does not authorize redesigning controls, changing copy or altering layout semant
 | Responsive variants    | Match the original media condition, including fractional widths at a breakpoint.                                 |
 | Alpha colors           | Preserve the exact compiled HSL or color-mix expression; see [Alpha](README.md#alpha).                           |
 | `border` without color | Preserve the existing inherited/current color and border style.                                                  |
+
+The current `px-*` utility emits `padding-inline`; verify the primitive's actual
+compiled reader uses the same axis before moving the value into a public token.
+Horizontal screenshots alone cannot detect an axis swap. Include vertical writing
+when that is a relevant inherited/public contract.
 
 Inspect dimension utilities too: the current `max-w-xs` emits literal `20rem`,
 not a read of `--container-xs`. Preserve that literal while retaining local
@@ -272,7 +285,10 @@ and focus as well as the component's own hover and focus.
    Keep historical method/count records and compare versions on the same source
    snapshot. Counts are source occurrences; unresolved dynamic/compound writes
    are reported separately and are not evidence of zero usage.
-2. Capture the unchanged component before editing. Prefer a fixed Storybook
+2. Capture the unchanged component before editing. Verify the effective root theme
+   and relevant computed palette: story-level globals can override URL globals,
+   leaving a requested light frame dark.
+   Prefer a fixed Storybook
    build. Include its important states, both themes, narrow/desktop widths and
    exact breakpoint boundaries. New stories render production components with
    synthetic data, never recreated approximations of the UI.

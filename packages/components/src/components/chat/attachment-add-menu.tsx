@@ -54,6 +54,11 @@ const enterFromLeft = stylex.keyframes({
 });
 
 const styles = stylex.create({
+  itemMobileType: { fontSize: '15px' },
+  rowMono: {
+    fontFamily: 'var(--font-mono)',
+    fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
+  },
   /** The pushed MCP panel enters from the right; the root returns from the left. */
   panelFromRight: {
     animationName: enterFromRight,
@@ -158,7 +163,11 @@ export function AttachmentAddMenu({
   // Primitive dimensions use their APIs; visual/state compatibility classes remain.
   const triggerSize =
     !isLanding && isMobile ? 'calc(var(--spacing) * 9)' : 'calc(var(--spacing) * 7)';
-  const itemClass = cn('cursor-pointer', isMobile && 'gap-2.5 py-2.5 text-[15px]');
+  const itemClass = cn(
+    'cursor-pointer',
+    isMobile && 'gap-2.5 py-2.5',
+    isMobile && stylex.props(styles.itemMobileType).className
+  );
   const plusClassName = stylex.props(isMobile ? styles.plusLarge : styles.plusSmall).className;
   const selectedCount = mcp
     ? mcp.selectedIds.filter((id) => mcpServers.some((server) => server.id === id)).length
@@ -336,16 +345,7 @@ function McpServerItems({ mcp, isMobile }: { mcp: AttachmentAddMenuMcp; isMobile
               <span {...stylex.props(styles.rowName, isMobile && styles.rowNameMobile)}>
                 {server.name}
               </span>
-              <span
-                className={[
-                  stylex.props(styles.rowDetail).className,
-                  // `font-mono` is the app's own global class; it keeps the
-                  // server's own detail in the mono face.
-                  server.description ? undefined : 'font-mono',
-                ]
-                  .filter(Boolean)
-                  .join(' ')}
-              >
+              <span {...stylex.props(styles.rowDetail, !server.description && styles.rowMono)}>
                 {detail}
               </span>
             </span>

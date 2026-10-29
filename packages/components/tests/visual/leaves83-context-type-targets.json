@@ -1,0 +1,263 @@
+{
+  "viewports": [
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 900
+    },
+    {
+      "name": "before-sm",
+      "width": 639,
+      "height": 900
+    },
+    {
+      "name": "at-sm",
+      "width": 640,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "chat-migration--context-tabs",
+    "chat-migration--context-disabled-action",
+    "chat-migration--context-disabled-tooltip",
+    "migration-ownedcontexttypography--long-tab-labels",
+    "migration-ownedcontexttypography--scoped-long-tab-labels"
+  ],
+  "ready": {
+    "chat-migration--context-tabs": [
+      {
+        "action": "visible",
+        "role": "tablist"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "document.querySelectorAll(\"[role=tablist]\").length===1 && document.querySelectorAll(\"[role=tab]\").length>=1 && document.fonts.status===\"loaded\""
+      }
+    ],
+    "chat-migration--context-disabled-action": [
+      {
+        "action": "visible",
+        "role": "tablist"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "document.querySelectorAll(\"[role=tablist]\").length===1 && document.querySelectorAll(\"[role=tab]\").length>=1 && document.fonts.status===\"loaded\""
+      }
+    ],
+    "chat-migration--context-disabled-tooltip": [
+      {
+        "action": "visible",
+        "role": "tablist"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "document.querySelectorAll(\"[role=tablist]\").length===1 && document.querySelectorAll(\"[role=tab]\").length>=1 && document.fonts.status===\"loaded\""
+      }
+    ],
+    "migration-ownedcontexttypography--long-tab-labels": [
+      {
+        "action": "visible",
+        "role": "tablist"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "document.querySelectorAll(\"[role=tablist]\").length===1 && document.querySelectorAll(\"[role=tab]\").length>=1 && document.fonts.status===\"loaded\""
+      }
+    ],
+    "migration-ownedcontexttypography--scoped-long-tab-labels": [
+      {
+        "action": "visible",
+        "role": "tablist"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "document.querySelectorAll(\"[role=tablist]\").length===1 && document.querySelectorAll(\"[role=tab]\").length>=1 && document.fonts.status===\"loaded\""
+      }
+    ]
+  },
+  "states": {
+    "chat-migration--context-disabled-action": [
+      {
+        "name": "local-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Local Add folder"
+          }
+        ]
+      },
+      {
+        "name": "local-action",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Local Add folder"
+          },
+          {
+            "action": "visible",
+            "selector": "output[aria-label=\"Last action\"]:has-text(\"Add folder\")"
+          }
+        ]
+      },
+      {
+        "name": "github-hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "GitHub Connect GitHub"
+          }
+        ]
+      },
+      {
+        "name": "github-action",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "GitHub Connect GitHub"
+          }
+        ]
+      }
+    ],
+    "chat-migration--context-disabled-tooltip": [
+      {
+        "name": "tooltip-open",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Local"
+          },
+          {
+            "action": "visible",
+            "text": "Desktop only"
+          }
+        ]
+      },
+      {
+        "name": "tooltip-close",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Outside control"
+          },
+          {
+            "action": "hidden",
+            "text": "Desktop only"
+          }
+        ]
+      }
+    ],
+    "chat-migration--context-tabs": [
+      {
+        "name": "github-selected",
+        "steps": [
+          {
+            "action": "click",
+            "role": "tab",
+            "name": "GitHub"
+          }
+        ]
+      },
+      {
+        "name": "chat-keyboard-selected",
+        "steps": [
+          {
+            "action": "press",
+            "role": "tab",
+            "name": "GitHub",
+            "key": "ArrowRight"
+          }
+        ]
+      },
+      {
+        "name": "local-keyboard-selected",
+        "steps": [
+          {
+            "action": "press",
+            "role": "tab",
+            "name": "Chat",
+            "key": "Home"
+          }
+        ]
+      }
+    ],
+    "migration-ownedcontexttypography--long-tab-labels": [
+      {
+        "name": "github-keyboard-selected",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "tab",
+            "name": "Local development workspaces",
+            "exact": true
+          },
+          {
+            "action": "press",
+            "role": "tab",
+            "name": "Local development workspaces",
+            "exact": true,
+            "key": "ArrowRight"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "document.activeElement?.textContent === \"GitHub organization repositories\" && document.querySelector(\"output[aria-label=\\\"Selected context\\\"]\")?.textContent === \"local\""
+          },
+          {
+            "action": "press",
+            "role": "tab",
+            "name": "GitHub organization repositories",
+            "exact": true,
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "document.querySelector(\"output[aria-label=\\\"Selected context\\\"]\")?.textContent === \"github\""
+          }
+        ]
+      }
+    ],
+    "migration-ownedcontexttypography--scoped-long-tab-labels": [
+      {
+        "name": "github-keyboard-selected",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "tab",
+            "name": "Local development workspaces",
+            "exact": true
+          },
+          {
+            "action": "press",
+            "role": "tab",
+            "name": "Local development workspaces",
+            "exact": true,
+            "key": "ArrowRight"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "document.activeElement?.textContent === \"GitHub organization repositories\" && document.querySelector(\"output[aria-label=\\\"Selected context\\\"]\")?.textContent === \"local\""
+          },
+          {
+            "action": "press",
+            "role": "tab",
+            "name": "GitHub organization repositories",
+            "exact": true,
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "document.querySelector(\"output[aria-label=\\\"Selected context\\\"]\")?.textContent === \"github\""
+          }
+        ]
+      }
+    ]
+  }
+}

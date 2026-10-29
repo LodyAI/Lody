@@ -1391,58 +1391,74 @@ ReactNode children 并不安全，即使默认面板像素相同。两份被拒�
 布局判断，最初四十对候选实际仅三十九对 PNG 字节一致；原标签与明确更正均保留。局部字号
 正控、已知 inline 负控、真实 portal 门禁失败与所有更早 OPEN 均保留。
 
-Tooltip、resize edge 与字体续迁在十六个产品调用文件中移除 35 处 utility，另一个
-源码文件是共享 Button 归属层。Tooltip 保留实际编译表达式：`max-w-xs` 是字面 `20rem`，
-而 Header 与 Sharing 的宽度仍读取元素局部 spacing。ResizableHandle 在同一归属层调用中
-组合显式 `appearance="edge"` 与 base；默认 handle 的原始 class/style 和 computed 合同
-不变。实际 edge 调用是水平方向。正常动效环境验证真实 150ms delay/duration 与稳定端点，
-不声称验证未经中断的逐帧序列。
+### 控件归属与采集边界
 
-Button 仅新增 CSS 类型的 `fontSize` 和 `lineHeight` 字段。两者省略时保留原 style 对象；
-提供时与归属层 StyleX inline 变量合并，写入实际 CSS 字段。被拒的 custom-property 实现
-虽然六十对普通截图相同，却在真实 `initial`、`inherit`、`revert` 和嵌套 `var()` fallback
-上不等价。最终实现通过 104 个浏览器 CSS 语义用例和 24 个真实 class 优先级用例。
-直接 caller style 的既有行为不变，Base UI render 元素合并另行验证；不新增 Token 组或依赖。
+第 74–84 批通过既有 primitive 迁移 Tooltip、resize edge、标签、上下文与实心操作样式，
+保留实际调用方合同，不新增 Token 组或依赖。Button 新增 CSS 类型的 `fontSize`、
+`lineHeight` 与平实 `solid` variant，ResizableHandle 新增显式 edge 外观；原默认不变。
 
-私有 diff-notice Header 保留 `dark:border-border`：真实公开 `*:` 调用方暴露了
-utilities 层排序合同，较早的 StyleX 声明不能保留原胜负。其余七处迁移；完整构建 CSSOM
-与竖排书写验证实际逻辑 inset。不能把较早 margin-block 的编译问题泛化为全部 camelCase
-逻辑属性。
+接受完整 CSS 值的字体 API 必须写实际 CSS 字段。被拒的 custom-property 实现虽通过
+六十对普通截图，却改变 `initial`、`inherit`、`revert` 和嵌套 `var()` fallback 语义。
+最终字段与归属层 StyleX inline 值合并，两项省略时保留原 style 对象，通过 104 个浏览器
+语义用例与 24 个 class 优先级用例；直接 caller style 和 Base UI render 元素合并另列。
+固定文本 Field 标签则写既有字号／leading Token：输入为兄弟节点，标签无后代读取者。
+Login 保留完整字号／leading，移动标签仅改字号；字重、tracking、私有 leading writer 保留。
 
-`leaves74-78-acceptance.html` 保留 **310 对正式图／305 对逐字节一致／30,303 条完整
-标准记录相同**。五对 Tooltip 边角仍 OPEN（13 原始／零阈值像素），另两对侧栏补充图
-仍 OPEN（882 原始／829 阈值像素）。Archive hover 状态与 Monaco tokenizer 就绪失败
-有明确同源证据，四个修正 cell 显式组装，原数据全部可查。原生模块导入失败、被拒字体
-候选、inline 负控及更早 OPEN 均保留。1,862 文件源码稳定边界通过 components
-620 文件／6,207 测试、UI 25／307、真实 OSS Electron 构建及四页冒烟；应用图仅为 After，
-不能证明全应用 Before 等价。根检查仍受既有 ACP 前置失败阻塞，位于 UI 迁移范围之外。
+`solid` 仅拥有填充、文字、精细 hover 90% alpha 与已有 focus ring，读取既有 primary 颜色，
+如 primary 一样忽略 destructive tone，不引入 sheen、edge 或按压 transform。私有 Session
+主题继承其余二十五个 Button Token，六个旧 shadow／transition／active utility 及原焦点结果
+保留。165 个旧 variant 对照节点的原始属性、完整普通／伪元素／变量样式与几何相同。
+Token 写入只用于已审查固定 glyph／文本子树，真实同元素 inline Token 负控不接受为任意
+输入等价。
 
-私有焦点与标签续迁在五份产品源码中移除十八处 utility。两处 resize 声明在实际
-CombinedMentionTextarea 两条路径中均冗余：fallback 自带 resize API，mention 输入也已
-拥有同一规则。这是实际渲染调用图的结论，不承诺导出的 class helper 能为任意裸 textarea
-提供该行为。焦点提示继续观察原有所有 `.group` 祖先，包括 composer 外层。完整编译对
-条件 StyleX class 加倍，最终 `:where(.group:focus-within *)` 保留原总 specificity 二。
-迁移样式层仍会改变在同元素人工注入 `opacity-100` 的胜负，该负控明确保留。私有提示
-没有公开 caller class/style 槽，也未用额外 specificity 掩盖层边界。
+Resize edge 在归属层组合 base，不与调用方 class 竞争。实际调用是水平方向，默认竖向
+覆盖不证明新 edge 外观。正常动效环境验证真实 150ms delay／duration 与禁用截图动画后的
+稳定端点，不声称完整连续序列。私有 diff-notice／DiffViewer Header 保留 dark 边框 utility：
+真实公开 `*:` 调用方暴露迁层无法保留的排序合同。其余 Header 与原生 Chevron 样式迁移，
+保留原非正方形收缩；完整构建 CSSOM 验证逻辑 inset，不能把 margin-block 编译问题泛化为
+所有 camelCase 逻辑属性。
 
-DiffViewer 默认 Header 保留公开调用方与条件 dark 边框合同，自定义原生 Chevron 保留
-原非正方形收缩行为。六个固定文本 Field.Label 写既有标签 Token：Login 同时保留原字号
-和 leading 表达式，移动标签仅改字号。关联输入为兄弟节点，标签内没有其他 Token 读取者；
-字重 writer 及其余兼容类继续保留。
+保留实际编译与局部变量合同：Tooltip `max-w-xs` 是字面 `20rem`，其他固定上限为
+420px／22rem，spacing 上限仍读局部变量。Context 的 `px-*` 与 UI 归属层都编译为
+`padding-inline`，四对竖排 PNG 验证四个非零物理边。移动菜单 row 没有归属层 font-size
+声明，详情保留全局 monospace 变量与连字 hook。两处 composer resize 在实际
+CombinedMentionTextarea 两路径均冗余，不承诺导出 helper 可为任意裸 textarea 提供该行为。
 
-`leaves79-81-acceptance.html` 保留 **296 对正式图／292 对逐字节一致／14,056 条完整标准
-记录相同**。四对原图仍 OPEN（1,075 原始／零阈值像素）；另有 DiffViewer 底角补充对
-仍 OPEN（22 原始／零阈值像素）。有界匹配控制不能证明原始栅格原因。最初缺少 hint 的
-夹具、没有伪造 After 图的被拒 selector 源码、真实层负控及所有更早 OPEN 均可查。
-各归属套件分别通过二十、二十五、十九个测试，类型通过且 lint 零错误；更早全量回归
-继续保留准确的截至 78 边界。
+焦点提示保留全部 `.group` 祖先，包括 composer 外层。完整编译将 StyleX class 加倍，最终
+`:where(.group:focus-within *)` 保留总 specificity 二；人工同元素 `opacity-100` 仍因迁层
+改变胜负。私有提示没有 caller class/style 槽，未用额外 specificity 掩盖。Tabs 手动激活：
+方向键移动焦点，Enter 选择。十二个原失败断言与十二个严格修正 cell 并列；十六个 Login
+`email-focused` 键实际最后填写密码，报告更正为填好凭据／密码聚焦，原键保留。
 
-标签 native 验证明确先聚焦真实输入。观测到原 rest 流程的 stage `scrollLeft=804` 将标签
-移出视口，真实输入 focus 使其归零，没有赋值滚动位置或改产品样式。十八对严格可见的
-focused 图相同，六对 inline Token 负控不同；原视口外及几何变化采集仍拒绝。两个最终
-native 进程记录二十四行后，在末 checkpoint 后停滞且已无 Chrome 子进程，已仅终止
-它们自己的 Node。原 `complete:false` 记录保留，末 label-click／cleanup 结果 UNKNOWN；
-完成的截图行不代表正常关闭或未观察到的末行为通过。
+小型 provider／memory-router 场景挂实际 MobileWorkspaceStack、ChatLanding 与真实
+SessionDetail loading 分支，没有替换子组件或 runtime。已有全宽 API 移除归属层自己的
+方向上限，只验收这一调用点，四个 SessionDetail 内部 Drawer 仍未访问。私有 inline 宽度
+注入的已知负控不属于 Stack props。原 native Escape 超时与可信 content 按键控制、明确
+补缺来源并列，缺失原 DOM 时不追认原超时原因。
+
+| 冻结报告                      | 正式对数／字节相同／完整标准记录 | 保留原 OPEN，原始／阈值像素                |
+| ----------------------------- | -------------------------------: | ------------------------------------------ |
+| `leaves74-78-acceptance.html` |                 310／305／30,303 | 正式五对 13／0；侧栏补充两对 882／829。    |
+| `leaves79-81-acceptance.html` |                 296／292／14,056 | 正式四对 1,075／0；native 补充一对 22／0。 |
+| `leaves82-84-acceptance.html` |                 306／305／12,854 | disabled Button 边角一对 10／7。           |
+
+最后一组包含三十六对实际 Stack 与二十四对单列既有 API 控制，控制不增加 utility 计数。
+后继匹配控制不关闭原未知栅格差异。实际主题门禁拒绝 light URL 错标的固定 dark 场景；
+Archive hover 与 Monaco tokenizer 失败有有界同源证据、明确修正 cell，原数据全部保留。
+被拒字体候选、没有伪造 After 图的 selector 源码、inline 负控、Gallery After-only 图及更早
+OPEN 分开保留。
+
+标签 native 验证明确先聚焦输入。原 rest 流程观测到 `scrollLeft=804` 使标签出视口，真实
+focus 使其归零，没有赋值滚动位置或改产品 CSS。十八对可见 focused 图相同，六对 Token
+负控不同，原视口外／几何失败仍拒绝。两个 native 进程记录二十四行后，在末 checkpoint
+后停滞且已无 Chrome 子进程，已仅终止自己的 Node；原 `complete:false` 保留，末
+label-click／cleanup 仍 UNKNOWN，不称正常关闭或末行为通过。
+
+截至 84 的完整工作区回归冻结 1,867 份 UI 源码、146 份 Electron 源码与五份元数据，
+期间哈希不变。components 620 文件／6,207 测试、UI 25／307、真实 Electron 构建／四页
+冒烟通过，主 Agent 已看四张应用图。它们仅为 After，未配置 agent 的 local chat 不证明
+真实 agent send/stop 调度。Table 的七十八条既有 Styleq warning 与前次相同；更早全量
+回归保留截至 78 的准确边界，无关根 ACP 前置失败仍阻止将根检查称为通过。
 
 ## 后续工作
 
@@ -1469,6 +1485,7 @@ native 进程记录二十四行后，在末 checkpoint 后停滞且已无 Chrome
 | 精确截至 73 的源码，视觉部分验收 | v2       |    1,542 |  165 |    718 |
 | 精确截至 78 的源码，视觉部分验收 | v2       |    1,507 |  163 |    718 |
 | 精确截至 81 的源码，视觉部分验收 | v2       |    1,489 |  163 |    724 |
+| 精确截至 84 的源码，视觉部分验收 | v2       |    1,474 |  163 |    726 |
 
 更早的方法修正覆盖了单个 utility、`withClassName` 第二参数和受支持的静态类名数组。
 各批历史数字继续留在冻结报告，不能跨方法混合基线。例如四文件 helper 重扫得到 165→97，
@@ -1481,11 +1498,11 @@ v1 漏记五个真实 utility，因此 31–33 批实际移除 26，而旧下界
 其他字段中看似有效 utility 的负控。模糊写入继续列为未解析；UI 适配器两处 `className` 写入新增四个未解析表达式，
 因此数量相应增加。
 
-已发布截至 81 的 v2 分项为 components 1,054 处／147 文件／631 未解析，旧 UI 430／14／93，
-routes 五处／两文件／零；总数仅覆盖这三个源码根。三根全部 789 份文件逐一记录字节哈希。
-截至 81 快照在冻结截至 78 上更新五份源码，不含第 82 批起的工作；共享 UI Button 归属层
-位于三根之外，单独保留截至 78 的冻结哈希。新增六个未解析表达式均为明确的 Field.Label
-StyleX class 模板，不代表六个新增未知 Tailwind utility。
+已发布截至 84 的 v2 分项为 components 1,039 处／147 文件／633 未解析，旧 UI 430／14／93，
+routes 五处／两文件／零。三根共记录 790 份文件：更新四份截至 81 文件，新增一个没有
+Tailwind 的主题模块。共享 UI Button／Gallery 源码与导出元数据位于计数范围之外，单独冻结，
+不含后续批次。未解析中包括截至 81 的六个已知 Field.Label StyleX 模板，以及截至 84 的
+两个已知 action-theme 模板，不代表八个新增未知 utility。
 此前截至 67 时，五个 Usage 模板表达式和一个 Archive
 类查找消失，新增两个 FileError／Bub
 StyleX 模板未解析，它们不代表新增未知 Tailwind utility。另一次 helper 审查在 lib／hooks 两个文件中发现另外九处，位于三根范围之外；

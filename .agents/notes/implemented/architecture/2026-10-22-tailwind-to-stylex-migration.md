@@ -1955,84 +1955,104 @@ initial forty-pair candidate actually has 39 byte-exact PNGs. Its old label and
 explicit correction remain, alongside local-font positive controls, known inline
 negatives and real portal-gate calibration failures. Earlier OPENs stay unchanged.
 
-The tooltip, resize-edge and typography continuation removes 35 utilities in
-sixteen product consumers; a seventeenth source is the shared Button owner.
-Tooltip geometry preserves compiler output rather than equal-default scale
-aliases: `max-w-xs` is literal `20rem`, while the header and sharing widths still
-read local spacing. ResizableHandle composes its opt-in `appearance="edge"` in the
-same owner call as its base. Default handles preserve their raw class/style and
-computed contract; the actual edge consumer is horizontal. Its no-preference
-captures establish the real 150ms delay/duration and settled endpoints, not an
-uninterrupted animation sequence.
+### Control ownership and capture boundaries
 
-Button gains only CSS-typed `fontSize` and `lineHeight` fields. Both omitted
-preserves the original style object; supplied values merge with the owner's
-StyleX inline variables at the physical CSS fields. The rejected custom-property
-implementation passed sixty ordinary screenshots but failed real `initial`,
-`inherit`, `revert` and nested `var()` fallback semantics. The final fields pass
-104 browser CSS-semantic cases and 24 actual class-precedence cases. Direct
-caller-style behavior is unchanged; Base UI render-element merging remains
-verified separately. No token group or dependency is added.
+Batches74–84 move owned Tooltip, resize-edge, label, context and filled-action
+styles through existing primitives, preserving their actual caller contracts.
+The product adds no token group or dependency. Button gains CSS-typed `fontSize`
+and `lineHeight`, plus an explicit flat `solid` variant; ResizableHandle gains
+an opt-in edge appearance. Existing defaults remain unchanged.
 
-The private diff-notice header retains `dark:border-border`. Actual built-in
-public `*:` callers expose a utilities-layer ordering contract that an earlier
-StyleX declaration cannot preserve. The other seven header utilities migrate;
-complete-build CSSOM and vertical writing modes verify the emitted logical
-inset. This does not generalize the earlier margin-block compiler issue to every
-camel-case logical property.
+Typography values must reach the physical CSS fields when the API accepts all
+CSS values. The rejected custom-property Button implementation passed sixty
+ordinary screenshots but changed `initial`, `inherit`, `revert` and nested `var()`
+fallback semantics. The final fields merge with the owner's StyleX inline values;
+omitting both preserves its original style object. It passes 104 browser semantic
+cases and 24 class-priority cases, with direct caller-style behavior and Base UI
+render-element merging recorded separately. Fixed-text Field labels instead write
+existing size/leading tokens: inputs are siblings and there are no descendant
+readers. Login retains full size/leading, while mobile labels change only size.
+Weight, tracking and private leading writers stay compatible.
 
-`leaves74-78-acceptance.html` retains **310 formal pairs / 305 byte-exact /
-30,303 identical full standard records**. Five tooltip corner differences remain
-OPEN (13 raw / zero threshold pixels); two supplementary sidebar pairs separately
-remain OPEN (882 raw / 829 threshold). Archive hover-state and Monaco tokenizer
-readiness failures have concrete same-source evidence and four explicit corrected
-cells, while all originals remain inspectable. Native module-import failures,
-rejected typography candidates, inline negatives and earlier OPENs are retained.
-A source-stable 1,862-file boundary passes components 620 files / 6,207 tests,
-UI 25 / 307, the actual OSS Electron build and four-page smoke. Those application
-images are After-only and cannot establish an application-wide Before comparison.
-The root check remains blocked by the existing ACP prerequisite, outside this UI
-migration.
+`solid` owns only fill, label, fine-hover 90% alpha and the existing focus ring.
+It reads existing primary inks and ignores destructive tone like primary, adding
+no sheen, edge or press transform. The private Session theme inherits all other
+twenty-five Button tokens. Six old shadow/transition/active utilities remain,
+including their original focus result; all 165 old-variant control nodes retain
+raw attributes and full ordinary, pseudo, custom-property and geometry records.
+Token writes remain limited to reviewed fixed glyph/text subtrees. Real
+same-element inline-token negatives are not accepted as arbitrary-input equivalence.
 
-The private-focus and field-label continuation removes eighteen utilities in
-five product sources. Two resize declarations are redundant across the actual
-CombinedMentionTextarea branches; the fallback has its own resize API and the
-mention input already owns the same rule. This is a rendering-call-graph claim,
-not a promise that an exported class helper styles an arbitrary bare textarea.
-The focus hint observes every original `.group` ancestor, including outside the
-composer. Full compilation doubled the conditional StyleX class, so the final
-`:where(.group:focus-within *)` keeps the original total specificity of two.
-Moving layers still changes a synthetic same-element `opacity-100` injection;
-that negative remains explicit. The private hint has no caller class/style slot,
-and no additional specificity conceals that boundary.
+Resize edge composes inside its owner rather than competing with the base through
+caller classes. Its actual consumer is horizontal; default vertical coverage does
+not prove an edge variant there. No-preference captures verify the actual 150ms
+delay/duration and settled endpoints with screenshot animation disabling, not an
+uninterrupted sequence. The private diff-notice and DiffViewer headers retain
+their dark border utilities: real public `*:` callers expose a layer-order contract
+that moving the declaration cannot preserve. Other header rules and the native
+Chevron migrate, retaining its original non-square shrink behavior. Full-build
+CSSOM verifies actual logical insets; the earlier margin-block compiler issue is
+not generalized to every camel-case logical property.
 
-DiffViewer's default header preserves its public caller and conditional dark
-border contract, while its native custom Chevron keeps the original non-square
-shrink behavior. Six fixed-text Field.Label sites write existing label tokens;
-Login retains both the original size and leading expression, while mobile labels
-change only size. Their associated inputs are siblings, and there are no token
-readers inside the labels. Weight writers and other compatibility classes stay.
+Preserve compiler output and runtime scope. Tooltip `max-w-xs` is literal `20rem`,
+while other fixed bounds remain 420px/22rem and spacing-based bounds keep local
+variables. Context `px-*` and the UI owner both compile to `padding-inline`;
+four vertical-writing PNG pairs verify all four nonzero physical edges. The
+mobile menu row has no owner font-size declaration, and its detail preserves
+the global monospace variable plus ligature hook. Two composer resize rules are
+redundant across the actual CombinedMentionTextarea branches; this does not promise
+that an exported class helper styles an arbitrary bare textarea.
 
-`leaves79-81-acceptance.html` retains **296 formal pairs / 292 byte-exact /
-14,056 identical full standard records**. Four originals remain OPEN (1,075 raw /
-zero threshold pixels). A supplementary DiffViewer bottom-corner pair separately
-remains OPEN (22 raw / zero threshold); matching bounded controls do not establish
-the original raster causes. The initial missing-hint fixture, rejected selector
-source without invented After images, actual layer negatives and all earlier
-OPENs remain inspectable. Owning suites pass twenty, twenty-five and nineteen
-tests respectively, with passing types and zero lint errors; the earlier complete
-regression retains its exact through78 boundary.
+Focus hint observes every original `.group` ancestor, including outside the
+composer. Full compilation doubles its StyleX class, so the final
+`:where(.group:focus-within *)` retains total specificity two. This still changes
+a synthetic same-element `opacity-100` winner because the layer changed. The
+private hint has no caller class/style slot; no extra specificity hides that
+boundary. Tabs use manual activation: direction keys move focus and Enter selects.
+Twelve original failed selection assertions remain beside twelve strict corrected
+cells. Sixteen Login keys named `email-focused` actually fill the password last;
+the report identifies filled credentials/password focus, preserving the old keys.
 
-Field-label native verification explicitly focuses an input first. An observed
-stage `scrollLeft=804` put the original rest labels outside the viewport; the
-real input focus restored it to zero without assigning scroll positions or
-changing product styles. Eighteen strictly painted focused pairs agree; six
-inline-token negative pairs differ. Original offscreen and changing-geometry
-captures remain rejected. Both final native processes recorded all twenty-four
-rows but stalled after the last checkpoint with no Chrome child; their own Node
-processes were terminated. Original `complete:false` records remain, and the last
-label-click/cleanup outcome is UNKNOWN. This establishes the completed screenshot
-rows, not normal closure or the unobserved final behavior.
+A small provider/memory-router fixture mounts actual MobileWorkspaceStack,
+ChatLanding and the real SessionDetail loading branch, replacing no child or
+runtime. The existing full-width owner API removes its own directional cap.
+This accepts one real consumer; four SessionDetail inner Drawers remain unvisited.
+Its known injected inline-width negative lies outside the private stack props.
+Original native Escape timeout evidence stays beside a trusted content-key
+control and explicit recovery sources; missing original DOM cannot prove the
+old timeout's exact cause.
+
+| Frozen report                 | Formal pairs / byte-exact / full standard records | Original OPEN retained, raw / threshold pixels         |
+| ----------------------------- | ------------------------------------------------: | ------------------------------------------------------ |
+| `leaves74-78-acceptance.html` |                                310 / 305 / 30,303 | Five formal 13 / 0; two sidebar supplements 882 / 829. |
+| `leaves79-81-acceptance.html` |                                296 / 292 / 14,056 | Four formal 1,075 / 0; one native supplement 22 / 0.   |
+| `leaves82-84-acceptance.html` |                                306 / 305 / 12,854 | One disabled-button corner 10 / 7.                     |
+
+The final group includes 36 actual stack pairs and 24 separately identified
+existing-API controls; controls add no utility count. Later matching controls
+never close an original unexplained raster difference. Theme gates reject
+fixed-dark stories falsely labelled by light URL globals. Archive hover-state
+and Monaco tokenizer failures have bounded same-source evidence and explicit
+corrected cells, with every original preserved. Rejected typography candidates,
+selector source without invented After PNGs, inline negatives, Gallery After-only
+images and earlier OPENs remain separate evidence.
+
+Field native verification explicitly focuses an input first. Observed
+`scrollLeft=804` put the original rest labels outside the viewport; actual focus
+restored it to zero without assigning scroll positions or changing product CSS.
+Eighteen painted focused pairs agree, six token negatives differ, and original
+offscreen/geometry failures remain rejected. Both final native processes recorded
+all twenty-four rows then stalled after the last checkpoint without a Chrome
+child. Their own Nodes were terminated; original `complete:false` remains and
+the last label-click/cleanup is UNKNOWN, not normal closure or final-behavior PASS.
+
+The complete working-tree regression through84 freezes 1,867 UI sources, 146
+Electron sources and five metadata files. Hashes stay unchanged while components
+pass 620 files / 6,207 tests, UI passes 25 / 307, and actual Electron build/four-page
+smoke pass. The primary agent views all four app images. They are After-only;
+unconfigured local chat does not establish real-agent send/stop dispatch. Table's
+78 unchanged Styleq warnings match the prior run. Earlier full runs retain their
+through78 boundary; the unrelated root ACP prerequisite still blocks root-check PASS.
 
 ## Remaining work
 
@@ -2060,6 +2080,7 @@ completion percentage. Unresolved expressions remain a separate work list.
 | Exact source through 73, with partial visual acceptance    | v2             |       1,542 |   165 |        718 |
 | Exact source through 78, with partial visual acceptance    | v2             |       1,507 |   163 |        718 |
 | Exact source through 81, with partial visual acceptance    | v2             |       1,489 |   163 |        724 |
+| Exact source through 84, with partial visual acceptance    | v2             |       1,474 |   163 |        726 |
 
 Earlier method changes recognized single utilities, `withClassName`'s second
 argument and supported static class arrays. Historical per-batch counts remain
@@ -2079,13 +2100,13 @@ utility-looking strings in comparisons or unrelated properties. Ambiguous writes
 remain unresolved. Two adapter `className` writes expose four additional unresolved expressions,
 explaining the corresponding increase in that count.
 
-The published through 81 v2 split is components: 1,054 occurrences/147 files/631
-unresolved, legacy UI: 430/14/93 and routes: 5/2/0. These totals cover only those
-three source roots. All 789 three-root files are recorded with byte hashes.
-The through 81 snapshot updates five frozen through 78 sources and excludes
-batch82 onward. The shared UI Button owner stays separately frozen through78,
-outside these roots. Six new unresolved expressions are the exact Field.Label
-StyleX class templates, not six new unknown Tailwind utilities.
+The published through 84 v2 split is components: 1,039 occurrences/147 files/633
+unresolved, legacy UI: 430/14/93 and routes: 5/2/0. The three roots contain 790
+recorded files: four through81 files update and a new zero-Tailwind theme module
+joins them. Shared UI Button/Gallery sources and export metadata are frozen
+separately, outside the count. Later batches are excluded. The six through81
+Field.Label templates and two through84 action-theme templates are known StyleX
+expressions within the unresolved count, not eight new unknown utilities.
 The through 67 transition below explains its
 unresolved changes.
 Five Usage templates and one Archive class lookup disappear; two FileError/Bub

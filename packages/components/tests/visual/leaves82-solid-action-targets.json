@@ -1,0 +1,479 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 1000
+    },
+    {
+      "name": "phone",
+      "width": 390,
+      "height": 900,
+      "device": "iPhone 13"
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "ids": [
+    "migration-ownedsolidbutton--owner",
+    "migration-ownedsolidbutton--local-palette",
+    "migration-ownedsolidbutton--local-writers",
+    "migration-ownedsolidbutton--caller-classes",
+    "sessions-sessionchatinputarea--primary-action-draft",
+    "sessions-sessionchatinputarea--primary-action-running",
+    "sessions-sessionchatinputarea--primary-action-idle",
+    "sessions-sessionchatinputarea--primary-action-external-refresh",
+    "sessions-sessionchatinputarea--primary-action-pending"
+  ],
+  "ready": {
+    "migration-ownedsolidbutton--owner": [
+      {
+        "action": "visible",
+        "selector": "[data-solid-action]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>!!document.querySelector('[data-solid-owner-migration]')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const expected=new URL(location.href).searchParams.get('globals')?.match(/(?:^|;)theme:([^;]+)/)?.[1];return ['light','dark'].includes(expected)&&document.documentElement.classList.contains('dark')===(expected==='dark');}"
+      }
+    ],
+    "migration-ownedsolidbutton--local-palette": [
+      {
+        "action": "visible",
+        "selector": "[data-solid-action]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>!!document.querySelector('[data-solid-owner-migration]')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const expected=new URL(location.href).searchParams.get('globals')?.match(/(?:^|;)theme:([^;]+)/)?.[1];return ['light','dark'].includes(expected)&&document.documentElement.classList.contains('dark')===(expected==='dark');}"
+      }
+    ],
+    "migration-ownedsolidbutton--local-writers": [
+      {
+        "action": "visible",
+        "selector": "[data-solid-action]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>!!document.querySelector('[data-solid-owner-migration]')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const expected=new URL(location.href).searchParams.get('globals')?.match(/(?:^|;)theme:([^;]+)/)?.[1];return ['light','dark'].includes(expected)&&document.documentElement.classList.contains('dark')===(expected==='dark');}"
+      }
+    ],
+    "migration-ownedsolidbutton--caller-classes": [
+      {
+        "action": "visible",
+        "selector": "[data-solid-action]"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>!!document.querySelector('[data-solid-owner-migration]')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const expected=new URL(location.href).searchParams.get('globals')?.match(/(?:^|;)theme:([^;]+)/)?.[1];return ['light','dark'].includes(expected)&&document.documentElement.classList.contains('dark')===(expected==='dark');}"
+      }
+    ],
+    "sessions-sessionchatinputarea--primary-action-draft": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Send"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>!!document.querySelector('textarea')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const expected=new URL(location.href).searchParams.get('globals')?.match(/(?:^|;)theme:([^;]+)/)?.[1];return ['light','dark'].includes(expected)&&document.documentElement.classList.contains('dark')===(expected==='dark');}"
+      }
+    ],
+    "sessions-sessionchatinputarea--primary-action-running": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Stop"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>!!document.querySelector('textarea')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const expected=new URL(location.href).searchParams.get('globals')?.match(/(?:^|;)theme:([^;]+)/)?.[1];return ['light','dark'].includes(expected)&&document.documentElement.classList.contains('dark')===(expected==='dark');}"
+      }
+    ],
+    "sessions-sessionchatinputarea--primary-action-idle": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Send"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>!!document.querySelector('textarea')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const expected=new URL(location.href).searchParams.get('globals')?.match(/(?:^|;)theme:([^;]+)/)?.[1];return ['light','dark'].includes(expected)&&document.documentElement.classList.contains('dark')===(expected==='dark');}"
+      }
+    ],
+    "sessions-sessionchatinputarea--primary-action-external-refresh": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Refreshing external history"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>!!document.querySelector('textarea')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const expected=new URL(location.href).searchParams.get('globals')?.match(/(?:^|;)theme:([^;]+)/)?.[1];return ['light','dark'].includes(expected)&&document.documentElement.classList.contains('dark')===(expected==='dark');}"
+      }
+    ],
+    "sessions-sessionchatinputarea--primary-action-pending": [
+      {
+        "action": "visible",
+        "role": "button",
+        "name": "Send"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>!!document.querySelector('textarea')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "()=>{const expected=new URL(location.href).searchParams.get('globals')?.match(/(?:^|;)theme:([^;]+)/)?.[1];return ['light','dark'].includes(expected)&&document.documentElement.classList.contains('dark')===(expected==='dark');}"
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedsolidbutton--owner": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-solid-action]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.querySelector('[data-solid-action]').matches(':hover')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.querySelector('[data-solid-action]').matches(':focus-visible')&&document.activeElement===document.querySelector('[data-solid-action]')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-activated",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-solid-action]",
+            "key": "Space"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.querySelector('[data-solid-receipt]').textContent==='Clicks: 1'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "migration-ownedsolidbutton--local-palette": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-solid-action]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.querySelector('[data-solid-action]').matches(':hover')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.querySelector('[data-solid-action]').matches(':focus-visible')&&document.activeElement===document.querySelector('[data-solid-action]')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-activated",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-solid-action]",
+            "key": "Space"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.querySelector('[data-solid-receipt]').textContent==='Clicks: 1'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "migration-ownedsolidbutton--local-writers": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-solid-action]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.querySelector('[data-solid-action]').matches(':hover')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.querySelector('[data-solid-action]').matches(':focus-visible')&&document.activeElement===document.querySelector('[data-solid-action]')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-activated",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-solid-action]",
+            "key": "Space"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.querySelector('[data-solid-receipt]').textContent==='Clicks: 1'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "migration-ownedsolidbutton--caller-classes": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "selector": "[data-solid-action]"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.querySelector('[data-solid-action]').matches(':hover')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "press",
+            "selector": "body",
+            "key": "Tab"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.querySelector('[data-solid-action]').matches(':focus-visible')&&document.activeElement===document.querySelector('[data-solid-action]')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-activated",
+        "steps": [
+          {
+            "action": "press",
+            "selector": "[data-solid-action]",
+            "key": "Space"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.querySelector('[data-solid-receipt]').textContent==='Clicks: 1'&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "sessions-sessionchatinputarea--primary-action-draft": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Send"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.querySelector('button[aria-label=\"Send\"]').matches(':hover')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "press",
+            "selector": "textarea",
+            "key": "ArrowLeft"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Send"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.querySelector('button[aria-label=\"Send\"]').matches(':focus-visible')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "accepted-send",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Send"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.querySelector('textarea').value===''&&document.querySelector('button[aria-label=\"Send\"]').disabled&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "sessions-sessionchatinputarea--primary-action-running": [
+      {
+        "name": "hover",
+        "steps": [
+          {
+            "action": "hover",
+            "role": "button",
+            "name": "Stop"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.querySelector('button[aria-label=\"Stop\"]').matches(':hover')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "keyboard-focus",
+        "steps": [
+          {
+            "action": "movePointer",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "action": "press",
+            "selector": "textarea",
+            "key": "ArrowLeft"
+          },
+          {
+            "action": "focus",
+            "role": "button",
+            "name": "Stop"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.querySelector('button[aria-label=\"Stop\"]').matches(':focus-visible')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ],
+    "sessions-sessionchatinputarea--primary-action-pending": [
+      {
+        "name": "draft",
+        "steps": [
+          {
+            "action": "fill",
+            "selector": "textarea",
+            "value": "A synthetic local draft awaiting its explicit acceptance signal."
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>!document.querySelector('button[aria-label=\"Send\"]').disabled&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      },
+      {
+        "name": "pending",
+        "steps": [
+          {
+            "action": "click",
+            "role": "button",
+            "name": "Send"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "()=>document.querySelector('button[aria-label=\"Send\"]').disabled&&!!document.querySelector('button[aria-label=\"Send\"] [role=status]')&&document.fonts.status==='loaded'&&document.getAnimations().every(a=>a.effect?.getTiming().iterations===Infinity||(!a.pending&&a.playState!=='running'))"
+          }
+        ]
+      }
+    ]
+  }
+}

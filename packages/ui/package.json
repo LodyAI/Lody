@@ -22,6 +22,7 @@
     "./context-menu": "./src/menu/context-menu.tsx",
     "./dialog": "./src/dialog/dialog.tsx",
     "./dialog/dialog.tokens.stylex": "./src/dialog/dialog.tokens.stylex.ts",
+    "./disclosure/disclosure.tokens.stylex": "./src/disclosure/disclosure.tokens.stylex.ts",
     "./drawer": "./src/drawer/drawer.tsx",
     "./field": "./src/field/field.tsx",
     "./field/field.tokens.stylex": "./src/field/field.tokens.stylex.ts",

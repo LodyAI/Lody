@@ -1,0 +1,120 @@
+{
+  "viewports": [
+    {
+      "name": "narrow",
+      "width": 320,
+      "height": 900
+    },
+    {
+      "name": "before-sm",
+      "width": 639,
+      "height": 900
+    },
+    {
+      "name": "at-sm",
+      "width": 640,
+      "height": 900
+    }
+  ],
+  "themes": ["light", "dark"],
+  "reducedMotion": "reduce",
+  "locale": "en",
+  "ids": [
+    "migration-ownedcontexttypography--long-tab-labels",
+    "migration-ownedcontexttypography--scoped-long-tab-labels"
+  ],
+  "ready": {
+    "migration-ownedcontexttypography--long-tab-labels": [
+      {
+        "action": "visible",
+        "role": "tablist"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "document.querySelectorAll(\"[role=tablist]\").length===1 && document.querySelectorAll(\"[role=tab]\").length>=1 && document.fonts.status===\"loaded\""
+      }
+    ],
+    "migration-ownedcontexttypography--scoped-long-tab-labels": [
+      {
+        "action": "visible",
+        "role": "tablist"
+      },
+      {
+        "action": "waitForFunction",
+        "expression": "document.querySelectorAll(\"[role=tablist]\").length===1 && document.querySelectorAll(\"[role=tab]\").length>=1 && document.fonts.status===\"loaded\""
+      }
+    ]
+  },
+  "states": {
+    "migration-ownedcontexttypography--long-tab-labels": [
+      {
+        "name": "github-keyboard-selected",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "tab",
+            "name": "Local development workspaces",
+            "exact": true
+          },
+          {
+            "action": "press",
+            "role": "tab",
+            "name": "Local development workspaces",
+            "exact": true,
+            "key": "ArrowRight"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "document.activeElement?.textContent === \"GitHub organization repositories\" && document.querySelector(\"output[aria-label=\\\"Selected context\\\"]\")?.textContent === \"local\""
+          },
+          {
+            "action": "press",
+            "role": "tab",
+            "name": "GitHub organization repositories",
+            "exact": true,
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "document.querySelector(\"output[aria-label=\\\"Selected context\\\"]\")?.textContent === \"github\""
+          }
+        ]
+      }
+    ],
+    "migration-ownedcontexttypography--scoped-long-tab-labels": [
+      {
+        "name": "github-keyboard-selected",
+        "steps": [
+          {
+            "action": "focus",
+            "role": "tab",
+            "name": "Local development workspaces",
+            "exact": true
+          },
+          {
+            "action": "press",
+            "role": "tab",
+            "name": "Local development workspaces",
+            "exact": true,
+            "key": "ArrowRight"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "document.activeElement?.textContent === \"GitHub organization repositories\" && document.querySelector(\"output[aria-label=\\\"Selected context\\\"]\")?.textContent === \"local\""
+          },
+          {
+            "action": "press",
+            "role": "tab",
+            "name": "GitHub organization repositories",
+            "exact": true,
+            "key": "Enter"
+          },
+          {
+            "action": "waitForFunction",
+            "expression": "document.querySelector(\"output[aria-label=\\\"Selected context\\\"]\")?.textContent === \"github\""
+          }
+        ]
+      }
+    ]
+  }
+}

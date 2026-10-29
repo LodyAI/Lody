@@ -35,12 +35,24 @@ primitive's visual rules.
 The existing modal and floating-surface token groups are available at
 `@lody/ui/dialog/dialog.tokens.stylex` and `@lody/ui/popup/popup.tokens.stylex`.
 Tooltip chips use `@lody/ui/tooltip/tooltip.tokens.stylex` for their own geometry.
+Tabs, Accordion and Collapsible share the existing group exported at
+`@lody/ui/disclosure/disclosure.tokens.stylex`.
 For a verified layout outside the named props, a surface can write the specific
 public token through a computed key in `stylex.create`; the other tokens keep
 inheriting. Keep those overrides local to the owned part and verify portals,
 local spacing, caller precedence and every descendant reader of the changed
 token. Physical appearance overrides do not establish the same inherited-token
 contract. These exports add no token or variant.
+
+`Button variant="solid"` uses the existing `button.primaryBackground` and
+`button.primaryLabel` pigments with a flat fill. A device that supports hover
+reduces the fill to 90% opacity on hover; the label stays constant. The variant
+adds no sheen, edge shadow or pressed translation, and retains the keyboard
+focus ring. Like `primary`, it ignores `tone="destructive"`; use the
+`destructive` variant for a destructive filled action. `ButtonGroup` keeps the
+same segment corners and spacing, including for solid buttons. Other variants
+and the default `primary` retain their existing behavior.
+
 `Button` accepts `width` and `height` for its outer box: numbers are pixels and
 strings can read local CSS variables. Explicit zero applies; omission restores
 the named size. The icon wrapper, ref, events and disabled behavior retain their

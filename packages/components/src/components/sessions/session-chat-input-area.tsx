@@ -10,6 +10,7 @@ import { useResolvedMachineMeta } from '@/hooks/use-resolved-machine-meta';
 import { snapshotAgentRole } from '@lody/shared';
 import { useSessionMentionSource } from '@/hooks/use-session-mention-source';
 import * as stylex from '@stylexjs/stylex';
+import { composerActionButtonTheme } from '../chat/composer-action-button.stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import {
   snapshotAttachmentDrafts,
@@ -2267,12 +2268,12 @@ export const SessionChatInputArea = memo(
         onClick={() => {
           void onStop();
         }}
-        variant="ghost"
+        variant="solid"
         size={isMobile ? 'medium' : 'small'}
         shape="pill"
         icon
         aria-label={t('sessions.stop')}
-        className="shadow-xs transition-all bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]"
+        className={`${stylex.props(composerActionButtonTheme).className} shadow-xs transition-all active:translate-y-[1px]`}
       >
         <span
           {...stylex.props(
@@ -2286,7 +2287,7 @@ export const SessionChatInputArea = memo(
       <Button
         type="button"
         icon
-        variant="ghost"
+        variant="solid"
         size={isMobile ? 'medium' : 'small'}
         shape="pill"
         onClick={() => {
@@ -2300,7 +2301,7 @@ export const SessionChatInputArea = memo(
               ? t('scheduledMessage.title')
               : t('sessions.send')
         }
-        className="shadow-xs transition-all bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]"
+        className={`${stylex.props(composerActionButtonTheme).className} shadow-xs transition-all active:translate-y-[1px]`}
       >
         {submissionPending || isExternalHistoryRefreshing ? (
           <Spinner size={isMobile ? 'medium' : 'small'} />

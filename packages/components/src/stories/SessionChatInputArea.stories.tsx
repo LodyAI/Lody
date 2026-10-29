@@ -14,6 +14,7 @@ import {
   useComposerNavigationFocus,
 } from '@/components/chat/submission/use-composer-navigation-focus';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useTheme } from '@/theme-provider';
 import { isNativeAppShell } from '@/lib/native-platform';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
@@ -65,6 +66,7 @@ const storyMachineViewMeta: MachineViewMeta = {
 
 type StoryShellProps = {
   isAgentBusy: boolean;
+  isDark?: boolean;
   initialInputText?: string;
   showFreeTurnLimitNotice?: boolean;
   onSendMessage?: SessionChatInputAreaProps['onSendMessage'];
@@ -85,6 +87,7 @@ function createStoryStore() {
 
 function StoryShell({
   isAgentBusy,
+  isDark = true,
   initialInputText = '',
   showFreeTurnLimitNotice = false,
   onSendMessage = async () => true,
@@ -130,7 +133,7 @@ function StoryShell({
               isMachineRemoved={false}
               isAgentBusy={isAgentBusy}
               canStopAgent={isAgentBusy}
-              isDark
+              isDark={isDark}
               isEmptyConversation={false}
               selectedModeId={null}
               selectedModelId={null}
@@ -234,6 +237,29 @@ export const DeferredSubmission: Story = {
         );
       }),
   },
+};
+
+function ThemeAwareStoryShell(props: StoryShellProps) {
+  const { resolvedTheme } = useTheme();
+  return <StoryShell {...props} isDark={resolvedTheme === 'dark'} />;
+}
+
+export const PrimaryActionIdle: Story = { render: (args) => <ThemeAwareStoryShell {...args} /> };
+export const PrimaryActionRunning: Story = {
+  args: RunningDark.args,
+  render: (args) => <ThemeAwareStoryShell {...args} />,
+};
+export const PrimaryActionDraft: Story = {
+  args: DraftDark.args,
+  render: (args) => <ThemeAwareStoryShell {...args} />,
+};
+export const PrimaryActionExternalRefresh: Story = {
+  args: ExternalHistoryRefreshing.args,
+  render: (args) => <ThemeAwareStoryShell {...args} />,
+};
+export const PrimaryActionPending: Story = {
+  args: DeferredSubmission.args,
+  render: (args) => <ThemeAwareStoryShell {...args} />,
 };
 
 function NavigationLanding() {
