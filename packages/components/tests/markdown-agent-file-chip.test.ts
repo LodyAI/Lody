@@ -1,15 +1,22 @@
+import { NativeTextSelectionHoldContext } from '../src/hooks/use-conversation-text-selection';
 // @vitest-environment jsdom
 
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { AgentFileLinkIndexContext } from '../src/components/ai-gui/agent-file-link-context';
+import { createAgentFileLinkIndex } from '../src/lib/agent-file-link-index';
+import type { FileWorkspaceProviderEntry } from '../src/lib/file-workspace-provider';
+import { toast } from '../src/lib/toast';
 import { MarkdownRenderer } from '../src/components/ai-gui/markdown-renderer';
 import { writeTextToClipboard } from '../src/lib/clipboard';
 
 vi.mock('../src/lib/clipboard', () => ({
   writeTextToClipboard: vi.fn(async () => true),
 }));
+
+vi.mock('../src/lib/toast', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -94,5 +101,184 @@ describe('agent file links in finished turns', () => {
     expect(container?.textContent).toContain(
       '改动落在 README.md、conductor.json、oss-revision.json 三个文件。'
     );
+  });
+
+  const file = (
+    path: string,
+    extra: Partial<FileWorkspaceProviderEntry> = {}
+  ): FileWorkspaceProviderEntry => ({ path, kind: 'text', sourceState: 'live-readonly', ...extra });
+
+  it.each([false, true])(
+    'confirms candidates against the live index (streaming=%s)',
+    async (isStreaming) => {
+      const index = createAgentFileLinkIndex();
+      const text =
+        'See src/app.ts and `src/code.ts`. [Guide](./docs/a%20b.md#L8). :codex-file-citation{path="out/report.pdf"}';
+      const render = () =>
+        root?.render(
+          createElement(
+            AgentFileLinkIndexContext.Provider,
+            { value: index },
+            createElement(MarkdownRenderer, { text, isStreaming })
+          )
+        );
+      await act(async () => render());
+      expect(container?.querySelectorAll('button[title]')).toHaveLength(0);
+      expect(container?.querySelector('code')?.textContent).toBe('src/code.ts');
+      expect(container?.textContent).toContain('out/report.pdf');
+      await act(async () =>
+        index.setFiles([
+          file('src/app.ts'),
+          file('src/code.ts'),
+          file('docs/a b.md'),
+          file('out/report.pdf', { kind: 'binary' }),
+        ])
+      );
+      expect(container?.querySelectorAll('button[title]')).toHaveLength(3);
+      expect(container?.querySelector('code')).toBeNull();
+      expect(container?.textContent).toContain('report.pdf');
+      await act(async () => index.setFiles([]));
+      expect(container?.querySelectorAll('button[title]')).toHaveLength(0);
+      expect(container?.querySelector('code')?.textContent).toBe('src/code.ts');
+      expect(container?.textContent).toContain('out/report.pdf');
+    }
+  );
+
+  it('opens absolute paths without an index and preserves the exact file and anchor', async () => {
+    const index = createAgentFileLinkIndex();
+    const open = vi.fn();
+    await act(async () =>
+      root?.render(
+        createElement(
+          AgentFileLinkIndexContext.Provider,
+          { value: index },
+          createElement(MarkdownRenderer, {
+            text: '[Artifact](/tmp/worktrees/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/report%2520v2.md#L12) and `C:\\repo\\file.ts:8`',
+            onAgentFileLinkClick: open,
+          })
+        )
+      )
+    );
+    const links = container!.querySelectorAll<HTMLButtonElement>('button[title]');
+    expect(links).toHaveLength(2);
+    await act(async () => links[0]!.click());
+    expect(open).toHaveBeenLastCalledWith(
+      '/tmp/worktrees/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/report%2520v2.md#L12'
+    );
+    await act(async () => links[1]!.click());
+    expect(open).toHaveBeenLastCalledWith('C:/repo/file.ts:8');
+    expect(index.isRequested()).toBe(false);
+  });
+
+  it('matches whole paths and excludes deleted files, directories and unresolved symlinks', async () => {
+    const index = createAgentFileLinkIndex();
+    index.setFiles([
+      file('src/app.ts'),
+      file('old/a.ts', { kind: 'deleted' }),
+      file('dir/a.ts', { entryType: 'lazy-directory' }),
+      file('special/a.ts', { kind: 'special' }),
+      file('link/a.ts', { kind: 'symlink', linkTarget: '../src/app.ts' }),
+      file('broken/a.ts', { kind: 'symlink', linkTarget: '../absent.ts' }),
+    ]);
+    await act(async () =>
+      root?.render(
+        createElement(
+          AgentFileLinkIndexContext.Provider,
+          { value: index },
+          createElement(MarkdownRenderer, {
+            text: '`app.ts` src/app.ts wrong/src/app.ts old/a.ts dir/a.ts special/a.ts link/a.ts broken/a.ts ../src/app.ts [directory](src/app.ts/) [parent](src/../src/app.ts)',
+          })
+        )
+      )
+    );
+    expect(
+      [...container!.querySelectorAll('button[title]')].map((link) => link.getAttribute('title'))
+    ).toEqual(['src/app.ts', 'link/a.ts']);
+    expect(container?.querySelector('code')?.textContent).toBe('app.ts');
+  });
+
+  it('does not leak index matches across cached Markdown consumers', async () => {
+    const first = createAgentFileLinkIndex();
+    first.setFiles([file('src/app.ts')]);
+    const second = createAgentFileLinkIndex();
+    for (const index of [first, second, first]) {
+      await act(async () =>
+        root?.render(
+          createElement(
+            AgentFileLinkIndexContext.Provider,
+            { value: index },
+            createElement(MarkdownRenderer, { text: '`src/app.ts`' })
+          )
+        )
+      );
+      expect(container?.querySelectorAll('button[title]')).toHaveLength(index === first ? 1 : 0);
+    }
+  });
+
+  it('copies the original Codex path with punctuation and confirms success', async () => {
+    const path = '/tmp/exports/预算 #draft%20.xlsx';
+    await act(async () =>
+      root?.render(
+        createElement(MarkdownRenderer, { text: `:codex-file-citation{path="${path}"}` })
+      )
+    );
+    const button = container!.querySelector<HTMLButtonElement>('button');
+    expect(button).not.toBeNull();
+    await act(async () => button!.click());
+    expect(writeTextToClipboard).toHaveBeenLastCalledWith(path);
+    expect(toast.success).toHaveBeenLastCalledWith('File path copied');
+  });
+  it.each(['/tmp/file%00.txt', '/tmp/file.txt#L0'])(
+    'copies invalid absolute target %s instead of opening it',
+    async (path) => {
+      const open = vi.fn();
+      await act(async () =>
+        root?.render(
+          createElement(
+            AgentFileLinkIndexContext.Provider,
+            { value: createAgentFileLinkIndex() },
+            createElement(MarkdownRenderer, {
+              text: `[Broken](${path})`,
+              onAgentFileLinkClick: open,
+            })
+          )
+        )
+      );
+      const button = container!.querySelector<HTMLButtonElement>('button[title]');
+      expect(button).not.toBeNull();
+      await act(async () => button!.click());
+      expect(writeTextToClipboard).toHaveBeenLastCalledWith(path);
+      expect(toast.success).toHaveBeenLastCalledWith('File path copied');
+      expect(button?.querySelector('.lucide-check')).not.toBeNull();
+      expect(open).not.toHaveBeenCalled();
+    }
+  );
+  it('preserves selected prose when index confirmation changes its presentation', async () => {
+    const index = createAgentFileLinkIndex();
+    const render = (held: boolean) =>
+      root?.render(
+        createElement(
+          NativeTextSelectionHoldContext.Provider,
+          { value: held },
+          createElement(
+            AgentFileLinkIndexContext.Provider,
+            { value: index },
+            createElement(MarkdownRenderer, { text: '`src/app.ts`' })
+          )
+        )
+      );
+    await act(async () => render(false));
+    const code = container!.querySelector('code')!;
+    const range = document.createRange();
+    range.selectNodeContents(code);
+    document.getSelection()!.addRange(range);
+    await act(async () => render(true));
+    await act(async () => index.setFiles([file('src/app.ts')]));
+    expect(container?.querySelector('code')).toBe(code);
+    expect(document.getSelection()?.toString()).toBe('src/app.ts');
+    document.getSelection()!.removeAllRanges();
+    await act(async () => render(false));
+    expect(container?.querySelector('code')).toBeNull();
+    expect(container?.querySelector('button[title]')).not.toBeNull();
   });
 });

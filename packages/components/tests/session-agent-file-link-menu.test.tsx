@@ -42,12 +42,27 @@ vi.mock('@/lib/toast', () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
 
+const fileSources = new Map<string, { provider: SessionFileProvider | null; status: string }>();
+vi.mock('../src/hooks/use-code-collab-requested-role', () => ({
+  useCodeCollabRequestedRole: () => 'read',
+}));
+vi.mock('../src/hooks/use-code-collab-session-file-provider', () => ({
+  useCodeCollabSessionFileProvider: ({ sessionId }: { sessionId: string }) =>
+    fileSources.get(sessionId) ?? { provider: null, status: 'loading' },
+}));
+
 const requestFilePreview = vi.fn();
 vi.mock('../src/atoms/runtime', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   activeWorkspaceRuntimeAtom: atom(() => ({ requestFilePreview })),
 }));
 
+import type {
+  SessionFileProvider,
+  SessionFileProviderEntry,
+} from '../src/lib/session-file-provider';
+import { createFakeSessionFileProvider } from '../src/lib/session-file-provider';
+import { toast } from '../src/lib/toast';
 import type { SessionMeta } from '@lody/shared';
 import { MarkdownRenderer } from '../src/components/ai-gui/markdown-renderer';
 import { SessionAgentFileLinkMenuProvider } from '../src/components/sessions/session-agent-file-link-menu';
@@ -85,6 +100,9 @@ describe('SessionAgentFileLinkMenuProvider', () => {
     probePathLaunchers.mockClear();
     writeTextToClipboard.mockClear();
     requestFilePreview.mockReset();
+    fileSources.clear();
+    vi.mocked(toast.error).mockClear();
+    vi.mocked(toast.success).mockClear();
     (window as { __LODY_ELECTRON__?: boolean }).__LODY_ELECTRON__ = true;
     (window as { __LODY_PLATFORM__?: { os: string } }).__LODY_PLATFORM__ = { os: 'darwin' };
     container = document.createElement('div');
@@ -97,9 +115,7 @@ describe('SessionAgentFileLinkMenuProvider', () => {
     root = undefined;
     container?.remove();
     container = undefined;
-    document
-      .querySelectorAll('[role="menu"]')
-      .forEach((node) => node.remove());
+    document.querySelectorAll('[role="menu"]').forEach((node) => node.remove());
     delete (window as { __LODY_ELECTRON__?: boolean }).__LODY_ELECTRON__;
     delete (window as { __LODY_PLATFORM__?: { os: string } }).__LODY_PLATFORM__;
   });
@@ -118,8 +134,9 @@ describe('SessionAgentFileLinkMenuProvider', () => {
       );
       await Promise.resolve();
     });
-    const openMenus = [...document.querySelectorAll<HTMLElement>('[role="menu"]')]
-      .filter((menu) => menu.hasAttribute('data-open') || menu.dataset.state === 'open');
+    const openMenus = [...document.querySelectorAll<HTMLElement>('[role="menu"]')].filter(
+      (menu) => menu.hasAttribute('data-open') || menu.dataset.state === 'open'
+    );
     const menu = openMenus[0];
     if (openMenus.length !== 1 || !menu) throw new Error('Exactly one context menu must be open');
     return menu;
@@ -189,64 +206,102 @@ describe('SessionAgentFileLinkMenuProvider', () => {
     expect(launchLocalPath).not.toHaveBeenCalled();
   });
 
-  it('acts on the worktree file the user picks for an ambiguous relative link', async () => {
-    const candidate = (worktree: string) => ({
-      path: `${worktree}/src/a.ts`,
-      absolutePath: `/repo/${worktree}/src/a.ts`,
-      worktreeRoot: `/repo/${worktree}`,
-      branch: `refs/heads/${worktree}`,
-      head: '0123456789abcdef',
-      mtimeMs: 0,
-    });
-    requestFilePreview.mockResolvedValue({
-      status: 'resolved-link',
-      v: 3,
-      candidates: [candidate('wt-a'), candidate('wt-b')],
-    });
-    await act(async () => {
+  const file = (path: string): SessionFileProviderEntry => ({
+    path,
+    kind: 'text',
+    sourceState: 'live-readonly',
+  });
+
+  const renderSession = async (session: SessionMeta, text: string) => {
+    await act(async () =>
       root?.render(
         createElement(
           Provider,
           null,
           createElement(
-            'section',
-            { 'data-testid': 'side-session' },
-            createElement(
-              SessionAgentFileLinkMenuProvider,
-              { session: SIDE_SESSION },
-              createElement(MarkdownRenderer, { text: '[a.ts](src/a.ts)' })
-            )
+            SessionAgentFileLinkMenuProvider,
+            { session },
+            createElement(MarkdownRenderer, { text })
           )
         )
-      );
-      await Promise.resolve();
-    });
-    const region = container?.querySelector<HTMLElement>('[data-testid="side-session"]');
-    if (!region) throw new Error('Session region did not render');
+      )
+    );
+  };
 
-    const copyPath = (await openContextMenu(region)).querySelector<HTMLElement>(
+  it('copies the authored relative path without resolving even when discovery would fail', async () => {
+    fileSources.set(SIDE_SESSION.id, {
+      provider: createFakeSessionFileProvider({ files: [file('src/a.ts')] }),
+      status: 'ready',
+    });
+    requestFilePreview.mockRejectedValue(new Error('offline'));
+    await renderSession(SIDE_SESSION, '[a.ts](./src/a.ts#L12)');
+    const copyPath = (await openContextMenu(container!)).querySelector<HTMLElement>(
       '[role="menuitem"]'
     );
     if (!copyPath) throw new Error('Copy Path action did not render');
-    await act(async () => {
-      copyPath.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-      await Promise.resolve();
-    });
-    expect(requestFilePreview).toHaveBeenCalledWith(
-      SIDE_SESSION.machineId,
-      expect.objectContaining({ path: 'src/a.ts', resolveMarkdownLink: true }),
-      expect.anything()
-    );
-    expect(writeTextToClipboard).not.toHaveBeenCalled();
+    await act(async () => copyPath.click());
+    expect(writeTextToClipboard).toHaveBeenLastCalledWith('./src/a.ts');
+    expect(toast.success).toHaveBeenLastCalledWith('File path copied');
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(requestFilePreview).not.toHaveBeenCalled();
+  });
 
-    const choices = [...document.querySelectorAll('button')].filter(
-      (button) => button.textContent === 'Open this file'
+  it('keeps the unencoded original Codex path when copying through the menu', async () => {
+    const path = '/tmp/预算 #draft%20.xlsx';
+    await renderSession(SIDE_SESSION, `:codex-file-citation{path="${path}"}`);
+    const card = container!.querySelector('button')!;
+    await act(async () =>
+      card.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
     );
-    expect(choices).toHaveLength(2);
-    await act(async () => {
-      choices[1]!.click();
-      await Promise.resolve();
+    const copyPath = document.querySelector<HTMLElement>('[role="menuitem"]');
+    expect(copyPath?.textContent).toBe('Copy Path');
+    await act(async () => copyPath!.click());
+    expect(writeTextToClipboard).toHaveBeenLastCalledWith(path);
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('ignores a late initial list after a newer index notification and releases its subscription', async () => {
+    let finish!: (files: readonly SessionFileProviderEntry[]) => void;
+    const pending = new Promise<readonly SessionFileProviderEntry[]>((resolve) => {
+      finish = resolve;
     });
-    expect(writeTextToClipboard).toHaveBeenLastCalledWith('/repo/wt-b/src/a.ts');
+    const listeners = new Set<(files: readonly SessionFileProviderEntry[]) => void>();
+    const provider = createFakeSessionFileProvider();
+    provider.listFiles = () => pending;
+    provider.subscribeFiles = (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    };
+    fileSources.set(SIDE_SESSION.id, { provider, status: 'ready' });
+    await renderSession(SIDE_SESSION, '`src/a.ts`');
+    expect(container?.querySelector('button[title]')).toBeNull();
+    await act(async () => {
+      for (const listener of listeners) listener([file('src/a.ts')]);
+    });
+    expect(container?.querySelector('button[title]')).not.toBeNull();
+    await act(async () => finish([]));
+    expect(container?.querySelector('button[title]')).not.toBeNull();
+    await renderSession(ROOT_SESSION, '`src/a.ts`');
+    expect(container?.querySelector('button[title]')).toBeNull();
+    expect(container?.querySelector('code')?.textContent).toBe('src/a.ts');
+    expect(listeners.size).toBe(0);
+  });
+
+  it('discards a late index list after switching sessions', async () => {
+    let finish!: (files: readonly SessionFileProviderEntry[]) => void;
+    const pending = new Promise<readonly SessionFileProviderEntry[]>((resolve) => {
+      finish = resolve;
+    });
+    const provider = createFakeSessionFileProvider();
+    provider.listFiles = () => pending;
+    fileSources.set(SIDE_SESSION.id, { provider, status: 'ready' });
+    await renderSession(SIDE_SESSION, '`src/a.ts`');
+    await renderSession(ROOT_SESSION, '`src/a.ts`');
+    await act(async () => finish([file('src/a.ts')]));
+    expect(container?.querySelector('button[title]')).toBeNull();
+    expect(container?.querySelector('code')?.textContent).toBe('src/a.ts');
   });
 });

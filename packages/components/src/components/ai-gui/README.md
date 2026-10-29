@@ -81,6 +81,14 @@ the reasoning behind those rules.
   shared `session-link-export`, preserving code examples and stored history.
   Only a known source workspace supplies a missing ID; anonymous readers do not
   borrow the viewer's workspace.
+- Conversation file links use `agent-file-link-context.ts`: absolute paths render
+  immediately, while relative candidates keep their original text/code until the
+  owning Session's file index confirms an exact path. The conversation boundary
+  borrows the existing shared index only when a relative candidate appears; leaf
+  subscriptions update presentation without reparsing Markdown. Opening goes
+  directly to the known path, retaining anchors. Copy uses the authored path,
+  without worktree discovery; Codex cards retain their original unencoded path.
+  `MarkdownCodexFileCitations.IndexedPaths` shows confirmation and removal.
 - `plan-surface.ts` resolves plan approval text from nonempty `rawInput.plan` first,
   then the first nonempty content text block. Claude result updates can replace
   content with a rejection message while retaining the original plan input.

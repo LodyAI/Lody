@@ -7181,7 +7181,11 @@ export const SessionChatInterface = memo(
                         {/* Key forces remount on session change, preventing scroll state bleed between sessions */}
                         <MessageSendStatusContext.Provider value={sendingMessageIds}>
                           <MessageSelectionContext.Provider value={shareSelection.context}>
-                            <SessionAgentFileLinkMenuProvider session={session}>
+                            <SessionAgentFileLinkMenuProvider
+                              session={session}
+                              workspaceId={workspaceId}
+                              isVisible={isVisible}
+                            >
                               <SessionChatStream
                                 key={session.id}
                                 ref={chatStreamRef}

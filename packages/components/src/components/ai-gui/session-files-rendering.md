@@ -79,7 +79,10 @@ Filename punctuation is URL-encoded for transport through the existing href reso
 Windows drive prefixes stay unescaped and backslash separators normalize to slashes,
 so absolute artifact targets retain their drive. The citation walk leaves non-container
 Markdown nodes untouched, including inline/display math.
-Without a session opener, clicking copies the path. Invalid/incomplete citations and
+In conversations, relative citations stay path text until the owning index confirms
+the file; absolute citations render immediately. Clicking a legal target opens it
+directly; without an opener or with an invalid target it copies the original path
+and reports success. Copy menus never resolve a path before copying. Invalid/incomplete citations and
 code examples do not become cards. The inline card uses a span frame to keep paragraph
 markup valid. Coverage lives in the Markdown file-link and streaming renderer suites;
 `MarkdownCodexFileCitations` provides the visual states.

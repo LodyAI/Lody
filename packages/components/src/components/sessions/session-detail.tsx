@@ -1,13 +1,11 @@
+import { writeTextToClipboard } from '@/lib/clipboard';
 import { useSessionForkCapabilities } from '@/hooks/use-session-fork-capabilities';
 import { requireWorkspaceFeature } from '@/lib/workspace-feature';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
-import { FileLinkCandidateDialog } from './file-link-candidate-dialog';
 import {
   useArchiveConfirmationRequest,
   useArchiveSessionWithConfirmation,
 } from './session-archive-confirmation';
-import type { FileLinkCandidate } from '@lody/shared';
-import { getIpcServices } from '@/lib/electron-ipc-client';
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import { pendingSessionLinkAtom } from '@/lib/session-deep-link';
 import { windowPreparationAtom } from '@/lib/window-preparation';
@@ -209,6 +207,7 @@ import { cn, getBasename } from '@/lib';
 
 import {
   resolveSessionFileOpenTarget,
+  resolveDirectMarkdownFileOpenTarget,
   type SessionFileOpenPathKind,
 } from '@/lib/session-file-open-target';
 import { isSessionMarkdownPath } from '@/lib/session-file-language';
@@ -4031,84 +4030,30 @@ const SessionDetail = ({
     },
     [fileLinkSessionKey, runtime]
   );
-  const [fileLinkChoice, setFileLinkChoice] = useState<{
-    sessionKey: string;
-    candidates: readonly FileLinkCandidate[];
-    options: SessionDetailOpenFileOptions;
-  } | null>(null);
-
   const handleOpenFile = useStableCallback(
     (filePath: string, options: SessionDetailOpenFileOptions = {}) => {
       const request = ++fileLinkRequestRef.current;
-      const sessionKey = fileLinkSessionKey;
-      setFileLinkChoice(null);
+      const target =
+        options.pathKind === 'canonical'
+          ? resolveSessionFileOpenTarget({
+              rawPath: filePath,
+              pathKind: 'canonical',
+              startLine: options.startLine,
+              endLine: options.endLine,
+            })
+          : resolveDirectMarkdownFileOpenTarget(filePath);
+      if (!target) {
+        void writeTextToClipboard(filePath).then((copied) => {
+          if (request !== fileLinkRequestRef.current) return;
+          if (copied) toast.success(t('sessions.fileViewer.pathCopied', 'File path copied'));
+          else toast.error(t('sessions.fileViewer.pathCopyFailed', 'Failed to copy file path'));
+        });
+        return;
+      }
       const claimCloseTarget = semanticRouterRef.current?.deferActivation('side-panel');
       setFileProviderRequestedByInteraction(true);
       void (async () => {
-        // Where the path came from decides whether it may be rewritten at all;
-        // `resolveSessionFileOpenTarget` owns that rule and documents why.
-        const preserveWorktreePath =
-          isElectronRenderer() &&
-          (isActiveSessionLocalMachine ||
-            (activeSessionMachineId
-              ? await getIpcServices()
-                  ?.machineRpc.isLocalFileMachine(activeSessionMachineId)
-                  .catch(() => false)
-              : false));
-        const target = resolveSessionFileOpenTarget({
-          rawPath: filePath,
-          pathKind: options.pathKind ?? 'markdown-href',
-          workspacePath: activeSessionWorkspacePath,
-          preserveWorktreePath,
-          ...(options.startLine === undefined ? {} : { startLine: options.startLine }),
-          ...(options.endLine === undefined ? {} : { endLine: options.endLine }),
-        });
-        let openingPath = target.filePath;
-        if (
-          target.resolveMarkdownLink &&
-          runtime &&
-          activeSessionMachineId &&
-          activeBrowserSession
-        ) {
-          const link = await runtime.requestFilePreview(
-            activeSessionMachineId,
-            {
-              sessionId: activeBrowserSession.id,
-              path: openingPath,
-              resolveMarkdownLink: true,
-            },
-            {
-              ownerSessionId: activeBrowserSession.parentSessionId ?? activeBrowserSession.id,
-              workspaceRoot: activeSessionWorkspacePath,
-            }
-          );
-          if (request !== fileLinkRequestRef.current) return;
-          if (link.status === 'resolved-link') {
-            if (link.candidates.length > 1) {
-              setFileLinkChoice({
-                sessionKey,
-                candidates: link.candidates,
-                options: {
-                  ...options,
-                  pathKind: 'canonical',
-                  startLine: target.startLine,
-                  endLine: target.endLine,
-                },
-              });
-              return;
-            }
-            openingPath = link.candidates[0]!.path;
-          } else if (link.status === 'error' && link.code !== 'unsupported_protocol') {
-            toast.error(
-              t(
-                'sessions.fileLinks.resolveFailed',
-                'Could not resolve this file link. Retry, or ask the agent for an absolute path.'
-              )
-            );
-            return;
-          }
-          // Older daemons cannot discover worktrees: open against the session root as before.
-        }
+        const openingPath = target.filePath;
         const resolution = await resolveSessionFileProviderOpenPath(
           activeSessionFileProvider,
           openingPath
@@ -4116,6 +4061,7 @@ const SessionDetail = ({
           path: openingPath,
           redirected: false,
         }));
+        if (request !== fileLinkRequestRef.current) return;
         const resolvedFilePath = resolution.path;
 
         const requestSeq = nextFocusRequestSeq();
@@ -4126,8 +4072,8 @@ const SessionDetail = ({
             filePath: resolvedFilePath,
             ...(resolution.fileId === undefined ? {} : { fileId: resolution.fileId }),
             label: getBasename(resolvedFilePath),
-            startLine: target.startLine,
-            endLine: target.endLine,
+            startLine: options.startLine ?? target.startLine,
+            endLine: options.endLine ?? target.endLine,
             focusRequestSeq: requestSeq,
             ...(options.previewHtml ? { htmlPreviewRequestSeq: requestSeq } : {}),
           },
@@ -4143,15 +4089,6 @@ const SessionDetail = ({
       })();
     }
   );
-
-  const fileLinkDialog =
-    fileLinkChoice?.sessionKey === fileLinkSessionKey ? (
-      <FileLinkCandidateDialog
-        candidates={fileLinkChoice.candidates}
-        onClose={() => setFileLinkChoice(null)}
-        onSelect={(candidate) => handleOpenFile(candidate.path, fileLinkChoice.options)}
-      />
-    ) : null;
 
   const handleOpenHtmlFile = useStableCallback((filePath: string) => {
     handleOpenFile(filePath, {
@@ -6859,7 +6796,6 @@ const SessionDetail = ({
         {fileQuickOpenDialog}
         {deleteConfirmDialog}
         {dirtyForkDialog}
-        {fileLinkDialog}
         {worktreeForkObservers}
         <SessionShareDialog
           open={showSessionSharing && pendingSessionShare != null}
@@ -7340,7 +7276,6 @@ const SessionDetail = ({
           target on desktop. They portal out, so tree position
           doesn't matter. */}
       {dirtyForkDialog}
-      {fileLinkDialog}
       {worktreeForkObservers}
       <SessionShareDialog
         open={showSessionSharing && pendingSessionShare != null}
