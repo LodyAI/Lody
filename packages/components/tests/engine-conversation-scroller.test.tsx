@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { SessionId } from '@lody/shared';
 import { EngineConversationScroller } from '../src/components/ai-gui/conversation-list/engine-conversation-scroller';
+import { compensateConversationScroll } from '../src/components/ai-gui/conversation-list/scroll-compensation';
 import type {
   ConversationListHandle,
   ConversationRowComponentProps,
@@ -49,6 +50,18 @@ class RecoveryBoundary extends Component<
 
 const VIEWPORT = 400;
 const ROW = 100;
+
+it('restores the viewport overflow when a reading correction fails', () => {
+  const viewport = document.createElement('div');
+  viewport.style.setProperty('overflow-y', 'scroll', 'important');
+  const failure = new Error('scroll write failed');
+  viewport.scrollBy = () => {
+    throw failure;
+  };
+  expect(() => compensateConversationScroll(viewport, 536, true)).toThrow(failure);
+  expect(viewport.style.getPropertyValue('overflow-y')).toBe('scroll');
+  expect(viewport.style.getPropertyPriority('overflow-y')).toBe('important');
+});
 
 function Row({ index, ...props }: ConversationRowComponentProps) {
   return <div {...props} data-virtual-index={index} />;

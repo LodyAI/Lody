@@ -300,9 +300,9 @@ jobs:
         if: steps.plan.outputs.run != 'false'
         run: pnpm install --frozen-lockfile
 
-      - name: Install Chromium
+      - name: Install conversation browsers
         if: steps.plan.outputs.run != 'false'
-        run: pnpm --filter @lody/components exec playwright install --with-deps chromium
+        run: pnpm --filter @lody/components exec playwright install --with-deps chromium webkit
 
       - name: Run conversation browser tests
         if: steps.plan.outputs.run != 'false'
@@ -312,6 +312,17 @@ jobs:
           pnpm --filter @lody/components exec playwright test \
             tests/e2e/session-chat-hydration.spec.ts \
             tests/e2e/conversation-scroll-engine.spec.ts \
+            --workers=1
+
+      - name: Run WebKit scroll compensation regression
+        if: steps.plan.outputs.run != 'false'
+        env:
+          CI: 'true'
+          LODY_E2E_BROWSER: webkit
+        run: |
+          pnpm --filter @lody/components exec playwright test \
+            tests/e2e/conversation-scroll-engine.spec.ts \
+            --grep 'native wheel input keeps reading corrections' \
             --workers=1
 
   e2ee-signature-vectors:

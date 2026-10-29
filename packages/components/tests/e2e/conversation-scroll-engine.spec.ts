@@ -1,6 +1,111 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { measureTextareaScrollHeight } from '../../src/components/chat/textarea-measurement';
+import { compensateConversationScroll } from '../../src/components/ai-gui/conversation-list/scroll-compensation';
+
+for (const timing of ['before native input', 'after native input'] as const) {
+  test(`native wheel input keeps reading corrections (${timing})`, async ({
+    page,
+    browserName,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.setContent(`
+    <style>
+      body { margin: 0; }
+      #viewport { height: 712px; overflow: auto; overflow-anchor: none; scrollbar-gutter: stable; }
+      #above { height: 10000px; }
+      .row { height: 100px; }
+    </style>
+    <div id="viewport"><div id="above"></div>
+      ${Array.from({ length: 400 }, (_, i) => `<div class="row" id="row-${i}">Synthetic paragraph ${i}</div>`).join('')}
+    </div>
+  `);
+    await page.addScriptTag({
+      content: `window.compensateScroll = ${compensateConversationScroll.toString()}`,
+    });
+    await page.evaluate(
+      ({ webKit, timing: inputTiming }) => {
+        const viewport = document.querySelector<HTMLElement>('#viewport')!;
+        const above = document.querySelector<HTMLElement>('#above')!;
+        const state = { step: 0, running: true, reversals: [] as number[], corrections: 0 };
+        const testWindow = window as unknown as {
+          compensationTest: typeof state;
+          compensateScroll: typeof compensateConversationScroll;
+        };
+        testWindow.compensationTest = state;
+        viewport.scrollTop = 30_000;
+        // Route every wheel through the web process. This exposes the stale native
+        // position reproducibly when a layout correction precedes its default action.
+        viewport.addEventListener('wheel', () => {}, { passive: false });
+        let previous = new Map<Element, number>();
+        let correctedStep = -1;
+        const correct = () => {
+          if (state.step > 0 && state.step % 12 === 0 && correctedStep !== state.step) {
+            correctedStep = state.step;
+            above.style.height = `${parseFloat(above.style.height || '10000') + 536}px`;
+            testWindow.compensateScroll(viewport, 536, webKit);
+            state.corrections++;
+          }
+        };
+        if (inputTiming === 'after native input') viewport.addEventListener('scroll', correct);
+        const sample = () => {
+          if (!state.running) return;
+          const next = new Map<Element, number>();
+          for (const row of viewport.querySelectorAll('.row')) {
+            const y = row.getBoundingClientRect().top;
+            if (y < -100 || y > 712) continue;
+            next.set(row, y);
+            const before = previous.get(row);
+            if (before !== undefined && y < before - 1) state.reversals.push(y - before);
+          }
+          previous = next;
+          if (inputTiming === 'before native input') correct();
+          requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      },
+      { webKit: browserName === 'webkit', timing }
+    );
+    await page.mouse.move(190, 350);
+    for (let step = 1; step <= 72; step++) {
+      await page.evaluate((value) => {
+        (window as unknown as { compensationTest: { step: number } }).compensationTest.step = value;
+      }, step);
+      await page.mouse.wheel(0, -160);
+      await page.evaluate(
+        () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+      );
+    }
+    await settleFrames(page, 12);
+    const result = await page.evaluate(() => {
+      const state = (
+        window as unknown as {
+          compensationTest: { running: boolean; reversals: number[]; corrections: number };
+        }
+      ).compensationTest;
+      state.running = false;
+      const viewport = document.querySelector<HTMLElement>('#viewport')!;
+      return {
+        ...state,
+        top: viewport.scrollTop,
+        overflow: getComputedStyle(viewport).overflowY,
+      };
+    });
+    expect(result.corrections).toBe(6);
+    expect(result.reversals).toEqual([]);
+    const uninterruptedTop = 30_000 - 72 * 160 + 6 * 536;
+    if (browserName === 'webkit' && timing === 'before native input') {
+      // Releasing native ownership may cancel the in-flight input, just as a
+      // programmatic correction can end an iOS fling. Never lose the correction,
+      // reverse the reader's motion, or discard subsequent native inputs.
+      expect(result.top).toBeGreaterThanOrEqual(uninterruptedTop);
+      expect(result.top).toBeLessThanOrEqual(uninterruptedTop + result.corrections * 160);
+    } else {
+      expect(result.top).toBe(uninterruptedTop);
+    }
+    expect(result.overflow).toBe('auto');
+  });
+}
 
 test('composer measurement preserves the conversation layout and reading offset', async ({
   page,
