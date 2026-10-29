@@ -145,6 +145,24 @@ export default async function afterPack(context) {
   if (!fs.existsSync(packedRoostBinding)) {
     throw new Error(`[roost] packaged binding missing: ${packedRoostBinding}`)
   }
+  // This is the main process's installed package, separate from CLI staging.
+  // Keep a cross-host structural gate even when the runtime probe cannot run.
+  const mainSqliteDir = path.join(
+    resourcesDir,
+    'app.asar.unpacked',
+    'node_modules',
+    'better-sqlite3'
+  )
+  for (const relativePath of [
+    path.join('lib', 'database.js'),
+    path.join('prebuilds', path.basename(stagedSqliteBindingPath(nativeTarget)))
+  ]) {
+    if (!fs.existsSync(path.join(mainSqliteDir, relativePath))) {
+      throw new Error(
+        `[main-native-storage-smoke] SQLite package missing after unpack: ${relativePath}`
+      )
+    }
+  }
   console.log(`[embedded-cli] copied runtime node_modules into ${packedCliDir}`)
 
   if (
@@ -314,6 +332,42 @@ export default async function afterPack(context) {
         `(exit ${String(probeResult.status)}).\n${detail}`
     )
   }
+
+  // Resolve from app.asar, not resources/cli: the main-process bundle has a
+  // separate dependency graph and may inline a broken loader even when the CLI
+  // and an external require('better-sqlite3') both work.
+  const mainSmokeEntry = path.join(
+    resourcesDir,
+    'app.asar',
+    'out',
+    'main',
+    'native-storage-smoke.js'
+  )
+  const mainSmoke = spawnSync(
+    cliRuntimePath,
+    [
+      '-e',
+      `require(${JSON.stringify(mainSmokeEntry)}).runNativeStorageSmoke().then(() => console.log('main-native-storage-ok'), error => { console.error(error); process.exitCode = 1 })`
+    ],
+    {
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+      encoding: 'utf8',
+      timeout: SMOKE_TIMEOUT_MS,
+      windowsHide: true
+    }
+  )
+  if (
+    mainSmoke.error ||
+    mainSmoke.status !== 0 ||
+    !mainSmoke.stdout.includes('main-native-storage-ok')
+  ) {
+    const detail = [mainSmoke.error?.message, mainSmoke.stderr, mainSmoke.stdout]
+      .filter(Boolean)
+      .join('\n')
+      .slice(-4000)
+    throw new Error(`[main-native-storage-smoke] packaged E2EE storage failed: ${detail}`)
+  }
+  console.log('[main-native-storage-smoke] E2EE SQLite and encrypted custody wrote and reopened')
 
   console.log(`[embedded-cli-smoke] OK for ${platform}-${archName} (boot + native bindings)`)
 }
