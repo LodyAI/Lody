@@ -5313,7 +5313,7 @@ export class SessionExecutionService {
         }
       } finally {
         for (const run of runtime.afterRelease.splice(0))
-          this.ownBookkeeping(sessionId, Promise.resolve().then(run));
+          void this.ownBookkeeping(sessionId, Promise.resolve().then(run));
         const notify = async () => {
           if (fact) await this.publishTurnOutcomeFact(fact);
         };
