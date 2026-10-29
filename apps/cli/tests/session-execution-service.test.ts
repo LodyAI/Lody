@@ -339,6 +339,7 @@ const createBaseDeps = (
       onTurnOutcome: vi.fn(async () => {}),
     },
     recordChatFailure: vi.fn(async () => {}),
+    recordSessionStopFailure: vi.fn(async () => {}),
     maybeGenerateAndStoreSessionTitle: vi.fn(async () => {}),
     processMessageQueue: vi.fn(async () => {}),
     collectMachineResources: vi.fn(async () => ({
@@ -8817,12 +8818,27 @@ describe('SessionExecutionService', () => {
     'terminated',
     'termination-failed',
     'cancel-unacknowledged',
+    'cancel-rejected',
+    'late-cancel-rejected',
+    'notice-write-pending',
+    'notice-write-rejected',
   ] as const;
   it.each(cancelCompletions)('retains cancelled ownership (%s)', async (completion) => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const lateApplied =
       completion === 'late-steer-ack' || completion === 'late-steer-write-failure';
-    const nativeCompletion = completion === 'native-terminal' || lateApplied;
+    const nativeCompletion =
+      completion === 'native-terminal' || completion === 'late-cancel-rejected' || lateApplied;
+    const terminationFails =
+      completion === 'termination-failed' ||
+      completion === 'notice-write-pending' ||
+      completion === 'notice-write-rejected';
+    const stopFailures: Array<{
+      turnId: string;
+      phase: 'cancel' | 'timeout' | 'terminate';
+      message: string;
+    }> = [];
+    const pendingNotice = createDeferred();
     let meta: Record<string, unknown> = {};
     let history: Array<Record<string, unknown>> = [
       {
@@ -8903,6 +8919,9 @@ describe('SessionExecutionService', () => {
       cancel: async () => {
         cancelSubmitted.resolve();
         await cancelAck.promise;
+        if (completion === 'cancel-rejected' || completion === 'late-cancel-rejected') {
+          throw new Error('Synthetic cancellation rejection');
+        }
       },
       prompt: async ({ prompt }: PromptRequest): Promise<PromptResponse> => {
         if (nativePending) throw new RequestError(-32600, 'A Codex prompt is already active');
@@ -8962,7 +8981,7 @@ describe('SessionExecutionService', () => {
       terminate: vi.fn(async () => {
         terminationRequested = true;
         await termination.promise;
-        if (completion === 'termination-failed') throw new Error('Synthetic termination failure');
+        if (terminationFails) throw new Error('Synthetic termination failure');
         nativeTerminal.reject(new Error('Synthetic ACP connection closed'));
         if (completion === 'stalled-steer-request')
           rawSteer.reject(new Error('Synthetic ACP connection closed'));
@@ -9006,6 +9025,12 @@ describe('SessionExecutionService', () => {
       } as unknown as LoroDocumentManager,
       buildAcpPromptBlocks: async ({ inputBlocks }) => inputBlocks as ContentBlock[],
       processMessageQueue: vi.fn(async () => {}),
+      recordSessionStopFailure: async (_sessionId, turnId, failure) => {
+        stopFailures.push({ turnId, ...failure });
+        if (completion === 'notice-write-pending') await pendingNotice.promise;
+        if (completion === 'notice-write-rejected')
+          throw new Error('Synthetic notice write failure');
+      },
     });
     vi.mocked(deps.turnFinalization.finalizeACPState).mockImplementation(
       async (_sessionId, turnId) => {
@@ -9070,8 +9095,21 @@ describe('SessionExecutionService', () => {
         )
       ).resolves.toEqual({ success: true });
       await cancelSubmitted.promise;
-      if (completion !== 'cancel-unacknowledged') cancelAck.resolve();
+      if (completion !== 'cancel-unacknowledged' && completion !== 'late-cancel-rejected') {
+        cancelAck.resolve();
+      }
       await vi.advanceTimersByTimeAsync(0);
+      if (completion === 'cancel-rejected') {
+        expect(stopFailures).toEqual([
+          {
+            turnId: 'assistant-prompt-cancel',
+            phase: 'cancel',
+            message: expect.stringContaining('Synthetic cancellation rejection'),
+          },
+        ]);
+      } else {
+        expect(stopFailures).toEqual([]);
+      }
       if (steering && lateApplied) {
         steerApplied.resolve({ release: () => steerReleased.resolve() });
         await expect(steering).resolves.toMatchObject({
@@ -9135,6 +9173,11 @@ describe('SessionExecutionService', () => {
       } else {
         await vi.advanceTimersByTimeAsync(1);
         expect(terminationRequested).toBe(true);
+        expect(stopFailures).toContainEqual({
+          turnId: 'assistant-prompt-cancel',
+          phase: 'timeout',
+          message: expect.stringContaining('ACP prompt cancellation timed out'),
+        });
         expect(promptSignal?.aborted).toBe(false);
         expect(history[1]).not.toHaveProperty('finished', true);
         expect(service.getExecutionSnapshot(message.sessionId)).toMatchObject({
@@ -9144,8 +9187,20 @@ describe('SessionExecutionService', () => {
         expect(delivered).toEqual([[{ type: 'text', text: '/compact' }]]);
         termination.resolve();
         await vi.advanceTimersByTimeAsync(0);
-        if (completion === 'termination-failed') {
+        if (terminationFails) {
           await vi.advanceTimersByTimeAsync(5_000);
+          expect(stopFailures).toEqual([
+            {
+              turnId: 'assistant-prompt-cancel',
+              phase: 'timeout',
+              message: expect.stringContaining('ACP prompt cancellation timed out'),
+            },
+            {
+              turnId: 'assistant-prompt-cancel',
+              phase: 'terminate',
+              message: expect.stringContaining('Synthetic termination failure'),
+            },
+          ]);
           expect(agentClient.pendingPromptCompletion).not.toBeNull();
           expect(promptSignal?.aborted).toBe(false);
           expect(history[1]).not.toHaveProperty('finished', true);
@@ -9154,13 +9209,36 @@ describe('SessionExecutionService', () => {
           });
           await service.continueSession(nextMessage);
           expect(delivered).toEqual([[{ type: 'text', text: '/compact' }]]);
+          await service.cancelSession({
+            type: 'session/cancel',
+            sessionId: message.sessionId,
+            machineId: message.machineId,
+            workspaceId: message.workspaceId,
+            turnId: 'assistant-prompt-cancel',
+          });
+          expect(stopFailures).toHaveLength(2);
           nativeTerminal.resolve({ stopReason: 'cancelled' });
         }
       }
       await running;
+      // Preserve the existing blocked-release recovery. A pending notice adds
+      // no hold once that recovery confirms the process has terminated.
+      if (terminationFails) {
+        expect(service.getExecutionSnapshot(message.sessionId).releaseBlocked?.reason).toContain(
+          'Synthetic termination failure'
+        );
+        session.terminate.mockImplementationOnce(async () => {});
+        await expect(service.requestReleaseRecovery(message.sessionId)).resolves.toBe(true);
+      }
+      expect(service.getExecutionSnapshot(message.sessionId).hasActiveTurn).toBe(false);
+      cancelAck.resolve();
       await vi.advanceTimersByTimeAsync(5_000);
+      expect(stopFailures).toHaveLength(
+        nativeCompletion ? 0 : terminationFails || completion === 'cancel-rejected' ? 2 : 1
+      );
       expect(terminationRequested).toBe(!nativeCompletion);
     } finally {
+      pendingNotice.resolve();
       steerApplied.resolve({ release: () => steerReleased.resolve() });
       cancelAck.resolve();
       termination.resolve();
@@ -9172,13 +9250,6 @@ describe('SessionExecutionService', () => {
     }
 
     expect(agentClient.pendingPromptCompletion).toBeNull();
-    if (completion === 'termination-failed') {
-      expect(service.getExecutionSnapshot(message.sessionId)).toMatchObject({
-        hasActiveTurn: true,
-      });
-      session.terminate.mockImplementationOnce(async () => {});
-      await service.recoverInboxExecution(message.sessionId);
-    }
     expect(service.getExecutionSnapshot(message.sessionId)).toMatchObject({ hasActiveTurn: false });
     expect(deps.processMessageQueue).not.toHaveBeenCalled();
     expect(sessionDoc.setStatus).toHaveBeenCalledWith(SessionStatusFactory.idle());

@@ -220,6 +220,18 @@ Raw prompt/steer requests and configuration work remain in the owner's five-seco
 termination failure keeps ownership. Steer configuration checks the local signal before each
 subsequent mutation. Already-applied handoff commits before queued completion can run.
 
+A failed release remains `releaseBlocked`, and the next waiting input drives a single-flight
+recovery. The [release decision](../../../../.agents/notes/implemented/bug-fix/2026-10-17-turn-release-survives-failure-handling.md)
+explains why slow finalization alone is not a release failure.
+
+Stop reports a rejected provider cancellation, expiration of that five-second drain, and
+failed process termination through durable `agent_warning` notices. The execution runtime
+deduplicates each phase for its assistant turn and ignores a cancellation rejection from
+an already-released runtime. MessageHandler assigns a turn/phase notice identity rather
+than deduplicating by error text across the whole conversation. Notice persistence never
+delays escalation or raw-request release; the warning does not finalize history or change
+dispatch ownership. See the [decision](../../../../.agents/notes/implemented/bug-fix/2026-10-29-session-stop-failure-notices.md).
+
 Cancellation separately selects the pre-prompt process lifetime. Stop and access revocation
 discard it; Edit & Resend keeps it because preparation has already created the replacement
 inside that same ACP process. Creation/restoration retain their cancellation fences until

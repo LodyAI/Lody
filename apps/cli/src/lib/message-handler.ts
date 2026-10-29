@@ -3167,6 +3167,19 @@ export class MessageHandler {
       },
       recordChatFailure: async (sessionDoc, reason, message, code) =>
         await this.recordChatFailure(sessionDoc, reason, message, code),
+      recordSessionStopFailure: async (sessionId, turnId, failure) =>
+        await this.recordAgentWarning(
+          sessionId,
+          {
+            message: failure.message,
+            source: {
+              cancel: 'sessionCancelFailed',
+              timeout: 'sessionStopTimedOut',
+              terminate: 'sessionTerminationFailed',
+            }[failure.phase],
+          },
+          { noticeId: `session-stop-failure-${turnId}-${failure.phase}` }
+        ),
       maybeGenerateAndStoreSessionTitle: async (
         sessionId,
         cliType,
@@ -9750,16 +9763,15 @@ export class MessageHandler {
   }
 
   /**
-   * Persists an agent-issued warning (e.g. Codex app-server `warning`/`configWarning`
-   * notifications, forwarded structured via ACP session_info_update `_meta`) as a
-   * system_notice history item. Kept out of agent text so it renders as a warning
-   * and never pollutes titles or replay prompts. Runs on the per-session notice
-   * queue; dedupe happens inside the atomic updateHistory call because some
-   * runtime warnings fire once per turn.
+   * Persists runtime and host-control warnings as system notices, keeping titles
+   * and replay prompts free of diagnostic text. Ordinary runtime warnings dedupe
+   * by message; a supplied notice identity upserts an exact turn/phase diagnostic
+   * so a later turn can still report the same error.
    */
   private async recordAgentWarning(
     sessionId: SessionId,
-    warning: AgentSessionWarning
+    warning: AgentSessionWarning,
+    options?: { noticeId: string }
   ): Promise<void> {
     try {
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
@@ -9776,7 +9788,7 @@ export class MessageHandler {
         },
       };
       const systemNotice: SessionHistoryInput = {
-        id: `agent-warning-${uuidV4()}`,
+        id: options?.noticeId ?? `agent-warning-${uuidV4()}`,
         role: 'system',
         timestamp: new Date(getServerNow()).toISOString(),
         read: undefined,
@@ -9785,6 +9797,11 @@ export class MessageHandler {
         items: [noticeItem],
       };
       const backend = await this.getSessionBackend(sessionDoc);
+      if (options?.noticeId) {
+        // Stop failures are per turn: the same error on a later turn must remain visible.
+        await backend.applyHistoryAction({ kind: 'upsert-turn', turn: systemNotice });
+        return;
+      }
       await backend.applyHistoryAction({
         kind: 'agent-warning',
         turn: systemNotice,

@@ -18,8 +18,8 @@ finalization is waited for instead of being recorded as a release failure,
 and a release that genuinely cannot be confirmed is reported as a busy
 `waiting` state. The next input that waits on that Session requests its
 recovery. Releasing a turn never terminates the agent process; the
-idle-document race that started this incident is left to the Session
-residency work.
+idle-document race that started this incident is handled separately by the
+[Session residency work](https://github.com/LodyAI/Lody/pull/1670).
 
 ## Incident
 
@@ -64,6 +64,11 @@ not recover the Session either.
 
 ## The agent process is kept
 
+Stop also persists [control-failure diagnostics](2026-10-29-session-stop-failure-notices.md)
+for cancellation rejection, drain expiry and failed termination. These warnings
+complement `releaseBlocked`; they do not release resources or block cleanup on
+notice persistence.
+
 Releasing a turn returns its ownership slot after in-flight ACP requests have
 ended and the Inbox execution record is written. It does not terminate the
 agent process, which stays alive for the next turn. Only idle GC
@@ -102,12 +107,10 @@ tests cover the new reason and state.
 
 ## Limits and follow-up
 
-This change does not stop GC from destroying a document in use. GC still
-decides with a check-then-act sequence over a document cache without
-reference counts, and its active-turn predicate cannot see the pre-prompt
-startup phase. The Session residency work replaces both with leased,
-reference-counted generations. It stacks on the native Repo adoption and
-follows the
+The original GC/document-cache race is now owned by the
+[leased Session documents and atomic retirement](https://github.com/LodyAI/Lody/pull/1670)
+implementation. This note continues to own failure-classification and release
+ordering. That work follows the
 [turn execution and ACP process ownership](../../proposed/architecture/2026-09-27-effect-turn-execution-and-acp-process-ownership.md)
 target. The full `TurnRegistry` in that note, with registration as an Effect
 `acquireRelease`, remains unimplemented: failure classification is still

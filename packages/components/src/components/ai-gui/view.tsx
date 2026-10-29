@@ -3693,7 +3693,7 @@ const AgentWarningNoticeView = ({
     return null;
   }
 
-  return <AgentWarningNoticeBody message={meta.message} inTurn={inTurn} />;
+  return <AgentWarningNoticeBody message={meta.message} source={meta.source} inTurn={inTurn} />;
 };
 
 /**
@@ -3708,18 +3708,48 @@ const AgentWarningNoticeView = ({
  */
 const AgentWarningNoticeBody = ({
   message,
+  source,
   inTurn = false,
 }: {
   message: string;
+  source?: string;
   inTurn?: boolean;
 }) => {
   const { t } = useTranslation();
+  const label =
+    source === 'sessionCancelFailed'
+      ? t('sessions.systemNotices.agentWarning.stopRequestFailed', 'Stop request failed')
+      : source === 'sessionStopTimedOut'
+        ? t('sessions.systemNotices.agentWarning.stopTimedOut', 'Stopping took too long')
+        : source === 'sessionTerminationFailed'
+          ? t(
+              'sessions.systemNotices.agentWarning.stopTerminationFailed',
+              'Could not stop the task'
+            )
+          : t('sessions.systemNotices.agentWarning.title', 'Agent warning');
+  const guidance =
+    source === 'sessionCancelFailed'
+      ? t(
+          'sessions.systemNotices.agentWarning.stopRequestFailedGuidance',
+          'The agent could not process the Stop request. Lody will keep trying to end the task.'
+        )
+      : source === 'sessionStopTimedOut'
+        ? t(
+            'sessions.systemNotices.agentWarning.stopTimedOutGuidance',
+            'The task has not stopped yet. Lody is trying to force it to end.'
+          )
+        : source === 'sessionTerminationFailed'
+          ? t(
+              'sessions.systemNotices.agentWarning.stopTerminationFailedGuidance',
+              'The task may still be running. Try restarting Lody’s background service on this machine.'
+            )
+          : undefined;
   return (
     <div className={cn('py-1', !inTurn && '@[640px]:pl-3')} role="alert">
       <AgentNoticeBanner
         tone="warning"
-        label={t('sessions.systemNotices.agentWarning.title', 'Agent warning')}
-        detail={message}
+        label={label}
+        detail={guidance ? `${guidance}\n\n${message}` : message}
       />
     </div>
   );

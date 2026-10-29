@@ -317,6 +317,8 @@ type TurnInvocation = {
   notificationAudience?: TurnResultAudience;
 };
 
+type SessionStopFailurePhase = 'cancel' | 'timeout' | 'terminate';
+
 type TurnRuntimeState = {
   sessionId: SessionId;
   /** Logical chain tail exposed to Web, cancel, and optimistic steer validation. */
@@ -351,6 +353,7 @@ type TurnRuntimeState = {
   cancelFinalized: boolean;
   /** One drain deadline shared by Stop and the cancellation finalizer. */
   cancellationDrain?: Promise<void>;
+  reportedStopFailures?: Set<SessionStopFailurePhase>;
   steerWaitController?: AbortController;
   /** Submitted handoff steer whose verdict may trail the yielded prompt's answer. */
   pendingHandoffSteerOutcome?: Promise<SteerOutcomeResult>;
@@ -673,6 +676,11 @@ export type SessionExecutionServiceDeps = {
     reason: ChatFailedReason,
     message?: string,
     code?: ChatFailedCode
+  ) => Promise<void>;
+  recordSessionStopFailure: (
+    sessionId: SessionId,
+    turnId: string,
+    failure: { phase: SessionStopFailurePhase; message: string }
   ) => Promise<void>;
   maybeGenerateAndStoreSessionTitle: (
     sessionId: SessionId,
@@ -3027,6 +3035,34 @@ export class SessionExecutionService {
         this.deps.logger.debug(
           `[${runtime.sessionId}] Failed to cancel ${stage} turn ${runtime.turnId}: ${formatErrorMessage(error)}`
         );
+        this.reportSessionStopFailure(runtime.sessionId, runtime.turnId, 'cancel', error, runtime);
+      });
+  }
+
+  private reportSessionStopFailure(
+    sessionId: SessionId,
+    turnId: string,
+    phase: SessionStopFailurePhase,
+    error: unknown,
+    runtime?: TurnRuntimeState
+  ): void {
+    if (runtime) {
+      if (this.getTurnRuntime(sessionId, turnId) !== runtime) return;
+      runtime.reportedStopFailures ??= new Set();
+      if (runtime.reportedStopFailures.has(phase)) return;
+      runtime.reportedStopFailures.add(phase);
+    }
+    // Reporting must not delay termination or keep a completed raw request owned.
+    // The MessageHandler history writer owns persistence of this system notice.
+    void this.deps
+      .recordSessionStopFailure(sessionId, turnId, {
+        phase,
+        message: formatErrorMessage(error, { includeStack: true }),
+      })
+      .catch((noticeError: unknown) => {
+        this.deps.logger.warn(
+          `[${sessionId}] Failed to report Stop ${phase} failure: ${formatErrorMessage(noticeError)}`
+        );
       });
   }
 
@@ -3104,7 +3140,11 @@ export class SessionExecutionService {
     });
   }
 
-  private drainCancelledPrompt(session: ISession, runtime?: TurnRuntimeState): Promise<void> {
+  private drainCancelledPrompt(
+    session: ISession,
+    runtime?: TurnRuntimeState,
+    turnId = runtime?.turnId
+  ): Promise<void> {
     if (runtime?.cancellationDrain) return runtime.cancellationDrain;
     const requests = () =>
       [
@@ -3117,19 +3157,31 @@ export class SessionExecutionService {
     const pendingPrompt = Promise.allSettled(pending).then(() => undefined);
 
     const drain = withTimeout(pendingPrompt, 5_000, 'ACP prompt cancellation timed out').catch(
-      async () => {
+      async (timeoutError: unknown) => {
         // A terminal response may have won just after the timeout fired.
         if (requests().length === 0) return;
         if (runtime && this.getTurnRuntime(runtime.sessionId, runtime.turnId) !== runtime) return;
         this.deps.logger.warn(
           `[${session.sessionId}] ACP prompt did not finish after cancellation; terminating session before reuse`
         );
+        if (turnId) {
+          this.reportSessionStopFailure(
+            session.sessionId,
+            turnId,
+            'timeout',
+            timeoutError,
+            runtime
+          );
+        }
         try {
           await session.terminate(true);
         } catch (error) {
           this.deps.logger.warn(
             `[${session.sessionId}] Failed to terminate cancelled session; waiting for ACP completion: ${formatErrorMessage(error)}`
           );
+          if (turnId) {
+            this.reportSessionStopFailure(session.sessionId, turnId, 'terminate', error, runtime);
+          }
           // Failed termination is not permission to reuse a busy agent.
           if (runtime) runtime.releaseFailure = error;
           throw error;
@@ -3240,7 +3292,21 @@ export class SessionExecutionService {
         yield* self.ignoreWithWarning(
           options.sessionId,
           'Failed to terminate session after stop request',
-          self.tryPromise(() => sessionToTerminate.terminate(true))
+          self
+            .tryPromise(() => sessionToTerminate.terminate(true))
+            .pipe(
+              Effect.tapError((error) =>
+                Effect.sync(() =>
+                  self.reportSessionStopFailure(
+                    options.sessionId,
+                    options.turnId,
+                    'terminate',
+                    error,
+                    runtime
+                  )
+                )
+              )
+            )
         );
       }
 
@@ -3301,7 +3367,9 @@ export class SessionExecutionService {
       if (sessionToDrain && !options.terminateSession) {
         // Keep the execution owner until ACP has actually finished. Otherwise
         // the next queued turn can reach the still-busy adapter after local abort.
-        yield* self.tryPromise(() => self.drainCancelledPrompt(sessionToDrain, runtime));
+        yield* self.tryPromise(() =>
+          self.drainCancelledPrompt(sessionToDrain, runtime, options.turnId)
+        );
       }
 
       if (runtime?.promptStarted) {
@@ -7626,6 +7694,7 @@ export class SessionExecutionService {
     } catch (error) {
       const errorMessage = formatErrorMessage(error);
       this.deps.logger.error(`[${sessionId}] Failed to stop session: ${errorMessage}`);
+      this.reportSessionStopFailure(sessionId, turnId, 'cancel', error);
       return {
         success: false,
         error: errorMessage,

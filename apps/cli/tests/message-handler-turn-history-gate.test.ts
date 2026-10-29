@@ -14,7 +14,10 @@ import { MessageHandler } from '../src/lib/message-handler';
 import { SessionDocument } from '../src/lib/loro/doc';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import type { SessionManager } from '../src/session/session-manager';
-import type { SessionDispatchSource } from '../src/session/session-execution-service';
+import type {
+  SessionDispatchSource,
+  SessionExecutionService,
+} from '../src/session/session-execution-service';
 import { DEFAULT_TURN_HISTORY_GATE_TIMEOUT_MS } from '../src/session/turn-history-gate';
 import type { Logger } from '../src/utils/logger';
 import { loadEnv } from '../src/utils/const';
@@ -41,6 +44,7 @@ const createSilentLogger = (): Logger => ({
 const originalLodyServerUrl = process.env.LODY_SERVER_URL;
 
 type MessageHandlerHost = {
+  executionService: SessionExecutionService;
   applyAcpModeAndModel(
     session: AcpSessionConfigTarget,
     config: AcpSessionRunConfig,
@@ -149,6 +153,57 @@ const agentChunk = (sessionId: SessionId, text: string): AcpSessionNotification 
 });
 
 describe('MessageHandler turn history gate (RPC fast path ordering)', () => {
+  it('persists Stop failures on each turn without completing the running assistant', async () => {
+    const sessionId = 'stop-failure-notices' as SessionId;
+    const { repo, doc, handler } = await createHandlerHarness(sessionId);
+    try {
+      await updateTestHistory(doc, () => [userEntry('stop-user-1')]);
+      const turnId = handler.beginConversationTurn(sessionId, 'stop-user-1', { sessionDoc: doc });
+      await handler.createAssistantEntryForTurn(sessionId, doc, turnId, undefined, 'stop-user-1');
+      const record = handler.executionService['deps'].recordSessionStopFailure;
+      const failure = {
+        phase: 'terminate' as const,
+        message: 'Synthetic process termination failure',
+      };
+      await record(sessionId, turnId, { ...failure, phase: 'cancel' });
+      await record(sessionId, turnId, { ...failure, phase: 'timeout' });
+      await record(sessionId, turnId, failure);
+      await record(sessionId, turnId, failure);
+      await record(sessionId, 'assistant-stop-user-2', failure);
+
+      const history = await doc.sessionData.history.readAll();
+      const notices = history.filter((entry) => entry.role === 'system');
+      expect(notices.map((entry) => entry.items[0])).toEqual([
+        expect.objectContaining({
+          type: 'system_notice',
+          name: 'agent_warning',
+          meta: { source: 'sessionCancelFailed', message: failure.message },
+        }),
+        expect.objectContaining({
+          type: 'system_notice',
+          name: 'agent_warning',
+          meta: { source: 'sessionStopTimedOut', message: failure.message },
+        }),
+        expect.objectContaining({
+          type: 'system_notice',
+          name: 'agent_warning',
+          meta: { source: 'sessionTerminationFailed', message: failure.message },
+        }),
+        expect.objectContaining({
+          type: 'system_notice',
+          name: 'agent_warning',
+          meta: { source: 'sessionTerminationFailed', message: failure.message },
+        }),
+      ]);
+      expect(new Set(notices.map((entry) => entry.id)).size).toBe(4);
+      const assistant = history.find((entry) => entry.id === turnId);
+      expect(assistant?.finished).not.toBe(true);
+      expect(assistant?.endedAt).toBeUndefined();
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
   it.each(['codex', 'claude'])(
     'persists a rejected %s model as a GUI notice after the driving user turn',
     async (agentType) => {
