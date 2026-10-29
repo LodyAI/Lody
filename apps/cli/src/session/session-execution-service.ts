@@ -984,19 +984,21 @@ export class SessionExecutionService {
     if (runtime?.releaseFailure === undefined) {
       return Promise.resolve(false);
     }
-    const recovery = withTimeout(
-      this.recoverInboxExecution(sessionId, runtime),
-      5_000,
-      'Background execution cleanup timed out'
-    )
-      .then(() => true)
-      .catch((cause: unknown) => {
-        this.deps.logger.warn(
-          `[${sessionId}] Background execution cleanup incomplete; continuing: ${formatErrorMessage(cause)}`
-        );
-        return false;
-      })
-      .finally(async () => {
+    const recovery = (async () => {
+      try {
+        return await withTimeout(
+          this.recoverInboxExecution(sessionId, runtime),
+          5_000,
+          'Background execution cleanup timed out'
+        )
+          .then(() => true)
+          .catch((cause: unknown) => {
+            this.deps.logger.warn(
+              `[${sessionId}] Background execution cleanup incomplete; continuing: ${formatErrorMessage(cause)}`
+            );
+            return false;
+          });
+      } finally {
         try {
           const owner = runtime.inboxOwner;
           if (owner)
@@ -1016,7 +1018,8 @@ export class SessionExecutionService {
           this.deps.logger.warn(`Cleanup observer detach failed: ${formatErrorMessage(cause)}`);
         }
         this.releaseRecoveryBySession.delete(sessionId);
-      });
+      }
+    })();
     this.releaseRecoveryBySession.set(sessionId, recovery);
     this.ownedWork.add(recovery);
     void recovery.then(() => this.ownedWork.delete(recovery));
