@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#2052](https://github.com/LodyAI/Lody/pull/2052)
 
 [English](2026-10-29-session-stop-failure-notices.md)
 
